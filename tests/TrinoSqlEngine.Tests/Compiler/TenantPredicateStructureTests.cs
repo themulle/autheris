@@ -10,6 +10,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// CR-ADG-04: the binary-exact tenant comparison is asserted on the node structure, not on SQL text. A mutant that joins
 /// conjuncts with OR, or compares the column with itself, changes the structure and fails here (no container needed).
 /// </summary>
+[Trait("Category", "SqlGate")]
 public class TenantPredicateStructureTests
 {
     private const string Column = "TenantId";

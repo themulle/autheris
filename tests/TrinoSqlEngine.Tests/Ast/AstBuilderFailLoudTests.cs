@@ -11,6 +11,7 @@ using Xunit;
 /// Anything it does not map is rejected with <see cref="AstBuildException"/> (WebSQL answers 400).
 /// Constructs that later phases implement move from <see cref="Unsupported_Construct_IsRejected"/> to their own emission tests.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public sealed class AstBuilderFailLoudTests
 {
     private readonly FastSqlEngine _engine = new();

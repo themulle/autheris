@@ -9,6 +9,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// WP-X0-fix item 6: constructs a dialect cannot emit under the bind-everything rule are rejected with the typed
 /// <see cref="SqlCompileNotSupportedException"/> before emission, not through the emitted-SQL invariant check.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public class TypedRejectionTests
 {
     private static readonly InMemoryTableCatalog Catalog = new(new[]

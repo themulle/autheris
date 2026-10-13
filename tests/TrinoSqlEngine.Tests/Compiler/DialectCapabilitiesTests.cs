@@ -7,6 +7,7 @@ using Xunit;
 
 namespace TrinoSqlEngine.Tests.Compiler;
 
+[Trait("Category", "SqlGate")]
 public class DialectCapabilitiesTests
 {
     private static readonly IDialectCapabilityProvider Provider = DialectCapabilityTable.Default;

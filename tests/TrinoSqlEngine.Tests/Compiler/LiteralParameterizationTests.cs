@@ -5,6 +5,7 @@ using static TrinoSqlEngine.Tests.Compiler.CompilerTestHelpers;
 
 namespace TrinoSqlEngine.Tests.Compiler;
 
+[Trait("Category", "SqlGate")]
 public class LiteralParameterizationTests
 {
     [Fact]

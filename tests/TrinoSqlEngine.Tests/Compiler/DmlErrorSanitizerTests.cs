@@ -5,6 +5,7 @@ using Xunit;
 namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>R-12 / SEC-ADG-08 d: constraint violations reach the caller as a typed error without driver text, key value or names.</summary>
+[Trait("Category", "SqlGate")]
 public class DmlErrorSanitizerTests
 {
     private sealed class NumberedException(int number, string message) : DbException(message)

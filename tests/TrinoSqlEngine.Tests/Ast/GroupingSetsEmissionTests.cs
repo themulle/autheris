@@ -9,6 +9,7 @@ using Xunit;
 /// Wunsch 4, Phase 5: ROLLUP, CUBE and GROUPING SETS used to remove the whole GROUP BY (silently different results),
 /// GROUP BY DISTINCT lost its quantifier and GROUPING(…) failed with 500.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public sealed class GroupingSetsEmissionTests
 {
     private string Generate(string sql, TargetSqlDialect dialect) =>

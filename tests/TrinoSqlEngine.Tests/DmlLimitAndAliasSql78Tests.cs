@@ -10,6 +10,7 @@ using Xunit;
 /// written). SQL-8: the alias of a rewritten table keeps the quoting of the written name; the legacy alias tests (string rewriter
 /// output) are replaced by AstSecurityRegressionTests.SQL8_*. SQLite is covered here because the shared cases do not run it.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public sealed class DmlLimitAndAliasSql78Tests
 {
     [Theory]

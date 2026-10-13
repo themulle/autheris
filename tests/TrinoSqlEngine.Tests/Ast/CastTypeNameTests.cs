@@ -10,6 +10,7 @@ using Xunit;
 /// <c>boolean</c>, and its <c>timestamp</c> is rowversion; PostgreSQL has no <c>double</c>/<c>tinyint</c>; Oracle needs
 /// VARCHAR2/NUMBER. TRY_CAST exists only in SQL Server, DuckDB and Snowflake.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public sealed class CastTypeNameTests
 {
     private string Cast(string type, TargetSqlDialect dialect, string function = "CAST") =>

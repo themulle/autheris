@@ -10,6 +10,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// typed <see cref="SqlCompileNotSupportedException"/> when there is none. The execution proofs against the real engines are in
 /// <c>Autheris.Tests.Integration</c> (<c>FunctionMapping_*</c>).
 /// </summary>
+[Trait("Category", "SqlGate")]
 public class FunctionMappingTests
 {
     private static readonly TableIdentity Orders = new("dbo", "Orders");

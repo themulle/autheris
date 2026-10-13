@@ -11,6 +11,7 @@ using Xunit;
 namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>WP-X0h: SQLite on the AST path at tier Production (plan 28.3, 28.5, SEC-X1-09, SEC-X1-10).</summary>
+[Trait("Category", "SqlGate")]
 public class SqliteAstSupportTests
 {
     private static readonly TableIdentity Orders = new("main", "Orders");

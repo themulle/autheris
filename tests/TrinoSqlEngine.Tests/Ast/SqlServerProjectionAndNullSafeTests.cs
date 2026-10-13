@@ -9,6 +9,7 @@ using Xunit;
 /// Wunsch 4, Phase 7: SQL Server wrapped CASE conditions a second time (<c>CASE WHEN CASE WHEN …</c>) and stopped wrapping
 /// boolean projections after a scalar subquery; IS DISTINCT FROM and JOIN … USING were emitted although T-SQL lacks them.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public sealed class SqlServerProjectionAndNullSafeTests
 {
     private string Generate(string sql, TargetSqlDialect dialect) =>

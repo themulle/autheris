@@ -4,6 +4,7 @@ using Xunit;
 namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>CR-ADG-42: the closed set of native column types the INSERT check option casts to.</summary>
+[Trait("Category", "SqlGate")]
 public class CatalogTypeMapTests
 {
     [Theory]
