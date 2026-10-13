@@ -240,16 +240,16 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     /// <summary>
     /// AU-06: DSGVO Art. 17 AST-Literal-Anonymisierung für SQL-Audit-Details (@p_redacted).
-    /// Ersetzt alle String- und numerischen Literale durch @p_redacted und liefert den SHA-256 Hash des Original-SQL.
+    /// Ersetzt alle String- und numerischen Literale durch @p_redacted. The result carries no literal value, so a hash over it (M-A3: the
+    /// keyed <c>originalSqlHash</c> that the gateway builds) can never leak or confirm a value; there is deliberately no hash over the raw text.
     /// </summary>
-    public static (string RedactedSql, string OriginalSqlHash) AnonymizeSqlForAudit(string? sql, int maxLength = DefaultMaxAuditSqlLength)
+    public static string RedactSqlLiterals(string? sql)
     {
         if (string.IsNullOrWhiteSpace(sql))
         {
-            return (string.Empty, Convert.ToHexString(SHA256.HashData(Array.Empty<byte>())));
+            return string.Empty;
         }
 
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sql)));
         string result;
         try
         {
@@ -285,11 +285,10 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             result = FallbackNumericLiteralRegex.Replace(s, RedactedLiteralPlaceholder);
         }
 
-        if (result.Length > maxLength)
-        {
-            result = result[..maxLength] + "...[TRUNCATED]";
-        }
-
-        return (result, hash);
+        return result;
     }
+
+    /// <summary>The audit text of an already redacted statement: cut to <paramref name="maxLength"/> characters.</summary>
+    public static string TruncateForAudit(string redactedSql, int maxLength = DefaultMaxAuditSqlLength) =>
+        redactedSql.Length > maxLength ? redactedSql[..maxLength] + "...[TRUNCATED]" : redactedSql;
 }

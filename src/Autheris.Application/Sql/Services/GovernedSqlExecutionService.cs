@@ -72,8 +72,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         IFederatedQueryExecutionService? federatedExecutionService = null,
         TypedPolicySources? typedPolicies = null,
         GovernancePolicyFactory? policyFactory = null,
-        IProviderExecutionGuard? executionGuard = null)
-        : this(options, NullAuditLogRepository.Instance, policyEnforcement, consentResolution, tableRepository, connectionFactory, clientIpResolver, environment, logger, consentRepository, secretProvider, sqlEngine, sqlSecurityValidator, concurrencyGate, sessionInitializer, rebacEvaluator, consentCache, mandatoryFilters, contractManager, accessProfileRepository, memoryCache, serviceProvider, federatedExecutionService, typedPolicies, policyFactory, executionGuard)
+        IProviderExecutionGuard? executionGuard = null,
+        CompiledSqlAuditDigester? auditDigester = null)
+        : this(options, NullAuditLogRepository.Instance, policyEnforcement, consentResolution, tableRepository, connectionFactory, clientIpResolver, environment, logger, consentRepository, secretProvider, sqlEngine, sqlSecurityValidator, concurrencyGate, sessionInitializer, rebacEvaluator, consentCache, mandatoryFilters, contractManager, accessProfileRepository, memoryCache, serviceProvider, federatedExecutionService, typedPolicies, policyFactory, executionGuard, auditDigester)
     {
     }
 
@@ -103,7 +104,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         IFederatedQueryExecutionService? federatedExecutionService = null,
         TypedPolicySources? typedPolicies = null,
         GovernancePolicyFactory? policyFactory = null,
-        IProviderExecutionGuard? executionGuard = null)
+        IProviderExecutionGuard? executionGuard = null,
+        CompiledSqlAuditDigester? auditDigester = null)
     {
         _serviceProvider = serviceProvider;
         _federatedExecutionService = federatedExecutionService;
@@ -140,7 +142,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             logger,
             concurrencyGate,
             sessionInitializer,
-            secretProvider);
+            secretProvider,
+            auditDigester);
     }
 
     private IFederatedQueryExecutionService ResolveFederatedService()

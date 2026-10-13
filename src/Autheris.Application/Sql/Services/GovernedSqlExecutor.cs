@@ -67,7 +67,8 @@ public sealed class GovernedSqlExecutor
         ILogger? logger = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
         IDbSessionContextInitializer? sessionInitializer = null,
-        IKeyVaultSecretProvider? secretProvider = null)
+        IKeyVaultSecretProvider? secretProvider = null,
+        CompiledSqlAuditDigester? auditDigester = null)
     {
         _rewriter = rewriter ?? throw new ArgumentNullException(nameof(rewriter));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -78,7 +79,8 @@ public sealed class GovernedSqlExecutor
         _concurrencyGate = concurrencyGate;
         _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
         _dataSourceResolver = new SqlDataSourceResolver(_options, logger);
-        _digester = new CompiledSqlAuditDigester(_options, secretProvider);
+        // L-A1: the host registers one singleton (one key read); only unit-test construction builds its own.
+        _digester = auditDigester ?? new CompiledSqlAuditDigester(_options, secretProvider, environment);
         // L-A3: the guard is a required dependency; there is no silent pass-through fallback in the executor.
         _executionGuard = executionGuard ?? throw new ArgumentNullException(nameof(executionGuard));
     }
@@ -195,7 +197,7 @@ public sealed class GovernedSqlExecutor
             }
             else if (_auditLogRepository != null)
             {
-                var (redactedOriginalSql, originalSqlHash) = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.AnonymizeSqlForAudit(request.Sql);
+                var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
                 var userSid = user.GetUserSid() ?? new Sid("anonymous");
                 var detailsJson = new AuditDetailsBuilder()
                     .WithField("originalSql", redactedOriginalSql)
@@ -241,7 +243,7 @@ public sealed class GovernedSqlExecutor
 
         if (_auditLogRepository != null && !dmlContext.IsDml)
         {
-            var (redactedOriginalSql, originalSqlHash) = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.AnonymizeSqlForAudit(request.Sql);
+            var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
             var userSid = user.GetUserSid() ?? new Sid("anonymous");
             var fields = new Dictionary<string, object?>
             {
@@ -432,7 +434,7 @@ public sealed class GovernedSqlExecutor
             {
                 try
                 {
-                    var (redactedOriginalSql, originalSqlHash) = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.AnonymizeSqlForAudit(request.Sql);
+                    var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
                     var userSid = user.GetUserSid() ?? new Sid("anonymous");
                     // SEC-X1-12: the stable code and the exception type, never ex.Message (a driver message can carry key values).
                     var detailsJson = new AuditDetailsBuilder()
@@ -603,7 +605,7 @@ public sealed class GovernedSqlExecutor
         else if (originalSql is not null)
         {
             // A statement rejected before it compiled has no digest; the hash of its (literal-free) original text identifies it.
-            fields["originalSqlHash"] = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.AnonymizeSqlForAudit(originalSql).Item2;
+            fields["originalSqlHash"] = _digester.Anonymize(originalSql).OriginalSqlHash;
         }
 
         await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry

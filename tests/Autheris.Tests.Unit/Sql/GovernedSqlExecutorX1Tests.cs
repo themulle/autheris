@@ -386,7 +386,7 @@ public sealed class GovernedSqlExecutorX1Tests
         root.GetProperty("dialect").GetString().ShouldBe("Sqlite");
         root.GetProperty("bind_count").GetInt32().ShouldBe(compiled.Parameters.Length);
         string digest = root.GetProperty("sql.compiled_digest").GetString()!;
-        digest.ShouldBe(CompiledSqlDigest.Compute(CompiledSqlAuditDigester.DeriveKey(master), compiled));
+        digest.ShouldBe(CompiledSqlDigest.Compute(CompiledSqlAuditDigester.DeriveKey(CompiledSqlAuditDigester.DeriveAuditKeyFromMaster(master)), compiled));
         digest.Length.ShouldBe(64);
         entry.DetailsJson.ShouldNotContain("client-secret-value-77");
         entry.DetailsJson.ShouldNotContain(Tenant + "'");              // no value of the statement is part of the record
