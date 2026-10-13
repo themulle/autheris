@@ -338,10 +338,24 @@ public sealed class CutoverArchitectureTests
     // NoCommandTextAssignmentOnGovernedPath (§28.4)
     // ---------------------------------------------------------------------------------------------------------------------
 
+    private static bool TakesString(MethodReference method) => method.Parameters.Any(p => p.ParameterType.FullName == "System.String");
+
     /// <summary>
-    /// Every call of a <c>CommandText</c> setter (<c>DbCommand</c>, <c>IDbCommand</c> and any provider command: the scan is on the member name,
-    /// so a subtype or an interface call cannot hide it) as (top-level type, "Type.Method").
+    /// L-3: every way to put text into a command, not only the property setter: a call of a <c>CommandText</c> setter (<c>DbCommand</c>,
+    /// <c>IDbCommand</c> and any provider command: the scan is on the member name, so a subtype or an interface call cannot hide it), a
+    /// constructor of a <c>*Command</c> type (a provider command or a batch command) that takes the text as a <c>string</c>, and a
+    /// <c>CreateCommand(string)</c> / <c>CreateBatchCommand(string)</c> factory call.
     /// </summary>
+    private static bool PutsTextIntoACommand(Instruction instruction) => instruction.OpCode.Code switch
+    {
+        Code.Call or Code.Callvirt => instruction.Operand is MethodReference called &&
+            (called.Name == "set_CommandText" || (called.Name is "CreateCommand" or "CreateBatchCommand" && TakesString(called))),
+        Code.Newobj => instruction.Operand is MethodReference { Name: ".ctor" } constructor &&
+            constructor.DeclaringType.Name.EndsWith("Command", StringComparison.Ordinal) && TakesString(constructor),
+        _ => false
+    };
+
+    /// <summary>Every method that puts text into a command (see <see cref="PutsTextIntoACommand"/>) as (top-level type, "Type.Method").</summary>
     private static List<(string Top, string Site)> CommandTextSetterSites(IEnumerable<(ModuleDefinition Module, TypeDefinition Type)> types)
     {
         var found = new List<(string, string)>();
@@ -349,7 +363,7 @@ public sealed class CutoverArchitectureTests
         {
             foreach (var method in type.Methods.Where(m => m.HasBody))
             {
-                if (method.Body.Instructions.Any(i => i.OpCode.Code is Code.Call or Code.Callvirt && i.Operand is MethodReference { Name: "set_CommandText" }))
+                if (method.Body.Instructions.Any(PutsTextIntoACommand))
                 {
                     found.Add((Top(type), $"{type.FullName}.{method.Name}"));
                 }
@@ -404,6 +418,34 @@ public sealed class CutoverArchitectureTests
     {
         CommandTextSetterSites(TypesOf([typeof(CutoverArchitectureTests).Assembly]))
             .ShouldContain(site => site.Site.Contains(nameof(ControlSetsCommandText), StringComparison.Ordinal));
+    }
+
+    /// <summary>A command type whose constructor takes the text (the shape of <c>SqlCommand(string, ...)</c> and of a provider batch command).</summary>
+    internal sealed class ControlTextCommand(string text)
+    {
+        public string Text { get; } = text;
+    }
+
+    internal sealed class ControlConnection
+    {
+        public System.Data.Common.DbCommand CreateCommand(string text) => throw new NotSupportedException(text);
+    }
+
+    internal sealed class ControlCreatesCommandsWithText
+    {
+        public object NewCommand() => new ControlTextCommand("SELECT 1");
+
+        public object Created(ControlConnection connection) => connection.CreateCommand("SELECT 1");
+    }
+
+    [Theory]
+    [InlineData(nameof(ControlCreatesCommandsWithText.NewCommand))]
+    [InlineData(nameof(ControlCreatesCommandsWithText.Created))]
+    public void TheCommandTextScanner_FindsACommandConstructorAndACreateCommandFactory_ThatTakeTheText(string method)
+    {
+        // L-3 positive controls: the constructor of a *Command type taking a string, and CreateCommand(string)
+        CommandTextSetterSites(TypesOf([typeof(CutoverArchitectureTests).Assembly]))
+            .ShouldContain(site => site.Site.EndsWith($"{nameof(ControlCreatesCommandsWithText)}.{method}", StringComparison.Ordinal));
     }
 
     [Fact]
