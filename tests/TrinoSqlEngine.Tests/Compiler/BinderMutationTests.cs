@@ -396,6 +396,13 @@ public class BinderMutationTests
     }
 
     [Fact]
+    public void BindForCheckedExecution_ChecksItsArguments()
+    {
+        var binder = new SqliteCompiledSqlBinder();
+        Assert.Equal("compiled", Assert.Throws<ArgumentNullException>(() => binder.BindForCheckedExecution(new RecCommand(), null!, NoClient)).ParamName);
+    }
+
+    [Fact]
     public void CompiledStatementForAnotherDialect_IsRefused()
     {
         var ex = Assert.Throws<InvalidOperationException>(() =>
