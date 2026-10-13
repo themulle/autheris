@@ -59,7 +59,7 @@ public sealed class TypeSafeMaskingExpressionTests
         env.EnvironmentName.Returns(Environments.Development);
 
         return new GovernedSqlExecutionService(
-            Options.Create(options),
+            Options.Create(options), executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             environment: env,

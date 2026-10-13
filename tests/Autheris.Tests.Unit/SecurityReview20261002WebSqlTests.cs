@@ -217,7 +217,7 @@ public sealed class SecurityReview20261002WebSqlTests
         var repo = repository ?? CreateRepository(CreateEmployeesMetadata(), CreateOrdersMetadata());
         var gatewayOptions = Options.Create(options ?? CreateOptions());
         return new GovernedSqlExecutionService(
-            gatewayOptions,
+            gatewayOptions, executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: casbin,
             consentResolution: withConsentServices ? (consentResolution ?? CreateConsentResolution(t => UnconstrainedAllow(t))) : null,
             tableRepository: repo,
@@ -808,7 +808,7 @@ public sealed class SecurityReview20261002WebSqlTests
             .Returns(ci => ci.Arg<TableIdentifier>().TableName == "employees" ? Task.FromResult<TableMetadata?>(employeesMeta) : Task.FromResult<TableMetadata?>(null));
 
         var service = new GovernedSqlExecutionService(
-            Options.Create(options),
+            Options.Create(options), executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: CreateCasbin(),
             consentResolution: CreateConsentResolution(t => UnconstrainedAllow(t)),
             consentRepository: CreateConsentRepository(),
@@ -876,7 +876,7 @@ public sealed class SecurityReview20261002WebSqlTests
             .Returns(ci => ci.Arg<TableIdentifier>().TableName == "employees" ? Task.FromResult<TableMetadata?>(employeesMeta) : Task.FromResult<TableMetadata?>(null));
 
         var service = new GovernedSqlExecutionService(
-            Options.Create(options),
+            Options.Create(options), executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: CreateCasbin(),
             consentResolution: CreateConsentResolution(t => UnconstrainedAllow(t)),
             consentRepository: CreateConsentRepository(),

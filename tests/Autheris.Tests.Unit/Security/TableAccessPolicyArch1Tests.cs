@@ -172,7 +172,7 @@ public sealed class TableAccessPolicyArch1Tests
         tables.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([Meta()]));
 
         var service = new GovernedSqlExecutionService(
-            Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500 } }),
+            Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500 } }), executionGuard: GovernedTestSupport.Guard,
             auditLogRepository: Substitute.For<IAuditLogRepository>(),
             consentResolution: ResolvesTo(allowed: false),
             tableRepository: tables, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tables), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),

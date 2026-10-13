@@ -49,6 +49,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
 
     public GovernedSqlExecutionService(
         IOptions<GatewayOptions> options,
+        IProviderExecutionGuard executionGuard,
         IPolicyEnforcementService? policyEnforcement = null,
         IConsentResolutionService? consentResolution = null,
         ITableMetadataRepository? tableRepository = null,
@@ -72,15 +73,15 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         IFederatedQueryExecutionService? federatedExecutionService = null,
         TypedPolicySources? typedPolicies = null,
         GovernancePolicyFactory? policyFactory = null,
-        IProviderExecutionGuard? executionGuard = null,
         CompiledSqlAuditDigester? auditDigester = null)
-        : this(options, NullAuditLogRepository.Instance, policyEnforcement, consentResolution, tableRepository, connectionFactory, clientIpResolver, environment, logger, consentRepository, secretProvider, sqlEngine, sqlSecurityValidator, concurrencyGate, sessionInitializer, rebacEvaluator, consentCache, mandatoryFilters, contractManager, accessProfileRepository, memoryCache, serviceProvider, federatedExecutionService, typedPolicies, policyFactory, executionGuard, auditDigester)
+        : this(options, NullAuditLogRepository.Instance, executionGuard, policyEnforcement, consentResolution, tableRepository, connectionFactory, clientIpResolver, environment, logger, consentRepository, secretProvider, sqlEngine, sqlSecurityValidator, concurrencyGate, sessionInitializer, rebacEvaluator, consentCache, mandatoryFilters, contractManager, accessProfileRepository, memoryCache, serviceProvider, federatedExecutionService, typedPolicies, policyFactory, auditDigester)
     {
     }
 
     public GovernedSqlExecutionService(
         IOptions<GatewayOptions> options,
         IAuditLogRepository auditLogRepository,
+        IProviderExecutionGuard executionGuard,
         IPolicyEnforcementService? policyEnforcement = null,
         IConsentResolutionService? consentResolution = null,
         ITableMetadataRepository? tableRepository = null,
@@ -104,9 +105,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         IFederatedQueryExecutionService? federatedExecutionService = null,
         TypedPolicySources? typedPolicies = null,
         GovernancePolicyFactory? policyFactory = null,
-        IProviderExecutionGuard? executionGuard = null,
         CompiledSqlAuditDigester? auditDigester = null)
     {
+        ArgumentNullException.ThrowIfNull(executionGuard);
         _serviceProvider = serviceProvider;
         _federatedExecutionService = federatedExecutionService;
 
@@ -136,7 +137,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             _rewriter,
             options,
             auditLogRepository ?? NullAuditLogRepository.Instance,
-            executionGuard ?? PassThroughExecutionGuard.Instance,   // the host registers the SQLite guard; only unit-test construction omits it
+            executionGuard,
             connectionFactory,
             environment,
             logger,

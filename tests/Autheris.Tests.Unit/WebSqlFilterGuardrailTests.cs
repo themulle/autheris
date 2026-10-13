@@ -93,7 +93,7 @@ public sealed class WebSqlFilterGuardrailTests
 
         var gatewayOptions = Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500 } });
         return new GovernedSqlExecutionService(
-            gatewayOptions,
+            gatewayOptions, executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: null,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(gatewayOptions, secretProvider),

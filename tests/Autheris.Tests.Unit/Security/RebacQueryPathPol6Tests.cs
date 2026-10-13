@@ -103,7 +103,7 @@ public sealed class RebacQueryPathPol6Tests
 
         var repo = CreateRepository();
         return new GovernedSqlExecutionService(
-            Options.Create(options),
+            Options.Create(options), executionGuard: GovernedTestSupport.Guard,
             auditLogRepository: Substitute.For<IAuditLogRepository>(),
             consentResolution: resolution,
             tableRepository: repo,

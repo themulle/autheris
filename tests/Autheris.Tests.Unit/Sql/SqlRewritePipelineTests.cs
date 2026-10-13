@@ -30,7 +30,7 @@ public sealed class SqlRewritePipelineTests
         stages[3].ShouldBe(SqlRewriteStageOrder.RewriteOptions);
         stages[4].ShouldBe(SqlRewriteStageOrder.SecureRewrite);
 
-        var service = new GovernedSqlExecutionService(options);
+        var service = new GovernedSqlExecutionService(options, executionGuard: GovernedTestSupport.Guard);
         service.StageOrder.ShouldBe(stages);
     }
 

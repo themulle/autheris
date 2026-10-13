@@ -77,7 +77,7 @@ public sealed class AstCompilerWebSqlTests(ITestOutputHelper output)
             Options.Create(new GatewayOptions
             {
                 WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500 }
-            }),
+            }), executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             environment: env,

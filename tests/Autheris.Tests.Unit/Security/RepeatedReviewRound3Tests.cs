@@ -123,7 +123,7 @@ public sealed class RepeatedReviewRound3Tests
         });
 
         var service = new GovernedSqlExecutionService(
-            options,
+            options, executionGuard: GovernedTestSupport.Guard,
             auditLogRepository: Substitute.For<IAuditLogRepository>(),
             tableRepository: metaRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(metaRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(options, secretProvider),
             secretProvider: secretProvider,

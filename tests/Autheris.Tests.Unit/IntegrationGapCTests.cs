@@ -631,7 +631,7 @@ public sealed class IntegrationGapCTests
 
         var repo = CreateRepository();
         return new GovernedSqlExecutionService(
-            Options.Create(options),
+            Options.Create(options), executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: null,
             consentResolution: consentResolution,
             tableRepository: repo,

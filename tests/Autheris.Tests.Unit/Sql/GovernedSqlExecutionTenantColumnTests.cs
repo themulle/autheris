@@ -108,7 +108,7 @@ public sealed class GovernedSqlExecutionTenantColumnTests
             .Returns(Task.FromResult(conn));
 
         var service = new GovernedSqlExecutionService(
-            Options.Create(options),
+            Options.Create(options), executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: null,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),

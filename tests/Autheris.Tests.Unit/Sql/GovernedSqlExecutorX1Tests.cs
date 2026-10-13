@@ -86,7 +86,7 @@ public sealed class GovernedSqlExecutorX1Tests
         resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
             .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), null, hasUnconstrainedColumnAllow: true));
         var service = new GovernedSqlExecutionService(
-            Options.Create(Gateway(sourceType == "PostgreSQL" ? "PostgreSql" : sourceType)),
+            Options.Create(Gateway(sourceType == "PostgreSQL" ? "PostgreSql" : sourceType)), executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies(),
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
@@ -452,7 +452,7 @@ public sealed class GovernedSqlExecutorX1Tests
         var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
         return new GovernedSqlExecutionService(
-            Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultDataSourceName = DataSource } }),
+            Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultDataSourceName = DataSource } }), executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies(),
             environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance, consentRepository: consents);

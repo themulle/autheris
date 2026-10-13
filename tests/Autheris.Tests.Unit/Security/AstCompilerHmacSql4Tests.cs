@@ -68,7 +68,7 @@ public sealed class AstCompilerHmacSql4Tests(ITestOutputHelper output)
             DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "GQL-HMAC", HmacKeyId = "k1" }
         });
         return new GovernedSqlExecutionService(
-            gatewayOptions,
+            gatewayOptions, executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(gatewayOptions, secrets),
             environment: env,

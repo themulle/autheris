@@ -89,7 +89,7 @@ public sealed class Sql6JoinGuardrailTests
         env.EnvironmentName.Returns("Development");
 
         return new GovernedSqlExecutionService(
-            Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500 } }),
+            Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500 } }), executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: null,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
