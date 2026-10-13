@@ -128,7 +128,7 @@ public sealed class GovernedSqlExecutorX1Tests
         var log = new CapturingLogger<GovernedSqlExecutor>();
         var opts = Options.Create(gateway);
         var executor = new GovernedSqlExecutor(
-            new GovernedSqlRewriter(opts), opts, auditRepo, factory, environment: null, logger: log, sessionInitializer: session, secretProvider: secrets, executionGuard: guard);
+            new GovernedSqlRewriter(opts), opts, auditRepo, guard ?? PassThroughExecutionGuard.Instance, factory, environment: null, logger: log, sessionInitializer: session, secretProvider: secrets);
         return new Harness { Executor = executor, Factory = factory, Connection = connection, Audit = audit, Log = log };
     }
 
@@ -261,8 +261,8 @@ public sealed class GovernedSqlExecutorX1Tests
                 .Returns(Task.FromResult<DbTransaction?>(null));
             var opts = Options.Create(gateway);
             var executor = new GovernedSqlExecutor(
-                new GovernedSqlRewriter(opts), opts, Substitute.For<IAuditLogRepository>(), factory, null, NullLogger.Instance, null, session,
-                executionGuard: new Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard());
+                new GovernedSqlRewriter(opts), opts, Substitute.For<IAuditLogRepository>(), new Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard(),
+                factory, null, NullLogger.Instance, null, session);
             var clock = System.Diagnostics.Stopwatch.StartNew();
 
             await Should.ThrowAsync<TimeoutException>(() => executor.ExecuteRewrittenAsync(

@@ -25,59 +25,6 @@ public sealed class GovernedSqlPlanCacheTests
 {
     private const string Tenant = "tenant_a";
 
-    private sealed class TrackingSqlEngine : ISqlEngine
-    {
-        private readonly ISqlEngine _inner;
-        public int RewriteRlsCallCount { get; private set; }
-
-        public TrackingSqlEngine(ISqlEngine inner) => _inner = inner;
-
-        public TrinoSqlEngine.Ast.Emit.CompiledSql Compile(ReadOnlyMemory<char> sql, CompileRequest request, CancellationToken cancellationToken)
-            => _inner.Compile(sql, request, cancellationToken);
-
-        public string RewriteRls(ReadOnlyMemory<char> sql, RlsOptions? options = null)
-        {
-            RewriteRlsCallCount++;
-            return _inner.RewriteRls(sql, options);
-        }
-
-        public string RewriteRls(ReadOnlyMemory<char> sql, RlsOptions? options, CancellationToken cancellationToken)
-        {
-            RewriteRlsCallCount++;
-            return _inner.RewriteRls(sql, options, cancellationToken);
-        }
-
-        public string GenerateGovernedSql(ReadOnlyMemory<char> sql, RlsOptions? options = null)
-            => _inner.GenerateGovernedSql(sql, options);
-
-        public string GenerateGovernedSql(ReadOnlyMemory<char> sql, RlsOptions? options, CancellationToken cancellationToken)
-            => _inner.GenerateGovernedSql(sql, options, cancellationToken);
-
-        public string GenerateGovernedSql(string sql, RlsOptions? options = null)
-            => _inner.GenerateGovernedSql(sql, options);
-
-        public (SqlBaseParser.SingleStatementContext Tree, CommonTokenStream Tokens) Parse(
-            ReadOnlyMemory<char> sql,
-            SqlTokenSecurityOptions? tokenOptions = null,
-            CancellationToken cancellationToken = default)
-            => _inner.Parse(sql, tokenOptions, cancellationToken);
-
-        public (SqlBaseParser.StandaloneExpressionContext Tree, CommonTokenStream Tokens) ParseExpression(
-            ReadOnlyMemory<char> sql,
-            SqlTokenSecurityOptions? tokenOptions = null,
-            CancellationToken cancellationToken = default)
-            => _inner.ParseExpression(sql, tokenOptions, cancellationToken);
-
-        public SqlQueryMetadata Analyze(ReadOnlyMemory<char> sql)
-            => _inner.Analyze(sql);
-
-        public SqlQueryMetadata Analyze(
-            ReadOnlyMemory<char> sql,
-            SqlTokenSecurityOptions? tokenOptions,
-            CancellationToken cancellationToken = default)
-            => _inner.Analyze(sql, tokenOptions, cancellationToken);
-    }
-
     private static ClaimsPrincipal CreateUser() =>
         new(new ClaimsIdentity(
             [
@@ -119,8 +66,7 @@ public sealed class GovernedSqlPlanCacheTests
 
     private static GovernedSqlExecutionService CreateService(
         ITableMetadataRepository repository,
-        ISqlEngine? sqlEngine = null,
-        ICompiledSqlQueryPlanCache? planCache = null)
+        ISqlEngine? sqlEngine = null)
     {
         var consentRepository = Substitute.For<IConsentRepository>();
         consentRepository.GetActiveConsentsForSubjectsAsync(
@@ -161,57 +107,25 @@ public sealed class GovernedSqlPlanCacheTests
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: consentRepository,
             secretProvider: null,
-            sqlEngine: sqlEngine,
-            planCache: planCache ?? NullCompiledSqlQueryPlanCache.Instance);
+            sqlEngine: sqlEngine);
     }
 
+    // L-16: the Application string cache is gone. The TTL and policy-hash tests of CompiledSqlQueryPlanCache tested deleted behaviour;
+    // its bound and collision properties live in Sql/CompiledSqlTemplateCacheTests.
     // X1: GovernedSqlExecutionService_UsesPlanCache_OnRepeatedQueries and ..._DifferentiatesCache_WhenColumnMaskingDiffers tested the
     // Application string cache, which the governed pipeline no longer uses. The same properties are asserted against the engine's
     // value-free template cache in GovernedPipelineCachePoisoningTests (M-8).
 
     [Fact]
-    public async Task GovernedSqlExecutionService_ZeroTrust_EnforcesTableDenialBeforeCacheLookup()
+    public async Task GovernedSqlExecutionService_ZeroTrust_EnforcesTableDenialBeforeCompile()
     {
-        var planCache = new CompiledSqlQueryPlanCache();
         // Repository with no tables: table lookup will return null and throw table denied
-        var service = CreateService(CreateRepository(), planCache: planCache);
+        var service = CreateService(CreateRepository());
 
         var user = CreateUser();
         var tenantId = new TenantId(Tenant);
 
         await Should.ThrowAsync<WebSqlPolicyException>(() =>
             service.RewriteSqlAsync("SELECT id, name FROM orders", user, tenantId));
-    }
-
-    [Fact]
-    public void CompiledSqlQueryPlanCache_EvictsEntries_WhenExpired()
-    {
-        var cache = new CompiledSqlQueryPlanCache(TimeSpan.FromMilliseconds(50));
-        var tenantId = new TenantId("t1");
-        cache.SetCompiledSql(12345, DatabaseDialect.PostgreSql, tenantId, 999, "SELECT 1");
-
-        cache.TryGetCompiledSql(12345, DatabaseDialect.PostgreSql, tenantId, 999, out var cached).ShouldBeTrue();
-        cached.ShouldBe("SELECT 1");
-
-        // Wait for TTL expiration
-        Thread.Sleep(70);
-
-        cache.TryGetCompiledSql(12345, DatabaseDialect.PostgreSql, tenantId, 999, out var expiredSql).ShouldBeFalse();
-        expiredSql.ShouldBeNull();
-    }
-
-    [Fact]
-    public void CompiledSqlQueryPlanCache_PolicyHash_DifferentiatesSubqueryStrategies()
-    {
-        var cache = new CompiledSqlQueryPlanCache();
-        var rlsFilters = new Dictionary<string, string> { ["orders"] = "autheris_target.id = 1" };
-
-        var hashExists = cache.ComputePolicyHash(rlsFilters, subqueryStrategy: RowFilterSubqueryStrategy.Exists);
-        var hashInCorrelated = cache.ComputePolicyHash(rlsFilters, subqueryStrategy: RowFilterSubqueryStrategy.InCorrelated);
-        var hashIn = cache.ComputePolicyHash(rlsFilters, subqueryStrategy: RowFilterSubqueryStrategy.In);
-
-        hashExists.ShouldNotBe(hashInCorrelated);
-        hashExists.ShouldNotBe(hashIn);
-        hashInCorrelated.ShouldNotBe(hashIn);
     }
 }

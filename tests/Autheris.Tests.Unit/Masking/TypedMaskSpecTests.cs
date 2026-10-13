@@ -310,7 +310,8 @@ public sealed class TypedMaskSpecTests
     [Fact]
     public void RenderedMask_GeoJitter_MatchesPreviousOutput()
     {
-        var legacy = AstSecurityVisitor.BuildDialectMaskExpression("col", "GEO_JITTER", TargetSqlDialect.Sqlite, decimals: 2);
+        // The expression the removed string builder (BuildDialectMaskExpression, L-9) produced for SQLite, frozen as the parity reference.
+        const string legacy = "CASE WHEN \"col\" IS NULL OR \"col\" = 0.0 THEN \"col\" ELSE ROUND(\"col\", 2) END";
 
         RunTyped(new MaskingRule { RuleType = "GEO_JITTER", Decimals = 2 }, "real").ShouldBe(Run(legacy, numeric: true));
     }

@@ -30,6 +30,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
+using Autheris.Tests.Unit.Sql;
 using TrinoSqlEngine;
 using Xunit;
 
@@ -41,129 +42,56 @@ public sealed class SecurityReviewRemediationCoverageTests
     // SQL-1 (High): UPDATE/DELETE with custom tenant column
     // =========================================================================
 
+    // The RlsListener variants of these tests (SQL_1_RlsListener_*) tested the removed string rewriter; the typed compiler path is the
+    // only path now. Custom tenant columns come from the catalog entry (TableCatalogEntry.TenantColumn), the expected tenant from the
+    // request's TenantBinding. Same properties: a tenant column assignment, a wrong tenant and a missing tenant column are rejected.
+
+    private static TestCompileEnv CustomTenantEnv() => new TestCompileEnv(TargetSqlDialect.PostgreSql, "public")
+        .Table("accounts", "TenantId", "id:INTEGER", "balance:INTEGER", "TenantId")
+        .Table("organizations", "org_id", "id:INTEGER", "name", "org_id")
+        .Table("orders", "order_tenant", "id:INTEGER", "total:INTEGER", "order_tenant");
+
+    private const StatementPermissions Dml = StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete;
+
     [Fact]
-    public void SQL_1_AstSecurityVisitor_BlocksUpdate_OnCustomTenantColumn()
+    public void SQL_1_Compile_BlocksUpdate_OnCustomTenantColumn()
     {
-        var rlsOptions = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            EnforceWithCheckOption = true,
-            TenantColumnName = "tenant_id",
-            RejectUnfilteredDml = true
-        };
-        // Table 'accounts' uses custom tenant column 'TenantId'
-        rlsOptions.TableTenantColumns["accounts"] = "TenantId";
+        var env = CustomTenantEnv();
 
-        var engine = new FastSqlEngine();
-        var sql = "UPDATE accounts SET balance = 100, TenantId = 'hacked' WHERE id = 1";
-
-        // AstSecurityVisitor should throw SecurityException because modifying tenant column is forbidden
-        Should.Throw<SecurityException>(() => engine.GenerateGovernedSql(sql.AsMemory(), rlsOptions));
+        Should.Throw<SecurityException>(() => env.Compile("UPDATE accounts SET balance = 100, \"TenantId\" = 'hacked' WHERE id = 1", statements: Dml));
+        Should.Throw<SecurityException>(() => env.Compile("UPDATE organizations SET name = 'New Corp', org_id = 'rogue_tenant' WHERE id = 42", statements: Dml));
     }
 
     [Fact]
-    public void SQL_1_RlsListener_BlocksUpdate_OnCustomTenantColumn()
+    public void SQL_1_Compile_BlocksInsert_WithCheckOption_OnCustomTenantColumn()
     {
-        var rlsOptions = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            EnforceWithCheckOption = true,
-            TenantColumnName = "tenant_id"
-        };
-        rlsOptions.TableTenantColumns["organizations"] = "org_id";
+        var env = CustomTenantEnv();
 
-        var engine = new FastSqlEngine();
-        var sql = "UPDATE organizations SET name = 'New Corp', org_id = 'rogue_tenant' WHERE id = 42";
-
-        Should.Throw<SecurityException>(() => engine.RewriteRls(sql.AsMemory(), rlsOptions));
-    }
-
-    [Fact]
-    public void SQL_1_AstSecurityVisitor_BlocksInsert_WithCheckOption_OnCustomTenantColumn()
-    {
-        var rlsOptions = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            EnforceWithCheckOption = true,
-            TenantColumnName = "tenant_id",
-            ExpectedTenantValue = "tenant-safe",
-            RequireTenantColumnInInsert = true
-        };
-        rlsOptions.TableTenantColumns["accounts"] = "TenantId";
-
-        var engine = new FastSqlEngine();
-        var sqlWrongTenant = "INSERT INTO accounts (id, balance, TenantId) VALUES (1, 100, 'tenant-hacked')";
-        Should.Throw<SecurityException>(() => engine.GenerateGovernedSql(sqlWrongTenant.AsMemory(), rlsOptions));
-
-        var sqlMissingTenant = "INSERT INTO accounts (id, balance) VALUES (1, 100)";
-        Should.Throw<SecurityException>(() => engine.GenerateGovernedSql(sqlMissingTenant.AsMemory(), rlsOptions));
-    }
-
-    [Fact]
-    public void SQL_1_RlsListener_BlocksInsert_WithCheckOption_OnCustomTenantColumn()
-    {
-        var rlsOptions = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            EnforceWithCheckOption = true,
-            TenantColumnName = "tenant_id",
-            ExpectedTenantValue = "tenant-safe",
-            RequireTenantColumnInInsert = true
-        };
-        rlsOptions.TableTenantColumns["organizations"] = "org_id";
-
-        var engine = new FastSqlEngine();
-        var sqlWrongTenant = "INSERT INTO organizations (id, name, org_id) VALUES (42, 'Rogue', 'rogue_tenant')";
-        Should.Throw<SecurityException>(() => engine.RewriteRls(sqlWrongTenant.AsMemory(), rlsOptions));
-
-        var sqlMissingTenant = "INSERT INTO organizations (id, name) VALUES (42, 'Rogue')";
-        Should.Throw<SecurityException>(() => engine.RewriteRls(sqlMissingTenant.AsMemory(), rlsOptions));
+        Should.Throw<SecurityException>(() => env.Compile(
+            "INSERT INTO accounts (id, balance, \"TenantId\") VALUES (1, 100, 'tenant-hacked')", tenant: "tenant-safe", statements: Dml));
+        Should.Throw<SecurityException>(() => env.Compile("INSERT INTO accounts (id, balance) VALUES (1, 100)", tenant: "tenant-safe", statements: Dml));
+        Should.Throw<SecurityException>(() => env.Compile(
+            "INSERT INTO organizations (id, name, org_id) VALUES (42, 'Rogue', 'rogue_tenant')", tenant: "tenant-safe", statements: Dml));
+        Should.Throw<SecurityException>(() => env.Compile("INSERT INTO organizations (id, name) VALUES (42, 'Rogue')", tenant: "tenant-safe", statements: Dml));
     }
 
     [Fact]
     public void SQL_1_MultiTableDml_BlocksModification_OnCustomTenantColumn()
     {
-        var rlsOptions = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            EnforceWithCheckOption = true,
-            TenantColumnName = "tenant_id",
-            ExpectedTenantValue = "tenant-safe"
-        };
-        rlsOptions.TableTenantColumns["accounts"] = "account_tenant";
-        rlsOptions.TableTenantColumns["orders"] = "order_tenant";
+        var env = CustomTenantEnv();
 
-        var engine = new FastSqlEngine();
-        var sql1 = "UPDATE accounts SET balance = 50, account_tenant = 'hacked' WHERE id = 10";
-        Should.Throw<SecurityException>(() => engine.GenerateGovernedSql(sql1.AsMemory(), rlsOptions));
-        Should.Throw<SecurityException>(() => engine.RewriteRls(sql1.AsMemory(), rlsOptions));
-
-        var sql2 = "UPDATE orders SET total = 200, order_tenant = 'hacked' WHERE id = 20";
-        Should.Throw<SecurityException>(() => engine.GenerateGovernedSql(sql2.AsMemory(), rlsOptions));
-        Should.Throw<SecurityException>(() => engine.RewriteRls(sql2.AsMemory(), rlsOptions));
+        Should.Throw<SecurityException>(() => env.Compile("UPDATE accounts SET balance = 50, \"TenantId\" = 'hacked' WHERE id = 10", statements: Dml));
+        Should.Throw<SecurityException>(() => env.Compile("UPDATE orders SET total = 200, order_tenant = 'hacked' WHERE id = 20", statements: Dml));
     }
 
     [Fact]
     public void SQL_1_ValidDml_WithoutTenantColumnModification_Succeeds()
     {
-        var rlsOptions = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            EnforceWithCheckOption = true,
-            TenantColumnName = "tenant_id",
-            ExpectedTenantValue = "tenant-safe",
-            RequireTenantColumnInInsert = true
-        };
-        rlsOptions.TableTenantColumns["accounts"] = "TenantId";
+        var env = CustomTenantEnv();
 
-        var engine = new FastSqlEngine();
-        var validUpdate = "UPDATE accounts SET balance = 500 WHERE id = 1";
-        var resUpd = engine.GenerateGovernedSql(validUpdate.AsMemory(), rlsOptions);
-        resUpd.ShouldNotBeNullOrWhiteSpace();
-
-        var validInsert = "INSERT INTO accounts (id, balance, TenantId) VALUES (1, 500, 'tenant-safe')";
-        var resIns = engine.GenerateGovernedSql(validInsert.AsMemory(), rlsOptions);
-        resIns.ShouldNotBeNullOrWhiteSpace();
+        env.Compile("UPDATE accounts SET balance = 500 WHERE id = 1", tenant: "tenant-safe", statements: Dml).Sql.ShouldNotBeNullOrWhiteSpace();
+        env.Compile("INSERT INTO accounts (id, balance, \"TenantId\") VALUES (1, 500, 'tenant-safe')", tenant: "tenant-safe", statements: Dml)
+            .Sql.ShouldNotBeNullOrWhiteSpace();
     }
 
     // =========================================================================

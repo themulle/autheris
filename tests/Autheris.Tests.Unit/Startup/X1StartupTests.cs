@@ -14,6 +14,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Tests.Unit.Databricks;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
@@ -34,6 +35,13 @@ public sealed class X1StartupTests
 
     // ---- SEC-ADG-28 -------------------------------------------------------------------------------------------------
 
+    private static IConfiguration ConfigWith(string? value)
+    {
+        var values = new Dictionary<string, string?>();
+        if (value is not null) values["Gateway:WebSql:SqlRewriterEngine"] = value;
+        return new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+    }
+
     [Theory]
     [InlineData("AstCompiler")]
     [InlineData("LegacyTokenStream")]
@@ -42,9 +50,7 @@ public sealed class X1StartupTests
     public void StartupFails_WhenSqlRewriterEngineConfigured(string value)
     {
         // The key is a removed kill switch: warn-and-ignore would let an operator believe the legacy path still exists.
-        var options = new GatewayOptions { WebSql = new WebSqlOptions { SqlRewriterEngine = value } };
-
-        var ex = Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateStartup(options, Env(), _ => null));
+        var ex = Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateSqlRewriterEngine(ConfigWith(value)));
 
         ex.Message.ShouldContain("WebSql:SqlRewriterEngine");
         ex.Message.ShouldNotContain(value.Length > 0 ? value : "\0");   // the configured value is never echoed
@@ -53,14 +59,20 @@ public sealed class X1StartupTests
     [Fact]
     public void Startup_WithoutSqlRewriterEngine_PassesThatCheck()
     {
+        Should.NotThrow(() => GatewayStartupValidator.ValidateSqlRewriterEngine(ConfigWith(null)));
         Should.NotThrow(() => GatewayStartupValidator.ValidateStartup(new GatewayOptions(), Env(), _ => null));
     }
 
-    [Fact]
-    public void StartupFails_WhenSqlRewriterEngineConfigured_AlsoOutsideDevelopment()
+    [Theory]
+    [InlineData("Development")]
+    [InlineData("Production")]
+    public void StartupFails_WhenSqlRewriterEngineConfigured_ThroughTheRealRegistration_InEveryEnvironment(string environment)
     {
-        Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateSqlRewriterEngine(
-            new GatewayOptions { WebSql = new WebSqlOptions { SqlRewriterEngine = "AstCompiler" } }));
+        // AddGatewayOptions is the production entry point: it reads the configuration key before binding the options.
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+
+        Should.Throw<ValidationException>(() => Autheris.Api.Extensions.GatewayServiceCollectionExtensions.AddGatewayOptions(
+            services, ConfigWith("AstCompiler"), Env(environment)));
     }
 
     // ---- SEC-ADG-26 -------------------------------------------------------------------------------------------------
