@@ -54,6 +54,13 @@ public class TypedRejectionTests
     public void SqlServer_ArraysAndSubscripts(string sql) =>
         Assert.Equal(nameof(SqlCompileNotSupportedException), Conformance.ConformanceRunner.Run(sql, "operator", TargetSqlDialect.SqlServer).ExceptionType);
 
+    // Oracle has no array type: arrays and subscripts are rejected with the typed exception, never emitted as ARRAY[...] / x[i].
+    [Theory]
+    [InlineData("SELECT a[1] AS r FROM t")]
+    [InlineData("SELECT ARRAY[1, 2, 3] AS r FROM t")]
+    public void Oracle_ArraysAndSubscripts(string sql) =>
+        Assert.Equal(nameof(SqlCompileNotSupportedException), Conformance.ConformanceRunner.Run(sql, "operator", TargetSqlDialect.Oracle).ExceptionType);
+
     [Theory]
     [InlineData("SELECT DATE '2024-01-15' AS r FROM orders")]
     [InlineData("SELECT TIMESTAMP '2024-01-15 10:30:00' AS r FROM orders")]

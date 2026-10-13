@@ -458,6 +458,12 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
 
     public override void GenerateExpression(Expression expression, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
+        // Oracle has no array type: ARRAY[...] and x[i] have no form. Rejected with the typed not-supported error.
+        if (expression is SubscriptExpression or ArrayConstructorExpression)
+        {
+            throw NoBoundForm("array constructors and subscripts", TargetDialect);
+        }
+
         if (context.InProjectionContext && IsPredicateExpression(expression))
         {
             builder.Append("CASE WHEN ");
