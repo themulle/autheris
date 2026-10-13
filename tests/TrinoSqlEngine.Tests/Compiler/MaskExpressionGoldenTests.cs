@@ -19,7 +19,7 @@ public class MaskExpressionGoldenTests
     {
         "int", "INTEGER", "bigint", "smallint", "tinyint", "decimal(10,2)", "numeric", "float", "real", "double", "double precision", "bit", "bool",
         "boolean", "date", "datetime", "datetime2", "timestamp", "timestamptz", "uuid", "uniqueidentifier", "money", "smallmoney", "smalldatetime",
-        "time", "varchar(10)", "text", "money (5)"
+        "time", "varchar(10)", "text", "money (5)", "numeric(12,3)", "DECIMAL", "NUMERIC (5)"
     };
 
     private static string Render()
@@ -56,7 +56,14 @@ public class MaskExpressionGoldenTests
     [Fact]
     public void MaskExpressions_MatchTheGoldenFile()
     {
-        string golden = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Compiler", "Golden", "mask-expressions.txt")).Replace("\r\n", "\n", StringComparison.Ordinal);
+        string path = Path.Combine(AppContext.BaseDirectory, "Compiler", "Golden", "mask-expressions.txt");
+        if (Environment.GetEnvironmentVariable("SQLGATE_UPDATE_GOLDEN") == "1")
+        {
+            // regenerates the copy in the output folder; copy it over Compiler/Golden/mask-expressions.txt after reviewing the diff
+            File.WriteAllText(path + ".new", Render());
+        }
+
+        string golden = File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal);
         Assert.Equal(golden.TrimEnd('\n'), Render().TrimEnd('\n'));
     }
 }

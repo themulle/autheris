@@ -41,6 +41,9 @@ T[time] redact=CAST(NULL AS DECIMAL(18, 4)) | default=CAST(NULL AS DECIMAL(18, 4
 T[varchar(10)] redact=N'[REDACTED]' | default=N'[REDACTED]'
 T[text] redact=N'[REDACTED]' | default=N'[REDACTED]'
 T[money (5)] redact=CAST(NULL AS DECIMAL(18, 4)) | default=CAST(NULL AS DECIMAL(18, 4))
+T[numeric(12,3)] redact=CAST(NULL AS NUMERIC(12,3)) | default=CAST(NULL AS NUMERIC(12,3))
+T[DECIMAL] redact=CAST(NULL AS DECIMAL(18, 4)) | default=CAST(NULL AS DECIMAL(18, 4))
+T[NUMERIC (5)] redact=CAST(NULL AS NUMERIC (5)) | default=CAST(NULL AS NUMERIC (5))
 == PostgreSql
 GEO: CASE WHEN "c""]x" IS NULL OR "c""]x" = 0.0 THEN "c""]x" ELSE ROUND("c""]x"::numeric, 6)::double precision END
 GEO3: CASE WHEN "c" IS NULL OR "c" = 0.0 THEN "c" ELSE ROUND("c"::numeric, 0)::double precision END
@@ -84,6 +87,9 @@ T[time] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
 T[varchar(10)] redact='[REDACTED]' | default='[REDACTED]'
 T[text] redact='[REDACTED]' | default='[REDACTED]'
 T[money (5)] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[numeric(12,3)] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[DECIMAL] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[NUMERIC (5)] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
 == DuckDb
 GEO: CASE WHEN "c""]x" IS NULL OR "c""]x" = 0.0 THEN "c""]x" ELSE ROUND("c""]x"::numeric, 6)::double precision END
 GEO3: CASE WHEN "c" IS NULL OR "c" = 0.0 THEN "c" ELSE ROUND("c"::numeric, 0)::double precision END
@@ -127,6 +133,9 @@ T[time] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
 T[varchar(10)] redact='[REDACTED]' | default='[REDACTED]'
 T[text] redact='[REDACTED]' | default='[REDACTED]'
 T[money (5)] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[numeric(12,3)] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[DECIMAL] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[NUMERIC (5)] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
 == Sqlite
 GEO: CASE WHEN "c""]x" IS NULL OR "c""]x" = 0.0 THEN "c""]x" ELSE ROUND("c""]x", 6) END
 GEO3: CASE WHEN "c" IS NULL OR "c" = 0.0 THEN "c" ELSE ROUND("c", 0) END
@@ -170,6 +179,9 @@ T[time] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
 T[varchar(10)] redact='[REDACTED]' | default='[REDACTED]'
 T[text] redact='[REDACTED]' | default='[REDACTED]'
 T[money (5)] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[numeric(12,3)] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[DECIMAL] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[NUMERIC (5)] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
 == Oracle
 GEO: CASE WHEN "c""]x" IS NULL OR "c""]x" = 0.0 THEN "c""]x" ELSE ROUND("c""]x", 6) END
 GEO3: CASE WHEN "c" IS NULL OR "c" = 0.0 THEN "c" ELSE ROUND("c", 0) END
@@ -213,3 +225,6 @@ T[time] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
 T[varchar(10)] redact='[REDACTED]' | default='[REDACTED]'
 T[text] redact='[REDACTED]' | default='[REDACTED]'
 T[money (5)] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[numeric(12,3)] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[DECIMAL] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[NUMERIC (5)] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
