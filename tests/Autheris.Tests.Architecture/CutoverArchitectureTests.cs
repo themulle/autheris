@@ -282,6 +282,59 @@ public sealed class CutoverArchitectureTests
     }
 
     // ---------------------------------------------------------------------------------------------------------------------
+    // No TokenStreamRewriter in production code (SD-1, L-2)
+    // ---------------------------------------------------------------------------------------------------------------------
+
+    private const string TokenStreamRewriterType = "Antlr4.Runtime.TokenStreamRewriter";
+
+    private static bool MentionsTokenStreamRewriter(object? operand) => operand switch
+    {
+        MethodReference m => m.DeclaringType?.FullName == TokenStreamRewriterType || m.ReturnType.FullName == TokenStreamRewriterType,
+        FieldReference f => f.DeclaringType?.FullName == TokenStreamRewriterType || f.FieldType.FullName == TokenStreamRewriterType,
+        TypeReference t => t.FullName == TokenStreamRewriterType,
+        _ => false
+    };
+
+    /// <summary>Every method (of the given types) that creates, calls, declares a local of, or takes the address of a <c>TokenStreamRewriter</c>, as "Type.Method".</summary>
+    private static List<string> TokenStreamRewriterUsers(IEnumerable<(ModuleDefinition Module, TypeDefinition Type)> types)
+    {
+        var found = new List<string>();
+        foreach (var (_, type) in types)
+        {
+            if (type.Fields.Any(f => f.FieldType.FullName == TokenStreamRewriterType)) found.Add($"{type.FullName} (field)");
+            foreach (var method in type.Methods.Where(m => m.HasBody))
+            {
+                if (method.Body.Variables.Any(v => v.VariableType.FullName == TokenStreamRewriterType) ||
+                    method.Body.Instructions.Any(i => MentionsTokenStreamRewriter(i.Operand)))
+                {
+                    found.Add($"{type.FullName}.{method.Name}");
+                }
+            }
+        }
+
+        return found;
+    }
+
+    internal sealed class ControlUsesTokenStreamRewriter
+    {
+        public string Run(Antlr4.Runtime.ITokenStream tokens) => new Antlr4.Runtime.TokenStreamRewriter(tokens).GetText();
+    }
+
+    [Fact]
+    public void TheTokenStreamRewriterScanner_FindsAKnownUser() =>
+        TokenStreamRewriterUsers(TypesOf([typeof(CutoverArchitectureTests).Assembly]))
+            .ShouldContain(u => u.Contains(nameof(ControlUsesTokenStreamRewriter), StringComparison.Ordinal));
+
+    [Fact]
+    public void NoProductionAssembly_ReferencesTheTokenStreamRewriter()
+    {
+        // SD-1: statements are never edited as text through the token stream; the audit redaction builds its text from the token indices.
+        var users = TokenStreamRewriterUsers(ProductionTypes());
+
+        users.ShouldBeEmpty("TokenStreamRewriter is banned from production code (SD-1): " + string.Join(", ", users));
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------------
     // NoCommandTextAssignmentOnGovernedPath (§28.4)
     // ---------------------------------------------------------------------------------------------------------------------
 

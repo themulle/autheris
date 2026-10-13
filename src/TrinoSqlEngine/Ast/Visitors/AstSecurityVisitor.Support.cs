@@ -257,7 +257,6 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             var tokens = new CommonTokenStream(lexer);
             tokens.Fill();
 
-            var rewriter = new TokenStreamRewriter(tokens);
             var tokenList = tokens.GetTokens();
 
             // L-3: an error of the lexer, or a character that it could not place (UNRECOGNIZED, such as the quote of an unterminated string
@@ -267,6 +266,9 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 return FullyRedactedStatement;
             }
 
+            // SD-1: the text is built from the token indices (every token of the stream, hidden-channel whitespace and comments included),
+            // never by editing the statement through a TokenStreamRewriter.
+            var redacted = new System.Text.StringBuilder(sql.Length);
             for (int i = 0; i < tokenList.Count; i++)
             {
                 var tok = tokenList[i];
@@ -280,11 +282,15 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                     tok.Type == SqlBaseLexer.DOUBLE_VALUE ||
                     tok.Type == SqlBaseLexer.BINARY_LITERAL)
                 {
-                    rewriter.Replace(tok.TokenIndex, RedactedLiteralPlaceholder);
+                    redacted.Append(RedactedLiteralPlaceholder);
+                }
+                else
+                {
+                    redacted.Append(tok.Text);
                 }
             }
 
-            result = rewriter.GetText();
+            result = redacted.ToString();
         }
         catch
         {
