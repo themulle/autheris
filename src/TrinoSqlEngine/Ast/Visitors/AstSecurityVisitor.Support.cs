@@ -228,15 +228,11 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     public const string RedactedLiteralPlaceholder = "@p_redacted";
     public const int DefaultMaxAuditSqlLength = 4096;
 
-    private static readonly Regex FallbackStringLiteralRegex = new(
-        @"'([^']|'')*'",
-        RegexOptions.Compiled,
-        TimeSpan.FromMilliseconds(200));
-
-    private static readonly Regex FallbackNumericLiteralRegex = new(
-        @"(?<=[=<>!,\s(+\-*/%])\d+(\.\d+)?(?=[=<>!,\s);+\-*/%]|$)|\b\d+(\.\d+)?\b",
-        RegexOptions.Compiled,
-        TimeSpan.FromMilliseconds(200));
+    /// <summary>
+    /// The audit text of a statement that cannot be redacted token by token (the lexer reported an error, so a literal may not have been
+    /// recognised as one, for example an unterminated string). Nothing of the statement is kept.
+    /// </summary>
+    public const string FullyRedactedStatement = "@p_redacted_statement";
 
     /// <summary>
     /// AU-06: DSGVO Art. 17 AST-Literal-Anonymisierung für SQL-Audit-Details (@p_redacted).
@@ -256,11 +252,20 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             var charStream = new ZeroCopyCaseInsensitiveStream(sql.AsMemory());
             var lexer = new SqlBaseLexer(charStream);
             lexer.RemoveErrorListeners();
+            var lexerErrors = new LexerErrorCounter();
+            lexer.AddErrorListener(lexerErrors);
             var tokens = new CommonTokenStream(lexer);
             tokens.Fill();
 
             var rewriter = new TokenStreamRewriter(tokens);
             var tokenList = tokens.GetTokens();
+
+            // L-3: an error of the lexer, or a character that it could not place (UNRECOGNIZED, such as the quote of an unterminated string
+            // whose text then lexes as plain identifiers), means that a literal may be left in the text: redact the whole statement.
+            if (lexerErrors.Count > 0 || tokenList.Any(static t => t.Type == SqlBaseLexer.UNRECOGNIZED))
+            {
+                return FullyRedactedStatement;
+            }
 
             for (int i = 0; i < tokenList.Count; i++)
             {
@@ -271,7 +276,9 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                     tok.Type == SqlBaseLexer.UNICODE_STRING ||
                     tok.Type == SqlBaseLexer.DOLLAR_STRING ||
                     tok.Type == SqlBaseLexer.INTEGER_VALUE ||
-                    tok.Type == SqlBaseLexer.DECIMAL_VALUE)
+                    tok.Type == SqlBaseLexer.DECIMAL_VALUE ||
+                    tok.Type == SqlBaseLexer.DOUBLE_VALUE ||
+                    tok.Type == SqlBaseLexer.BINARY_LITERAL)
                 {
                     rewriter.Replace(tok.TokenIndex, RedactedLiteralPlaceholder);
                 }
@@ -281,11 +288,17 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         }
         catch
         {
-            var s = FallbackStringLiteralRegex.Replace(sql, RedactedLiteralPlaceholder);
-            result = FallbackNumericLiteralRegex.Replace(s, RedactedLiteralPlaceholder);
+            result = FullyRedactedStatement;
         }
 
         return result;
+    }
+
+    private sealed class LexerErrorCounter : IAntlrErrorListener<int>
+    {
+        public int Count { get; private set; }
+
+        public void SyntaxError(System.IO.TextWriter output, IRecognizer recognizer, int offendingSymbol, int line, int charPositionInLine, string msg, RecognitionException e) => Count++;
     }
 
     /// <summary>The audit text of an already redacted statement: cut to <paramref name="maxLength"/> characters.</summary>

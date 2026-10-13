@@ -90,6 +90,36 @@ public sealed class CompiledSqlAuditDigesterTests
         a.OriginalSqlHash.ShouldNotContain("alice");
     }
 
+    // ---- L-3: every literal token kind is redacted --------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("SELECT id FROM orders WHERE ratio > 1.5E3", "SELECT id FROM orders WHERE ratio > 9.25E-7", "1.5E3", "9.25E-7")]
+    [InlineData("SELECT id FROM orders WHERE ratio > .5E2", "SELECT id FROM orders WHERE ratio > 3E10", ".5E2", "3E10")]
+    [InlineData("SELECT id FROM orders WHERE raw = X'DEADBEEF'", "SELECT id FROM orders WHERE raw = X'00112233'", "DEADBEEF", "00112233")]
+    public void OriginalSqlHash_DoesNotDependOnDoubleAndBinaryLiterals(string first, string second, string valueOfFirst, string valueOfSecond)
+    {
+        var digester = Digester();
+
+        var a = digester.Anonymize(first);
+        var b = digester.Anonymize(second);
+
+        a.RedactedSql.ShouldNotContain(valueOfFirst);
+        b.RedactedSql.ShouldNotContain(valueOfSecond);
+        b.OriginalSqlHash.ShouldBe(a.OriginalSqlHash);
+    }
+
+    [Theory]
+    [InlineData("SELECT id FROM orders WHERE email = 'alice@example.com")]    // unterminated string: the lexer reports an error
+    [InlineData("SELECT id FROM orders WHERE note = 'secret-value' AND x = `")]
+    public void Anonymize_LexerError_RedactsTheWholeStatement(string sql)
+    {
+        var (redacted, _) = Digester().Anonymize(sql);
+
+        redacted.ShouldNotContain("alice");
+        redacted.ShouldNotContain("secret-value");
+        redacted.ShouldNotContain("orders");
+    }
+
     [Fact]
     public void OriginalSqlHash_IsDeterministicForAKey_AndDiffersBetweenKeys()
     {
