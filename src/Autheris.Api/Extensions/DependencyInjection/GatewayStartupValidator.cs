@@ -190,6 +190,21 @@ public static class GatewayStartupValidator
         // but reported loudly at startup, regular options = no message (see GatewayOptions.GetAllActiveBypasses).
         var dangerBypasses = options.GetActiveDangerBypasses();
         var warnings = options.GetActiveWarnings();
+        if (options.IsWebSqlGovernanceBypassed)
+        {
+            // X1: there is one WebSQL code path and the former bypass no longer exists. The flag is inert but still a DANGER switch, so it
+            // fails the start outside Development (below); in Development it is reported once here, never per statement.
+            const string message = "[DANGER] danger_bypass_websql_governance has no effect since the AST compiler cutover; every WebSQL statement is governed. Remove the setting.";
+            if (logger is not null)
+            {
+                logger.LogWarning(message);
+            }
+            else
+            {
+                Console.WriteLine($"[Autheris] WARNING: {message}");
+            }
+        }
+
         if (dangerBypasses.Count > 0)
         {
             var bypasses = string.Join("\n  - ", dangerBypasses);

@@ -75,6 +75,47 @@ public sealed class X1StartupTests
             services, ConfigWith("AstCompiler"), Env(environment)));
     }
 
+    // ---- L-6: the inert governance-bypass switch is reported once at startup, never per statement ------------------------------
+
+    private static GatewayOptions WithWebSqlBypass() =>
+        new() { Insecure = new InsecureGettingStartedOptions { danger_bypass_websql_governance = true } };
+
+    [Fact]
+    public void WebSqlGovernanceBypassFlag_FailsTheStart_OutsideDevelopment()
+    {
+        var ex = Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateStartup(WithWebSqlBypass(), Env("Production"), _ => null));
+
+        ex.Message.ShouldContain("danger_bypass_websql_governance");
+    }
+
+    [Fact]
+    public void WebSqlGovernanceBypassFlag_InDevelopment_IsWarnedAboutOnceAtStartup_AsHavingNoEffect()
+    {
+        var logger = new CapturingLogger<GatewayOptions>();
+
+        GatewayStartupValidator.ValidateStartup(WithWebSqlBypass(), Env("Development"), _ => null, logger);
+
+        logger.Entries.Count(e => e.Level == LogLevel.Warning && e.Text.Contains("danger_bypass_websql_governance", StringComparison.Ordinal)).ShouldBe(1);
+        logger.Entries.ShouldContain(e => e.Text.Contains("no effect", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task WebSqlGovernanceBypassFlag_IsNotWarnedAboutPerStatement()
+    {
+        var logger = new CapturingLogger<Autheris.Application.Sql.Services.GovernedSqlRewriter>();
+        var gateway = WithWebSqlBypass();
+        gateway = new GatewayOptions { Insecure = gateway.Insecure, WebSql = new WebSqlOptions { Enabled = true } };
+        var options = Microsoft.Extensions.Options.Options.Create(gateway);
+        var rewriter = new Autheris.Application.Sql.Services.GovernedSqlRewriter(options, logger: logger);
+        var user = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "S-1-5-21-L6"), new System.Security.Claims.Claim("tenant_id", "t")], "Test"));
+
+        // the statement is refused later (no table repository); only the log of the bypass flag matters here
+        await Should.ThrowAsync<Exception>(() => rewriter.ValidateAsync("SELECT 1 FROM orders", user, new TenantId("t")));
+
+        logger.Lines.ShouldNotContain(l => l.Contains("danger_bypass_websql_governance", StringComparison.Ordinal));
+    }
+
     // ---- SEC-ADG-26 -------------------------------------------------------------------------------------------------
 
     private static TableMetadata Orders(string sourceType = "PostgreSQL") => new()

@@ -230,13 +230,6 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             }
         }
 
-        if (_options.Value.IsWebSqlGovernanceBypassed)
-        {
-            // X1: there is one code path. Text that did not come out of ISqlEngine.Compile never reaches a command, so the former
-            // bypass (raw SQL without RLS or masking) no longer exists. The flag is ignored: the statement is governed as usual.
-            _logger?.LogWarning("[DANGER] danger_bypass_websql_governance has no effect since the AST compiler cutover; the statement is governed.");
-        }
-
         if (metadata.ReferencedTables.Count == 0)
         {
             throw new WebSqlPolicyException("WebSQL statements must reference at least one governed catalog table. Table-less statements (e.g. standalone function calls) are not permitted.");
