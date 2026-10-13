@@ -609,6 +609,20 @@ public static class GatewayStartupValidator
         }
     }
 
+    /// <summary>
+    /// X1: <c>WebSql:PlanCache</c> (incl. <c>MaxEntries</c>) configured the cache of the removed legacy path; the engine template cache has a
+    /// fixed size of 512. A configured section fails the start in every environment (it would otherwise be silently ignored). Values are never echoed.
+    /// </summary>
+    public static void ValidateRemovedWebSqlSettings(Microsoft.Extensions.Configuration.IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        if (configuration.GetSection($"{GatewayOptions.SectionName}:WebSql:PlanCache").Exists())
+        {
+            throw new ValidationException(
+                "WebSql:PlanCache is no longer supported: the engine template cache has a fixed size of 512 and is not configurable. Remove the section from the configuration.");
+        }
+    }
+
     /// <summary>Code of a table that is denied because its dialect is not admitted to WebSQL (<see cref="SqlDialectMapper.IsExecutable(DatabaseDialect)"/>).</summary>
     public const string DeniedDialectNotAdmitted = "DIALECT_NOT_ADMITTED";
 

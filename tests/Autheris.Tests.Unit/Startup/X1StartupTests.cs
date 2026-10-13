@@ -63,6 +63,30 @@ public sealed class X1StartupTests
         Should.NotThrow(() => GatewayStartupValidator.ValidateStartup(new GatewayOptions(), Env(), _ => null));
     }
 
+    private static IConfiguration PlanCacheConfig(string key) =>
+        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { [key] = "128" }).Build();
+
+    [Theory]
+    [InlineData("Development", "Gateway:WebSql:PlanCache:MaxEntries")]
+    [InlineData("Production", "Gateway:WebSql:PlanCache:MaxEntries")]
+    [InlineData("Production", "Gateway:WebSql:PlanCache")]
+    public void StartupFails_WhenRemovedPlanCacheSectionConfigured_ThroughTheRealRegistration(string environment, string key)
+    {
+        // WebSql:PlanCache was removed with the legacy path (the engine template cache has a fixed size): ignoring it silently would
+        // let an operator believe the cache size is tunable.
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+
+        var ex = Should.Throw<ValidationException>(() => Autheris.Api.Extensions.GatewayServiceCollectionExtensions.AddGatewayOptions(
+            services, PlanCacheConfig(key), Env(environment)));
+
+        ex.Message.ShouldContain("WebSql:PlanCache");
+        ex.Message.ShouldNotContain("128");
+    }
+
+    [Fact]
+    public void Startup_WithoutPlanCacheSection_PassesThatCheck() =>
+        Should.NotThrow(() => GatewayStartupValidator.ValidateRemovedWebSqlSettings(ConfigWith(null)));
+
     [Theory]
     [InlineData("Development")]
     [InlineData("Production")]
