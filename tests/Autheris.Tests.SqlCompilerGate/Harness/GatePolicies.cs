@@ -66,8 +66,8 @@ public sealed class GatePolicies(GateDialect dialect, string defaultSchema, Poli
         return new CompileRequest
         {
             TargetDialect = Target,
-            // The token guards of the legacy options of this gate: PostgreSQL keeps dollar quoting out of the rejected set.
-            TokenGuards = SqlTokenSecurityOptions.ForDialect(Target) with { RejectDollarQuoting = Target != TargetSqlDialect.PostgreSql },
+            // The token guards of the production request factory: dollar quoting is rejected on every dialect.
+            TokenGuards = SqlTokenSecurityOptions.ForDialect(Target),
             Statements = permissions,
             AllowedFunctions = SqlFunctionAllowlists.Build(Target, null),
             Policy = new GovernancePolicy

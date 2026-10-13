@@ -52,7 +52,7 @@ public static class CompileRequestFactory
                 RejectComments = true,
                 RejectBackslashInStrings = true,
                 RejectEscapedStringLiterals = true,
-                RejectDollarQuoting = dialect != TargetSqlDialect.PostgreSql,
+                RejectDollarQuoting = true,
                 RejectBracketLexerDifferentials = dialect is TargetSqlDialect.SqlServer or TargetSqlDialect.Sqlite,
                 RejectNonAsciiIdentifiers = true,
                 RejectDotsInQuotedIdentifiers = true,
