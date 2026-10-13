@@ -44,6 +44,13 @@ public interface IGatewayExecutionService
         TableIdentifier table,
         CancellationToken ct = default);
 
+    Task<TableAccessDecision> CheckTableAccessAsync(
+        ClaimsPrincipal? principal,
+        TableMetadata metadata,
+        bool recordAudit = true,
+        CancellationToken ct = default) =>
+        CheckTableAccessAsync(principal, metadata.Identifier, ct);
+
     Task<IReadOnlyDictionary<string, List<InvoiceItemRecord>>> LoadInvoiceItemsBatchAsync(
         ClaimsPrincipal? principal,
         IReadOnlyList<string> invoiceIds,

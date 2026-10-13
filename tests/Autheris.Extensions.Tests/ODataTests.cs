@@ -23,7 +23,7 @@ public sealed class ODataTests
         return new TableMetadata
         {
             Identifier = new TableIdentifier("sales", "dbo", "invoices"),
-            Table = new Table { SchemaName = "dbo", TableName = "invoices" },
+            Table = new Table { SchemaName = "dbo", TableName = "invoices", IsActive = true },
             PrimaryKeyColumns = ["id"],
             Columns =
             [
@@ -1122,6 +1122,106 @@ public sealed class ODataTests
     {
         var result = ODataCsdlGenerator.EscapeAttribute(input);
         result.ShouldBe(expected);
+    }
+
+    [Fact]
+    public async Task ODataHandler_GetMetadataCsdlAsync_UsesFastPathWithoutPerTableAudit_AndCachesResult()
+    {
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var execService = Substitute.For<IGatewayExecutionService>();
+        var logger = NullLogger<ODataHandler>.Instance;
+        var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
+
+        var sampleTable = CreateSampleTable();
+        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([sampleTable]);
+
+        var decision = TableAccessDecision.Allowed(
+            sampleTable.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(),
+            hasUnconstrainedColumnAllow: true);
+
+        execService.CheckTableAccessAsync(
+            Arg.Any<ClaimsPrincipal>(),
+            Arg.Is<TableMetadata>(m => m.Identifier == sampleTable.Identifier),
+            recordAudit: false,
+            Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(decision));
+
+        var handler = new ODataHandler(metadataRepo, execService, logger, environment: null, memoryCache: memoryCache);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-12345678-500"), new Claim("tenant", "sales")], "TestAuth"));
+
+        // First call: resolves via fast-path check with recordAudit: false
+        var xml1 = await handler.GetMetadataCsdlAsync(principal);
+        xml1.ShouldContain("EntityType Name=\"sales_dbo_invoices\"");
+
+        await execService.Received(1).CheckTableAccessAsync(
+            Arg.Any<ClaimsPrincipal>(),
+            Arg.Is<TableMetadata>(m => m.Identifier == sampleTable.Identifier),
+            recordAudit: false,
+            Arg.Any<CancellationToken>());
+
+        // Second call: served directly from IMemoryCache without re-evaluating access
+        var xml2 = await handler.GetMetadataCsdlAsync(principal);
+        xml2.ShouldBe(xml1);
+
+        // Verify CheckTableAccessAsync was NOT called a second time
+        await execService.Received(1).CheckTableAccessAsync(
+            Arg.Any<ClaimsPrincipal>(),
+            Arg.Is<TableMetadata>(m => m.Identifier == sampleTable.Identifier),
+            recordAudit: false,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ODataHandler_GetServiceDocumentAsync_UsesFastPathWithoutPerTableAudit_AndCachesResult()
+    {
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var execService = Substitute.For<IGatewayExecutionService>();
+        var logger = NullLogger<ODataHandler>.Instance;
+        var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
+
+        var sampleTable = CreateSampleTable();
+        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([sampleTable]);
+
+        var decision = TableAccessDecision.Allowed(
+            sampleTable.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(),
+            hasUnconstrainedColumnAllow: true);
+
+        execService.CheckTableAccessAsync(
+            Arg.Any<ClaimsPrincipal>(),
+            Arg.Is<TableMetadata>(m => m.Identifier == sampleTable.Identifier),
+            recordAudit: false,
+            Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(decision));
+
+        var handler = new ODataHandler(metadataRepo, execService, logger, environment: null, memoryCache: memoryCache);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-12345678-500"), new Claim("tenant", "sales")], "TestAuth"));
+
+        // First call
+        var doc1 = await handler.GetServiceDocumentAsync("https://gateway/odata/v4", principal);
+        doc1.ShouldNotBeNull();
+
+        await execService.Received(1).CheckTableAccessAsync(
+            Arg.Any<ClaimsPrincipal>(),
+            Arg.Is<TableMetadata>(m => m.Identifier == sampleTable.Identifier),
+            recordAudit: false,
+            Arg.Any<CancellationToken>());
+
+        // Second call should hit the cache
+        var doc2 = await handler.GetServiceDocumentAsync("https://gateway/odata/v4", principal);
+        doc2.ShouldBeSameAs(doc1);
+
+        // Still only 1 invocation to CheckTableAccessAsync
+        await execService.Received(1).CheckTableAccessAsync(
+            Arg.Any<ClaimsPrincipal>(),
+            Arg.Is<TableMetadata>(m => m.Identifier == sampleTable.Identifier),
+            recordAudit: false,
+            Arg.Any<CancellationToken>());
     }
 }
 

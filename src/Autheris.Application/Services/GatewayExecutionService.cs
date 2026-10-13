@@ -599,6 +599,24 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         TableIdentifier table,
         CancellationToken ct = default)
     {
+        var metadata = await _metadataRepository.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
+        if (metadata == null || !metadata.Table.IsActive)
+        {
+            return TableAccessDecision.Denied(table, $"Table '{table}' not found in metadata catalog.");
+        }
+
+        return await CheckTableAccessAsync(principal, metadata, recordAudit: true, ct).ConfigureAwait(false);
+    }
+
+    public async Task<TableAccessDecision> CheckTableAccessAsync(
+        ClaimsPrincipal? principal,
+        TableMetadata metadata,
+        bool recordAudit = true,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        var table = metadata.Identifier;
+
         using var _ = _drainController?.TrackQuery();
         if (principal == null || principal.Identity?.IsAuthenticated != true)
         {
@@ -612,8 +630,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         }
         var userSid = userSidNullable.Value;
 
-        var metadata = await _metadataRepository.GetTableMetadataAsync(table, ct);
-        if (metadata == null || !metadata.Table.IsActive)
+        if (!metadata.Table.IsActive)
         {
             return TableAccessDecision.Denied(table, $"Table '{table}' not found in metadata catalog.");
         }
@@ -623,18 +640,21 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         // Architecture 1: same decision as ResolveTableAccessAsync (OData metadata must not show more than a query returns).
         var decision = await AccessPolicy().DecideAsync(TableAccessQuery.ForPrincipal(principal, userSid, tenantId, metadata), ct).ConfigureAwait(false);
 
-        // F-OPS-02: W3C Trace Correlation
-        var traceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId();
-        await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+        if (recordAudit)
         {
-            TenantId = tenantId,
-            EventType = "CHILD_RELATION_CHECK",
-            ActorSid = userSid,
-            TargetTable = table.ToString(),
-            Decision = decision.IsAllowed ? "ALLOW" : "DENY",
-            TraceId = traceId,
-            DetailsJson = JsonSerializer.Serialize(new { is_allowed = decision.IsAllowed, reasons = decision.DeniedReasons })
-        }, ct);
+            // F-OPS-02: W3C Trace Correlation
+            var traceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId();
+            await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+            {
+                TenantId = tenantId,
+                EventType = "CHILD_RELATION_CHECK",
+                ActorSid = userSid,
+                TargetTable = table.ToString(),
+                Decision = decision.IsAllowed ? "ALLOW" : "DENY",
+                TraceId = traceId,
+                DetailsJson = JsonSerializer.Serialize(new { is_allowed = decision.IsAllowed, reasons = decision.DeniedReasons })
+            }, ct);
+        }
 
         return decision;
     }
