@@ -36,7 +36,7 @@ public sealed class GovernedPipelineCachePoisoningTests
     private const string Tenant = "acme";
     private static readonly TableIdentifier OrdersId = new("default", "public", "orders");
 
-    private static readonly FastSqlEngine SharedEngine = new();
+    private readonly FastSqlEngine _engine = new();
 
     private static TableMetadata Orders(params string[] columns) => new()
     {
@@ -61,7 +61,7 @@ public sealed class GovernedPipelineCachePoisoningTests
         ColumnRules = table.Columns.Select(c => new ConsentColumnRule { ColumnName = c.ColumnName, AccessLevel = ColumnAccessLevel.Clear }).ToList()
     };
 
-    private static GovernedSqlExecutionService CreateService(
+    private GovernedSqlExecutionService CreateService(
         Func<TableMetadata> table, Func<IReadOnlyList<Consent>>? consents = null, bool allowDml = false, ISqlEngine? engine = null)
     {
         var repo = Substitute.For<ITableMetadataRepository>();
@@ -90,7 +90,7 @@ public sealed class GovernedPipelineCachePoisoningTests
             Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, AllowDml = allowDml, DmlWriterRoles = ["Writer"], DefaultMaxRows = 100, MaxAllowedRows = 500 } }), executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies(),
-            sqlEngine: engine ?? SharedEngine,
+            sqlEngine: engine ?? _engine,
             logger: NullLogger<GovernedSqlExecutionService>.Instance, consentRepository: consentRepository);
     }
 
@@ -105,6 +105,8 @@ public sealed class GovernedPipelineCachePoisoningTests
         var b = await service.CompileAsync(Sql, User("S-B"), new TenantId(Tenant));   // same text, same shape, other consent values
         var a2 = await service.CompileAsync(Sql, User("S-A"), new TenantId(Tenant));  // and back: a hit that must rebind
 
+        _engine.CompileCache.Stats.Misses.ShouldBe(1);   // only the first compile built a template
+        _engine.CompileCache.Stats.Hits.ShouldBe(2);     // the other principal and the way back were served from it, and rebound their own values
         a1.ValuesOf(ParameterOrigin.Policy).ShouldBe(["EU"]);
         b.ValuesOf(ParameterOrigin.Policy).ShouldBe(["US"]);
         a2.ValuesOf(ParameterOrigin.Policy).ShouldBe(["EU"]);
@@ -122,6 +124,8 @@ public sealed class GovernedPipelineCachePoisoningTests
         var upper = await service.CompileAsync(Sql, User("S-A"), new TenantId("ACME"));
         var lowerAgain = await service.CompileAsync(Sql, User("S-A"), new TenantId("acme"));
 
+        _engine.CompileCache.Stats.Misses.ShouldBe(1);
+        _engine.CompileCache.Stats.Hits.ShouldBe(2);                  // the variants share one template; the tenant is bound per request
         lower.ValuesOf(ParameterOrigin.Tenant).ShouldBe(["acme"]);
         upper.ValuesOf(ParameterOrigin.Tenant).ShouldBe(["ACME"]);   // 'ACME' never receives the cached 'acme'
         lowerAgain.ValuesOf(ParameterOrigin.Tenant).ShouldBe(["acme"]);
@@ -135,8 +139,14 @@ public sealed class GovernedPipelineCachePoisoningTests
         const string Sql = "SELECT * FROM orders";
 
         var before = await service.CompileAsync(Sql, User("S-A"), new TenantId(Tenant));
+        var control = await service.CompileAsync(Sql, User("S-A"), new TenantId(Tenant));
+        _engine.CompileCache.Stats.Hits.ShouldBe(1);                  // control: the unchanged catalog is a hit
+        control.Sql.ShouldBe(before.Sql);
+        long misses = _engine.CompileCache.Stats.Misses;
         current = Orders("id", "extra_column", "tenant_id");          // a governed column was added
         var after = await service.CompileAsync(Sql, User("S-A"), new TenantId(Tenant));
+        _engine.CompileCache.Stats.Misses.ShouldBe(misses + 1);       // a miss: the changed column set is a different dependency
+        _engine.CompileCache.Stats.Hits.ShouldBe(1);
         current = Orders("id", "tenant_id");                          // and removed again
         var back = await service.CompileAsync(Sql, User("S-A"), new TenantId(Tenant));
 
@@ -149,7 +159,7 @@ public sealed class GovernedPipelineCachePoisoningTests
     public async Task CachePoisoning_CancelledCompile_IsNotCached()
     {
         var table = Orders("id", "tenant_id");
-        var engine = new FastSqlEngine();   // a fresh engine: the cancelled compile is the first thing that could touch its cache
+        var engine = _engine;   // the cancelled compile is the first thing that could touch this engine's cache
         var service = CreateService(() => table, engine: engine);
         const string Sql = "SELECT id FROM orders";
         using var cancelled = new CancellationTokenSource();
@@ -159,6 +169,7 @@ public sealed class GovernedPipelineCachePoisoningTests
         var afterCancel = await service.CompileAsync(Sql, User("S-A"), new TenantId(Tenant));
         var reference = await CreateService(() => table, engine: new FastSqlEngine()).CompileAsync(Sql, User("S-A"), new TenantId(Tenant));
 
+        engine.CompileCache.Stats.Hits.ShouldBe(0);   // the cancelled compile left no template: the compile after it had to build its own
         afterCancel.Sql.ShouldBe(reference.Sql);
         afterCancel.Parameters.Select(p => (p.Origin, p.Value)).ShouldBe(reference.Parameters.Select(p => (p.Origin, p.Value)));
     }
@@ -186,8 +197,10 @@ public sealed class GovernedPipelineCachePoisoningTests
             CancellationToken.None);
         var readOnly = CompileRequestFactory.Create(policy, TargetSqlDialect.PostgreSql, new WebSqlOptions(), isDml: false, 100, new HashSet<string>());
 
-        var ex = Should.Throw<SqlCompileNotSupportedException>(() => SharedEngine.Compile(Sql.AsMemory(), readOnly, CancellationToken.None));
+        long hits = _engine.CompileCache.Stats.Hits;
+        var ex = Should.Throw<SqlCompileNotSupportedException>(() => _engine.Compile(Sql.AsMemory(), readOnly, CancellationToken.None));
         ex.Reason.ShouldBe(SqlCompileNotSupportedReason.StatementClass);
+        _engine.CompileCache.Stats.Hits.ShouldBe(hits);   // not served from the writer's template
     }
 
     private sealed class StubCatalogProvider(TableMetadata table) : IGovernedCatalogProvider
