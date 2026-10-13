@@ -16,12 +16,83 @@ public static class McpDocTools
     public const string ListDocTopics = "list_doc_topics";
     public const string ListApplications = "list_applications";
     public const string DepositDocumentation = "deposit_documentation";
+    public static bool IsDocTool(string? toolName) =>
+        string.Equals(toolName, SearchDocs, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, LookupErrorCode, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, GetProcedure, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, ListDocTopics, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, ListApplications, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, DepositDocumentation, StringComparison.OrdinalIgnoreCase);
 
     private static readonly JsonSerializerOptions IndentedOptions = new()
     {
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
+
+    public static async Task<string> ExecuteDocToolAsync(
+        string toolName,
+        string argumentsJson,
+        IDocSearchService? searchService,
+        IUniversalDocStore? docStore,
+        CancellationToken ct = default)
+    {
+        if (string.Equals(toolName, SearchDocs, StringComparison.OrdinalIgnoreCase))
+        {
+            if (searchService == null)
+            {
+                return JsonSerializer.Serialize(new { error = "Doc search service is not configured." });
+            }
+            return await ExecuteSearchDocsAsync(searchService, argumentsJson, ct).ConfigureAwait(false);
+        }
+
+        if (string.Equals(toolName, LookupErrorCode, StringComparison.OrdinalIgnoreCase))
+        {
+            if (searchService == null)
+            {
+                return JsonSerializer.Serialize(new { error = "Doc search service is not configured." });
+            }
+            return await ExecuteLookupErrorCodeAsync(searchService, argumentsJson, ct).ConfigureAwait(false);
+        }
+
+        if (string.Equals(toolName, GetProcedure, StringComparison.OrdinalIgnoreCase))
+        {
+            if (searchService == null)
+            {
+                return JsonSerializer.Serialize(new { error = "Doc search service is not configured." });
+            }
+            return await ExecuteGetProcedureAsync(searchService, argumentsJson, ct).ConfigureAwait(false);
+        }
+
+        if (string.Equals(toolName, ListDocTopics, StringComparison.OrdinalIgnoreCase))
+        {
+            if (searchService == null)
+            {
+                return JsonSerializer.Serialize(new { error = "Doc search service is not configured." });
+            }
+            return await ExecuteListDocTopicsAsync(searchService, argumentsJson, ct).ConfigureAwait(false);
+        }
+
+        if (string.Equals(toolName, ListApplications, StringComparison.OrdinalIgnoreCase))
+        {
+            if (docStore == null)
+            {
+                return JsonSerializer.Serialize(new { error = "Universal doc store is not configured." });
+            }
+            return await ExecuteListApplicationsAsync(docStore, argumentsJson, ct).ConfigureAwait(false);
+        }
+
+        if (string.Equals(toolName, DepositDocumentation, StringComparison.OrdinalIgnoreCase))
+        {
+            if (docStore == null)
+            {
+                return JsonSerializer.Serialize(new { error = "Universal doc store is not configured." });
+            }
+            return await ExecuteDepositDocumentationAsync(docStore, argumentsJson, ct).ConfigureAwait(false);
+        }
+
+        return JsonSerializer.Serialize(new { error = $"Unknown doc tool '{toolName}'." });
+    }
 
     public static IEnumerable<McpToolDefinition> Definitions()
     {

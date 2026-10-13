@@ -1068,5 +1068,60 @@ public sealed class ODataTests
         var entry = (Dictionary<string, object?>)value[0];
         entry["name"].ShouldBe("sales_dbo_invoices");
     }
+
+    [Fact]
+    public void ODataCsdlGenerator_MultiLineDescriptions_EncodesNewlinesAndTabsAsEntityReferences_ForExcelCompatibility()
+    {
+        var table = new TableMetadata
+        {
+            Identifier = new TableIdentifier("sales", "dbo", "notes"),
+            Table = new Table
+            {
+                SchemaName = "dbo",
+                TableName = "notes",
+                Description = "**Protobuf-Quelle:** `protos/v1`\n**Go-Modell:** `conf.Note`",
+                LongDescription = "Line 1\r\n\tTabbed Line 2\r\nLine 3"
+            },
+            PrimaryKeyColumns = ["id"],
+            Columns =
+            [
+                new TableColumn
+                {
+                    ColumnName = "id",
+                    DataType = "integer",
+                    Description = "Primary identifier.\nSecond line explanation.",
+                    LongDescription = "Detailed description with\ttab and\nnewline."
+                }
+            ]
+        };
+
+        var xml = ODataCsdlGenerator.GenerateMetadataXml([table]);
+
+        // Must not contain raw unescaped newlines in attributes
+        xml.ShouldNotContain("String=\"**Protobuf-Quelle:** `protos/v1`\n");
+        xml.ShouldNotContain("String=\"Line 1\r\n");
+
+        // Must contain entity references
+        xml.ShouldContain("&#10;");
+        xml.ShouldContain("&#9;");
+        xml.ShouldContain("String=\"**Protobuf-Quelle:** `protos/v1`&#10;**Go-Modell:** `conf.Note`\"");
+        xml.ShouldContain("String=\"Line 1&#10;&#9;Tabbed Line 2&#10;Line 3\"");
+
+        // Must still be well-formed XML parseable by System.Xml.Linq
+        var xDoc = System.Xml.Linq.XDocument.Parse(xml);
+        xDoc.Root.ShouldNotBeNull();
+    }
+
+    [Theory]
+    [InlineData("Simple text", "Simple text")]
+    [InlineData("Line1\nLine2", "Line1&#10;Line2")]
+    [InlineData("Line1\r\nLine2", "Line1&#10;Line2")]
+    [InlineData("Col1\tCol2", "Col1&#9;Col2")]
+    [InlineData("<tag attr=\"val\"> & 'quote'", "&lt;tag attr=&quot;val&quot;&gt; &amp; &apos;quote&apos;")]
+    public void ODataCsdlGenerator_EscapeAttribute_ProperlyEscapesAllSpecialCharacters(string input, string expected)
+    {
+        var result = ODataCsdlGenerator.EscapeAttribute(input);
+        result.ShouldBe(expected);
+    }
 }
 

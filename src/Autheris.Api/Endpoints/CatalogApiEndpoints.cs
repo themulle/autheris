@@ -116,7 +116,7 @@ public static class CatalogApiEndpoints
             var results = await resolverService.ResolvePrincipalAsync(q, context, ct);
             return Results.Ok(results);
         })
-        .RequireAuthorization()
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // R-55: POST /api/v1/catalog/datasources/{id}/test

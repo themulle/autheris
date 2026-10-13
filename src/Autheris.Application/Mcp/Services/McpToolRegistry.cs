@@ -142,6 +142,12 @@ public sealed class McpToolRegistry : IMcpToolRegistry
             RegisterTool(adminTool);
         }
 
+        // 8. Built-in doc tools: offline documentation and runbook MCP gateway (F-AI-15, F-AI-16)
+        foreach (var docTool in McpDocTools.Definitions())
+        {
+            RegisterTool(docTool);
+        }
+
         // Register any explicitly declared operations
         if (allowedOperations != null)
         {

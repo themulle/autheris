@@ -346,16 +346,9 @@ public class AccessPlanningService : IAccessPlanningService
             bool isActive = string.Equals(newState, "active", StringComparison.OrdinalIgnoreCase);
             var updated = existing with
             {
-                Table = new Table
+                Table = existing.Table with
                 {
-                    Id = existing.Table.Id,
-                    SchemaName = existing.Table.SchemaName,
-                    TableName = existing.Table.TableName,
-                    Sensitivity = existing.Table.Sensitivity,
-                    RequiresFourEyes = existing.Table.RequiresFourEyes,
-                    IsActive = isActive,
-                    Description = existing.Table.Description,
-                    DisplayName = existing.Table.DisplayName
+                    IsActive = isActive
                 }
             };
             await _tableRepo.UpsertTableMetadataAsync(updated, ct).ConfigureAwait(false);
