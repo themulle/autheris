@@ -33,7 +33,7 @@ using TrinoSqlEngine.Ast.Visitors;
 using TrinoSqlEngine.Governance;
 
 /// <summary>
-/// AR-05 / Sicherheits-Invariante 1: Modularized SQL Rewriter executing the 5 strictly ordered pipeline stages.
+/// AR-05 / Security invariant 1: Modularized SQL Rewriter executing the 5 strictly ordered pipeline stages.
 /// Stage 1: AnalyseAndStatementPolicy (AST parse, statement type, function security)
 /// Stage 2: IdentityResolution (User, Tenant, Roles, DataSource validation)
 /// Stage 3: GovernanceResolution (ReBAC, TableAccessPolicy, RLS filters, column masking)
@@ -623,7 +623,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         var request = CompileRequestFactory.Create(policy, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions);
 
         // -------------------------------------------------------------
-        // Stage 5: Compile (Sicherheits-Invariante 2). Engine exceptions propagate unwrapped: SqlCompilerErrorMapper maps them to
+        // Stage 5: Compile (Security invariant 2). Engine exceptions propagate unwrapped: SqlCompilerErrorMapper maps them to
         // stable codes with fixed messages at every error surface, and no Exception.Message is copied into a new exception.
         // -------------------------------------------------------------
         CompiledSql compiled;

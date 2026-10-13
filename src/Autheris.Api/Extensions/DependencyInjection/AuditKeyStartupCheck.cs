@@ -12,12 +12,10 @@ using Microsoft.Extensions.Hosting;
 /// </summary>
 public sealed class AuditKeyStartupCheck(CompiledSqlAuditDigester digester) : IHostedService
 {
-    private readonly CompiledSqlAuditDigester _digester = digester;
-
     /// <exception cref="System.InvalidOperationException">No usable audit key outside Development and Test.</exception>
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        _digester.EnsureKey();
+        digester.EnsureKey();
         return Task.CompletedTask;
     }
 

@@ -322,9 +322,9 @@ internal sealed class GovernedSqlCompiler
         {
             MaskedColumns = new CatalogMaskLookup(typed.Catalog, typed.Masks),
             TableColumns = name => typed.Catalog.Resolve(ParseName(name))?.Columns.Select(c => c.Name).ToList(),
-            TablesWithMaskedColumns = new HashSet<string>(request.Policy.TablesWithMaskedColumns, StringComparer.OrdinalIgnoreCase),
+            TablesWithMaskedColumns = CaseInsensitive(request.Policy.TablesWithMaskedColumns),
             EnforcedMaxRows = request.EnforcedMaxRows,
-            TablesWithConsentRowFilter = new HashSet<string>(request.Policy.TablesWithConsentRowFilter, StringComparer.OrdinalIgnoreCase),
+            TablesWithConsentRowFilter = CaseInsensitive(request.Policy.TablesWithConsentRowFilter),
             RejectMaskedColumnsInPredicates = true,
             // DML guards of the request (DmlGuardOptions.Strict by default); the coverage verifier proves what they require.
             EnforceWithCheckOption = guards.EnforceWithCheckOption,
@@ -337,6 +337,17 @@ internal sealed class GovernedSqlCompiler
             RejectPolicyColumnAssignment = guards.RejectPolicyColumnAssignment
         };
     }
+
+    /// <summary>
+    /// The table-name sets are matched case-insensitively. The set that the policy factory builds already is (a frozen, case-insensitive
+    /// set is passed on as it is, with no copy per compile); any other set is copied into a case-insensitive one, as before.
+    /// </summary>
+    private static IReadOnlySet<string> CaseInsensitive(IReadOnlySet<string> names) => names switch
+    {
+        { Count: 0 } => names,
+        FrozenSet<string> frozen when ReferenceEquals(frozen.Comparer, StringComparer.OrdinalIgnoreCase) => frozen,
+        _ => new HashSet<string>(names, StringComparer.OrdinalIgnoreCase)
+    };
 
     private static SqlQualifiedName ParseName(string normalized)
     {

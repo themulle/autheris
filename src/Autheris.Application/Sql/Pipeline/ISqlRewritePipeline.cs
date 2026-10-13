@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Autheris.Domain.Common;
 
 /// <summary>
-/// Sicherheits-Invariante 1: Strikte und unveränderliche Reihenfolge der 5 SQL-Rewrite-Stufen.
+/// Security invariant 1: the strict and immutable order of the 5 SQL rewrite stages.
 /// </summary>
 public enum SqlRewriteStageOrder
 {

@@ -177,6 +177,7 @@ public sealed class X1StartupTests
         var reporter = new DeniedTablesStartupReporter(tables, profiles, null, Microsoft.Extensions.Options.Options.Create(new GatewayOptions()), log);
 
         await reporter.StartAsync(CancellationToken.None);
+        await reporter.ExecuteTask!;   // the listing runs in the background
 
         string.Join('\n', log.Lines).ShouldContain("p-bad");
         string.Join('\n', log.Lines).ShouldNotContain(SecretValue);
@@ -184,7 +185,28 @@ public sealed class X1StartupTests
         // a store that cannot be read is a warning, not a failed start
         tables.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns<Task<IReadOnlyList<TableMetadata>>>(_ => throw new InvalidOperationException(SecretValue));
         var failing = new CapturingLogger<DeniedTablesStartupReporter>();
-        await new DeniedTablesStartupReporter(tables, profiles, null, Microsoft.Extensions.Options.Options.Create(new GatewayOptions()), failing).StartAsync(CancellationToken.None);
+        var failingReporter = new DeniedTablesStartupReporter(tables, profiles, null, Microsoft.Extensions.Options.Options.Create(new GatewayOptions()), failing);
+        await failingReporter.StartAsync(CancellationToken.None);
+        await failingReporter.ExecuteTask!;
         string.Join('\n', failing.Lines).ShouldNotContain(SecretValue);
+    }
+
+    [Fact]
+    public async Task DeniedTablesReporter_DoesNotBlockTheStartWhileTheStoreIsRead()
+    {
+        // a slow governance store must not delay the host start (the listing is background work, not part of StartAsync)
+        var release = new TaskCompletionSource<IReadOnlyList<TableMetadata>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tables = Substitute.For<ITableMetadataRepository>();
+        tables.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(_ => release.Task);
+        var reporter = new DeniedTablesStartupReporter(
+            tables, Substitute.For<IAccessProfileRepository>(), null, Microsoft.Extensions.Options.Options.Create(new GatewayOptions()),
+            new CapturingLogger<DeniedTablesStartupReporter>());
+
+        var start = reporter.StartAsync(CancellationToken.None);
+
+        (await Task.WhenAny(start, Task.Delay(TimeSpan.FromSeconds(2)))).ShouldBeSameAs(start, "StartAsync waited for the store");
+        release.SetResult([Orders()]);
+        await reporter.ExecuteTask!;
+        await reporter.StopAsync(CancellationToken.None);
     }
 }
