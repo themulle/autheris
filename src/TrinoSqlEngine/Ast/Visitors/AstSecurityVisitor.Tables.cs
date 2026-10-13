@@ -21,8 +21,6 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 {
     public override SqlNode VisitNamedTableSource(NamedTableSource node)
     {
-        string normalizedName = node.Name.NormalizedName;
-        string simpleName = node.Name.SimpleName;
         string scopeKey = SqlIdentifierHelper.FoldIdentifierForScope(node.Name.Parts[^1]);
 
         // CR-ADG-32: a self-reference requires WITH RECURSIVE on every dialect (SQL Server and Oracle would otherwise recurse silently
@@ -35,11 +33,6 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         // SEC C-02: Only simple (unqualified) names in CTE scope are considered CTEs
         if (node.Name.IsSimple && _cteScopeStack.Peek().Contains(scopeKey))
         {
-            if (_typed == null)
-            {
-                return node;
-            }
-
             // CR-ADG-01: the reference is emitted from the definition identifier (delimited scope key). The user spelling
             // survives as the alias so that qualified column references keep binding under the dialect's own folding.
             return node with
@@ -49,21 +42,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             };
         }
 
-        if (_typed != null)
-        {
-            return SecureTyped(node);
-        }
-
-        bool shouldApplyRls = _options.PolicyProvider.ShouldApplyPolicy(normalizedName);
-        bool hasMasking = HasMaskingForTable(normalizedName);
-        bool enforceCatalog = _options.EnforceCatalogProjection && _options.TableColumnsProvider != null && _options.TableColumnsProvider(normalizedName) is { Count: > 0 };
-
-        if (!shouldApplyRls && !hasMasking && !enforceCatalog)
-        {
-            return node;
-        }
-
-        return CreateSecuredSubqueryTableSource(node, normalizedName, shouldApplyRls, hasMasking);
+        return SecureTyped(node);
     }
 
     /// <summary>
@@ -73,7 +52,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     /// </summary>
     private SubqueryTableSource SecureTyped(NamedTableSource node)
     {
-        var typed = _typed!;
+        var typed = _typed;
         var entry = typed.Catalog.Resolve(node.Name)
             ?? throw new SecurityException("A table reference could not be resolved against the catalog.");
         var tid = entry.Identity;
@@ -133,91 +112,6 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             null, null);
         // An unquoted user name stays unquoted, so the dialect folds the alias and the user's references the same way.
         return new SubqueryTableSource(inner, node.Alias ?? new SqlIdentifier(node.Name.SimpleName, IsQuoted: node.Name.Parts[^1].IsQuoted));
-    }
-
-    private SubqueryTableSource CreateSecuredSubqueryTableSource(
-        NamedTableSource node,
-        string normalizedName,
-        bool shouldApplyRls,
-        bool hasMasking)
-    {
-        IReadOnlyList<SelectItem> projections;
-        if (_options.TableColumnsProvider != null)
-        {
-            var columns = _options.TableColumnsProvider(normalizedName);
-            if (columns != null && columns.Count > 0)
-            {
-                var list = new List<SelectItem>(columns.Count);
-                foreach (var col in columns)
-                {
-                    // SEC M-24: Delimited identifiers for columns
-                    var colId = new SqlIdentifier(col, IsQuoted: true);
-                    if (_options.ColumnMaskingProvider != null && _options.ColumnMaskingProvider.HasMask(normalizedName, col))
-                    {
-                        // SQL-4: mask expressions are rendered by the gateway for the target dialect (bound key parameters,
-                        // T-SQL brackets); re-parsing them as Trino SQL failed for every HMAC column. They are emitted
-                        // verbatim, exactly like the legacy rewriter does.
-                        string maskExpr = _options.ColumnMaskingProvider.GetMaskedExpression(normalizedName, col);
-                        list.Add(new ColumnSelectItem(new TrustedSqlExpression(maskExpr), colId));
-                    }
-                    else
-                    {
-                        list.Add(new ColumnSelectItem(new ColumnReference(new SqlQualifiedName(new[] { colId })), colId));
-                    }
-                }
-                projections = list.AsReadOnly();
-            }
-            else
-            {
-                if (hasMasking)
-                {
-                    throw new SecurityException($"Table '{normalizedName}' contains masked columns but column provider returned empty schema.");
-                }
-                projections = new[] { new WildcardSelectItem(null) };
-            }
-        }
-        else
-        {
-            if (hasMasking)
-            {
-                throw new SecurityException($"Table '{normalizedName}' contains masked columns but no TableColumnsProvider was configured to expand the projection.");
-            }
-            projections = new[] { new WildcardSelectItem(null) };
-        }
-
-        string policyFilter = shouldApplyRls ? _options.PolicyProvider.GetPolicyFilter(normalizedName) : string.Empty;
-        bool referencesTarget = RowFilterAliases.ReferencesTarget(policyFilter);
-
-        // Bind inner target table: if filter references autheris_target, alias must be declared
-        var innerTableAlias = referencesTarget ? new SqlIdentifier(RowFilterAliases.Target) : null;
-        var innerSource = new NamedTableSource(node.Name, innerTableAlias);
-
-        Expression? whereClause = !string.IsNullOrWhiteSpace(policyFilter)
-            ? PolicyFilterExpression(policyFilter)
-            : null;
-
-        var subqueryBody = new QuerySpecification(
-            Distinct: false,
-            Projections: projections,
-            From: innerSource,
-            Where: whereClause,
-            GroupBy: null,
-            Having: null);
-
-        var subqueryStatement = new SelectStatement(null, subqueryBody, null, null);
-
-        SqlIdentifier subqueryAlias;
-        if (node.Alias != null)
-        {
-            subqueryAlias = node.Alias;
-        }
-        else
-        {
-            bool isQuoted = node.Name.Parts[^1].IsQuoted || _options.TargetDialect == TargetSqlDialect.SqlServer;
-            subqueryAlias = new SqlIdentifier(node.Name.SimpleName, isQuoted);
-        }
-
-        return new SubqueryTableSource(subqueryStatement, subqueryAlias);
     }
 }
 

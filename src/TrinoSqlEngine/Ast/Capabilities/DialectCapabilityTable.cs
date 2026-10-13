@@ -245,6 +245,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         throw new ArgumentOutOfRangeException(nameof(dialect), dialect, "No capability entry exists for this dialect.");
     }
 
+    public bool TryGet(TargetSqlDialect dialect, out DialectCapabilities capabilities) => _table.TryGetValue(dialect, out capabilities!);
+
     private static FrozenDictionary<SqlParameterType, string> BuildIdentityTemplates()
     {
         var map = new Dictionary<SqlParameterType, string>();

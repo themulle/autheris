@@ -35,7 +35,6 @@ public static class GatewayStartupValidator
 
         ValidateObjectRecursively(options);
 
-        ValidateSqlRewriterEngine(options);
         ValidateOracleRuntime(options, environment, logger);
         ValidateDatabricks(options, environment);
         ValidateDefaultSchemas(options);
@@ -585,10 +584,10 @@ public static class GatewayStartupValidator
     /// one path now and no runtime switch (rollback is a revert), so a configured value fails the start in every environment:
     /// warn-and-ignore would let an operator believe in a kill switch that does not exist. The configured value is never echoed.
     /// </summary>
-    public static void ValidateSqlRewriterEngine(GatewayOptions options)
+    public static void ValidateSqlRewriterEngine(Microsoft.Extensions.Configuration.IConfiguration configuration)
     {
-        ArgumentNullException.ThrowIfNull(options);
-        if (options.WebSql.SqlRewriterEngine is not null)
+        ArgumentNullException.ThrowIfNull(configuration);
+        if (configuration.GetSection($"{GatewayOptions.SectionName}:WebSql:SqlRewriterEngine").Exists())
         {
             throw new ValidationException(
                 "WebSql:SqlRewriterEngine is no longer supported: the AST compiler is the only SQL path and there is no runtime switch. Remove the key from the configuration.");

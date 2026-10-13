@@ -7,7 +7,7 @@ using System.Collections.Generic;
 /// <summary>
 /// SQ-06 / SEC P-02: Curated function allowlists per target dialect (scalar, string, date, math, aggregate, window and
 /// conditional functions without side effects, SQL text execution, file/network access or server/session disclosure).
-/// Use with <see cref="RlsOptions.AllowedFunctions"/>. The default denylist (<see cref="SqlFunctionPolicy"/>) remains
+/// Use with <see cref="CompileRequest.AllowedFunctions"/>. The default denylist (<see cref="SqlFunctionPolicy"/>) remains
 /// the second line of defense: <see cref="Build"/> never includes a denylisted name, and
 /// <see cref="SqlFunctionPolicy.IsFunctionAllowed"/> rejects denylisted names even if they are allowlisted.
 /// Names are unqualified and matched case-insensitively; qualified calls (e.g. <c>pg_catalog.lower</c>) are not allowlisted.

@@ -182,7 +182,6 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
     protected override void FormatIntervalLiteral(ref ValueStringBuilder builder, IntervalLiteralExpression interval, SqlEmitterContext context) =>
         throw new TrinoSqlEngine.Ast.Builder.AstBuildException($"SQL construct INTERVAL literal is not supported for {TargetDialect} (no interval type).");
 
-    public override int MaxParameterBudget => 2100;
 
     /// <summary>Virtual filters (phase 7b): <c>DATEADD(unit, n, x)</c>.</summary>
     protected override void FormatDateAdd(ref ValueStringBuilder builder, DateUnit unit, long amount, Expression source, SqlEmitterContext context)

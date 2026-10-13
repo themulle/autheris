@@ -354,19 +354,8 @@ public static partial class SqlFilterCompiler
     {
         ArgumentNullException.ThrowIfNull(filter);
         var fragment = filter.Sql ?? throw new InvalidOperationException($"The virtual filter '{filter.Name}' has no sql definition.");
-        var options = new RlsOptions
-        {
-            TargetDialect = Sql.SqlDialectMapper.ToTargetDialect(dialect),
-            RewriterEngine = "AstCompiler",
-            TranslateTrinoDateFunctions = true,
-            PolicyProvider = new DefaultRlsPolicyProvider(predicate: _ => false),
-            EnforceReadOnlyQueries = true,
-            EnforceFunctionPolicy = true,
-            AllowedFunctions = AllowedFunctions,
-            EnforcedMaxRows = 0
-        };
-
-        var generated = new FastSqlEngine().GenerateGovernedSql(Statement(fragment), options);
+        var target = Sql.SqlDialectMapper.ToTargetDialect(dialect);
+        var generated = GenerateInline(Statement(fragment), target);
         if (!generated.StartsWith("SELECT 1 FROM ", StringComparison.Ordinal))
         {
             throw new InvalidOperationException($"The virtual filter '{filter.Name}' did not compile to a correlated subquery.");
@@ -393,21 +382,9 @@ public static partial class SqlFilterCompiler
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(engine);
         var fragment = filter.Sql ?? throw new InvalidOperationException($"The virtual filter '{filter.Name}' has no sql definition.");
-        var options = new RlsOptions
-        {
-            TargetDialect = Sql.SqlDialectMapper.ToTargetDialect(dialect),
-            RewriterEngine = "AstCompiler",
-            TranslateTrinoDateFunctions = true,
-            PolicyProvider = new DefaultRlsPolicyProvider(predicate: _ => false),
-            EnforceReadOnlyQueries = true,
-            EnforceFunctionPolicy = true,
-            AllowedFunctions = AllowedFunctions,
-            EnforcedMaxRows = 0
-        };
-
-        var (tree, _) = engine.Parse(Statement(fragment).AsMemory(), SqlTokenSecurityOptions.FromRlsOptions(options), CancellationToken.None);
-        var ast = new SqlAstBuilder(AstBuilderOptions.FromRlsOptions(options)).BuildStatement(tree);
-        var secured = (SqlStatement)new AstSecurityVisitor(options, engine).Visit(ast);
+        var target = Sql.SqlDialectMapper.ToTargetDialect(dialect);
+        var (tree, _) = engine.Parse(Statement(fragment).AsMemory(), SqlTokenSecurityOptions.ForDialect(target), CancellationToken.None);
+        var secured = new SqlAstBuilder(BuilderOptions()).BuildStatement(tree);
         var simplified = (SqlStatement)new AstSimplificationVisitor().Visit(secured);
         new AstValidationVisitor().Validate(simplified);
 
@@ -457,6 +434,27 @@ public static partial class SqlFilterCompiler
             LiteralExpression { Type: LiteralType.Boolean, Value: bool flag } => Namer.Add(new PolicyValue(flag, SqlParameterType.Boolean)),
             _ => expression
         };
+    }
+
+    private static AstBuilderOptions BuilderOptions() => new()
+    {
+        EnforceReadOnlyQueries = true,
+        EnforceFunctionPolicy = true,
+        AllowedFunctions = AllowedFunctions,
+        TranslateTrinoDateFunctions = true
+    };
+
+    /// <summary>
+    /// Inline text of a definition for the target dialect (the string form of the predicate, no policy applies to a definition): the
+    /// same parse, build, simplify and validate steps as <see cref="CompileTyped"/>, emitted without bound parameters.
+    /// </summary>
+    private static string GenerateInline(string statement, TargetSqlDialect target)
+    {
+        var (tree, _) = new FastSqlEngine().Parse(statement.AsMemory(), SqlTokenSecurityOptions.ForDialect(target), CancellationToken.None);
+        var ast = new SqlAstBuilder(BuilderOptions()).BuildStatement(tree);
+        var simplified = (SqlStatement)new AstSimplificationVisitor().Visit(ast);
+        new AstValidationVisitor().Validate(simplified);
+        return TrinoSqlEngine.Ast.Generators.SqlDialectGeneratorFactory.GetGenerator(target).GenerateSql(simplified);
     }
 
     private static string Statement(string fragment) => "SELECT 1 " + fragment.Trim();

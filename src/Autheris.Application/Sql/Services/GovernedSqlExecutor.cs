@@ -61,13 +61,13 @@ public sealed class GovernedSqlExecutor
         GovernedSqlRewriter rewriter,
         IOptions<GatewayOptions> options,
         IAuditLogRepository auditLogRepository,
+        IProviderExecutionGuard executionGuard,
         ISqlConnectionFactory? connectionFactory = null,
         IHostEnvironment? environment = null,
         ILogger? logger = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
         IDbSessionContextInitializer? sessionInitializer = null,
-        IKeyVaultSecretProvider? secretProvider = null,
-        IProviderExecutionGuard? executionGuard = null)
+        IKeyVaultSecretProvider? secretProvider = null)
     {
         _rewriter = rewriter ?? throw new ArgumentNullException(nameof(rewriter));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -79,7 +79,8 @@ public sealed class GovernedSqlExecutor
         _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
         _dataSourceResolver = new SqlDataSourceResolver(_options, logger);
         _digester = new CompiledSqlAuditDigester(_options, secretProvider);
-        _executionGuard = executionGuard ?? PassThroughExecutionGuard.Instance;
+        // L-A3: the guard is a required dependency; there is no silent pass-through fallback in the executor.
+        _executionGuard = executionGuard ?? throw new ArgumentNullException(nameof(executionGuard));
     }
 
     public async Task ExecuteGovernedQueryAsync(

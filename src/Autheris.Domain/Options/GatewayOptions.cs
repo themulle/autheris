@@ -1618,18 +1618,6 @@ public sealed class WebSqlOptions
     public List<string> AdditionalAllowedFunctions { get; init; } = [];
 
     /// <summary>
-    /// REMOVED (X1, SEC-ADG-28). The AST compiler is the only SQL path and there is no runtime switch; any configured value makes
-    /// <c>GatewayStartupValidator.ValidateSqlRewriterEngine</c> fail the start. The property remains only so that the failure can name
-    /// the key; it is deleted together with the legacy rewriter (WP-X1 part B).
-    /// </summary>
-    public string? SqlRewriterEngine { get; init; }
-
-    /// <summary>
-    /// Configuration for bounded compiled SQL query plan cache (AR-10 / AR-19).
-    /// </summary>
-    public WebSqlPlanCacheOptions PlanCache { get; init; } = new();
-
-    /// <summary>
     /// Heterogeneous Cross-Source / Federation Join options (DuckDB in-process engine).
     /// </summary>
     public CrossSourceOptions CrossSource { get; init; } = new();
@@ -1677,12 +1665,6 @@ public sealed class CrossSourceOptions
 
     /// <summary>Configured <see cref="AllowedHttpAuthModes"/> or the default list.</summary>
     public IReadOnlyList<string> GetEffectiveAllowedHttpAuthModes() => AllowedHttpAuthModes ?? (IReadOnlyList<string>)DefaultAllowedHttpAuthModes;
-}
-
-public sealed class WebSqlPlanCacheOptions
-{
-    public int MaxEntries { get; init; } = 10_000;
-    public int TtlSeconds { get; init; } = 600;
 }
 
 public sealed class SqlEndpointsOptions

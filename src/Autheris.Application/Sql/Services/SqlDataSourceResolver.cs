@@ -147,27 +147,6 @@ public sealed class SqlDataSourceResolver
     public static WebSqlTableDeniedException TableDenied(TableAccessTarget target) =>
         new($"Access to table '{target.FullName}' is denied or the table is not registered in the governance catalog.");
 
-    public static void AddInternalRowFilterParameters(IReadOnlyDictionary<string, object?>? source, Dictionary<string, object?> target)
-    {
-        if (source == null)
-        {
-            return;
-        }
-
-        // SEC-ADG-02: two keys of one decision that name the same parameter (marker prefix or case) fail closed.
-        _ = Autheris.Application.Sql.Policy.RowFilterParameterNames.Checked(source);
-
-        foreach (var (name, value) in source)
-        {
-            if (target.TryGetValue(name, out var existing) && !Equals(existing, value))
-            {
-                throw new WebSqlPolicyException("Conflicting row-level security parameters; the statement cannot be governed safely.");
-            }
-
-            target[name] = value;
-        }
-    }
-
     public static bool MatchesPostgreSqlCatalogName(TableAccessTarget target, TableIdentifier catalogTable)
     {
         var physicalTable = target.TableNameQuoted ? target.TableName : target.TableName.ToLowerInvariant();

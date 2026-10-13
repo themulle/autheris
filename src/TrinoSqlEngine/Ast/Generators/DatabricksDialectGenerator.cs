@@ -19,7 +19,6 @@ using TrinoSqlEngine.Ast.Nodes;
 public sealed class DatabricksDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.Databricks;
-    public override int MaxParameterBudget => 1000;
 
     protected override bool BindLiterals => true;
     protected override bool SupportsTryCast => true;

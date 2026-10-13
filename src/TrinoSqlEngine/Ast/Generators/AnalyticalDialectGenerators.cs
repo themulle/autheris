@@ -14,7 +14,6 @@ public sealed class AnsiDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.Ansi;
     protected override bool SupportsAggregateFilter => true;
-    public override int MaxParameterBudget => int.MaxValue;
 
     public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)
     {
@@ -85,7 +84,6 @@ public sealed class DuckDbDialectGenerator : SqlDialectGeneratorBase
     protected override bool SupportsAggregateFilter => true;
     protected override bool SupportsOrderedAggregates => true;
     protected override bool SupportsGroupByDistinct => true;
-    public override int MaxParameterBudget => 65535;
 
     // The inline structural positions of this generator are registered with the emitter context (WP-A3 for DuckDB).
     protected override bool BindLiterals => true;
@@ -376,7 +374,6 @@ public sealed class SnowflakeDialectGenerator : SqlDialectGeneratorBase
         GenerateExpression(source, ref builder, context);
         builder.Append(')');
     }
-    public override int MaxParameterBudget => 65535;
 
     public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)
     {

@@ -191,7 +191,7 @@ internal sealed class GovernedSqlCompiler
         // 6. typed security injection; user literals first learn the catalog type of the column they are compared with (SEC-ADG-16 item 2)
         Pass("inject");
         var typedLiterals = (SqlStatement)new LiteralColumnTypeAnnotator(policy.Catalog) { CancellationToken = token }.Visit(simplified);
-        var secured = (SqlStatement)new AstSecurityVisitor(BuildOptions(request, typed), _engine, typed)
+        var secured = (SqlStatement)new AstSecurityVisitor(BuildOptions(request, typed), typed)
         {
             CancellationToken = token
         }.Visit(typedLiterals);
@@ -312,21 +312,15 @@ internal sealed class GovernedSqlCompiler
         }
     }
 
-    private static RlsOptions BuildOptions(CompileRequest request, TypedPolicyContext typed)
+    private static AstSecurityVisitorOptions BuildOptions(CompileRequest request, TypedPolicyContext typed)
     {
-        var catalog = typed.Catalog;
         var guards = typed.Dml;
-        return new RlsOptions
+        return new AstSecurityVisitorOptions
         {
-            // The typed path never consults the string policy provider; any use fails loudly.
-            PolicyProvider = new UnusedPolicyProvider(),
-            ColumnMaskingProvider = new CatalogMaskGuard(catalog, typed.Masks),
-            TableColumnsProvider = name => catalog.Resolve(ParseName(name))?.Columns.Select(c => c.Name).ToList(),
-            EnforceCatalogProjection = true,
-            EnforcedMaxRows = request.EnforcedMaxRows,
-            EnforceReadOnlyQueries = true,
-            TargetDialect = request.TargetDialect,
+            MaskedColumns = new CatalogMaskLookup(typed.Catalog, typed.Masks),
+            TableColumns = name => typed.Catalog.Resolve(ParseName(name))?.Columns.Select(c => c.Name).ToList(),
             TablesWithMaskedColumns = new HashSet<string>(request.Policy.TablesWithMaskedColumns, StringComparer.OrdinalIgnoreCase),
+            EnforcedMaxRows = request.EnforcedMaxRows,
             TablesWithConsentRowFilter = new HashSet<string>(request.Policy.TablesWithConsentRowFilter, StringComparer.OrdinalIgnoreCase),
             RejectMaskedColumnsInPredicates = true,
             // DML guards of the request (DmlGuardOptions.Strict by default); the coverage verifier proves what they require.
@@ -362,20 +356,14 @@ internal sealed class GovernedSqlCompiler
         return new SqlQualifiedName(identifiers);
     }
 
-    private sealed class UnusedPolicyProvider : IRlsPolicyProvider
-    {
-        public bool ShouldApplyPolicy(string tableName) => throw new InvalidOperationException("The string policy provider is not used by the typed compiler.");
-        public string GetPolicyFilter(string tableName) => throw new InvalidOperationException("The string policy provider is not used by the typed compiler.");
-    }
-
     /// <summary>Lets the masked-column predicate guards ask the typed mask provider; it never renders SQL.</summary>
-    private sealed class CatalogMaskGuard : IColumnMaskingPolicyProvider
+    private sealed class CatalogMaskLookup : IMaskedColumnLookup
     {
         private readonly ITableCatalog _catalog;
         private readonly IColumnMaskProvider _masks;
         private Dictionary<string, SqlQualifiedName>? _names;   // one guard per compile: parsed table names are reused for every column check
 
-        public CatalogMaskGuard(ITableCatalog catalog, IColumnMaskProvider masks)
+        public CatalogMaskLookup(ITableCatalog catalog, IColumnMaskProvider masks)
         {
             _catalog = catalog;
             _masks = masks;
@@ -393,8 +381,5 @@ internal sealed class GovernedSqlCompiler
             var entry = _catalog.Resolve(name);
             return entry is not null && _masks.HasMask(entry.Identity, columnName);
         }
-
-        public string GetMaskedExpression(string tableName, string columnName) =>
-            throw new InvalidOperationException("Mask expressions are typed nodes on the compiler path.");
     }
 }

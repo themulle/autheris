@@ -501,8 +501,8 @@ public sealed partial class SecurityCoverageVerifier
                     }
 
                     break;
-                case TrustedSqlExpression:
-                    throw new SecurityCoverageException("Raw trusted SQL fragments are not permitted on the typed compiler path.");
+                case NamedBindMarkerExpression:
+                    throw new SecurityCoverageException("Text-rendering bind markers are not permitted on the typed compiler path.");
                 case LiteralExpression literal:
                     // INV-5: injected predicates carry parameters, never raw values. NULL and booleans are keywords.
                     if (_insidePredicate > 0 && literal.Type is not (LiteralType.Null or LiteralType.Boolean))

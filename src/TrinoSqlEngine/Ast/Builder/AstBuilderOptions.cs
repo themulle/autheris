@@ -19,23 +19,6 @@ public sealed record AstBuilderOptions
     public bool AllowInlineFunctionDefinitions { get; init; } = false;
     public bool RejectTimeTravelQueries { get; init; } = true;
 
-    /// <summary>See <see cref="RlsOptions.TranslateTrinoDateFunctions"/>.</summary>
+    /// <summary>Translate the Trino date functions <c>date_add</c>, <c>date_trunc</c>, <c>now()</c> and <c>x ± INTERVAL</c> into the date arithmetic of the target dialect.</summary>
     public bool TranslateTrinoDateFunctions { get; init; }
-
-    public static AstBuilderOptions FromRlsOptions(RlsOptions options)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return new AstBuilderOptions
-        {
-            EnforceReadOnlyQueries = options.EnforceReadOnlyQueries,
-            EnforceFunctionPolicy = options.EnforceFunctionPolicy,
-            AllowedFunctions = options.AllowedFunctions,
-            AdditionalDeniedFunctions = options.AdditionalDeniedFunctions,
-            AllowedTableFunctions = options.AllowedTableFunctions,
-            AllowedSessionProperties = options.AllowedSessionProperties,
-            AllowInlineFunctionDefinitions = options.AllowInlineFunctionDefinitions,
-            RejectTimeTravelQueries = options.RejectTimeTravelQueries,
-            TranslateTrinoDateFunctions = options.TranslateTrinoDateFunctions
-        };
-    }
 }

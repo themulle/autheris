@@ -231,7 +231,6 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
         throw NoBoundForm("INTERVAL literal", TargetDialect);
     }
 
-    public override int MaxParameterBudget => 1000;
 
     /// <summary>
     /// Virtual filters (phase 7b): <c>ADD_MONTHS</c> for month and year (calendar months), otherwise

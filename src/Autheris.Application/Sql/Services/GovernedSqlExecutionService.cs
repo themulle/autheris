@@ -59,7 +59,6 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         IConsentRepository? consentRepository = null,
         IKeyVaultSecretProvider? secretProvider = null,
         ISqlEngine? sqlEngine = null,
-        ICompiledSqlQueryPlanCache planCache = null!,
         ISqlSecurityValidator? sqlSecurityValidator = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
         IDbSessionContextInitializer? sessionInitializer = null,
@@ -74,7 +73,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         TypedPolicySources? typedPolicies = null,
         GovernancePolicyFactory? policyFactory = null,
         IProviderExecutionGuard? executionGuard = null)
-        : this(options, NullAuditLogRepository.Instance, policyEnforcement, consentResolution, tableRepository, connectionFactory, clientIpResolver, environment, logger, consentRepository, secretProvider, sqlEngine, planCache, sqlSecurityValidator, concurrencyGate, sessionInitializer, rebacEvaluator, consentCache, mandatoryFilters, contractManager, accessProfileRepository, memoryCache, serviceProvider, federatedExecutionService, typedPolicies, policyFactory, executionGuard)
+        : this(options, NullAuditLogRepository.Instance, policyEnforcement, consentResolution, tableRepository, connectionFactory, clientIpResolver, environment, logger, consentRepository, secretProvider, sqlEngine, sqlSecurityValidator, concurrencyGate, sessionInitializer, rebacEvaluator, consentCache, mandatoryFilters, contractManager, accessProfileRepository, memoryCache, serviceProvider, federatedExecutionService, typedPolicies, policyFactory, executionGuard)
     {
     }
 
@@ -91,7 +90,6 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         IConsentRepository? consentRepository = null,
         IKeyVaultSecretProvider? secretProvider = null,
         ISqlEngine? sqlEngine = null,
-        ICompiledSqlQueryPlanCache planCache = null!,
         ISqlSecurityValidator? sqlSecurityValidator = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
         IDbSessionContextInitializer? sessionInitializer = null,
@@ -136,13 +134,13 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             _rewriter,
             options,
             auditLogRepository ?? NullAuditLogRepository.Instance,
+            executionGuard ?? PassThroughExecutionGuard.Instance,   // the host registers the SQLite guard; only unit-test construction omits it
             connectionFactory,
             environment,
             logger,
             concurrencyGate,
             sessionInitializer,
-            secretProvider,
-            executionGuard);
+            secretProvider);
     }
 
     private IFederatedQueryExecutionService ResolveFederatedService()
@@ -426,19 +424,5 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         }
 
         return sb.ToString();
-    }
-
-    internal static string RestoreClientParameters(string securedSql, IReadOnlyCollection<string> names)
-    {
-        if (names.Count == 0)
-        {
-            return securedSql;
-        }
-
-        return Regex.Replace(
-            securedSql,
-            "[\"`\\[]?" + ClientParameterPlaceholderPrefix + "([A-Za-z_][A-Za-z0-9_]*)[\"`\\]]?",
-            m => names.Contains(m.Groups[1].Value) ? "@" + m.Groups[1].Value : m.Value,
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 }

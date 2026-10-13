@@ -187,11 +187,9 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         }
     }
 
-    private void EnsureRecursiveCteIsNotACatalogTable(SqlIdentifier name, string cteKey)
+    private void EnsureRecursiveCteIsNotACatalogTable(SqlIdentifier name)
     {
-        bool isTable = _typed != null
-            ? _typed.Catalog.Resolve(new SqlQualifiedName(new[] { new SqlIdentifier(name.Value, name.IsQuoted) })) != null
-            : _options.PolicyProvider.ShouldApplyPolicy(cteKey);
+        bool isTable = _typed.Catalog.Resolve(new SqlQualifiedName(new[] { new SqlIdentifier(name.Value, name.IsQuoted) })) != null;
         if (isTable)
         {
             throw new SecurityException("A recursive CTE must not have the name of a catalog table; the reference would be ambiguous.");
@@ -207,8 +205,6 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     private bool HasMaskingForTable(string normalizedTableName)
     {
-        if (_options.ColumnMaskingProvider == null) return false;
-
         string simpleTableName = SqlIdentifierHelper.GetSimpleName(normalizedTableName);
         if (_options.TablesWithMaskedColumns.Contains(normalizedTableName) ||
             _options.TablesWithMaskedColumns.Contains(simpleTableName))
@@ -216,16 +212,13 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             return true;
         }
 
-        if (_options.TableColumnsProvider != null)
+        var columns = _options.TableColumns(normalizedTableName);
+        if (columns != null)
         {
-            var columns = _options.TableColumnsProvider(normalizedTableName);
-            if (columns != null)
+            foreach (var col in columns)
             {
-                foreach (var col in columns)
-                {
-                    if (_options.ColumnMaskingProvider.HasMask(normalizedTableName, col))
-                        return true;
-                }
+                if (_options.MaskedColumns.HasMask(normalizedTableName, col))
+                    return true;
             }
         }
 

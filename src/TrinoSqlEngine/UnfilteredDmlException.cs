@@ -5,7 +5,7 @@ using System.Security;
 
 /// <summary>
 /// Raised by the RLS rewriter when an UPDATE/DELETE statement has no WHERE clause or only a trivially true one
-/// (see <see cref="RlsOptions.RejectUnfilteredDml"/>).
+/// (see <see cref="DmlGuardOptions.RejectUnfilteredDml"/>).
 /// </summary>
 public sealed class UnfilteredDmlException : SecurityException
 {
