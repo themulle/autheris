@@ -82,7 +82,8 @@ public static class TenantRegistryAdminEndpoints
             Decision = "ALLOW",
             TraceId = context.TraceIdentifier,
             DetailsJson = JsonSerializer.Serialize(new { keptSpelling = keep.Value, previousSpelling = resolution.PreviousTenantId, expectedCurrent = body?.ExpectedCurrent, group = TenantRegistryKey.Normalize(keep.Value) })
-        }, ct).ConfigureAwait(false);
+            // L-7: the change is already committed; a client that disconnects must not drop its audit record.
+        }, CancellationToken.None).ConfigureAwait(false);
         context.Features.Get<AuditContext>()?.MarkHandled();
 
         return Results.Ok(new { resolved = keep.Value, previous = resolution.PreviousTenantId, note = "Every other spelling of this tenant id stays denied." });

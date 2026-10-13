@@ -82,6 +82,24 @@ public sealed class TenantRegistryAdminEndpointTests
         await audit.DidNotReceiveWithAnyArgs().RecordAuditEventAsync(default!, default);
     }
 
+    [Fact]
+    public async Task Resolve_AuditsWithoutTheRequestToken_SoADisconnectAfterTheChangeCannotDropTheRecord()
+    {
+        // L-7: the registry change is already committed when the audit is written.
+        using var cts = new CancellationTokenSource();
+        var registry = Substitute.For<ITenantRegistry>();
+        registry.ResolveCollisionAsync(Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(_ => { cts.Cancel(); return Resolved("acme"); });
+        var audit = Substitute.For<IAuditLogRepository>();
+        audit.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<CancellationToken>(1).IsCancellationRequested ? Task.FromCanceled(call.ArgAt<CancellationToken>(1)) : Task.CompletedTask);
+
+        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("ACME", null, Context("ClusterAdmin"), registry, audit, cts.Token);
+
+        Status(result).ShouldBe(StatusCodes.Status200OK);
+        await audit.Received(1).RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Is<CancellationToken>(t => !t.CanBeCanceled));
+    }
+
     // ---- L-4: the overwritten spelling is audited and returned; expectedCurrent is a compare-and-swap ---------------------------
 
     [Fact]
