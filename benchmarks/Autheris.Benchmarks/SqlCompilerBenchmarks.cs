@@ -9,12 +9,12 @@ using TrinoSqlEngine.Governance;
 namespace Autheris.Benchmarks;
 
 /// <summary>
-/// G8 performance gate (plan 9.3): the legacy token-stream rewriter and the governed AST compiler compile the same 200-query corpus
-/// in the same job. The corpus has three size buckets (0.5 KB, 4 KB and 64 KB). One operation compiles one query; the queries of a
+/// G8 performance gate (plan 9.3): the governed AST compiler compiles a 200-query corpus. The legacy token-stream rewriter was deleted
+/// with the cutover (X1); its allocation and Gen2 numbers are frozen in <c>benchmarks/baselines/sql-compiler-legacy.json</c>, which
+/// <c>SqlGate.BenchCheck</c> uses as the reference when a result has no legacy sample. The corpus has three size buckets (0.5 KB, 4 KB and 64 KB). One operation compiles one query; the queries of a
 /// bucket are cycled, so the reported time and allocation are per-query averages over the bucket.
 /// <list type="bullet">
-/// <item><description><see cref="Legacy"/>: <c>RewriteRls</c> with the <c>LegacyTokenStream</c> engine (no cache exists on this path).</description></item>
-/// <item><description><see cref="Ast"/>: <c>Compile</c> on a fresh engine per operation, i.e. always a plan cache miss (the work legacy does as well).</description></item>
+/// <item><description><see cref="Ast"/>: <c>Compile</c> on a fresh engine per operation, i.e. always a plan cache miss (the work the frozen legacy numbers include).</description></item>
 /// <item><description><see cref="AstCached"/>: <c>Compile</c> on a warm engine (cache hit, informational, not gated).</description></item>
 /// </list>
 /// <c>SqlGate.BenchCheck</c> evaluates the exported JSON. Run: <c>dotnet run -c Release --project benchmarks/Autheris.Benchmarks -- --filter "*SqlCompiler*" --job short --exporters json --artifacts benchmarks/results</c>.
@@ -22,7 +22,6 @@ namespace Autheris.Benchmarks;
 [MemoryDiagnoser]
 public class SqlCompilerBenchmarks
 {
-    private const string TenantColumn = "tenantid";
     private const string TenantValue = "acme";
 
     // 200 queries: 100 of about 0.5 KB, 70 of about 4 KB, 30 of about 64 KB.
@@ -35,9 +34,7 @@ public class SqlCompilerBenchmarks
 
     private string[] _queries = [];
     private int _next;
-    private FastSqlEngine _legacyEngine = null!;
     private FastSqlEngine _warmEngine = null!;
-    private RlsOptions _legacyOptions = null!;
     private CompileRequest _astRequest = null!;
 
     [Params("0.5KB", "4KB", "64KB")]
@@ -48,21 +45,15 @@ public class SqlCompilerBenchmarks
     {
         var (count, target) = BucketShape[Bucket];
         _queries = BuildBucket(count, target);
-        _legacyEngine = new FastSqlEngine();
         _warmEngine = new FastSqlEngine();
-        _legacyOptions = LegacyOptions();
         _astRequest = AstRequest();
 
-        // Fail loudly if the corpus is not accepted by both engines: a benchmark of rejected statements would measure the error path.
+        // Fail loudly if the corpus is not accepted by the compiler: a benchmark of rejected statements would measure the error path.
         foreach (string sql in _queries)
         {
-            _legacyEngine.RewriteRls(sql.AsMemory(), _legacyOptions);
             _warmEngine.Compile(sql.AsMemory(), _astRequest, CancellationToken.None);
         }
     }
-
-    [Benchmark(Baseline = true)]
-    public string Legacy() => _legacyEngine.RewriteRls(NextQuery().AsMemory(), _legacyOptions);
 
     [Benchmark]
     public CompiledSql Ast() => new FastSqlEngine().Compile(NextQuery().AsMemory(), _astRequest, CancellationToken.None);
@@ -109,40 +100,6 @@ public class SqlCompilerBenchmarks
         return queries;
     }
 
-    private static readonly string[] Tables = ["orders", "entitlements"];
-
-    private static RlsOptions LegacyOptions()
-    {
-        var provider = new DefaultRlsPolicyProvider(
-            defaultFilter: "1 = 0",
-            predicate: _ => true,
-            filterFunc: table => Tables.Contains(SqlIdentifierHelper.GetSimpleName(table).Trim('"').ToLowerInvariant())
-                ? $"{TenantColumn} = '{TenantValue}'"
-                : "1 = 0")
-        {
-            FallbackToSimpleName = false
-        };
-
-        var columns = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["orders"] = ["id", TenantColumn, "status", "amount"],
-            ["entitlements"] = ["id", TenantColumn, "orderid"]
-        };
-
-        return new RlsOptions
-        {
-            AppendTableAlias = true,
-            EnforceCatalogProjection = true,
-            TargetDialect = TargetSqlDialect.SqlServer,
-            ExpectedTenantValue = TenantValue,
-            TenantColumnName = TenantColumn,
-            PolicyProvider = provider,
-            TableColumnsProvider = table => columns.GetValueOrDefault(SqlIdentifierHelper.GetSimpleName(table).Trim('"')),
-            PolicyFiltersAreTargetDialectSql = true,
-            RewriterEngine = "LegacyTokenStream"
-        };
-    }
-
     private sealed class NoPolicy : IPolicyPredicateProvider
     {
         public bool ShouldApplyPolicy(TableIdentity table) => false;
@@ -168,7 +125,7 @@ public class SqlCompilerBenchmarks
         return new CompileRequest
         {
             TargetDialect = TargetSqlDialect.SqlServer,
-            TokenGuards = SqlTokenSecurityOptions.FromRlsOptions(LegacyOptions()),
+            TokenGuards = SqlTokenSecurityOptions.ForDialect(TargetSqlDialect.SqlServer),
             Policy = new GovernancePolicy
             {
                 RowFilters = new NoPolicy(),

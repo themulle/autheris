@@ -5,7 +5,7 @@ using System.Text;
 using TrinoSqlEngine;
 
 /// <summary>The engines the differential gate compares (WP-X0s). <see cref="Unfiltered"/> exists only as a negative control.</summary>
-public enum EngineKind { Legacy, Ast, Unfiltered }
+public enum EngineKind { Ast, Unfiltered }
 
 /// <summary>The databases of the legacy-vs-AST differential (G4). DuckDB and Databricks have no legacy path (cross-dialect, WP-X0y).</summary>
 public enum GateDialect { Sqlite, PostgreSql, SqlServer, Oracle }

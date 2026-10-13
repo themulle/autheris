@@ -9,14 +9,12 @@ using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Governance;
 
 /// <summary>
-/// Builds the legacy options and the AST compile request of one scenario from the same fixture model. The legacy options follow
-/// the production assembly in <c>GovernedSqlRewriter</c> (string filters, catalog projection, table aliases, DML guards); the AST
-/// request carries the typed equivalents (tenant binding, consent predicate, constant masks).
+/// Builds the AST compile request of one scenario from the fixture model: tenant binding, consent predicate, constant masks, the
+/// catalog and the token guards of the dialect. (The legacy options that used to be built here were deleted with the legacy
+/// rewriter; its outcomes are frozen in <c>golden-results</c>, see <see cref="FrozenLegacy"/>.)
 /// </summary>
 public sealed class GatePolicies(GateDialect dialect, string defaultSchema, PolicyScenario scenario)
 {
-    private static readonly string[] MaskedColumns = ["email"];
-
     private GateDialect Dialect => dialect;
 
     private bool Consent => scenario == PolicyScenario.TenantConsentMask;
@@ -24,70 +22,6 @@ public sealed class GatePolicies(GateDialect dialect, string defaultSchema, Poli
     private bool Masks => scenario == PolicyScenario.TenantConsentMask;
 
     private TargetSqlDialect Target => GateModel.ToTarget(dialect);
-
-    private static string SimpleName(string name)
-    {
-        string simple = SqlIdentifierHelper.GetSimpleName(name).Trim('"', '`', '[', ']');
-        return simple.ToLowerInvariant();
-    }
-
-    public RlsOptions LegacyOptions(bool isDml)
-    {
-        var allowed = SqlFunctionAllowlists.Build(Target, null);
-        var masked = new HashSet<string>(GateModel.Tables.Where(t => t.Columns.Any(c => c.Masked)).Select(t => t.Name), StringComparer.OrdinalIgnoreCase);
-        var provider = new DefaultRlsPolicyProvider(
-            defaultFilter: "1 = 0",
-            predicate: _ => true,
-            filterFunc: table => SimpleName(table) switch
-            {
-                "orders" when Consent => $"{GateModel.TenantColumn} = '{GateModel.TenantA}' AND {GateModel.ConsentColumn} = '{GateModel.ConsentValue}'",
-                var t when GateModel.Tables.Any(x => x.Name == t) => $"{GateModel.TenantColumn} = '{GateModel.TenantA}'",
-                _ => "1 = 0"
-            })
-        {
-            FallbackToSimpleName = false
-        };
-
-        var maskProvider = new DefaultColumnMaskingPolicyProvider(
-            hasMaskPredicate: (table, column) => Masks && masked.Contains(SimpleName(table)) && MaskedColumns.Contains(column, StringComparer.OrdinalIgnoreCase),
-            maskExpressionProvider: (_, _) => "'***'")
-        {
-            FallbackToSimpleName = false
-        };
-
-        return new RlsOptions
-        {
-            AppendTableAlias = true,
-            EnforceCatalogProjection = true,
-            EnforceReadOnlyQueries = !isDml,
-            TargetDialect = Target,
-            RejectComments = true,
-            RejectBackslashInStrings = true,
-            RejectEscapedStringLiterals = true,
-            RejectDollarQuoting = Target != TargetSqlDialect.PostgreSql,
-            RejectBracketLexerDifferentials = Target is TargetSqlDialect.SqlServer or TargetSqlDialect.Sqlite,
-            RejectNonAsciiIdentifiers = true,
-            RejectDotsInQuotedIdentifiers = true,
-            RejectTimeTravelQueries = true,
-            RejectConsentFilteredInsert = true,
-            RejectWholeRowReferencesInDml = true,
-            TablesWithConsentRowFilter = Consent ? new HashSet<string>(["orders"], StringComparer.OrdinalIgnoreCase) : new(StringComparer.OrdinalIgnoreCase),
-            TablesWithMaskedColumns = Masks ? masked : new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-            ExpectedTenantValue = GateModel.TenantA,
-            TenantColumnName = GateModel.TenantColumn,
-            RequireTenantColumnInInsert = true,
-            EnforceFunctionPolicy = true,
-            AllowedFunctions = allowed,
-            AllowInlineFunctionDefinitions = false,
-            RejectMaskedColumnsInDml = true,
-            RejectUnfilteredDml = true,
-            PolicyProvider = provider,
-            TableColumnsProvider = table => GateModel.Tables.FirstOrDefault(t => t.Name == SimpleName(table))?.Columns.Select(c => c.Name).ToList(),
-            ColumnMaskingProvider = maskProvider,
-            PolicyFiltersAreTargetDialectSql = true,
-            RewriterEngine = "LegacyTokenStream"
-        };
-    }
 
     private TableIdentity IdentityOf(TableDef table) => new(defaultSchema, GateModel.Canon(dialect, table.Name));
 
@@ -125,23 +59,25 @@ public sealed class GatePolicies(GateDialect dialect, string defaultSchema, Poli
             new Dictionary<string, PolicyValue> { ["__mask_const"] = new(GateModel.MaskValue, SqlParameterType.String) }.ToFrozenDictionary());
     }
 
-    public CompileRequest AstRequest(RlsOptions legacyOptions, StatementPermissions permissions)
+    public CompileRequest AstRequest(StatementPermissions permissions)
     {
         var typed = new TypedPolicies(this);
+        var masked = new HashSet<string>(GateModel.Tables.Where(t => t.Columns.Any(c => c.Masked)).Select(t => t.Name), StringComparer.OrdinalIgnoreCase);
         return new CompileRequest
         {
             TargetDialect = Target,
-            TokenGuards = SqlTokenSecurityOptions.FromRlsOptions(legacyOptions),
+            // The token guards of the legacy options of this gate: PostgreSQL keeps dollar quoting out of the rejected set.
+            TokenGuards = SqlTokenSecurityOptions.ForDialect(Target) with { RejectDollarQuoting = Target != TargetSqlDialect.PostgreSql },
             Statements = permissions,
-            AllowedFunctions = legacyOptions.AllowedFunctions,
+            AllowedFunctions = SqlFunctionAllowlists.Build(Target, null),
             Policy = new GovernancePolicy
             {
                 RowFilters = typed,
                 Masks = typed,
                 Catalog = Catalog(),
                 Tenant = new TenantBinding("__autheris_tenant", GateModel.TenantA, SqlParameterType.String),
-                TablesWithConsentRowFilter = legacyOptions.TablesWithConsentRowFilter.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
-                TablesWithMaskedColumns = legacyOptions.TablesWithMaskedColumns.ToFrozenSet(StringComparer.OrdinalIgnoreCase)
+                TablesWithConsentRowFilter = (Consent ? new HashSet<string>(["orders"], StringComparer.OrdinalIgnoreCase) : new HashSet<string>(StringComparer.OrdinalIgnoreCase)).ToFrozenSet(StringComparer.OrdinalIgnoreCase),
+                TablesWithMaskedColumns = (Masks ? masked : new HashSet<string>(StringComparer.OrdinalIgnoreCase)).ToFrozenSet(StringComparer.OrdinalIgnoreCase)
             }
         };
     }

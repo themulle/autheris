@@ -9,6 +9,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using System.Linq;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -69,6 +70,8 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<WebApplicat
             b.UseSetting("Gateway:SqlEndpoints:EnableHotReload", "false");
             b.UseSetting("Gateway:SqlEndpoints:AutoSyncFromDbt", "false");
             b.UseSetting("Gateway:Arrow:FlightTicketSigningKey", "0123456789abcdef0123456789abcdef");
+            b.UseSetting("Gateway:Mcp:Enabled", "true");
+            b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
         });
     }
 
@@ -104,6 +107,47 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<WebApplicat
         return c;
     }
 
+
+    /// <summary>
+    /// L-A2: the outcome (acme rows only) does not prove the path. A compiled statement that ran through the executor leaves an audit
+    /// record with the compiler version and the keyed digest of the compiled text; only Compile plus the executor write both.
+    /// </summary>
+    private async Task<int> CompiledAuditCountAsync()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IAuditLogRepository>();
+        var entries = await repo.GetAuditLogEntriesAsync(1000);
+        return entries.Count(e => e.DetailsJson != null && e.DetailsJson.Contains("\"compiler_version\"", StringComparison.Ordinal)
+                                                         && e.DetailsJson.Contains("\"sql.compiled_digest\"", StringComparison.Ordinal));
+    }
+
+    private async Task AssertCompiledAuditAsync(int before, string door)
+    {
+        int after = before;
+        for (var attempt = 0; attempt < 40 && after <= before; attempt++)
+        {
+            after = await CompiledAuditCountAsync();
+            if (after <= before) await Task.Delay(250);
+        }
+
+        after.ShouldBeGreaterThan(before, $"{door}: no audit record with compiler_version and sql.compiled_digest was written");
+
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IAuditLogRepository>();
+        var newest = (await repo.GetAuditLogEntriesAsync(1000))
+            .Where(e => e.DetailsJson != null && e.DetailsJson.Contains("\"sql.compiled_digest\"", StringComparison.Ordinal))
+            .Select(e => JsonDocument.Parse(e.DetailsJson!).RootElement.Clone())
+            .ToList();
+        newest.ShouldNotBeEmpty();
+        foreach (var details in newest)
+        {
+            details.GetProperty("compiler_version").GetString().ShouldNotBeNullOrWhiteSpace(door);
+            var digest = details.GetProperty("sql.compiled_digest").GetString();
+            digest.ShouldNotBeNullOrWhiteSpace(door);
+            digest!.Length.ShouldBe(64, $"{door}: the digest is a hex HMAC-SHA256");
+        }
+    }
+
     private static void ShouldBeAcmeOnly(string text, string where)
     {
         text.ShouldContain("acme-row-1", customMessage: where);
@@ -115,18 +159,21 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<WebApplicat
     public async Task WebSqlJson_ReturnsTheCallersTenantOnly()
     {
         await RegisterAsync();
+        int audited = await CompiledAuditCountAsync();
 
         var response = await Client().PostAsJsonAsync("/api/v1/sql", new { sql = "SELECT id, name FROM main.ep_orders ORDER BY id" });
 
         var body = await response.Content.ReadAsStringAsync();
         response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
         ShouldBeAcmeOnly(body, "WebSQL JSON");
+        await AssertCompiledAuditAsync(audited, "WebSQL JSON");
     }
 
     [Fact]
     public async Task WebSqlClientParameter_IsBoundByName()
     {
         await RegisterAsync();
+        int audited = await CompiledAuditCountAsync();
 
         var response = await Client().PostAsJsonAsync("/api/v1/sql", new
         {
@@ -137,36 +184,42 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<WebApplicat
         var body = await response.Content.ReadAsStringAsync();
         response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
         body.ShouldNotContain("other-row");
+        await AssertCompiledAuditAsync(audited, "WebSQL client parameter");
     }
 
     [Fact]
     public async Task DeclaredSqlEndpoint_ReturnsTheCallersTenantOnly()
     {
         await RegisterAsync();
+        int audited = await CompiledAuditCountAsync();
 
         var response = await Client().GetAsync("/api/v1/queries/ep_orders_list");
 
         var body = await response.Content.ReadAsStringAsync();
         response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
         ShouldBeAcmeOnly(body, "declared SQL endpoint");
+        await AssertCompiledAuditAsync(audited, "declared SQL endpoint");
     }
 
     [Fact]
     public async Task RestDataset_ReturnsTheCallersTenantOnly()
     {
         await RegisterAsync();
+        int audited = await CompiledAuditCountAsync();
 
         var response = await Client().GetAsync("/api/v1/data/default/main/ep_orders");
 
         var body = await response.Content.ReadAsStringAsync();
         response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
         ShouldBeAcmeOnly(body, "REST dataset");
+        await AssertCompiledAuditAsync(audited, "REST dataset");
     }
 
     [Fact]
     public async Task ArrowFlightSql_ValidatesThroughCompile_AndStreamsTheCallersTenantOnly()
     {
         await RegisterAsync();
+        int audited = await CompiledAuditCountAsync();
         var client = Client();
 
         // G-6: GetFlightInfo validates through the governed pipeline (no SQL text comes back); a denied table never gets a ticket
@@ -185,12 +238,14 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<WebApplicat
         var text = Encoding.UTF8.GetString(bytes);
         text.ShouldContain("acme-row-1");
         text.ShouldNotContain("other-row");
+        await AssertCompiledAuditAsync(audited, "Arrow Flight SQL");
     }
 
     [Fact]
     public async Task ArrowExport_ReturnsTheCallersTenantOnly()
     {
         await RegisterAsync();
+        int audited = await CompiledAuditCountAsync();
 
         var response = await Client().PostAsJsonAsync("/api/v1/export/arrow", new { sql = "SELECT id, name FROM main.ep_orders ORDER BY id" });
 
@@ -198,12 +253,14 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<WebApplicat
         var text = Encoding.UTF8.GetString(await response.Content.ReadAsByteArrayAsync());
         text.ShouldContain("acme-row-1");
         text.ShouldNotContain("other-row");
+        await AssertCompiledAuditAsync(audited, "Arrow export");
     }
 
     [Fact]
     public async Task AsyncQueryJob_ReturnsTheCallersTenantOnly()
     {
         await RegisterAsync();
+        int audited = await CompiledAuditCountAsync();
         var client = Client();
 
         var submit = await client.PostAsJsonAsync("/api/v1/jobs/query", new { query = "SELECT id, name FROM main.ep_orders ORDER BY id", format = "json" });
@@ -233,6 +290,75 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<WebApplicat
 
         result.ShouldNotBeNull("the job did not complete in time");
         ShouldBeAcmeOnly(result, "async query job");
+        await AssertCompiledAuditAsync(audited, "async query job");
+    }
+
+    [Fact]
+    public async Task WebSqlAsyncStatement_ReturnsTheCallersTenantOnly()
+    {
+        await RegisterAsync();
+        int audited = await CompiledAuditCountAsync();
+        var client = Client();
+        client.DefaultRequestHeaders.Add("X-Trino-User", "x1-ep");
+
+        // The Trino protocol route runs through WebSqlStatementManager (async statements); follow nextUri until the rows arrive.
+        var request = new HttpRequestMessage(HttpMethod.Post, "/v1/statement")
+        {
+            Content = new StringContent("SELECT id, name FROM main.ep_orders ORDER BY id", Encoding.UTF8, "text/plain")
+        };
+        request.Headers.Add("X-Trino-Wait-Timeout", "10s");
+        var response = await client.SendAsync(request);
+        var text = new StringBuilder(await response.Content.ReadAsStringAsync());
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, text.ToString());
+
+        for (var hop = 0; hop < 40 && !text.ToString().Contains("acme-row-1", StringComparison.Ordinal); hop++)
+        {
+            using var json = JsonDocument.Parse(text.ToString());
+            text.Append(' ');
+            if (!json.RootElement.TryGetProperty("nextUri", out var next) || next.GetString() is not { Length: > 0 } uri)
+            {
+                break;
+            }
+
+            var follow = new HttpRequestMessage(HttpMethod.Get, uri);
+            follow.Headers.Add("X-Trino-Wait-Timeout", "10s");
+            var followed = await client.SendAsync(follow);
+            followed.StatusCode.ShouldBe(HttpStatusCode.OK);
+            text.Clear().Append(await followed.Content.ReadAsStringAsync());
+        }
+
+        ShouldBeAcmeOnly(text.ToString(), "WebSQL async statement");
+        await AssertCompiledAuditAsync(audited, "WebSQL async statement");
+    }
+
+    [Fact]
+    public async Task McpSqlTool_ReturnsTheCallersTenantOnly()
+    {
+        await RegisterAsync();
+        int audited = await CompiledAuditCountAsync();
+
+        await using var mcp = await McpTestClient.ConnectAsync(Client());
+        var (isError, text) = await McpTestClient.CallAsync(mcp, Autheris.Application.Mcp.Services.McpDatasetTools.QuerySql,
+            new { query = "SELECT id, name FROM main.ep_orders ORDER BY id" });
+
+        isError.ShouldBeFalse(text);
+        ShouldBeAcmeOnly(text, "MCP SQL tool");
+        await AssertCompiledAuditAsync(audited, "MCP SQL tool");
+    }
+
+    [Fact]
+    public async Task McpDatasetTool_ReturnsTheCallersTenantOnly()
+    {
+        await RegisterAsync();
+        int audited = await CompiledAuditCountAsync();
+
+        await using var mcp = await McpTestClient.ConnectAsync(Client());
+        var (isError, text) = await McpTestClient.CallAsync(mcp, Autheris.Application.Mcp.Services.McpDatasetTools.QueryDataset,
+            new { dataset = "default.main.ep_orders", limit = 10 });
+
+        isError.ShouldBeFalse(text);
+        ShouldBeAcmeOnly(text, "MCP dataset tool");
+        await AssertCompiledAuditAsync(audited, "MCP dataset tool");
     }
 
     [Fact]

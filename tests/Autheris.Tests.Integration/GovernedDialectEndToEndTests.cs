@@ -118,6 +118,34 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
         return await service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest(sql, parameters), User(tenant, roles ?? []), new TenantId(tenant));
     }
 
+    /// <summary>
+    /// L-A2: proof of the path, not only of the outcome. Compile plus the executor write the compiler version and the keyed digest of
+    /// the compiled text into the audit record of every statement; nothing else does.
+    /// </summary>
+    private async Task<int> CompiledAuditCountAsync()
+    {
+        using var scope = Scope();
+        var repo = scope.ServiceProvider.GetRequiredService<IAuditLogRepository>();
+        return (await repo.GetAuditLogEntriesAsync(1000)).Count(e =>
+            e.DetailsJson != null && e.DetailsJson.Contains("\"compiler_version\"", StringComparison.Ordinal)
+                                  && e.DetailsJson.Contains("\"sql.compiled_digest\"", StringComparison.Ordinal)
+                                  && e.DetailsJson.Contains($"\"dialect\":\"{ExpectedDialect}\"", StringComparison.Ordinal));
+    }
+
+    private async Task AssertCompiledAuditAsync(int before, string what)
+    {
+        int after = before;
+        for (var attempt = 0; attempt < 40 && after <= before; attempt++)
+        {
+            after = await CompiledAuditCountAsync();
+            if (after <= before) await Task.Delay(250);
+        }
+
+        after.ShouldBeGreaterThan(before, $"{Target!.Provider} {what}: no audit record with compiler_version, dialect and sql.compiled_digest");
+    }
+
+    private string ExpectedDialect => Target!.Provider;
+
     private static List<long> Ids(GovernedSqlResult result) =>
         result.Rows.Select(r => Convert.ToInt64(r.First(kv => kv.Key.Equals("id", StringComparison.OrdinalIgnoreCase)).Value)).OrderBy(x => x).ToList();
 
@@ -125,11 +153,13 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
     public async Task Select_IsTenantIsolated_WithAnExactTenantComparison()
     {
         if (!await EnsureHostAsync()) return;
+        int audited = await CompiledAuditCountAsync();
 
         Ids(await QueryAsync($"SELECT id FROM {Ref} ORDER BY id", "acme")).ShouldBe([1L, 2L, 3L]);
         Ids(await QueryAsync($"SELECT id FROM {Ref} ORDER BY id", "ACME")).ShouldBe([6L]);        // another tenant, not a case variant of acme
         Ids(await QueryAsync($"SELECT id FROM {Ref} ORDER BY id", "other")).ShouldBe([5L]);
         Ids(await QueryAsync($"SELECT id FROM {Ref} ORDER BY id", "nobody")).ShouldBeEmpty();
+        await AssertCompiledAuditAsync(audited, "SELECT");
     }
 
     [Fact]
@@ -170,7 +200,9 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
     {
         if (!await EnsureHostAsync()) return;
 
+        int audited = await CompiledAuditCountAsync();
         await QueryAsync($"UPDATE {Ref} SET region = 'ZZ' WHERE id = 1", "acme", roles: ["Writer"]);
+        await AssertCompiledAuditAsync(audited, "DML");
 
         (await QueryAsync($"SELECT id, region FROM {Ref} WHERE region = 'ZZ'", "acme")).Rows.Select(r => Convert.ToInt64(r.First(kv => kv.Key.Equals("id", StringComparison.OrdinalIgnoreCase)).Value)).ShouldBe([1L]);
         // the same statement as another tenant reaches none of acme's rows, and acme's other rows are untouched

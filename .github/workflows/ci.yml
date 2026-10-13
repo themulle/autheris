@@ -81,7 +81,7 @@ jobs:
       - name: Architecture tests
         run: dotnet test tests/Autheris.Tests.Architecture -c Release --no-restore --verbosity normal
 
-      # G8: legacy and AST are measured in the same job and compared by ratio (time) and by bytes (allocation).
+      # G8: the AST compiler is measured and compared with the frozen legacy baseline (benchmarks/baselines/sql-compiler-legacy.json) by bytes (allocation) and Gen2 count.
       - name: G8 performance benchmark
         run: dotnet run -c Release --no-restore --project benchmarks/Autheris.Benchmarks -- --filter "*SqlCompiler*" --job short --inProcess --exporters json --artifacts benchmarks/results
 

@@ -44,8 +44,7 @@ public sealed class GateRunner(GateDatabase database, PolicyScenario scenario)
         if (Binder() is null) return $"no compiled-SQL binder for {database.Dialect}";
         try
         {
-            var options = _policies.LegacyOptions(false);
-            _engine.Compile("SELECT id FROM orders".AsMemory(), _policies.AstRequest(options, StatementPermissions.ReadOnly), CancellationToken.None);
+            _engine.Compile("SELECT id FROM orders".AsMemory(), _policies.AstRequest(StatementPermissions.ReadOnly), CancellationToken.None);
             return null;
         }
         catch (SqlCompileNotSupportedException ex)
@@ -83,32 +82,10 @@ public sealed class GateRunner(GateDatabase database, PolicyScenario scenario)
     {
         return engine switch
         {
-            EngineKind.Legacy => await RunLegacyAsync(statement),
             EngineKind.Ast => await RunAstAsync(statement),
             EngineKind.Unfiltered => await RunUnfilteredAsync(statement),
             _ => throw new ArgumentOutOfRangeException(nameof(engine))
         };
-    }
-
-    private async Task<EngineOutcome> RunLegacyAsync(CorpusStatement statement)
-    {
-        string sql;
-        try
-        {
-            sql = _engine.RewriteRls(statement.Sql.AsMemory(), _policies.LegacyOptions(statement.IsDml));
-        }
-        catch (Exception ex)
-        {
-            return new EngineOutcome.Rejected(RejectionStage.Compile, ex.GetType().Name, true);
-        }
-
-        return await ExecuteAsync(statement, async (conn, token) =>
-        {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = sql;
-            cmd.CommandTimeout = (int)CommandTimeout.TotalSeconds;
-            return await RunCommandAsync(cmd, statement, token);
-        });
     }
 
     private async Task<EngineOutcome> RunUnfilteredAsync(CorpusStatement statement) =>
@@ -126,8 +103,7 @@ public sealed class GateRunner(GateDatabase database, PolicyScenario scenario)
         CompiledSql compiled;
         try
         {
-            var options = _policies.LegacyOptions(statement.IsDml);
-            compiled = _engine.Compile(statement.Sql.AsMemory(), _policies.AstRequest(options, GatePolicies.PermissionsOf(statement.Class)), CancellationToken.None);
+            compiled = _engine.Compile(statement.Sql.AsMemory(), _policies.AstRequest(GatePolicies.PermissionsOf(statement.Class)), CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -235,6 +211,6 @@ public sealed class GateRunner(GateDatabase database, PolicyScenario scenario)
 
     /// <summary>A typed, expected governance refusal (as opposed to an unexpected exception type, which is an AST defect).</summary>
     public static bool IsGoverned(Exception ex) =>
-        ex is SecurityException or AstBuildException or DialectLimitExceededException or GovernedSqlException or ArgumentException
+        ex is SecurityException or AstBuildException or GovernedSqlException or ArgumentException
             or OperationCanceledException or Antlr4.Runtime.Misc.ParseCanceledException;
 }

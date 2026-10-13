@@ -8,8 +8,9 @@ using Shouldly;
 using Xunit.Abstractions;
 
 /// <summary>
-/// G4: every corpus statement is compiled by legacy (<c>RewriteRls</c>, <c>LegacyTokenStream</c>) and by the AST compiler
-/// (<c>Compile</c>), executed on the same fixture and classified directionally. The gate asserts 0 <c>ast-looser-*</c>, 0 oracle
+/// G4: every corpus statement is compiled by the AST compiler (<c>Compile</c>), executed on the fixture and classified directionally
+/// against the frozen results of the legacy rewriter (<see cref="FrozenLegacy"/>, recorded on the pre-cutover head; the legacy engine is
+/// gone). The gate asserts 0 <c>ast-looser-*</c>, 0 oracle
 /// violations on the AST path (M-2), and that every <c>ast-stricter</c>/<c>ast-error</c> is listed in <c>accepted-differences.json</c>.
 /// </summary>
 public abstract class DifferentialGateBase<TDatabase>(DifferentialFixture<TDatabase> fixture, ITestOutputHelper output)
@@ -38,6 +39,7 @@ public abstract class DifferentialGateBase<TDatabase>(DifferentialFixture<TDatab
         if (!DatabaseReady()) return null;
         var results = await Fixture.GetResultsAsync();
         DifferentialRules.RequireAstLeg(Fixture.Database.Dialect.ToString(), Fixture.AstUnavailable);
+        DifferentialRules.RequireFrozenLegacy(Fixture.Database.Dialect.ToString(), Fixture.MissingFrozen);
 
         var counts = results.GroupBy(r => r.Classification.Class.ToWireName()).OrderBy(g => g.Key, StringComparer.Ordinal)
             .Select(g => $"{g.Key}={g.Count()}");
@@ -79,22 +81,22 @@ public abstract class DifferentialGateBase<TDatabase>(DifferentialFixture<TDatab
         var tenantOracle = new PolicyOracle(PolicyScenario.Tenant);
         var maskOracle = new PolicyOracle(PolicyScenario.TenantConsentMask);
 
-        // (Oracle's legacy path is not executable, so the class there is ast-looser-accepts; every looser class fails the gate.)
+        // (The baseline is the governed AST outcome; against an engine without any filter every looser class fails the gate.)
         // rows: no tenant filter returns the rows of tenant B
         var select = new CorpusStatement("000000000001", "select", "accept", "negative-control", "SELECT id FROM orders");
-        var rowsResult = Classifier.Classify(await tenant.RunAsync(EngineKind.Legacy, select), await tenant.RunAsync(EngineKind.Unfiltered, select), tenantOracle);
+        var rowsResult = Classifier.Classify(await tenant.RunAsync(EngineKind.Ast, select), await tenant.RunAsync(EngineKind.Unfiltered, select), tenantOracle);
         rowsResult.Class.IsLooser().ShouldBeTrue();
         rowsResult.AstViolations.ShouldContain(v => v.Kind == OracleViolationKind.ForeignTenantMarker);
 
         // mask: no mask returns the clear e-mail where legacy returned the constant
         var email = new CorpusStatement("000000000002", "select", "accept", "negative-control", "SELECT email FROM users WHERE id = 1");
-        var maskResult = Classifier.Classify(await masked.RunAsync(EngineKind.Legacy, email), await masked.RunAsync(EngineKind.Unfiltered, email), maskOracle);
+        var maskResult = Classifier.Classify(await masked.RunAsync(EngineKind.Ast, email), await masked.RunAsync(EngineKind.Unfiltered, email), maskOracle);
         maskResult.Class.IsLooser().ShouldBeTrue();
         maskResult.AstViolations.ShouldContain(v => v.Kind == OracleViolationKind.ClearMaskedValue);
 
         // write: an unfiltered DELETE also deletes the rows of tenant B
         var delete = new CorpusStatement("000000000003", "delete", "accept", "negative-control", "DELETE FROM users WHERE id > 0");
-        var writeResult = Classifier.Classify(await tenant.RunAsync(EngineKind.Legacy, delete), await tenant.RunAsync(EngineKind.Unfiltered, delete), tenantOracle);
+        var writeResult = Classifier.Classify(await tenant.RunAsync(EngineKind.Ast, delete), await tenant.RunAsync(EngineKind.Unfiltered, delete), tenantOracle);
         writeResult.Class.IsLooser().ShouldBeTrue();
         writeResult.AstViolations.ShouldContain(v => v.Kind == OracleViolationKind.InvisibleRowChanged);
 
