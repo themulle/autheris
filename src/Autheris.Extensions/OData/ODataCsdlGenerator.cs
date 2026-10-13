@@ -10,7 +10,7 @@ public static class ODataCsdlGenerator
     public static string GenerateMetadataXml(IReadOnlyList<TableMetadata> tables, string serviceNamespace = "Autheris.OData")
     {
         var sb = new StringBuilder();
-        var escapedNamespace = System.Security.SecurityElement.Escape(serviceNamespace) ?? serviceNamespace;
+        var escapedNamespace = EscapeAttribute(serviceNamespace);
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
         sb.AppendLine("<edmx:Edmx Version=\"4.0\" xmlns:edmx=\"http://docs.oasis-open.org/odata/ns/edmx\">");
         sb.AppendLine("  <edmx:Reference Uri=\"https://oasis-tcs.github.io/odata-vocabularies/vocabularies/Org.OData.Core.V1.xml\">");
@@ -23,7 +23,7 @@ public static class ODataCsdlGenerator
         foreach (var table in tables)
         {
             var rawEntityName = GetEntityName(table);
-            var entityName = System.Security.SecurityElement.Escape(rawEntityName) ?? rawEntityName;
+            var entityName = EscapeAttribute(rawEntityName);
             sb.AppendLine($"      <EntityType Name=\"{entityName}\">");
 
             // Keys (Befund 4a.4: ensure keys always reference existing properties with Nullable="false")
@@ -31,7 +31,7 @@ public static class ODataCsdlGenerator
             sb.AppendLine("        <Key>");
             foreach (var key in keys)
             {
-                var escapedKey = System.Security.SecurityElement.Escape(key) ?? key;
+                var escapedKey = EscapeAttribute(key);
                 sb.AppendLine($"          <PropertyRef Name=\"{escapedKey}\" />");
             }
             sb.AppendLine("        </Key>");
@@ -39,12 +39,12 @@ public static class ODataCsdlGenerator
             // Entity description annotations
             if (!string.IsNullOrWhiteSpace(table.Table.Description))
             {
-                var escapedDesc = System.Security.SecurityElement.Escape(table.Table.Description) ?? table.Table.Description;
+                var escapedDesc = EscapeAttribute(table.Table.Description);
                 sb.AppendLine($"        <Annotation Term=\"Core.Description\" String=\"{escapedDesc}\" />");
             }
             if (!string.IsNullOrWhiteSpace(table.Table.LongDescription))
             {
-                var escapedLongDesc = System.Security.SecurityElement.Escape(table.Table.LongDescription) ?? table.Table.LongDescription;
+                var escapedLongDesc = EscapeAttribute(table.Table.LongDescription);
                 sb.AppendLine($"        <Annotation Term=\"Core.LongDescription\" String=\"{escapedLongDesc}\" />");
             }
 
@@ -56,7 +56,7 @@ public static class ODataCsdlGenerator
                     var edmType = MapToEdmType(col.DataType);
                     var isKey = keys.Contains(col.ColumnName, StringComparer.OrdinalIgnoreCase);
                     var nullStr = isKey ? " Nullable=\"false\"" : "";
-                    var escapedColName = System.Security.SecurityElement.Escape(col.ColumnName) ?? col.ColumnName;
+                    var escapedColName = EscapeAttribute(col.ColumnName);
 
                     var hasDesc = !string.IsNullOrWhiteSpace(col.Description);
                     var hasLongDesc = !string.IsNullOrWhiteSpace(col.LongDescription);
@@ -66,12 +66,12 @@ public static class ODataCsdlGenerator
                         sb.AppendLine($"        <Property Name=\"{escapedColName}\" Type=\"{edmType}\"{nullStr}>");
                         if (hasDesc)
                         {
-                            var escapedDesc = System.Security.SecurityElement.Escape(col.Description) ?? col.Description;
+                            var escapedDesc = EscapeAttribute(col.Description);
                             sb.AppendLine($"          <Annotation Term=\"Core.Description\" String=\"{escapedDesc}\" />");
                         }
                         if (hasLongDesc)
                         {
-                            var escapedLongDesc = System.Security.SecurityElement.Escape(col.LongDescription) ?? col.LongDescription;
+                            var escapedLongDesc = EscapeAttribute(col.LongDescription);
                             sb.AppendLine($"          <Annotation Term=\"Core.LongDescription\" String=\"{escapedLongDesc}\" />");
                         }
                         sb.AppendLine("        </Property>");
@@ -96,7 +96,7 @@ public static class ODataCsdlGenerator
         foreach (var table in tables)
         {
             var rawEntityName = GetEntityName(table);
-            var entityName = System.Security.SecurityElement.Escape(rawEntityName) ?? rawEntityName;
+            var entityName = EscapeAttribute(rawEntityName);
             sb.AppendLine($"        <EntitySet Name=\"{entityName}\" EntityType=\"{escapedNamespace}.{entityName}\" />");
         }
         sb.AppendLine("      </EntityContainer>");
@@ -106,6 +106,26 @@ public static class ODataCsdlGenerator
         sb.AppendLine("</edmx:Edmx>");
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Escapes XML attribute values. In addition to standard XML characters (&lt;, &gt;, &amp;, &quot;, &apos;),
+    /// converts line breaks and tabs into XML character references (&amp;#10;, &amp;#13;, &amp;#9;) to prevent
+    /// raw unescaped newlines in attributes which break strict XML parsers such as Microsoft Excel's OData feed consumer.
+    /// </summary>
+    public static string EscapeAttribute(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        var escaped = System.Security.SecurityElement.Escape(value) ?? value;
+        return escaped
+            .Replace("\r\n", "&#10;")
+            .Replace("\r", "&#13;")
+            .Replace("\n", "&#10;")
+            .Replace("\t", "&#9;");
     }
 
     public static string GetEntityName(TableMetadata table)
