@@ -188,8 +188,21 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         }
     }
 
-    private static string EscapeCsv(string value)
+    internal static string EscapeCsv(string value)
     {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        // OWASP CSV Formula Injection defense (SEC-MED-16):
+        // If the value starts with '=', '+', '-', '@', '\t', or '\r', prepend a single quote "'"
+        if (value.StartsWith('=') || value.StartsWith('+') || value.StartsWith('-') ||
+            value.StartsWith('@') || value.StartsWith('\t') || value.StartsWith('\r'))
+        {
+            value = "'" + value;
+        }
+
         if (value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r'))
         {
             return $"\"{value.Replace("\"", "\"\"")}\"";

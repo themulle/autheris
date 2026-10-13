@@ -120,4 +120,38 @@ public sealed class CatalogApiEndpointsTests
         result[0].DisplayName.ShouldBe("david");
         result[0].ExactMatch.ShouldBeTrue();
     }
+
+    [Fact]
+    public async Task SetDatasetStateHandler_WhenSuccessful_ReturnsOk()
+    {
+        var planningService = Substitute.For<Autheris.Application.Governance.Interfaces.IAccessPlanningService>();
+        planningService.SetDatasetStateAsync(
+            Arg.Is<AdminSetDatasetStateRequest>(r => r.DatasetId == "sales.orders" && r.State == "active"),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>())
+            .Returns(new AdminSetDatasetStateResult("sales.orders", "quarantined", "active", true, "Dataset activated."));
+
+        var context = CreateContext(roles: ["GOVERNANCE_ADMIN"]);
+        var dto = new AdminSetDatasetStateDto("active", "Review complete");
+        var result = await CatalogApiEndpoints.SetDatasetStateHandler("sales.orders", dto, planningService, context, CancellationToken.None);
+
+        result.ShouldBeOfType<Ok<AdminSetDatasetStateResult>>();
+    }
+
+    [Fact]
+    public async Task SetDatasetStateHandler_WhenDatasetNotFound_ReturnsNotFound()
+    {
+        var planningService = Substitute.For<Autheris.Application.Governance.Interfaces.IAccessPlanningService>();
+        planningService.SetDatasetStateAsync(
+            Arg.Any<AdminSetDatasetStateRequest>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>())
+            .Returns(new AdminSetDatasetStateResult("unknown.table", "unknown", "active", false, "Dataset 'unknown.table' not found."));
+
+        var context = CreateContext(roles: ["GOVERNANCE_ADMIN"]);
+        var dto = new AdminSetDatasetStateDto("active", "Review complete");
+        var result = await CatalogApiEndpoints.SetDatasetStateHandler("unknown.table", dto, planningService, context, CancellationToken.None);
+
+        result.ShouldBeAssignableTo<IStatusCodeHttpResult>().StatusCode.ShouldBe(404);
+    }
 }

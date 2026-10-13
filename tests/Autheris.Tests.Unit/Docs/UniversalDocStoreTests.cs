@@ -121,6 +121,29 @@ public sealed class UniversalDocStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task ExtractBundleAsync_DefendsAgainstZipBomb()
+    {
+        using var memoryStream = new MemoryStream();
+        using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            // Create entries that exceed maximum entry limit or huge uncompressed size
+            for (int i = 0; i < 1005; i++)
+            {
+                var entry = archive.CreateEntry($"docs/doc_{i}.md");
+                using var writer = new StreamWriter(entry.Open());
+                writer.WriteLine("# Small doc");
+            }
+        }
+
+        memoryStream.Position = 0;
+        var result = await _docStore.ExtractBundleAsync("huge-app", memoryStream);
+
+        result.Success.ShouldBeFalse();
+        result.ErrorCode.ShouldBe("ZIP_BOMB_DETECTED");
+        result.Message.ShouldContain("Zip bomb");
+    }
+
+    [Fact]
     public async Task ExtractBundleAsync_ExtractsValidArchiveAndIndexesMarkdown()
     {
         using var memoryStream = new MemoryStream();
