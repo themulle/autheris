@@ -4061,3 +4061,106 @@ Branch `feat/ast-x1-cutover` (on `bb80e29`). Part A is the production wiring; pa
 **Breaking changes (release notes).** `RewriteSqlAsync` -> `ValidateAsync`; error statuses/codes per §28.4.3 incl. dataset endpoints; `SqlRewriterEngine` fails startup; `RequireDefaultSchema` default true; tenant registry on by default; Oracle admitted (not announced, S-1); audit fields changed (no `securedSql`; `compiler_version`, `dialect`, `bind_count`, `sql.compiled_digest`, optional `compiledSql`); `GovernedSqlResult.RewrittenSql` is compiled text with markers; reserved `autheris_*` identifiers 400; GitOps 400 message; bypass flag no effect.
 
 **Open for part B.** Delete L-1..L-17 (RlsListener, RlsOptions, legacy engine methods, `SqlRewriterEngine` option, `ICompiledSqlQueryPlanCache`, `RestoreClientParameters`, `AddInternalRowFilterParameters`, unused ctor parameters), TrinoSqlEngine README, architecture/IL tests (X1.6), harness `EngineKind.Legacy`, golden-results freeze, docs/features (Phase 6), refine masked-column guard and HMAC predicate decision, security review of the EXISTS constant projection.
+
+#### WP-X1 part B implementation log
+
+Branch `feat/ast-x1-cutover`, on part A (`c1a2af2`). Legacy removal, architecture guards, gate freeze, README and the revert rehearsal. The Phase 3 findings L-A2 and L-A3 of the part A review are included; M-A1..M-A3 and L-A1 are a separate package.
+
+**Commits.** `bd0680c` architecture tests (X1.6); `b80cbc8` production deletion (X1.4); `fe352e2` `AstEmit` helper and removal of the L-14/L-16 tests; `78ef24c` README (X1.5); `5df53b5` gate harness, benchmark, container tests, door audit proofs and new doors; `7a802ed` visitor tests; `3a35731` golden-results freeze; `6ee1c72` row-cap fix; `aad05f7`, `d2ebc90`, `181f2c5` test ports (security suites, emission/conformance/typed-visitor, Autheris.Tests.Unit); `9ff3ab7` template cache tests.
+
+**Deleted (L-1..L-17).** `RlsListener` (980 lines), `FastSqlEngine.Rewrite.cs`, `IRlsPolicyProvider.cs` (string policy and mask provider interfaces, `RlsOptions`), `RewriteRls`, `RunLegacyRewrite`, `GenerateGovernedSql` and the `ISqlEngine` members, `FastSqlEngine.SqlRewriterEngine`, `WebSqlOptions.SqlRewriterEngine` and `WebSqlOptions.PlanCache`, `TrustedSqlExpression`, `AstSecurityVisitor.BuildDialectMaskExpression`, `DialectLimitExceededException` and the per-generator `MaxParameterBudget` (the inline emission takes the budget from `DialectCapabilityTable` and throws `SqlLimitExceededException`), `ICompiledSqlQueryPlanCache`, `CompiledSqlQueryPlanCache`, `NullCompiledSqlQueryPlanCache` and their DI registrations, `RestoreClientParameters`, the `__param_` text emission of the generator, `SqlDataSourceResolver.AddInternalRowFilterParameters`, and the unused `planCache` constructor parameter. `TargetSqlDialect` moved to its own file.
+
+**L-17 `RlsOptions`.** The typed security visitor was the last consumer. It now takes the internal `AstSecurityVisitorOptions` (switches the compiler derives from `CompileRequest`) plus a required `TypedPolicyContext`; the untyped string path of the visitor (tables, DML, mask guards, CTE checks) was deleted. `SqlTokenSecurityOptions.FromRlsOptions` became `ForDialect(TargetSqlDialect)` and `AstBuilderOptions.FromRlsOptions` was removed. No `RlsOptions` remains, so there is nothing to document as analyzer-only.
+
+**SEC-ADG-28.** `WebSql:SqlRewriterEngine` still fails the start: `GatewayStartupValidator.ValidateSqlRewriterEngine(IConfiguration)` checks that `Gateway:WebSql:SqlRewriterEngine` exists (also an empty value, also outside Development) and never echoes it. The property is gone from `GatewayOptions`.
+
+**Deviation: `NamedBindMarkerExpression`.** `PolicyPredicateRenderer` (the OQ-4 text renderer) used `TrustedSqlExpression` for its `@name` markers, which §28.6 did not list. It now uses the new node `NamedBindMarkerExpression(name)`: it holds a validated identifier (no SQL text), only the inline text emission accepts it, `SecurityCoverageVerifier` and `PolicyExpressionParser` reject it, and the architecture scan forbids free-text members on expression nodes.
+
+**Architecture tests (`CutoverArchitectureTests`).** Red before the deletion: `NoLegacyRewriterTypes`, `NoTrustedSqlExpression`, `DeletedPathsNotReintroduced`. Green from the start and kept as pins (part A had already done the work): `CompiledSqlIsOnlyConstructedByTheEngine` (IL scan: no `newobj CompiledSql::.ctor`, no `<Clone>$`, no `set_Sql`/`set_Parameters`/`set_Dialect` outside the engine assembly), `NoCommandTextAssignmentOnGovernedPath`, `GovernedEntryPoints_ReachCompileAndBinder` (call graph on type and method; the nine entry points of §28.2; the OQ-GQL and OQ-4 exceptions are listed and must not reach the binder). Each scan has a positive control. The obsolete `TypedMaskArchitectureTests` (scan for `BuildDialectMaskExpression`) was deleted; `NoLegacyRewriterTypes` covers it.
+
+**Gate freeze (X1.4).** `golden-results` did not exist as files before; G4 computed the legacy leg live. The legacy leg was recorded on the pre-cutover head `c1a2af2` with `SQLGATE_PROFILE=pr` on SQLite, PostgreSQL, SQL Server and Oracle, and committed as `tests/Autheris.Tests.SqlCompilerGate/golden-results/legacy-<Dialect>.json` (3310 outcomes per dialect: every corpus statement in both scenarios, typed cells included). `EngineKind.Legacy` is gone; the differential classifies the live AST outcome against `FrozenLegacy`, so direction (rows, mask, write), the `legacyDefects` rule and the oracle rule are unchanged. A corpus statement without a frozen result fails the gate. The files are never regenerated (the engine that produced them is deleted); `FrozenLegacyTests` pins the codec, the coverage of the whole corpus and the classification. `benchmarks/baselines/sql-compiler-legacy.json` is unchanged apart from its description (the legacy numbers came from the pre-cutover head; BenchCheck uses `legacyGen2PerThousandOps` and the frozen bytes when a result has no legacy sample); the `Legacy` benchmark method was removed. No benchmark was run.
+
+**L-A2 (door proofs).** Every door of `GovernedEntryPointsEndToEndTests` and the dialect tests now also asserts that an audit record with `compiler_version` and a 64-character `sql.compiled_digest` was written (and, per dialect, the dialect name). New end-to-end tests: WebSQL async statements (`/v1/statement` through `WebSqlStatementManager`), the MCP SQL tool and the MCP dataset tool.
+
+**L-A3.** `GovernedSqlExecutor` requires `IProviderExecutionGuard` (no silent pass-through). `GovernedSqlExecutionService` substitutes `PassThroughExecutionGuard` only when constructed without one (unit tests); the real host test `ProviderExecutionGuard_IsTheSqliteGuard_InTheRealHost` and `CompositionRootModularizationTests.ProviderExecutionGuard_IsResolvedFromTheHost_AsTheSqliteGuard` prove that the host hands over the SQLite guard.
+
+**Plan cache (L-16).** The unit tests of the string plan cache were deleted with it. Its bound and collision properties and the two cases "a different data source" and "changed catalog columns" now run against the engine `CompiledSqlTemplateCache` (`CompiledSqlTemplateCacheTests`); cache poisoning is covered by `GovernedPipelineCachePoisoningTests`.
+
+**Production fix found by the port.** The AST path clamped a root `FETCH FIRST n ROWS WITH TIES` but kept `WITH TIES`, so ties could return more rows than the enforced cap; legacy downgraded it. Fixed with a Red test first (`6ee1c72`).
+
+**Stricter than legacy (ported tests document each).**
+- The strict token guards reject `[` on every dialect, so PostgreSQL array subscripts such as `tags[1]` are rejected on the governed path. Legacy kept them for PostgreSQL.
+- `DELETE ... WHERE 1 = 0` and a predicate such as `id = 3 AND 1 = 0` count as unfiltered DML (the predicate must not be literal-only or constant). Legacy accepted them.
+- An allowlisted table function is still rejected, with `NotSupportedException` instead of `SecurityException`.
+- Qualified function names are not accepted even when the caller lists them; only the dialect function map applies.
+- The DML guards and the function policy have no switches any more (`DmlGuardOptions.Strict` only).
+
+**For security review (open question).** A masked column used in `GROUP BY` inside a DML subquery (`UPDATE ... WHERE x IN (SELECT ... GROUP BY masked_col)`): the legacy suite expected a rejection; on the typed path the subquery reads the table through the masked projection, so grouping groups the mask value, not the clear value, and the statement compiles (`Dml_GroupByAMaskedColumnInASubquery_GroupsTheMaskNotTheValue`). Please confirm that this is acceptable or request a guard.
+
+**Revert rehearsal (M-11).** On a scratch branch from `9ff3ab7` (worktree, deleted afterwards). Commits reverted, newest first, with `git revert --no-edit`; a conflict in this plan file was always resolved with the current version (`git checkout --ours`), since the plan is not part of the revert:
+1. X1: `git revert --no-commit bb80e29..HEAD && git commit` (no conflicts).
+2. X0y: `c9bc3c9`, `45e88bb` (conflict in the gate csproj: keep the `SqlGate.BenchCheck` project reference, drop the `Autheris.Application` reference), `bf2dd42`. `cd953de` (a gate fix against the X0k `CheckedExecutorFor` signature) must NOT be reverted: reverting it breaks the build, so it stays. `6e4702f` is a plan-only commit (skipped).
+3. X0l: `5201a34`, `8d8a754`, `385ed74` (conflict: keep the current `GovernedDataQueryService.cs`, because X0n removed the dataset policy splice and X0n stays; delete `GovernedDataQueryServiceTypedPolicyTests` and `PolicyMarkerInlinerTests`), `6ed50f3`, `a5a06b3`, `a37d2aa`, `1490f43` (conflict: `git rm` `CompileRequestFactory.cs` and its test, which `56d33fc` had edited; `56d33fc` itself touched only those files and the plan, so it needs no revert of its own).
+4. X0g `d9c75eb`; X0f `3c57b01`, `393e210`; X0e `bfa181b`; X0d `3b5a1d1`. X0d-2 was never split out (the work stayed in X0d), so there is no separate commit set for it.
+5. **Amendment to the revert set: X0x (policy lint) must go too.** `PolicyPredicateLinter` (X0x) calls `IRlsFilterGenerator.BuildCorrelatedPredicate`, which X0d introduced; without X0d the tree does not build. `git revert -m 1 3da0248` (the merge of `feat/ast-x1-policy-lint`) removes X0x and `tools/PolicyPredicateLint`. The set is therefore {X1, X0y, X0l, X0g, X0f, X0e, X0d (with X0d-2), X0x}, with `cd953de` kept.
+6. Test expectations of the reverted tree that reference the removed X0y/X0l evidence: `SecurityRegressionCatalog` loses the Phase 3 evidence entries whose files no longer exist, and `Phase3IdsWithoutEvidence_AreOnlyThoseOwnedByTheX1Cutover` expects `SEC-ADG-02, -12, -25, -26, -28`.
+Result on the reverted tree: `dotnet build Autheris.sln` 0 errors, 0 warnings; G1 (the TrinoSqlEngine, Unit, Architecture and Extensions test projects): see the numbers below; G7 (`Category=Security`, 395 tests incl. the traceability tests) green.
+
+**Evidence on the cutover branch.**
+- `dotnet build Autheris.sln -m:2`: 0 errors, 0 warnings.
+- `tests/TrinoSqlEngine.Tests` (Debug) 7285, `tests/Autheris.Tests.Unit` 5293 (plus 2 new cache tests), `tests/Autheris.Tests.Architecture` 51, `tests/Autheris.Extensions.Tests` 233: all green (run on `181f2c5`; `9ff3ab7` only adds the two cache tests and a comment).
+- `tests/Autheris.Tests.SqlCompilerGate` with `SQLGATE_PROFILE=pr`: 181/181 green (also on `9ff3ab7`).
+- Full `tests/Autheris.Tests.Integration` on `9ff3ab7`: 1024/1024 green, including the door audit proofs, the three new doors and the guard DI test.
+- Timing flakes (parse budget under load, never retried): `DmlCompileTests.Insert_MultiRow_OverTheBindLimit_IsRejected_WithTheTypedError` (PostgreSQL, DuckDB) and `LimitBoundaryProperties.BindLimit_IsExact_ForEveryGovernedDialect` failed once under heavy machine load and passed in an isolated rerun; one DuckDB bind-limit compile-time test failed once in a fork run and passed alone.
+- Revert rehearsal tree: build 0/0; `TrinoSqlEngine.Tests` 7265 with only the load flake above (isolated rerun green), Unit 4995, Architecture 29, Extensions 233 green; G7 (`Category=Security`) 395/395 green after the catalog adjustment of step 6. The scratch worktree and branch were deleted.
+
+**X1 squash commit message (draft).**
+
+```
+feat(governed-sql): cut over to the AST compiler and delete the legacy rewriter (WP-X1)
+
+The governed pipeline compiles every statement with ISqlEngine.Compile, binds it through
+the dialect binders and runs DML through the checked executor. The legacy string rewriter
+and everything that fed it are gone; there is no runtime switch.
+
+Deleted: RlsListener, RewriteRls/GenerateGovernedSql, FastSqlEngine.SqlRewriterEngine,
+the string policy providers and RlsOptions, TrustedSqlExpression, BuildDialectMaskExpression,
+DialectLimitExceededException, the string plan cache (ICompiledSqlQueryPlanCache and
+implementations), RestoreClientParameters and the __param_ text emission.
+New: architecture guards (no legacy types, no free-text expression nodes, CompiledSql only
+built by the engine, CommandText only set by the binder, entry points reach Compile and
+the binder, deleted paths stay deleted), frozen legacy results for the G4 differential,
+NamedBindMarkerExpression for the OQ-4 text renderers, door-level audit proofs.
+
+Breaking changes (release notes):
+- WebSql:SqlRewriterEngine is removed; configuring it fails the start (SEC-ADG-28).
+- RewriteSqlAsync is ValidateAsync; error statuses and codes follow section 28.4.3 (also
+  for dataset endpoints).
+- RequireDefaultSchema defaults to true for PostgreSQL and Oracle; the tenant registry is
+  on by default; WebSql:PlanCache is removed.
+- Audit records carry compiler_version, dialect, bind_count and sql.compiled_digest instead
+  of the secured SQL text.
+- Stricter than legacy: "[" is rejected on every dialect, constant-only DML predicates count
+  as unfiltered, qualified functions are not accepted from the caller list, FETCH WITH TIES
+  is downgraded under an enforced row cap.
+- Oracle is admitted but not announced until S-1 is cleared.
+
+Revert (M-11, rehearsed; the tree builds and G1 + G7 are green). The revert set is
+{X1, X0y, X0l, X0g, X0f, X0e, X0d (X0d-2 folded in), X0x}:
+  git switch -c revert-x1 <this commit>
+  git revert --no-edit <this commit>                                 # X1 (rehearsed as bb80e29..HEAD, no conflicts)
+  then, newest first:
+  git revert --no-edit c9bc3c9 45e88bb bf2dd42                       # X0y (keep cd953de)
+  git revert --no-edit 5201a34 8d8a754 385ed74 6ed50f3 a5a06b3 a37d2aa 1490f43   # X0l
+  git revert --no-edit d9c75eb 3c57b01 393e210 bfa181b 3b5a1d1      # X0g, X0f, X0e, X0d
+  git revert -m 1 3da0248                                            # X0x (needs X0d's generator method)
+  Manual resolutions: gate csproj (45e88bb: keep the BenchCheck reference), GovernedDataQueryService.cs
+  (385ed74: keep the current file, X0n stays), CompileRequestFactory.cs and its test (1490f43: delete),
+  plan conflicts: keep the current plan. Reverted tree: SecurityRegressionCatalog loses the evidence
+  entries of the removed X0y/X0l tests. An operator who set WebSql:SqlRewriterEngine must remove it
+  before deploying a revert only if the old default is not wanted; the old default is legacy.
+No schema or data migration is involved.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+```
+
