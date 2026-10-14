@@ -297,10 +297,12 @@ public class AdvancedMaskingRuleTests
     private static void Compile(string sql, string maskedCol, TargetSqlDialect dialect = TargetSqlDialect.PostgreSql)
     {
         string schema = dialect == TargetSqlDialect.SqlServer ? "dbo" : "public";
+        // Typed masks validate the catalog type against the dialect's native type set (SQL Server has no INTEGER).
+        string intType = dialect == TargetSqlDialect.SqlServer ? "INT" : "INTEGER";
         var env = new TestCompileEnv(dialect, schema)
             .Table("employees", "tenant_id", "id:INTEGER", "name", "salary:INTEGER", "tenant_id")
             .Table("users", "tenant_id", "id:INTEGER", "name", "ssn", "tenant_id")
-            .Table("sales", "tenant_id", "id:INTEGER", "department", "bonus:INTEGER", "tenant_id")
+            .Table("sales", "tenant_id", $"id:{intType}", "department", $"bonus:{intType}", "tenant_id")
             .Table("a", "tenant_id", "id:INTEGER", "ssn", "tenant_id")
             .Table("b", "tenant_id", "info", "ssn", "tenant_id");
         var nullify = new MaskSpec(MaskKind.Nullify, new MaskArguments(), FrozenDictionary<string, PolicyValue>.Empty);

@@ -787,7 +787,7 @@ public sealed class AccessProfileTests
         var (status, body) = await ExecuteResultAsync(result, context);
 
         status.ShouldBe(StatusCodes.Status400BadRequest);
-        body.ShouldContain("Invalid row filter syntax");
+        body.ShouldContain("ROW_FILTER_SYNTAX_INVALID");
     }
 
     [Fact]

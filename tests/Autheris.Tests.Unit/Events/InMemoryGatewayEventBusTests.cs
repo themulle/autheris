@@ -42,6 +42,7 @@ public sealed class InMemoryGatewayEventBusTests : IDisposable
 
         // Act
         await _bus.PublishAsync(@event);
+        await _bus.DrainAsync();
 
         // Assert
         received.ShouldNotBeNull();
@@ -117,6 +118,7 @@ public sealed class InMemoryGatewayEventBusTests : IDisposable
 
         // Act 1
         await _bus.PublishAsync(@event);
+        await _bus.DrainAsync();
         invocationCount.ShouldBe(1);
 
         // Dispose subscription
@@ -124,6 +126,7 @@ public sealed class InMemoryGatewayEventBusTests : IDisposable
 
         // Act 2
         await _bus.PublishAsync(@event);
+        await _bus.DrainAsync();
 
         // Assert
         invocationCount.ShouldBe(1);

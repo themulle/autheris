@@ -97,36 +97,24 @@ public sealed class AstSecurityVisitorDmlTests
         Assert.ThrowsAny<SecurityException>(() => Env(TargetSqlDialect.PostgreSql, maskEmail: true).Compile(sql));
     }
 
-    // The legacy guard also rejected GROUP BY over a masked column inside a DML subquery. On the typed path the table reference is
-    // already the masked projection, so grouping reads the mask (never the real value) and is not an oracle: it compiles.
+    // GROUP BY over a masked column inside a DML subquery: the typed path only ever groups the masked projection, but the
+    // aggregate guard (WP-FEAT-02) rejects it anyway to close the cardinality inference channel.
     [Fact]
-    public void Dml_GroupByAMaskedColumnInASubquery_GroupsTheMaskNotTheValue()
+    public void Dml_GroupByAMaskedColumnInASubquery_IsRejected()
     {
-        var compiled = Env(TargetSqlDialect.PostgreSql, maskEmail: true)
-            .Compile("DELETE FROM entitlements WHERE orderid IN (SELECT count(*) FROM orders GROUP BY email)");
-
-        Assert.Contains("CAST(NULL AS", compiled.Sql, StringComparison.Ordinal);
+        // WP-FEAT-02: grouping by a masked column is rejected outright (even though only the mask would be grouped),
+        // because the group cardinality of a keyed or partial mask is an inference channel.
+        Assert.Throws<MaskedAggregationException>(() => Env(TargetSqlDialect.PostgreSql, maskEmail: true)
+            .Compile("DELETE FROM entitlements WHERE orderid IN (SELECT count(*) FROM orders GROUP BY email)"));
     }
 
-    // The same for the keyed and the partial masks: the GROUP BY of the subquery groups the projected (masked) column of the derived table,
-    // never the stored value, so the mask is not an equality oracle.
     [Theory]
-    [InlineData("hmac", "HMAC(")]
-    [InlineData("partial", "right(")]
-    public void Dml_GroupByAMaskedColumnInASubquery_Hmac_And_PartialMask_GroupTheProjectedAlias(string kind, string maskFunction)
+    [InlineData("hmac")]
+    [InlineData("partial")]
+    public void Dml_GroupByAMaskedColumnInASubquery_Hmac_And_PartialMask_AreRejected(string kind)
     {
-        var compiled = MaskedEnv(kind).Compile("DELETE FROM entitlements WHERE orderid IN (SELECT count(*) FROM orders GROUP BY email)");
-
-        // the mask is computed inside the derived table that stands for orders ...
-        const string derivedTableEnd = ") AS \"orders\" GROUP BY ";
-        int end = compiled.Sql.IndexOf(derivedTableEnd, StringComparison.Ordinal);
-        Assert.True(end > 0, compiled.Sql);
-        Assert.Contains(maskFunction, compiled.Sql[..end], StringComparison.OrdinalIgnoreCase);
-
-        // ... and the grouping outside of it reads only the projected alias: never the mask function, never the stored column of the base table
-        string grouping = compiled.Sql[(end + derivedTableEnd.Length)..];
-        string groupingExpression = grouping[..grouping.IndexOf(')', StringComparison.Ordinal)];
-        Assert.Equal("\"email\"", groupingExpression);
+        Assert.Throws<MaskedAggregationException>(() => MaskedEnv(kind)
+            .Compile("DELETE FROM entitlements WHERE orderid IN (SELECT count(*) FROM orders GROUP BY email)"));
     }
 
     [Theory]
