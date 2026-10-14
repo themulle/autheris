@@ -49,6 +49,8 @@ public static class GatewayGovernanceServiceExtensions
         services.AddOptions<AuditLegacyMigrationOptions>()
             .BindConfiguration(AuditLegacyMigrationOptions.SectionName);
 
+        services.AddSingleton<Autheris.Application.Audit.IAuditWriter, Autheris.Application.Audit.AuditWriter>();
+
         if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.PostgreSql))
         {
             services.AddSingleton<PostgreSqlGovernanceRepository>();

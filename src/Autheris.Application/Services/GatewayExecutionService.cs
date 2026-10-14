@@ -17,7 +17,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 {
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly IConsentRepository _consentRepository;
-    private readonly IAuditLogRepository _auditLogRepository;
+    private readonly Autheris.Application.Audit.IAuditWriter _auditWriter;
     private readonly IConsentResolutionService _resolutionService;
     private readonly IConsentCacheService _cacheService;
     private readonly IColumnMaskingProvider _maskingProvider;
@@ -61,7 +61,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null,
         IAccessProfileRepository? accessProfileRepository = null,
         Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
-        TypedPolicySources? typedPolicies = null)
+        TypedPolicySources? typedPolicies = null,
+        Autheris.Application.Audit.IAuditWriter? auditWriter = null)
     {
         _typedPolicies = typedPolicies;
         _accessProfileRepository = accessProfileRepository;
@@ -70,7 +71,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         _mandatoryFilters = mandatoryFilters;
         _metadataRepository = metadataRepository;
         _consentRepository = consentRepository;
-        _auditLogRepository = auditLogRepository;
+        // WP-ARC-A-06: all audit writes go through the writer; direct construction (tests) wraps the repository.
+        _auditWriter = auditWriter ?? new Autheris.Application.Audit.AuditWriter(auditLogRepository, Microsoft.Extensions.Logging.Abstractions.NullLogger<Autheris.Application.Audit.AuditWriter>.Instance);
         _resolutionService = resolutionService;
         _cacheService = cacheService;
         _maskingProvider = maskingProvider;
@@ -172,7 +174,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         // Enforce Access
         if (!decision.IsAllowed)
         {
-            await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+            await _auditWriter.RecordRequiredAsync(new AuditLogEntry
             {
                 TenantId = tenantId,
                 EventType = "TABLE_QUERY",
@@ -254,7 +256,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         catch (Exception ex)
         {
             // SR15-32: Validation/preparation failures are audited as DENY with predicate details
-            await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+            await _auditWriter.RecordRequiredAsync(new AuditLogEntry
             {
                 TenantId = tenantId,
                 EventType = "TABLE_QUERY",
@@ -275,7 +277,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         }
 
         // SR15-32: ALLOW audit is recorded only after successful validation of all query parameters
-        await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+        await _auditWriter.RecordRequiredAsync(new AuditLogEntry
         {
             TenantId = tenantId,
             EventType = "TABLE_QUERY",
@@ -522,7 +524,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             if (catalogCol != null && decision.GetColumnAccess(catalogCol.ColumnName) == ColumnAccessLevel.Deny)
             {
                 // O1: Gesperrte (Deny) Spalte: dieselbe Antwort wie unbekannt (kein Existenz-Orakel), Audit-Eintrag mit dem echten Grund.
-                await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+                await _auditWriter.RecordRequiredAsync(new AuditLogEntry
                 {
                     TenantId = tenantId,
                     EventType = "COLUMN_ACCESS_DENIED",
@@ -665,7 +667,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         {
             // F-OPS-02: W3C Trace Correlation
             var traceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId();
-            await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+            await _auditWriter.RecordRequiredAsync(new AuditLogEntry
             {
                 TenantId = tenantId,
                 EventType = "CHILD_RELATION_CHECK",

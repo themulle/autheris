@@ -46,6 +46,14 @@ The audit subsystem decouples in-memory high-throughput hash chaining from asymm
 - The compile-time legacy HMAC key no longer exists. SQLite audit rows without a sequence number are no longer verifiable.
 - On startup, such rows latch a chain violation unless `Gateway:Audit:AllowLegacyUnsequencedRows` is `true` (default `false`). With the flag set for one start, all rows from the first unsequenced one onward are re-sealed under the real audit key in a single transaction (sequence numbers in rowid order), the original table is copied to `AUDIT_LOG_ENTRIES_legacy_backup`, and the re-sealed tail is recorded in the external signed anchor. Set the flag back to `false` afterwards.
 
+### 9. Unified Audit Contract (`IAuditWriter`)
+- Endpoints and services write audit records through `Autheris.Application.Audit.IAuditWriter` instead of resolving `IAuditLogRepository` ad hoc.
+  - `RecordRequiredAsync` throws `AuditUnavailableException` when the record cannot be written ("no audit, no data"); the API maps it to `503` with `Retry-After`. Used for ALLOW records and administrative changes.
+  - `RecordBestEffortAsync` logs and counts (`autheris_audit_write_failed_total{tier}`) but never throws. Used where a failing sink must not change the outcome (for example tenant-collision denials).
+  - `RecordAsync` dispatches through `AuditPolicyTable`, which assigns an explicit `AuditFailurePolicy` (`FailClosed` or `BestEffort`) to every `AuditEventTypes` entry; unknown types are `FailClosed`.
+- A denial is never turned into an allow by an audit failure.
+- The ReBAC table gate keeps denying when its dependency fails, now records `authz_dependency_failure_total`, and lets cancellation propagate.
+
 ---
 
 ## Configuration Example

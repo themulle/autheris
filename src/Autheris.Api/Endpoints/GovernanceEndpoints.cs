@@ -110,28 +110,25 @@ public static class GovernanceEndpoints
                 return Results.BadRequest(result);
             }
 
-            var auditRepo = context.RequestServices.GetService<IAuditLogRepository>();
-            if (auditRepo != null)
+            var auditRepo = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
+            await auditRepo.RecordRequiredAsync(new AuditLogEntry
             {
-                await auditRepo.RecordAuditEventAsync(new AuditLogEntry
+                TenantId = callerTenant,
+                EventType = "OPENAPI_CATALOG_INGESTED",
+                ActorSid = context.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+                TargetTable = domain,
+                Decision = "ALLOW",
+                TraceId = context.TraceIdentifier,
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
                 {
-                    TenantId = callerTenant,
-                    EventType = "OPENAPI_CATALOG_INGESTED",
-                    ActorSid = context.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
-                    TargetTable = domain,
-                    Decision = "ALLOW",
-                    TraceId = context.TraceIdentifier,
-                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
-                    {
-                        domain,
-                        serviceTitle = result.ServiceTitle,
-                        ingestedTablesCount = result.IngestedTablesCount,
-                        ingestedColumnsCount = result.IngestedColumnsCount,
-                        ingestedTableNames = result.IngestedTableNames,
-                        warnings = result.Warnings
-                    })
-                }, context.RequestAborted).ConfigureAwait(false);
-            }
+                    domain,
+                    serviceTitle = result.ServiceTitle,
+                    ingestedTablesCount = result.IngestedTablesCount,
+                    ingestedColumnsCount = result.IngestedColumnsCount,
+                    ingestedTableNames = result.IngestedTableNames,
+                    warnings = result.Warnings
+                })
+            }, context.RequestAborted).ConfigureAwait(false);
 
             return Results.Ok(result);
         }).RequireAuthorization()
@@ -317,25 +314,22 @@ public static class GovernanceEndpoints
 
             await dpEngine.ResetBudgetAsync(targetKey, context.RequestAborted);
 
-            var auditRepo = context.RequestServices.GetService<IAuditLogRepository>();
-            if (auditRepo != null)
+            var auditRepo = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
+            await auditRepo.RecordRequiredAsync(new AuditLogEntry
             {
-                await auditRepo.RecordAuditEventAsync(new AuditLogEntry
+                TenantId = EndpointSecurity.GetRequestTenant(context),
+                EventType = AuditEventTypes.AuditConfigChanged,
+                ActorSid = context.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+                TargetTable = clientId,
+                Decision = "ALLOW",
+                TraceId = context.TraceIdentifier,
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
                 {
-                    TenantId = EndpointSecurity.GetRequestTenant(context),
-                    EventType = AuditEventTypes.AuditConfigChanged,
-                    ActorSid = context.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
-                    TargetTable = clientId,
-                    Decision = "ALLOW",
-                    TraceId = context.TraceIdentifier,
-                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
-                    {
-                        clientId,
-                        targetKey,
-                        resetBy = callerId
-                    })
-                }, context.RequestAborted).ConfigureAwait(false);
-            }
+                    clientId,
+                    targetKey,
+                    resetBy = callerId
+                })
+            }, context.RequestAborted).ConfigureAwait(false);
 
             return Results.Ok(new { message = $"Privacy budget reset for client '{clientId}'." });
         }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
@@ -786,11 +780,8 @@ public static class GovernanceEndpoints
             })
         };
 
-        var auditRepo = context.RequestServices.GetService<IAuditLogRepository>();
-        if (auditRepo != null)
-        {
-            await auditRepo.RecordAuditEventAsync(auditEvent, ct).ConfigureAwait(false);
-        }
+        var auditRepo = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
+        await auditRepo.RecordRequiredAsync(auditEvent, ct).ConfigureAwait(false);
 
         // Cluster-weite Cache-Invalidierung (AR-01)
         var accessProfileCache = context.RequestServices.GetService<Autheris.Application.Policy.Interfaces.IAccessProfileCache>();
@@ -802,24 +793,21 @@ public static class GovernanceEndpoints
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                if (auditRepo != null)
+                var failAudit = new AuditLogEntry
                 {
-                    var failAudit = new AuditLogEntry
+                    TenantId = tenantId,
+                    EventType = "PROFILE_INVALIDATION_FAILED",
+                    ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
+                    Decision = "DENY",
+                    TraceId = context.TraceIdentifier,
+                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
                     {
-                        TenantId = tenantId,
-                        EventType = "PROFILE_INVALIDATION_FAILED",
-                        ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
-                        Decision = "DENY",
-                        TraceId = context.TraceIdentifier,
-                        DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
-                        {
-                            reason = ex.Message,
-                            tenant = tenantId.Value,
-                            subject = trimmedSubject
-                        })
-                    };
-                    await auditRepo.RecordAuditEventAsync(failAudit, ct).ConfigureAwait(false);
-                }
+                        reason = ex.Message,
+                        tenant = tenantId.Value,
+                        subject = trimmedSubject
+                    })
+                };
+                await auditRepo.RecordRequiredAsync(failAudit, ct).ConfigureAwait(false);
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             }
         }
@@ -938,11 +926,8 @@ public static class GovernanceEndpoints
             })
         };
 
-        var auditRepo = context.RequestServices.GetService<IAuditLogRepository>();
-        if (auditRepo != null)
-        {
-            await auditRepo.RecordAuditEventAsync(auditEvent, ct).ConfigureAwait(false);
-        }
+        var auditRepo = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
+        await auditRepo.RecordRequiredAsync(auditEvent, ct).ConfigureAwait(false);
 
         // Cluster-weite Cache-Invalidierung (AR-01)
         var accessProfileCache = context.RequestServices.GetService<Autheris.Application.Policy.Interfaces.IAccessProfileCache>();
@@ -954,24 +939,21 @@ public static class GovernanceEndpoints
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                if (auditRepo != null)
+                var failAudit = new AuditLogEntry
                 {
-                    var failAudit = new AuditLogEntry
+                    TenantId = tenantId,
+                    EventType = "PROFILE_INVALIDATION_FAILED",
+                    ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
+                    Decision = "DENY",
+                    TraceId = context.TraceIdentifier,
+                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
                     {
-                        TenantId = tenantId,
-                        EventType = "PROFILE_INVALIDATION_FAILED",
-                        ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
-                        Decision = "DENY",
-                        TraceId = context.TraceIdentifier,
-                        DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
-                        {
-                            reason = ex.Message,
-                            tenant = tenantId.Value,
-                            profileId = id.ToString()
-                        })
-                    };
-                    await auditRepo.RecordAuditEventAsync(failAudit, ct).ConfigureAwait(false);
-                }
+                        reason = ex.Message,
+                        tenant = tenantId.Value,
+                        profileId = id.ToString()
+                    })
+                };
+                await auditRepo.RecordRequiredAsync(failAudit, ct).ConfigureAwait(false);
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             }
         }

@@ -92,26 +92,16 @@ public static class DevEndpoints
         // Review A-1: a persona login replaces the identity and is never silent.
         var log = context.RequestServices.GetService<Microsoft.Extensions.Logging.ILoggerFactory>()?.CreateLogger("Autheris.DevPersonaLogin");
         log?.LogWarning("Development persona login: {Persona} ({Sid}) from {RemoteIp}", user.Username, BasicAuthPrincipalFactory.ResolveSid(user), context.Connection.RemoteIpAddress);
-        var audit = context.RequestServices.GetService<Autheris.Application.Interfaces.IAuditLogRepository>();
-        if (audit != null)
+        var audit = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
+        await audit.RecordBestEffortAsync(new Autheris.Domain.Model.AuditLogEntry
         {
-            try
-            {
-                await audit.RecordAuditEventAsync(new Autheris.Domain.Model.AuditLogEntry
-                {
-                    EventType = "DEV_PERSONA_LOGIN",
-                    ActorSid = new Autheris.Domain.Common.Sid(BasicAuthPrincipalFactory.ResolveSid(user)),
-                    TargetTable = string.Empty,
-                    Decision = "ALLOW",
-                    TraceId = context.TraceIdentifier,
-                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { persona = user.Username })
-                }, context.RequestAborted).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                log?.LogWarning(ex, "The persona login could not be audited.");
-            }
-        }
+            EventType = "DEV_PERSONA_LOGIN",
+            ActorSid = new Autheris.Domain.Common.Sid(BasicAuthPrincipalFactory.ResolveSid(user)),
+            TargetTable = string.Empty,
+            Decision = "ALLOW",
+            TraceId = context.TraceIdentifier,
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { persona = user.Username })
+        }, context.RequestAborted).ConfigureAwait(false);
 
         return IsLocalPath(redirect)
             ? Results.Redirect(redirect!)

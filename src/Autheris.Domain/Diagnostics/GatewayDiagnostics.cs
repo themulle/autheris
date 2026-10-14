@@ -25,6 +25,12 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> CrossTenantMismatchCounter =
         Meter.CreateCounter<long>("autheris_cross_tenant_mismatch_total", description: "Cross-tenant webhook or access mismatches");
 
+    public static readonly Counter<long> AuthzDependencyFailureCounter =
+        Meter.CreateCounter<long>("authz_dependency_failure_total", description: "Authorization dependency failures that resulted in a fail-closed denial");
+
+    public static readonly Counter<long> AuditWriteFailedCounter =
+        Meter.CreateCounter<long>("autheris_audit_write_failed_total", description: "Audit writes that failed, by tier (required or best_effort)");
+
     public static readonly Counter<long> AuditDeadLetterCounter =
         Meter.CreateCounter<long>("autheris_audit_dead_letter_total", description: "Total number of audit events diverted to dead-letter storage");
 

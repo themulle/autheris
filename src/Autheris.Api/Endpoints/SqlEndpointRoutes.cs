@@ -135,26 +135,23 @@ public static class SqlEndpointRoutes
 
         registry.Register(definition);
 
-        var auditRepo = context.RequestServices?.GetService<Autheris.Application.Interfaces.IAuditLogRepository>();
-        if (auditRepo != null)
+        var auditRepo = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
+        await auditRepo.RecordRequiredAsync(new Autheris.Domain.Model.AuditLogEntry
         {
-            await auditRepo.RecordAuditEventAsync(new Autheris.Domain.Model.AuditLogEntry
+            TenantId = EndpointSecurity.GetRequestTenant(context),
+            EventType = "SQL_ENDPOINT_REGISTERED",
+            ActorSid = context.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+            TargetTable = definition.Name,
+            Decision = "ALLOW",
+            TraceId = context.TraceIdentifier,
+            DetailsJson = JsonSerializer.Serialize(new
             {
-                TenantId = EndpointSecurity.GetRequestTenant(context),
-                EventType = "SQL_ENDPOINT_REGISTERED",
-                ActorSid = context.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
-                TargetTable = definition.Name,
-                Decision = "ALLOW",
-                TraceId = context.TraceIdentifier,
-                DetailsJson = JsonSerializer.Serialize(new
-                {
-                    name = definition.Name,
-                    dataSource = definition.DataSource,
-                    httpMethod = definition.HttpMethod,
-                    overwrite
-                })
-            }, context.RequestAborted).ConfigureAwait(false);
-        }
+                name = definition.Name,
+                dataSource = definition.DataSource,
+                httpMethod = definition.HttpMethod,
+                overwrite
+            })
+        }, context.RequestAborted).ConfigureAwait(false);
 
         return Results.Created($"/api/v1/queries/{definition.Name}", (object)new
         {

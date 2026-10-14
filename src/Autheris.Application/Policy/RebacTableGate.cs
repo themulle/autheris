@@ -6,6 +6,7 @@ using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Logging;
 
 /// <summary>
 /// POL-6: the ReBAC <c>can_query</c> check on a catalog table, shared by every read path. The unified PDP (MCP-RAG,
@@ -56,7 +57,8 @@ public static class RebacTableGate
         TenantId tenant,
         Sid subject,
         TableIdentifier table,
-        CancellationToken ct)
+        CancellationToken ct,
+        ILogger? logger = null)
     {
         if (evaluator is not { IsEnabled: true })
         {
@@ -68,8 +70,11 @@ public static class RebacTableGate
             var result = await evaluator.CheckAsync(new RebacCheckRequest(tenant.Value, subject.Value, Relation, ObjectId(table)), ct).ConfigureAwait(false);
             return result.Allowed;
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            // WP-ARC-A-06: still a denial (fail-closed), but no longer silent; cancellation is not a policy decision and propagates.
+            Autheris.Domain.Diagnostics.GatewayDiagnostics.AuthzDependencyFailureCounter.Add(1, new KeyValuePair<string, object?>("dependency", "rebac"));
+            logger?.LogError(new Microsoft.Extensions.Logging.EventId(4101, "RebacGateDependencyFailure"), ex, "ReBAC evaluation failed; denying access to {Table} (fail-closed).", table);
             return false;
         }
     }
