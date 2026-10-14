@@ -58,7 +58,7 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
         _clusterState = clusterState;
     }
 
-    public async Task<OpenMetadataSyncResult> SyncPermissionsAsync(bool dryRun = false, CancellationToken ct = default)
+    public async Task<OpenMetadataSyncResult> SyncPermissionsAsync(bool dryRun = false, CancellationToken ct = default, TenantId? restrictToTenant = null)
     {
         if (!await SyncLock.WaitAsync(TimeSpan.FromSeconds(5), ct))
         {
@@ -87,7 +87,7 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to fetch tables from OpenMetadata.");
-                return new OpenMetadataSyncResult(0, 0, 0, Array.Empty<TableIdentifier>(), [ex.Message], false);
+                return new OpenMetadataSyncResult(0, 0, 0, Array.Empty<TableIdentifier>(), ["Failed to fetch tables from OpenMetadata."], false);
             }
 
             // SEC E-09 / EX-06: ServiceFilter per table, database-aware identity (explicit map) and collision rejection.
@@ -96,6 +96,12 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
             {
                 if (OpenMetadataTableIdentity.TryResolve(omTable, omOptions, out var resolved, out var reason))
                 {
+                    // SR-L-23: a tenant-restricted sync only touches tables mapped to the caller's tenant (silently, no foreign names reported).
+                    if (restrictToTenant.HasValue && resolved.TenantId != restrictToTenant.Value)
+                    {
+                        continue;
+                    }
+
                     candidates.Add((omTable, resolved));
                 }
                 else
@@ -155,7 +161,7 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
             int syncedConsentsCount = 0;
             try
             {
-                var outcome = await ReconcileConsentsAsync(omOptions, tableMetadataMap, tableTenantMap, affectedTables, warnings, dryRun, ct);
+                var outcome = await ReconcileConsentsAsync(omOptions, tableMetadataMap, tableTenantMap, affectedTables, warnings, dryRun, restrictToTenant, ct);
                 syncedConsentsCount = outcome.SyncedConsents;
                 success = outcome.Success;
             }
@@ -218,6 +224,7 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
         HashSet<TableIdentifier> affectedTables,
         List<string> warnings,
         bool dryRun,
+        TenantId? restrictToTenant,
         CancellationToken ct)
     {
         // ---- Phase 1: read everything (no writes) ----
@@ -403,6 +410,13 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
             {
                 managedTenants.Add(new TenantId(tStr.Trim()));
             }
+        }
+
+        if (restrictToTenant.HasValue)
+        {
+            // SR-L-23: a tenant-restricted run reconciles only that tenant's sync consents.
+            managedTenants.Clear();
+            managedTenants.Add(restrictToTenant.Value);
         }
 
         // ---- Phase 2: apply ----

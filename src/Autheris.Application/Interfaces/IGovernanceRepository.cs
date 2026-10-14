@@ -31,6 +31,14 @@ public interface IConsentRepository
     /// a table owner and a revocation can only tighten access. Returns false when nothing was revoked.
     /// </summary>
     Task<bool> RevokeSystemConsentAsync(Guid consentId, Guid consentRequestId, Sid revokedBySid, string reason, CancellationToken ct = default);
+
+    /// <summary>
+    /// SR-L-21: Tables on which <paramref name="tenantId"/> holds at least one non-revoked consent record (Allow or Deny).
+    /// Consent-derived tenant ownership signal for catalog isolation (decision G-11: <c>TableMetadata</c> has no owner tenant).
+    /// The default returns nothing (fail-closed: no consent-derived visibility).
+    /// </summary>
+    Task<IReadOnlyList<TableIdentifier>> GetTablesWithConsentsForTenantAsync(TenantId tenantId, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<TableIdentifier>>(Array.Empty<TableIdentifier>());
 }
 
 

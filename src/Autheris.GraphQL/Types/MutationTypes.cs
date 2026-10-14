@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.Interfaces;
 using Autheris.Application.OpenMetadata.Interfaces;
+using Autheris.Application.OpenMetadata.Models;
 using Autheris.Application.DataCatalog.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -534,59 +535,10 @@ public sealed class Mutation
                 .Build());
         }
 
+        // SR-L-23: only the canonical ClusterAdmin (claims-based, never ForwardAuth) or a GovernanceAdmin may synchronise.
         var roles = principal.FindAll(ClaimTypes.Role).Select(r => r.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (!roles.Contains("GovernanceAdmin") && !roles.Contains("ClusterAdmin"))
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("FORBIDDEN")
-                .SetMessage("Only governance or cluster administrators may reload the schema.")
-                .Build());
-        }
-
-        await eventBus.PublishAsync("schema:reload", DateTimeOffset.UtcNow.ToString("O"), ct);
-
-        // Review E-10: schema reloads change what the gateway exposes and belong in the audit chain.
-        TenantId reloadTenant;
-        try
-        {
-            reloadTenant = principal.GetTenantId();
-        }
-        catch (System.Security.SecurityException)
-        {
-            reloadTenant = TenantId.LegacySingleTenant; // cluster admins may have no tenant claim
-        }
-
-        await auditLog.RecordAuditEventAsync(new AuditLogEntry
-        {
-            TenantId = reloadTenant,
-            EventType = "SCHEMA_RELOAD",
-            ActorSid = principal.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
-            TargetTable = string.Empty,
-            Decision = "ALLOW",
-            TraceId = Guid.NewGuid().ToString("N"),
-            DetailsJson = "{}"
-        }, ct);
-
-        return true;
-    }
-
-    public async Task<OpenMetadataSyncPayload> SyncOpenMetadataAsync(
-        bool dryRun = false,
-        [Service] IOpenMetadataSyncService syncService = default!,
-        [Service] IHttpContextAccessor httpContextAccessor = default!,
-        CancellationToken ct = default)
-    {
-        var principal = httpContextAccessor?.HttpContext?.User;
-        if (principal?.Identity?.IsAuthenticated != true)
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("UNAUTHORIZED")
-                .SetMessage("Authentication is required.")
-                .Build());
-        }
-
-        var roles = principal.FindAll(ClaimTypes.Role).Select(r => r.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (!roles.Contains("GovernanceAdmin") && !roles.Contains("ClusterAdmin"))
+        var isClusterAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        if (!isClusterAdmin && !roles.Contains("GovernanceAdmin"))
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
@@ -594,14 +546,44 @@ public sealed class Mutation
                 .Build());
         }
 
-        var result = await syncService.SyncPermissionsAsync(dryRun, ct);
+        // Non-cluster administrators are confined to their own tenant (fail-closed on an invalid tenant claim).
+        TenantId? restrictToTenant = null;
+        if (!isClusterAdmin)
+        {
+            try
+            {
+                restrictToTenant = principal.GetTenantId();
+            }
+            catch (System.Security.SecurityException)
+            {
+                throw new GraphQLException(ErrorBuilder.New()
+                    .SetCode("UNAUTHORIZED")
+                    .SetMessage("No valid tenant in the authentication token.")
+                    .Build());
+            }
+        }
+
+        OpenMetadataSyncResult result;
+        try
+        {
+            result = await syncService.SyncPermissionsAsync(dryRun, ct, restrictToTenant);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not GraphQLException)
+        {
+            // Full detail stays in the server log (the sync service logs it); the caller gets a fixed code only.
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("SYNC_FAILED")
+                .SetMessage("OpenMetadata synchronization failed.")
+                .Build());
+        }
+
         return new OpenMetadataSyncPayload
         {
             Success = result.Success,
             SyncedTables = result.SyncedTables,
             SyncedConsents = result.SyncedConsents,
             SyncedMaskingRules = result.SyncedMaskingRules,
-            Warnings = result.Warnings.ToList()
+            Warnings = result.SanitizedWarnings.ToList()
         };
     }
 
