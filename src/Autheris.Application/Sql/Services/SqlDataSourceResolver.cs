@@ -26,15 +26,34 @@ public sealed class SqlDataSourceResolver
         _logger = logger;
     }
 
-    public string ResolveAllowedDataSource(string? requested, TenantId tenantId)
+    public string ResolveAllowedDataSource(string? requested, TenantId tenantId) =>
+        ResolveAllowedDataSource(_options.Value.WebSql, requested, tenantId);
+
+    /// <summary>
+    /// Global (<c>AllowedDataSources</c>) and per-tenant (<c>TenantDataSourceAllowlist</c>) allowlist check of one catalog /
+    /// data source; the single check shared by the single-catalog, cross-source and OLAP paths (fail closed).
+    /// </summary>
+    public static string ResolveAllowedDataSource(WebSqlOptions webSqlOptions, string? requested, TenantId tenantId)
     {
-        string resolved = ResolveGloballyAllowedDataSource(requested);
-        if (!GovernedSqlExecutionService.IsDataSourceAllowedForTenant(_options.Value.WebSql, tenantId, resolved))
+        ArgumentNullException.ThrowIfNull(webSqlOptions);
+        if (!TryResolveGloballyAllowedDataSource(webSqlOptions, requested, out var resolved))
+        {
+            throw new WebSqlPolicyException("The requested data source is not enabled for WebSQL.");
+        }
+
+        if (!GovernedSqlExecutionService.IsDataSourceAllowedForTenant(webSqlOptions, tenantId, resolved))
         {
             throw new WebSqlPolicyException("The requested data source is not enabled for this tenant.");
         }
 
         return resolved;
+    }
+
+    /// <summary>Per-tenant allowlist only (<c>TenantDataSourceAllowlist</c>); tenants without an entry are unrestricted.</summary>
+    public static bool IsAllowedForTenant(WebSqlOptions webSqlOptions, TenantId tenantId, string dataSourceName)
+    {
+        ArgumentNullException.ThrowIfNull(webSqlOptions);
+        return GovernedSqlExecutionService.IsDataSourceAllowedForTenant(webSqlOptions, tenantId, dataSourceName);
     }
 
     public string ResolveGloballyAllowedDataSource(string? requested)

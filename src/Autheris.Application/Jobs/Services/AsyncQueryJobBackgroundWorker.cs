@@ -25,12 +25,16 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
     private readonly IAuditLogRepository _auditLogRepository;
     private readonly ILogger<AsyncQueryJobBackgroundWorker> _logger;
 
+    private readonly Autheris.Domain.Options.GatewayOptions? _gatewayOptions;
+
     public AsyncQueryJobBackgroundWorker(
         IAsyncQueryJobManager jobManager,
         IServiceScopeFactory scopeFactory,
         IAuditLogRepository auditLogRepository,
-        ILogger<AsyncQueryJobBackgroundWorker>? logger = null)
+        ILogger<AsyncQueryJobBackgroundWorker>? logger = null,
+        Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? options = null)
     {
+        _gatewayOptions = options?.Value;
         ArgumentNullException.ThrowIfNull(jobManager);
         ArgumentNullException.ThrowIfNull(scopeFactory);
         ArgumentNullException.ThrowIfNull(auditLogRepository);
@@ -87,10 +91,11 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
             using var scope = _scopeFactory.CreateScope();
             var sqlExec = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
 
-            var maxRows = Math.Max(1, item.Request.MaxRows);
+            // SR-H-05: the requested MaxRows only lowers the WebSQL / AsyncJob channel limits and the hard cap.
+            var rowLimit = AsyncJobLimits.ResolveRowLimit(_gatewayOptions, item.Request.MaxRows);
             var queryRequest = new GovernedSqlQueryRequest(
                 Sql: item.Request.Query,
-                RowLimit: new SqlRowLimit(maxRows, maxRows),
+                RowLimit: rowLimit,
                 Transport: SqlTransports.AsyncJob);
 
             var tenantId = new TenantId(item.Job.TenantId);

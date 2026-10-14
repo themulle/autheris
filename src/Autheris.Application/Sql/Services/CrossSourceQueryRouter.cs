@@ -88,6 +88,11 @@ public sealed class CrossSourceQueryRouter : ICrossSourceQueryRouter
             var domain = !string.IsNullOrWhiteSpace(target.Catalog)
                 ? target.Catalog
                 : (requestedDataSource ?? _webSqlOptions.DefaultDataSourceName);
+
+            // SR-H-06: every catalog of the statement passes the same global + tenant allowlist as the single-catalog path,
+            // before any metadata or upstream access (fail closed).
+            _ = SqlDataSourceResolver.ResolveAllowedDataSource(_webSqlOptions, domain, tenantId);
+
             var schema = !string.IsNullOrWhiteSpace(target.Schema) ? target.Schema : "public";
             var tableId = new TableIdentifier(domain, schema, target.TableName);
 

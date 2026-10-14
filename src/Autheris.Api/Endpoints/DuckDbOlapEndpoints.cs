@@ -9,6 +9,8 @@ using Autheris.Application.Connectors;
 using Autheris.Application.Connectors.CrossDomain;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Olap;
+using Autheris.Application.Sql;
+using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Connectors;
 using Autheris.Domain.Interfaces;
@@ -43,6 +45,29 @@ public static class DuckDbOlapEndpoints
            .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         return app;
+    }
+
+    /// <summary>
+    /// The tenant allowlist always applies; the global WebSql.AllowedDataSources only when it is configured, because the OLAP
+    /// engine does not depend on WebSQL being enabled and would otherwise lose every non-default catalog.
+    /// </summary>
+    private static bool IsCatalogAllowedForOlap(WebSqlOptions? webSql, TenantId tenantId, string catalog)
+    {
+        webSql ??= new WebSqlOptions();
+        try
+        {
+            if (webSql.AllowedDataSources.Count > 0 || webSql.DataSourceMappings?.Count > 0)
+            {
+                _ = SqlDataSourceResolver.ResolveAllowedDataSource(webSql, catalog, tenantId);
+                return true;
+            }
+
+            return SqlDataSourceResolver.IsAllowedForTenant(webSql, tenantId, catalog);
+        }
+        catch (WebSqlPolicyException)
+        {
+            return false;
+        }
     }
 
     internal static async Task HandleOlapQueryAsync(
@@ -188,6 +213,16 @@ public static class DuckDbOlapEndpoints
                     logger.LogWarning("OLAP request table '{Table}' not found in metadata catalog.", rawTableName);
                     httpContext.Response.StatusCode = isDev ? StatusCodes.Status404NotFound : StatusCodes.Status403Forbidden;
                     await httpContext.Response.WriteAsJsonAsync(new { error = isDev ? $"Table '{rawTableName}' not found in metadata catalog." : $"Access denied to table '{rawTableName}'." }, ct);
+                    return;
+                }
+
+                // SR-H-06: the tenant data-source allowlist (and the global one, when configured) applies to OLAP staging too,
+                // before the access decision or any connector read. Same denial as an unknown table (no policy detail).
+                if (!IsCatalogAllowedForOlap(gatewayOptions.Value.WebSql, tenantId, meta.Identifier.Domain))
+                {
+                    logger.LogWarning("OLAP request denied: data source of table {Table} is not enabled for the tenant.", meta.Identifier);
+                    httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    await httpContext.Response.WriteAsJsonAsync(new { error = $"Access denied to table '{rawTableName}'." }, ct);
                     return;
                 }
 

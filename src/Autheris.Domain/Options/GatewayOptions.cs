@@ -38,6 +38,7 @@ public sealed class GatewayOptions
     [Required] public WebSqlOptions WebSql { get; init; } = new();
     [Required] public TransportRowLimitsOptions RowLimits { get; init; } = new();
     [Required] public SqlEndpointsOptions SqlEndpoints { get; init; } = new();
+    [Required] public AsyncJobOptions AsyncJobs { get; init; } = new();
     [Required] public InsecureGettingStartedOptions Insecure { get; init; } = new();
     [Required] public DevOptions Dev { get; init; } = new();
     [Required] public MssqlChangeTrackingOptions MssqlChangeTracking { get; init; } = new();
@@ -1544,6 +1545,21 @@ public sealed class TransportRowLimitsOptions
 
     /// <summary>Arrow Flight SQL (/api/v1/flight/sql/*).</summary>
     public ChannelRowLimitOptions FlightSql { get; init; } = new();
+
+    /// <summary>Async query jobs (POST /api/v1/jobs/query); AsyncJobs.MaxRowsHardCap still caps the job.</summary>
+    public ChannelRowLimitOptions AsyncJob { get; init; } = new();
+}
+
+/// <summary>
+/// Hard caps of async query jobs (SR-H-05). The client-supplied MaxRows / Timeout can only lower these values.
+/// </summary>
+public sealed class AsyncJobOptions
+{
+    /// <summary>Upper bound for the rows of one job, applied on top of the WebSql / AsyncJob channel limits.</summary>
+    [Range(1, 100_000_000)] public long MaxRowsHardCap { get; init; } = 100_000;
+
+    /// <summary>Upper bound for the wall-clock runtime of one job; also applied when the client sends no timeout.</summary>
+    [Range(1, 86_400)] public int MaxTimeoutSeconds { get; init; } = 600;
 }
 
 /// <summary>Row limits of one transport; null keeps the WebSql value.</summary>

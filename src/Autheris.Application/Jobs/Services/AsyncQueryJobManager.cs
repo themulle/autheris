@@ -27,11 +27,15 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
     private readonly ILogger<AsyncQueryJobManager> _logger;
     private readonly string _scratchDirectory;
 
+    private readonly Autheris.Domain.Options.GatewayOptions? _gatewayOptions;
+
     public AsyncQueryJobManager(
         IAuditLogRepository auditLogRepository,
         ILogger<AsyncQueryJobManager>? logger = null,
-        IHostEnvironment? environment = null)
+        IHostEnvironment? environment = null,
+        Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? options = null)
     {
+        _gatewayOptions = options?.Value;
         ArgumentNullException.ThrowIfNull(auditLogRepository);
         _auditLogRepository = auditLogRepository;
         _logger = logger ?? NullLogger<AsyncQueryJobManager>.Instance;
@@ -97,10 +101,8 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
         _jobs[jobId] = descriptor;
 
         var cts = new CancellationTokenSource();
-        if (request.Timeout.HasValue && request.Timeout.Value > TimeSpan.Zero)
-        {
-            cts.CancelAfter(request.Timeout.Value);
-        }
+        // SR-H-05: the timeout is always armed and never above the configured maximum.
+        cts.CancelAfter(AsyncJobLimits.ResolveTimeout(_gatewayOptions, request.Timeout));
         _activeCts[jobId] = cts;
 
         try
