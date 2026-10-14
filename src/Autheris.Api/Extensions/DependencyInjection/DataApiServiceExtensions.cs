@@ -7,7 +7,9 @@ using Autheris.Application.Data;
 using Autheris.Application.Data.Interfaces;
 using Autheris.Application.Data.Services;
 using Autheris.Application.Interfaces;
+using Autheris.Domain.Options;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -18,6 +20,10 @@ public static class DataApiServiceExtensions
 {
     public static IServiceCollection AddAutherisDataApi(this IServiceCollection services)
     {
+        services.AddOptions<AnalyticsOptions>()
+            .Configure<Microsoft.Extensions.Configuration.IConfiguration>((o, cfg) => cfg.GetSection(AnalyticsOptions.SectionName).Bind(o))
+            .ValidateOnStart();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<Microsoft.Extensions.Options.IValidateOptions<AnalyticsOptions>, AnalyticsOptionsValidator>());
         services.AddScoped<IGovernedDataQueryService, GovernedDataQueryService>();
         services.AddHostedService<VirtualSystemTablesHostedService>();
         return services;
