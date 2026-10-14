@@ -166,4 +166,22 @@ public class ODataFilterParserTests
         Should.Throw<GatewayInvalidQueryException>(() => ODataFilterParser.Parse("unknown_fn(col)"));
         Should.Throw<GatewayInvalidQueryException>(() => ODataFilterParser.Parse("contains(col)")); // missing arg
     }
+
+    [Fact]
+    public void Parse_TrinoPredicate_UsesCatalogSpellingAndTheSameParameters()
+    {
+        var clause = ODataFilterParser.Parse("STATUS eq 'active'", DatabaseDialect.SqlServer);
+
+        clause.GetTrinoPredicate(name => name.ToLowerInvariant()).ShouldBe("(\"status\" = @p_od_0)");
+        clause.GetTrinoPredicate().ShouldBe("(\"STATUS\" = @p_od_0)");
+        clause.Parameters["@p_od_0"].ShouldBe("active");
+    }
+
+    [Fact]
+    public void GetTrinoPredicate_WithoutBuilder_FailsClosed()
+    {
+        var clause = new Autheris.Application.Interfaces.TableFilterClause("a = 1", new System.Collections.Generic.Dictionary<string, object?>(), new[] { "a" });
+
+        Should.Throw<NotSupportedException>(() => clause.GetTrinoPredicate());
+    }
 }

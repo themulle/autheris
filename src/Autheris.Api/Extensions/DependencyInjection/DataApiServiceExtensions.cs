@@ -24,6 +24,7 @@ public static class DataApiServiceExtensions
             .Configure<Microsoft.Extensions.Configuration.IConfiguration>((o, cfg) => cfg.GetSection(AnalyticsOptions.SectionName).Bind(o))
             .ValidateOnStart();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<Microsoft.Extensions.Options.IValidateOptions<AnalyticsOptions>, AnalyticsOptionsValidator>());
+        services.TryAddSingleton<IGovernedTableReadPlanner, GovernedTableReadPlanner>();
         services.AddScoped<IGovernedDataQueryService, GovernedDataQueryService>();
         services.AddHostedService<VirtualSystemTablesHostedService>();
         return services;
