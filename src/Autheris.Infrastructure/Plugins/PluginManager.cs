@@ -28,6 +28,14 @@ public sealed class PluginManager : IPluginManager, IDisposable
     private readonly List<PluginListenerEntry> _listeners = [];
     private readonly List<IDisposable> _busSubscriptions = [];
     private readonly object _lock = new();
+    private int _inFlightActions;
+    private volatile bool _disposed;
+
+    /// <summary>Upper bound for a single plugin action execution.</summary>
+    internal static readonly TimeSpan ActionTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>Maximum time <see cref="Dispose"/> waits for in-flight plugin actions.</summary>
+    private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(5);
 
     private sealed record PluginEntry(IHttpDataSourcePlugin Plugin, PluginAssemblyLoadContext? Context);
     private sealed record PluginListenerEntry(IPluginEventListener Listener, PluginAssemblyLoadContext? Context);
@@ -103,14 +111,36 @@ public sealed class PluginManager : IPluginManager, IDisposable
             return PluginActionResult.Failed($"Action handler '{actionName}' not found.");
         }
 
+        if (_disposed)
+        {
+            return PluginActionResult.Failed("Plugin manager is shutting down.");
+        }
+
+        Interlocked.Increment(ref _inFlightActions);
         try
         {
-            return await entry.Handler.ExecuteActionAsync(context, ct).ConfigureAwait(false);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(ActionTimeout);
+            return await entry.Handler.ExecuteActionAsync(context, cts.Token).WaitAsync(ActionTimeout, ct).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogError("Plugin action '{ActionName}' exceeded the timeout of {Timeout}", actionName, ActionTimeout);
+            return PluginActionResult.Failed($"Action '{actionName}' timed out.");
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogError("Plugin action '{ActionName}' exceeded the timeout of {Timeout}", actionName, ActionTimeout);
+            return PluginActionResult.Failed($"Action '{actionName}' timed out.");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Unhandled exception executing plugin action '{ActionName}'", actionName);
             return PluginActionResult.Failed($"Action execution failed: {ex.Message}");
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _inFlightActions);
         }
     }
 
@@ -313,6 +343,15 @@ public sealed class PluginManager : IPluginManager, IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
+
+        // Drain in-flight action handlers (bounded) before unloading their assembly contexts.
+        var deadline = DateTime.UtcNow + DrainTimeout;
+        while (Volatile.Read(ref _inFlightActions) > 0 && DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(10);
+        }
+
         lock (_lock)
         {
             foreach (var sub in _busSubscriptions)

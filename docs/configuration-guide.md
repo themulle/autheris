@@ -541,14 +541,22 @@ Verwaltet dynamische C#-Erweiterungen (`IHttpDataSourcePlugin`) in isolierten `A
 | Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
 | `Directory` | `string` | Verzeichnispfad | `"plugins"` | Relativer oder absoluter Pfad zum Plugin-Ordner mit DLLs. |
-| `EnableHotReload` | `bool` | `true \| false` | `false` | Ermöglicht das Neuladen von Plugins zur Laufzeit ohne Neustart. |
 
 ```json
 "Plugins": {
-  "Directory": "/var/gql-gateway/plugins",
-  "EnableHotReload": false
+  "Directory": "/var/gql-gateway/plugins"
 }
 ```
+
+#### `Gateway:ExtensibilityPipeline` (Interceptor failure policy)
+
+| Property | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `IngressFailurePolicy` | `FailClosed \| FailOpen` | `FailClosed` | An ingress interceptor that throws or times out denies the request (HTTP 503) when fail-closed; it is skipped when fail-open. |
+| `EgressFailurePolicy` | `FailClosed \| FailOpen` | `FailOpen` | An egress interceptor failure is logged and skipped when fail-open; with fail-closed the failure propagates and the response is not delivered. |
+| `InterceptorTimeoutMs` | `int` | `5000` | Per-interceptor time budget in milliseconds (1-600000). |
+
+Plugin action handlers are limited to 30 seconds per execution; in-flight actions are drained (up to 5 seconds) on shutdown. `IHttpDataSourcePlugin` has no `ConfigureServices` member; plugins receive services through constructor injection.
 
 ---
 
