@@ -427,7 +427,8 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
         }
         else if (!double.TryParse(value.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out d))
         {
-            return value;
+            // SR-M-20: fail closed - never return the raw value for non-numeric input.
+            return null;
         }
 
         // Null-Island Schutz: Fehlender GPS-Fix (0.0, 0.0) bleibt zwingend 0.0
