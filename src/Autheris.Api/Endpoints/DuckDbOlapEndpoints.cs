@@ -1,18 +1,8 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Security;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Autheris.Application.Connectors;
-using Autheris.Application.Connectors.CrossDomain;
-using Autheris.Application.Interfaces;
 using Autheris.Application.Olap;
-using Autheris.Domain.Common;
-using Autheris.Domain.Connectors;
-using Autheris.Domain.Interfaces;
-using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -95,14 +85,31 @@ public static class DuckDbOlapEndpoints
         httpContext.Response.StatusCode = outcome.StatusCode;
         if (outcome.Result is { } result)
         {
-            httpContext.Response.ContentType = "application/json; charset=utf-8";
-            await httpContext.Response.WriteAsJsonAsync(new
+            try
             {
-                columns = result.Columns,
-                rows = result.Rows,
-                totalRows = result.TotalRowCount,
-                executionDurationMs = result.ExecutionDuration.TotalMilliseconds
-            }, ct);
+                httpContext.Response.ContentType = "application/json; charset=utf-8";
+                await httpContext.Response.WriteAsJsonAsync(new
+                {
+                    columns = result.Columns,
+                    rows = result.Rows,
+                    totalRows = result.TotalRowCount,
+                    executionDurationMs = result.ExecutionDuration.TotalMilliseconds
+                }, ct);
+            }
+            catch (Exception ex)
+            {
+                // Same contract as before the extraction: a failure while writing the result is a 400 with a generic error.
+                logger.LogError(ex, "Error executing DuckDB OLAP query.");
+                httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+                if (isDev || gatewayOptions.Value.IsQuickstartProfile)
+                {
+                    await httpContext.Response.WriteAsJsonAsync(new { error = "Analytical query execution failed.", details = ex.Message }, ct);
+                }
+                else
+                {
+                    await httpContext.Response.WriteAsJsonAsync(new { error = "Analytical query execution failed." }, ct);
+                }
+            }
         }
         else if (outcome.Details != null)
         {

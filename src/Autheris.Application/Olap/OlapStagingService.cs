@@ -140,11 +140,9 @@ public sealed class OlapStagingService(
                     return new OlapStagingOutcome(403, $"Access denied to table '{rawTableName}'.");
                 }
 
-                var effectiveUser = user;
-
                 // SEC-OLAP-05 / RR-L3-04 / Architecture 1: one access decision (ReBAC whenever enabled, consents, Casbin, RLS)
                 // without leaking internal policy details.
-                var decision = await accessResolver.ResolveAccessAsync(effectiveUser, meta.Identifier, meta, tenantId, ct).ConfigureAwait(false);
+                var decision = await accessResolver.ResolveAccessAsync(user, meta.Identifier, meta, tenantId, ct).ConfigureAwait(false);
 
                 if (!decision.IsAllowed)
                 {
@@ -169,7 +167,7 @@ public sealed class OlapStagingService(
                 }
 
                 var session = new ConnectorSessionContext(
-                    Principal: effectiveUser,
+                    Principal: user,
                     Tenant: tenantId,
                     AccessDecision: decision,
                     ProjectedColumns: meta.Columns.Select(c => c.ColumnName).ToList(),

@@ -127,6 +127,8 @@ public sealed class DelegatedAuditRouteIntegrationTests : IClassFixture<WebAppli
         var response = await client.PostAsJsonAsync("/api/v1/olap/query", new { sql = "SELECT 1", tableNames = new[] { "secret.main.payroll" } });
 
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        // The denial must come from the access resolver, not from an earlier guard (allowlist, catalog).
+        await resolver.Received(1).ResolveAccessAsync(Arg.Any<System.Security.Claims.ClaimsPrincipal>(), Arg.Any<Autheris.Domain.Common.TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<Autheris.Domain.Common.TenantId>(), Arg.Any<System.Threading.CancellationToken>());
         using var scope = factory.Services.CreateScope();
         var entries = (await scope.ServiceProvider.GetRequiredService<IAuditLogRepository>().GetAuditLogEntriesAsync(1000)).ToArray();
         entries.ShouldContain(e => e.EventType == AuditEventTypes.AuthzEndpointDenied && e.Decision == "DENY"

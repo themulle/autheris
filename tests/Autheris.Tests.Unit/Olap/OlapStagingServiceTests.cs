@@ -11,6 +11,7 @@ using Autheris.Application.Connectors.CrossDomain;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Olap;
 using Autheris.Domain.Common;
+using Autheris.Domain.Connectors;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -114,12 +115,36 @@ public sealed class OlapStagingServiceTests
     [Fact]
     public async Task Success_AuditsQueryWithTraceId_BeforeReturningTheResult()
     {
-        var f = Create(TableAccessDecision.Denied(Orders));
+        var f = Create(TableAccessDecision.Allowed(Orders, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
 
         var outcome = await f.Sut.ExecuteAsync(User(), Caller(), Command(), isDevelopment: false, "trace-9", CancellationToken.None);
 
         outcome.StatusCode.ShouldBe(StatusCodes.Status200OK);
         outcome.Result!.TotalRowCount.ShouldBe(1);
         await f.Audit.Received(1).RecordRequiredAsync(Arg.Is<AuditLogEntry>(e => e.EventType == "OLAP_QUERY" && e.TraceId == "trace-9" && e.Decision == "ALLOW"), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task StagedTableAuditFails_Returns503_AndTheEngineIsNotCalled()
+    {
+        var f = Create(TableAccessDecision.Allowed(Orders, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
+        var connector = Substitute.For<IAutherisConnector>();
+        var splitManager = Substitute.For<IConnectorSplitManager>();
+        var recordSource = Substitute.For<IConnectorRecordSource>();
+        connector.SplitManager.Returns(splitManager);
+        connector.RecordSource.Returns(recordSource);
+        splitManager.GetSplitsAsync(Arg.Any<TableMetadata>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
+            .Returns([new ConnectorSplit("s1", new Dictionary<string, object?>())]);
+        recordSource.ReadBatchAsync(Arg.Any<ConnectorSplit>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
+            .Returns([(IReadOnlyDictionary<string, object?>)new Dictionary<string, object?> { ["id"] = 1 }]);
+        f.Registry.TryGetConnectorForTable(Orders, out Arg.Any<IAutherisConnector>()!).Returns(x => { x[1] = connector; return true; });
+        f.Audit.RecordRequiredAsync(Arg.Is<AuditLogEntry>(e => e.EventType == "OLAP_TABLE_STAGED"), Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new AuditUnavailableException("down"));
+
+        var outcome = await f.Sut.ExecuteAsync(User(), Caller(), Command("sales.public.orders"), isDevelopment: false, "trace-1", CancellationToken.None);
+
+        outcome.StatusCode.ShouldBe(StatusCodes.Status503ServiceUnavailable);
+        outcome.Result.ShouldBeNull();
+        await f.Engine.DidNotReceiveWithAnyArgs().ExecuteOlapQueryAsync(default!, default);
     }
 }

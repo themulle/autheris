@@ -25,6 +25,9 @@ public sealed record OpenApiIngestionOutcome(OpenApiIngestionOutcomeKind Kind, O
 /// </summary>
 public interface IOpenApiIngestionUseCase
 {
+    /// <summary>The role check alone (needs no tenant), so an unprivileged caller is rejected before any tenant resolution.</summary>
+    bool HasPublishRole(ClaimsPrincipal user);
+
     /// <summary>
     /// The role and domain checks of <see cref="IngestAsync"/> without ingesting, so the endpoint can reject a caller before it reads
     /// the (up to 20 MB) body. Returns false when the caller is forbidden.

@@ -132,7 +132,7 @@ public sealed class ArrowExportRebacBodyTests
         var sql = Substitute.For<IGovernedSqlExecutionService>();
 
         var result = await ArrowExportEndpoints.HandleArrowExportAsync(
-            context, new ArrowExportService(services.GetRequiredService<IOptions<GatewayOptions>>(), NullLogger<ArrowExportService>.Instance), sql, CancellationToken.None);
+            context, new ArrowExportService(services.GetRequiredService<IOptions<GatewayOptions>>(), NullLogger<ArrowExportService>.Instance), sql, new Autheris.Application.Data.Services.GovernedTableReadPlanner(), CancellationToken.None);
 
         result.ShouldBeOfType<ProblemHttpResult>().StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
         await sql.DidNotReceiveWithAnyArgs().ExecuteQueryBufferedAsync(default!, default!, default, default);
@@ -148,7 +148,7 @@ public sealed class ArrowExportRebacBodyTests
             .Returns(new GovernedSqlResult("q", ["id"], [new Dictionary<string, object?> { ["id"] = 1 }], 1, 1));
 
         var result = await ArrowExportEndpoints.HandleArrowExportAsync(
-            context, new ArrowExportService(services.GetRequiredService<IOptions<GatewayOptions>>(), NullLogger<ArrowExportService>.Instance), sql, CancellationToken.None);
+            context, new ArrowExportService(services.GetRequiredService<IOptions<GatewayOptions>>(), NullLogger<ArrowExportService>.Instance), sql, new Autheris.Application.Data.Services.GovernedTableReadPlanner(), CancellationToken.None);
 
         result.ShouldNotBeOfType<ProblemHttpResult>();
         await sql.Received(1).ExecuteQueryBufferedAsync(
@@ -178,7 +178,7 @@ public sealed class ArrowExportRebacBodyTests
         var sql = Substitute.For<IGovernedSqlExecutionService>();
 
         var result = await ArrowExportEndpoints.HandleArrowExportAsync(
-            context, new ArrowExportService(services.GetRequiredService<IOptions<GatewayOptions>>(), NullLogger<ArrowExportService>.Instance), sql, CancellationToken.None);
+            context, new ArrowExportService(services.GetRequiredService<IOptions<GatewayOptions>>(), NullLogger<ArrowExportService>.Instance), sql, new Autheris.Application.Data.Services.GovernedTableReadPlanner(), CancellationToken.None);
 
         var problem = result.ShouldBeOfType<ProblemHttpResult>();
         problem.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
@@ -204,7 +204,7 @@ public sealed class ArrowExportRebacBodyTests
             .Returns(Task.FromException<GovernedSqlResult>(new Autheris.Application.Sql.WebSqlPolicyException("Sensitive internal table structure revealed")));
 
         var result = await ArrowExportEndpoints.HandleArrowExportAsync(
-            context, new ArrowExportService(Options.Create(new GatewayOptions()), NullLogger<ArrowExportService>.Instance), sql, CancellationToken.None);
+            context, new ArrowExportService(Options.Create(new GatewayOptions()), NullLogger<ArrowExportService>.Instance), sql, new Autheris.Application.Data.Services.GovernedTableReadPlanner(), CancellationToken.None);
 
         var problem = result.ShouldBeOfType<ProblemHttpResult>();
         problem.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);

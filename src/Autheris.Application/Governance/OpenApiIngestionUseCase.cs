@@ -18,6 +18,15 @@ public sealed class OpenApiIngestionUseCase(IOpenApiIngestionService ingestionSe
 {
     private static readonly IGatewayRoleEvaluator Roles = new GatewayRoleEvaluator();
 
+    public bool HasPublishRole(ClaimsPrincipal user)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        return HasRole(user);
+    }
+
+    private static bool HasRole(ClaimsPrincipal user) =>
+        Roles.HasAnyRole(user, new[] { GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher });
+
     public bool IsAuthorized(ClaimsPrincipal user, TenantId callerTenant, bool isClusterAdmin, string? domain) =>
         TryResolveDomain(user, callerTenant, isClusterAdmin, domain, out _);
 
@@ -71,7 +80,7 @@ public sealed class OpenApiIngestionUseCase(IOpenApiIngestionService ingestionSe
     private static bool TryResolveDomain(ClaimsPrincipal user, TenantId callerTenant, bool isClusterAdmin, string? domain, out string resolved)
     {
         resolved = string.Empty;
-        if (!Roles.HasAnyRole(user, new[] { GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher }))
+        if (!HasRole(user))
         {
             return false;
         }

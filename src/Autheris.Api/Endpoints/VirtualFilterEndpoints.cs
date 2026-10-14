@@ -240,7 +240,7 @@ public static class VirtualFilterEndpoints
                 return Results.Json(new { error = inspection.Error }, statusCode: StatusCodes.Status404NotFound);
             case EffectiveFilterInspectionKind.SingleTable:
                 return Results.Ok(ExplanationView(inspection.User!, inspection.Table!, inspection.Explanation!));
-            default:
+            case EffectiveFilterInspectionKind.Page:
                 var objects = inspection.Items.Select(i => (object)new
                 {
                     table = i.Table,
@@ -249,6 +249,8 @@ public static class VirtualFilterEndpoints
                     reason = i.Reason
                 }).ToList();
                 return Results.Ok(new { user = inspection.User, page = inspection.PageNo, page_size = inspection.PageSize, total = inspection.Total, objects });
+            default:
+                throw new System.Diagnostics.UnreachableException();
         }
     }
 

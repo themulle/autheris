@@ -239,7 +239,7 @@ public sealed class ArrowExportSecurityTests
             httpContext,
             service,
             sqlExecutionService: null,
-            CancellationToken.None);
+            new Autheris.Application.Data.Services.GovernedTableReadPlanner(), CancellationToken.None);
 
         // Assert
         result.ShouldBeOfType<ProblemHttpResult>();
@@ -267,7 +267,7 @@ public sealed class ArrowExportSecurityTests
             httpContext,
             service,
             sqlExecutionService: null,
-            CancellationToken.None);
+            new Autheris.Application.Data.Services.GovernedTableReadPlanner(), CancellationToken.None);
 
         // Assert
         result.ShouldBeOfType<ProblemHttpResult>();
@@ -300,7 +300,7 @@ public sealed class ArrowExportSecurityTests
             .Returns<Task<GovernedSqlResult>>(_ => throw (Exception)Activator.CreateInstance(exceptionType, secret)!);
 
         var result = await ArrowExportEndpoints.HandleArrowExportAsync(
-            CreateAuthenticatedArrowContext("finance.invoices"), service, sql, CancellationToken.None);
+            CreateAuthenticatedArrowContext("finance.invoices"), service, sql, new Autheris.Application.Data.Services.GovernedTableReadPlanner(), CancellationToken.None);
 
         var problem = result.ShouldBeOfType<ProblemHttpResult>();
         problem.StatusCode.ShouldBe(expectedStatus);
@@ -314,7 +314,7 @@ public sealed class ArrowExportSecurityTests
         var service = new ArrowExportService(CreateOptions(), NullLogger<ArrowExportService>.Instance);
 
         var result = await ArrowExportEndpoints.HandleArrowExportAsync(
-            CreateAuthenticatedArrowContext("finance.invoices"), service, sqlExecutionService: null, CancellationToken.None);
+            CreateAuthenticatedArrowContext("finance.invoices"), service, sqlExecutionService: null, new Autheris.Application.Data.Services.GovernedTableReadPlanner(), CancellationToken.None);
 
         result.ShouldBeOfType<ProblemHttpResult>().StatusCode.ShouldBe(StatusCodes.Status503ServiceUnavailable);
     }
@@ -331,7 +331,7 @@ public sealed class ArrowExportSecurityTests
         planner.BuildFullTableSelect(Arg.Any<TableIdentifier>()).Returns("SELECT * FROM planner_text");
 
         await ArrowExportEndpoints.HandleArrowExportAsync(
-            CreateAuthenticatedArrowContext("finance.invoices"), service, sql, CancellationToken.None, planner);
+            CreateAuthenticatedArrowContext("finance.invoices"), service, sql, planner, CancellationToken.None);
 
         captured.ShouldNotBeNull();
         captured!.Sql.ShouldBe("SELECT * FROM planner_text");

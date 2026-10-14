@@ -92,4 +92,18 @@ public sealed class OpenApiIngestionUseCaseTests
         outcome.Result!.ErrorMessage.ShouldBe("bad");
         await audit.DidNotReceiveWithAnyArgs().RecordRequiredAsync(default!, default);
     }
+
+    [Fact]
+    public void IsAuthorized_RejectsForeignDomain_ButAcceptsTrimmedOwnDomain()
+    {
+        var (sut, _, _) = Create();
+        var publisher = User("SchemaPublisher");
+
+        sut.IsAuthorized(publisher, Alpha, false, "tenant-bravo").ShouldBeFalse();
+        sut.IsAuthorized(publisher, Alpha, false, "  TENANT-ALPHA ").ShouldBeTrue();
+        sut.IsAuthorized(publisher, Alpha, true, "tenant-bravo").ShouldBeTrue();
+        sut.IsAuthorized(User("StandardUser"), Alpha, true, null).ShouldBeFalse();
+        sut.HasPublishRole(User("StandardUser")).ShouldBeFalse();
+        sut.HasPublishRole(publisher).ShouldBeTrue();
+    }
 }

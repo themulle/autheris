@@ -59,50 +59,58 @@ public static class GovernanceEndpoints
         return await ownershipRepository.IsAuthorizedApproverForTableAsync(table, new Sid(sid), context.RequestAborted).ConfigureAwait(false);
     }
 
+    internal static async Task<IResult> IngestOpenApiAsync(HttpContext context, IOpenApiIngestionUseCase ingestionUseCase)
+    {
+        // Role first: an unprivileged caller gets 403 before any tenant resolution (a malformed tenant claim throws) or body read.
+        if (!ingestionUseCase.HasPublishRole(context.User))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var callerTenant = EndpointSecurity.GetRequestTenant(context);
+        var isClusterAdmin = EndpointSecurity.IsCanonicalClusterAdmin(context.User);
+
+        string? domain = context.Request.Query.TryGetValue("domain", out var dVal) && !string.IsNullOrWhiteSpace(dVal)
+            ? dVal.ToString()
+            : null;
+
+        var baseUrl = context.Request.Query.TryGetValue("baseUrl", out var bVal) && !string.IsNullOrWhiteSpace(bVal)
+            ? bVal.ToString().Trim()
+            : null;
+
+        // Reject before the body is read; IngestAsync re-checks the same authorization.
+        if (!ingestionUseCase.IsAuthorized(context.User, callerTenant, isClusterAdmin, domain))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        // SEC M-07: Bounded read instead of a bypassable Content-Length check.
+        var (json, tooLarge) = await EndpointSecurity.TryReadBodyAsync(
+            context.Request,
+            20 * 1024 * 1024,
+            "OpenAPI specification exceeds maximum allowed size (20 MB).",
+            context.RequestAborted);
+        if (json == null)
+        {
+            return tooLarge!;
+        }
+
+        var outcome = await ingestionUseCase.IngestAsync(
+            context.User, callerTenant, isClusterAdmin, domain, baseUrl, json, context.TraceIdentifier, context.RequestAborted);
+        return outcome.Kind switch
+        {
+            OpenApiIngestionOutcomeKind.Forbidden => Results.StatusCode(StatusCodes.Status403Forbidden),
+            OpenApiIngestionOutcomeKind.Rejected => Results.BadRequest(outcome.Result),
+            _ => Results.Ok(outcome.Result)
+        };
+    }
+
     public static IEndpointRouteBuilder MapGovernanceEndpoints(this IEndpointRouteBuilder app)
     {
         // F-API-04: Declarative Web API OpenAPI/Swagger Schema & Doc Ingestion
-        app.MapPost("/api/governance/catalog/ingest-openapi", async (
-            HttpContext context,
-            IOpenApiIngestionUseCase ingestionUseCase) =>
-        {
-            var callerTenant = EndpointSecurity.GetRequestTenant(context);
-            var isClusterAdmin = EndpointSecurity.IsCanonicalClusterAdmin(context.User);
-
-            string? domain = context.Request.Query.TryGetValue("domain", out var dVal) && !string.IsNullOrWhiteSpace(dVal)
-                ? dVal.ToString()
-                : null;
-
-            var baseUrl = context.Request.Query.TryGetValue("baseUrl", out var bVal) && !string.IsNullOrWhiteSpace(bVal)
-                ? bVal.ToString().Trim()
-                : null;
-
-            // Reject before the body is read; IngestAsync re-checks the same authorization.
-            if (!ingestionUseCase.IsAuthorized(context.User, callerTenant, isClusterAdmin, domain))
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            // SEC M-07: Bounded read instead of a bypassable Content-Length check.
-            var (json, tooLarge) = await EndpointSecurity.TryReadBodyAsync(
-                context.Request,
-                20 * 1024 * 1024,
-                "OpenAPI specification exceeds maximum allowed size (20 MB).",
-                context.RequestAborted);
-            if (json == null)
-            {
-                return tooLarge!;
-            }
-
-            var outcome = await ingestionUseCase.IngestAsync(
-                context.User, callerTenant, isClusterAdmin, domain, baseUrl, json, context.TraceIdentifier, context.RequestAborted);
-            return outcome.Kind switch
-            {
-                OpenApiIngestionOutcomeKind.Forbidden => Results.StatusCode(StatusCodes.Status403Forbidden),
-                OpenApiIngestionOutcomeKind.Rejected => Results.BadRequest(outcome.Result),
-                _ => Results.Ok(outcome.Result)
-            };
-        }).RequireAuthorization()
+        app.MapPost("/api/governance/catalog/ingest-openapi", (HttpContext context, IOpenApiIngestionUseCase ingestionUseCase) =>
+            IngestOpenApiAsync(context, ingestionUseCase))
+          .RequireAuthorization()
           .WithRequestBodyLimit(20 * 1024 * 1024) // SEC M-01: explicit large-body exception to the global Kestrel limit
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 

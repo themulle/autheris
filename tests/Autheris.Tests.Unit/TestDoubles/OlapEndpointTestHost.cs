@@ -20,8 +20,9 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// WP-ARC-B-07: the OLAP endpoint delegates to <see cref="IOlapStagingService"/>. Tests that exercise the whole path compose the
-/// production service over their doubles; the audit writer is resolved from the request services, so a missing
-/// writer stays a composition error (<see cref="InvalidOperationException"/>).
+/// production service over their doubles. The audit writer is resolved eagerly from the request services, so a missing
+/// writer stays a composition error (<see cref="InvalidOperationException"/>); only a context without request services
+/// (early 401/400 paths) falls back to a lazy resolver that is never reached.
 /// </summary>
 internal static class OlapEndpointTestHost
 {
