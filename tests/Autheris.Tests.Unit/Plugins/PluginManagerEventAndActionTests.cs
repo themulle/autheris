@@ -71,6 +71,7 @@ public sealed class PluginManagerEventAndActionTests
             Timestamp: DateTimeOffset.UtcNow);
 
         await bus.PublishAsync(@event);
+        await bus.DrainAsync();
 
         // Assert
         listener.LastReceivedEvent.ShouldNotBeNull();

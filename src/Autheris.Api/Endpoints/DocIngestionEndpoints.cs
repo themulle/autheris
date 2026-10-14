@@ -122,7 +122,7 @@ public static class DocIngestionEndpoints
                     Category: category,
                     DocId: docId,
                     Title: title,
-                    SourceFilePath: result.FilePath ?? string.Empty,
+                    RelativePath: DocumentDepositedEvent.BuildRelativePath(appId, category, docId),
                     Timestamp: DateTimeOffset.UtcNow,
                     TenantId: EndpointSecurity.GetRequestTenant(httpContext).Value), ct).ConfigureAwait(false);
             }

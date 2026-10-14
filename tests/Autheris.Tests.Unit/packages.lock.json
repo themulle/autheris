@@ -1629,6 +1629,9 @@
           "prometheus-net": "[8.2.1, )"
         }
       },
+      "autheris.tests.common": {
+        "type": "Project"
+      },
       "autheris.domain": {
         "type": "Project",
         "dependencies": {

@@ -3,25 +3,52 @@ using Xunit;
 namespace TrinoSqlEngine.Tests.Security;
 
 /// <summary>
-/// Plan M-3: the mutant hooks are "compiled out of Release builds". In a Release build this test proves it by reflection: neither the
-/// seam type nor the control switches exist in the production assembly, so production code can neither reference nor enable them.
-/// In a Debug build it proves the opposite, so that a Debug-only suite cannot silently run against an assembly without hooks.
+/// ARC-S-06: Debug and Release compile the same security code. The shipped assembly contains no test seam type and no
+/// <see cref="ICompilerHooks"/> implementation other than the no-op, so no production code path can switch a control off. The
+/// mutant implementation lives in the test assembly only. Runs in both configurations.
 /// </summary>
 [Trait("Category", "Security")]
 [Trait("Category", "SqlGate")]
 public class ReleaseHookAbsenceTests
 {
     [Fact]
-    public void MutantHooks_ExistOnlyInDebugBuilds()
+    public void ProductionAssembly_HasNoCompilerTestSeamsType()
     {
         var assembly = typeof(FastSqlEngine).Assembly;
-        bool seam = assembly.GetType("TrinoSqlEngine.CompilerTestSeams") is not null;
-        bool controls = assembly.GetType("TrinoSqlEngine.SecurityControl") is not null;
-#if DEBUG
-        Assert.True(seam && controls);
-#else
-        Assert.False(seam, "CompilerTestSeams must not exist in a Release build.");
-        Assert.False(controls, "SecurityControl must not exist in a Release build.");
-#endif
+
+        Assert.Null(assembly.GetType("TrinoSqlEngine.CompilerTestSeams"));
+    }
+
+    [Fact]
+    public void ProductionAssembly_ContainsOnlyTheNoOpHooksImplementation()
+    {
+        var implementations = typeof(FastSqlEngine).Assembly.GetTypes()
+            .Where(t => !t.IsInterface && typeof(ICompilerHooks).IsAssignableFrom(t))
+            .ToList();
+
+        var only = Assert.Single(implementations);
+        Assert.Equal(typeof(NoOpCompilerHooks), only);
+    }
+
+    [Fact]
+    public void WithoutInstalledHooks_AllControlsAreEnabled()
+    {
+        Assert.Same(NoOpCompilerHooks.Instance, CompilerHooks.Current);
+        foreach (var control in Enum.GetValues<SecurityControl>())
+        {
+            Assert.False(CompilerHooks.IsDisabled(control), control.ToString());
+        }
+    }
+
+    [Fact]
+    public void DisposingTheScope_RestoresTheNoOpHooks()
+    {
+        using (CompilerHooks.Use(new MutantHooks { DisabledControls = new HashSet<SecurityControl> { SecurityControl.CoverageVerifier } }))
+        {
+            Assert.True(CompilerHooks.IsDisabled(SecurityControl.CoverageVerifier));
+        }
+
+        Assert.False(CompilerHooks.IsDisabled(SecurityControl.CoverageVerifier));
+        Assert.Same(NoOpCompilerHooks.Instance, CompilerHooks.Current);
     }
 }

@@ -63,7 +63,7 @@ public sealed class PostgreSqlGovernanceContractTests : IAsyncLifetime
                 SeedDemoData = false
             }
         });
-        return new PostgreSqlGovernanceRepository(epoch, options, env);
+        return GovernanceStoreFactory.CreatePostgreSql(epoch, options, env);
     }
 
     private static AuditLogEntry Entry(string type, string actor) => new()

@@ -30,7 +30,7 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
     public DefaultCrossDomainAccessResolver(
         IConsentRepository consentRepository,
         IConsentResolutionService resolutionService,
-        IPolicyEnforcementService? policyEnforcementService = null,
+        IPolicyEnforcementService policyEnforcementService,
         IClientIpResolver? clientIpResolver = null,
         IOptions<GatewayOptions>? options = null,
         IConsentCacheService? consentCache = null,
@@ -44,7 +44,7 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
             consentRepository ?? throw new ArgumentNullException(nameof(consentRepository)),
             resolutionService ?? throw new ArgumentNullException(nameof(resolutionService)),
             consentCache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            policyEnforcementService ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+            policyEnforcementService ?? throw new ArgumentNullException(nameof(policyEnforcementService)),
             rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver,
             _options,

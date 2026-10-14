@@ -107,7 +107,7 @@ public sealed class TableAccessPolicyArch1Tests
     public async Task CrossDomainResolver_RebacDenies_IsDenied()
     {
         var resolver = new DefaultCrossDomainAccessResolver(
-            NoConsents(), ResolvesTo(allowed: true), options: Options.Create(RebacOptions()), rebacEvaluator: RebacDenyingAll());
+            NoConsents(), ResolvesTo(allowed: true), global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, options: Options.Create(RebacOptions()), rebacEvaluator: RebacDenyingAll());
 
         var decision = await resolver.ResolveAccessAsync(User(), Table, Meta(), new TenantId(Tenant));
 
@@ -118,7 +118,7 @@ public sealed class TableAccessPolicyArch1Tests
     public async Task CrossDomainResolver_UsesTheConsentDecisionCache()
     {
         var resolver = new DefaultCrossDomainAccessResolver(
-            NoConsents(), ResolvesTo(allowed: false), consentCache: CacheWith(AllowAll()));
+            NoConsents(), ResolvesTo(allowed: false), global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, consentCache: CacheWith(AllowAll()));
 
         var decision = await resolver.ResolveAccessAsync(User(), Table, Meta(), new TenantId(Tenant));
 
@@ -179,7 +179,7 @@ public sealed class TableAccessPolicyArch1Tests
             environment: env,
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: NoConsents(),
-            consentCache: CacheWith(AllowAll()));
+            consentCache: CacheWith(AllowAll()), policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var sql = await service.RewriteSqlAsync("SELECT id FROM orders", User(), new TenantId(Tenant));
 
@@ -196,7 +196,7 @@ public sealed class TableAccessPolicyArch1Tests
         IConsentCacheService? cache = null) =>
         new(NoConsents(), resolution,
             cache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            casbin ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+            casbin ?? global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             rebac ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             options ?? new GatewayOptions(),

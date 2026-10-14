@@ -56,3 +56,16 @@ The audit subsystem decouples in-memory high-throughput hash chaining from asymm
   }
 }
 ```
+
+## Unrouted request handling
+
+Requests that match no endpoint and are answered by the router with a non-authentication 4xx status (typically 404, 405 or 400) are scanner noise and are never written to the audit chain, because the target of such a request is chosen by the client. Instead the counter `autheris_unrouted_requests_total` (tags `status_code` and `channel`, no path tag) is incremented and one in 100 occurrences is logged at Information level with a truncated path.
+
+The following behaviour is unchanged:
+
+- 401 and 429 responses are aggregated through `IAuthFailureAggregator` and not persisted individually.
+- 403 responses on routed endpoints are persisted as DENY rows.
+- Any exception and any 5xx response is still audited as an error.
+- Routed endpoints that answer 404 are still audited.
+
+The `TargetTable` of every persisted middleware audit row is capped at 256 characters.

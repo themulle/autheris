@@ -4,6 +4,7 @@
 **Location:** `doc/plan/features.md` (or `docs/plans/features.md`)  
 **Status:** ACTIVE & IN EXECUTION 🚀  
 **Parent Plan:** [`00-master-plan-overview.md`](00-master-plan-overview.md)  
+**Implementation Plan:** [`implementation/impl-features-analytics.md`](implementation/impl-features-analytics.md); global order in [`implementation/00-implementation-roadmap.md`](implementation/00-implementation-roadmap.md)  
 **Scope:** Active and planned functional feature streams building on the delivered AST SQL compiler (`F-DIALECT-02`), federated virtual filters (`F-GOV-14`), and OpenAPI ingestion (`F-AI-16`).
 
 ---

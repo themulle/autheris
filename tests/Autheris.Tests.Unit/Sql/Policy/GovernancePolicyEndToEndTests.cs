@@ -72,7 +72,7 @@ public sealed class GovernancePolicyEndToEndTests
             .Returns(Task.FromResult<IReadOnlyList<Consent>>(consents));
         var accessPolicy = new TableAccessPolicy(repo, new ConsentResolutionService(),
             Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+            global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null, new GatewayOptions(), NullMandatoryRowFilterResolver.Instance,
             rowPolicyFactory: new RowPolicyFactory(new PolicyPredicateRenderer()),

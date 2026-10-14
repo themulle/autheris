@@ -576,7 +576,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     internal TableAccessPolicy AccessPolicy() =>
         new(_consentRepository, _resolutionService,
             _cacheService,
-            _policyEnforcementService ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+            _policyEnforcementService ?? throw new InvalidOperationException("IPolicyEnforcementService is not configured; refusing to evaluate table access without policy enforcement (fail-closed)."),
             _rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             _clientIpResolver,
             _options ?? new GatewayOptions(),
@@ -604,6 +604,13 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         TableMetadata metadata,
         IReadOnlyDictionary<string, object?>? parameters = null) =>
         InMemoryRowFilterEvaluator.FilterRows(rows, rowFilterSql, metadata, parameters);
+
+    /// <summary>WP-ARC-B-04: filters by the decision's typed row policy (text only for a decision without one).</summary>
+    public static List<IReadOnlyDictionary<string, object?>> FilterRows(
+        List<IReadOnlyDictionary<string, object?>> rows,
+        TableAccessDecision decision,
+        TableMetadata metadata) =>
+        InMemoryRowFilterEvaluator.FilterRows(rows, decision, metadata);
 
     internal static bool IsTypeStrictRowFilter(string normalizedSql, System.Data.DataTable table) =>
         InMemoryRowFilterEvaluator.IsTypeStrictRowFilter(normalizedSql, table);

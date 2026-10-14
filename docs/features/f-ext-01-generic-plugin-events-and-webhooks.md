@@ -53,12 +53,14 @@ flowchart TD
   - `AccessPlanCreatedEvent`: Emitted when an access plan is generated.
   - `AccessPlanAppliedEvent`: Emitted when an access plan is confirmed and applied to REBAC policies.
   - `DatasetStateChangedEvent`: Emitted when a dataset is activated, quarantined, or deprecated.
-  - `PolicyDeniedEvent`: Emitted when Casbin ABAC or REBAC rejects an access request.
+  - `PolicyDeniedEvent`: Emitted when Casbin ABAC or REBAC rejects an access request. Carries a stable `ReasonCode` (`POLICY_DENIED`) and never the verbatim denial text (`Reason` holds the same code); full reasons are only written to the audit log.
   - `SecurityAlertEvent`: Emitted when prompt injections, jailbreaks, or brute force attempts are intercepted.
-  - `DocumentDepositedEvent`: Emitted when a document is deposited into the Universal Doc Store.
+  - `DocumentDepositedEvent`: Emitted when a document is deposited into the Universal Doc Store. Carries `RelativePath` (`{appId}/{category}/{docId}`), never an absolute filesystem path. The deprecated `SourceFilePath` property is kept for one release and equals `RelativePath`.
 - **`IGatewayEventBus` (`Autheris.Application.Events`):**
   - Thread-safe pub/sub dispatching events asynchronously to typed subscribers and general listeners.
   - Fault-isolated execution: Subscriber exceptions are caught and logged, preventing any failing plugin from affecting core operations or aborting other subscribers.
+  - Bounded asynchronous delivery (default `Queued` mode): every subscription owns a bounded queue and a single reader task, so `PublishAsync` only enqueues and returns immediately. A slow or hung handler is cut off after the per-handler timeout (10 s) and never delays the publisher or other subscribers. Semantics: in-process, at-most-once, ordered per subscriber, lossy under overload (the oldest queued event is dropped when a queue is full). Security decisions and audit records must never depend on the bus; events are notifications only.
+  - Metrics: `autheris_event_bus_dropped_total{event_type}` and `autheris_event_bus_handler_timeout_total{event_type}`.
 - **Plugin Contracts (`Autheris.Application.Plugins`):**
   - `IPluginEventListener<TEvent>`: Strongly typed event listener implemented in plugin DLLs.
   - `IPluginActionHandler`: Custom action handler callable by name via `IPluginManager.ExecuteActionAsync(...)`.
@@ -112,6 +114,27 @@ Webhook endpoints and filtering rules are configured under `Gateway:Webhooks`:
 }
 ```
 
+### 3.1.1 Event Bus Options (`Gateway:Events`)
+
+```json
+{
+  "Gateway": {
+    "Events": {
+      "SubscriberQueueCapacity": 1024,
+      "DeliveryMode": "Queued"
+    }
+  }
+}
+```
+
+- `SubscriberQueueCapacity` (default `1024`, minimum `1`): capacity of each subscriber queue; overflow drops the oldest event.
+- `DeliveryMode` (`Queued` default, or `Inline`): `Inline` awaits all handlers inside `PublishAsync` and exists for tests only; it is rejected at startup outside Development.
+- Tests that assert handler side effects after `PublishAsync` resolve `IGatewayEventBusDrain` and `await DrainAsync()`.
+
+### 3.1.2 CDC Webhook Subscription Endpoints (`Gateway:CdcWebhooks`)
+
+The endpoints `GET/POST /api/v1/cdc/subscriptions` and `DELETE /api/v1/cdc/subscriptions/{id}` are disabled by default and answer `501 Not Implemented` (problem details). While disabled, no subscription store and no CloudEvents dispatcher HTTP client are registered. Setting `Gateway:CdcWebhooks:Enabled` to `true` activates them; callers still need the `GovernanceAdmin` or `TenantAdmin` role.
+
 ### 3.2 Authoring a C# DLL Plugin Event Listener
 
 A plugin DLL can implement `IPluginEventListener<TEvent>`:
@@ -161,9 +184,14 @@ public sealed class CustomSyncActionHandler : IPluginActionHandler
      - `X-Autheris-Signature-256`: `sha256=${hexSignature}`
      - `X-Autheris-Timestamp`: ISO 8601 UTC timestamp
    - The signature is calculated across `${timestamp}.${jsonPayload}` to defend against tampering and replay attacks.
+   - Both dispatchers (`WebhookDispatcherService` and the CDC `CloudEventWebhookDispatcher`) use the shared `WebhookSignature` helper, so receivers use one verification recipe: parse `X-Autheris-Timestamp`, reject it if it differs from the receiver clock by more than 5 minutes, recompute HMAC-SHA256 over `timestamp + "." + rawBody` with the subscription secret, and compare in constant time (`WebhookSignature.TryVerify` is the reference implementation). The CloudEvents dispatcher additionally sends `X-Autheris-Event-Id` and `X-Autheris-Event-Type` (informational; id and type are part of the signed body).
+   - Deprecated: the CloudEvents dispatcher also emits `X-Autheris-Signature` (HMAC over the body only, no timestamp) while `Gateway:Webhooks:EmitLegacySignature` is `true` (default). It will be removed in the next release; set the option to `false` to stop sending it now.
+   - A subscription without a secret never produces a signature header. With `Gateway:Webhooks:RequireSecret` (default: `true` outside Development) such a delivery is dropped with a warning instead of being sent unsigned.
 2. **SSRF Defense:**
    - Outbound HTTP requests from `WebhookDispatcherService` run with `AddSecureOutboundHandlers(EgressIntegrations.Webhooks)`.
    - Loopback addresses, link-local IPs, cloud metadata endpoints (e.g. AWS IMDS `169.254.169.254`), and unauthorized internal networks are denied by default.
+   - Logs and client-visible errors never contain URL userinfo, path, query or resolved IP addresses: destinations are logged as `scheme://host[:port]/` (`UrlRedactor`), and `EgressUrlPolicy` exceptions carry no IP in the message (the address is available in `Exception.Data["ResolvedIp"]` for operator logs).
+   - As defence in depth, `WebhookDispatcherService` passes every event through `EventRedaction.Sanitize`, which replaces any string value that looks like an absolute filesystem path (`/...`, `C:\...`, `\\host\...`) with `[redacted-path]` before it is serialised into the webhook payload.
 3. **Isolated Assembly Loading & Integrity Check:**
    - Plugin DLLs are loaded into isolated `PluginAssemblyLoadContext` instances.
    - In production environments, SHA-256 hash checks against `Gateway:Plugins:TrustedPluginHashes` prevent unauthorized code execution.

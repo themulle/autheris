@@ -22,6 +22,33 @@ These rules protect sensitive personal data and business identifiers from unauth
 
 ---
 
+## One Mask Semantic for SQL and In-Memory Sources
+
+Columns masked in the database and columns masked in gateway memory (HTTP, lakehouse and other non-SQL sources) use the same typed `MaskSpec`:
+`SqlDataMaskingProvider.BuildUnkeyedMaskSpec` defines the mask, the dialect generator renders it for SQL, and `MaskSpecEvaluator` evaluates it for in-memory values.
+`ColumnMaskingProvider` only evaluates the spec for the key-less kinds; `MaskingInputCanonicalizer` stays the single canonicalizer of mask input.
+
+| Rule | Result (both engines) |
+|---|---|
+| `NULLIFY` | `NULL` for every value kind |
+| `REDACT` | text becomes the replacement constant (default `***`); numeric, temporal and boolean values become `NULL` |
+| `PARTIAL_MASK` | prefix + one mask character per hidden character + suffix; a value not longer than prefix plus suffix (including the empty string) becomes five mask characters; a fixed-length partial mask is the five-character constant |
+| `MASK_EMAIL` / `MASK_IBAN` | constants `***@***` and `****`; neither characters nor length are revealed |
+| `GEO_JITTER` (round mode) | rounded to `Decimals`; the (0, 0) null island stays `0` |
+| `HMAC` | 64 hex characters, deterministic; the key is derived per engine, so values of the two engines are not equal by design |
+| `NULL` input | `NULL` for every rule |
+
+The golden corpus `tests/Autheris.Tests.Unit/Masking/MaskSemanticsCorpus.cs` runs each row against both engines.
+
+## In-Memory Row Filters
+
+Sources that filter in gateway memory evaluate the typed row policy (`IRowPolicy`, backed by the `PolicyPredicate` tree) of the access decision with SQL three-valued logic:
+a row passes only when the predicate is TRUE. Comparisons are type-strict (no `'007' = 7`), and policy values used as `LIKE` patterns keep their wildcards only when flagged as patterns.
+The evaluator fails closed: a predicate node it does not implement, an unknown column, or a comparison between different value kinds denies every row; a row that lacks a column the predicate reads is denied.
+A decision whose filter text no longer equals the projection of its typed policy denies every row. SQL text is parsed only for decisions that carry no typed policy (string-only legacy decisions of non-SQL sources), in an isolated legacy evaluator.
+
+---
+
 ## AST Pushdown & Dual-Engine Execution
 
 The extended masking engine operates in two execution modes:

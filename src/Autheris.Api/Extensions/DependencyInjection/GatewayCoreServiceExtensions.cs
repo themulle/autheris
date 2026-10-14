@@ -135,6 +135,10 @@ public static class GatewayCoreServiceExtensions
             });
 
         // Extensibility Pipeline & Interceptors (P9)
+        services.AddOptions<Autheris.Domain.Options.ExtensibilityPipelineOptions>()
+            .BindConfiguration(Autheris.Domain.Options.ExtensibilityPipelineOptions.SectionName)
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
         services.AddSingleton<IExtensibilityPipeline, ExtensibilityPipeline>();
         services.AddSingleton<IIngressInterceptor, JustificationAndBreakGlassInterceptor>();
         services.AddSingleton<IEgressInterceptor, AuditLineageEgressInterceptor>();

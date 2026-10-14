@@ -13,7 +13,7 @@ using Microsoft.Data.SqlClient;
 
 namespace Autheris.Infrastructure.Persistence;
 
-public partial class SqlServerGovernanceRepository : IGovernanceRepository, IAuditChainExportSource, IDisposable, IAsyncDisposable
+public partial class SqlServerGovernanceRepository : IGovernanceRepository, Migrations.IGovernanceStoreInitializer, IAuditChainExportSource, IDisposable, IAsyncDisposable
 {
     private readonly string _connectionString;
     private readonly IEpochValidationService _epochValidationService;
@@ -25,7 +25,9 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, IAud
 
     private readonly Channel<AuditLogEntry> _auditChannel;
     private readonly CancellationTokenSource _auditCts = new();
-    private readonly Task _auditProcessorTask;
+    private Task? _auditProcessorTask;
+    private int _initialized;
+    private bool _shouldSeed;
     private string _lastAuditHash = "GENESIS_0000000000000000000000000000000000000000000000000000000000000000";
     private static readonly byte[] ProcessEphemeralAuditHmacKey = RandomNumberGenerator.GetBytes(32);
     private long _lastAuditSeq;
@@ -34,6 +36,8 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, IAud
     private readonly IAuditChainAnchorStore? _auditAnchorStore;
     private readonly bool _isDevOrTest;
     private readonly string? _migrationConnectionString;
+    internal string ConnectionString => _connectionString;
+    internal string? MigrationConnectionString => _migrationConnectionString;
     private readonly ILogger<SqlServerGovernanceRepository>? _logger;
     private string? _auditChainViolation;
     private readonly GatewayOptions? _options;
@@ -219,29 +223,47 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, IAud
             auditAnchorSigner,
             _logger);
 
-        bool shouldSeed = options?.Value?.GovernanceDb?.SeedDemoData ?? isDevOrTest;
-        InitializeDatabaseSafely(shouldSeed);
-
-        // AU-12: Background processor starts only after keys and stores are completely initialized
-        _auditProcessorTask = Task.Run(ProcessAuditChannelAsync);
+        // No DDL and no database I/O here: the schema is created by the governance migration runner (WP-ARC-B-12).
+        _shouldSeed = options?.Value?.GovernanceDb?.SeedDemoData ?? isDevOrTest;
     }
 
-    private void InitializeDatabaseSafely(bool shouldSeed)
+    /// <summary>
+    /// Post-migration initialization: reads the audit chain tail, verifies the external chain anchor, seeds demo data (when
+    /// configured) and starts the audit processor. Requires the schema to be migrated first; fails closed otherwise.
+    /// </summary>
+    public Task InitializeAsync(CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
+        if (Interlocked.Exchange(ref _initialized, 1) == 1)
+        {
+            return Task.CompletedTask;
+        }
+
         try
         {
-            InitializeDatabase();
+            var (tailHash, tailSeq) = ReadAuditTail(null);
+            if (tailHash != null)
+            {
+                _lastAuditHash = tailHash;
+                _lastAuditSeq = tailSeq;
+            }
+
             InitializeAuditChainAnchor();
-            if (shouldSeed)
+            if (_shouldSeed)
             {
                 SeedInitialCatalog();
             }
+
+            // AU-12: Background processor starts only after keys and stores are completely initialized
+            _auditProcessorTask = Task.Run(ProcessAuditChannelAsync, CancellationToken.None);
         }
-        catch (Exception ex)
+        catch
         {
-            Volatile.Write(ref _isInitialized, 0);
-            _logger?.LogWarning(ex, "Could not eagerly initialize SQL Server governance database during startup (e.g. host unreachable or test environment). Database will be initialized on first connection or health check.");
+            Volatile.Write(ref _initialized, 0);
+            throw;
         }
+
+        return Task.CompletedTask;
     }
 
     private SqlConnection OpenConnection()
@@ -278,10 +300,6 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, IAud
     {
         try
         {
-            if (Volatile.Read(ref _isInitialized) == 0)
-            {
-                InitializeDatabaseSafely(_options?.GovernanceDb?.SeedDemoData ?? false);
-            }
             await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT 1;";
@@ -315,7 +333,10 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, IAud
 
         try
         {
-            await _auditProcessorTask.ConfigureAwait(false);
+            if (_auditProcessorTask != null)
+            {
+                await _auditProcessorTask.ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)

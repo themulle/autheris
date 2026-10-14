@@ -149,12 +149,14 @@ public sealed class TotpVerificationService : ITotpVerificationService
             // Atomic counter: only the node/request that creates the key (value 1) wins; the TTL is well past the
             // 30s +/- 30s tolerance window.
             var count = await _clusterState.IncrementAsync(replayKey, 1, ReplayTtl, ct).ConfigureAwait(false);
-            return count is null or <= 1;
+
+            // WP-ARC-A-09: null means the shared store is unavailable. Replay protection must then fail closed: the
+            // code is rejected because another node may already have consumed it.
+            return count is { } value && value <= 1;
         }
-        catch
+        catch (ClusterStateUnavailableException)
         {
-            // Cluster state unreachable: the in-process guard above stays active.
-            return true;
+            return false;
         }
     }
 
@@ -179,8 +181,10 @@ public sealed class TotpVerificationService : ITotpVerificationService
             var remote = await _clusterState.IncrementAsync(failureKey, 0, _lockoutWindow, ct).ConfigureAwait(false);
             return Math.Max(local, remote ?? 0);
         }
-        catch
+        catch (ClusterStateUnavailableException)
         {
+            // Lockout throttling keeps the in-process counter active; the code itself is still protected by the
+            // fail-closed replay consumption above.
             return local;
         }
     }
@@ -206,7 +210,7 @@ public sealed class TotpVerificationService : ITotpVerificationService
             {
                 await _clusterState.IncrementAsync(failureKey, 1, _lockoutWindow, ct).ConfigureAwait(false);
             }
-            catch
+            catch (ClusterStateUnavailableException)
             {
                 // Local counter remains active.
             }
@@ -226,7 +230,7 @@ public sealed class TotpVerificationService : ITotpVerificationService
             {
                 await _clusterState.RemoveAsync(failureKey, ct).ConfigureAwait(false);
             }
-            catch
+            catch (ClusterStateUnavailableException)
             {
                 // Counter expires with its window.
             }

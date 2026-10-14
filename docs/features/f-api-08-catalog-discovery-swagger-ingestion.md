@@ -27,3 +27,7 @@ The **Catalog Discovery & Swagger Ingestion API** provides automated, single-ste
 - **Service:** `CatalogDiscoveryService` in `src/Autheris.Application/Catalog/Services/CatalogDiscoveryService.cs`.
 - **Secrets Provider:** `IKeyVaultSecretProvider` in `src/Autheris.Core/Security/IKeyVaultSecretProvider.cs`.
 - **Endpoints:** Mapped in `src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs`.
+
+## 4. Remote Spec Download Limits
+
+Specs fetched via `SpecUrl` are downloaded with a hard size cap (`Gateway:Catalog:MaxSpecDownloadBytes`, default 10 MiB). A declared `Content-Length` above the cap is rejected before reading, and the body is additionally capped while streaming so chunked responses without `Content-Length` cannot bypass the limit. Redirects are never followed (`SecureOutboundHttp` uses `AllowAutoRedirect = false`). Overflow is rejected with a generic error message.

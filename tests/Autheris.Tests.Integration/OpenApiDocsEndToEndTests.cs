@@ -366,6 +366,9 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran'),(2,'LR-1600','Raupenkra
         using var proxied = _factory.WithWebHostBuilder(b =>
         {
             b.UseSetting("Gateway:ReverseProxy:Enabled", "true");
+            // SR-L-02: the forwarded external host must be on the host allow-list
+            b.UseSetting("Gateway:Hosting:AllowedHosts:0", "docs.corp.local");
+            b.UseSetting("Gateway:Hosting:AllowedHosts:1", "localhost");
             b.ConfigureServices(s => s.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter, LoopbackPeerStartupFilter>());
         });
         var client = AdminOf(proxied);

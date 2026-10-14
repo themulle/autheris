@@ -1,4 +1,3 @@
-#if DEBUG
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Visitors;
 
@@ -6,10 +5,10 @@ namespace TrinoSqlEngine.Tests.Security;
 
 /// <summary>
 /// A named security mutant (plan M-3 and the WP-X0v Phase 3 amendment): one control deliberately switched off, either by a control
-/// switch of the Debug-only test seam or by a mutation operator in test code applied to the injector output. At least one gate
+/// switch of the test-only compiler hooks or by a mutation operator in test code applied to the injector output. At least one gate
 /// probe must fail for every mutant. A mutant that no probe notices is a gap in the gate.
 /// </summary>
-internal sealed record SecurityMutant(string Id, string Description, string PlanRef, CompilerTestSeams Seam)
+internal sealed record SecurityMutant(string Id, string Description, string PlanRef, MutantHooks Seam)
 {
     public override string ToString() => Id;
 }
@@ -22,15 +21,15 @@ internal sealed record PendingMutant(string Id, string Description, string PlanR
 
 internal static class SecurityMutants
 {
-    private static CompilerTestSeams Off(params SecurityControl[] controls) => new() { DisabledControls = controls.ToHashSet() };
+    private static MutantHooks Off(params SecurityControl[] controls) => new() { DisabledControls = controls.ToHashSet() };
 
-    private static CompilerTestSeams Operator(SqlAstRewriter rewriter, params SecurityControl[] also) =>
+    private static MutantHooks Operator(SqlAstRewriter rewriter, params SecurityControl[] also) =>
         new() { FaultyInjector = SecurityProbes.Rewrite(rewriter), DisabledControls = also.ToHashSet() };
 
     /// <summary>A DML guard relaxed after the strict-guard check (the operator is test code; production never builds relaxed options).</summary>
-    private static CompilerTestSeams Relax(Func<DmlGuardOptions, DmlGuardOptions> relax) => new() { DmlGuardMutator = relax };
+    private static MutantHooks Relax(Func<DmlGuardOptions, DmlGuardOptions> relax) => new() { DmlGuardMutator = relax };
 
-    private static CompilerTestSeams OmitFromKey(params string[] fields) => new() { OmittedCacheKeyFields = fields.ToHashSet() };
+    private static MutantHooks OmitFromKey(params string[] fields) => new() { OmittedCacheKeyFields = fields.ToHashSet() };
 
     /// <summary>
     /// The injector fault is always run twice: alone (the production coverage verifier is the backstop and must notice) and with
@@ -113,4 +112,3 @@ internal static class SecurityMutants
     /// </summary>
     public static IReadOnlyList<PendingMutant> Pending { get; } = Array.Empty<PendingMutant>();
 }
-#endif

@@ -11,6 +11,13 @@ image:
 serviceAccount:
   automountServiceAccountToken: false
 
+monitoring:
+  serviceMonitor:
+    # Production must scrape /metrics with credentials; helm template fails when auth.type is "none".
+    requireAuth: true
+    auth:
+      type: bearer
+
 networkPolicy:
   enabled: true
   ingress:

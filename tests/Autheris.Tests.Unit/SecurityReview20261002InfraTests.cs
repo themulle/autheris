@@ -322,7 +322,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
     public async Task H17_TailTruncation_IsDetectedAfterRestart()
     {
         var (options, _, anchorFile) = CreateFileAuditOptions();
-        using (var repo = new SqliteGovernanceRepository(new EpochValidationService(), options))
+        using (var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options))
         {
             for (var i = 1; i <= 5; i++)
             {
@@ -338,7 +338,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
 
         File.Exists(anchorFile).ShouldBeTrue("The signed end anchor must be persisted outside the database.");
 
-        using var restarted = new SqliteGovernanceRepository(new EpochValidationService(), options);
+        using var restarted = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options);
         (await restarted.VerifyAuditHashChainAsync()).ShouldBeFalse("Tail truncation must be detected against the external anchor, even after a restart.");
     }
 
@@ -346,7 +346,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
     public async Task H17_TotalDeletion_IsDetectedAfterRestart()
     {
         var (options, _, _) = CreateFileAuditOptions();
-        using (var repo = new SqliteGovernanceRepository(new EpochValidationService(), options))
+        using (var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options))
         {
             for (var i = 1; i <= 3; i++)
             {
@@ -358,7 +358,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
             await cmd.ExecuteNonQueryAsync();
         }
 
-        using var restarted = new SqliteGovernanceRepository(new EpochValidationService(), options);
+        using var restarted = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options);
         (await restarted.VerifyAuditHashChainAsync()).ShouldBeFalse("An emptied audit log must not be accepted as a fresh GENESIS chain.");
     }
 
@@ -366,7 +366,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
     public async Task H17_InProcessTruncation_IsNotSilentlyResynchronised()
     {
         var (options, _, _) = CreateFileAuditOptions();
-        using var repo = new SqliteGovernanceRepository(new EpochValidationService(), options);
+        using var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options);
         for (var i = 1; i <= 3; i++)
         {
             await repo.RecordAuditEventAsync(NewAuditEntry(i));
@@ -388,7 +388,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
     public async Task H17_SequenceNumbers_AreGapFreeAndBoundIntoTheHash()
     {
         var (options, _, _) = CreateFileAuditOptions();
-        using var repo = new SqliteGovernanceRepository(new EpochValidationService(), options);
+        using var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options);
         for (var i = 1; i <= 3; i++)
         {
             await repo.RecordAuditEventAsync(NewAuditEntry(i));
@@ -419,7 +419,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
     public async Task H17_ForgedAnchorFile_IsRejected()
     {
         var (options, _, anchorFile) = CreateFileAuditOptions();
-        using (var repo = new SqliteGovernanceRepository(new EpochValidationService(), options))
+        using (var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options))
         {
             await repo.RecordAuditEventAsync(NewAuditEntry(1));
         }
@@ -427,7 +427,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
         // Attacker rewrites the anchor to "legitimise" a shortened chain, but cannot compute the HMAC.
         File.WriteAllText(anchorFile, JsonSerializer.Serialize(new AuditChainAnchor(0, "GENESIS_0000000000000000000000000000000000000000000000000000000000000000", DateTimeOffset.UtcNow, "00")));
 
-        using var restarted = new SqliteGovernanceRepository(new EpochValidationService(), options);
+        using var restarted = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options);
         (await restarted.VerifyAuditHashChainAsync()).ShouldBeFalse();
     }
 
@@ -435,7 +435,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
     public async Task H17_LegacyRowsWithoutSequence_RemainVerifiable_AndNewRowsContinueTheSequence()
     {
         var (options, dbFile, anchorFile) = CreateFileAuditOptions();
-        using (new SqliteGovernanceRepository(new EpochValidationService(), options))
+        using (GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options))
         {
             // creates schema
         }
@@ -462,7 +462,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
         }
         File.Delete(anchorFile);
 
-        using var repo = new SqliteGovernanceRepository(new EpochValidationService(), options);
+        using var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options);
         await repo.RecordAuditEventAsync(NewAuditEntry(2));
         (await repo.VerifyAuditHashChainAsync()).ShouldBeTrue("Legacy (v1) entries must stay verifiable after the additive migration.");
 
@@ -493,7 +493,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
     public async Task M31_WormExport_ExportsMoreThan5000Entries_WithSequenceRangeInManifest()
     {
         const int total = 5100;
-        using var repo = new SqliteGovernanceRepository(new EpochValidationService(), Options.Create(new GatewayOptions
+        using var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), Options.Create(new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=worm_{Guid.NewGuid():N};Mode=Memory;Cache=Shared", SeedDemoData = false }
         }));

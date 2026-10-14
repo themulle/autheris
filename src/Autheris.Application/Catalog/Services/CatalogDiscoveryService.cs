@@ -18,6 +18,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
 {
@@ -28,6 +29,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     private readonly IOpenApiIngestionService? _openApiIngestionService;
     private readonly ICatalogSearchEngine? _searchEngine;
     private readonly ILogger<CatalogDiscoveryService> _logger;
+    private readonly long _maxSpecDownloadBytes;
 
     public CatalogDiscoveryService(
         ITableMetadataRepository metadataRepository,
@@ -36,8 +38,10 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         IKeyVaultSecretProvider? secretProvider = null,
         IOpenApiIngestionService? openApiIngestionService = null,
         ICatalogSearchEngine? searchEngine = null,
-        ILogger<CatalogDiscoveryService>? logger = null)
+        ILogger<CatalogDiscoveryService>? logger = null,
+        IOptions<CatalogDiscoveryOptions>? options = null)
     {
+        _maxSpecDownloadBytes = options?.Value.MaxSpecDownloadBytes ?? new CatalogDiscoveryOptions().MaxSpecDownloadBytes;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
         _rebacEvaluator = rebacEvaluator;
@@ -322,7 +326,10 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
 
             using var httpClient = new HttpClient(handler);
             httpClient.Timeout = TimeSpan.FromSeconds(30);
-            specContent = await httpClient.GetStringAsync(specUri, ct).ConfigureAwait(false);
+            using var specRequest = new HttpRequestMessage(HttpMethod.Get, specUri);
+            using var specResponse = await httpClient.SendAsync(specRequest, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+            specResponse.EnsureSuccessStatusCode();
+            specContent = await BoundedHttpContentReader.ReadStringAsync(specResponse.Content, _maxSpecDownloadBytes, ct).ConfigureAwait(false);
         }
 
         if (string.IsNullOrWhiteSpace(specContent))

@@ -376,6 +376,26 @@ public sealed class SubgraphFederationSecurityTests
     }
 
     [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task ReplayCheck_WhenClusterStateUnavailable_FailsClosedOnlyWhenClusterWide(bool clusterWide, bool expectedOk)
+    {
+        SubgraphSecurityValidator.ResetReplayCache();
+        var request = SignedRequest(null, out var sig, out var ts, out var nonce, out var bodyHash);
+        var roles = string.Join(",", request.Headers.GetValues("X-Gateway-Roles"));
+        var cluster = NSubstitute.Substitute.For<Autheris.Application.State.IDistributedClusterStateProvider>();
+        cluster.IncrementAsync(Arg.Any<string>(), Arg.Any<long>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<long?>((long?)null)); // store unavailable
+        var topology = new Autheris.Application.State.ClusterStateTopology(
+            clusterWide ? Autheris.Application.State.ClusterStateMode.External : Autheris.Application.State.ClusterStateMode.InMemory);
+
+        var ok = await SubgraphSecurityValidator.ValidateSignatureAsync("tenant_alpha", "S-1", ts, nonce, sig, Secret, cluster,
+            subgraph: "products", roles: roles, method: "POST", path: "/graphql", version: "v2", bodySha256: bodyHash, topology: topology);
+
+        ok.ShouldBe(expectedOk);
+    }
+
+    [Theory]
     [InlineData("9223372036854775807")]
     [InlineData("-9223372036854775808")]
     [InlineData("99999999999999")]
@@ -597,5 +617,23 @@ public sealed class SubgraphFederationSecurityTests
         Should.Throw<System.ComponentModel.DataAnnotations.ValidationException>(() =>
             Autheris.Api.Extensions.GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, prodEnv))
             .Message.ShouldContain("Federation:SigningKey");
+    }
+}
+
+[Trait("Category", "Security")]
+public sealed class SubgraphTimestampRangeTests
+{
+    [Theory]
+    [InlineData("9223372036854775807")]
+    [InlineData("-9223372036854775808")]
+    [InlineData("9999999999999999999")]
+    [InlineData("not-a-number")]
+    public void OutOfRangeTimestamp_ReturnsFalseWithoutThrowing(string timestamp)
+    {
+        var result = SubgraphSecurityValidator.ValidateSignature(
+            tenant: "t", userSid: "u", timestampStr: timestamp, nonce: "n", signature: "sig",
+            signingKey: "key-key-key-key-key-key-key-key-key", subgraph: "products");
+
+        result.ShouldBeFalse();
     }
 }

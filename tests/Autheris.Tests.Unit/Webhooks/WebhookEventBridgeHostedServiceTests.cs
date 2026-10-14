@@ -83,6 +83,7 @@ public sealed class WebhookEventBridgeHostedServiceTests
         await bus.PublishAsync(NewEvent("ev-hang"));
 
         sw.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
+        await bus.DrainAsync();
         healthyRan.ShouldBeTrue();
     }
 }

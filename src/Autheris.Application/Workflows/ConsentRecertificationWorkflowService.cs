@@ -33,15 +33,6 @@ public sealed class ConsentRecertificationWorkflowService : IConsentRecertificat
         IConsentRepository consentRepo,
         IItsmOutboxRepository outboxRepo,
         IOptions<GatewayOptions> options,
-        ILogger<ConsentRecertificationWorkflowService> logger)
-        : this(consentRepo, outboxRepo, options, logger, Autheris.Application.Audit.NullAuditLogRepository.Instance)
-    {
-    }
-
-    public ConsentRecertificationWorkflowService(
-        IConsentRepository consentRepo,
-        IItsmOutboxRepository outboxRepo,
-        IOptions<GatewayOptions> options,
         ILogger<ConsentRecertificationWorkflowService> logger,
         IAuditLogRepository auditRepo)
     {

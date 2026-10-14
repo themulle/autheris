@@ -98,7 +98,7 @@ public sealed class GovernedSqlPlanCacheTests
 
         return new GovernedSqlExecutionService(
             options: options, executionGuard: GovernedTestSupport.Guard,
-            policyEnforcement: null,
+            policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             consentResolution: consentResolution,
             tableRepository: repository, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repository), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null,
@@ -107,7 +107,7 @@ public sealed class GovernedSqlPlanCacheTests
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: consentRepository,
             secretProvider: null,
-            sqlEngine: sqlEngine);
+            sqlEngine: sqlEngine, auditLogRepository: global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
     }
 
     // L-16: the Application string cache is gone. The TTL and policy-hash tests of CompiledSqlQueryPlanCache tested deleted behaviour;

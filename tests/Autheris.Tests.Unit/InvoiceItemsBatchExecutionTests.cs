@@ -31,7 +31,7 @@ public class InvoiceItemsBatchExecutionTests : IDisposable
     public InvoiceItemsBatchExecutionTests()
     {
         var epochService = new EpochValidationService();
-        _repository = new SqliteGovernanceRepository(epochService);
+        _repository = GovernanceStoreFactory.CreateSqlite(epochService);
         _resolutionService = new ConsentResolutionService();
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
         var eventBus = new Autheris.Infrastructure.Messaging.InProcessChannelEventBus();
@@ -79,7 +79,7 @@ public class InvoiceItemsBatchExecutionTests : IDisposable
             new ChunkedQueryExecutor(500),
             _options,
             drainController: null,
-            dataSourceExecutors: new[] { mockExecutor });
+            dataSourceExecutors: new[] { mockExecutor }, policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var childTableId = new TableIdentifier("finance", "dbo", "finance_items");
         var userSid = new Sid("S-1-5-21-EXECUTOR-TEST");
@@ -141,7 +141,7 @@ public class InvoiceItemsBatchExecutionTests : IDisposable
             new ChunkedQueryExecutor(500),
             _options,
             drainController: null,
-            dataSourceExecutors: Array.Empty<IDataSourceExecutor>());
+            dataSourceExecutors: Array.Empty<IDataSourceExecutor>(), policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var childTableId = new TableIdentifier("finance", "dbo", "finance_items");
         var userSid = new Sid("S-1-5-21-NO-EXEC-TEST");

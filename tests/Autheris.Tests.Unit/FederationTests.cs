@@ -127,22 +127,21 @@ public sealed class FederationTests
         masked.ShouldNotBeNull();
 
         masked["id"].ShouldBe("CUST-99");
-        masked["userEmail"]!.ToString()!.ShouldStartWith("a***@");
-        masked["customerIban"]!.ToString()!.ShouldStartWith("DE");
-        masked["customerIban"]!.ToString()!.ShouldEndWith("3000");
+        masked["userEmail"]!.ToString()!.ShouldBe("***@***"); // MASK_EMAIL matches the SQL mask (WP-ARC-B-04)
+        masked["customerIban"]!.ToString()!.ShouldBe("****"); // MASK_IBAN matches the SQL mask (WP-ARC-B-04)
         masked["phoneNumber"]!.ToString()!.ShouldContain("***");
         masked["salary"]!.ToString()!.ShouldBe("[REDACTED]");
 
         var nested = masked["nested"] as IReadOnlyDictionary<string, object?>;
         nested.ShouldNotBeNull();
-        nested["contactEmail"]!.ToString().ShouldStartWith("b***@");
+        nested["contactEmail"]!.ToString().ShouldBe("***@***");
         nested["diagnosis"]!.ToString().ShouldBe("[REDACTED]");
 
         var items = masked["items"] as List<object?>;
         items.ShouldNotBeNull();
         var item0 = items[0] as IReadOnlyDictionary<string, object?>;
         item0.ShouldNotBeNull();
-        item0["accountEmail"]!.ToString().ShouldStartWith("c***@");
+        item0["accountEmail"]!.ToString().ShouldBe("***@***");
     }
 
     [Fact]
@@ -213,7 +212,7 @@ public sealed class FederationTests
         result.ShouldNotBeNull();
         // Since role evaluator rejected admin, email must be masked, NOT cleartext!
         result["email"]!.ToString().ShouldNotBe("admin@corp.local");
-        result["email"]!.ToString().ShouldStartWith("a***@");
+        result["email"]!.ToString().ShouldBe("***@***"); // MASK_EMAIL matches the SQL mask (WP-ARC-B-04)
     }
 
     [Fact]

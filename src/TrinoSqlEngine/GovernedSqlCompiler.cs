@@ -71,26 +71,11 @@ internal sealed class GovernedSqlCompiler
         }
     }
 
-    /// <summary>Test seam hook (Debug builds only; the call is removed from Release builds).</summary>
-    [Conditional("DEBUG")]
-    private static void Pass(string name)
-    {
-#if DEBUG
-        CompilerTestSeams.Current?.OnPass?.Invoke(name);
-#endif
-    }
+    /// <summary>Test hook: observes (and may cancel from) the start of a pass. A no-op in production.</summary>
+    private static void Pass(string name) => CompilerHooks.Current.OnPass(name);
 
-    /// <summary>The DML guards the pipeline applies: the validated request guards (strict), except in a Debug seam that runs a mutant.</summary>
-    private static DmlGuardOptions EffectiveDmlGuards(DmlGuardOptions requested)
-    {
-#if DEBUG
-        if (CompilerTestSeams.Current?.DmlGuardMutator is { } mutate)
-        {
-            return mutate(requested);
-        }
-#endif
-        return requested;
-    }
+    /// <summary>The DML guards the pipeline applies: the validated request guards (strict), except when test hooks run a mutant.</summary>
+    private static DmlGuardOptions EffectiveDmlGuards(DmlGuardOptions requested) => CompilerHooks.Current.InterceptDmlGuards(requested);
 
     private static void CheckBudget(CompileRequest request, Stopwatch clock, CancellationToken token)
     {
@@ -197,22 +182,13 @@ internal sealed class GovernedSqlCompiler
         }.Visit(typedLiterals);
         CheckBudget(request, clock, token);
 
-#if DEBUG
-        if (CompilerTestSeams.Current?.FaultyInjector is { } faultyInjector)
-        {
-            secured = (SqlStatement)faultyInjector(secured);
-        }
-#endif
+        secured = CompilerHooks.Current.InterceptInjected(secured);
 
         // 7. production coverage proof (does not trust the injector)
         Pass("verify");
-#if DEBUG
-        var applied = CompilerTestSeams.IsDisabled(SecurityControl.CoverageVerifier)
+        var applied = CompilerHooks.IsDisabled(SecurityControl.CoverageVerifier)
             ? System.Collections.Immutable.ImmutableArray<SecurityPredicateId>.Empty
             : typed.CreateVerifier(request.TargetDialect).Verify(secured, token);
-#else
-        var applied = typed.CreateVerifier(request.TargetDialect).Verify(secured, token);
-#endif
 
         // 8. dialect capabilities
         Pass("capabilities");

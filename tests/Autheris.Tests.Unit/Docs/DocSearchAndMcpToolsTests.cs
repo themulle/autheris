@@ -137,7 +137,7 @@ public sealed class DocSearchAndMcpToolsTests
             toolRegistry,
             options,
             NullLogger<AiDataGuardrailService>.Instance,
-            docSearchService: searchService);
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, docSearchService: searchService);
 
         var sessionContext = new McpSessionContext("session-1", "client-1", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "user-david", Roles: ["DataConsumer"]);
         var request = new McpToolCallRequest("search_docs", """{"query": "kubernetes"}""", "session-1", "req-1");

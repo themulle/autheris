@@ -9,8 +9,6 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Infrastructure.Plugins;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Shouldly;
@@ -23,13 +21,6 @@ public sealed class PluginManagerTests
     private sealed class TestBillingPlugin : IHttpDataSourcePlugin
     {
         public string Name => "TestBillingPlugin";
-
-        public bool ConfigureServicesCalled { get; private set; }
-
-        public void ConfigureServices(IServiceCollection services, IConfiguration configuration)
-        {
-            ConfigureServicesCalled = true;
-        }
 
         public Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ExecuteAsync(
             PluginExecutionContext context,

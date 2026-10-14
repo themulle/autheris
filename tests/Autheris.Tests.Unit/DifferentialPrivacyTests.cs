@@ -13,7 +13,7 @@ public sealed class DifferentialPrivacyTests
     public async Task PerturbAsync_ShouldPerturbValueWithLaplaceNoiseAndDeductBudget()
     {
         // Arrange
-        var engine = new DifferentialPrivacyEngine();
+        var engine = new DifferentialPrivacyEngine(global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
         var clientId = "analyst-alice";
 
         var request = new DifferentialPrivacyPerturbationRequest(
@@ -47,7 +47,7 @@ public sealed class DifferentialPrivacyTests
     public async Task PerturbAsync_ShouldSuppressSmallCohortsBelowKAnonymityThreshold()
     {
         // Arrange
-        var engine = new DifferentialPrivacyEngine();
+        var engine = new DifferentialPrivacyEngine(global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
         var clientId = "researcher-bob";
 
         var request = new DifferentialPrivacyPerturbationRequest(
@@ -75,7 +75,7 @@ public sealed class DifferentialPrivacyTests
     public async Task PerturbAsync_ShouldThrowWhenDailyEpsilonBudgetIsExhausted()
     {
         // Arrange
-        var engine = new DifferentialPrivacyEngine();
+        var engine = new DifferentialPrivacyEngine(global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
         var clientId = "bot-carol";
 
         // Total default budget is 10.0 epsilon. Consume 6.0 then 4.0 = 10.0

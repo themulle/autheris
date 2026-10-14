@@ -30,7 +30,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
 {
     private const string Tenant = "tenant_lwe";
 
-    private readonly SqliteGovernanceRepository _repository = new(
+    private readonly SqliteGovernanceRepository _repository = GovernanceStoreFactory.CreateSqlite(
         Substitute.For<IEpochValidationService>(),
         Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=vfe_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" } }));
 

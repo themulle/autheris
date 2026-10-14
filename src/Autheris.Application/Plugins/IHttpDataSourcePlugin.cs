@@ -1,22 +1,17 @@
 using System.Security.Claims;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Autheris.Application.Plugins;
 
 public interface IHttpDataSourcePlugin
 {
-    /// <summary>Eindeutiger Bezeichner des Plugins (wird in Table.PluginName oder Table.SourceName referenziert)</summary>
+    /// <summary>Unique plugin identifier (referenced by Table.PluginName or Table.SourceName).</summary>
     string Name { get; }
 
-    /// <summary>Registriert pluginspezifische Abhängigkeiten und typisierte HttpClients</summary>
-    void ConfigureServices(IServiceCollection services, IConfiguration configuration);
-
     /// <summary>
-    /// Führt den Aufruf aus und liefert die Rohdaten als Dictionaries zurück.
-    /// Spaltenmaskierung, RLS-Post-Filtering und Audit-Logs werden anschließend zentral vom Gateway erzwungen!
+    /// Executes the call and returns the raw rows as dictionaries.
+    /// Column masking, row-level post-filtering and audit logging are enforced centrally by the gateway afterwards.
     /// </summary>
     Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ExecuteAsync(
         PluginExecutionContext context,

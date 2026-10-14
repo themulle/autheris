@@ -160,6 +160,9 @@ public static class GatewayServiceCollectionExtensions
                 !DataSourceProvider.Is(opts.GovernanceDb.Provider, DatabaseDialect.Sqlite),
                 "Security violation (E-2): Multi-node cluster mode and more than 1 replica are not allowed with SQLite, because SQLite uses local database files per instance. Configure GovernanceDb.Provider = 'PostgreSql' or 'SqlServer' for cluster operation.")
             .Validate(opts =>
+                !(opts.HighAvailability.MultiNodeClusterMode || opts.HighAvailability.Replicas > 1) || !opts.Caching.Garnet.EnableEmbeddedServer,
+                "NF-HA-02 violation: Multi-node cluster mode or more than one replica requires an external Redis/Garnet; the embedded Garnet server is local to one process and cannot provide cluster-wide state.")
+            .Validate(opts =>
                 environment.IsDevelopment() || !opts.OpenMetadata.Enabled ||
                 (Uri.TryCreate(opts.OpenMetadata.ServerUrl, UriKind.Absolute, out var uri) && string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase)) ||
                 opts.IsInsecureTransportAllowed,
@@ -238,6 +241,8 @@ public static class GatewayServiceCollectionExtensions
     {
         var hostEnv = environment ?? (services.FirstOrDefault(d => d.ServiceType == typeof(IHostEnvironment))?.ImplementationInstance as IHostEnvironment);
 
+        // WP-ARC-B-12: must stay the first hosted service so the governance schema is migrated before anything else starts.
+        services.AddAutherisGovernanceMigrations();
         services.AddAutherisEvents(gatewayOptions);
         services.AddAutherisStorage(gatewayOptions, hostEnv);
         services.AddAutherisGovernance(gatewayOptions);

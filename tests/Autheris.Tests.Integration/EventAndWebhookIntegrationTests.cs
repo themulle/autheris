@@ -63,11 +63,13 @@ public sealed class EventAndWebhookIntegrationTests : IClassFixture<WebApplicati
 
         // Assert
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        await ((IGatewayEventBusDrain)eventBus).DrainAsync();
         receivedEvent.ShouldNotBeNull();
         receivedEvent.AppId.ShouldBe("orders-service");
         receivedEvent.Category.ShouldBe("architecture");
         receivedEvent.DocId.ShouldBe("overview");
         receivedEvent.Title.ShouldBe("Orders Service Architecture");
+        receivedEvent.RelativePath.ShouldBe("orders-service/architecture/overview");
     }
 
     [Fact]
@@ -110,6 +112,7 @@ public sealed class EventAndWebhookIntegrationTests : IClassFixture<WebApplicati
         stateResult.ShouldNotBeNull();
 
         // Assert
+        await ((IGatewayEventBusDrain)eventBus).DrainAsync();
         lock (receivedEvents)
         {
             receivedEvents.ShouldContain(e => e is AccessPlanCreatedEvent && ((AccessPlanCreatedEvent)e).DatasetId == "crm.customers");

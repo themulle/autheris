@@ -254,7 +254,7 @@ public class ItsmClientsAndRecertificationTests
             consentRepo,
             outboxRepo,
             options,
-            NullLogger<ConsentRecertificationWorkflowService>.Instance);
+            NullLogger<ConsentRecertificationWorkflowService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
 
         // Act 1: First scan should dispatch 1 ticket
         var firstCount = await workflow.ScanAndTriggerExpiringConsentRecertificationsAsync();
@@ -272,7 +272,7 @@ public class ItsmClientsAndRecertificationTests
     public async Task SqliteGovernanceRepository_GetExpiringConsentsAsync_ShouldReadStringEnumsCorrectly()
     {
         // Arrange: Real in-memory SQLite database
-        using var repo = new Autheris.Infrastructure.Persistence.SqliteGovernanceRepository(new StubEpochValidationService());
+        using var repo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
 
         var table = new TableIdentifier("crm", "dbo", "customers");
         var tableEntity = new Table
@@ -328,7 +328,7 @@ public class ItsmClientsAndRecertificationTests
             consentRepo,
             outboxRepo,
             options,
-            NullLogger<ConsentRecertificationWorkflowService>.Instance);
+            NullLogger<ConsentRecertificationWorkflowService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
 
         var consentId = Guid.NewGuid();
         var approver = new Sid("S-1-5-21-approver");
@@ -378,7 +378,7 @@ public class ItsmClientsAndRecertificationTests
             consentRepo,
             outboxRepo,
             options,
-            NullLogger<ConsentRecertificationWorkflowService>.Instance);
+            NullLogger<ConsentRecertificationWorkflowService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
 
         var ex = await Should.ThrowAsync<InvalidOperationException>(() =>
             workflow.ExtendConsentExpiryAsync(revokedConsent.Id, TimeSpan.FromDays(7), new Sid("S-1-5-21-approver"), "Legitimate reason"));

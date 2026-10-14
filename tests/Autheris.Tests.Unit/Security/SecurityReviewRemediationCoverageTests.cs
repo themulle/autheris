@@ -213,7 +213,7 @@ public sealed class SecurityReviewRemediationCoverageTests
     [Fact]
     public async Task POL_3_ConsentResolutionService_AddedColumnsAfterConsentActivation_AreDenyNotClear()
     {
-        using var repo = new SqliteGovernanceRepository(new StubEpochValidationService());
+        using var repo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
         var tableId = new TableIdentifier("sales", "crm", "pol3_customers_" + Guid.NewGuid().ToString("N")[..8]);
         var table = new Table
         {

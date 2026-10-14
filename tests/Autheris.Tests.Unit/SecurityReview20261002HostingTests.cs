@@ -224,7 +224,7 @@ public sealed class SecurityReview20261002HostingTests
 
         try
         {
-            using var repo = new Autheris.Infrastructure.Persistence.SqliteGovernanceRepository(
+            using var repo = GovernanceStoreFactory.CreateSqlite(
                 Substitute.For<IEpochValidationService>(),
                 options,
                 Env(Environments.Development));

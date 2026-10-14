@@ -4,6 +4,7 @@ using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 if (args.Length > 0 && (args[0] == "hash-password" || args[0] == "--hash-password"))
 {
@@ -70,6 +71,26 @@ builder.Services.AddPlan9Services(builder.Configuration);
 
 // 4. Build and Pipeline Configuration
 var app = builder.Build();
+
+// WP-ARC-B-12: init-job mode. Applies the governance schema migrations (honoring GovernanceDb:Migrations) and exits without serving.
+if (Array.IndexOf(args, "--migrate-governance") >= 0)
+{
+    try
+    {
+        var migrationRunner = app.Services.GetRequiredService<Autheris.Infrastructure.Persistence.Migrations.IGovernanceMigrationRunner>();
+        await migrationRunner.RunAsync();
+        Console.WriteLine("Governance schema migrations completed.");
+        Environment.ExitCode = 0;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine("Governance schema migration failed: " + ex.Message);
+        Environment.ExitCode = 1;
+    }
+
+    await app.DisposeAsync();
+    return;
+}
 
 // SEC H-01 / AR-06: Start embedded Garnet server imperatively before the host runs
 // to prevent race conditions where hosted services or constructors connect to Redis during startup.

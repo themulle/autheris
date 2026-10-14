@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using Autheris.Application.Interfaces;
+using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -69,16 +70,14 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
                 case "NULLIFY":
                     return null;
 
-                case "REDACT":
-                    return rule.Replacement ?? "REDACTED";
-
                 case "HMAC":
                 case "HMAC_SHA256":
                     return ComputeHmacSha256(rawBytes, rule.HmacKeyId ?? _options.HmacKeyId);
 
                 default:
-                    // String patterns (email, iban, regex) do not apply to raw byte[] - fail-closed
-                    return rule.Replacement ?? "REDACTED";
+                    // REDACT and every string pattern (email, iban, regex) do not apply to raw byte[]: the redact constant of the
+                    // shared mask spec (fail-closed).
+                    return EvaluateSpec(rule, columnName, rawValue, string.Empty);
             }
         }
 
@@ -94,37 +93,22 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
                 return MaskGeoJitter(rawValue, rule, columnName);
 
             case "PARTIAL_MASK":
-                return MaskPartial(textValue, rule);
+            case "MASK_EMAIL":
+            case "MASK_IBAN":
+                // WP-ARC-B-04: one definition with the SQL path (SqlDataMaskingProvider.BuildUnkeyedMaskSpec).
+                return EvaluateSpec(rule, columnName, rawValue, textValue);
 
             case "TOKENIZE":
             case "TOKENIZATION":
                 return MaskTokenize(textValue, rule, columnName);
 
             case "REDACT":
-                // B-06: For numeric and temporal types, REDACT returns null (NULLIFY standard) so it is distinguishable from valid zero/epoch
-                if (rawValue is int or long or short or sbyte or byte or uint or ulong or ushort or decimal or double or float)
-                {
-                    return null;
-                }
-                if (rawValue is DateTime or DateTimeOffset or DateOnly or TimeOnly)
-                {
-                    return null;
-                }
-                if (rawValue is bool)
-                {
-                    return null;
-                }
-                return rule.Replacement ?? "REDACTED";
+                // B-06: numeric, temporal and boolean values redact to NULL; text gets the redact constant of the shared mask spec.
+                return EvaluateSpec(rule, columnName, rawValue, textValue);
 
             case "HMAC":
             case "HMAC_SHA256":
                 return ComputeHmacSha256(textValue, rule.HmacKeyId ?? _options.HmacKeyId);
-
-            case "MASK_EMAIL":
-                return MaskEmail(textValue);
-
-            case "MASK_IBAN":
-                return MaskIban(textValue);
 
             case "MASK_PHONE":
                 return MaskPhone(textValue);
@@ -133,8 +117,23 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
                 return ApplyRegexOrFormatMask(columnName, textValue, rule);
 
             default:
-                return rule.Replacement ?? "REDACTED";
+                return EvaluateSpec(rule, columnName, rawValue, textValue);
         }
+    }
+
+    // The in-memory side of ARC-C-12: the spec comes from the same builder as the SQL path (a non-SQLite dialect, so a partial mask is
+    // the variable-length one), only its evaluation is local.
+    private static object? EvaluateSpec(MaskingRule rule, string columnName, object? value, string canonicalText)
+    {
+        var column = string.IsNullOrWhiteSpace(columnName) ? "column" : columnName;
+        var spec = Autheris.Application.Sql.Masking.SqlDataMaskingProvider.BuildUnkeyedMaskSpec(rule, column, DatabaseDialect.PostgreSql);
+        if (spec.Kind == TrinoSqlEngine.Governance.MaskKind.GeoJitter)
+        {
+            // A numeric jitter does not apply to this value (for example raw bytes): redact instead (fail-closed).
+            spec = Autheris.Application.Sql.Masking.SqlDataMaskingProvider.BuildUnkeyedMaskSpec(rule with { RuleType = "REDACT" }, column, DatabaseDialect.PostgreSql);
+        }
+
+        return Autheris.Application.Sql.Masking.MaskSpecEvaluator.Evaluate(spec, value, canonicalText);
     }
 
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte[]> _derivedKeys = new(StringComparer.Ordinal);
@@ -482,31 +481,6 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
             var decimals = Math.Clamp(rule.Decimals ?? 2, 0, 6);
             return Math.Round(d, decimals, MidpointRounding.AwayFromZero);
         }
-    }
-
-    private static string MaskPartial(string s, MaskingRule rule)
-    {
-        if (string.IsNullOrEmpty(s))
-        {
-            return s;
-        }
-
-        var prefixLen = Math.Max(0, rule.KeepPrefix ?? 1);
-        var suffixLen = Math.Max(0, rule.KeepSuffix ?? 0);
-        var maskChar = rule.MaskChar ?? '*';
-        var fixedLen = rule.FixedLength ?? false;
-
-        var runes = s.EnumerateRunes().ToArray();
-        if (runes.Length <= prefixLen + suffixLen)
-        {
-            return new string(maskChar, 5);
-        }
-
-        var prefix = string.Concat(runes.Take(prefixLen));
-        var suffix = suffixLen > 0 ? string.Concat(runes.TakeLast(suffixLen)) : string.Empty;
-        var maskCount = fixedLen ? 5 : (runes.Length - prefixLen - suffixLen);
-
-        return $"{prefix}{new string(maskChar, maskCount)}{suffix}";
     }
 
     private string MaskTokenize(string text, MaskingRule rule, string columnName)

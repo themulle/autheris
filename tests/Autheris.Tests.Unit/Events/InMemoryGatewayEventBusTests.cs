@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 using Xunit;
 
-public sealed class InMemoryGatewayEventBusTests
+public sealed class InMemoryGatewayEventBusTests : IDisposable
 {
     private readonly InMemoryGatewayEventBus _bus;
 
@@ -18,6 +18,8 @@ public sealed class InMemoryGatewayEventBusTests
     {
         _bus = new InMemoryGatewayEventBus(NullLogger<InMemoryGatewayEventBus>.Instance);
     }
+
+    public void Dispose() => _bus.Dispose();
 
     [Fact]
     public async Task PublishAsync_WithTypedSubscriber_DeliversEvent()
@@ -40,6 +42,7 @@ public sealed class InMemoryGatewayEventBusTests
 
         // Act
         await _bus.PublishAsync(@event);
+        await _bus.DrainAsync();
 
         // Assert
         received.ShouldNotBeNull();
@@ -67,7 +70,9 @@ public sealed class InMemoryGatewayEventBusTests
 
         // Act
         await _bus.PublishAsync(ev1);
+        await _bus.DrainAsync();
         await _bus.PublishAsync(ev2);
+        await _bus.DrainAsync();
 
         // Assert
         receivedEvents.Count.ShouldBe(2);
@@ -94,6 +99,7 @@ public sealed class InMemoryGatewayEventBusTests
 
         // Act & Assert
         await Should.NotThrowAsync(async () => await _bus.PublishAsync(@event));
+        await _bus.DrainAsync();
         healthySubscriberExecuted.ShouldBeTrue();
     }
 
@@ -112,6 +118,7 @@ public sealed class InMemoryGatewayEventBusTests
 
         // Act 1
         await _bus.PublishAsync(@event);
+        await _bus.DrainAsync();
         invocationCount.ShouldBe(1);
 
         // Dispose subscription
@@ -119,6 +126,7 @@ public sealed class InMemoryGatewayEventBusTests
 
         // Act 2
         await _bus.PublishAsync(@event);
+        await _bus.DrainAsync();
 
         // Assert
         invocationCount.ShouldBe(1);

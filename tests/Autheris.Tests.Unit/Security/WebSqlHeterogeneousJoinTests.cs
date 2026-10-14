@@ -195,7 +195,7 @@ public sealed class WebSqlHeterogeneousJoinTests
             stagingService,
             duckDbEngine,
             sqlEngine: sqlEngine,
-            logger: NullLogger<FederatedDuckDbExecutionService>.Instance);
+            logger: NullLogger<FederatedDuckDbExecutionService>.Instance, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var governedSqlService = new GovernedSqlExecutionService(
             Options.Create(options),
@@ -204,7 +204,7 @@ public sealed class WebSqlHeterogeneousJoinTests
             tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             sqlEngine: sqlEngine,
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
-            federatedExecutionService: federatedService);
+            federatedExecutionService: federatedService, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var query = "SELECT o.id, o.amount, s.carrier, s.status " +
                     "FROM crm.public.orders o " +
@@ -281,7 +281,7 @@ public sealed class WebSqlHeterogeneousJoinTests
             planner,
             stagingService,
             duckDbEngine,
-            sqlEngine: sqlEngine);
+            sqlEngine: sqlEngine, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var query = "SELECT id, carrier FROM logistics.v1.shipments";
         var request = new GovernedSqlQueryRequest(query, Transport: "WebSql");
@@ -323,7 +323,7 @@ public sealed class WebSqlHeterogeneousJoinTests
             Substitute.For<ICrossSourceQueryRouter>(),
             Substitute.For<ICrossSourcePlanner>(),
             Substitute.For<IFederatedStagingService>(),
-            Substitute.For<IDuckDbOlapEngine>());
+            Substitute.For<IDuckDbOlapEngine>(), policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var request = new GovernedSqlQueryRequest("SELECT 1", Transport: "ArrowExport");
 
@@ -363,7 +363,7 @@ public sealed class WebSqlHeterogeneousJoinTests
             Substitute.For<ICrossSourceQueryRouter>(),
             Substitute.For<ICrossSourcePlanner>(),
             Substitute.For<IFederatedStagingService>(),
-            Substitute.For<IDuckDbOlapEngine>());
+            Substitute.For<IDuckDbOlapEngine>(), policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var request = new GovernedSqlQueryRequest("SELECT 1", Transport: null);
 
@@ -403,7 +403,7 @@ public sealed class WebSqlHeterogeneousJoinTests
             Substitute.For<ICrossSourceQueryRouter>(),
             Substitute.For<ICrossSourcePlanner>(),
             Substitute.For<IFederatedStagingService>(),
-            Substitute.For<IDuckDbOlapEngine>());
+            Substitute.For<IDuckDbOlapEngine>(), policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var request = new GovernedSqlQueryRequest("SELECT 1", Transport: "Rest");
 
@@ -484,7 +484,7 @@ public sealed class WebSqlHeterogeneousJoinTests
             new CrossSourceQueryRouter(tableRepo, options.WebSql.CrossSource, options.WebSql),
             new CrossSourcePlanner(FastSqlEngine.Default),
             stagingService,
-            Substitute.For<IDuckDbOlapEngine>());
+            Substitute.For<IDuckDbOlapEngine>(), policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var query = "SELECT o.id, s.carrier FROM crm.public.orders o JOIN logistics.v1.shipments s ON o.tracking_id = s.id";
         var request = new GovernedSqlQueryRequest(query, Transport: "WebSql");
@@ -526,7 +526,7 @@ public sealed class WebSqlHeterogeneousJoinTests
             new CrossSourceQueryRouter(tableRepo, options.WebSql.CrossSource, options.WebSql),
             new CrossSourcePlanner(FastSqlEngine.Default),
             Substitute.For<IFederatedStagingService>(),
-            Substitute.For<IDuckDbOlapEngine>());
+            Substitute.For<IDuckDbOlapEngine>(), policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var query = "SELECT o.id, s.carrier FROM crm.public.orders o JOIN logistics.v1.shipments s ON o.tracking_id = s.id";
         var request = new GovernedSqlQueryRequest(query, Transport: "WebSql");
@@ -572,7 +572,7 @@ public sealed class WebSqlHeterogeneousJoinTests
             new CrossSourceQueryRouter(tableRepo, options.WebSql.CrossSource, options.WebSql),
             new CrossSourcePlanner(FastSqlEngine.Default),
             stagingService,
-            Substitute.For<IDuckDbOlapEngine>());
+            Substitute.For<IDuckDbOlapEngine>(), policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var query = "SELECT o.id, s.carrier FROM crm.public.orders o JOIN logistics.v1.shipments s ON o.tracking_id = s.id";
         var request = new GovernedSqlQueryRequest(query, Transport: "WebSql");

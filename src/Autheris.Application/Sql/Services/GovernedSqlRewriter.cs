@@ -655,7 +655,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
     internal TableAccessPolicy AccessPolicy() =>
         new(_consentRepository!, _consentResolution!,
             _consentCache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            _policyEnforcement ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+            _policyEnforcement ?? throw new InvalidOperationException("IPolicyEnforcementService is not configured; refusing to evaluate table access without policy enforcement (fail-closed)."),
             _rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             _clientIpResolver,
             _options.Value,

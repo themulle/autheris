@@ -36,6 +36,7 @@ public static class GatewayMcpServiceExtensions
         services.AddSingleton<ISemanticToolPruner, SemanticToolPruner>();
         services.AddSingleton<IPersistedToolValidator, PersistedToolValidator>();
         services.AddScoped<IApiDispatcherService, ApiDispatcherService>();
+        services.AddScoped<IMcpResourceProvider, McpResourceProvider>();
         services.AddScoped<IMcpToolExecutionHandler, McpToolExecutionHandler>();
         services.AddScoped<IMcpQueryExecutor, GatewayMcpQueryExecutor>();
         GatewayMcpServer.AddGatewayMcpServer(services, gatewayOptions);
@@ -49,6 +50,11 @@ public static class GatewayMcpServiceExtensions
         services.AddSingleton<IHitLStepUpApprovalService, HitLStepUpApprovalService>();
 
         // Governance Access Plans & Control Plane (Track E, ADR-03, ADR-05, R-60..R-64)
+        services.AddOptions<AccessPlanOptions>()
+            .Configure<Microsoft.Extensions.Configuration.IConfiguration>((o, cfg) =>
+                Microsoft.Extensions.Configuration.ConfigurationBinder.Bind(cfg.GetSection(AccessPlanOptions.SectionName), o))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
         services.AddAutherisGovernancePlans();
 
         return services;

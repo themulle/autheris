@@ -38,7 +38,7 @@ public sealed class GatewayRoleEvaluator : IGatewayRoleEvaluator
             return false;
         }
 
-        if (GatewayRoleExtensions.TryParseRole(roleName, out var parsedRole))
+        if (GatewayRoleExtensions.TryParseGlobalRole(roleName, out var parsedRole))
         {
             return HasRole(principal, parsedRole, tenantId);
         }
@@ -167,12 +167,14 @@ public sealed class GatewayRoleEvaluator : IGatewayRoleEvaluator
                 continue;
             }
 
-            // Check if role is tenant-prefixed: "tenant1:DataOwner"
-            var colonIdx = raw.IndexOf(':');
-            if (colonIdx > 0)
+            if (raw.Contains(':', StringComparison.Ordinal))
             {
-                var roleTenant = raw[..colonIdx];
-                var roleName = raw[(colonIdx + 1)..];
+                // Strict tenant-scoped form "tenant1:DataOwner": exactly one colon, non-empty parts, exact role name.
+                // Anything else containing ':' (":ClusterAdmin", "a:b:DataOwner", "tenant:") is malformed and grants nothing.
+                if (!GatewayRoleExtensions.TryParseTenantScopedRole(raw, out var roleTenant, out var parsedRole))
+                {
+                    continue;
+                }
 
                 // Security Guard: Tenant-scoped roles only apply when evaluating within that specific tenant.
                 // They never satisfy a global (tenantId == null) authorization check unless the role is wildcard (*).
@@ -182,25 +184,19 @@ public sealed class GatewayRoleEvaluator : IGatewayRoleEvaluator
                     continue;
                 }
 
-                if (GatewayRoleExtensions.TryParseRole(roleName, out var parsedRole))
+                // Security Guard: ClusterAdmin and GovernanceAdmin are strictly global platform roles.
+                // They can never be granted via a tenant-scoped prefix (e.g. "tenant-1:ClusterAdmin").
+                if (parsedRole is GatewayRole.ClusterAdmin or GatewayRole.GovernanceAdmin)
                 {
-                    // Security Guard: ClusterAdmin and GovernanceAdmin are strictly global platform roles.
-                    // They can never be granted via a tenant-scoped prefix (e.g. "tenant-1:ClusterAdmin").
-                    if (parsedRole is GatewayRole.ClusterAdmin or GatewayRole.GovernanceAdmin)
-                    {
-                        continue;
-                    }
-
-                    result.Add(parsedRole);
+                    continue;
                 }
+
+                result.Add(parsedRole);
             }
-            else
+            else if (GatewayRoleExtensions.TryParseGlobalRole(raw, out var globalRole))
             {
                 // Global role (applies across all tenants)
-                if (GatewayRoleExtensions.TryParseRole(raw, out var parsedRole))
-                {
-                    result.Add(parsedRole);
-                }
+                result.Add(globalRole);
             }
         }
 

@@ -35,8 +35,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="TrinoSqlEngine.Tests" />
     <InternalsVisibleTo Include="Autheris.Tests.Unit" />
-    <!-- Debug only: the controls of these assemblies carry the same mutant hooks (CompilerTestSeams is compiled out of Release). -->
-    <InternalsVisibleTo Include="Autheris.Application" Condition="'$(Configuration)' == 'Debug'" />
-    <InternalsVisibleTo Include="Autheris.Infrastructure" Condition="'$(Configuration)' == 'Debug'" />
+    <!-- The controls of these assemblies ask the same ICompilerHooks (CompilerHooks.IsDisabled); production never installs a hook. -->
+    <InternalsVisibleTo Include="Autheris.Application" />
+    <InternalsVisibleTo Include="Autheris.Infrastructure" />
   </ItemGroup>
 </Project>

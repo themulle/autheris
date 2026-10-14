@@ -80,12 +80,10 @@ public sealed record CompiledSqlTemplate(
                 }
 
                 value = current.Value;
-#if DEBUG
-                if (CompilerTestSeams.IsDisabled(SecurityControl.CacheRebindPolicyValues))
+                if (CompilerHooks.IsDisabled(SecurityControl.CacheRebindPolicyValues))
                 {
                     value = slot.LiteralValue;   // mutant: the template keeps the value of the request that created it
                 }
-#endif
             }
 
             parameters.Add(new BoundParameter(slot.Marker, slot.Name, slot.Ordinal, value, type, slot.Origin, slot.SourceName, slot.ColumnType));
@@ -231,9 +229,7 @@ public static class CompileCacheKey
 
         var sb = _keyBuilder ??= new StringBuilder(4096);
         sb.Clear();
-#if DEBUG
-        if (CompilerTestSeams.Current?.OmittedCacheKeyFields?.Contains("Versions") != true)
-#endif
+        if (!CompilerHooks.Current.OmitsCacheKeyField("Versions"))
         {
             sb.Append("v=").Append(CompilerInfo.Version).Append(";cap=").Append(DialectCapabilities.TableVersion).Append(';');
         }
@@ -312,9 +308,7 @@ public static class CompileCacheKey
                          .ToArray()))
         {
             if (value is GovernancePolicy && ValidatedPerTable.Contains(property.Name)) continue;
-#if DEBUG
-            if (value is CompileRequest && CompilerTestSeams.Current?.OmittedCacheKeyFields?.Contains(property.Name) == true) continue;
-#endif
+            if (value is CompileRequest && CompilerHooks.Current.OmitsCacheKeyField(property.Name)) continue;
             sb.Append(property.Name).Append('=');
             Write(sb, property.Get(value), false);
             sb.Append(',');

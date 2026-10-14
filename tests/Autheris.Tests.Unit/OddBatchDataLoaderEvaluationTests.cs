@@ -174,7 +174,7 @@ public class OddBatchDataLoaderEvaluationTests
                 ConnectionString = $"Data Source=odd_dataloader_{Guid.NewGuid():N};Mode=Memory;Cache=Shared"
             }
         });
-        using var repository = new SqliteGovernanceRepository(epochService, repoOptions);
+        using var repository = GovernanceStoreFactory.CreateSqlite(epochService, repoOptions);
         var resolutionService = new ConsentResolutionService();
         var maskingProvider = new ColumnMaskingProvider();
 
@@ -198,7 +198,7 @@ public class OddBatchDataLoaderEvaluationTests
             maskingProvider,
             executor,
             options,
-            dataSourceExecutors: new[] { sqlExecutor });
+            dataSourceExecutors: new[] { sqlExecutor }, policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         // Grant consent for finance_items
         var childTableId = new TableIdentifier("finance", "dbo", "finance_items");

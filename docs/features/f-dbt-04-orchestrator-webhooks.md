@@ -63,3 +63,18 @@ curl -X POST http://localhost:8080/api/v1/webhooks/dbt \
   }
 }
 ```
+
+## Error responses
+
+Webhook, dbt and CDC subscription endpoints never return exception text to clients. Failures are returned as `application/problem+json` with a fixed `detail`, a stable `extensions.code` and `extensions.traceId`; the original exception is logged server-side with the same trace id.
+
+| Endpoint | Status | Code |
+|---|---|---|
+| ITSM, ServiceNow and Jira webhooks (anonymous) | 400 | `WEBHOOK_PAYLOAD_INVALID`, `WEBHOOK_SIGNATURE_OR_FORMAT_INVALID` |
+| `POST /api/v1/cdc/subscriptions` (target URL rejected by egress policy; unresolved, private and blocked targets are indistinguishable) | 400 | `CDC_TARGET_URL_NOT_ALLOWED` |
+| `POST /api/v1/cdc/subscriptions` (subscription limit) | 429 | `CDC_SUBSCRIPTION_QUOTA_EXCEEDED` |
+| dbt proposal approve and reject | 409 | `DBT_PROPOSAL_CONFLICT` |
+| dbt semantic manifest ingestion | 400 | `DBT_MANIFEST_INVALID` |
+| Bulk consent row filter syntax error | 400 | `ROW_FILTER_SYNTAX_INVALID` (parser detail only in Development) |
+
+An architecture test (`NoRawExceptionMessageInEndpointResponsesTests`) fails when new endpoint code exposes `ex.Message`; legacy sites are listed in its baseline.

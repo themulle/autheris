@@ -86,7 +86,7 @@ public sealed class SyntheticDataAndExceptionHandlingTests
             _chunkedExecutor,
             Options.Create(new GatewayOptions()),
             drainController: null,
-            dataSourceExecutors: []); // explicitly empty
+            dataSourceExecutors: [], policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance); // explicitly empty
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity([
             new Claim(ClaimTypes.PrimarySid, "S-1-5-21-123"),
@@ -143,11 +143,11 @@ public sealed class SyntheticDataAndExceptionHandlingTests
             WebSql = new WebSqlOptions { Enabled = true, DefaultDataSourceName = "crm_db", AllowedDataSources = ["crm_db"] }
         });
         var service = new GovernedSqlExecutionService(
-            options, executionGuard: GovernedTestSupport.Guard,
+            options, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
             consentResolution: _resolutionService,
             consentRepository: _consentRepo,
             tableRepository: _metadataRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(_metadataRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
-            environment: null); // null environment
+            environment: null, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance); // null environment
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity([
             new Claim(ClaimTypes.PrimarySid, "S-1-5-21-123"),

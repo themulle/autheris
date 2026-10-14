@@ -508,7 +508,6 @@ public class BinderMutationTests
         Assert.Equal(expected, Assert.Throws<SqlCompileNotSupportedException>(() => CompiledSqlBinders.CheckedExecutorFor(dialect)).Message);
     }
 
-#if DEBUG
     [Theory]
     [InlineData(TargetSqlDialect.SqlServer)]
     [InlineData(TargetSqlDialect.DuckDb)]
@@ -520,7 +519,7 @@ public class BinderMutationTests
     {
         var compiled = new CompiledSql("INSERT INTO t (a) SELECT 1", ImmutableArray<BoundParameter>.Empty, dialect, SqlStatementClass.Insert,
             ImmutableArray<SecurityPredicateId>.Empty, "v") { ExpectedAffectedRows = 1 };
-        using var seam = CompilerTestSeams.Use(new CompilerTestSeams { DisabledControls = new HashSet<SecurityControl> { SecurityControl.BinderFactoryRefusal } });
+        using var seam = CompilerHooks.Use(new MutantHooks { DisabledControls = new HashSet<SecurityControl> { SecurityControl.BinderFactoryRefusal } });
         var binder = CompiledSqlBinders.For(dialect);
         Assert.True(binder.CanBind(dialect));
         using var cmd = new OracleCommandStub();
@@ -531,11 +530,10 @@ public class BinderMutationTests
     [Fact]
     public void FactoryRefusalSeam_StillRefusesDialectsWithoutABinder()
     {
-        using var seam = CompilerTestSeams.Use(new CompilerTestSeams { DisabledControls = new HashSet<SecurityControl> { SecurityControl.BinderFactoryRefusal } });
+        using var seam = CompilerHooks.Use(new MutantHooks { DisabledControls = new HashSet<SecurityControl> { SecurityControl.BinderFactoryRefusal } });
         Assert.Equal("Not yet supported by the governed SQL compiler: Dialect (no binder for dialect Snowflake).",
             Assert.Throws<SqlCompileNotSupportedException>(() => CompiledSqlBinders.For(TargetSqlDialect.Snowflake)).Message);
     }
-#endif
 
     // ---- ColumnBindAdapter ----
 

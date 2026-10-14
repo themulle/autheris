@@ -342,6 +342,12 @@ public static class GatewayStartupValidator
                 throw new ValidationException("Sicherheitsverletzung: GovernanceDb.SeedDemoData darf AUSSCHLIESSLICH in der Development-Umgebung true sein!");
             }
 
+            // WP-ARC-B-12 (fail closed): the schema must never be started unchecked outside Development.
+            if (options.GovernanceDb.Migrations.Mode == GovernanceMigrationMode.Skip)
+            {
+                throw new ValidationException("Security violation: GovernanceDb:Migrations:Mode = Skip is only allowed in the Development environment. Use Apply or Verify.");
+            }
+
             if (options.Authentication.EnableTestAuthHandler)
             {
                 throw new ValidationException("Security violation: EnableTestAuthHandler may be true ONLY in the Development environment.");
@@ -592,6 +598,15 @@ public static class GatewayStartupValidator
         {
             throw new ValidationException("Security violation (E-2): Multi-node cluster mode and more than 1 replica are not allowed with SQLite, because SQLite uses local database files per instance. Configure GovernanceDb.Provider = 'PostgreSql' or 'SqlServer' for cluster operation.");
         }
+
+        // WP-ARC-A-09: an embedded Garnet server lives inside one process and is shared with no other replica, so it cannot
+        // provide cluster-wide state. This also catches EnableEmbeddedServer = true combined with Redis.Enabled = true,
+        // where the embedded server silently wins the registration.
+        if ((options.HighAvailability.MultiNodeClusterMode || options.HighAvailability.Replicas > 1) &&
+            options.Caching.Garnet.EnableEmbeddedServer)
+        {
+            throw new ValidationException("NF-HA-02 violation: Multi-node cluster mode or more than one replica requires an external Redis/Garnet. The embedded Garnet server (Caching.Garnet.EnableEmbeddedServer = true) is local to one process and cannot provide cluster-wide state; disable it and configure Caching.Redis.");
+        }
     }
 
     /// <summary>
@@ -599,6 +614,34 @@ public static class GatewayStartupValidator
     /// one path now and no runtime switch (rollback is a revert), so a configured value fails the start in every environment:
     /// warn-and-ignore would let an operator believe in a kill switch that does not exist. The configured value is never echoed.
     /// </summary>
+    /// <summary>
+    /// SR-L-02 / G-4: outside Development <c>Gateway:Hosting:AllowedHosts</c> must be set and must not be the bare wildcard.
+    /// </summary>
+    public static void ValidateAllowedHosts(GatewayOptions options, IHostEnvironment environment)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(environment);
+
+        if (environment.IsDevelopment())
+        {
+            return;
+        }
+
+        var hosts = options.Hosting.AllowedHosts.Where(h => !string.IsNullOrWhiteSpace(h)).Select(h => h.Trim()).ToList();
+        if (hosts.Count == 0)
+        {
+            throw new ValidationException(
+                "Gateway:Hosting:AllowedHosts is required outside Development. List the host names clients use to reach the gateway " +
+                "(for example [\"gateway.corp.example\"], \"host:port\" or \"*.corp.example\"), or set Gateway__Hosting__AllowedHosts__0 in the environment.");
+        }
+
+        if (hosts.Contains("*"))
+        {
+            throw new ValidationException(
+                "Gateway:Hosting:AllowedHosts must not contain the bare wildcard '*' outside Development; list the concrete host names.");
+        }
+    }
+
     public static void ValidateSqlRewriterEngine(Microsoft.Extensions.Configuration.IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
@@ -634,12 +677,12 @@ public static class GatewayStartupValidator
     /// does not admit. A deny at scale is an outage, so the start lists all of them (a warning per table, ids and codes only). The same
     /// lint runs as the blocking pre-deploy step <c>tools/PolicyPredicateLint</c>.
     /// </summary>
-    public static IReadOnlyList<DeniedTable> ListDeniedTables(PolicyLintInput input, ILogger? logger = null)
+    public static IReadOnlyList<DeniedTable> ListDeniedTables(PolicyLintInput input, ILogger? logger = null, SqlDataSourceOptions? dataSources = null)
     {
         ArgumentNullException.ThrowIfNull(input);
         var denied = new List<DeniedTable>();
 
-        foreach (var finding in new PolicyPredicateLinter().Lint(input).Findings)
+        foreach (var finding in new PolicyPredicateLinter(dataSources: dataSources).Lint(input).Findings)
         {
             denied.Add(new DeniedTable(finding.Table, finding.PolicyId, finding.Code));
         }

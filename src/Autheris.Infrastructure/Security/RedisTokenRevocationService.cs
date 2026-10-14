@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Security.Claims;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
@@ -19,18 +20,27 @@ public sealed class RedisTokenRevocationService : ITokenRevocationService
     private readonly TimeProvider _timeProvider;
     private readonly InMemoryTokenRevocationService _local;
     private readonly string _prefix;
+    private readonly bool _failClosed;
+    private readonly TimeSpan _grace;
+
+    private static readonly Prometheus.Counter LookupFailures = Prometheus.Metrics.CreateCounter(
+        "autheris_token_revocation_lookup_failures_total", "Number of token revocation lookups that failed against Redis",
+        new Prometheus.CounterConfiguration { LabelNames = ["outcome"] });
 
     public RedisTokenRevocationService(
         IConnectionMultiplexer multiplexer,
         IOptions<GatewayOptions> options,
         ILogger<RedisTokenRevocationService> logger,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Microsoft.Extensions.Hosting.IHostEnvironment? environment = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         _multiplexer = multiplexer ?? throw new ArgumentNullException(nameof(multiplexer));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _local = new InMemoryTokenRevocationService(_timeProvider);
+        _failClosed = options.Value.Caching.Redis.ResolveFailClosedOnRevocationLookupError(environment?.IsDevelopment() ?? false);
+        _grace = TimeSpan.FromSeconds(Math.Max(0, options.Value.Caching.Redis.RevocationLookupGraceSeconds));
 
         var instance = options.Value.Caching.Redis.InstanceName;
         if (string.IsNullOrWhiteSpace(instance))
@@ -120,6 +130,8 @@ public sealed class RedisTokenRevocationService : ITokenRevocationService
         }
 
         var issuedAt = TokenRevocationKeys.GetIssuedAt(principal);
+        var lookupFailed = false;
+        Exception? lookupFailure = null;
         try
         {
             var db = _multiplexer.GetDatabase();
@@ -144,6 +156,8 @@ public sealed class RedisTokenRevocationService : ITokenRevocationService
                 {
                     // One failing key must not hide a revocation that another lookup already returned.
                     _logger.LogWarning(ex, "Token revocation lookup of a single key in Redis failed.");
+                    lookupFailed = true;
+                    lookupFailure ??= ex;
                     continue;
                 }
 
@@ -171,9 +185,44 @@ public sealed class RedisTokenRevocationService : ITokenRevocationService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Token revocation lookup in Redis failed; only locally known revocations are enforced.");
+            lookupFailed = true;
+            lookupFailure = ex;
+        }
+
+        if (lookupFailed)
+        {
+            return HandleLookupFailure(issuedAt, lookupFailure);
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// SR-L-10: no revocation was found locally or remotely but the remote lookup was incomplete. With the policy off
+    /// the token is accepted (legacy behaviour); with it on the request is denied unless the token is younger than the grace
+    /// window.
+    /// </summary>
+    private bool HandleLookupFailure(DateTimeOffset? issuedAt, Exception? failure)
+    {
+        if (!_failClosed)
+        {
+            LookupFailures.WithLabels("fail_open").Inc();
+            return false;
+        }
+
+        if (issuedAt is { } iat && _grace > TimeSpan.Zero)
+        {
+            var age = _timeProvider.GetUtcNow() - iat;
+            if (age >= TimeSpan.FromMinutes(-1) && age <= _grace)
+            {
+                // Younger than the grace window: it cannot have been revoked on another node before the outage began.
+                LookupFailures.WithLabels("grace").Inc();
+                return false;
+            }
+        }
+
+        LookupFailures.WithLabels("fail_closed").Inc();
+        throw new TokenRevocationUnavailableException("The token revocation status could not be determined.", failure);
     }
 
     public async Task RevokeAsync(string subjectOrJti, DateTimeOffset until, CancellationToken ct = default)

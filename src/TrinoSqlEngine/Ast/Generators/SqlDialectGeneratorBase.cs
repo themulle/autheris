@@ -58,9 +58,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         {
             GenerateSql(statement, ref builder, context);
             sql = builder.ToString();
-#if DEBUG
-            sql = TrinoSqlEngine.CompilerTestSeams.Current?.FaultyEmitter?.Invoke(sql) ?? sql;
-#endif
+            sql = CompilerHooks.Current.InterceptEmitted(sql);
         }
         catch (InsufficientExecutionStackException)
         {
@@ -82,9 +80,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
             MergeStatement => SqlStatementClass.Merge,
             _ => throw new NotSupportedException($"Unsupported statement type: {statement.GetType().Name}")
         };
-#if DEBUG
-        if (!CompilerTestSeams.IsDisabled(SecurityControl.EmittedTextChecker))
-#endif
+        if (!CompilerHooks.IsDisabled(SecurityControl.EmittedTextChecker))
         {
             EmittedSqlInvariantChecker.Check(sql, TargetDialect, parameters, context.Ranges, structuralOnly: !BindLiterals, statementClass);
         }

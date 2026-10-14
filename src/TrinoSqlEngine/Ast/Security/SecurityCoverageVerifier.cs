@@ -202,6 +202,8 @@ public sealed partial class SecurityCoverageVerifier
 
         private void Spec(QuerySpecification spec, ImmutableHashSet<string> cte, bool policyScope, SelectStatement? enclosing)
         {
+            if (!policyScope) VerifyNoWholeRowOfMaskedSource(spec, cte);
+
             foreach (var item in spec.Projections)
             {
                 if (item is ColumnSelectItem col) Expr(col.Expression, cte, policyScope);
@@ -230,6 +232,65 @@ public sealed partial class SecurityCoverageVerifier
             }
 
             if (spec.Having != null) Expr(spec.Having, cte, policyScope);
+        }
+
+        /// <summary>
+        /// SR-L-24, second line of defence independent of the visitor: a projection must not reference the row of a secured derived
+        /// table over a table with masked columns as a whole (<c>SELECT t FROM t</c>, <c>to_json(t)</c>), that is a one-part
+        /// <see cref="ColumnReference"/> named like the derived table's alias that is not a cataloged column.
+        /// </summary>
+        private void VerifyNoWholeRowOfMaskedSource(QuerySpecification spec, ImmutableHashSet<string> cte)
+        {
+            if (spec.From is null) return;
+
+            List<(string Alias, ImmutableHashSet<string>? CatalogColumns)>? aliases = null;
+            CollectMaskedSources(spec.From, cte, ref aliases);
+            if (aliases is null) return;
+
+            foreach (var item in spec.Projections)
+            {
+                if (item is not ColumnSelectItem column) continue;
+
+                bool wholeRow = false;
+                AstReflection.Walk(column.Expression, node =>
+                {
+                    if (node is ColumnReference { Name.Parts.Count: 1 } reference)
+                    {
+                        foreach (var (alias, catalogColumns) in aliases)
+                        {
+                            if (string.Equals(reference.Name.SimpleName, alias, StringComparison.OrdinalIgnoreCase) &&
+                                catalogColumns?.Contains(reference.Name.SimpleName) != true)
+                            {
+                                wholeRow = true;
+                            }
+                        }
+                    }
+
+                    return !wholeRow;
+                });
+                if (wholeRow)
+                {
+                    throw new SecurityCoverageException("A whole-row reference to a table with masked columns is projected.");
+                }
+            }
+        }
+
+        private void CollectMaskedSources(TableSource source, ImmutableHashSet<string> cte, ref List<(string Alias, ImmutableHashSet<string>? CatalogColumns)>? into)
+        {
+            switch (source)
+            {
+                case JoinedTableSource join:
+                    CollectMaskedSources(join.Left, cte, ref into);
+                    CollectMaskedSources(join.Right, cte, ref into);
+                    break;
+                case SubqueryTableSource { Alias: var alias, Subquery.Body: QuerySpecification { From: NamedTableSource named } } when !IsCte(named, cte):
+                    if (owner._requirementOf(named.Name) is { MaskedColumns.Count: > 0 } requirement)
+                    {
+                        (into ??= new()).Add((alias.Value, requirement.CatalogColumns));
+                    }
+
+                    break;
+            }
         }
 
         private static bool IsCte(NamedTableSource named, ImmutableHashSet<string> cte) =>

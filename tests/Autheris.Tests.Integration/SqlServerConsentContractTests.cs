@@ -49,7 +49,7 @@ public sealed class SqlServerConsentContractTests : IAsyncLifetime
                 SeedDemoData = false
             }
         });
-        return new SqlServerGovernanceRepository(Substitute.For<IEpochValidationService>(), options, env);
+        return GovernanceStoreFactory.CreateSqlServer(Substitute.For<IEpochValidationService>(), options, env);
     }
 
     [Fact]

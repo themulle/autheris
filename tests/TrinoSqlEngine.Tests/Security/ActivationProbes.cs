@@ -1,4 +1,3 @@
-#if DEBUG
 using System.Collections.Immutable;
 using System.Data;
 using System.Data.Common;
@@ -188,4 +187,3 @@ internal static class ActivationProbes
         return (long)command.ExecuteScalar()!;
     }
 }
-#endif

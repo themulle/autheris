@@ -31,7 +31,7 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
     private static readonly VirtualFilterActor CreatorActor = new(Creator, IsSync: false);
     private static readonly VirtualFilterActor SupervisorActor = new(Supervisor, IsSync: false);
 
-    private readonly SqliteGovernanceRepository _repository = new(
+    private readonly SqliteGovernanceRepository _repository = GovernanceStoreFactory.CreateSqlite(
         Substitute.For<IEpochValidationService>(),
         Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=vfa_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" } }));
 

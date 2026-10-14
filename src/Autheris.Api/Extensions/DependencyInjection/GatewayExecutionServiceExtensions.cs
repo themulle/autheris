@@ -87,7 +87,7 @@ public static class GatewayExecutionServiceExtensions
             sp.GetService<IOptions<GatewayOptions>>(),
             sp.GetService<ITrafficDrainController>(),
             sp.GetServices<IDataSourceExecutor>(),
-            sp.GetService<IPolicyEnforcementService>(),
+            sp.GetRequiredService<IPolicyEnforcementService>(),
             sp.GetService<IClientIpResolver>(),
             sp.GetService<IAutherisConnectorRegistry>(),
             sp.GetService<ITableReadConcurrencyGate>(),
@@ -132,10 +132,20 @@ public static class GatewayExecutionServiceExtensions
         }
 
         // F-EVT-01: CloudEvents v1.0 Outbound Webhook Subscriptions
-        services.AddSingleton<ICloudEventSubscriptionStore, InMemoryCloudEventSubscriptionStore>();
-        services.AddSingleton<ICloudEventTransformer, CloudEventTransformer>();
-        services.AddHttpClient<ICloudEventWebhookDispatcher, CloudEventWebhookDispatcher>()
-            .AddSecureOutboundHandlers("CloudEvents");
+        // Interim guard (WP-ARC-A-01): disabled by default; nothing is registered (no store, no egress client).
+        services.AddOptions<Autheris.Domain.Options.CdcWebhooksOptions>()
+            .BindConfiguration(Autheris.Domain.Options.CdcWebhooksOptions.SectionName);
+        var configuration = services.FirstOrDefault(d => d.ServiceType == typeof(Microsoft.Extensions.Configuration.IConfiguration))
+            ?.ImplementationInstance as Microsoft.Extensions.Configuration.IConfiguration;
+        var cdcWebhooksEnabled = configuration?.GetSection(Autheris.Domain.Options.CdcWebhooksOptions.SectionName)
+            .GetValue<bool>(nameof(Autheris.Domain.Options.CdcWebhooksOptions.Enabled)) == true;
+        if (cdcWebhooksEnabled)
+        {
+            services.AddSingleton<ICloudEventSubscriptionStore, InMemoryCloudEventSubscriptionStore>();
+            services.AddSingleton<ICloudEventTransformer, CloudEventTransformer>();
+            services.AddHttpClient<ICloudEventWebhookDispatcher, CloudEventWebhookDispatcher>()
+                .AddSecureOutboundHandlers("CloudEvents");
+        }
 
         // AST-Aware Traffic Shadowing & Dark Replay (F-OPS-01, INF-2)
         services.AddHttpClient<TrafficShadowingService>()

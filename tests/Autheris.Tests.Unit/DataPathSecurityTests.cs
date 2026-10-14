@@ -34,7 +34,7 @@ public class DataPathSecurityTests : IDisposable
     public DataPathSecurityTests()
     {
         var epochService = new EpochValidationService();
-        _repository = new SqliteGovernanceRepository(epochService);
+        _repository = GovernanceStoreFactory.CreateSqlite(epochService);
         _resolutionService = new ConsentResolutionService();
         var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
         var eventBus = new Autheris.Infrastructure.Messaging.InProcessChannelEventBus();
@@ -54,7 +54,7 @@ public class DataPathSecurityTests : IDisposable
             _maskingProvider,
             new ChunkedQueryExecutor(500),
             gatewayOptions,
-            dataSourceExecutors: [sqlExecutor]);
+            dataSourceExecutors: [sqlExecutor], policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
         _query = new Query();
     }
 

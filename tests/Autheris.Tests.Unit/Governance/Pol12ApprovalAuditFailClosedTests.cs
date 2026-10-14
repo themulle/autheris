@@ -21,7 +21,7 @@ public sealed class Pol12ApprovalAuditFailClosedTests
         // If audit recording fails, the approval step and request status update must NOT be committed to the database.
         var eventBus = new InProcessChannelEventBus();
         var epochService = new EpochValidationService(eventBus: eventBus);
-        var repo = new SqliteGovernanceRepository(epochService);
+        var repo = GovernanceStoreFactory.CreateSqlite(epochService);
 
         var table = new TableIdentifier("finance", "dbo", "finance_table_1");
         var meta = await repo.GetTableMetadataAsync(table);

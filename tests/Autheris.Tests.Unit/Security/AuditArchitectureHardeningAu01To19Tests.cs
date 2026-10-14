@@ -199,7 +199,7 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
             .Returns(Encoding.UTF8.GetBytes("secret-audit-key-32-chars-long-minimum!"));
 
         var ex = Should.Throw<InvalidOperationException>(() =>
-            new SqliteGovernanceRepository(
+            GovernanceStoreFactory.CreateSqlite(
                 new EpochValidationService(),
                 options,
                 environment: env,
@@ -341,7 +341,7 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
             }
         });
 
-        using var repo = new SqliteGovernanceRepository(new EpochValidationService(), options);
+        using var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options);
 
         var entry1 = CreateAuditEntry(1, "CONSENT_CREATED");
         await repo.LockAsync();
@@ -384,7 +384,7 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
             }
         });
 
-        using var repo = new SqliteGovernanceRepository(new EpochValidationService(), options);
+        using var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options);
 
         // 1. Initial committed entry
         var entry1 = CreateAuditEntry(1, "CONSENT_INITIAL");

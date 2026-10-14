@@ -186,7 +186,7 @@ public class ChunkedQueryExecutorTests
                 ConnectionString = $"Data Source=chunked_test_{Guid.NewGuid():N};Mode=Memory;Cache=Shared"
             }
         });
-        using var repository = new Autheris.Infrastructure.Persistence.SqliteGovernanceRepository(epochService, repoOptions);
+        using var repository = GovernanceStoreFactory.CreateSqlite(epochService, repoOptions);
         var resolutionService = new ConsentResolutionService();
         var maskingProvider = new ColumnMaskingProvider();
 
@@ -210,7 +210,8 @@ public class ChunkedQueryExecutorTests
             maskingProvider,
             executor,
             options,
-            dataSourceExecutors: new[] { sqlExecutor });
+            dataSourceExecutors: new[] { sqlExecutor },
+            policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         // Grant consent for finance_items
         var childTableId = new Autheris.Domain.Common.TableIdentifier("finance", "dbo", "finance_items");

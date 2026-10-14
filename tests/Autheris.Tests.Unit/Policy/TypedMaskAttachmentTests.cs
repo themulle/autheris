@@ -47,7 +47,7 @@ public sealed class TypedMaskAttachmentTests
             .Returns(Task.FromResult<IReadOnlyList<Consent>>([]));
         return new TableAccessPolicy(consents, resolution,
             Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+            global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null, new GatewayOptions(), NullMandatoryRowFilterResolver.Instance,
             maskPolicyFactory: masks);

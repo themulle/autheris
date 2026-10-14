@@ -431,7 +431,7 @@ public class SecurityReview20261002EndpointTests
     [Fact]
     public async Task H06_SqliteRepository_TicketLookupIsTenantBound_AndActivationOnlyFromPending()
     {
-        using var repo = new SqliteGovernanceRepository(new StubEpochValidationService());
+        using var repo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
         var tableId = new TableIdentifier("sales", "crm", "h06_contacts");
         var table = new Table { Id = Guid.NewGuid(), SourceName = tableId.Domain, SchemaName = tableId.Schema, TableName = tableId.TableName, IsActive = true };
         var meta = await repo.UpsertTableMetadataAsync(new TableMetadata

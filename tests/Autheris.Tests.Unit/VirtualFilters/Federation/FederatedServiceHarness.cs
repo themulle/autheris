@@ -145,7 +145,7 @@ internal static class FederatedServiceHarness
             consentRepository: consents,
             mandatoryFilters: resolverOverride ?? resolver,
             logger: logs == null ? null : new ListLogger<FederatedDuckDbExecutionService>(logs),
-            vfPlanner: withPlanner ? new VirtualFilterFederationPlanner(keySetProvider, Options.Create(options)) : null);
+            vfPlanner: withPlanner ? new VirtualFilterFederationPlanner(keySetProvider, Options.Create(options)) : null, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         return new Pipeline { Service = service, Audit = audit, KeySetProvider = keySetProvider };
     }

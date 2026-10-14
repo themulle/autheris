@@ -1,12 +1,15 @@
 using System;
 using System.Diagnostics;
+using System.Collections.Generic;
 using System.IO;
 using System.Security.Claims;
+using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
@@ -26,6 +29,9 @@ public sealed class AccessAuditMiddleware
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<AccessAuditMiddleware> _logger;
     private readonly IAuthFailureAggregator? _authFailureAggregator;
+    private const int MaxTargetLength = 256;
+    private const int UnroutedLogSampleInterval = 100;
+    private static long _unroutedLogSequence;
 
     public AccessAuditMiddleware(
         RequestDelegate next,
@@ -97,6 +103,19 @@ public sealed class AccessAuditMiddleware
 
         var policy = endpoint?.Metadata.GetMetadata<AuditPolicy>();
         int statusCode = context.Response.StatusCode;
+
+        // Router-produced 4xx (404/405/400...) on unrouted paths are scanner noise: never persist a chain row with a
+        // client-chosen target. 401/403/429 and any exception/5xx path keep the regular audit behaviour (fail-closed).
+        if (endpoint == null
+            && !exceptionOccurred
+            && statusCode >= StatusCodes.Status400BadRequest
+            && statusCode < StatusCodes.Status500InternalServerError
+            && statusCode is not (StatusCodes.Status401Unauthorized or StatusCodes.Status403Forbidden or StatusCodes.Status429TooManyRequests))
+        {
+            RecordUnroutedRequest(context, auditContext, statusCode);
+            auditContext.MarkHandled();
+            return;
+        }
         var isDelegated = policy?.Level == AuditLevel.Delegated;
         if (isDelegated && !exceptionOccurred && statusCode < StatusCodes.Status400BadRequest)
         {
@@ -129,7 +148,8 @@ public sealed class AccessAuditMiddleware
         }
 
         var eventType = auditContext.EventType ?? policy?.EventType ?? (auditContext.Decision == "DENY" ? AuditEventTypes.AuthzEndpointDenied : AuditEventTypes.TableQuery);
-        var target = string.IsNullOrWhiteSpace(auditContext.Target) ? context.Request.Path.Value ?? "/" : auditContext.Target;
+        var rawTarget = string.IsNullOrWhiteSpace(auditContext.Target) ? context.Request.Path.Value ?? "/" : auditContext.Target;
+        var target = Truncate(rawTarget, MaxTargetLength);
 
         var detailsBuilder = new AuditDetailsBuilder()
             .WithField("channel", auditContext.Channel)
@@ -195,6 +215,27 @@ public sealed class AccessAuditMiddleware
 
         auditContext.MarkHandled();
     }
+
+    private void RecordUnroutedRequest(HttpContext context, AuditContext auditContext, int statusCode)
+    {
+        GatewayDiagnostics.UnroutedRequestCounter.Add(
+            1,
+            new KeyValuePair<string, object?>("status_code", statusCode),
+            new KeyValuePair<string, object?>("channel", auditContext.Channel));
+
+        if (Interlocked.Increment(ref _unroutedLogSequence) % UnroutedLogSampleInterval == 1)
+        {
+            _logger.LogInformation(
+                "Unrouted request answered with {StatusCode} (sampled 1/{SampleInterval}): {Method} {Path}",
+                statusCode,
+                UnroutedLogSampleInterval,
+                context.Request.Method,
+                Truncate(context.Request.Path.Value ?? "/", 128));
+        }
+    }
+
+    private static string Truncate(string value, int maxLength) =>
+        value.Length <= maxLength ? value : value[..maxLength];
 
     private static void ResolveSecurityContext(HttpContext context, AuditContext auditContext)
     {

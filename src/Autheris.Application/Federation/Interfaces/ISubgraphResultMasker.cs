@@ -2,6 +2,8 @@ namespace Autheris.Application.Federation.Interfaces;
 
 using System.Collections.Generic;
 using System.Security.Claims;
+using System.Threading;
+using System.Threading.Tasks;
 
 /// <summary>
 /// Enforces in-memory data masking rules on aggregated federated subgraph response trees.
@@ -15,4 +17,9 @@ public interface ISubgraphResultMasker
     /// with '.', list indices omitted, e.g. <c>customer.contact</c>) to the real field name.
     /// </summary>
     object? MaskResultData(object? data, ClaimsPrincipal? principal, IReadOnlyDictionary<string, string>? aliasToFieldMap = null);
+
+    /// <summary>
+    /// SR-L-12: same as <see cref="MaskResultData"/> but consults the catalog classification (tenant-scoped) without blocking.
+    /// </summary>
+    ValueTask<object?> MaskResultDataAsync(object? data, ClaimsPrincipal? principal, IReadOnlyDictionary<string, string>? aliasToFieldMap, CancellationToken cancellationToken = default);
 }

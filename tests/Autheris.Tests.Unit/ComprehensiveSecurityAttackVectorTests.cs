@@ -157,7 +157,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
             }
         });
 
-        var governanceRepo = new SqliteGovernanceRepository(new StubEpochValidationService());
+        var governanceRepo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
         var handler = new ItsmWebhookHandler(new TestSecretProvider(secretBytes), governanceRepo, options, NullLogger<ItsmWebhookHandler>.Instance);
 
         var now = DateTimeOffset.UtcNow;
@@ -196,7 +196,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
             }
         });
 
-        var governanceRepo = new SqliteGovernanceRepository(new StubEpochValidationService());
+        var governanceRepo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
         var handler = new ItsmWebhookHandler(new TestSecretProvider(secretBytes), governanceRepo, options, NullLogger<ItsmWebhookHandler>.Instance);
 
         var now = DateTimeOffset.UtcNow;
@@ -223,7 +223,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
             }
         });
 
-        var governanceRepo = new SqliteGovernanceRepository(new StubEpochValidationService());
+        var governanceRepo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
         var handler = new ItsmWebhookHandler(new TestSecretProvider(secretBytes), governanceRepo, options, NullLogger<ItsmWebhookHandler>.Instance);
 
         var staleTimestamp = DateTimeOffset.UtcNow.AddMinutes(-15);
@@ -257,7 +257,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
             }
         });
 
-        var governanceRepo = new SqliteGovernanceRepository(new StubEpochValidationService());
+        var governanceRepo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
         var handler = new ItsmWebhookHandler(new TestSecretProvider(secretBytes), governanceRepo, options, NullLogger<ItsmWebhookHandler>.Instance);
 
         var futureTimestamp = DateTimeOffset.UtcNow.AddMinutes(10);
@@ -291,7 +291,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
             }
         });
 
-        var governanceRepo = new SqliteGovernanceRepository(new StubEpochValidationService());
+        var governanceRepo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
         var handler = new ItsmWebhookHandler(new TestSecretProvider(secretBytes), governanceRepo, options, NullLogger<ItsmWebhookHandler>.Instance);
 
         var oldTimestamp = DateTimeOffset.UtcNow.AddMinutes(-30);
@@ -371,7 +371,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
         {
             Mcp = new McpOptions { Enabled = true, RequirePiiMasking = true }
         });
-        var guardrail = new AiDataGuardrailService(registry, options, NullLogger<AiDataGuardrailService>.Instance);
+        var guardrail = new AiDataGuardrailService(registry, options, NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
 
         var session = new McpSessionContext("sess-pii", "agent-pii", "tenant-health", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         var request = new McpToolCallRequest("query_customers", "{}");
@@ -619,7 +619,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
     [Fact]
     public async Task SqliteGovernanceRepository_AuditTampering_ModifyingActorSid_BreaksHashChain()
     {
-        using var repo = new SqliteGovernanceRepository(new StubEpochValidationService());
+        using var repo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
 
         var entry1 = new AuditLogEntry
         {
@@ -653,7 +653,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
     [Fact]
     public async Task SqliteGovernanceRepository_AuditTampering_ModifyingDecision_BreaksHashChain()
     {
-        using var repo = new SqliteGovernanceRepository(new StubEpochValidationService());
+        using var repo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
 
         var entry1 = new AuditLogEntry
         {

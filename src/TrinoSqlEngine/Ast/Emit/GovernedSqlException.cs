@@ -20,6 +20,9 @@ public static class GovernedSqlErrorCodes
     public const string LimitExceeded = "SQL_LIMIT_EXCEEDED";
     public const string UnfilteredDml = "SQL_UNFILTERED_DML";
 
+    /// <summary>A masked column was used as an aggregate argument or grouping expression.</summary>
+    public const string AggregationOnMaskedColumn = "AGGREGATION_ON_MASKED_COLUMN";
+
     /// <summary>The statement uses an identifier with the reserved gateway prefix (a user error, 400; not a gateway defect).</summary>
     public const string ReservedIdentifier = "SQL_RESERVED_IDENTIFIER";
 
@@ -49,6 +52,7 @@ public static class GovernedSqlErrorCodes
         DialectNotSupported => "The statement is not supported for this data source dialect.",
         LimitExceeded => "The statement exceeds a resource limit.",
         UnfilteredDml => "UPDATE and DELETE statements require a restricting WHERE clause.",
+        AggregationOnMaskedColumn => "Masked columns cannot be aggregated or grouped.",
         ReservedIdentifier => "The statement uses an identifier that is reserved by the gateway.",
         PolicyDenied => "Access to a referenced table or column is denied.",
         PolicyViolation => "The SQL statement was rejected by the gateway security policy.",

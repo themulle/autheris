@@ -397,9 +397,10 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Application.Procedures.Services.StoredProcedureCatalogValidator", "catalog validation queries over the procedure definitions (metadata only)"),
         ("Autheris.Infrastructure.Persistence.Catalog.*", "column-metadata readers: fixed information_schema/PRAGMA queries of the governed catalog provider"),
         // -- persistence of the gateway's own governance store (its schema bootstrap and repositories) --
-        ("Autheris.Infrastructure.Persistence.SqliteGovernanceRepository", "governance store repository and schema bootstrap/migrations"),
+        ("Autheris.Infrastructure.Persistence.SqliteGovernanceRepository", "governance store repository"),
         ("Autheris.Infrastructure.Persistence.SqlServerGovernanceRepository", "governance store repository and schema bootstrap"),
         ("Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository", "governance store repository and schema bootstrap"),
+        ("Autheris.Infrastructure.Persistence.Migrations.*", "governance schema migrations (WP-ARC-B-12): fixed DDL and version-table statements, no client text"),
         ("Autheris.Infrastructure.Persistence.SqliteGovernanceLintSource", "read-only governance store reader of the pre-deploy policy lint"),
         ("Autheris.Infrastructure.Persistence.TenantRegistryStore", "tenant registry table of the governance store"),
         ("Autheris.Infrastructure.Persistence.VirtualFilterStore", "virtual filter table of the governance store"),

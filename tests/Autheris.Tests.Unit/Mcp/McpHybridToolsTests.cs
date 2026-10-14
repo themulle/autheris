@@ -399,36 +399,37 @@ public sealed class McpHybridToolsTests
         httpContextAccessor.HttpContext.Returns(httpContext);
         services.AddSingleton(httpContextAccessor);
 
-        var sp = services.BuildServiceProvider();
+        var provider = new McpResourceProvider(_catalogDiscoveryService, _apiDispatcherService);
+        var session = new McpSessionContext("s-1", "user-mcp", "tenant-test", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "user-mcp");
 
         // 1. autheris://catalog/summary
-        var summaryResult = await GatewayMcpServer.ReadNativeResourceAsync("autheris://catalog/summary", sp, CancellationToken.None);
+        var summaryResult = await GatewayMcpServer.ReadNativeResourceAsync("autheris://catalog/summary", provider, session, CancellationToken.None);
         summaryResult.Contents.ShouldNotBeEmpty();
         var summaryText = ((TextResourceContents)summaryResult.Contents[0]).Text;
         summaryText.ShouldContain("sales.public.orders");
 
         // 2. autheris://catalog/datasources
-        var dsResult = await GatewayMcpServer.ReadNativeResourceAsync("autheris://catalog/datasources", sp, CancellationToken.None);
+        var dsResult = await GatewayMcpServer.ReadNativeResourceAsync("autheris://catalog/datasources", provider, session, CancellationToken.None);
         dsResult.Contents.ShouldNotBeEmpty();
         var dsText = ((TextResourceContents)dsResult.Contents[0]).Text;
         dsText.ShouldContain("SalesDW");
 
         // 3. autheris://governance/my-access
-        var accessResult = await GatewayMcpServer.ReadNativeResourceAsync("autheris://governance/my-access", sp, CancellationToken.None);
+        var accessResult = await GatewayMcpServer.ReadNativeResourceAsync("autheris://governance/my-access", provider, session, CancellationToken.None);
         accessResult.Contents.ShouldNotBeEmpty();
         var accessText = ((TextResourceContents)accessResult.Contents[0]).Text;
         accessText.ShouldContain("user-mcp");
 
         // 4. autheris://api/openapi.json
-        var openApiResult = await GatewayMcpServer.ReadNativeResourceAsync("autheris://api/openapi.json", sp, CancellationToken.None);
+        var openApiResult = await GatewayMcpServer.ReadNativeResourceAsync("autheris://api/openapi.json", provider, session, CancellationToken.None);
         ((TextResourceContents)openApiResult.Contents[0]).Text.ShouldContain("3.1.0");
 
         // 5. autheris://api/docs/endpoints
-        var epDocResult = await GatewayMcpServer.ReadNativeResourceAsync("autheris://api/docs/endpoints", sp, CancellationToken.None);
+        var epDocResult = await GatewayMcpServer.ReadNativeResourceAsync("autheris://api/docs/endpoints", provider, session, CancellationToken.None);
         ((TextResourceContents)epDocResult.Contents[0]).Text.ShouldContain("/api/v1/data");
 
         // 6. autheris://api/docs/mcp-tools
-        var toolsDocResult = await GatewayMcpServer.ReadNativeResourceAsync("autheris://api/docs/mcp-tools", sp, CancellationToken.None);
+        var toolsDocResult = await GatewayMcpServer.ReadNativeResourceAsync("autheris://api/docs/mcp-tools", provider, session, CancellationToken.None);
         ((TextResourceContents)toolsDocResult.Contents[0]).Text.ShouldContain("query_sql");
     }
 

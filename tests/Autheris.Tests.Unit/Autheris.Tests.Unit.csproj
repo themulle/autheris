@@ -28,6 +28,7 @@
     <ProjectReference Include="..\..\src\Autheris.Infrastructure\Autheris.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Autheris.GraphQL\Autheris.GraphQL.csproj" />
     <ProjectReference Include="..\..\src\Autheris.Api\Autheris.Api.csproj" />
+    <ProjectReference Include="..\Autheris.Tests.Common\Autheris.Tests.Common.csproj" />
     <ProjectReference Include="..\..\src\Autheris.Extensions\Autheris.Extensions.csproj" />
     <ProjectReference Include="..\..\src\TrinoSqlEngine\TrinoSqlEngine.csproj" />
   </ItemGroup>

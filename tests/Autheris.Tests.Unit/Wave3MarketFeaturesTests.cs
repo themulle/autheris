@@ -199,8 +199,7 @@ public sealed class Wave3MarketFeaturesTests
             logger: NullLogger<AiDataGuardrailService>.Instance,
             queryExecutor: queryExecutor,
             tableMetadataRepository: metaRepo,
-            stepUpApprovalService: hitlService
-        );
+            stepUpApprovalService: hitlService, auditLogRepository: global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
 
         var sessionContext = new McpSessionContext("sess-1", "sp-agent", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "agent-bob");
         var request = new McpToolCallRequest("query_secret_data", "{}");

@@ -45,6 +45,10 @@ public static class GatewayRoleExtensions
         ["Analyst"] = GatewayRole.Consumer
     };
 
+    /// <summary>
+    /// Lenient parser: strips any tenant prefix (everything up to the last ':') before the lookup. Must NOT be used for authorization
+    /// decisions on raw claim values; use <see cref="TryParseGlobalRole"/> or <see cref="TryParseTenantScopedRole"/> instead.
+    /// </summary>
     public static bool TryParseRole(string? roleName, out GatewayRole role)
     {
         if (string.IsNullOrWhiteSpace(roleName))
@@ -58,6 +62,61 @@ public static class GatewayRoleExtensions
         var lookupName = colonIdx >= 0 ? roleName[(colonIdx + 1)..] : roleName;
 
         return NameToRole.TryGetValue(lookupName.Trim(), out role);
+    }
+
+    /// <summary>
+    /// Strict parser for a global role value: trims, rejects any value containing ':' and performs an exact name lookup (no prefix stripping).
+    /// </summary>
+    public static bool TryParseGlobalRole(string? roleName, out GatewayRole role)
+    {
+        role = default;
+        if (string.IsNullOrWhiteSpace(roleName))
+        {
+            return false;
+        }
+
+        var trimmed = roleName.Trim();
+        if (trimmed.Contains(':', StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return NameToRole.TryGetValue(trimmed, out role);
+    }
+
+    /// <summary>
+    /// Strict parser for a tenant-scoped role value "tenant:Role": requires exactly one ':' with a non-empty tenant part and an exactly
+    /// matching role name. Anything else (leading colon, multiple colons, empty parts) is rejected.
+    /// </summary>
+    public static bool TryParseTenantScopedRole(string? raw, out string tenant, out GatewayRole role)
+    {
+        tenant = string.Empty;
+        role = default;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        var colonIdx = raw.IndexOf(':', StringComparison.Ordinal);
+        if (colonIdx <= 0 || colonIdx != raw.LastIndexOf(':'))
+        {
+            return false;
+        }
+
+        var tenantPart = raw[..colonIdx].Trim();
+        var rolePart = raw[(colonIdx + 1)..].Trim();
+        if (tenantPart.Length == 0 || rolePart.Length == 0)
+        {
+            return false;
+        }
+
+        if (!NameToRole.TryGetValue(rolePart, out role))
+        {
+            return false;
+        }
+
+        tenant = tenantPart;
+        return true;
     }
 
     /// <summary>

@@ -493,9 +493,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         }
 
         if (context.IsBound && BindLiterals
-#if DEBUG
-            && !(lit.Type == LiteralType.String && CompilerTestSeams.IsDisabled(SecurityControl.UnboundStringLiteral))
-#endif
+            && !(lit.Type == LiteralType.String && CompilerHooks.IsDisabled(SecurityControl.UnboundStringLiteral))
             )
         {
             FormatBoundLiteral(ref builder, lit, context);

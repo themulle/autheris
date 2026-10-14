@@ -127,7 +127,15 @@ If the Redis cluster becomes unavailable:
 - The gateway automatically falls back to L1 local `IMemoryCache`.
 - Epoch validation queries the database directly with brief local caching.
 - Queries continue executing without dropping client requests or returning 500 errors.
-- **Token revocations are only enforced locally on the node that received them while Redis is down** (revocations issued on other nodes are not visible). Treat a Redis outage as degraded security for token revocation and restore Redis quickly; with PostgreSQL and several replicas Redis is required (startup check), so an outage affects all nodes the same way.
+- **Token revocation fails closed by default outside Development** (`Caching:Redis:FailClosedOnRevocationLookupError`, unset = `true` outside Development, `false` in Development). When the Redis revocation lookup fails and the token is not revoked locally, HTTP requests are answered with `503` (`Retry-After: 5`, error code `TOKEN_REVOCATION_UNAVAILABLE`), new WebSocket connections are rejected, and open subscriptions and WebSocket sessions are closed. Tokens issued less than `Caching:Redis:RevocationLookupGraceSeconds` (default 60, range 0 to 3600, 0 disables) ago are still accepted because they cannot have been revoked on another node before the outage began. Revocations known to the local node are always enforced. The failures are counted in `autheris_token_revocation_lookup_failures_total{outcome=fail_closed|grace|fail_open}`.
+- **Availability-over-security escape hatch:** set `Caching:Redis:FailClosedOnRevocationLookupError = false` (Helm: `gateway.redis.failClosedOnRevocationLookupError: false`). Revocations issued on other nodes are then not visible while Redis is down and authenticated traffic keeps being served; treat that as degraded security and restore Redis quickly. With PostgreSQL and several replicas Redis is required (startup check), so an outage affects all nodes the same way. Single-node deployments without Redis use the in-memory revocation service and are unaffected.
+
+### 3.1.1 Cluster State Contract (absent vs unavailable)
+The shared cluster state (`IDistributedClusterStateProvider`) distinguishes "key absent" from "store unavailable":
+- A read of a missing key returns no value. An infrastructure failure (connection loss, timeout, Redis error) throws `ClusterStateUnavailableException` for reads, writes, deletes, event publishing and lock acquisition. A `null` lock lease only ever means "lock busy". Counters return `null` and budgets return `StoreUnavailable` when the store cannot be reached.
+- Consumers decide explicitly: TOTP secret reads and TOTP replay consumption fail closed (a valid code is rejected while the store is down), MCP session reads and HitL ticket reads treat the remote entry as not found, HitL locks honour `HitLStepUp:FailClosedOnClusterPartition`, FinOps budget enforcement fails closed, federation nonce replay checks reject requests when the topology is cluster-wide. Background singletons (catalog sync, CDC, ITSM) skip the cycle.
+- Every store failure increments `autheris_cluster_state_failure_total{operation}`; failed event handlers increment `autheris_cluster_state_handler_failure_total`. Alert on a sustained rate of the first.
+- The embedded Garnet server is process-local. Startup fails when `HighAvailability:MultiNodeClusterMode` is set or `HighAvailability:Replicas` is greater than 1 while `Caching:Garnet:EnableEmbeddedServer` is true (also when `Caching:Redis:Enabled` is true as well, because the embedded server takes precedence). Use an external Redis/Garnet for multi-replica deployments.
 
 ### 3.2 Recovery
 Once Redis connectivity is restored:
@@ -226,6 +234,13 @@ The monthly FinOps budget is enforced against a cluster-wide counter in the shar
 - `Audit:ChainAnchorSignerKeyVaultRef`: Key Vault/KMS reference of a PEM (PKCS#8) ECDSA or RSA private key. Every anchor then also carries an asymmetric signature (`ExternalSignature`) and an anchor without a valid one is rejected (fail-closed). Verify-only replicas can use `Audit:ChainAnchorVerifyKeyVaultRef` (public key). Register a custom `IAuditAnchorSigner` in DI to sign through a remote KMS/HSM so the private key never leaves it.
 - Anchors are advanced only after the audit transaction commits, so an append-only anchor can never be ahead of the database.
 - `Audit:SynchronousQueryAudit=true` commits query audit events before the request is answered (no loss window on a crash, lower throughput). Otherwise they travel through an in-memory channel of `Audit:QueryAuditChannelCapacity` entries (default 5000), the maximum a hard crash can lose; a graceful shutdown drains it.
+
+### 4.ac Governance schema migrations (WP-ARC-B-12)
+
+- The governance schema is versioned in `autheris_schema_migrations`. The first start of a new build applies pending migrations under the cross-replica schema lock; later replicas find nothing to do. Existing databases upgrade in place.
+- Startup fails closed (the host does not serve) when a migration fails, when a stored checksum differs from the build (`GovernanceSchemaDriftException`), when the database is newer than the build, or, in `Verify` mode, while migrations are pending. Read the critical log entry `Governance database migration or initialization failed` and the inner exception.
+- Separate pipelines: set `GovernanceDb:Migrations:Mode=Verify` on the application and run `Autheris.Api --migrate-governance` as a pre-deployment job (with `GovernanceDb:MigrationConnectionString` for a DDL-capable role). The command exits `0` on success and `1` on failure.
+- Migrations are forward-only. Rolling back to an older build means restoring a database backup taken before the upgrade; an older build refuses to start against a newer schema unless `GovernanceDb:Migrations:AllowNewerSchema=true`.
 
 ---
 
@@ -373,10 +388,12 @@ For high-throughput environments, configure ASP.NET Core Kestrel limits in `apps
   "Hosting": {
     "MaxRequestBodySizeBytes": 2097152,
     "MaxConcurrentConnections": 10000,
-    "MaxConcurrentUpgradedConnections": 2000
+    "MaxConcurrentUpgradedConnections": 2000,
+    "AllowedHosts": [ "gateway.corp.example" ]
   }
 }
 ```
+* **Host allow-list (`Gateway:Hosting:AllowedHosts`):** Required outside Development; the gateway refuses to start when the list is empty or contains the bare wildcard `*`. Entries are an exact host (`gateway.corp.example`), `host:port` (that port only) or `*.suffix` (sub-domains only). The `Host` header (the forwarded host when `Gateway:ReverseProxy:Enabled` is true) must match an entry, otherwise the request is answered with `400`. `/health*` is exempt so probes that send the pod IP as `Host` keep working. The CSRF `Origin`/`Referer` check uses the same list (in addition to `Gateway:GraphQL:TrustedOrigins`); `Origin == Host` alone is not trusted. In Development an empty list accepts loopback names only (`localhost`, `127.0.0.1`, `[::1]`, `*.localhost`); other host names such as a compose service name must be listed. Helm: `gateway.allowedHosts` (defaults to the ingress hosts); environment variable form: `Gateway__Hosting__AllowedHosts__0`.
 * **Garbage Collection:** Ensure Server GC is enabled in container runtime (`DOTNET_gcServer=1`).
 * **Connection Pooling:** Set upstream database `MaxPoolSize` according to pod replica count to avoid exhausting database connection pools (`MaxPoolSize=100` per pod on typical setups).
 * **Redis Sizing:** Maintain an active connection pool with `abortConnect=false` and keep-alive pings enabled; L2 policy cache size rarely exceeds 200 MB even with 50,000 active consents.

@@ -39,7 +39,7 @@ public sealed class SqlServerTenantRegistryContractTests : IAsyncLifetime
     {
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
-        return new SqlServerGovernanceRepository(Substitute.For<IEpochValidationService>(), Options.Create(new GatewayOptions
+        return GovernanceStoreFactory.CreateSqlServer(Substitute.For<IEpochValidationService>(), Options.Create(new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions { Provider = "SqlServer", ConnectionString = _db!.ConnectionString, EnableOutboxProcessor = false, SeedDemoData = false }
         }), env);

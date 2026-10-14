@@ -70,7 +70,7 @@ public static class GatewayStorageServiceExtensions
             services.AddSingleton<IRateLimiterService, RedisRateLimiterService>();
             services.AddSingleton<IIdempotencyStore, RedisIdempotencyStore>();
             services.AddSingleton<ITokenRevocationService, RedisTokenRevocationService>(); // SEC M-14 (GAP-B)
-            services.AddSingleton<IDistributedClusterStateProvider, Autheris.Infrastructure.State.RedisClusterStateProvider>();
+            services.AddClusterState(ClusterStateMode.Embedded);
         }
         else if (gatewayOptions.Caching.Redis.Enabled)
         {
@@ -84,7 +84,7 @@ public static class GatewayStorageServiceExtensions
             services.AddSingleton<IRateLimiterService, RedisRateLimiterService>();
             services.AddSingleton<IIdempotencyStore, RedisIdempotencyStore>();
             services.AddSingleton<ITokenRevocationService, RedisTokenRevocationService>(); // SEC M-14 (GAP-B)
-            services.AddSingleton<IDistributedClusterStateProvider, Autheris.Infrastructure.State.RedisClusterStateProvider>();
+            services.AddClusterState(ClusterStateMode.External);
         }
         else
         {
@@ -92,7 +92,7 @@ public static class GatewayStorageServiceExtensions
             services.AddSingleton<IRateLimiterService, InMemoryRateLimiterService>();
             services.AddSingleton<IIdempotencyStore, InMemoryIdempotencyStore>();
             services.AddSingleton<ITokenRevocationService, InMemoryTokenRevocationService>(); // SEC M-14 (GAP-B)
-            services.AddSingleton<IDistributedClusterStateProvider, InMemoryClusterStateProvider>();
+            services.AddClusterState(ClusterStateMode.InMemory);
         }
 
         var isDev = environment?.IsDevelopment() ?? false;

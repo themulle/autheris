@@ -26,7 +26,7 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     private static readonly VirtualFilterActor Admin = new(new Sid("S-1-5-21-ADMIN"), IsSync: false);
     private static readonly VirtualFilterActor Sync = new(new Sid("S-1-5-21-TALOS"), IsSync: true);
 
-    private readonly SqliteGovernanceRepository _repository = new(
+    private readonly SqliteGovernanceRepository _repository = GovernanceStoreFactory.CreateSqlite(
         Substitute.For<IEpochValidationService>(),
         Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=vfs_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" } }));
 

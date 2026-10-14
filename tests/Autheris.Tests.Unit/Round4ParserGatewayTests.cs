@@ -132,8 +132,8 @@ public sealed class Round4ParserGatewayTests
                 hasUnconstrainedColumnAllow: true));
 
         return new GovernedSqlExecutionService(
-            Options.Create(options), executionGuard: GovernedTestSupport.Guard,
-            policyEnforcement: null,
+            Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
+            policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             consentResolution: consentResolution,
             tableRepository: repository, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repository), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: connectionFactory,

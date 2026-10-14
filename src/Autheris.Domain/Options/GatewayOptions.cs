@@ -379,12 +379,18 @@ public sealed class HostingLimitsOptions
     [Range(1, 1000000)] public long MaxConcurrentUpgradedConnections { get; init; } = 1000;
     /// <summary>0 = unlimited (Kestrel default).</summary>
     [Range(0, 10000000)] public long MaxConcurrentConnections { get; init; } = 0;
+
+    /// <summary>
+    /// SR-L-02: accepted <c>Host</c> values (exact host, <c>host:port</c>, <c>*.suffix</c>). Required outside Development
+    /// (startup fails when empty); in Development an empty list accepts loopback host names only.
+    /// Also the allow-list for the CSRF Origin check.
+    /// </summary>
+    public List<string> AllowedHosts { get; init; } = [];
 }
 
 public sealed class PluginsOptions
 {
     public string Directory { get; init; } = "plugins";
-    public bool EnableHotReload { get; init; } = false;
     public bool RequireIntegrityManifest { get; init; } = false;
     public Dictionary<string, string> TrustedPluginHashes { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 }
@@ -648,6 +654,32 @@ public sealed class GovernanceDbOptions
     /// shared memory (-shm) is broken, configure DELETE or TRUNCATE to avoid database disk image corruption.
     /// </summary>
     public string JournalMode { get; init; } = "WAL";
+
+    /// <summary>WP-ARC-B-12: versioned governance schema migrations (<c>GovernanceDb:Migrations</c>).</summary>
+    public GovernanceMigrationOptions Migrations { get; init; } = new();
+}
+
+/// <summary>How the governance schema migrations are handled at startup.</summary>
+public enum GovernanceMigrationMode
+{
+    /// <summary>Apply pending migrations under the schema lock (default). Startup fails when a migration fails.</summary>
+    Apply = 0,
+
+    /// <summary>Do not change the schema; startup fails when migrations are pending (a separate pipeline migrates).</summary>
+    Verify = 1,
+
+    /// <summary>Do not inspect or change the schema. Rejected outside Development/Test.</summary>
+    Skip = 2
+}
+
+public sealed class GovernanceMigrationOptions
+{
+    public GovernanceMigrationMode Mode { get; init; } = GovernanceMigrationMode.Apply;
+
+    /// <summary>
+    /// When false (default) startup fails if the database contains migrations newer than this binary (database newer than code).
+    /// </summary>
+    public bool AllowNewerSchema { get; init; }
 }
 
 public sealed class CachingOptions
@@ -737,6 +769,23 @@ public sealed class RedisOptions
     public string InvalidationChannel { get; init; } = "consent:invalidations";
     [Range(100, 10000)] public int ConnectTimeoutMs { get; init; } = 2000;
     [Range(100, 10000)] public int SyncTimeoutMs { get; init; } = 1000;
+
+    /// <summary>
+    /// SR-L-10: when the Redis revocation lookup fails (Redis unreachable or a lookup faults) and the token is not
+    /// revoked locally, deny the request (HTTP 503) instead of accepting it. <c>null</c> (default) resolves to
+    /// <c>true</c> outside Development and <c>false</c> in Development. Set <c>false</c> explicitly to prefer
+    /// availability over security during Redis outages.
+    /// </summary>
+    public bool? FailClosedOnRevocationLookupError { get; init; }
+
+    /// <summary>
+    /// SR-L-10: with the fail-closed policy active, a token issued less than this many seconds ago is still accepted
+    /// when the lookup fails (it cannot have been revoked on another node before the outage began). 0 disables the grace.
+    /// </summary>
+    [Range(0, 3600)] public int RevocationLookupGraceSeconds { get; init; } = 60;
+
+    /// <summary>Resolves <see cref="FailClosedOnRevocationLookupError"/> for the given environment.</summary>
+    public bool ResolveFailClosedOnRevocationLookupError(bool isDevelopment) => FailClosedOnRevocationLookupError ?? !isDevelopment;
 
     /// <summary>
     /// SEC H-01: Secret-Referenz für das Redis-Passwort (außerhalb Development Pflicht, falls nicht im Verbindungsstring).
@@ -1404,7 +1453,6 @@ public sealed class ExtensibilityOptions
 
     public string JustificationHeaderName { get; init; } = "X-Access-Justification";
     public string BreakGlassHeaderName { get; init; } = "X-Break-Glass";
-    public string PluginDirectory { get; init; } = "plugins";
 }
 
 public sealed class CasbinOptions

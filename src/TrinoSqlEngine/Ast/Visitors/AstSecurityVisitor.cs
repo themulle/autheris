@@ -34,9 +34,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     /// <summary>CTE names are compared by ordinal bytes: a delimited physical name that differs in case is not the CTE (INV-11).</summary>
     private static StringComparer CteScopeComparer =>
-#if DEBUG
-        CompilerTestSeams.IsDisabled(SecurityControl.CteCaseInsensitiveScope) ? StringComparer.OrdinalIgnoreCase :
-#endif
+        CompilerHooks.IsDisabled(SecurityControl.CteCaseInsensitiveScope) ? StringComparer.OrdinalIgnoreCase :
         StringComparer.Ordinal;
 
     // CR-ADG-32: names of non-recursive CTEs whose body is being visited; a reference to one of them (not shadowed) is a self-reference.
@@ -212,6 +210,9 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
             CheckJoinConditions(node.From, tables);
         }
+
+        EnsureNoMaskedColumnsInAggregatesAndGrouping(node);
+        EnsureNoWholeRowReferencesInProjections(node);
 
         return base.VisitQuerySpecification(node);
     }

@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.ConsentRequests;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -60,7 +61,7 @@ public sealed class MutationTenantRGql9Tests
     {
         var (metadata, approvals, created) = Repositories();
 
-        await new Mutation().RequestTableAccessAsync("hr", "dbo", "salaries", "Quarterly audit", 7, null, metadata, approvals, Context("tenant-a", "tenant-b", "ClusterAdmin"));
+        await new Mutation().RequestTableAccessAsync("hr", "dbo", "salaries", "Quarterly audit", 7, null, new ConsentRequestService(metadata, approvals), Context("tenant-a", "tenant-b", "ClusterAdmin"));
 
         created.ShouldHaveSingleItem().TenantId.ShouldBe(new TenantId("tenant-b"));
     }
@@ -71,7 +72,7 @@ public sealed class MutationTenantRGql9Tests
         var (metadata, approvals, _) = Repositories();
 
         var ex = await Should.ThrowAsync<GraphQLException>(() =>
-            new Mutation().RequestTableAccessAsync("hr", "dbo", "salaries", "Quarterly audit", 7, null, metadata, approvals, Context("tenant-a", "tenant-b")));
+            new Mutation().RequestTableAccessAsync("hr", "dbo", "salaries", "Quarterly audit", 7, null, new ConsentRequestService(metadata, approvals), Context("tenant-a", "tenant-b")));
 
         ex.Errors[0].Code.ShouldBe("FORBIDDEN");
     }
@@ -83,12 +84,13 @@ public sealed class MutationTenantRGql9Tests
         var store = new MemoryIdempotencyStore();
         var context = Context("tenant-a", "tenant-a");
 
-        var first = await new Mutation().RequestTableAccessAsync("hr", "dbo", "salaries", "Quarterly audit", 7, "key-1", metadata, approvals, context, store);
-        var replay = await new Mutation().RequestTableAccessAsync("hr", "dbo", "salaries", "Quarterly audit", 7, "key-1", metadata, approvals, context, store);
-        var other = await new Mutation().RequestTableAccessAsync("hr", "dbo", "bonuses", "Quarterly audit", 7, "key-1", metadata, approvals, context, store);
+        var first = await new Mutation().RequestTableAccessAsync("hr", "dbo", "salaries", "Quarterly audit", 7, "key-1", new ConsentRequestService(metadata, approvals, store), context);
+        var replay = await new Mutation().RequestTableAccessAsync("hr", "dbo", "salaries", "Quarterly audit", 7, "key-1", new ConsentRequestService(metadata, approvals, store), context);
+        var other = await new Mutation().RequestTableAccessAsync("hr", "dbo", "bonuses", "Quarterly audit", 7, "key-1", new ConsentRequestService(metadata, approvals, store), context);
 
         created.Count.ShouldBe(2);
-        replay.ShouldBe(first);
-        other.ShouldNotBe(first);
+        replay.RequestId.ShouldBe(first.RequestId);
+        replay.Status.ShouldBe(first.Status);
+        other.RequestId.ShouldNotBe(first.RequestId);
     }
 }

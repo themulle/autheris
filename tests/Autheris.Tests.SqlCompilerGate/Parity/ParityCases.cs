@@ -238,8 +238,10 @@ public static class ParityCases
             {
                 TenantId = new TenantId("tenant_gate"), Name = "gate_filter", Source = "gate", Sql = sql(ctx)
             }, [Catalogued(ctx, Customers)]);
-            var legacy = SqlFilterCompiler.Compile(filter, ctx.Database);
-            var typed = SqlFilterCompiler.CompileTyped(filter, ctx.Database, new FastSqlEngine());
+            // SR-L-11: every tenanted source table is bound to the caller's tenant through the reserved value.
+            var tenant = new VirtualFilterTenantContext(GateModel.TenantA, _ => GateModel.TenantColumn);
+            var legacy = SqlFilterCompiler.Compile(filter, ctx.Database, tenant);
+            var typed = SqlFilterCompiler.CompileTyped(filter, ctx.Database, new FastSqlEngine(), tenant: tenant);
             var rendered = new PolicyPredicateRenderer().Render(typed, PolicyParameterNamer.ToTargetDialect(ctx.Database), RowFilterAliases.Target);
             return new ProducedPair(FilterText.Plain(legacy), new FilterText(rendered.Sql, rendered.Parameters));
         }, reference);
@@ -273,19 +275,19 @@ public static class ParityCases
     private static IEnumerable<ParityCase> VirtualFilterCases()
     {
         yield return SqlVirtualFilter("vf-sql.eq-literal", "sql filter, string literal",
-            ctx => $"from {ctx.Schema}.customers c where target.customer_id = c.id and c.tenant_id = target.tenant_id and c.region = 'EU'",
+            ctx => $"from {ctx.Schema}.customers c where target.customer_id = c.id and c.tenant_id = '{{{{tenant}}}}' and c.region = 'EU'",
             row => CustomerOf(row, c => Text(c, "region") == "EU"));
         yield return SqlVirtualFilter("vf-sql.hostile-literal", "sql filter, hostile literal",
-            ctx => $"from {ctx.Schema}.customers c where target.customer_id = c.id and c.tenant_id = target.tenant_id and c.name = 'x'' OR ''1''=''1'",
+            ctx => $"from {ctx.Schema}.customers c where target.customer_id = c.id and c.tenant_id = '{{{{tenant}}}}' and c.name = 'x'' OR ''1''=''1'",
             _ => false);
         yield return SqlVirtualFilter("vf-sql.number-in", "sql filter, number and IN list",
-            ctx => $"from {ctx.Schema}.customers c where target.customer_id = c.id and c.tenant_id = target.tenant_id and c.id >= 2 and c.region in ('EU', 'XX')",
+            ctx => $"from {ctx.Schema}.customers c where target.customer_id = c.id and c.tenant_id = '{{{{tenant}}}}' and c.id >= 2 and c.region in ('EU', 'XX')",
             row => CustomerOf(row, c => Number(c, "id") >= 2 && Text(c, "region") == "EU"));
         yield return SqlVirtualFilter("vf-sql.or-precedence", "sql filter, OR inside AND",
-            ctx => $"from {ctx.Schema}.customers c where c.tenant_id = target.tenant_id and ((target.customer_id = c.id and c.id = 1) or (target.customer_id = c.id and c.id = 2)) and c.region = 'EU'",
+            ctx => $"from {ctx.Schema}.customers c where c.tenant_id = '{{{{tenant}}}}' and ((target.customer_id = c.id and c.id = 1) or (target.customer_id = c.id and c.id = 2)) and c.region = 'EU'",
             row => CustomerOf(row, c => (Number(c, "id") == 1 || Number(c, "id") == 2) && Text(c, "region") == "EU"));
         yield return SqlVirtualFilter("vf-sql.like", "sql filter, LIKE",
-            ctx => $"from {ctx.Schema}.customers c where target.customer_id = c.id and c.tenant_id = target.tenant_id and c.name like 'customers-A-%'",
+            ctx => $"from {ctx.Schema}.customers c where target.customer_id = c.id and c.tenant_id = '{{{{tenant}}}}' and c.name like 'customers-A-%'",
             row => CustomerOf(row, c => Text(c, "name").StartsWith("customers-A-", StringComparison.Ordinal)));
         yield return StructuredVirtualFilter("vf-structured.eq", "structured filter, equality",
             ctx => Structured(ctx, new FilterCondition("c.region", FilterConditionOperator.Eq, "EU")),
