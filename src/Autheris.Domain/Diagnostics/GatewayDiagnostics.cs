@@ -16,6 +16,14 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> ForbiddenRequestsCounter =
         Meter.CreateCounter<long>("autheris_forbidden_requests_total", description: "Anzahl abgewiesener Anfragen (403/Forbidden)");
 
+    /// <summary>R-3: a Redis event-bus publish failed (tag <c>message_type</c> only: channel names can carry tenant ids).</summary>
+    public static readonly Counter<long> EventBusPublishFailedCounter =
+        Meter.CreateCounter<long>("autheris_event_bus_publish_failed_total", description: "Redis event bus publishes that failed and were rethrown");
+
+    /// <summary>R-3: a Redis event-bus subscriber handler (or message deserialization) failed.</summary>
+    public static readonly Counter<long> EventBusHandlerFailedCounter =
+        Meter.CreateCounter<long>("autheris_event_bus_handler_failed_total", description: "Redis event bus subscriber handlers that failed");
+
     public static readonly Counter<long> UnroutedRequestCounter =
         Meter.CreateCounter<long>("autheris_unrouted_requests_total", description: "Requests answered by the router without a matching endpoint (404/405/400); not written to the audit chain");
 
