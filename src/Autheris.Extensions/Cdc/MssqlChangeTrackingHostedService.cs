@@ -8,6 +8,7 @@ using Autheris.Application.Hosting;
 using Autheris.Application.State;
 using Autheris.Application.Streaming.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -25,10 +26,24 @@ public sealed class MssqlChangeTrackingHostedService(
     IServiceScopeFactory scopeFactory,
     IOptionsMonitor<GatewayOptions> options,
     IDistributedClusterStateProvider clusterState,
+    IMssqlWatermarkStore watermarkStore,
+    IHostEnvironment environment,
     ILogger<MssqlChangeTrackingHostedService> logger,
     TimeProvider? timeProvider = null)
     : ClusterScheduledService<MssqlChangeTrackingPollJob>(scopeFactory, clusterState, logger, timeProvider)
 {
+    public override Task StartAsync(CancellationToken cancellationToken)
+    {
+        // A watermark lost on restart would replay or skip changes; only Development may run without a durable store.
+        if (options.CurrentValue.MssqlChangeTracking.Enabled && !watermarkStore.IsDurable && !environment.IsDevelopment())
+        {
+            throw new InvalidOperationException(
+                "MSSQL Change Tracking requires a durable watermark store outside Development (the governance database store is registered by the host).");
+        }
+
+        return base.StartAsync(cancellationToken);
+    }
+
     protected override string LeaseKey => "cdc:mssql:poll";
 
     protected override ClusterSchedule GetSchedule()
@@ -94,7 +109,7 @@ public sealed class MssqlChangeTrackingPollJob(
 
             try
             {
-                var processed = await poller.PollTableChangesAsync(table, ct).ConfigureAwait(false);
+                var processed = await poller.PollTableChangesAsync(table, context.FencingToken, ct).ConfigureAwait(false);
                 if (processed > 0)
                 {
                     logger.LogDebug("Polled and dispatched {Count} CDC changes for table {Table}.", processed, table);

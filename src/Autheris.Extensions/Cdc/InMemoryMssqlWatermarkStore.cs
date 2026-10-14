@@ -1,31 +1,50 @@
 namespace Autheris.Extensions.Cdc;
 
-using System.Collections.Concurrent;
+using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Common;
-using Autheris.Application.Interfaces;
-using Autheris.Domain.Interfaces;
-using Autheris.Domain.Model;
-using Autheris.Domain.Options;
 
 /// <summary>
-/// In-memory thread-safe implementation of IMssqlWatermarkStore.
+/// In-memory thread-safe implementation of <see cref="IMssqlWatermarkStore"/> with the same fencing semantics as the durable
+/// store. Not durable and therefore not registered by the host; kept for tests.
 /// </summary>
 public sealed class InMemoryMssqlWatermarkStore : IMssqlWatermarkStore
 {
-    private readonly ConcurrentDictionary<TableIdentifier, long> _watermarks = new();
+    private readonly object _gate = new();
+    private readonly Dictionary<TableIdentifier, (long Watermark, long Token)> _state = [];
 
-    public ValueTask<long> GetWatermarkAsync(TableIdentifier table, CancellationToken ct = default)
+    public bool IsDurable => false;
+
+    public ValueTask<long?> GetWatermarkAsync(TableIdentifier table, CancellationToken ct = default)
     {
-        _watermarks.TryGetValue(table, out var version);
-        return ValueTask.FromResult(version);
+        lock (_gate)
+        {
+            return ValueTask.FromResult<long?>(_state.TryGetValue(table, out var entry) ? entry.Watermark : null);
+        }
     }
 
-    public ValueTask SetWatermarkAsync(TableIdentifier table, long watermark, CancellationToken ct = default)
+    public ValueTask<bool> TryAdvanceWatermarkAsync(TableIdentifier table, long watermark, long fencingToken, CancellationToken ct = default)
     {
-        _watermarks.AddOrUpdate(table, watermark, (_, existing) => System.Math.Max(existing, watermark));
-        return ValueTask.CompletedTask;
+        lock (_gate)
+        {
+            if (_state.TryGetValue(table, out var existing))
+            {
+                if (fencingToken < existing.Token)
+                {
+                    return ValueTask.FromResult(false);
+                }
+
+                _state[table] = (Math.Max(existing.Watermark, watermark), fencingToken);
+            }
+            else
+            {
+                _state[table] = (watermark, fencingToken);
+            }
+
+            return ValueTask.FromResult(true);
+        }
     }
 }

@@ -96,7 +96,7 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
         }
     }
 
-    public async Task<int> PollTableChangesAsync(TableIdentifier table, CancellationToken ct = default)
+    public async Task<int> PollTableChangesAsync(TableIdentifier table, long fencingToken, CancellationToken ct = default)
     {
         ValidateSqlIdentifier(table.Schema, nameof(table.Schema));
         ValidateSqlIdentifier(table.TableName, nameof(table.TableName));
@@ -110,7 +110,7 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
         var rawBatch = _gatewayOptions.Value.MssqlChangeTracking.BatchSize <= 0 ? 500 : _gatewayOptions.Value.MssqlChangeTracking.BatchSize;
         var batchSize = Math.Clamp(rawBatch, 1, 5000);
 
-        var lastVersion = await _watermarkStore.GetWatermarkAsync(table, ct).ConfigureAwait(false);
+        var lastVersion = await _watermarkStore.GetWatermarkAsync(table, ct).ConfigureAwait(false) ?? 0;
 
         try
         {
@@ -244,7 +244,10 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
 
             if (maxVersion > lastVersion)
             {
-                await _watermarkStore.SetWatermarkAsync(table, maxVersion, ct).ConfigureAwait(false);
+                if (!await _watermarkStore.TryAdvanceWatermarkAsync(table, maxVersion, fencingToken, ct).ConfigureAwait(false))
+                {
+                    throw new Autheris.Application.State.FencingTokenRejectedException($"{table.Domain}.{table.Schema}.{table.TableName}", fencingToken);
+                }
             }
 
             return eventsProcessed;

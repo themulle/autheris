@@ -82,6 +82,13 @@ public sealed class BackgroundServiceLockTests
         }
     }
 
+    internal static IHostEnvironment DevelopmentEnvironment()
+    {
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Development");
+        return env;
+    }
+
     private static IOptionsMonitor<GatewayOptions> Monitor(GatewayOptions options) => new StaticOptionsMonitor<GatewayOptions>(options);
 
     private static GatewayOptions CdcOptions() => new()
@@ -98,7 +105,7 @@ public sealed class BackgroundServiceLockTests
         IDistributedClusterStateProvider clusterState, FakeTimeProvider time)
     {
         var poller = Substitute.For<IMssqlChangeTrackingPoller>();
-        poller.PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+        poller.PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(1));
         var services = new ServiceCollection();
         services.AddSingleton(poller);
@@ -110,6 +117,8 @@ public sealed class BackgroundServiceLockTests
             sp.GetRequiredService<IServiceScopeFactory>(),
             Monitor(CdcOptions()),
             clusterState,
+            new InMemoryMssqlWatermarkStore(),
+            DevelopmentEnvironment(),
             NullLogger<MssqlChangeTrackingHostedService>.Instance,
             time);
         return (service, poller);
@@ -123,7 +132,8 @@ public sealed class BackgroundServiceLockTests
 
         await RunAsync(service, time, TimeSpan.FromSeconds(2));
 
-        await poller.Received().PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>());
+        // The lease's fencing token must reach the poller.
+        await poller.Received().PollTableChangesAsync(Arg.Any<TableIdentifier>(), 7, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -134,7 +144,7 @@ public sealed class BackgroundServiceLockTests
 
         await RunAsync(service, time, TimeSpan.FromSeconds(2));
 
-        await poller.DidNotReceive().PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>());
+        await poller.DidNotReceive().PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<long>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -148,7 +158,7 @@ public sealed class BackgroundServiceLockTests
 
         await RunAsync(service, time, TimeSpan.FromSeconds(2));
 
-        await poller.DidNotReceive().PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>());
+        await poller.DidNotReceive().PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<long>(), Arg.Any<CancellationToken>());
         service.ExecuteTask!.IsFaulted.ShouldBeFalse();
     }
 

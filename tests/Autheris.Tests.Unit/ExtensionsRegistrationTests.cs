@@ -87,6 +87,19 @@ public sealed class ExtensionsRegistrationTests
     }
 
     [Fact]
+    public void EXT_Extensions_RegisterNoWatermarkStore_TheHostProvidesTheDurableOne()
+    {
+        var options = new GatewayOptions();
+        var extensionsOnly = new ServiceCollection();
+        extensionsOnly.AddGatewayExtensions(options);
+        extensionsOnly.Count(d => d.ServiceType == typeof(IMssqlWatermarkStore)).ShouldBe(0);
+
+        var host = CreateServices(options).Where(d => d.ServiceType == typeof(IMssqlWatermarkStore)).ToList();
+        host.Count.ShouldBe(1);
+        host[0].ImplementationType.ShouldBe(typeof(Autheris.Infrastructure.Streaming.GovernanceDbMssqlWatermarkStore));
+    }
+
+    [Fact]
     public void EXT_ConnectorInterfaces_HaveExactlyOneImplementation_InExtensionsAssembly()
     {
         var services = CreateServices(new GatewayOptions());
@@ -98,8 +111,7 @@ public sealed class ExtensionsRegistrationTests
             typeof(IDataCatalogWebhookHandler),
             typeof(IItsmWebhookHandler),
             typeof(IBackstageCatalogExportService),
-            typeof(IMssqlChangeTrackingPoller),
-            typeof(IMssqlWatermarkStore)
+            typeof(IMssqlChangeTrackingPoller)
         ];
 
         foreach (var serviceType in typeBasedServices)
