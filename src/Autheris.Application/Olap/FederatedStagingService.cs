@@ -83,6 +83,11 @@ public sealed class FederatedStagingService : IFederatedStagingService
                 throw new GatewaySecurityException($"Access denied to table '{req.Metadata.Identifier}'.", "TABLE_DENIED");
             }
 
+            // SR-H-06: tenant/global data-source allowlists apply to every staged table before any read.
+            Autheris.Application.Sql.Services.DataSourceAllowlistGuard.EnsureAllowed(
+                _gatewayOptions.Value.WebSql ?? new WebSqlOptions(), tenantId,
+                req.Metadata.Identifier.Domain);
+
             // HTTP descriptor checks (E-3, INV-8)
             if (req.Metadata.Table.DataSourceType == DataSourceType.HttpDeclarative &&
                 req.Metadata.HttpEndpoint != null)

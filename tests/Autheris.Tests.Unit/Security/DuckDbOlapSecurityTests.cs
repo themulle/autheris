@@ -456,6 +456,7 @@ public sealed class DuckDbOlapSecurityTests
 
         var options = Options.Create(new GatewayOptions
         {
+            WebSql = new WebSqlOptions { AllowedDataSources = ["sales"] },
             DuckDbOlap = new DuckDbOlapOptions { Enabled = true, MaxStagedRowsPerTable = 10 }
         });
         var engine = Substitute.For<IDuckDbOlapEngine>();
