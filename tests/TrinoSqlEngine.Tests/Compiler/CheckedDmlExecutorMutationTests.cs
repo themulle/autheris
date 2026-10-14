@@ -437,11 +437,10 @@ public class CheckedDmlExecutorMutationTests
         Assert.Equal(0, posts);
     }
 
-#if DEBUG
     [Fact]
     public void TheCommitBeforeEnforceSeamPath_DoesNotResumeOnTheCallersContext()
     {
-        using var seam = CompilerTestSeams.Use(new CompilerTestSeams
+        using var seam = CompilerHooks.Use(new MutantHooks
         {
             DisabledControls = new HashSet<SecurityControl> { SecurityControl.CheckedDmlCommitBeforeEnforce, SecurityControl.CheckedDmlRowCount }
         });
@@ -457,7 +456,7 @@ public class CheckedDmlExecutorMutationTests
     [Fact]
     public async Task CommitBeforeEnforceSeam_CommitsFirst_AndReturnsWhenTheCheckIsAlsoOff()
     {
-        using var seam = CompilerTestSeams.Use(new CompilerTestSeams
+        using var seam = CompilerHooks.Use(new MutantHooks
         {
             DisabledControls = new HashSet<SecurityControl> { SecurityControl.CheckedDmlCommitBeforeEnforce, SecurityControl.CheckedDmlRowCount }
         });
@@ -471,7 +470,7 @@ public class CheckedDmlExecutorMutationTests
     [Fact]
     public async Task CommitBeforeEnforceSeam_WithTheCheckOn_CommitsAndThenThrows()
     {
-        using var seam = CompilerTestSeams.Use(new CompilerTestSeams
+        using var seam = CompilerHooks.Use(new MutantHooks
         {
             DisabledControls = new HashSet<SecurityControl> { SecurityControl.CheckedDmlCommitBeforeEnforce }
         });
@@ -481,5 +480,4 @@ public class CheckedDmlExecutorMutationTests
             Executor().ExecuteInTransactionAsync(tx, Dml("INSERT INTO t (a) SELECT 1", expected: 1), NoValues, new CheckedDmlLimits(0, 0)));
         Assert.Equal(1, tx.Commits);
     }
-#endif
 }

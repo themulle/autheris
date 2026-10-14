@@ -13,7 +13,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>
 /// WP-A7 proofs that do not depend on the injector being right: the coverage verifier and the emitted-text checker reject a
-/// faulty DML tree (mutation tests through the Debug-only seam), the MERGE clause set and the grammar stay closed (SEC-ADG-08 a),
+/// faulty DML tree (mutation tests through the test-only hooks), the MERGE clause set and the grammar stay closed (SEC-ADG-08 a),
 /// the SQL Server MERGE terminator is accepted only at its registered position (SEC-ADG-08 c), and the capability matrix of the
 /// DML classes is pinned.
 /// </summary>
@@ -55,10 +55,9 @@ public class DmlCoverageTests
         new SqlQualifiedName(new[] { new SqlIdentifier("dbo", true), new SqlIdentifier("Orders", true) }),
         alias.Length == 0 ? null : new SqlIdentifier(alias));
 
-#if DEBUG
     private void Mutant(TargetSqlDialect dialect, string sql, Func<SqlStatement, SqlStatement> mutate)
     {
-        using var _ = CompilerTestSeams.Use(new CompilerTestSeams { FaultyInjector = s => mutate(s) });
+        using var _ = CompilerHooks.Use(new MutantHooks { FaultyInjector = s => mutate(s) });
         Assert.Throws<SecurityCoverageException>(() => Compile(dialect, sql));
         Assert.Equal(0, _engine.CompileCache.Stats.Entries);   // never cached unverified
     }
@@ -299,7 +298,7 @@ public class DmlCoverageTests
                      "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'x'"
                  })
         {
-            using var _ = CompilerTestSeams.Use(new CompilerTestSeams { FaultyEmitter = text => text + ";" + (text.EndsWith(';') ? "" : " SELECT 1") });
+            using var _ = CompilerHooks.Use(new MutantHooks { FaultyEmitter = text => text + ";" + (text.EndsWith(';') ? "" : " SELECT 1") });
             Assert.Throws<EmittedSqlInvariantViolationException>(() => Compile(dialect, sql));
         }
     }
@@ -307,11 +306,10 @@ public class DmlCoverageTests
     [Fact]
     public void FaultyEmitter_InsertingASemicolonBeforeTheMergeTerminator_IsRejected()
     {
-        using var _ = CompilerTestSeams.Use(new CompilerTestSeams { FaultyEmitter = text => text.Replace(" WHEN ", "; DROP TABLE x; MERGE WHEN ", StringComparison.Ordinal) });
+        using var _ = CompilerHooks.Use(new MutantHooks { FaultyEmitter = text => text.Replace(" WHEN ", "; DROP TABLE x; MERGE WHEN ", StringComparison.Ordinal) });
         Assert.Throws<EmittedSqlInvariantViolationException>(() =>
             Compile(TargetSqlDialect.SqlServer, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN DELETE"));
     }
-#endif
 
     // ---- the emitted-text checker and the MERGE terminator (SEC-ADG-08 c) ----
 

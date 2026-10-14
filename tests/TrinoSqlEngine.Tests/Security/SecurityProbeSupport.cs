@@ -12,22 +12,21 @@ using static TrinoSqlEngine.Tests.Compiler.PolicyFixtures;
 
 namespace TrinoSqlEngine.Tests.Security;
 
-#if DEBUG
 /// <summary>
 /// The seam of the mutant that is currently active, so that a probe which needs its own faulty injector or emitter can layer it
 /// over the mutant instead of replacing it (WP-X0v). Null when no mutant is active.
 /// </summary>
 internal static class MutantContext
 {
-    private static readonly AsyncLocal<CompilerTestSeams?> Active = new();
+    private static readonly AsyncLocal<MutantHooks?> Active = new();
 
-    public static CompilerTestSeams? Current => Active.Value;
+    public static MutantHooks? Current => Active.Value;
 
-    public static IDisposable Enter(CompilerTestSeams? mutant)
+    public static IDisposable Enter(MutantHooks? mutant)
     {
         var previous = Active.Value;
         Active.Value = mutant;
-        var inner = mutant is null ? null : CompilerTestSeams.Use(mutant);
+        var inner = mutant is null ? null : CompilerHooks.Use(mutant);
         return new Scope(() =>
         {
             inner?.Dispose();
@@ -55,7 +54,7 @@ internal static class MutantContext
             (var p, null) => p,
             (var p, var m) => s => p!(m!(s))
         };
-        return CompilerTestSeams.Use(new CompilerTestSeams
+        return CompilerHooks.Use(new MutantHooks
         {
             DisabledControls = mutant?.DisabledControls,
             OmittedCacheKeyFields = mutant?.OmittedCacheKeyFields,
@@ -111,7 +110,6 @@ internal sealed class AddUnknownMergeClauseRewriter : SqlAstRewriter
     }
 }
 
-#endif
 
 /// <summary>One governed compile environment per probe: its own engine (and so its own plan cache), policies and catalog.</summary>
 internal sealed class ProbeEnv

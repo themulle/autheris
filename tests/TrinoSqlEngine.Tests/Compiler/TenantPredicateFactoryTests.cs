@@ -135,7 +135,6 @@ public class TenantPredicateFactoryTests
         Assert.Equal($"No binary-exact tenant comparison is defined for {caps.Dialect}.", ex.Message);
     }
 
-#if DEBUG
     [Theory]
     [InlineData("UTF8_BINARY", true)]
     [InlineData("UTF8_LCASE", false)]
@@ -143,10 +142,9 @@ public class TenantPredicateFactoryTests
     public void Databricks_RelaxationMutant_OnlyAppliesToTheBinaryCollation(string? collation, bool relaxed)
     {
         // The relaxation mutant (SEC-X1-09) must switch the comparison to plain equality only for a UTF8_BINARY column.
-        using var _ = CompilerTestSeams.Use(new CompilerTestSeams { DisabledControls = new HashSet<SecurityControl> { SecurityControl.DatabricksUtf8BinaryRelaxation } });
+        using var _ = CompilerHooks.Use(new MutantHooks { DisabledControls = new HashSet<SecurityControl> { SecurityControl.DatabricksUtf8BinaryRelaxation } });
         var predicate = TenantPredicateFactory.Build(Caps(TargetSqlDialect.Databricks), "TenantId", "p", SqlParameterType.String, null, collation);
         var equality = Assert.IsType<BinaryExpression>(predicate);
         Assert.Equal(relaxed, equality.Left is ColumnReference);
     }
-#endif
 }

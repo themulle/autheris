@@ -78,12 +78,10 @@ public sealed class TenantRegistryGate(ITenantRegistry inner, TenantRegistryGate
         catch
         {
             Release(bucket);
-#if DEBUG
-            if (TrinoSqlEngine.CompilerTestSeams.IsDisabled(TrinoSqlEngine.SecurityControl.TenantRegistryFailClosed))
+            if (TrinoSqlEngine.CompilerHooks.IsDisabled(TrinoSqlEngine.SecurityControl.TenantRegistryFailClosed))
             {
                 return TenantRegistration.Registered;
             }
-#endif
             throw;
         }
 

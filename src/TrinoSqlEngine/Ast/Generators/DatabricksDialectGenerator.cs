@@ -29,12 +29,10 @@ public sealed class DatabricksDialectGenerator : SqlDialectGeneratorBase
     /// <summary>SEC-ADG-10: <c>$</c>, <c>{</c> and <c>}</c> start a variable substitution on Databricks; such an identifier is never emitted.</summary>
     private static bool HasSubstitutionCharacters(string value)
     {
-#if DEBUG
-        if (CompilerTestSeams.IsDisabled(SecurityControl.VariableSubstitution))
+        if (CompilerHooks.IsDisabled(SecurityControl.VariableSubstitution))
         {
             return false;
         }
-#endif
         return value.AsSpan().IndexOfAny('$', '{', '}') >= 0;
     }
 

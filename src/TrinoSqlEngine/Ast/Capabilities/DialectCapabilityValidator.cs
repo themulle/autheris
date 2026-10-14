@@ -42,9 +42,7 @@ public static class DialectCapabilityValidator
                     // SEC-ADG-18: the dialect LIKE is looser than the policy author expects (SQLite: ASCII case-insensitive).
                     throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "policy LIKE on a case-insensitive LIKE dialect");
                 case InListExpression inList when capabilities.MaxInListItems is { } max && inList.Items.Count > max
-#if DEBUG
-                                                    && !CompilerTestSeams.IsDisabled(SecurityControl.InListLimit)
-#endif
+                                                    && !CompilerHooks.IsDisabled(SecurityControl.InListLimit)
                                                     :
                     throw new SqlLimitExceededException(SqlLimitKind.InListItems, capabilities.Dialect, inList.Items.Count, max);
                 case SqlIdentifier id:

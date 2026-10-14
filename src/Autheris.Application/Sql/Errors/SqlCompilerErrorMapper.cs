@@ -40,12 +40,10 @@ public static class SqlCompilerErrorMapper
     public static bool TryMap(Exception? exception, out SqlErrorMapping mapping)
     {
         bool mapped = TryMapCore(exception, out mapping);
-#if DEBUG
-        if (mapped && TrinoSqlEngine.CompilerTestSeams.IsDisabled(TrinoSqlEngine.SecurityControl.ErrorMapperFixedMessage))
+        if (mapped && TrinoSqlEngine.CompilerHooks.IsDisabled(TrinoSqlEngine.SecurityControl.ErrorMapperFixedMessage))
         {
             mapping = mapping with { Title = exception!.Message };
         }
-#endif
         return mapped;
     }
 

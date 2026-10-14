@@ -403,9 +403,7 @@ public sealed partial class FastSqlEngine : ISqlEngine
 
             // SEC-ADG-10: ${...} variable substitution sequences (Spark / Databricks)
             if (options.RejectVariableSubstitutionSequences && text != null && text.Contains("${", StringComparison.Ordinal)
-#if DEBUG
-                && !CompilerTestSeams.IsDisabled(SecurityControl.VariableSubstitution)
-#endif
+                && !CompilerHooks.IsDisabled(SecurityControl.VariableSubstitution)
                 )
             {
                 throw new ParseCanceledException(

@@ -62,12 +62,10 @@ public static class DmlErrorSanitizer
     public static GovernedSqlException Map(TargetSqlDialect dialect, Exception error)
     {
         ArgumentNullException.ThrowIfNull(error);
-#if DEBUG
-        if (CompilerTestSeams.IsDisabled(SecurityControl.ErrorSanitizer))
+        if (CompilerHooks.Current.LeakProviderError(error.Message, dialect) is { } leaked)
         {
-            return new LeakingGovernedSqlException(error.Message, dialect);   // mutant: the provider message reaches the caller
+            return leaked;   // test mutant only: the provider message reaches the caller
         }
-#endif
         if (TryMap(dialect, error) is { } constraint) return constraint;
         for (Exception? current = error; current is not null; current = current.InnerException)
         {
@@ -190,12 +188,3 @@ public static class DmlErrorSanitizer
     public static string Describe(DmlConstraintViolationException error) =>
         string.Create(CultureInfo.InvariantCulture, $"{error.Dialect}:{error.Kind}");
 }
-
-#if DEBUG
-/// <summary>Mutant of <see cref="DmlErrorSanitizer"/> (Debug builds only): an error that carries the provider message.</summary>
-internal sealed class LeakingGovernedSqlException(string message, TargetSqlDialect dialect)
-    : GovernedSqlException(GovernedSqlErrorCodes.ProviderError, dialect)
-{
-    public override string Message { get; } = message;
-}
-#endif

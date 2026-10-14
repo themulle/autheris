@@ -66,12 +66,12 @@ jobs:
       - name: Restore with Locked Mode
         run: dotnet restore Autheris.sln --locked-mode
 
-      # G2, G3, G5 in-memory, G7. Debug builds contain the security mutant hooks, so this is the run that kills the mutants.
+      # G2, G3, G5 in-memory, G7. Debug and Release compile the same security code (ARC-S-06); the mutant hooks live in the test assembly,
+      # so both runs kill the mutants.
       - name: Gate tests, Debug (security mutants)
         run: dotnet test tests/TrinoSqlEngine.Tests -c Debug --no-restore --filter "Category=SqlGate" --verbosity normal
 
-      # Release has the hooks compiled out; this run proves they are absent from shipped code.
-      - name: Gate tests, Release (mutant hooks absent)
+      - name: Gate tests, Release (security mutants, no hooks in shipped code)
         run: dotnet test tests/TrinoSqlEngine.Tests -c Release --no-restore --filter "Category=SqlGate" --verbosity normal
 
       # G4 differential, G6 execution on PostgreSQL, SQL Server and Oracle (CI=true makes a missing database fail).

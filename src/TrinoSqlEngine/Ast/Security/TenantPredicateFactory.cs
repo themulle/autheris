@@ -44,12 +44,10 @@ public static class TenantPredicateFactory
         Expression Column() => column;
         Expression Param() => value;
 
-#if DEBUG
-        if (CompilerTestSeams.IsDisabled(SecurityControl.TenantByteExactCompare))
+        if (CompilerHooks.IsDisabled(SecurityControl.TenantByteExactCompare))
         {
             return new BinaryExpression(Column(), BinaryOperator.Equal, Param());
         }
-#endif
 
         switch (capabilities.TenantComparison)
         {
@@ -70,12 +68,10 @@ public static class TenantPredicateFactory
                     new BinaryExpression(Column(), BinaryOperator.Equal, Param()),
                     BinaryOperator.And,
                     new BinaryExpression(Binary(Column()), BinaryOperator.Equal, Binary(Param())));
-#if DEBUG
-                if (CompilerTestSeams.IsDisabled(SecurityControl.TenantBinaryLengthConjunct))
+                if (CompilerHooks.IsDisabled(SecurityControl.TenantBinaryLengthConjunct))
                 {
                     return binaryEquality;
                 }
-#endif
                 return new BinaryExpression(
                     binaryEquality,
                     BinaryOperator.And,
@@ -123,12 +119,10 @@ public static class TenantPredicateFactory
                 // into a tautology (found by the Spark proxy test), which would make the comparison case-insensitive again.
                 static Expression Raw(Expression operand) => new CastExpression(operand, "varbinary");
 
-#if DEBUG
-                if (CompilerTestSeams.IsDisabled(SecurityControl.DatabricksUtf8BinaryRelaxation) && columnCollation == "UTF8_BINARY")
+                if (CompilerHooks.IsDisabled(SecurityControl.DatabricksUtf8BinaryRelaxation) && columnCollation == "UTF8_BINARY")
                 {
                     return new BinaryExpression(Column(), BinaryOperator.Equal, Param());
                 }
-#endif
                 return new BinaryExpression(Raw(Column()), BinaryOperator.Equal, Raw(Param()));
             }
             case TenantComparisonStyle.CastBlob:

@@ -1,4 +1,3 @@
-#if DEBUG
 using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
@@ -11,8 +10,8 @@ namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>
 /// CR-ADG-04 and CR-ADG-19: the pipeline must itself call the coverage verifier and the emitted-text checker, and must never
-/// cache unverified output. The Debug-only seam injects a faulty injector or emitter; a mutant that skips either proof, or caches
-/// before verification, fails these tests. The same seam cancels from inside every pass.
+/// cache unverified output. The test hooks inject a faulty injector or emitter; a mutant that skips either proof, or caches
+/// before verification, fails these tests. The same hooks cancel from inside every pass.
 /// </summary>
 [Trait("Category", "SqlGate")]
 public class PipelineSeamTests
@@ -58,7 +57,7 @@ public class PipelineSeamTests
     [MemberData(nameof(Dialects))]
     public void FaultyInjector_DroppingTheTenantPredicate_IsRejectedByTheVerifier(TargetSqlDialect dialect)
     {
-        using var _ = CompilerTestSeams.Use(new CompilerTestSeams { FaultyInjector = _ => Unsecured() });
+        using var _ = CompilerHooks.Use(new MutantHooks { FaultyInjector = _ => Unsecured() });
         Assert.Throws<SecurityCoverageException>(() => Compile(dialect));
     }
 
@@ -66,7 +65,7 @@ public class PipelineSeamTests
     [MemberData(nameof(Dialects))]
     public void FailedVerification_NeverInsertsACacheEntry(TargetSqlDialect dialect)
     {
-        using (CompilerTestSeams.Use(new CompilerTestSeams { FaultyInjector = _ => Unsecured() }))
+        using (CompilerHooks.Use(new MutantHooks { FaultyInjector = _ => Unsecured() }))
         {
             Assert.Throws<SecurityCoverageException>(() => Compile(dialect));
         }
@@ -83,7 +82,7 @@ public class PipelineSeamTests
     [MemberData(nameof(Dialects))]
     public void FaultyEmitter_AddingALiteral_IsRejectedByTheEmittedTextChecker(TargetSqlDialect dialect)
     {
-        using var _ = CompilerTestSeams.Use(new CompilerTestSeams { FaultyEmitter = sql => sql.Replace("SELECT", "SELECT 'smuggled',", StringComparison.Ordinal) });
+        using var _ = CompilerHooks.Use(new MutantHooks { FaultyEmitter = sql => sql.Replace("SELECT", "SELECT 'smuggled',", StringComparison.Ordinal) });
         Assert.Throws<EmittedSqlInvariantViolationException>(() => Compile(dialect));
         Assert.Equal(0, _engine.CompileCache.Stats.Entries);
     }
@@ -92,7 +91,7 @@ public class PipelineSeamTests
     [MemberData(nameof(Dialects))]
     public void FaultyEmitter_AddingAStatementSeparator_IsRejectedByTheEmittedTextChecker(TargetSqlDialect dialect)
     {
-        using var _ = CompilerTestSeams.Use(new CompilerTestSeams { FaultyEmitter = sql => sql + "; SELECT 1" });
+        using var _ = CompilerHooks.Use(new MutantHooks { FaultyEmitter = sql => sql + "; SELECT 1" });
         Assert.Throws<EmittedSqlInvariantViolationException>(() => Compile(dialect));
         Assert.Equal(0, _engine.CompileCache.Stats.Entries);
     }
@@ -101,7 +100,7 @@ public class PipelineSeamTests
     [MemberData(nameof(Dialects))]
     public void FaultyEmitter_AddingAnUnboundNumber_IsRejectedByTheEmittedTextChecker(TargetSqlDialect dialect)
     {
-        using var _ = CompilerTestSeams.Use(new CompilerTestSeams { FaultyEmitter = sql => sql + " WHERE 1 = 1 OR 42 = 42" });
+        using var _ = CompilerHooks.Use(new MutantHooks { FaultyEmitter = sql => sql + " WHERE 1 = 1 OR 42 = 42" });
         Assert.Throws<EmittedSqlInvariantViolationException>(() => Compile(dialect));
     }
 
@@ -110,7 +109,7 @@ public class PipelineSeamTests
     public void EveryPass_ReportsItselfInOrder(TargetSqlDialect dialect)
     {
         var seen = new List<string>();
-        using var _ = CompilerTestSeams.Use(new CompilerTestSeams { OnPass = seen.Add });
+        using var _ = CompilerHooks.Use(new MutantHooks { OnPass = seen.Add });
         Compile(dialect);
         Assert.Equal(Passes, seen);
     }
@@ -120,7 +119,7 @@ public class PipelineSeamTests
     public void Compile_CancelledInsideEveryPass_NoCacheEntry_NoPartialSql(string pass)
     {
         using var cts = new CancellationTokenSource();
-        using var _ = CompilerTestSeams.Use(new CompilerTestSeams
+        using var _ = CompilerHooks.Use(new MutantHooks
         {
             OnPass = name =>
             {
@@ -135,7 +134,6 @@ public class PipelineSeamTests
     [Fact]
     public void TheSeam_IsNotInstalledByDefault()
     {
-        Assert.Null(CompilerTestSeams.Current);
+        Assert.Same(NoOpCompilerHooks.Instance, CompilerHooks.Current);
     }
 }
-#endif
