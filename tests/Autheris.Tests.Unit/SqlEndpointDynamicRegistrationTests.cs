@@ -1,5 +1,8 @@
 namespace Autheris.Tests.Unit;
 
+using Microsoft.Extensions.DependencyInjection;
+using Autheris.Application.Interfaces;
+using Autheris.Tests.Unit.TestDoubles;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -21,7 +24,10 @@ public sealed class SqlEndpointDynamicRegistrationTests
 {
     private static HttpContext CreateContext(bool isAdmin)
     {
-        var context = new DefaultHttpContext();
+        var context = new DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection().AddAuditWriterOver(Substitute.For<IAuditLogRepository>()).BuildServiceProvider()
+        };
         var claims = new List<Claim>
         {
             new(ClaimTypes.PrimarySid, "S-1-5-21-USER-1"),

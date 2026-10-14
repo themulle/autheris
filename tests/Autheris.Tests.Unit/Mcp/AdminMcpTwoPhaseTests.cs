@@ -219,8 +219,9 @@ public sealed class AdminMcpTwoPhaseTests
     [Fact]
     public async Task AdminRegisterDatasource_InactiveStatusAndSecretsStoredInVault_NoLeakageInAudit()
     {
-        // Arrange
-        var service = _service;
+        // Arrange: inline secrets are written to a writable secret provider (WP-ARC-A-10), never kept by the service.
+        var secretProvider = Substitute.For<IKeyVaultSecretProvider>();
+        var service = new AccessPlanningService(_auditRepo, _tableRepo, _rebacStore, _totpService, _totpSecretStore, secretProvider: secretProvider);
         const string cleartextSecret = "super-secret-vault-api-key-99999";
         var request = new AdminRegisterDatasourceRequest(
             Name: "sap_erp",
@@ -239,7 +240,8 @@ public sealed class AdminMcpTwoPhaseTests
         result.Status.ShouldBe("inactive"); // SEC M-30 Inactive on creation
         result.IsConfigured.ShouldBeTrue();
         result.SecretRef.ShouldNotBeNullOrWhiteSpace();
-        result.SecretRef.ShouldStartWith("vault://");
+        result.SecretRef.ShouldBe("datasource:finance:sap_erp:auth_secret");
+        secretProvider.Received(1).SetSecret("datasource:finance:sap_erp:auth_secret", Arg.Any<byte[]>());
 
         // Cleartext secret MUST NEVER be returned in result
         result.ToString().ShouldNotContain(cleartextSecret);

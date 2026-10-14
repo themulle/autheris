@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Unit.TestDoubles;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -79,7 +80,7 @@ public sealed class GovernedConnectorReaderArch2Tests
         httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER"), new Claim("tenant_id", "tenant-a")], "Bearer"));
         httpContext.RequestServices = new ServiceCollection()
-            .AddSingleton(Substitute.For<IAuditLogRepository>())
+            .AddAuditWriterOver(Substitute.For<IAuditLogRepository>())
             .BuildServiceProvider();
         httpContext.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
         {

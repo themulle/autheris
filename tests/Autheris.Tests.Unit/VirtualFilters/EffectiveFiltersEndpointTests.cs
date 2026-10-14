@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.VirtualFilters;
 
+using Autheris.Tests.Unit.TestDoubles;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -45,7 +46,7 @@ public sealed class EffectiveFiltersEndpointTests
 
     private static HttpContext Context(string query, params string[] roles)
     {
-        var context = new DefaultHttpContext { RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider() };
+        var context = new DefaultHttpContext { RequestServices = new ServiceCollection().AddLogging().AddAuditWriterOver(Substitute.For<IAuditLogRepository>()).BuildServiceProvider() };
         context.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
         {
             UserSid = new Sid("S-1-5-21-AUDITOR"),

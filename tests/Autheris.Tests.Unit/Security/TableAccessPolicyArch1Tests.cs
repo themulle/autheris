@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Unit.TestDoubles;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -131,7 +132,7 @@ public sealed class TableAccessPolicyArch1Tests
         var httpContext = new DefaultHttpContext();
         httpContext.Response.Body = new MemoryStream();
         httpContext.User = User();
-        httpContext.RequestServices = new ServiceCollection().AddSingleton(Substitute.For<IAuditLogRepository>()).BuildServiceProvider();
+        httpContext.RequestServices = new ServiceCollection().AddAuditWriterOver(Substitute.For<IAuditLogRepository>()).BuildServiceProvider();
         httpContext.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { sql = "SELECT 1", tableNames = new[] { "sales.public.orders" } })));
 
         var metadataRepo = Substitute.For<ITableMetadataRepository>();

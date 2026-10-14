@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.AccessProfiles;
 
+using Autheris.Tests.Unit.TestDoubles;
 using System;
 using System.Collections.Generic;
 using System.Net;
@@ -579,7 +580,7 @@ public sealed class AccessProfileTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        if (auditRepo != null) services.AddSingleton(auditRepo);
+        services.AddAuditWriterOver(auditRepo ?? Substitute.For<IAuditLogRepository>());
         if (clusterState != null)
         {
             clusterState.IncrementAsync(Arg.Any<string>(), Arg.Any<long>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())

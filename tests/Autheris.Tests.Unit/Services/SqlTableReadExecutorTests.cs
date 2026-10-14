@@ -134,7 +134,10 @@ public sealed class SqlTableReadExecutorTests
     public async Task Execute_NonCanonicalClusterAdminClaim_ThrowsBeforeAnyRead()
     {
         var (executor, governed) = Create();
-        var principal = User(new Claim(ClaimTypes.Role, "ClusterAdmin"));
+        // A ForwardAuth identity is never a canonical cluster admin, whatever role claims it carries.
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.Role, "ClusterAdmin"), new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1"), new Claim("tenant_id", "tenant-1")],
+            Autheris.Domain.Security.ClusterAdminPolicy.ForwardAuthScheme));
 
         var ex = await Should.ThrowAsync<UnauthorizedAccessException>(() => executor.ExecuteAsync(Context(principal: principal)));
 

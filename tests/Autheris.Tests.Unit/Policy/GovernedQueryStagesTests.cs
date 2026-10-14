@@ -38,7 +38,10 @@ public sealed class GovernedQueryStagesTests
         pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<Autheris.Domain.Security.SecurityPrincipalContext>(),
                 Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
             .Returns(TableAccessDecision.Allowed(Orders, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear }, hasUnconstrainedColumnAllow: true));
-        var user = User(new Claim(ClaimTypes.Role, "ClusterAdmin"), new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1"));
+        // A ForwardAuth identity is never a canonical cluster admin, whatever role claims it carries.
+        var user = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.Role, "ClusterAdmin"), new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1")],
+            Autheris.Domain.Security.ClusterAdminPolicy.ForwardAuthScheme));
 
         var ex = await Should.ThrowAsync<UnauthorizedAccessException>(() =>
             GovernedQueryStages.AuthorizeTableAsync(pdp, Orders, Metadata(), user, new TenantId("default"), null, null, CancellationToken.None));

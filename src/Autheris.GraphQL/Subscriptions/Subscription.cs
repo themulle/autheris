@@ -113,7 +113,7 @@ public sealed class Subscription
         using var expiryReg = expiryCts.Token.Register(static s => ((CancellationTokenSource)s!).Cancel(), guardCts);
         var watchPolicy = RevocationWatchPolicy.From(services.GetService<IOptions<RevocationWatchOptions>>());
         var failureCounter = new RevocationFailureCounter(watchPolicy);
-        var watchLogger = services.GetService<ILogger<Subscription>>();
+        ILogger? watchLogger = services.GetService<ILogger<Subscription>>();
         using var revocationTimer = revocation == null ? null : timeProvider.CreateTimer(static state =>
         {
             var (cts, svc, p, counter, logger) =

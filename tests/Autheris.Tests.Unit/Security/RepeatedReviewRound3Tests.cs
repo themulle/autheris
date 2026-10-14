@@ -2,6 +2,8 @@
 
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Application.Audit;
+using Autheris.Tests.Unit.TestDoubles;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -219,6 +221,7 @@ public sealed class RepeatedReviewRound3Tests
         env.EnvironmentName.Returns("Development");
         var serviceProvider = Substitute.For<IServiceProvider>();
         serviceProvider.GetService(typeof(IHostEnvironment)).Returns(env);
+        serviceProvider.GetService(typeof(IAuditWriter)).Returns(AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()));
         context.RequestServices = serviceProvider;
 
         var secContext = new SecurityPrincipalContext
@@ -266,6 +269,7 @@ public sealed class RepeatedReviewRound3Tests
         env.EnvironmentName.Returns("Production");
         var serviceProvider = Substitute.For<IServiceProvider>();
         serviceProvider.GetService(typeof(IHostEnvironment)).Returns(env);
+        serviceProvider.GetService(typeof(IAuditWriter)).Returns(AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()));
         context.RequestServices = serviceProvider;
 
         var secContext = new SecurityPrincipalContext

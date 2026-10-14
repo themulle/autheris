@@ -254,7 +254,7 @@ Method call syntax (`expr.method(...)`, `Type::method(...)`) is always rejected.
 | `ParseConcurrencyLimiter` | `null` | Limits concurrently running parses; `null` uses the process-wide limiter (`ProcessorCount * 2`). |
 | `InlineParseMaxLength` | 0 (off) | Statements up to this length parse on the calling thread when enough stack is left. Limiter and time budget still apply. |
 | `LlFallbackTimeout` | 1 s | Budget of the LL pass that follows a failed SLL pass (also bound by `ParseTimeout`). |
-| `SkipLlFallbackOnTokenMismatch` | `true` | A plain token mismatch in the SLL pass is final; prediction failures still retry in LL mode. |
+| `SkipLlFallbackOnTokenMismatch` | `false` | When enabled, a plain token mismatch in the SLL pass is final; prediction failures still retry in LL mode. Off by default because an SLL mis-prediction can surface as a token mismatch on valid SQL. |
 | `SyntaxErrorCacheTtl` | 30 s | How long a parser syntax failure is remembered so repeated invalid input is rejected without parsing (`0` disables). Successes, timeouts and token-security rejections are never cached. |
 | `SyntaxErrorCacheMaxEntries` | 256 | Bound of that cache (statements above 4,096 characters are never cached). |
 

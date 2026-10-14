@@ -1,5 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Microsoft.Extensions.DependencyInjection;
+using Autheris.Tests.Unit.TestDoubles;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -188,7 +190,10 @@ public sealed class DataSourceAllowlistSrH06Tests
 
     private static async Task<(int Status, IAutherisConnectorRegistry Registry)> RunOlapAsync(WebSqlOptions web, string domain)
     {
-        var httpContext = new DefaultHttpContext();
+        var httpContext = new DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection().AddAuditWriterOver(Substitute.For<IAuditLogRepository>()).BuildServiceProvider()
+        };
         httpContext.Response.Body = new MemoryStream();
         httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim("tid", TenantA), new Claim("sub", "user-1"), new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER")], "test"));

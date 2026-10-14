@@ -64,7 +64,15 @@ public class DialectRegistryCompletenessTests
         Assert.NotNull(CompiledSqlBinders.For(dialect));
         Assert.NotNull(CompiledSqlBinders.CheckedExecutorFor(dialect));
         Assert.NotEmpty(SqlFunctionAllowlists.GetDefault(dialect));
-        Assert.Contains(TypeProbes, probe => CatalogTypeMap.TryResolve(dialect, probe, out _, out _));
+        if (dialect == TargetSqlDialect.Databricks)
+        {
+            // Databricks has no governed DML path and therefore no catalog type map: the check option is rejected (fail closed).
+            Assert.DoesNotContain(TypeProbes, probe => CatalogTypeMap.TryResolve(dialect, probe, out _, out _));
+        }
+        else
+        {
+            Assert.Contains(TypeProbes, probe => CatalogTypeMap.TryResolve(dialect, probe, out _, out _));
+        }
     }
 
     [Theory]

@@ -34,6 +34,7 @@ public class ConnectorSpiTests
         var identifier = new TableIdentifier(domain, schema, table);
         return new TableMetadata
         {
+            Identifier = identifier,
             Table = new Table
             {
                 SourceName = sourceName,

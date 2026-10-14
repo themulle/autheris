@@ -115,10 +115,12 @@ public sealed partial class FastSqlEngine : ISqlEngine
     public TimeSpan LlFallbackTimeout { get; set; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
-    /// ARC-S-09: When true (default), an SLL failure caused by a plain token mismatch is final and the LL pass is skipped.
-    /// Prediction failures (no viable alternative, failed predicate) always retry in LL mode.
+    /// ARC-S-09: When true, an SLL failure caused by a plain token mismatch is final and the LL pass is skipped.
+    /// Prediction failures (no viable alternative, failed predicate) always retry in LL mode. Off by default: an SLL
+    /// mis-prediction can surface as a later token mismatch on valid SQL (for example quantified comparisons and some
+    /// function-call shapes), so skipping LL would reject statements the full grammar accepts.
     /// </summary>
-    public bool SkipLlFallbackOnTokenMismatch { get; set; } = true;
+    public bool SkipLlFallbackOnTokenMismatch { get; set; }
 
     /// <summary>
     /// ARC-S-09: How long a parser syntax failure is remembered so that repeated invalid input is rejected without parsing again

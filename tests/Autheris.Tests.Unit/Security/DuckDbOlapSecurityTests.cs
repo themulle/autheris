@@ -1,4 +1,6 @@
 using System;
+using Microsoft.Extensions.DependencyInjection;
+using Autheris.Tests.Unit.TestDoubles;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -405,7 +407,10 @@ public sealed class DuckDbOlapSecurityTests
     [Fact]
     public async Task SQL202_DuckDbOlap_TableExceedingMaxStagedRows_FailsWith400()
     {
-        var httpContext = new DefaultHttpContext();
+        var httpContext = new DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection().AddAuditWriterOver(Substitute.For<IAuditLogRepository>()).BuildServiceProvider()
+        };
         httpContext.Response.Body = new MemoryStream();
         httpContext.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER")], "Bearer"));
 
@@ -528,7 +533,10 @@ public sealed class DuckDbOlapSecurityTests
     [Fact]
     public async Task SG_02_TableCountLimit_Exceeded_ReturnsBadRequest()
     {
-        var httpContext = new DefaultHttpContext();
+        var httpContext = new DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection().AddAuditWriterOver(Substitute.For<IAuditLogRepository>()).BuildServiceProvider()
+        };
         httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim("tid", "tenant-1"), new Claim("sub", "user-1"), new Claim("name", "Alice")],
             "test"));

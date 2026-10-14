@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Unit.TestDoubles;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -146,7 +147,7 @@ public sealed class WebSqlCrossSourceGuardTests
 
         var auditRepo = Substitute.For<IAuditLogRepository>();
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
-        services.AddSingleton(auditRepo);
+        services.AddAuditWriterOver(auditRepo);
         httpContext.RequestServices = services.BuildServiceProvider();
 
         var body = JsonSerializer.Serialize(new
