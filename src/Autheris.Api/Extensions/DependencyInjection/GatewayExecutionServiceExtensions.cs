@@ -142,8 +142,6 @@ public static class GatewayExecutionServiceExtensions
         {
             services.AddSingleton<ICloudEventSubscriptionStore, InMemoryCloudEventSubscriptionStore>();
             services.AddSingleton<ICloudEventTransformer, CloudEventTransformer>();
-            services.AddHttpClient<ICloudEventWebhookDispatcher, CloudEventWebhookDispatcher>()
-                .AddSecureOutboundHandlers("CloudEvents");
         }
 
         // AST-Aware Traffic Shadowing & Dark Replay (F-OPS-01, INF-2)

@@ -69,10 +69,11 @@ public sealed class GovernanceSchemaMigrationTests
         var cs = NewConnectionString();
         using var repository = NewRawRepository(cs);
 
-        await NewRunner(repository, cs).RunAsync();
+        var runner = NewRunner(repository, cs);
+        await runner.RunAsync();
 
         Scalar(repository, "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('TABLES', 'AUDIT_LOG_ENTRIES', 'CONSENTS', 'autheris_schema_migrations')").ShouldBe(4);
-        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations").ShouldBe(1);
+        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations").ShouldBe(runner.Steps.Count);
         Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 1 AND name = 'baseline_governance_schema' AND length(checksum) = 64").ShouldBe(1);
     }
 
@@ -86,7 +87,22 @@ public sealed class GovernanceSchemaMigrationTests
         await runner.RunAsync();
         await runner.RunAsync();
 
-        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations").ShouldBe(1);
+        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations").ShouldBe(runner.Steps.Count);
+    }
+
+    [Fact]
+    public async Task Run_AppliesWebhookOutboxMigration_AsVersion2()
+    {
+        var cs = NewConnectionString();
+        using var repository = NewRawRepository(cs);
+        var runner = NewRunner(repository, cs);
+
+        runner.Steps.ShouldContain(s => s.Version == 2 && s.Name == "webhook_outbox");
+        await runner.RunAsync();
+        await runner.RunAsync();
+
+        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 2 AND name = 'webhook_outbox' AND length(checksum) = 64").ShouldBe(1);
+        Scalar(repository, "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('WEBHOOK_OUTBOX', 'ux_webhook_outbox_dedupe', 'ix_webhook_outbox_due', 'ix_webhook_outbox_lease', 'ix_webhook_outbox_owner')").ShouldBe(5);
     }
 
     [Fact]

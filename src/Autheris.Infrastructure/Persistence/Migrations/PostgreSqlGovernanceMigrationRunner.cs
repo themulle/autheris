@@ -23,7 +23,13 @@ public sealed class PostgreSqlGovernanceMigrationRunner : GovernanceMigrationRun
             {
                 PostgreSqlBaselineSchema.Apply((NpgsqlConnection)ctx.Connection, ctx.Logger);
                 return Task.CompletedTask;
-            })
+            }),
+        new MigrationStep(
+            2,
+            "webhook_outbox",
+            MigrationStep.ComputeChecksum("postgresql:0002:webhook_outbox:v1"),
+            ctx => ExecuteAsync(ctx.Connection, ctx.Transaction, WebhookOutboxSchema.PostgreSql, ctx.CancellationToken),
+            Transactional: true)
     ];
 
     private readonly PostgreSqlGovernanceRepository _repository;

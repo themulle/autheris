@@ -38,6 +38,7 @@
   <ItemGroup>
     <!-- Demo-catalog SQL tables have no database behind them; workflow tests read deterministic synthetic rows. -->
     <Compile Include="..\Autheris.Tests.Unit\TestDoubles\SyntheticSqlDataSourceExecutor.cs" Link="TestDoubles\SyntheticSqlDataSourceExecutor.cs" />
+    <Compile Include="..\Autheris.Tests.Unit\Webhooks\WebhookOutboxContractTests.cs" Link="Webhooks\WebhookOutboxContractTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

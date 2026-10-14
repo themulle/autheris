@@ -39,6 +39,7 @@ public static class GatewayStartupValidator
         ValidateDatabricks(options, environment);
         ValidateDefaultSchemas(options);
         ValidateTenantCollisions(options, environment, logger);
+        ValidateWebhookSubscriptions(options);
 
         // SEC E-01: the egress allowlist is validated in every environment; invalid or too broad entries abort the start.
         var egressErrors = EgressAllowlist.Validate(options.Egress);
@@ -795,6 +796,39 @@ public static class GatewayStartupValidator
             {
                 throw new ValidationException(
                     $"Security violation: Oracle data source '{name}' needs DataSources:Connections:{name}:PasswordKeyVaultRef outside Development.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// WP-ARC-A-02: configured webhook subscriptions need a stable, unique id (<= 128 chars). Outbox rows reference the id, so a generated
+    /// or colliding id would dead-letter queued deliveries after a restart or on another node. Messages never echo URLs or secrets.
+    /// </summary>
+    public static void ValidateWebhookSubscriptions(GatewayOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        if (!options.Webhooks.Enabled)
+        {
+            return;
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < options.Webhooks.Subscriptions.Count; i++)
+        {
+            var id = options.Webhooks.Subscriptions[i].Id;
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                throw new ValidationException($"Gateway:Webhooks:Subscriptions:{i}:Id is required (a stable, unique id of at most 128 characters).");
+            }
+
+            if (id.Length > 128)
+            {
+                throw new ValidationException($"Gateway:Webhooks:Subscriptions:{i}:Id exceeds 128 characters.");
+            }
+
+            if (!seen.Add(id))
+            {
+                throw new ValidationException($"Gateway:Webhooks:Subscriptions:{i}:Id '{id}' is not unique.");
             }
         }
     }

@@ -17,6 +17,7 @@ using Autheris.Application.Policy.Services;
 using Autheris.Application.Security;
 using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters;
+using Autheris.Application.Webhooks;
 using Autheris.Application.Workflows;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -61,6 +62,7 @@ public static class GatewayGovernanceServiceExtensions
             services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
+            services.AddSingleton<IWebhookOutbox>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<IVirtualFilterRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<IAccessProfileRepository, InMemoryAccessProfileRepository>();
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
@@ -79,6 +81,7 @@ public static class GatewayGovernanceServiceExtensions
             services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
             services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
             services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
+            services.AddSingleton<IWebhookOutbox>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
             services.AddSingleton<IVirtualFilterRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
             services.AddSingleton<IAccessProfileRepository, InMemoryAccessProfileRepository>();
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
@@ -97,6 +100,7 @@ public static class GatewayGovernanceServiceExtensions
             services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+            services.AddSingleton<IWebhookOutbox>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<IVirtualFilterRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<IAccessProfileRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());

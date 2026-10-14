@@ -2,196 +2,191 @@ namespace Autheris.Tests.Unit.Webhooks;
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
-using System.Net;
-using System.Net.Http;
-using System.Threading;
+using System.Text;
 using System.Threading.Tasks;
 using Autheris.Application.Events.Services;
+using Autheris.Application.Interfaces;
 using Autheris.Application.Webhooks;
 using Autheris.Domain.Common;
 using Autheris.Domain.Events;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Infrastructure.Persistence;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
 
+/// <summary>Enqueue-side hygiene of the webhook facade and the durable row (WP-ARC-A-02).</summary>
 [Trait("Category", "Security")]
-public sealed class WebhookSigningAndHygieneTests
+public sealed class WebhookSigningAndHygieneTests : IDisposable
 {
-    private sealed class CapturingHandler : HttpMessageHandler
-    {
-        public List<(HttpRequestMessage Request, string Body)> Calls { get; } = [];
+    private const string Secret = "TOP-SECRET-SIGNING-KEY";
+    private const string UrlToken = "URLTOKEN-9f3a";
+    private const string HeaderValue = "HEADER-VALUE-77c1";
 
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    private readonly SqliteGovernanceRepository _repo = GovernanceStoreFactory.CreateSqlite(
+        Substitute.For<IEpochValidationService>(),
+        Options.Create(new GatewayOptions
         {
-            var body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
-            Calls.Add((request, body));
-            return new HttpResponseMessage(HttpStatusCode.OK);
-        }
-    }
+            GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=wh_{Guid.NewGuid():N};Mode=Memory;Cache=Shared", SeedDemoData = false }
+        }));
 
-    private sealed class CapturingLogger<T> : ILogger<T>
+    public void Dispose() => _repo.Dispose();
+
+    private WebhookDispatcherService Service(WebhooksOptions webhooks, string environment = "Development", WebhookCapturingLogger<WebhookDispatcherService>? logger = null)
     {
-        public List<string> Messages { get; } = [];
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-        {
-            Messages.Add(formatter(state, exception));
-            if (exception is not null)
-            {
-                Messages.Add(exception.ToString());
-            }
-        }
-    }
-
-    private static CloudEventEnvelope Envelope() => new(
-        SpecVersion: "1.0",
-        Id: "evt-1",
-        Source: "/autheris/cdc/t",
-        Type: "autheris.cdc.insert",
-        Time: DateTimeOffset.Parse("2026-10-04T12:00:00Z"),
-        DataContentType: "application/json",
-        TenantId: "tenant-A",
-        Data: new Dictionary<string, object?> { ["id"] = 1 });
-
-    private static CloudEventWebhookSubscription Subscription(string url = "https://example.com/events/v1", string secret = "secret-1") => new(
-        Id: "sub",
-        TenantId: "tenant-A",
-        TargetUrl: url,
-        FilterTable: "*",
-        FilterOperations: [CdcOperation.Insert],
-        HmacSecret: secret);
-
-    [Fact]
-    public async Task Dispatch_SignsTimestampAndPayload_ReplayedWithOldTimestampFailsVerification()
-    {
-        var handler = new CapturingHandler();
-        var dispatcher = new CloudEventWebhookDispatcher(new HttpClient(handler), new CapturingLogger<CloudEventWebhookDispatcher>());
-
-        var result = await dispatcher.DispatchAsync(Subscription(), Envelope());
-
-        result.Success.ShouldBeTrue();
-        var (req, body) = handler.Calls.Single();
-        var ts = req.Headers.GetValues("X-Autheris-Timestamp").Single();
-        var sig = req.Headers.GetValues("X-Autheris-Signature-256").Single();
-        req.Headers.GetValues("X-Autheris-Event-Id").Single().ShouldBe("evt-1");
-        req.Headers.GetValues("X-Autheris-Event-Type").Single().ShouldBe("autheris.cdc.insert");
-
-        var sentAt = DateTimeOffset.Parse(ts, System.Globalization.CultureInfo.InvariantCulture);
-        WebhookSignature.TryVerify("secret-1", ts, body, sig, sentAt.AddSeconds(30)).ShouldBeTrue();
-        WebhookSignature.TryVerify("secret-1", ts, body, sig, sentAt.AddMinutes(6)).ShouldBeFalse();
-    }
-
-    [Fact]
-    public async Task Dispatch_LegacySignature_EmittedByDefault_SuppressedWhenDisabled()
-    {
-        var defaultHandler = new CapturingHandler();
-        await new CloudEventWebhookDispatcher(new HttpClient(defaultHandler), new CapturingLogger<CloudEventWebhookDispatcher>())
-            .DispatchAsync(Subscription(), Envelope());
-        defaultHandler.Calls.Single().Request.Headers.Contains("X-Autheris-Signature").ShouldBeTrue();
-
-        var offHandler = new CapturingHandler();
-        var options = Options.Create(new GatewayOptions { Webhooks = new WebhooksOptions { EmitLegacySignature = false } });
-        await new CloudEventWebhookDispatcher(new HttpClient(offHandler), new CapturingLogger<CloudEventWebhookDispatcher>(), options)
-            .DispatchAsync(Subscription(), Envelope());
-        var req = offHandler.Calls.Single().Request;
-        req.Headers.Contains("X-Autheris-Signature").ShouldBeFalse();
-        req.Headers.Contains("X-Autheris-Signature-256").ShouldBeTrue();
-    }
-
-    [Theory]
-    [InlineData("X-Autheris-Timestamp")]
-    [InlineData("x-autheris-signature-256")]
-    [InlineData("X-Autheris-Event-Id")]
-    public void CustomHeaders_SigningHeaders_AreForbidden(string name) =>
-        CloudEventWebhookDispatcher.IsForbiddenCustomHeader(name).ShouldBeTrue();
-
-    [Fact]
-    public async Task Dispatch_SsrfRejection_LogsRedactedUrlAndNoMessage()
-    {
-        var handler = new CapturingHandler();
-        var logger = new CapturingLogger<CloudEventWebhookDispatcher>();
-        var dispatcher = new CloudEventWebhookDispatcher(new HttpClient(handler), logger);
-
-        var result = await dispatcher.DispatchAsync(Subscription("https://10.9.8.7/secret/path?token=TOPSECRET"), Envelope());
-
-        result.Success.ShouldBeFalse();
-        handler.Calls.ShouldBeEmpty();
-        var log = string.Join("\n", logger.Messages);
-        log.ShouldNotContain("TOPSECRET");
-        log.ShouldNotContain("/secret/path");
-        // the redacted URL keeps scheme and host only; the egress policy message itself is never logged
-        log.ShouldContain("https://10.9.8.7/");
-        log.ShouldNotContain("forbidden");
-    }
-
-    private static (WebhookDispatcherService Dispatcher, CapturingHandler Handler, CapturingLogger<WebhookDispatcherService> Logger) CreateService(
-        string secret, bool? requireSecret, string url = "https://receiver.internal/webhook?token=TOPSECRET")
-    {
-        var handler = new CapturingHandler();
-        var logger = new CapturingLogger<WebhookDispatcherService>();
-        var options = Options.Create(new GatewayOptions
-        {
-            Webhooks = new WebhooksOptions
-            {
-                RequireSecret = requireSecret,
-                Subscriptions =
-                [
-                    new WebhookSubscription { Id = "s1", TargetUrl = url, Secret = secret, IsClusterWide = true, MaxRetries = 1 }
-                ]
-            }
-        });
         var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
-        return (new WebhookDispatcherService(new HttpClient(handler), options, logger, env), handler, logger);
+        env.EnvironmentName.Returns(environment);
+        return new WebhookDispatcherService(_repo, Options.Create(new GatewayOptions { Webhooks = webhooks }), logger ?? new WebhookCapturingLogger<WebhookDispatcherService>(), env);
     }
 
-    private static AccessPlanCreatedEvent Event() =>
-        new(EventId: "ev-1", PlanId: "p", DatasetId: "d", RequesterSid: "u", GrantCount: 1, Timestamp: DateTimeOffset.UtcNow);
-
-    [Fact]
-    public async Task EmptySecret_DoesNotSendSignatureHeader()
+    private static WebhooksOptions Config(string secret = Secret, bool? requireSecret = null, string? tenant = null, int maxAttempts = 3, int? maxPayloadBytes = null) => new()
     {
-        var (dispatcher, handler, _) = CreateService(secret: string.Empty, requireSecret: null);
+        RequireSecret = requireSecret,
+        MaxPayloadBytes = maxPayloadBytes ?? 262144,
+        Subscriptions =
+        [
+            new WebhookSubscription
+            {
+                Id = "s1",
+                TargetUrl = $"https://receiver.internal/webhook?token={UrlToken}",
+                Secret = secret,
+                TenantId = tenant,
+                IsClusterWide = tenant is null,
+                MaxAttempts = maxAttempts
+            }
+        ]
+    };
 
-        await dispatcher.DispatchEventAsync(Event());
+    private static AccessPlanCreatedEvent Event(string id = "ev-1", string? tenant = null) =>
+        new(EventId: id, PlanId: "p", DatasetId: "d", RequesterSid: "u", GrantCount: 1, Timestamp: DateTimeOffset.UtcNow, TenantId: tenant);
 
-        var req = handler.Calls.Single().Request;
-        req.Headers.Contains("X-Autheris-Signature-256").ShouldBeFalse();
-        req.Headers.Contains("X-Autheris-Timestamp").ShouldBeTrue();
+    private string RawRows()
+    {
+        var sb = new StringBuilder();
+        using var cmd = _repo.Connection.CreateCommand();
+        cmd.CommandText = "SELECT * FROM WEBHOOK_OUTBOX";
+        using var r = cmd.ExecuteReader();
+        while (r.Read())
+        {
+            for (var i = 0; i < r.FieldCount; i++)
+            {
+                sb.Append(r.GetName(i)).Append('=').Append(Convert.ToString(r.GetValue(i), CultureInfo.InvariantCulture)).Append('\n');
+            }
+        }
+
+        return sb.ToString();
     }
 
     [Fact]
-    public async Task RequireSecret_EmptySecret_DropsDelivery()
+    public async Task Enqueue_RowContainsNoSecretUrlOrCustomHeaders()
     {
-        var (dispatcher, handler, logger) = CreateService(secret: string.Empty, requireSecret: true);
+        await Service(Config()).DispatchEventAsync(Event());
+        var ce = new CloudEventWebhookSubscription(
+            "ce-1", "tenant-A", $"https://ce.example.com/in?token={UrlToken}", "*", [CdcOperation.Insert], Secret,
+            CustomHeaders: new Dictionary<string, string> { ["X-Api-Key"] = HeaderValue });
+        var envelope = new CloudEventEnvelope("1.0", "ce-evt", "/autheris/cdc/t", "autheris.cdc.insert", DateTimeOffset.UtcNow, "application/json", "tenant-A", new { id = 1 });
+        await ((IWebhookOutbox)_repo).EnqueueAsync(CloudEventOutboxMessageFactory.Create(ce, envelope, DateTimeOffset.UtcNow, 5));
 
-        await dispatcher.DispatchEventAsync(Event());
-
-        handler.Calls.ShouldBeEmpty();
-        string.Join("\n", logger.Messages).ShouldNotContain("TOPSECRET");
+        (await ((IWebhookOutbox)_repo).CountPendingAsync()).ShouldBe(2);
+        var raw = RawRows();
+        raw.ShouldNotContain(Secret);
+        raw.ShouldNotContain(UrlToken);
+        raw.ShouldNotContain(HeaderValue);
+        raw.ShouldNotContain("receiver.internal");
+        raw.ShouldNotContain("ce.example.com");
+        using var cmd = _repo.Connection.CreateCommand();
+        cmd.CommandText = "SELECT group_concat(name) FROM pragma_table_info('WEBHOOK_OUTBOX')";
+        var columns = (string)cmd.ExecuteScalar()!;
+        columns.ShouldNotContain("url");
+        columns.ShouldNotContain("secret");
+        columns.ShouldNotContain("header");
     }
 
     [Fact]
-    public async Task Dispatch_WithSecret_SignsTimestampDotBody_AndLogsOnlyRedactedUrl()
+    public async Task Dispatch_EnqueuesOneRowPerMatchingSubscription_WithOwnerAndAttemptBudget()
     {
-        var (dispatcher, handler, logger) = CreateService(secret: "k", requireSecret: true);
+        await Service(Config(tenant: "tenant-A", maxAttempts: 7)).DispatchEventAsync(Event(tenant: "tenant-A"));
 
-        await dispatcher.DispatchEventAsync(Event());
+        var rows = await ((IWebhookOutbox)_repo).ClaimBatchAsync(10, DateTimeOffset.UtcNow.AddSeconds(1), TimeSpan.FromMinutes(1), "w");
+        var row = rows.ShouldHaveSingleItem();
+        row.OwnerTenantId.ShouldBe("tenant-A");
+        row.EventTenantId.ShouldBe("tenant-A");
+        row.MaxAttempts.ShouldBe(7);
+        row.Source.ShouldBe(WebhookSubscriptionSource.Configured);
+        row.PayloadJson.ShouldContain("\"id\":\"ev-1\"");
+    }
 
-        var (req, body) = handler.Calls.Single();
-        var ts = req.Headers.GetValues("X-Autheris-Timestamp").Single();
-        req.Headers.GetValues("X-Autheris-Signature-256").Single()
-            .ShouldBe(WebhookSignature.SignHeaderValue("k", ts, body));
-        string.Join("\n", logger.Messages).ShouldNotContain("TOPSECRET");
+    [Fact]
+    public async Task Dispatch_SameEventTwice_IsDeduplicated()
+    {
+        var service = Service(Config());
+
+        await service.DispatchEventAsync(Event("dup"));
+        await service.DispatchEventAsync(Event("dup"));
+
+        (await ((IWebhookOutbox)_repo).CountPendingAsync()).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task RequireSecret_EmptySecret_IsNotEnqueued_AndLogsOnlyRedactedUrl()
+    {
+        var logger = new WebhookCapturingLogger<WebhookDispatcherService>();
+
+        await Service(Config(secret: string.Empty, requireSecret: true), logger: logger).DispatchEventAsync(Event());
+
+        (await ((IWebhookOutbox)_repo).CountPendingAsync()).ShouldBe(0);
+        logger.All.ShouldNotContain(UrlToken);
+        logger.All.ShouldContain("https://receiver.internal/");
+    }
+
+    [Fact]
+    public async Task EmptySecret_InDevelopment_IsEnqueuedByDefault_ButNotInProduction()
+    {
+        await Service(Config(secret: string.Empty), "Development").DispatchEventAsync(Event("dev"));
+        await Service(Config(secret: string.Empty), "Production").DispatchEventAsync(Event("prod"));
+
+        (await ((IWebhookOutbox)_repo).CountPendingAsync()).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task OversizedPayload_IsRejectedWithoutEnqueue()
+    {
+        var logger = new WebhookCapturingLogger<WebhookDispatcherService>();
+
+        await Service(Config(maxPayloadBytes: 1024), logger: logger).DispatchEventAsync(
+            new AccessPlanCreatedEvent(EventId: "big", PlanId: new string('p', 4000), DatasetId: "d", RequesterSid: "u", GrantCount: 1, Timestamp: DateTimeOffset.UtcNow));
+
+        (await ((IWebhookOutbox)_repo).CountPendingAsync()).ShouldBe(0);
+        logger.All.ShouldContain(WebhookDeliveryErrorCodes.PayloadTooLarge);
+    }
+
+    [Fact]
+    public async Task Dispatch_CompletesAfterEnqueue_WithoutAnyHttpCall()
+    {
+        // The facade has no HttpClient at all: delivery is the hosted service's job.
+        typeof(WebhookDispatcherService).GetConstructors().Single().GetParameters()
+            .ShouldNotContain(p => p.ParameterType == typeof(System.Net.Http.HttpClient));
+        await Service(Config()).DispatchEventAsync(Event());
+        (await ((IWebhookOutbox)_repo).CountPendingAsync()).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task OutboxFailure_IsLoggedWithoutMessage_AndDoesNotThrow()
+    {
+        var failing = Substitute.For<IWebhookOutbox>();
+        failing.EnqueueAsync(Arg.Any<WebhookOutboxMessage>(), Arg.Any<System.Threading.CancellationToken>())
+            .Returns<Task<bool>>(_ => throw new InvalidOperationException("Host=db.internal;Password=hunter2"));
+        var logger = new WebhookCapturingLogger<WebhookDispatcherService>();
+        var service = new WebhookDispatcherService(failing, Options.Create(new GatewayOptions { Webhooks = Config() }), logger);
+
+        await service.DispatchEventAsync(Event());
+
+        logger.All.ShouldNotContain("hunter2");
+        logger.All.ShouldContain(nameof(InvalidOperationException));
     }
 }

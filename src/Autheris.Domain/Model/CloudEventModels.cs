@@ -32,16 +32,3 @@ public sealed record CloudEventWebhookSubscription(
     bool IsEnabled = true,
     IReadOnlyDictionary<string, string>? CustomHeaders = null
 );
-
-/// <summary>
-/// Status result of a webhook delivery attempt.
-/// </summary>
-public sealed record CloudEventDeliveryResult(
-    string DeliveryId,
-    string SubscriptionId,
-    string EventId,
-    bool Success,
-    int StatusCode,
-    TimeSpan Elapsed,
-    string? ErrorMessage = null
-);
