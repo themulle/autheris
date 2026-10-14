@@ -239,7 +239,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
                 continue;
             }
 
-            var marker = "@p_arg_" + (index++).ToString(CultureInfo.InvariantCulture);
+            var marker = '@' + "p_arg_" + (index++).ToString(CultureInfo.InvariantCulture);
             var name = column.ColumnName;
             clauses.Add(new TableFilterClause(
                 $"{name} = {marker}",

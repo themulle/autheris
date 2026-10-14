@@ -90,50 +90,6 @@ public sealed class DialectAlignmentTests
         supported.ShouldBe(expectedSupported);
     }
 
-    private static DataSourceExecutionContext CreateContext(string sourceType)
-    {
-        var metadata = new TableMetadata
-        {
-            Identifier = new TableIdentifier("erp", "dbo", "orders"),
-            Table = new Table { SourceName = "erp", SchemaName = "dbo", TableName = "orders", SourceType = sourceType },
-            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
-        };
-        var decision = TableAccessDecision.Allowed(metadata.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
-        var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1")], "Test"));
-        return new DataSourceExecutionContext("erp", metadata, principal, decision, new Dictionary<string, object?>(), ["id"]);
-    }
-
-    private static SqlDataSourceExecutor CreateExecutor(string provider, ISqlConnectionFactory factory)
-    {
-        var options = Options.Create(new GatewayOptions
-        {
-            DataSources = new SqlDataSourceOptions
-            {
-                Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["erp"] = new DataSourceConnectionOptions { Provider = provider, ConnectionString = "Server=unused" }
-                }
-            }
-        });
-        return new SqlDataSourceExecutor(factory, options);
-    }
-
-    [Theory]
-    [InlineData("SqlServer", "PostgreSQL")]
-    [InlineData("PostgreSql", "SqlServer")]
-    [InlineData("SqlServer", "Oracle")]
-    [InlineData("", "SqlServer")]
-    [InlineData("   ", "PostgreSQL")]
-    public async Task SqlDataSourceExecutor_CatalogDialectDiffersFromProvider_FailsBeforeConnecting(string provider, string catalogSourceType)
-    {
-        var factory = Substitute.For<ISqlConnectionFactory>();
-        var executor = CreateExecutor(provider, factory);
-
-        await Should.ThrowAsync<InvalidOperationException>(() => executor.ExecuteAsync(CreateContext(catalogSourceType)));
-
-        await factory.DidNotReceiveWithAnyArgs().CreateOpenConnectionAsync(default!, default);
-    }
-
     [Fact]
     public void GatewayOptions_UndefinedSubqueryStrategy_FailsValidation()
     {

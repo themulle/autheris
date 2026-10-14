@@ -478,9 +478,11 @@ public sealed class SecurityReview20261002WebSqlTests
             Arguments: new Dictionary<string, object?> { ["ssn"] = "123-45-6789" },
             RequestedFields: ["id", "name"]);
 
-        var executor = new SqlDataSourceExecutor(logger: NullLogger<SqlDataSourceExecutor>.Instance);
+        var executor = new SqlTableReadExecutor(
+            new Autheris.Application.Data.Services.GovernedTableReadPlanner(),
+            () => Substitute.For<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>());
 
-        var ex = await Should.ThrowAsync<SecurityException>(() => executor.ExecuteAsync(context));
+        var ex = await Should.ThrowAsync<ArgumentException>(() => executor.ExecuteAsync(context));
         ex.Message.ShouldContain("ssn");
     }
 
@@ -496,7 +498,10 @@ public sealed class SecurityReview20261002WebSqlTests
             Arguments: new Dictionary<string, object?> { ["name"] = "Alice" },
             RequestedFields: ["id", "name"]);
 
-        var executor = new SqlDataSourceExecutor(logger: NullLogger<SqlDataSourceExecutor>.Instance, environment: CreateDevEnvironment());
+        var governed = Substitute.For<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>();
+        governed.ExecuteQueryBufferedAsync(default!, default!, default, default)
+            .ReturnsForAnyArgs(new Autheris.Application.Sql.Interfaces.GovernedSqlResult("", [], [], 0, 0));
+        var executor = new SqlTableReadExecutor(new Autheris.Application.Data.Services.GovernedTableReadPlanner(), () => governed);
 
         var rows = await executor.ExecuteAsync(context);
         rows.ShouldNotBeNull();
@@ -614,19 +619,6 @@ public sealed class SecurityReview20261002WebSqlTests
                 CreateUser(),
                 new TenantId(Tenant),
                 (_, _) => Task.CompletedTask));
-    }
-
-    [Fact]
-    public void H13_SqlExecutor_MaskedHmacProjection_ContainsNoSaltOrUnkeyedHash()
-    {
-        var metadata = CreateEmployeesMetadata(hmacRuleType: "HMAC");
-
-        var projection = SqlDataSourceExecutor.BuildMaskedColumnProjection("ssn", "varchar", DatabaseDialect.PostgreSql, metadata);
-
-        projection.ShouldNotContain("DIGEST");
-        projection.ShouldNotContain("HASHBYTES");
-        projection.ShouldNotContain(HmacSecretRef);
-        projection.ShouldNotContain("gateway_salt");
     }
 
     // =========================================================================
@@ -1176,35 +1168,11 @@ public sealed class SecurityReview20261002WebSqlTests
     #region D-6 Tenant Identity Sanitization Tests
 
     [Fact]
-    public async Task SqlDataSourceExecutor_InvalidTenantClaim_ThrowsForbiddenWithGenericMessage()
+    public async Task SqlTableReadExecutor_InvalidTenantClaim_ThrowsForbiddenWithGenericMessage()
     {
-        var connFactory = Substitute.For<ISqlConnectionFactory>();
-        var conn = Substitute.For<DbConnection>();
-        var cmd = Substitute.For<DbCommand>();
-        var paramCol = Substitute.For<DbParameterCollection>();
-        conn.CreateCommand().Returns(cmd);
-        cmd.Parameters.Returns(paramCol);
-        cmd.CreateParameter().Returns(Substitute.For<DbParameter>());
-        connFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(conn));
-
-        var options = Options.Create(new GatewayOptions
-        {
-            DataSources = new SqlDataSourceOptions
-            {
-                Connections = new Dictionary<string, DataSourceConnectionOptions>
-                {
-                    ["test_ds"] = new() { ConnectionString = "Data Source=test.db;", Provider = "sqlite" }
-                }
-            }
-        });
-
-        var executor = new SqlDataSourceExecutor(
-            connectionFactory: connFactory,
-            sessionInitializer: Substitute.For<IDbSessionContextInitializer>(),
-            options: options,
-            logger: NullLogger<SqlDataSourceExecutor>.Instance,
-            environment: CreateDevEnvironment());
+        var executor = new SqlTableReadExecutor(
+            new Autheris.Application.Data.Services.GovernedTableReadPlanner(),
+            () => Substitute.For<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>());
 
         var table = new Table
         {

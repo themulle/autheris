@@ -15,6 +15,7 @@ using Autheris.Api.Extensions;
 using Autheris.Application.DataCatalog.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Services;
+using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Connectors;
 using Autheris.Domain.Interfaces;
@@ -25,6 +26,7 @@ using Autheris.Infrastructure.Connectors;
 using Autheris.Infrastructure.Security;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -322,7 +324,7 @@ public sealed class IntegrationGapATests
     }
 
     // =========================================================================
-    // GAP08: SqlConnector pseudonymizes HMAC columns via IColumnMaskingProvider
+    // GAP08 / ARC-I-13: SqlConnector requires a masking provider and reads through the governed pipeline
     // =========================================================================
 
     private const string ConnectorId = "gap-a-sql";
@@ -330,11 +332,11 @@ public sealed class IntegrationGapATests
 
     private static TableMetadata CreateEmployeesMetadata() => new()
     {
-        Identifier = new TableIdentifier("corp", "hr", "employees"),
+        Identifier = new TableIdentifier("corp", "main", "employees"),
         Table = new Table
         {
             SourceName = ConnectorId,
-            SchemaName = "hr",
+            SchemaName = "main",
             TableName = "employees",
             DataSourceType = DataSourceType.Sql,
             SourceType = "Sqlite"
@@ -351,14 +353,20 @@ public sealed class IntegrationGapATests
         }
     };
 
-    private static async Task<DbConnection> OpenSqliteAsync(string connectionString)
+    private static SqlConnector NewConnector(IGovernedSqlExecutionService governed, IColumnMaskingProvider maskingProvider)
     {
-        var connection = new SqliteConnection(connectionString);
-        await connection.OpenAsync();
-        return connection;
+        var services = new ServiceCollection();
+        services.AddScoped<IDataSourceExecutor>(_ => new SqlTableReadExecutor(
+            new Autheris.Application.Data.Services.GovernedTableReadPlanner(), () => governed));
+        var provider = services.BuildServiceProvider();
+        return new SqlConnector(
+            connectorId: ConnectorId,
+            metadataRepository: Substitute.For<ITableMetadataRepository>(),
+            maskingProvider: maskingProvider,
+            scopeFactory: provider.GetRequiredService<IServiceScopeFactory>());
     }
 
-    private static async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ReadSsnViaConnectorAsync(IColumnMaskingProvider? maskingProvider)
+    private static async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ReadSsnViaConnectorAsync()
     {
         var connectionString = $"Data Source=gapa08_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
         await using var keepAlive = new SqliteConnection(connectionString);
@@ -369,29 +377,14 @@ public sealed class IntegrationGapATests
             await setup.ExecuteNonQueryAsync();
         }
 
-        var connectionFactory = Substitute.For<ISqlConnectionFactory>();
-        connectionFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-            .Returns(_ => OpenSqliteAsync(connectionString));
-
-        var options = Options.Create(new GatewayOptions
-        {
-            DataSources = new SqlDataSourceOptions
-            {
-                Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
-                {
-                    [ConnectorId] = new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = connectionString }
-                }
-            }
-        });
+        // The mask comes from the compiler (typed MaskSpec), not from the connector.
+        var env = new Autheris.Tests.Unit.Sql.TestCompileEnv(TrinoSqlEngine.TargetSqlDialect.Sqlite)
+            .Table("employees", null, "id:INTEGER", "name", "ssn")
+            .Mask("employees", "ssn", Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService.Redact("ssn", "***"));
+        var governed = new Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService(keepAlive, env);
+        var connector = NewConnector(governed, Substitute.For<IColumnMaskingProvider>());
 
         var metadata = CreateEmployeesMetadata();
-        var connector = new SqlConnector(
-            connectorId: ConnectorId,
-            connectionFactory: connectionFactory,
-            metadataRepository: Substitute.For<ITableMetadataRepository>(),
-            options: options,
-            maskingProvider: maskingProvider);
-
         var decision = TableAccessDecision.Allowed(metadata.Identifier, new Dictionary<string, ColumnAccessLevel>
         {
             ["id"] = ColumnAccessLevel.Clear,
@@ -407,38 +400,31 @@ public sealed class IntegrationGapATests
             Arguments: new Dictionary<string, object?>());
         session.Items["TableMetadata"] = metadata;
 
-        return await connector.RecordSource.ReadBatchAsync(ConnectorSplit.Default(), session);
+        var rows = await connector.RecordSource.ReadBatchAsync(ConnectorSplit.Default(), session);
+        session.Items["InDbColumnMaskingExecuted"].ShouldBe(true);
+        session.Items["RlsPushdownExecuted"].ShouldBe(true);
+        return rows;
     }
 
     [Fact]
-    public async Task GAP08_SqlConnector_WithMaskingProvider_PseudonymizesHmacColumn()
+    public async Task GAP08_SqlConnector_ReadsAreMaskedByTheGovernedPipeline()
     {
-        var maskingProvider = new ColumnMaskingProvider(Options.Create(new GatewayOptions
-        {
-            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "gap-a-test-hmac-key" }
-        }));
-
-        var first = await ReadSsnViaConnectorAsync(maskingProvider);
-        var second = await ReadSsnViaConnectorAsync(maskingProvider);
-
-        first.Count.ShouldBe(1);
-        var pseudonym = first[0]["ssn"]?.ToString();
-        pseudonym.ShouldNotBeNullOrWhiteSpace();
-        pseudonym.ShouldNotBe(RawSsn);
-        pseudonym.ShouldNotBe("***");
-        // Deterministic pseudonym (joinable), not a redaction.
-        second.Count.ShouldBe(1);
-        second[0]["ssn"].ShouldNotBeNull();
-        second[0]["ssn"]!.ToString().ShouldBe(pseudonym);
-        first[0]["name"].ShouldBe("Alice");
-    }
-
-    [Fact]
-    public async Task GAP08_SqlConnector_WithoutMaskingProvider_RedactsHmacColumn_FailClosed()
-    {
-        var rows = await ReadSsnViaConnectorAsync(maskingProvider: null);
+        var rows = await ReadSsnViaConnectorAsync();
 
         rows.Count.ShouldBe(1);
         rows[0]["ssn"].ShouldBe("***");
+        rows[0]["name"].ShouldBe("Alice");
+    }
+
+    [Fact]
+    public void GAP08_SqlConnector_WithoutMaskingProvider_CannotBeConstructed_FailClosed()
+    {
+        var scopeFactory = Substitute.For<IServiceScopeFactory>();
+
+        Should.Throw<ArgumentNullException>(() => new SqlConnector(
+            connectorId: ConnectorId,
+            metadataRepository: Substitute.For<ITableMetadataRepository>(),
+            maskingProvider: null!,
+            scopeFactory: scopeFactory));
     }
 }

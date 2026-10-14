@@ -124,7 +124,7 @@ public class PipelineAndInfrastructureSecurityTests
 
         var devEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         devEnv.EnvironmentName.Returns("Development");
-        var sqlExecutor = new SqlDataSourceExecutor(environment: devEnv);
+        var sqlExecutor = new Autheris.Tests.Unit.TestDoubles.SyntheticSqlDataSourceExecutor();
 
         var executionService = new GatewayExecutionService(
             repository,

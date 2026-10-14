@@ -112,7 +112,7 @@ public sealed class OracleRuntimeTests
         var literalMarker = new Regex("\\$?\"@[A-Za-z_{]|\"@\"\\s*\\+", RegexOptions.Compiled);
         foreach (var relative in new[]
                  {
-                     "src/Autheris.Application/Services/SqlDataSourceExecutor.cs",
+                     "src/Autheris.Application/Services/SqlTableReadExecutor.cs",
                      "src/Autheris.Application/Sql/Masking/SqlDataMaskingProvider.cs"
                  })
         {

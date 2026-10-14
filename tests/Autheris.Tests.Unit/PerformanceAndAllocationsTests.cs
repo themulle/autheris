@@ -124,7 +124,7 @@ public class PerformanceAndAllocationsTests
     [Fact]
     public void GatewayExecution_WhenRealSqlConnectionConfigured_SkipsRedundantFilterRows()
     {
-        // When real SQL connection is configured, SqlDataSourceExecutor pushes down RLS to the DB engine.
+        // When real SQL connection is configured, the governed SQL read executor pushes down RLS to the DB engine.
         // GatewayExecutionService skips redundant in-memory FilterRows.
         var repository = Substitute.For<IGovernanceRepository>();
         var cacheService = Substitute.For<IConsentCacheService>();

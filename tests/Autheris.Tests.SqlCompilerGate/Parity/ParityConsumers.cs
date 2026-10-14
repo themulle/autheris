@@ -104,45 +104,6 @@ internal sealed class GateConnectionFactory(GateDatabase database) : ISqlConnect
         await database.OpenAsync();
 }
 
-/// <summary><c>SqlDataSourceExecutor</c>: GraphQL data sources, MCP dataset tools, REST data sources (plan 7.3).</summary>
-public sealed class SqlDataSourceExecutorConsumer : IParityConsumer
-{
-    public string Name => "SqlDataSourceExecutor";
-
-    public string? OwnTenantParameter => "p_tenant_0";
-
-    public async Task<EngineOutcome> RunAsync(ParityEnv env, FilterText filter)
-    {
-        var options = Options.Create(new GatewayOptions
-        {
-            DataSources = new SqlDataSourceOptions
-            {
-                Connections = new Dictionary<string, DataSourceConnectionOptions>
-                {
-                    [ParityData.Source] = new() { ConnectionString = "gate", Provider = env.Context.Database.ToString() }
-                }
-            }
-        });
-        var executor = new SqlDataSourceExecutor(new GateConnectionFactory(env.Database), options);
-        var context = new DataSourceExecutionContext(
-            ParityData.Source, ParityData.OrdersMetadata(env.Context), ParityData.Principal(), ParityData.Decision(env.Context, filter),
-            new Dictionary<string, object?>(), ["id"], Limit: 10_000, Tenant: new TenantId(GateModel.TenantA));
-        try
-        {
-            var rows = await executor.ExecuteAsync(context);
-            return ParityData.Ids(rows.Select(r => ParityData.IdOf(r["id"])));
-        }
-        catch (Exception ex) when (ex is SecurityException or InvalidOperationException or ArgumentException)
-        {
-            return ParityData.Refused(ex);
-        }
-        catch (Exception ex)
-        {
-            return ParityData.DatabaseError(ex);
-        }
-    }
-}
-
 /// <summary><c>TreeSqlCompiler</c>: the GraphQL tree compiler (ADR-004).</summary>
 public sealed class TreeSqlCompilerConsumer : IParityConsumer
 {
@@ -365,7 +326,7 @@ public static class ParityConsumers
     public static IReadOnlyList<IParityConsumer> RowConsumers(bool databaseBacked) =>
     [
         .. databaseBacked
-            ? new IParityConsumer[] { new SqlDataSourceExecutorConsumer(), new TreeSqlCompilerConsumer(), new ProcedureRowScopeConsumer(), new DatasetSpliceConsumer() }
+            ? new IParityConsumer[] { new TreeSqlCompilerConsumer(), new ProcedureRowScopeConsumer(), new DatasetSpliceConsumer() }
             : [],
         new InMemoryFilterRowsConsumer(),
         new StreamingEvaluatorConsumer(inlined: false),
