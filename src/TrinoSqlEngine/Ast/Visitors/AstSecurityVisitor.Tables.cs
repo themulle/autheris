@@ -186,6 +186,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         }
 
         string policyFilter = shouldApplyRls ? _options.PolicyProvider.GetPolicyFilter(normalizedName) : string.Empty;
+        _cteFilterGuard.RegisterFilter(policyFilter);
         bool referencesTarget = RowFilterAliases.ReferencesTarget(policyFilter);
 
         // Bind inner target table: if filter references autheris_target, alias must be declared

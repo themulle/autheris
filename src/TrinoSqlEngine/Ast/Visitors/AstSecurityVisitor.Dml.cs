@@ -61,6 +61,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         }
 
         string policyFilter = _options.PolicyProvider.GetPolicyFilter(normalizedName);
+        _cteFilterGuard.RegisterFilter(policyFilter);
         if (RowFilterAliases.ReferencesTarget(policyFilter))
         {
             throw new SecurityException("Correlated row filters are not supported for UPDATE/DELETE statements.");
@@ -141,6 +142,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         }
 
         string policyFilter = _options.PolicyProvider.GetPolicyFilter(normalizedName);
+        _cteFilterGuard.RegisterFilter(policyFilter);
         if (RowFilterAliases.ReferencesTarget(policyFilter))
         {
             throw new SecurityException("Correlated row filters are not supported for UPDATE/DELETE statements.");
@@ -182,10 +184,18 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             {
                 for (int i = 0; i < node.Columns.Count; i++)
                 {
-                    if (node.Columns[i].Value.Equals(tenantColumn, StringComparison.OrdinalIgnoreCase))
+                    // SR-M-26: a repeated column would let a later value bypass the check of the first one.
+                    for (int j = 0; j < i; j++)
+                    {
+                        if (node.Columns[i].Value.Equals(node.Columns[j].Value, StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new SecurityException($"Column '{node.Columns[i].Value}' is listed more than once in the INSERT column list.");
+                        }
+                    }
+
+                    if (tenantIndex == -1 && node.Columns[i].Value.Equals(tenantColumn, StringComparison.OrdinalIgnoreCase))
                     {
                         tenantIndex = i;
-                        break;
                     }
                 }
             }
