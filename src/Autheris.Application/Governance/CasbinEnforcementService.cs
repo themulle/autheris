@@ -18,6 +18,7 @@ using Casbin.Model;
 using Autheris.Application.Governance.Caching;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Services;
+using Autheris.Application.State;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Interfaces;
@@ -130,6 +131,8 @@ public sealed class CasbinEnforcementService : IPolicyEnforcementService, IDispo
     private readonly bool _modelSupportsWildcardTenant;
 
     private readonly CasbinDecisionCache _decisionCache;
+    private readonly PolicyEpochGuard? _epochGuard;
+    private long _decisionCacheHits;
     private readonly ConcurrentDictionary<string, string> _tenantPolicyFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, FileSystemWatcher> _fileWatchers = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, System.Timers.Timer> _debounceTimers = new(StringComparer.OrdinalIgnoreCase);
@@ -177,11 +180,25 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         ILogger<CasbinEnforcementService>? logger = null,
         Autheris.Application.Policy.RowPolicyFactory? rowPolicies = null,
         CasbinDecisionCacheOptions? cacheOptions = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IDistributedClusterStateProvider? stateProvider = null,
+        IClusterStateTopology? topology = null)
     {
         cacheOptions ??= new CasbinDecisionCacheOptions();
+        timeProvider ??= TimeProvider.System;
         _decisionCache = new CasbinDecisionCache(
-            cacheOptions.Capacity, TimeSpan.FromSeconds(cacheOptions.TtlSeconds), timeProvider ?? TimeProvider.System);
+            cacheOptions.Capacity, TimeSpan.FromSeconds(cacheOptions.TtlSeconds), timeProvider);
+        if (topology?.IsClusterWide == true)
+        {
+            // Cluster-wide state: policy changes propagate through a shared epoch (throws when no state provider is available).
+            _epochGuard = new PolicyEpochGuard(
+                stateProvider,
+                timeProvider,
+                TimeSpan.FromSeconds(cacheOptions.EpochCheckSeconds),
+                TimeSpan.FromMilliseconds(cacheOptions.UnavailableBackoffMilliseconds),
+                logger);
+        }
+
         _rowPolicies = rowPolicies;
         _logger = logger;
         _rlsFilterGenerator = rlsFilterGenerator ?? RlsFilterGenerator.Instance;
@@ -417,7 +434,8 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
     private void Publish(
         Func<PolicySources, PolicySources> change,
         Action<PolicySources, PolicySources>? validate = null,
-        string? changedTenant = null)
+        string? changedTenant = null,
+        bool propagate = true)
     {
         List<string> tenantsToNotify;
         lock (_syncLock)
@@ -443,6 +461,12 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
             }
+        }
+
+        if (propagate && _epochGuard is not null)
+        {
+            // Fire and forget by design: the guard logs and counts its own failures and never throws.
+            _ = _epochGuard.PropagateAsync(string.IsNullOrEmpty(changedTenant) ? PolicyEpochGuard.WildcardTenant : changedTenant);
         }
 
         foreach (var tName in tenantsToNotify)
@@ -702,14 +726,96 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
     {
         ArgumentNullException.ThrowIfNull(context);
 
+        var guard = _epochGuard;
+        if (guard is null)
+        {
+            return EvaluateCore(context, useCache: true);
+        }
+
+        return guard.GetStatus(context.Tenant.Value) switch
+        {
+            EpochStatus.Fresh => EvaluateCore(context, useCache: true),
+            EpochStatus.Degraded => EvaluateCore(context, useCache: false),
+            _ => EvaluateAfterEpochCheckAsync(guard, context, ct)
+        };
+    }
+
+    private async ValueTask<TableAccessDecision> EvaluateAfterEpochCheckAsync(
+        PolicyEpochGuard guard,
+        SecurityEvaluationContext context,
+        CancellationToken ct)
+    {
+        var tenant = context.Tenant.Value;
+        var outcome = await guard.CheckAsync(
+            tenant,
+            (tenantChanged, wildcardChanged) => ReloadFromClusterSignal(tenant, tenantChanged, wildcardChanged),
+            ct).ConfigureAwait(false);
+
+        // Unavailable: the cluster epoch is unknown, so neither read nor write the decision cache.
+        return await EvaluateCore(context, useCache: outcome.Kind != EpochCheckKind.Unavailable).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Re-reads only the file-backed policy sources after another node changed policy. Programmatic rules are never touched
+    /// here (the <see cref="ReloadPoliciesAsync"/> branch that drops them is deliberately not used), and the reload does not
+    /// propagate again, so nodes do not ping-pong. Returns false when the reload failed and must be retried.
+    /// </summary>
+    private bool ReloadFromClusterSignal(string tenant, bool tenantChanged, bool wildcardChanged)
+    {
+        try
+        {
+            var reloaded = false;
+            if (tenantChanged && _tenantPolicyFiles.TryGetValue(tenant, out var tenantFile))
+            {
+                if (!File.Exists(tenantFile))
+                {
+                    _logger?.LogWarning("Casbin tenant policy file for {Tenant} is missing; keeping the last-known-good policy set.", tenant);
+                    return false;
+                }
+
+                LoadPolicyFromTextCore(new TenantId(tenant), File.ReadAllText(tenantFile), propagate: false);
+                reloaded = true;
+            }
+
+            var globalFile = _globalPolicyFilePath;
+            if (wildcardChanged && !string.IsNullOrWhiteSpace(globalFile))
+            {
+                if (!File.Exists(globalFile))
+                {
+                    _logger?.LogWarning("Casbin global policy file is missing; keeping the last-known-good policy set.");
+                    return false;
+                }
+
+                LoadPolicyFromTextCore(File.ReadAllText(globalFile), propagate: false);
+                reloaded = true;
+            }
+
+            if (!reloaded)
+            {
+                // Nothing file-backed to re-read: still drop cached decisions and move to a new snapshot epoch.
+                Publish(src => src, changedTenant: tenantChanged ? tenant : null, propagate: false);
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Casbin policy reload after a cluster epoch change failed; the last-known-good policy set remains active.");
+            return false;
+        }
+    }
+
+    private ValueTask<TableAccessDecision> EvaluateCore(SecurityEvaluationContext context, bool useCache)
+    {
         var snapshot = Volatile.Read(ref _currentSnapshot);
         var requestedAction = ResolveRequestedAction(context);
 
         var tableStr = context.TargetTable.ToString();
         var cacheKey = DecisionKey.Create(snapshot.Epoch, context, requestedAction);
 
-        if (_decisionCache.TryGet(cacheKey, out var cachedDecision))
+        if (useCache && _decisionCache.TryGet(cacheKey, out var cachedDecision))
         {
+            Interlocked.Increment(ref _decisionCacheHits);
             return ValueTask.FromResult(cachedDecision);
         }
 
@@ -847,7 +953,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         }
 
         // E-5: Do not cache decision if the snapshot epoch has changed while evaluating
-        if (cacheable && Volatile.Read(ref _currentSnapshot).Epoch == snapshot.Epoch)
+        if (useCache && cacheable && Volatile.Read(ref _currentSnapshot).Epoch == snapshot.Epoch)
         {
             _decisionCache.Set(cacheKey, decision);
         }
@@ -1552,7 +1658,10 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         return (rules, groupingBuilder.ToImmutableArray());
     }
 
-    public void LoadPolicyFromText(TenantId tenant, string policyText)
+    public void LoadPolicyFromText(TenantId tenant, string policyText) =>
+        LoadPolicyFromTextCore(tenant, policyText, propagate: true);
+
+    private void LoadPolicyFromTextCore(TenantId tenant, string policyText, bool propagate)
     {
         ArgumentNullException.ThrowIfNull(policyText);
 
@@ -1596,7 +1705,8 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                         "The last-known-good policy set remains active.");
                 }
             },
-            changedTenant: tenant.Value);
+            changedTenant: tenant.Value,
+            propagate: propagate);
     }
 
     public void LoadPolicyFromFile(TenantId tenant, string filePath, bool watchFile = false)
@@ -1609,7 +1719,9 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
 
         _tenantPolicyFiles[tenant.Value] = Path.GetFullPath(filePath);
         var content = File.ReadAllText(filePath);
-        LoadPolicyFromText(tenant, content);
+        // Registering a file is node startup, not a policy change: it must not bump the cluster epoch (rolling restarts would
+        // otherwise make every node reload and clear its cache).
+        LoadPolicyFromTextCore(tenant, content, propagate: false);
 
         if (watchFile)
         {
@@ -1627,7 +1739,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
 
         _globalPolicyFilePath = Path.GetFullPath(filePath);
         var content = File.ReadAllText(filePath);
-        LoadPolicyFromText(content);
+        LoadPolicyFromTextCore(content, propagate: false);
 
         if (watchFile)
         {
@@ -1635,7 +1747,10 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         }
     }
 
-    public void LoadPolicyFromText(string policyText)
+    public void LoadPolicyFromText(string policyText) =>
+        LoadPolicyFromTextCore(policyText, propagate: true);
+
+    private void LoadPolicyFromTextCore(string policyText, bool propagate)
     {
         ArgumentNullException.ThrowIfNull(policyText);
 
@@ -1667,7 +1782,8 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                         "Casbin policy reload rejected: the new policy set has no 'p' rules while active policies exist. " +
                         "The last-known-good policy set remains active.");
                 }
-            });
+            },
+            propagate: propagate);
     }
 
     private void EnableGlobalFileWatcher(string filePath)
@@ -1863,8 +1979,11 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
 
     internal int DiagnosticDecisionCacheCount => _decisionCache.Count;
 
+    internal long DiagnosticDecisionCacheHits => Interlocked.Read(ref _decisionCacheHits);
+
     public void Dispose()
     {
+        _epochGuard?.Dispose();
         _globalDebounceTimer?.Dispose();
         _globalFileWatcher?.Dispose();
 
