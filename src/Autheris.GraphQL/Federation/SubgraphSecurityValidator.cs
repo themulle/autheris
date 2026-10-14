@@ -4,10 +4,16 @@ using System;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using Autheris.Application.Federation.Services;
+using Autheris.Application.State;
 
 /// <summary>
 /// Validates cryptographic HMAC-SHA256 signatures on forwarded Zero-Trust context headers (1.10).
 /// Protects downstream subgraphs against context spoofing and replay attacks.
+/// SR-M-18: only the versioned v2 canonical form (length-prefixed fields, body hash) is accepted unless
+/// <c>allowLegacy</c> is set explicitly for a rolling upgrade.
 /// </summary>
 public static class SubgraphSecurityValidator
 {
@@ -29,8 +35,80 @@ public static class SubgraphSecurityValidator
         string? subgraph = null,
         string? roles = null,
         string? method = null,
-        string? path = null)
+        string? path = null,
+        string? version = null,
+        string? bodySha256 = null,
+        bool allowLegacy = false)
     {
+        var drift = maxDrift ?? TimeSpan.FromSeconds(60);
+        if (!VerifyCore(tenant, userSid, timestampStr, nonce, signature, signingKey, drift, subgraph, roles, method, path, version, bodySha256, allowLegacy, out var now))
+        {
+            return false;
+        }
+
+        return TryRegisterNonceLocal(tenant!, nonce!, now);
+    }
+
+    /// <summary>
+    /// Same as <see cref="ValidateSignature"/> but records the nonce in the distributed cluster state provider (when given and
+    /// reachable) so replays are detected across nodes; falls back to the process-local cache otherwise.
+    /// </summary>
+    public static async Task<bool> ValidateSignatureAsync(
+        string? tenant,
+        string? userSid,
+        string? timestampStr,
+        string? nonce,
+        string? signature,
+        string signingKey,
+        IDistributedClusterStateProvider? clusterState,
+        TimeSpan? maxDrift = null,
+        string? subgraph = null,
+        string? roles = null,
+        string? method = null,
+        string? path = null,
+        string? version = null,
+        string? bodySha256 = null,
+        bool allowLegacy = false,
+        CancellationToken ct = default)
+    {
+        var drift = maxDrift ?? TimeSpan.FromSeconds(60);
+        if (!VerifyCore(tenant, userSid, timestampStr, nonce, signature, signingKey, drift, subgraph, roles, method, path, version, bodySha256, allowLegacy, out var now))
+        {
+            return false;
+        }
+
+        if (!TryRegisterNonceLocal(tenant!, nonce!, now))
+        {
+            return false;
+        }
+
+        if (clusterState != null)
+        {
+            try
+            {
+                var ttl = drift * 2 + TimeSpan.FromSeconds(5);
+                var count = await clusterState.IncrementAsync($"federation:nonce:{tenant}:{nonce}", 1, ttl, ct).ConfigureAwait(false);
+                if (count is > 1)
+                {
+                    return false;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Shared store unavailable: the local cache above remains the replay defense.
+            }
+        }
+
+        return true;
+    }
+
+    private static bool VerifyCore(
+        string? tenant, string? userSid, string? timestampStr, string? nonce, string? signature, string signingKey,
+        TimeSpan drift, string? subgraph, string? roles, string? method, string? path,
+        string? version, string? bodySha256, bool allowLegacy, out DateTimeOffset now)
+    {
+        now = DateTimeOffset.UtcNow;
+
         // SEC-MED-23: Disallow 4-field signature downgrade; target subgraph must be specified
         if (string.IsNullOrWhiteSpace(tenant) ||
             string.IsNullOrWhiteSpace(timestampStr) ||
@@ -47,29 +125,46 @@ public static class SubgraphSecurityValidator
             return false;
         }
 
-        var drift = maxDrift ?? TimeSpan.FromSeconds(60);
+        // SR-L-17: out-of-range timestamps are invalid, not an exception.
+        if (timestamp < DateTimeOffset.MinValue.ToUnixTimeSeconds() || timestamp > DateTimeOffset.MaxValue.ToUnixTimeSeconds())
+        {
+            return false;
+        }
+
         var messageTime = DateTimeOffset.FromUnixTimeSeconds(timestamp);
-        var now = DateTimeOffset.UtcNow;
         if (now - messageTime > drift || messageTime - now > drift)
         {
             return false;
         }
 
-        // Full 8-field context payload
-        var payload = $"{tenant}:{userSid ?? string.Empty}:{timestampStr}:{nonce}:{subgraph}:{roles ?? string.Empty}:{method ?? string.Empty}:{path ?? string.Empty}";
+        string payload;
+        if (string.Equals(version, FederationContextSignature.CurrentVersion, StringComparison.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(bodySha256))
+            {
+                return false;
+            }
 
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(signingKey));
-        var expectedSignature = Convert.ToHexStringLower(hmac.ComputeHash(Encoding.UTF8.GetBytes(payload)));
-
-        var isSignatureValid = CryptographicOperations.FixedTimeEquals(
-            Encoding.UTF8.GetBytes(signature.ToLowerInvariant()),
-            Encoding.UTF8.GetBytes(expectedSignature));
-
-        if (!isSignatureValid)
+            payload = FederationContextSignature.BuildCanonicalV2(
+                tenant, userSid, timestampStr, nonce, subgraph, roles, method, path, bodySha256.ToLowerInvariant());
+        }
+        else if (allowLegacy && string.IsNullOrWhiteSpace(version))
+        {
+            payload = FederationContextSignature.BuildLegacy(tenant, userSid, timestampStr, nonce, subgraph, roles, method, path);
+        }
+        else
         {
             return false;
         }
 
+        var expectedSignature = FederationContextSignature.Sign(payload, signingKey);
+        return CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(signature.ToLowerInvariant()),
+            Encoding.UTF8.GetBytes(expectedSignature));
+    }
+
+    private static bool TryRegisterNonceLocal(string tenant, string nonce, DateTimeOffset now)
+    {
         // SEC-MED-23: Nonce replay defense within time-drift window
         var replayKey = $"{tenant}:{nonce}";
         if (!SeenNonces.TryAdd(replayKey, now))
