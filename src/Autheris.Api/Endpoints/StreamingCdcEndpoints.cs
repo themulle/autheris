@@ -5,14 +5,19 @@ using System.Security.Claims;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
+using Autheris.Application.Events.Interfaces;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Audit;
+using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Autheris.Extensions.Cdc;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 public static class StreamingCdcEndpoints
 {
@@ -94,93 +99,123 @@ public static class StreamingCdcEndpoints
           .WithRequestBodyLimit(10 * 1024 * 1024) // SEC M-01: explicit large-body exception to the global Kestrel limit
           .WithAudit(AuditLevel.Full, AuditEventTypes.StreamSubscribe);
 
-        // F-EVT-01: CloudEvents Outbound Webhook Subscriptions
-        app.MapGet("/api/v1/cdc/subscriptions", async (
-            HttpContext context,
-            [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore store) =>
-        {
-            if (!IsAuthorizedSubscriptionAdmin(context.User))
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
+        // F-EVT-01: CloudEvents Outbound Webhook Subscriptions (interim guard WP-ARC-A-01: 501 unless
+        // Gateway:CdcWebhooks:Enabled is true; the subscription store is not registered while disabled).
+        app.MapGet("/api/v1/cdc/subscriptions", ListSubscriptionsAsync)
+            .RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
-            var tenantId = EndpointSecurity.GetRequestTenant(context).Value;
-            if (string.IsNullOrWhiteSpace(tenantId))
-            {
-                tenantId = "default";
-            }
-            var subs = await store.ListSubscriptionsAsync(tenantId, context.RequestAborted);
-            // SEC M-5: Never return HMAC secrets in GET responses
-            var safeSubs = subs.Select(s => s with { HmacSecret = string.IsNullOrEmpty(s.HmacSecret) ? string.Empty : "[REDACTED]" });
-            return Results.Ok(safeSubs);
-        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+        app.MapPost("/api/v1/cdc/subscriptions", CreateSubscriptionAsync)
+            .RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
-        app.MapPost("/api/v1/cdc/subscriptions", async (
-            HttpContext context,
-            Autheris.Domain.Model.CloudEventWebhookSubscription subscription,
-            [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore store) =>
-        {
-            if (!IsAuthorizedSubscriptionAdmin(context.User))
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            var tenantId = EndpointSecurity.GetRequestTenant(context).Value;
-            if (string.IsNullOrWhiteSpace(tenantId))
-            {
-                tenantId = "default";
-            }
-
-            if (!Uri.TryCreate(subscription.TargetUrl, UriKind.Absolute, out var targetUri))
-            {
-                return Results.BadRequest(new { error = "Invalid absolute target URL" });
-            }
-
-            try
-            {
-                await Autheris.Application.Security.EgressUrlPolicy.ValidateResolvedAsync(targetUri, isDev: false, ct: context.RequestAborted);
-            }
-            catch (Exception ex)
-            {
-                return Results.BadRequest(new { error = $"Target URL blocked by SSRF egress policy: {ex.Message}" });
-            }
-
-            // SEC M-5: Server-side ID generation; client-chosen ID is ignored to prevent overwrite attacks
-            var serverId = Guid.NewGuid().ToString("N");
-            var securedSub = subscription with { Id = serverId, TenantId = tenantId };
-            try
-            {
-                await store.RegisterSubscriptionAsync(securedSub, context.RequestAborted);
-            }
-            catch (InvalidOperationException ex)
-            {
-                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status429TooManyRequests);
-            }
-
-            var responseSub = securedSub with { HmacSecret = string.IsNullOrEmpty(securedSub.HmacSecret) ? string.Empty : "[REDACTED]" };
-            return Results.Created($"/api/v1/cdc/subscriptions/{securedSub.Id}", responseSub);
-        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
-
-        app.MapDelete("/api/v1/cdc/subscriptions/{id}", async (
-            string id,
-            HttpContext context,
-            [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore store) =>
-        {
-            if (!IsAuthorizedSubscriptionAdmin(context.User))
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            var tenantId = EndpointSecurity.GetRequestTenant(context).Value;
-            if (string.IsNullOrWhiteSpace(tenantId))
-            {
-                tenantId = "default";
-            }
-            var removed = await store.RemoveSubscriptionAsync(tenantId, id, context.RequestAborted);
-            return removed ? Results.NoContent() : Results.NotFound();
-        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+        app.MapDelete("/api/v1/cdc/subscriptions/{id}", DeleteSubscriptionAsync)
+            .RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         return app;
+    }
+
+    /// <summary>Returns a 501 problem result while the CDC webhook feature flag is off; otherwise <c>null</c>.</summary>
+    internal static IResult? GuardCdcWebhooksDisabled(HttpContext context)
+    {
+        var options = context.RequestServices.GetService<IOptions<CdcWebhooksOptions>>()?.Value;
+        if (options is { Enabled: true })
+        {
+            return null;
+        }
+
+        return Results.Problem(
+            title: "CDC webhook subscriptions are not enabled",
+            detail: "Outbound CDC webhook delivery is not available. Set Gateway:CdcWebhooks:Enabled to true once delivery is supported.",
+            statusCode: StatusCodes.Status501NotImplemented);
+    }
+
+    private static string ResolveTenant(HttpContext context)
+    {
+        var tenantId = EndpointSecurity.GetRequestTenant(context).Value;
+        return string.IsNullOrWhiteSpace(tenantId) ? "default" : tenantId;
+    }
+
+    internal static async Task<IResult> ListSubscriptionsAsync(HttpContext context)
+    {
+        var guard = GuardCdcWebhooksDisabled(context);
+        if (guard != null)
+        {
+            return guard;
+        }
+
+        if (!IsAuthorizedSubscriptionAdmin(context.User))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var store = context.RequestServices.GetRequiredService<ICloudEventSubscriptionStore>();
+        var subs = await store.ListSubscriptionsAsync(ResolveTenant(context), context.RequestAborted);
+        // SEC M-5: Never return HMAC secrets in GET responses
+        var safeSubs = subs.Select(s => s with { HmacSecret = string.IsNullOrEmpty(s.HmacSecret) ? string.Empty : "[REDACTED]" });
+        return Results.Ok(safeSubs);
+    }
+
+    internal static async Task<IResult> CreateSubscriptionAsync(HttpContext context, CloudEventWebhookSubscription subscription)
+    {
+        var guard = GuardCdcWebhooksDisabled(context);
+        if (guard != null)
+        {
+            return guard;
+        }
+
+        if (!IsAuthorizedSubscriptionAdmin(context.User))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var store = context.RequestServices.GetRequiredService<ICloudEventSubscriptionStore>();
+        var tenantId = ResolveTenant(context);
+
+        if (!Uri.TryCreate(subscription.TargetUrl, UriKind.Absolute, out var targetUri))
+        {
+            return Results.BadRequest(new { error = "Invalid absolute target URL" });
+        }
+
+        try
+        {
+            await Autheris.Application.Security.EgressUrlPolicy.ValidateResolvedAsync(targetUri, isDev: false, ct: context.RequestAborted);
+        }
+        catch (Exception ex)
+        {
+            return Results.BadRequest(new { error = $"Target URL blocked by SSRF egress policy: {ex.Message}" });
+        }
+
+        // SEC M-5: Server-side ID generation; client-chosen ID is ignored to prevent overwrite attacks
+        var serverId = Guid.NewGuid().ToString("N");
+        var securedSub = subscription with { Id = serverId, TenantId = tenantId };
+        try
+        {
+            await store.RegisterSubscriptionAsync(securedSub, context.RequestAborted);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status429TooManyRequests);
+        }
+
+        var responseSub = securedSub with { HmacSecret = string.IsNullOrEmpty(securedSub.HmacSecret) ? string.Empty : "[REDACTED]" };
+        return Results.Created($"/api/v1/cdc/subscriptions/{securedSub.Id}", responseSub);
+    }
+
+    internal static async Task<IResult> DeleteSubscriptionAsync(string id, HttpContext context)
+    {
+        var guard = GuardCdcWebhooksDisabled(context);
+        if (guard != null)
+        {
+            return guard;
+        }
+
+        if (!IsAuthorizedSubscriptionAdmin(context.User))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var store = context.RequestServices.GetRequiredService<ICloudEventSubscriptionStore>();
+        var removed = await store.RemoveSubscriptionAsync(ResolveTenant(context), id, context.RequestAborted);
+        return removed ? Results.NoContent() : Results.NotFound();
     }
 
     private static bool IsAuthorizedSubscriptionAdmin(ClaimsPrincipal user)

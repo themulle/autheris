@@ -31,6 +31,12 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> EventBusDroppedCounter =
         Meter.CreateCounter<long>("autheris_eventbus_dropped_total", description: "Total number of event bus messages dropped due to channel saturation");
 
+    public static readonly Counter<long> GatewayEventBusDroppedCounter =
+        Meter.CreateCounter<long>("autheris_event_bus_dropped_total", description: "Gateway events dropped (oldest first) because a subscriber queue was full");
+
+    public static readonly Counter<long> GatewayEventBusHandlerTimeoutCounter =
+        Meter.CreateCounter<long>("autheris_event_bus_handler_timeout_total", description: "Gateway event handler invocations that exceeded the per-handler timeout");
+
     public static readonly Histogram<double> PolicyEvaluationDuration =
         Meter.CreateHistogram<double>("autheris_policy_evaluation_duration_ms", "ms", description: "Dauer der Casbin ABAC Evaluierung");
 
