@@ -28,7 +28,7 @@ COPY src_build/gql_extensions/src/ /gql_extensions/src/
 
 # Build and publish
 WORKDIR /gql/src/Autheris.Api
-RUN dotnet publish -c Release -o /app/publish --no-restore -p:AutherisIncludeTestAuth=false
+RUN dotnet publish -c Release -o /app/publish --no-restore
 
 # --- Stage 2: Runtime Image ---
 FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:d5633778c754e89a386882eddf8dbee6942447a8a4b8267c19cf1e1158d0b0ac AS runtime

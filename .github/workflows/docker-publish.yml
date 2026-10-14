@@ -60,16 +60,15 @@ jobs:
           dotnet publish src/Autheris.Api/Autheris.Api.csproj \
             -c Release \
             --no-restore \
-            -p:AutherisIncludeTestAuth=false \
             -o ./dist/publish
 
       - name: Verify TestAuthHandler is Excluded from Publish Output (SC-04)
+        env:
+          AUTHERIS_RELEASE_API_ASSEMBLY: ${{ github.workspace }}/dist/publish/Autheris.Api.dll
         run: |
-          if strings ./dist/publish/Autheris.Api.dll | grep -E "(^TestAuth$|Autheris\.Api\.Security\.TestAuthHandler)" > /dev/null; then
-            echo "::error::Security invariant violation: TestAuthHandler found in published binary!"
-            exit 1
-          fi
-          echo "Verified: TestAuthHandler and TestAuth scheme are excluded from publish binary."
+          dotnet test tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj \
+            -c Release --no-build \
+            --filter "FullyQualifiedName~ReleaseBuildExcludesTestAuthTests"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1

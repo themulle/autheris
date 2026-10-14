@@ -70,13 +70,17 @@ jobs:
               -r "$RID" \
               --self-contained true \
               -p:PublishSingleFile=true \
-              -p:AutherisIncludeTestAuth=false \
               -o "$OUT_DIR"
 
-            if strings "$OUT_DIR/$BINARY" | grep -E "(^TestAuth$|Autheris\.Api\.Security\.TestAuthHandler)" > /dev/null; then
-              echo "::error::Security invariant violation: TestAuthHandler found in $RID binary!"
+            # Single-file bundles embed the assembly, so scan the per-RID compiled assembly (SC-04).
+            API_DLL="$(find src/Autheris.Api/obj/Release -path "*/${RID}/Autheris.Api.dll" -not -path "*/ref*" | head -n 1)"
+            if [ -z "$API_DLL" ]; then
+              echo "::error::Compiled Autheris.Api.dll for $RID not found"
               exit 1
             fi
+            AUTHERIS_RELEASE_API_ASSEMBLY="$PWD/$API_DLL" dotnet test tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj \
+              -c Release --no-build \
+              --filter "FullyQualifiedName~ReleaseBuildExcludesTestAuthTests"
 
             ARCHIVE_NAME="Autheris-${RID}"
             if [ "$ARCHIVE" = "zip" ]; then
