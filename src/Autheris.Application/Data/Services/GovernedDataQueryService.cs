@@ -31,7 +31,8 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
     private const int MaxLimit = 1000;
 
     /// <summary>
-    /// Absolute upper bound of the pagination window (offset + limit + 1) a single request may span. The effective cap is
+    /// Absolute upper bound of the pagination window (limit + 1 for single-source tables, offset + limit + 1 on the
+    /// cross-source path) a single request may span. The effective cap is
     /// lowered further by WebSql.MaxAllowedRows and, on the cross-source path, DuckDbOlap.MaxResultRows
     /// (see <see cref="ResolvePaginationWindowCap"/>).
     /// </summary>
@@ -45,6 +46,7 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
     private readonly IFederatedQueryExecutionService _federatedExecutionService;
     private readonly IColumnMaskingProvider _maskingProvider;
     private readonly GatewayOptions _options;
+    private readonly int _maxOffset;
 
     public GovernedDataQueryService(
         ITableMetadataRepository metadataRepository,
@@ -52,9 +54,11 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
         IGovernedSqlExecutionService sqlExecutionService,
         IFederatedQueryExecutionService federatedExecutionService,
         IColumnMaskingProvider maskingProvider,
-        IOptions<GatewayOptions>? options = null)
+        IOptions<GatewayOptions>? options = null,
+        IOptions<AnalyticsOptions>? analyticsOptions = null)
     {
         _options = options?.Value ?? new GatewayOptions();
+        _maxOffset = analyticsOptions?.Value?.DatasetApi?.MaxOffset ?? DatasetApiOptions.DefaultMaxOffset;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _pdp = pdp ?? throw new ArgumentNullException(nameof(pdp));
         _sqlExecutionService = sqlExecutionService ?? throw new ArgumentNullException(nameof(sqlExecutionService));
@@ -190,22 +194,43 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
         var limit = request.Limit > 0 ? Math.Min(request.Limit, MaxLimit) : DefaultLimit;
         var offset = request.Offset >= 0 ? request.Offset : 0;
 
-        // Pagination is applied here, not as OFFSET text in the generated SQL: the SQL engine's grammar only accepts the
-        // Trino form (OFFSET n LIMIT m) while the legacy token-stream rewriter hands the text unchanged to SQLite,
-        // SQL Server, PostgreSQL and the cross-source planner, none of which share that form. A plain LIMIT is
-        // understood and translated per target by every path, so the query reads offset + limit + 1 rows and the
-        // first <offset> rows are skipped below (the extra row populates HasMore).
+        // Single-source SQL tables push the page down as Trino-form pagination (OFFSET n ROWS LIMIT m): the governed compile
+        // path parses that grammar and every dialect generator emits its native form, so the gateway reads limit + 1 rows
+        // (the extra row populates HasMore). Cross-source tables (staged DuckDB / HTTP sources) cannot take a pushed-down
+        // offset and keep the window logic: LIMIT offset + limit + 1, the first <offset> rows are skipped below.
         bool isCrossSource = metadata.DataSourceType is DataSourceType.LakehouseIceberg
             or DataSourceType.LakehouseDelta
             or DataSourceType.HttpDeclarative
             or DataSourceType.HttpPlugin;
 
         var windowCap = ResolvePaginationWindowCap(isCrossSource);
-        var window = (long)offset + limit + 1;
-        if (window > windowCap)
+        var window = isCrossSource ? (long)offset + limit + 1 : limit + 1L;
+        if (isCrossSource)
         {
-            throw new ArgumentException(
-                $"Pagination window too large: offset + limit must not exceed {windowCap - 1}.", nameof(request));
+            if (window > windowCap)
+            {
+                throw new ArgumentException(
+                    $"Pagination window too large: offset + limit must not exceed {windowCap - 1}.", nameof(request));
+            }
+        }
+        else
+        {
+            if (offset > _maxOffset)
+            {
+                throw new ArgumentException($"Offset too large: offset must not exceed {_maxOffset}.", nameof(request));
+            }
+
+            if (window > windowCap)
+            {
+                throw new ArgumentException($"Limit too large: limit must not exceed {windowCap - 1}.", nameof(request));
+            }
+
+            // OFFSET paging is only well-defined (and required by SQL Server / Oracle) with a deterministic ORDER BY.
+            if (offset > 0 && string.IsNullOrWhiteSpace(request.OrderBy) && metadata.PrimaryKeyColumns.Count == 0)
+            {
+                throw new ArgumentException(
+                    "Offset paging requires an orderBy or a primary key on the table.", nameof(request));
+            }
         }
 
         var sb = new StringBuilder();
@@ -232,8 +257,20 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             sb.Append(" ORDER BY ").Append(string.Join(", ", metadata.PrimaryKeyColumns.Select(DataApiFilterTranslator.QuoteIdentifier)));
         }
 
-        // Fetch offset + limit + 1 rows: the skipped window plus one row to accurately populate HasMore
-        sb.Append(" LIMIT ").Append(offset + limit + 1);
+        if (isCrossSource)
+        {
+            // Fetch offset + limit + 1 rows: the skipped window plus one row to accurately populate HasMore
+            sb.Append(" LIMIT ").Append(offset + limit + 1);
+        }
+        else
+        {
+            if (offset > 0)
+            {
+                sb.Append(" OFFSET ").Append(offset).Append(" ROWS");
+            }
+
+            sb.Append(" LIMIT ").Append(limit + 1);
+        }
         var sql = sb.ToString();
 
         // 6. Execution & Routing
@@ -278,13 +315,15 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
                 "Pagination window exceeds the row limit of this data source; reduce offset or limit.", nameof(request));
         }
 
-        int available = Math.Max(0, sourceRows.Count - offset);
+        // Rows already positioned by the database (pushdown) need no in-memory skip.
+        int skip = isCrossSource ? offset : 0;
+        int available = Math.Max(0, sourceRows.Count - skip);
         bool hasMore = available > limit;
         int pageCount = Math.Min(limit, available);
         var pagedRows = new List<IReadOnlyDictionary<string, object?>>(pageCount);
         for (int i = 0; i < pageCount; i++)
         {
-            pagedRows.Add(sourceRows[offset + i]);
+            pagedRows.Add(sourceRows[skip + i]);
         }
 
         var columnInfos = new List<DatasetColumnInfo>(columnsToSelect.Count);
