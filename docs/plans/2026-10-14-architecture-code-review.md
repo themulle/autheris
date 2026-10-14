@@ -4,7 +4,7 @@
 **Role:** Solution Architect (Phase 2 perspective, read-only review)
 **Commit base:** `88f7df1c` (`main`)
 **Parent:** [`00-master-plan-overview.md`](00-master-plan-overview.md)
-**Related:** `2026-10-13-plan-security-audit-and-remediation.md` *(archived, see git history)* (AppSec audit; pure security bugs are out of scope here), [`2026-10-10-plan-ast-dialect-generator.md`](2026-10-10-plan-ast-dialect-generator.md) (X1 cutover)
+**Related:** `2026-10-13-plan-security-audit-and-remediation.md` *(archived, see git history)* (AppSec audit; pure security bugs are out of scope here), `2026-10-10-plan-ast-dialect-generator.md` *(completed & archived, see git history; documented in [F-DIALECT-02](../features/f-dialect-02-ast-sql-compiler.md))* (X1 cutover)
 
 Detailed evidence per slice (each finding with `path:line`, problem, impact, recommendation, effort):
 

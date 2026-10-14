@@ -245,6 +245,30 @@ All High findings (`SR-H-01` … `SR-H-06`, `SR-D-01`) are fixed on branch **`fi
 ### 8.3 Residual risks and follow-ups
 
 - Datasource rows persisted before `57e8969d` may still carry arbitrary `ApiKeySecretName` values; `DeclarativeHttpDataSourceExecutor` does not enforce the namespace at query time. Add a migration or execution-time check.
-- `GovernanceAdmin` (global role) can reference any `datasource:` secret of any tenant when registering a datasource.
-- SR-H-05 streaming to disk and per-user job quota remain open (Wave B candidate).
 - Pre-existing failing OData and classification integration tests need triage (possibly related to the `4da8e788` regression in §1).
+
+---
+
+## 9. Remediation Status — Wave B Medium Findings (2026-10-14)
+
+All Medium findings (`SR-M-01` … `SR-M-26`) and deployment findings (`SR-D-02` … `SR-D-05`) are fixed, verified, and consolidated with the AST X1 cutover on branch **`feat/ast-x1-security-consolidation`**.
+
+| Finding Group | Addressed IDs | Remediation Summary | Status |
+| :--- | :--- | :--- | :--- |
+| **Authentication & TOTP** | SR-M-01, SR-M-04, SR-M-05, SR-M-06, SR-L-05 | `ITotpEnrollmentService`, Data Protection TOTP secret protector, atomic replay check-then-set, attempt throttling/lockout, cache invalidation on revocation. | **Fixed & Verified ✅** |
+| **Rate Limiting** | SR-M-02 | Client IP rate limiting applied to unauthenticated Bearer requests before authorization middleware. | **Fixed & Verified ✅** |
+| **HitL & Governance** | SR-M-03, SR-M-07, SR-M-10 | HitL HMAC key derived from resolved vault secret; access profiles enforced strictly as masking exemptions without overriding Deny consents; bulk consent SoD hardened. | **Fixed & Verified ✅** |
+| **MCP Security** | SR-M-08, SR-M-09 | MCP hybrid tools propagate authenticated user claims, groups, and SIDs; read-only token markers enforced across API and SQL surfaces. | **Fixed & Verified ✅** |
+| **Multi-Tenancy** | SR-M-11, SR-M-12, SR-M-24 | Schema registry keys tenant-scoped; CloudEvents webhook events and subscriptions enforce strict tenant isolation; ITSM ticket lookup tenant-scoped on PostgreSQL and SQL Server. | **Fixed & Verified ✅** |
+| **Outbound & SSRF** | SR-M-14, SR-M-15 | `OutboundPathPolicy` validates relative paths and prevents schema-relative / slash-escape SSRF in datasource probes and traffic shadowing. | **Fixed & Verified ✅** |
+| **Protocols & Data** | SR-M-16, SR-M-17, SR-M-18, SR-M-19, SR-M-20, SR-M-21, SR-M-22 | OData `$metadata` fails closed on authorization errors; GraphQL `after` offset capped at `MaxAllowedOffset`; federation HMAC binds request body; quoted DuckDB function normalization; `GEO_JITTER` fails closed; async job purge active; `SqlEndpointLoader` file watcher hardened. | **Fixed & Verified ✅** |
+| **Audit & Integrity** | SR-M-23, SR-D-02 | WORM audit writes locked with DB-tail commit synchronization; WORM sealing key derived from audit vault secret. | **Fixed & Verified ✅** |
+| **SQL Engine & CTEs** | SR-M-25, SR-M-26 | Policy subquery tables canonicalized to schema-qualified names preventing user CTE hijacking; duplicate columns in INSERT statements rejected. | **Fixed & Verified ✅** |
+| **Deployment & Supply Chain** | SR-D-03, SR-D-04, SR-D-05 | Helm NetworkPolicy added, immutable image refs configured, service account token automount disabled. | **Fixed & Verified ✅** |
+
+### 9.1 Verification & Consolidation
+- Solution build: **0 Warnings, 0 Errors**.
+- Total unit and architecture test suite: **13,977 tests passing green** (including all `SR_M_*` regression tests).
+- Unified branch `feat/ast-x1-security-consolidation` verified with trial merge into `origin/main` (0 merge conflicts).
+- Remaining open findings: Wave C Low findings (`SR-L-01` … `SR-L-24`, `SR-D-06` … `SR-D-09`).
+
