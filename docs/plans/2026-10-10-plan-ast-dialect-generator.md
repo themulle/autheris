@@ -6,7 +6,7 @@
 **Author:** Solution Architect (`csharp-architect`); Phase 3 reviews (§16, §29) by Security Expert (`csharp-security-expert`)
 **Parent plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
 **Requirements baseline:** [2026-10-10-req-ast-dialect-generator.md](2026-10-10-req-ast-dialect-generator.md) (PRD, Phase 1)
-**Supersedes:** [2026-10-06-implementation-plan-ast-dialect-generator.md](2026-10-06-implementation-plan-ast-dialect-generator.md) (German draft, kept for history only)
+**Supersedes:** `2026-10-06-implementation-plan-ast-dialect-generator.md` *(archived, see git history)* (German draft, kept for history only)
 **Amends:** [ADR-017 §2](../adr/ADR-017-distributed-state-ast-generator-and-rbac.md) (amendment text in §13; Phase 6 writes it)
 **Branch base:** `feat/ast-target-dialect-generator` (commit `6985be1`)
 
