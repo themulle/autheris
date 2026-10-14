@@ -5,6 +5,7 @@ using Autheris.Infrastructure.Persistence.Migrations;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 
 namespace Autheris.Tests.Unit;
 
@@ -24,18 +25,12 @@ public static class GovernanceStoreFactory
         IAuditAnchorSigner? auditAnchorSigner = null,
         ICallerContextProvider? callerContextProvider = null)
     {
-        var repository = new SqliteGovernanceRepository(
-            epochValidationService,
-            options,
-            environment,
-            secretProvider,
-            auditAnchorStore,
-            logger,
-            auditAnchorSigner,
-            callerContextProvider);
+        var repository = CreateUnmigratedSqlite(
+            epochValidationService, options, environment, secretProvider, auditAnchorStore, logger, auditAnchorSigner, callerContextProvider);
+        var gateway = options ?? Options.Create(new GatewayOptions());
         try
         {
-            var runner = new SqliteGovernanceMigrationRunner(repository, options ?? Options.Create(new GatewayOptions()));
+            var runner = new SqliteGovernanceMigrationRunner(repository, gateway);
             runner.RunAsync().GetAwaiter().GetResult();
             repository.InitializeAsync().GetAwaiter().GetResult();
             return repository;
@@ -45,5 +40,83 @@ public static class GovernanceStoreFactory
             repository.Dispose();
             throw;
         }
+    }
+
+    /// <summary>A SQLite repository that is neither migrated nor initialized (for readiness and migration tests).</summary>
+    public static SqliteGovernanceRepository CreateUnmigratedSqlite(
+        IEpochValidationService epochValidationService,
+        IOptions<GatewayOptions>? options = null,
+        IHostEnvironment? environment = null,
+        IKeyVaultSecretProvider? secretProvider = null,
+        IAuditChainAnchorStore? auditAnchorStore = null,
+        ILogger<SqliteGovernanceRepository>? logger = null,
+        IAuditAnchorSigner? auditAnchorSigner = null,
+        ICallerContextProvider? callerContextProvider = null)
+    {
+        var gateway = options ?? Options.Create(new GatewayOptions
+        {
+            GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=governance_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" }
+        });
+        var env = environment ?? DefaultEnvironment();
+        var secrets = secretProvider ?? Substitute.For<IKeyVaultSecretProvider>();
+        // Outside Development/Test the anchor factory (AU-01/AU-03) is covered by its own tests; here a stand-in lets the
+        // constructor-level checks (for example the audit key length) be reached.
+        var anchorStore = auditAnchorStore
+            ?? (IsDevOrTest(env)
+                ? AuditChainAnchorStoreFactory.CreateForGovernance(gateway.Value, env, secrets, auditAnchorSigner, logger)
+                : Substitute.For<IAuditChainAnchorStore>());
+        return new SqliteGovernanceRepository(
+            epochValidationService,
+            gateway,
+            env,
+            secrets,
+            anchorStore,
+            callerContextProvider ?? Substitute.For<ICallerContextProvider>(),
+            logger);
+    }
+
+    /// <summary>A PostgreSQL repository that is neither migrated nor initialized and opens no connection.</summary>
+    public static PostgreSqlGovernanceRepository CreateUnmigratedPostgreSql(
+        IEpochValidationService epochValidationService,
+        IOptions<GatewayOptions> options,
+        IHostEnvironment? environment = null)
+    {
+        var env = environment ?? DefaultEnvironment();
+        var secrets = Substitute.For<IKeyVaultSecretProvider>();
+        return new PostgreSqlGovernanceRepository(
+            epochValidationService,
+            options,
+            env,
+            secrets,
+            AuditChainAnchorStoreFactory.CreateForGovernance(options.Value, env, secrets, null, null),
+            Substitute.For<ICallerContextProvider>());
+    }
+
+    /// <summary>A SQL Server repository that is neither migrated nor initialized and opens no connection.</summary>
+    public static SqlServerGovernanceRepository CreateUnmigratedSqlServer(
+        IEpochValidationService epochValidationService,
+        IOptions<GatewayOptions> options,
+        IHostEnvironment? environment = null)
+    {
+        var env = environment ?? DefaultEnvironment();
+        var secrets = Substitute.For<IKeyVaultSecretProvider>();
+        return new SqlServerGovernanceRepository(
+            epochValidationService,
+            options,
+            env,
+            secrets,
+            AuditChainAnchorStoreFactory.CreateForGovernance(options.Value, env, secrets, null, null),
+            Substitute.For<ICallerContextProvider>());
+    }
+
+    private static bool IsDevOrTest(IHostEnvironment env) =>
+        string.Equals(env.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(env.EnvironmentName, "Test", StringComparison.OrdinalIgnoreCase);
+
+    private static IHostEnvironment DefaultEnvironment()
+    {
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Test");
+        return env;
     }
 }

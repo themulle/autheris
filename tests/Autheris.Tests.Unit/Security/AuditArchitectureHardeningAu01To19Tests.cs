@@ -175,7 +175,7 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
     }
 
     [Fact]
-    public void AU01_SqliteRepository_InProduction_MissingAnchorStore_ThrowsInvalidOperationException()
+    public void AU01_AnchorStoreFactory_InProduction_MissingAnchorStore_ThrowsInvalidOperationException()
     {
         var dbPath = Path.Combine(_testDir, "prod_test.db");
         var options = Options.Create(new GatewayOptions
@@ -198,14 +198,14 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
         mockSecretProvider.GetSecretBytes(Arg.Any<string>())
             .Returns(Encoding.UTF8.GetBytes("secret-audit-key-32-chars-long-minimum!"));
 
+        // ARC-I-13: AU-01/AU-03 are enforced where the repository's anchor store is built.
         var ex = Should.Throw<InvalidOperationException>(() =>
-            GovernanceStoreFactory.CreateSqlite(
-                new EpochValidationService(),
-                options,
-                environment: env,
-                secretProvider: mockSecretProvider,
-                auditAnchorStore: null,
-                logger: NullLogger<SqliteGovernanceRepository>.Instance));
+            AuditChainAnchorStoreFactory.CreateForGovernance(
+                options.Value,
+                env,
+                mockSecretProvider,
+                null,
+                NullLogger<SqliteGovernanceRepository>.Instance));
 
         ex.Message.ShouldContain("AU-01/AU-03");
     }

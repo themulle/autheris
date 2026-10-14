@@ -47,6 +47,14 @@ public static class GatewayGovernanceServiceExtensions
     {
         services.AddSingleton<Autheris.Application.Audit.IAuditWriter, Autheris.Application.Audit.AuditWriter>();
 
+        // ARC-I-13: the anchor store is a required repository dependency; AU-01/AU-03 are enforced when it is built.
+        services.AddSingleton<IAuditChainAnchorStore>(sp => AuditChainAnchorStoreFactory.CreateForGovernance(
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value,
+            sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>(),
+            sp.GetRequiredService<IKeyVaultSecretProvider>(),
+            sp.GetService<IAuditAnchorSigner>(),
+            sp.GetService<Microsoft.Extensions.Logging.ILoggerFactory>()?.CreateLogger("Autheris.Infrastructure.Persistence.AuditChainAnchorStore")));
+
         if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.PostgreSql))
         {
             services.AddSingleton<PostgreSqlGovernanceRepository>();

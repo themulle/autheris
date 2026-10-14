@@ -1092,31 +1092,6 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         }
     }
 
-    private static IAuditChainAnchorStore CreateDefaultAuditAnchorStore(string connectionString, bool isMemory, string? configuredPath)
-    {
-        if (!string.IsNullOrWhiteSpace(configuredPath))
-        {
-            return new FileAuditChainAnchorStore(configuredPath);
-        }
-
-        string dataSource;
-        try
-        {
-            dataSource = new SqliteConnectionStringBuilder(connectionString).DataSource;
-        }
-        catch
-        {
-            dataSource = connectionString;
-        }
-
-        if (isMemory || string.IsNullOrWhiteSpace(dataSource) || dataSource == ":memory:")
-        {
-            return new InMemoryAuditChainAnchorStore();
-        }
-
-        return new FileAuditChainAnchorStore(dataSource + ".audit-anchor.json");
-    }
-
     private void FlagAuditChainViolation(string reason)
     {
         if (Interlocked.CompareExchange(ref _auditChainViolation, reason, null) == null)

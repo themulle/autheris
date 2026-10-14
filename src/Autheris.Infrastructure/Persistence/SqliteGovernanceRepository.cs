@@ -78,14 +78,20 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
 
     public SqliteGovernanceRepository(
         IEpochValidationService epochValidationService,
-        IOptions<GatewayOptions>? options = null,
-        Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
-        IKeyVaultSecretProvider? secretProvider = null,
-        IAuditChainAnchorStore? auditAnchorStore = null,
-        ILogger<SqliteGovernanceRepository>? logger = null,
-        IAuditAnchorSigner? auditAnchorSigner = null,
-        ICallerContextProvider? callerContextProvider = null)
+        IOptions<GatewayOptions> options,
+        Microsoft.Extensions.Hosting.IHostEnvironment environment,
+        IKeyVaultSecretProvider secretProvider,
+        IAuditChainAnchorStore auditAnchorStore,
+        ICallerContextProvider callerContextProvider,
+        ILogger<SqliteGovernanceRepository>? logger = null)
     {
+        ArgumentNullException.ThrowIfNull(epochValidationService);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(secretProvider);
+        ArgumentNullException.ThrowIfNull(auditAnchorStore);
+        ArgumentNullException.ThrowIfNull(callerContextProvider);
+
         _epochValidationService = epochValidationService;
         _lock = new ReadinessGatedLock(() => _ready, nameof(SqliteGovernanceRepository));
         _logger = logger;
@@ -119,8 +125,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
             }
             catch (Exception)
             {
-                var env = environment?.EnvironmentName ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-                bool isDev = string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase);
+                bool isDev = string.Equals(environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
                 if (!isDev)
                 {
                     throw new InvalidOperationException("Security critical: Failed to load AuditHmacKeyVaultRef from Key Vault in non-development environment.");
@@ -129,9 +134,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
         }
 
         // R-DEP-1: the length is checked here, where the key is used, not by its reference name.
-        var envName = environment?.EnvironmentName ??
-                      Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
-                      Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        var envName = environment.EnvironmentName;
         bool isDevOrTest = string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase) ||
                            string.Equals(envName, "Test", StringComparison.OrdinalIgnoreCase);
         if (key != null)
@@ -207,27 +210,17 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
         // SEC H-17: dedicated sub-key for signing the external audit chain end anchor.
         _auditAnchorKey = HKDF.DeriveKey(HashAlgorithmName.SHA256, _auditHmacKey, 32, info: "Autheris:AuditChainAnchor:v1"u8.ToArray());
 
-        // AU-01 & AU-03: Startabbruch (Fail-Closed) außerhalb von Dev/Test ohne persistenten Anker-Pfad oder KMS-Signer.
-        if (!isDevOrTest && auditAnchorStore == null)
+        // AU-01 & AU-03 are enforced where the anchor store is built (AuditChainAnchorStoreFactory.CreateForGovernance).
+        // Defense in depth: an injected in-memory anchor store never protects a production chain.
+        if (!isDevOrTest && auditAnchorStore is InMemoryAuditChainAnchorStore)
         {
-            if (string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorPath) &&
-                string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorWormDirectory) &&
-                string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorSignerKeyVaultRef) &&
-                auditAnchorSigner == null)
-            {
-                throw new InvalidOperationException(
-                    "CRITICAL AUDIT MISCONFIGURATION (AU-01/AU-03): In production environments, " +
-                    "a persistent audit anchor store (ChainAnchorPath, ChainAnchorWormDirectory, or KMS Signer) " +
-                    "is mandatory. In-memory anchor stores are strictly prohibited outside Development/Test.");
-            }
+            throw new InvalidOperationException(
+                "CRITICAL AUDIT MISCONFIGURATION (AU-01/AU-03): In production environments, " +
+                "a persistent audit anchor store (ChainAnchorPath, ChainAnchorWormDirectory, or KMS Signer) " +
+                "is mandatory. In-memory anchor stores are strictly prohibited outside Development/Test.");
         }
 
-        _auditAnchorStore = auditAnchorStore ?? AuditChainAnchorStoreFactory.Create(
-            options?.Value?.Audit,
-            CreateDefaultAuditAnchorStore(connStr, isMemory, options?.Value?.Audit?.ChainAnchorPath),
-            secretProvider,
-            auditAnchorSigner,
-            _logger);
+        _auditAnchorStore = auditAnchorStore;
         _isDevOrTest = isDevOrTest;
         _shouldSeed = options?.Value?.GovernanceDb?.SeedDemoData ?? (isMemory && isDevOrTest);
     }

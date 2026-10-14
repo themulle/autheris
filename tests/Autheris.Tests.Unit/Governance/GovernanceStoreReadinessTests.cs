@@ -26,7 +26,7 @@ public sealed class GovernanceStoreReadinessTests
     private static string NewMemoryConnectionString() => $"Data Source=ready_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
 
     private static SqliteGovernanceRepository NewRawSqlite(string? connectionString = null) =>
-        new(Substitute.For<IEpochValidationService>(), Options.Create(Gateway(connectionString ?? NewMemoryConnectionString())));
+        GovernanceStoreFactory.CreateUnmigratedSqlite(Substitute.For<IEpochValidationService>(), Options.Create(Gateway(connectionString ?? NewMemoryConnectionString())));
 
     private static IHostEnvironment TestEnvironment()
     {
@@ -122,7 +122,7 @@ public sealed class GovernanceStoreReadinessTests
     public async Task PostgreSql_UsedBeforeInitialize_ThrowsNotReady_WithoutConnecting()
     {
         var options = Options.Create(Gateway("Host=203.0.113.1;Database=x;Username=u;Password=p;Timeout=1"));
-        await using var repository = new PostgreSqlGovernanceRepository(Substitute.For<IEpochValidationService>(), options, TestEnvironment());
+        await using var repository = GovernanceStoreFactory.CreateUnmigratedPostgreSql(Substitute.For<IEpochValidationService>(), options, TestEnvironment());
 
         await Should.ThrowAsync<GovernanceStoreNotReadyException>(() => repository.GetTableMetadataAsync(new TableIdentifier("default", "public", "orders")));
         await Should.ThrowAsync<GovernanceStoreNotReadyException>(() => repository.GetConsentRequestAsync(Guid.NewGuid()));
@@ -134,7 +134,7 @@ public sealed class GovernanceStoreReadinessTests
     public async Task SqlServer_UsedBeforeInitialize_ThrowsNotReady_WithoutConnecting()
     {
         var options = Options.Create(Gateway("Server=203.0.113.1;Database=x;User Id=u;Password=p;TrustServerCertificate=true;Connect Timeout=1"));
-        await using var repository = new SqlServerGovernanceRepository(Substitute.For<IEpochValidationService>(), options, TestEnvironment());
+        await using var repository = GovernanceStoreFactory.CreateUnmigratedSqlServer(Substitute.For<IEpochValidationService>(), options, TestEnvironment());
 
         await Should.ThrowAsync<GovernanceStoreNotReadyException>(() => repository.GetTableMetadataAsync(new TableIdentifier("default", "public", "orders")));
         await Should.ThrowAsync<GovernanceStoreNotReadyException>(() => repository.GetConsentRequestAsync(Guid.NewGuid()));

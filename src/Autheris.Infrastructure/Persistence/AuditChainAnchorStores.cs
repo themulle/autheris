@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Autheris.Application.Interfaces;
+using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
@@ -512,6 +513,83 @@ public static class AuditChainAnchorStoreFactory
         IAuditChainAnchorStore result = stores.Count == 1 ? primary : new CompositeAuditChainAnchorStore(stores);
 
         return signer == null ? result : new SigningAuditChainAnchorStore(result, signer);
+    }
+
+    /// <summary>
+    /// Builds the anchor store of the governance repository for the configured provider (AU-01/AU-03, ARC-I-13). Outside
+    /// Development/Test a persistent anchor (file, WORM directory or KMS signer) is mandatory; the provider defaults are the SQLite
+    /// <c>&lt;db&gt;.audit-anchor.json</c> file or, for PostgreSQL and SQL Server, <c>Audit:ChainAnchorPath</c>.
+    /// </summary>
+    public static IAuditChainAnchorStore CreateForGovernance(
+        GatewayOptions options,
+        Microsoft.Extensions.Hosting.IHostEnvironment environment,
+        IKeyVaultSecretProvider secrets,
+        IAuditAnchorSigner? signer,
+        ILogger? logger)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(secrets);
+
+        var audit = options.Audit;
+        var isDevOrTest = string.Equals(environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(environment.EnvironmentName, "Test", StringComparison.OrdinalIgnoreCase);
+
+        // AU-01 & AU-03: fail closed outside Dev/Test without a persistent anchor path or KMS signer.
+        if (!isDevOrTest &&
+            string.IsNullOrWhiteSpace(audit?.ChainAnchorPath) &&
+            string.IsNullOrWhiteSpace(audit?.ChainAnchorWormDirectory) &&
+            string.IsNullOrWhiteSpace(audit?.ChainAnchorSignerKeyVaultRef) &&
+            signer == null)
+        {
+            throw new InvalidOperationException(
+                "CRITICAL AUDIT MISCONFIGURATION (AU-01/AU-03): In production environments, " +
+                "a persistent audit anchor store (ChainAnchorPath, ChainAnchorWormDirectory, or KMS Signer) " +
+                "is mandatory. In-memory anchor stores are strictly prohibited outside Development/Test.");
+        }
+
+        var provider = options.GovernanceDb?.Provider;
+        var primary = DataSourceProvider.Is(provider, DatabaseDialect.PostgreSql) || DataSourceProvider.Is(provider, DatabaseDialect.SqlServer)
+            ? (!string.IsNullOrWhiteSpace(audit?.ChainAnchorPath)
+                ? new FileAuditChainAnchorStore(audit.ChainAnchorPath)
+                : (IAuditChainAnchorStore)new InMemoryAuditChainAnchorStore())
+            : CreateSqliteDefaultStore(options.GovernanceDb?.ConnectionString, audit?.ChainAnchorPath);
+
+        return Create(audit, primary, secrets, signer, logger);
+    }
+
+    private static IAuditChainAnchorStore CreateSqliteDefaultStore(string? connectionString, string? configuredPath)
+    {
+        if (!string.IsNullOrWhiteSpace(configuredPath))
+        {
+            return new FileAuditChainAnchorStore(configuredPath);
+        }
+
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return new InMemoryAuditChainAnchorStore();
+        }
+
+        string dataSource;
+        bool isMemory;
+        try
+        {
+            var builder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(connectionString);
+            dataSource = builder.DataSource;
+            isMemory = builder.Mode == Microsoft.Data.Sqlite.SqliteOpenMode.Memory;
+        }
+        catch
+        {
+            dataSource = connectionString;
+            isMemory = false;
+        }
+
+        if (isMemory || string.IsNullOrWhiteSpace(dataSource) || dataSource == ":memory:")
+        {
+            return new InMemoryAuditChainAnchorStore();
+        }
+
+        return new FileAuditChainAnchorStore(dataSource + ".audit-anchor.json");
     }
 
     private static IAuditAnchorSigner? CreateSigner(AuditOptions? options, IKeyVaultSecretProvider? secrets)
