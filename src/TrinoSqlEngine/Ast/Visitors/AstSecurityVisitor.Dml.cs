@@ -108,20 +108,8 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         return false;
     }
 
-    private static bool TryCompareNumericLiterals(LiteralExpression left, LiteralExpression right, out int comparison)
-    {
-        comparison = 0;
-        if (left.Value == null || right.Value == null) return false;
-
-        if (double.TryParse(left.Value.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double d1) &&
-            double.TryParse(right.Value.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double d2))
-        {
-            comparison = d1.CompareTo(d2);
-            return true;
-        }
-
-        return false;
-    }
+    private static bool TryCompareNumericLiterals(LiteralExpression left, LiteralExpression right, out int comparison) =>
+        LiteralComparison.TryCompareNumeric(left, right, out comparison);
 
     /// <summary><c>x IS NULL OR x IS NOT NULL</c> (either order, same column): true for every row.</summary>
     private static bool IsNullComplement(Expression left, Expression right)
