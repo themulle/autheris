@@ -94,7 +94,7 @@ public sealed class McpHybridToolsTests
             Arg.Do<ClaimsPrincipal>(p => captured = p),
             Arg.Any<TenantId>(),
             Arg.Any<CancellationToken>())
-            .Returns(new GovernedSqlResult("q", "q", [], [], 0, 1));
+            .Returns(new GovernedSqlResult("q", [], [], 0, 1));
 
         await handler.ExecuteToolAsync(tool, JsonSerializer.Serialize(new { query = "SELECT 1" }), session);
 

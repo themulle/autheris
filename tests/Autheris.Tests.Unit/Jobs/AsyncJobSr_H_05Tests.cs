@@ -55,7 +55,7 @@ public sealed class AsyncJobSr_H_05Tests : IDisposable
         var sql = Substitute.For<IGovernedSqlExecutionService>();
         GovernedSqlQueryRequest? captured = null;
         sql.ExecuteQueryBufferedAsync(Arg.Do<GovernedSqlQueryRequest>(r => captured = r), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new GovernedSqlResult("s", "s", ["id"], new List<IReadOnlyDictionary<string, object?>>(), 0, 1)));
+            .Returns(Task.FromResult(new GovernedSqlResult("s", ["id"], new List<IReadOnlyDictionary<string, object?>>(), 0, 1)));
         var services = new ServiceCollection();
         services.AddScoped(_ => sql);
         var worker = new AsyncQueryJobBackgroundWorker(manager, services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _audit, NullLogger<AsyncQueryJobBackgroundWorker>.Instance, options);
@@ -105,7 +105,7 @@ public sealed class AsyncJobSr_H_05Tests : IDisposable
         var sql = Substitute.For<IGovernedSqlExecutionService>();
         GovernedSqlQueryRequest? captured = null;
         sql.ExecuteQueryBufferedAsync(Arg.Do<GovernedSqlQueryRequest>(r => captured = r), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new GovernedSqlResult("s", "s", ["id"], new List<IReadOnlyDictionary<string, object?>>(), 0, 1)));
+            .Returns(Task.FromResult(new GovernedSqlResult("s", ["id"], new List<IReadOnlyDictionary<string, object?>>(), 0, 1)));
         var manager = new AsyncQueryJobManager(_audit, environment: _env, options: options);
         var services = new ServiceCollection();
         services.AddScoped(_ => sql);
