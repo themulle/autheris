@@ -8,17 +8,27 @@ using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Application.State;
 
 /// <summary>
-/// Cluster-wide persistent TOTP secret store using IDistributedClusterStateProvider (Redis/Garnet)
-/// with in-memory fallback for resilient single-node or partitioned operation.
+/// Cluster-wide persistent TOTP secret store using IDistributedClusterStateProvider (Redis/Garnet).
+/// Without a cluster state provider the secrets live in-process (single node).
+/// SR-M-06: when a cluster provider is configured every read goes to the shared store (no per-node cache), so a
+/// revocation or overwrite is effective on all nodes immediately, and shared-store failures are not swallowed
+/// (reads, writes and revocations fail closed instead of silently diverging from the cluster).
+/// SR-L-05: seeds are optionally encrypted at rest through <see cref="ITotpSecretProtector"/>.
 /// </summary>
 public sealed class ClusterTotpSecretStore : ITotpSecretStore
 {
+    internal const string ProtectedPrefix = "dp1:";
+
     private readonly IDistributedClusterStateProvider? _clusterState;
+    private readonly ITotpSecretProtector? _protector;
     private readonly ConcurrentDictionary<string, string> _localSecrets = new(StringComparer.OrdinalIgnoreCase);
 
-    public ClusterTotpSecretStore(IDistributedClusterStateProvider? clusterState = null)
+    public ClusterTotpSecretStore(
+        IDistributedClusterStateProvider? clusterState = null,
+        ITotpSecretProtector? protector = null)
     {
         _clusterState = clusterState;
+        _protector = protector;
     }
 
     public async Task SetSecretAsync(string userSid, string secretBase32, CancellationToken ct = default)
@@ -28,20 +38,17 @@ public sealed class ClusterTotpSecretStore : ITotpSecretStore
 
         var key = FormatKey(userSid);
         var val = secretBase32.Trim();
-        _localSecrets[key] = val;
 
-        if (_clusterState != null)
+        if (_clusterState == null)
         {
-            try
-            {
-                // Permanent until explicitly revoked/re-enrolled (e.g. 365 days TTL)
-                await _clusterState.SetAsync(key, val, TimeSpan.FromDays(365), ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                // Silently tolerate cluster store unreachable; local store remains consistent
-            }
+            _localSecrets[key] = val;
+            return;
         }
+
+        var stored = _protector != null ? ProtectedPrefix + _protector.Protect(val) : val;
+
+        // Permanent until explicitly revoked/re-enrolled (e.g. 365 days TTL)
+        await _clusterState.SetAsync(key, stored, TimeSpan.FromDays(365), ct).ConfigureAwait(false);
     }
 
     public async Task<string?> GetSecretAsync(string userSid, CancellationToken ct = default)
@@ -52,25 +59,31 @@ public sealed class ClusterTotpSecretStore : ITotpSecretStore
         }
 
         var key = FormatKey(userSid);
-        if (_clusterState != null)
+        if (_clusterState == null)
         {
-            try
-            {
-                var remote = await _clusterState.GetAsync<string>(key, ct).ConfigureAwait(false);
-                if (!string.IsNullOrEmpty(remote))
-                {
-                    _localSecrets[key] = remote;
-                    return remote;
-                }
-            }
-            catch
-            {
-                // Fall back to local secrets
-            }
+            _localSecrets.TryGetValue(key, out var local);
+            return local;
         }
 
-        _localSecrets.TryGetValue(key, out var local);
-        return local;
+        var remote = await _clusterState.GetAsync<string>(key, ct).ConfigureAwait(false);
+        if (string.IsNullOrEmpty(remote))
+        {
+            return null;
+        }
+
+        if (remote.StartsWith(ProtectedPrefix, StringComparison.Ordinal))
+        {
+            if (_protector == null)
+            {
+                throw new InvalidOperationException(
+                    "A TOTP secret is stored encrypted but no ITotpSecretProtector is configured (Totp.EncryptSecretsAtRest).");
+            }
+
+            return _protector.Unprotect(remote[ProtectedPrefix.Length..]);
+        }
+
+        // Legacy plaintext value (written before encryption at rest was enabled).
+        return remote;
     }
 
     public async Task<bool> HasSecretAsync(string userSid, CancellationToken ct = default)
@@ -91,14 +104,7 @@ public sealed class ClusterTotpSecretStore : ITotpSecretStore
 
         if (_clusterState != null)
         {
-            try
-            {
-                await _clusterState.RemoveAsync(key, ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                // Silently tolerate
-            }
+            await _clusterState.RemoveAsync(key, ct).ConfigureAwait(false);
         }
     }
 

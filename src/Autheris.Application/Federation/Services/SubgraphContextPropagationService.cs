@@ -70,7 +70,7 @@ public sealed class SubgraphContextPropagationService : ISubgraphContextPropagat
             {
                 rolesStr = string.Join(",", roles.OrderBy(r => r, StringComparer.Ordinal));
                 request.Headers.Remove(fedOptions.RolesHeaderName);
-                request.Headers.TryAddWithoutValidation(fedOptions.RolesHeaderName, string.Join(",", roles));
+                request.Headers.TryAddWithoutValidation(fedOptions.RolesHeaderName, rolesStr);
             }
         }
 
@@ -126,10 +126,30 @@ public sealed class SubgraphContextPropagationService : ISubgraphContextPropagat
             var methodStr = request.Method.Method;
             var pathStr = request.RequestUri?.AbsolutePath ?? string.Empty;
 
-            var payload = $"{effectiveTenant}:{userSid ?? string.Empty}:{timestamp}:{nonce}:{subgraphName}:{rolesStr}:{methodStr}:{pathStr}";
-            using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(signingKey));
-            var signature = Convert.ToHexStringLower(hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(payload)));
+            // SR-M-18: bind the request body via SHA-256 and sign an unambiguous length-prefixed v2 form.
+            string bodyHash;
+            if (request.Content == null)
+            {
+                bodyHash = FederationContextSignature.HashBody(ReadOnlySpan<byte>.Empty);
+            }
+            else
+            {
+                using var bodyStream = request.Content.ReadAsStream();
+                bodyHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bodyStream));
+                if (bodyStream.CanSeek)
+                {
+                    bodyStream.Position = 0;
+                }
+            }
 
+            var payload = FederationContextSignature.BuildCanonicalV2(
+                effectiveTenant, userSid, timestamp, nonce, subgraphName, rolesStr, methodStr, pathStr, bodyHash);
+            var signature = FederationContextSignature.Sign(payload, signingKey);
+
+            request.Headers.Remove(FederationContextSignature.VersionHeader);
+            request.Headers.Remove(FederationContextSignature.BodyHashHeader);
+            request.Headers.TryAddWithoutValidation(FederationContextSignature.VersionHeader, FederationContextSignature.CurrentVersion);
+            request.Headers.TryAddWithoutValidation(FederationContextSignature.BodyHashHeader, bodyHash);
             request.Headers.Remove("X-Autheris-Signature");
             request.Headers.Remove("X-Autheris-Timestamp");
             request.Headers.Remove("X-Autheris-Nonce");

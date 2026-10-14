@@ -26,6 +26,8 @@ public sealed class WebhookDispatcherService : IWebhookDispatcherService
         WriteIndented = false
     };
 
+    private const int MaxBackoffMilliseconds = 5000;
+
     private readonly HttpClient _httpClient;
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<WebhookDispatcherService> _logger;
@@ -89,7 +91,7 @@ public sealed class WebhookDispatcherService : IWebhookDispatcherService
     {
         var timestamp = DateTimeOffset.UtcNow.ToString("O");
         var signature = ComputeHmacSha256(subscription.Secret, $"{timestamp}.{jsonPayload}");
-        var maxRetries = Math.Max(1, subscription.MaxRetries);
+        var maxRetries = subscription.EffectiveMaxRetries;
 
         if (!Uri.TryCreate(subscription.TargetUrl, UriKind.Absolute, out var targetUri))
         {
@@ -160,7 +162,7 @@ public sealed class WebhookDispatcherService : IWebhookDispatcherService
             if (attempt < maxRetries)
             {
                 // Exponential backoff
-                var delayMs = (int)(Math.Pow(2, attempt) * 100);
+                var delayMs = (int)Math.Min(Math.Pow(2, attempt) * 100, MaxBackoffMilliseconds);
                 await Task.Delay(delayMs, ct).ConfigureAwait(false);
             }
         }

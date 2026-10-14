@@ -337,16 +337,31 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
             : serialized;
     }
 
-    /// <summary>The principal of an MCP caller as the catalog and resource services expect it (SID, tenant, roles, groups).</summary>
+    /// <summary>Claim that marks a principal as an application identity (no authenticated user in the session).</summary>
+    public const string IdentityKindClaimType = "autheris_identity_kind";
+
+    /// <summary>Value of <see cref="IdentityKindClaimType"/> for an app-only principal.</summary>
+    public const string ApplicationIdentityKind = "application";
+
+    /// <summary>
+    /// The principal of an MCP caller as the catalog, resource and tool services expect it (SID, tenant, roles, groups, claims, read-only
+    /// marker). SR-M-08: the subject is the authenticated user of the session. A session without a user SID (app-only token) keeps the
+    /// application identity, is marked with <see cref="IdentityKindClaimType"/> and carries no group SIDs, so no user-level consent applies.
+    /// </summary>
     public static System.Security.Claims.ClaimsPrincipal? BuildPrincipalFromSession(McpSessionContext? session)
     {
         if (session == null) return null;
         var identity = new System.Security.Claims.ClaimsIdentity("MCP");
-        var sid = !string.IsNullOrWhiteSpace(session.UserSid) ? session.UserSid : session.ServicePrincipalId;
+        var isAppOnly = string.IsNullOrWhiteSpace(session.UserSid);
+        var sid = !isAppOnly ? session.UserSid : session.ServicePrincipalId;
         if (!string.IsNullOrWhiteSpace(sid))
         {
             identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, sid));
             identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, sid));
+        }
+        if (isAppOnly)
+        {
+            identity.AddClaim(new System.Security.Claims.Claim(IdentityKindClaimType, ApplicationIdentityKind));
         }
         if (!string.IsNullOrWhiteSpace(session.TenantId))
         {
@@ -359,7 +374,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
                 identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, r));
             }
         }
-        if (session.GroupSids != null)
+        if (!isAppOnly && session.GroupSids != null)
         {
             foreach (var g in session.GroupSids)
             {
@@ -370,6 +385,12 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
         {
             foreach (var (k, v) in session.AdditionalClaims)
             {
+                // The identity markers are set by the gateway only; a token claim must not spoof or clear them.
+                if (string.Equals(k, IdentityKindClaimType, StringComparison.Ordinal) ||
+                    string.Equals(k, Autheris.Domain.Security.TokenAccessScope.ClaimType, StringComparison.Ordinal))
+                {
+                    continue;
+                }
                 identity.AddClaim(new System.Security.Claims.Claim(k, v));
             }
         }

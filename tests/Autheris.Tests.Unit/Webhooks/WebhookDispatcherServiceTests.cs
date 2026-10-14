@@ -68,6 +68,7 @@ public sealed class WebhookDispatcherServiceTests
         var subscription = new WebhookSubscription
         {
             IsActive = true,
+            IsClusterWide = true, // SR-M-12: tenant-less subscriptions need an explicit cluster-wide opt-in
             EventFilters = [filter]
         };
 
@@ -96,6 +97,45 @@ public sealed class WebhookDispatcherServiceTests
     }
 
     [Fact]
+    public void SR_M_12_TenantlessSubscription_WithoutClusterWideFlag_ReceivesNothing()
+    {
+        var subscription = new WebhookSubscription { IsActive = true, EventFilters = ["*"] };
+
+        subscription.MatchesEvent("security.alert", "tenant-a").ShouldBeFalse();
+        subscription.MatchesEvent("security.alert", null).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void SR_M_12_ClusterWideSubscription_ReceivesTenantAndGlobalEvents()
+    {
+        var subscription = new WebhookSubscription { IsActive = true, IsClusterWide = true, EventFilters = ["*"] };
+
+        subscription.MatchesEvent("security.alert", "tenant-a").ShouldBeTrue();
+        subscription.MatchesEvent("security.alert", "tenant-b").ShouldBeTrue();
+        subscription.MatchesEvent("security.alert", null).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void SR_M_12_TenantScopedSubscription_NeverReceivesGlobalOrForeignEvents_EvenIfClusterWideSet()
+    {
+        var subscription = new WebhookSubscription { IsActive = true, IsClusterWide = true, TenantId = "tenant-a", EventFilters = ["*"] };
+
+        subscription.MatchesEvent("x", "tenant-a").ShouldBeTrue();
+        subscription.MatchesEvent("x", "tenant-b").ShouldBeFalse();
+        subscription.MatchesEvent("x", null).ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(-5, 1)]
+    [InlineData(3, 3)]
+    [InlineData(int.MaxValue, WebhookSubscription.MaxAllowedRetries)]
+    public void SR_M_13_MaxRetries_IsClamped(int configured, int expected)
+    {
+        new WebhookSubscription { MaxRetries = configured }.EffectiveMaxRetries.ShouldBe(expected);
+    }
+
+    [Fact]
     public async Task DispatchEventAsync_DispatchesSignedCloudEventWithStandardHeaders()
     {
         // Arrange
@@ -116,6 +156,7 @@ public sealed class WebhookDispatcherServiceTests
                         TargetUrl = "https://receiver.internal/webhook",
                         EventFilters = ["governance.*"],
                         Secret = "secret-key-456",
+                        IsClusterWide = true,
                         MaxRetries = 1
                     }
                 ]

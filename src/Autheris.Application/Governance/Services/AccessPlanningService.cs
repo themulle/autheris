@@ -54,7 +54,11 @@ public class AccessPlanningService : IAccessPlanningService
         AdminPlanAccessResult Result,
         AdminPlanAccessRequest Request,
         string AdminSid,
-        string? ConfirmedToken = null);
+        string? ConfirmedToken = null,
+        string? TenantId = null);
+
+    private static string? NormalizeTenant(string? tenantId)
+        => string.IsNullOrWhiteSpace(tenantId) ? null : tenantId;
 
     private static readonly HashSet<string> PiiKeywords = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -103,6 +107,7 @@ public class AccessPlanningService : IAccessPlanningService
     public async Task<AdminPlanAccessResult> PlanAccessAsync(
         AdminPlanAccessRequest request,
         string adminSid,
+        string? tenantId = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -147,7 +152,7 @@ public class AccessPlanningService : IAccessPlanningService
         var expiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
         var result = new AdminPlanAccessResult(planId, request.DatasetId, diffs, warnings, expiresAt);
 
-        _plans[planId] = new StoredPlan(result, request, adminSid);
+        _plans[planId] = new StoredPlan(result, request, adminSid, TenantId: NormalizeTenant(tenantId));
 
         if (_eventBus != null)
         {
@@ -157,7 +162,8 @@ public class AccessPlanningService : IAccessPlanningService
                 DatasetId: request.DatasetId,
                 RequesterSid: adminSid,
                 GrantCount: request.Grants.Count,
-                Timestamp: DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+                Timestamp: DateTimeOffset.UtcNow,
+                TenantId: NormalizeTenant(tenantId)), ct).ConfigureAwait(false);
         }
 
         return result;
@@ -312,7 +318,8 @@ public class AccessPlanningService : IAccessPlanningService
                 DatasetId: stored.Request.DatasetId,
                 ApproverSid: adminSid,
                 AppliedGrantCount: tuples.Count,
-                Timestamp: DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+                Timestamp: DateTimeOffset.UtcNow,
+                TenantId: NormalizeTenant(tenantId) ?? stored.TenantId), ct).ConfigureAwait(false);
         }
 
         return new AdminApplyAccessResult(true, request.PlanId, tuples.Count, "Access applied successfully.");
@@ -443,7 +450,8 @@ public class AccessPlanningService : IAccessPlanningService
                 NewState: string.Equals(newState, "active", StringComparison.OrdinalIgnoreCase),
                 ChangedBySid: adminSid,
                 Reason: request.Reason,
-                Timestamp: DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+                Timestamp: DateTimeOffset.UtcNow,
+                TenantId: NormalizeTenant(tenantId)), ct).ConfigureAwait(false);
         }
 
         return new AdminSetDatasetStateResult(request.DatasetId, previousState, newState, true);

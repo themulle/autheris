@@ -86,7 +86,10 @@ public sealed class Wave2MarketFeaturesTests
         var queuedTask = Task.Run(async () => await manager.TryAcquireLeaseAsync(ResourceGroupTier.AutonomousAgents, "tenant-2", cts.Token));
 
         // Allow task to hit the queue
-        await Task.Delay(100);
+        for (var i = 0; i < 100 && manager.GetMetrics().Tiers.First(t => t.Tier == ResourceGroupTier.AutonomousAgents).QueuedRequests == 0; i++)
+        {
+            await Task.Delay(20);
+        }
 
         // 3. Next request exceeds queue depth -> immediate QueueFull rejection
         var rejectedResult = await manager.TryAcquireLeaseAsync(ResourceGroupTier.AutonomousAgents, "tenant-3");

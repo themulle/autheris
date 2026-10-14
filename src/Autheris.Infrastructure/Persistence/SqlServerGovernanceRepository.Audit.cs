@@ -238,8 +238,6 @@ public partial class SqlServerGovernanceRepository
 
     private sealed class AuditTxPendingState
     {
-        public required long PreTxSeq { get; init; }
-        public required string PreTxHash { get; init; }
         public required long LastSeq { get; set; }
         public required string LastHash { get; set; }
     }
@@ -263,7 +261,13 @@ public partial class SqlServerGovernanceRepository
             {
                 try
                 {
-                    _auditAnchorStore.Save(CreateSignedAnchor(state.LastSeq, state.LastHash));
+                    // SR-L-07: same monotonic check as the batch path; replicas sharing one anchor store must never move it backwards.
+                    var anchor = CreateSignedAnchor(state.LastSeq, state.LastHash);
+                    var current = TryLoadVerifiedAnchor(out var anchorInvalid);
+                    if (!anchorInvalid && (current == null || current.Sequence < anchor.Sequence))
+                    {
+                        _auditAnchorStore.Save(anchor);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -275,34 +279,13 @@ public partial class SqlServerGovernanceRepository
 
     public void OnTransactionRolledBack(System.Data.Common.DbTransaction tx)
     {
-        if (_pendingAuditTxStates.TryRemove(tx, out var state))
-        {
-            lock (_pendingAuditTxStates)
-            {
-                if (state.PreTxSeq <= _lastAuditSeq)
-                {
-                    _lastAuditSeq = state.PreTxSeq;
-                    _lastAuditHash = state.PreTxHash;
-                }
-            }
-        }
+        // SR-M-23: in-memory chain state is only advanced on commit, so a rollback has nothing to restore.
+        _pendingAuditTxStates.TryRemove(tx, out _);
     }
 
     public void RollbackPendingAuditTransactions()
     {
-        if (_pendingAuditTxStates.IsEmpty) return;
-        lock (_pendingAuditTxStates)
-        {
-            foreach (var state in _pendingAuditTxStates.Values)
-            {
-                if (state.PreTxSeq <= _lastAuditSeq)
-                {
-                    _lastAuditSeq = state.PreTxSeq;
-                    _lastAuditHash = state.PreTxHash;
-                }
-            }
-            _pendingAuditTxStates.Clear();
-        }
+        _pendingAuditTxStates.Clear();
     }
 
     /// <summary>Review PG-1: resource name of the transaction-owned sp_getapplock that serialises audit chain writers across replicas.</summary>
@@ -355,16 +338,36 @@ public partial class SqlServerGovernanceRepository
         var conn = (SqlConnection)existingTx.Connection!;
         var tx = (SqlTransaction)existingTx;
 
-        var (dbTailHash, dbTailSeq) = ReadAuditTail(tx);
-        var effectiveDbHash = dbTailHash ?? AuditGenesisHash;
-
-        var pendingState = _pendingAuditTxStates.GetOrAdd(existingTx, _ => new AuditTxPendingState
+        if (!_pendingAuditTxStates.TryGetValue(existingTx, out var pendingState))
         {
-            PreTxSeq = _lastAuditSeq,
-            PreTxHash = _lastAuditHash,
-            LastSeq = dbTailSeq,
-            LastHash = effectiveDbHash
-        });
+            // SR-M-23: serialise with every other chain writer (transaction-owned lock, released on commit/rollback) and
+            // read the tail from the DB under the lock; the in-memory tail is not trustworthy before commit.
+            await using (var lockCmd = conn.CreateCommand())
+            {
+                lockCmd.Transaction = tx;
+                lockCmd.CommandText = "sp_getapplock";
+                lockCmd.CommandType = CommandType.StoredProcedure;
+                lockCmd.Parameters.Add("@Resource", SqlDbType.NVarChar, 255).Value = AuditChainLockResource;
+                lockCmd.Parameters.Add("@LockMode", SqlDbType.NVarChar, 32).Value = "Exclusive";
+                lockCmd.Parameters.Add("@LockOwner", SqlDbType.NVarChar, 32).Value = "Transaction";
+                lockCmd.Parameters.Add("@LockTimeout", SqlDbType.Int).Value = AuditChainLockTimeoutMs;
+                var pRet = lockCmd.Parameters.Add("@ret", SqlDbType.Int);
+                pRet.Direction = ParameterDirection.ReturnValue;
+                await lockCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                var lockResult = pRet.Value is int rc ? rc : -999;
+                if (lockResult < 0)
+                {
+                    throw new AuditChainLockException(lockResult);
+                }
+            }
+
+            var (dbTailHash, dbTailSeq) = ReadAuditTail(tx);
+            pendingState = _pendingAuditTxStates.GetOrAdd(existingTx, _ => new AuditTxPendingState
+            {
+                LastSeq = dbTailSeq,
+                LastHash = dbTailHash ?? AuditGenesisHash
+            });
+        }
 
         long lastSequence = pendingState.LastSeq;
         string lastEntryHash = pendingState.LastHash;
@@ -438,11 +441,9 @@ public partial class SqlServerGovernanceRepository
             lastEntryHash = entryHash;
         }
 
+        // In-memory _lastAuditSeq/_lastAuditHash are advanced in OnTransactionCommitted only.
         pendingState.LastSeq = lastSequence;
         pendingState.LastHash = lastEntryHash;
-
-        _lastAuditHash = lastEntryHash;
-        Interlocked.Exchange(ref _lastAuditSeq, lastSequence);
     }
 
     private async Task WriteAuditBatchOnceAsync(IReadOnlyList<AuditLogEntry> batch, CancellationToken ct)

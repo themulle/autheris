@@ -1,6 +1,7 @@
 namespace Autheris.Application.SqlEndpoints.Services;
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -32,6 +33,8 @@ public sealed class SqlEndpointLoader : IDisposable
     private readonly ISqlEndpointRegistry _registry;
     private readonly ISqlEngine _sqlEngine;
     private readonly ILogger<SqlEndpointLoader>? _logger;
+    // SR-M-22: file path -> registered endpoint name, so deletes/renames unregister by path (the @name header may differ from the file name).
+    private readonly ConcurrentDictionary<string, string> _fileToEndpointName = new(StringComparer.Ordinal);
     private FileSystemWatcher? _watcher;
     private bool _disposed;
 
@@ -62,7 +65,14 @@ public sealed class SqlEndpointLoader : IDisposable
             return 0;
         }
 
-        var sqlFiles = Directory.GetFiles(directoryPath, "*.sql", SearchOption.AllDirectories);
+        // SR-M-22: never follow directory symlinks / reparse points out of the endpoints directory.
+        var enumerationOptions = new EnumerationOptions
+        {
+            RecurseSubdirectories = true,
+            AttributesToSkip = FileAttributes.ReparsePoint | FileAttributes.Hidden | FileAttributes.System,
+            IgnoreInaccessible = true,
+        };
+        var sqlFiles = Directory.GetFiles(directoryPath, "*.sql", enumerationOptions);
         int loadedCount = 0;
 
         foreach (var file in sqlFiles)
@@ -108,9 +118,60 @@ public sealed class SqlEndpointLoader : IDisposable
         if (definition != null)
         {
             _registry.Register(definition);
+
+            string key = Path.GetFullPath(filePath);
+            if (_fileToEndpointName.TryGetValue(key, out var previousName) &&
+                !string.Equals(previousName, definition.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                // The @name header changed: drop the stale registration of the previous name.
+                _registry.Unregister(previousName);
+            }
+
+            _fileToEndpointName[key] = definition.Name;
         }
 
         return definition;
+    }
+
+    /// <summary>
+    /// Unregisters the endpoint that was loaded from the given file (by path, not by file name).
+    /// </summary>
+    public void UnloadFile(string filePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        string key = Path.GetFullPath(filePath);
+        if (_fileToEndpointName.TryRemove(key, out var name))
+        {
+            _registry.Unregister(name);
+        }
+        else
+        {
+            _registry.Unregister(Path.GetFileNameWithoutExtension(filePath));
+        }
+    }
+
+    private void SafeLoadFile(string filePath)
+    {
+        try
+        {
+            LoadFile(filePath);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to reload SQL endpoint from file '{FilePath}'. Keeping the previous definition.", filePath);
+        }
+    }
+
+    private void SafeUnloadFile(string filePath)
+    {
+        try
+        {
+            UnloadFile(filePath);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to unload SQL endpoint for file '{FilePath}'.", filePath);
+        }
     }
 
     /// <summary>
@@ -522,13 +583,18 @@ public sealed class SqlEndpointLoader : IDisposable
                 EnableRaisingEvents = true
             };
 
-            _watcher.Created += (_, e) => LoadFile(e.FullPath);
-            _watcher.Changed += (_, e) => LoadFile(e.FullPath);
-            _watcher.Deleted += (_, e) =>
+            _watcher.Created += (_, e) => SafeLoadFile(e.FullPath);
+            _watcher.Changed += (_, e) => SafeLoadFile(e.FullPath);
+            _watcher.Deleted += (_, e) => SafeUnloadFile(e.FullPath);
+            _watcher.Renamed += (_, e) =>
             {
-                string name = Path.GetFileNameWithoutExtension(e.FullPath);
-                _registry.Unregister(name);
+                SafeUnloadFile(e.OldFullPath);
+                if (e.FullPath.EndsWith(".sql", StringComparison.OrdinalIgnoreCase))
+                {
+                    SafeLoadFile(e.FullPath);
+                }
             };
+            _watcher.Error += (_, e) => _logger?.LogError(e.GetException(), "SQL endpoint file watcher error; keeping the last loaded state.");
         }
         catch (Exception ex)
         {

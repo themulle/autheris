@@ -467,8 +467,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
             "RECURSIVE"
         };
 
-        var tokens = ExtractTokens(trimmed);
-        foreach (var token in tokens)
+        foreach (var token in ExtractTokens(trimmed))
         {
             if (dangerousKeywords.Contains(token))
             {
@@ -485,6 +484,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
                 token.Equals("iceberg_scan", StringComparison.OrdinalIgnoreCase) ||
                 token.Equals("delta_scan", StringComparison.OrdinalIgnoreCase) ||
                 token.Equals("sqlite_scan", StringComparison.OrdinalIgnoreCase) ||
+                token.Equals("sqlite_attach", StringComparison.OrdinalIgnoreCase) ||
                 token.Equals("postgres_scan", StringComparison.OrdinalIgnoreCase) ||
                 token.Equals("mysql_scan", StringComparison.OrdinalIgnoreCase) ||
                 token.Equals("current_setting", StringComparison.OrdinalIgnoreCase) ||
@@ -494,17 +494,81 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
             }
         }
 
+        // SR-M-19: the call-form check runs on a normalised form where quoted identifiers ("range", "main"."range")
+        // are unquoted, so quoting cannot hide a blocked function name.
+        var normalized = NormalizeQuotedIdentifiers(trimmed);
         // 4. SQL2-9 & SG-01: unbounded generator and file reading functions are prohibited
-        var match = DisallowedTableFunctionsRegex.Match(trimmed);
+        var match = DisallowedTableFunctionsRegex.Match(normalized);
         if (match.Success)
         {
             throw new System.Security.SecurityException($"Table generator or file function '{match.Groups[1].Value}' is prohibited in OLAP queries.");
         }
     }
 
+    /// <summary>
+    /// Replaces double-quoted identifiers with their unquoted, unescaped content (doubled quotes collapsed,
+    /// characters that are not identifier characters mapped to '_'). Single-quoted string literals are copied verbatim.
+    /// </summary>
+    internal static string NormalizeQuotedIdentifiers(string sql)
+    {
+        var sb = new System.Text.StringBuilder(sql.Length);
+        int i = 0;
+        while (i < sql.Length)
+        {
+            char c = sql[i];
+            if (c == '\'')
+            {
+                // String literal: copy through the closing quote (doubled quotes re-enter on the next loop turn).
+                sb.Append(c);
+                i++;
+                while (i < sql.Length && sql[i] != '\'')
+                {
+                    sb.Append(sql[i]);
+                    i++;
+                }
+
+                if (i < sql.Length)
+                {
+                    sb.Append('\'');
+                    i++;
+                }
+            }
+            else if (c == '"')
+            {
+                i++;
+                while (i < sql.Length)
+                {
+                    if (sql[i] == '"')
+                    {
+                        if (i + 1 < sql.Length && sql[i + 1] == '"')
+                        {
+                            sb.Append('_');
+                            i += 2;
+                            continue;
+                        }
+
+                        break;
+                    }
+
+                    sb.Append(char.IsLetterOrDigit(sql[i]) || sql[i] == '_' ? char.ToLowerInvariant(sql[i]) : '_');
+                    i++;
+                }
+
+                i++; // closing quote (or past end when unterminated)
+            }
+            else
+            {
+                sb.Append(c);
+                i++;
+            }
+        }
+
+        return sb.ToString();
+    }
+
     // Function name followed by optional whitespace and '(' (e.g. "range (1, 1000000000)").
     private static readonly System.Text.RegularExpressions.Regex DisallowedTableFunctionsRegex = new(
-        @"\b(range|generate_series|repeat|read_\w+|glob|sniff_\w+|parquet_\w+|duckdb_\w+|iceberg_scan|delta_scan|sqlite_scan|postgres_scan|mysql_scan|pragma_\w+|current_setting|getenv)\s*\(",
+        @"\b(range|generate_series|repeat|read_\w+|glob|sniff_\w+|parquet_\w+|duckdb_\w+|iceberg_scan|delta_scan|sqlite_scan|sqlite_attach|postgres_scan|mysql_scan|pragma_\w+|current_setting|getenv)\s*\(",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant,
         TimeSpan.FromMilliseconds(250));
 

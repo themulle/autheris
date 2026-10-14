@@ -2,6 +2,50 @@
 
 replicaCount: 3
 
+image:
+  pullPolicy: IfNotPresent
+  # Production must pin an immutable digest: --set image.digest=sha256:<digest>
+  digest: ""
+  requireDigest: true
+
+serviceAccount:
+  automountServiceAccountToken: false
+
+networkPolicy:
+  enabled: true
+  ingress:
+    from:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: traefik   # PLACEHOLDER: ingress controller namespace
+  metrics:
+    from:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: monitoring   # PLACEHOLDER: Prometheus namespace
+  egress:
+    allowAll: false
+    # PLACEHOLDERS: replace CIDRs/ports with the real governance DB, Redis, IdP and Key Vault endpoints.
+    rules:
+      - to:                      # Governance database (PostgreSQL)
+          - ipBlock:
+              cidr: 10.0.10.0/24
+        ports:
+          - protocol: TCP
+            port: 5432
+      - to:                      # Redis
+          - ipBlock:
+              cidr: 10.0.11.0/24
+        ports:
+          - protocol: TCP
+            port: 6379
+      - to:                      # IdP / Key Vault (HTTPS)
+          - ipBlock:
+              cidr: 10.0.12.0/24
+        ports:
+          - protocol: TCP
+            port: 443
+
 resources:
   limits:
     cpu: 4000m

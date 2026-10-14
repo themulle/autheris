@@ -51,6 +51,7 @@ public sealed class SubgraphFederationSecurityTests
         var sig = request.Headers.GetValues("X-Autheris-Signature").First();
         var ts = request.Headers.GetValues("X-Autheris-Timestamp").First();
         var nonce = request.Headers.GetValues("X-Autheris-Nonce").First();
+        var bodyHash = request.Headers.GetValues("X-Autheris-Body-Sha256").First();
 
         // Validator should accept
         var isValid = SubgraphSecurityValidator.ValidateSignature(
@@ -63,7 +64,9 @@ public sealed class SubgraphFederationSecurityTests
             subgraph: "products",
             roles: "",
             method: "POST",
-            path: "/graphql");
+            path: "/graphql",
+            version: "v2",
+            bodySha256: bodyHash);
 
         isValid.ShouldBeTrue();
     }
@@ -94,6 +97,7 @@ public sealed class SubgraphFederationSecurityTests
         var sig = request.Headers.GetValues("X-Autheris-Signature").First();
         var ts = request.Headers.GetValues("X-Autheris-Timestamp").First();
         var nonce = request.Headers.GetValues("X-Autheris-Nonce").First();
+        var bodyHash = request.Headers.GetValues("X-Autheris-Body-Sha256").First();
 
         // Tamper with tenant
         var isValid = SubgraphSecurityValidator.ValidateSignature(
@@ -106,7 +110,9 @@ public sealed class SubgraphFederationSecurityTests
             subgraph: "products",
             roles: "",
             method: "POST",
-            path: "/graphql");
+            path: "/graphql",
+            version: "v2",
+            bodySha256: bodyHash);
 
         isValid.ShouldBeFalse();
     }
@@ -140,6 +146,7 @@ public sealed class SubgraphFederationSecurityTests
         var sig = request.Headers.GetValues("X-Autheris-Signature").First();
         var ts = request.Headers.GetValues("X-Autheris-Timestamp").First();
         var nonce = request.Headers.GetValues("X-Autheris-Nonce").First();
+        var bodyHash = request.Headers.GetValues("X-Autheris-Body-Sha256").First();
 
         // Tamper with roles by escalating to ClusterAdmin
         var isValid = SubgraphSecurityValidator.ValidateSignature(
@@ -152,7 +159,9 @@ public sealed class SubgraphFederationSecurityTests
             subgraph: "products",
             roles: "ClusterAdmin",
             method: "POST",
-            path: "/graphql");
+            path: "/graphql",
+            version: "v2",
+            bodySha256: bodyHash);
 
         isValid.ShouldBeFalse();
     }
@@ -183,6 +192,7 @@ public sealed class SubgraphFederationSecurityTests
         var sig = request.Headers.GetValues("X-Autheris-Signature").First();
         var ts = request.Headers.GetValues("X-Autheris-Timestamp").First();
         var nonce = request.Headers.GetValues("X-Autheris-Nonce").First();
+        var bodyHash = request.Headers.GetValues("X-Autheris-Body-Sha256").First();
 
         // Replay to another subgraph (e.g. orders)
         var isValid = SubgraphSecurityValidator.ValidateSignature(
@@ -195,7 +205,9 @@ public sealed class SubgraphFederationSecurityTests
             subgraph: "orders",
             roles: "",
             method: "POST",
-            path: "/graphql");
+            path: "/graphql",
+            version: "v2",
+            bodySha256: bodyHash);
 
         isValid.ShouldBeFalse();
     }
@@ -205,7 +217,7 @@ public sealed class SubgraphFederationSecurityTests
     {
         var oldTimestamp = DateTimeOffset.UtcNow.AddMinutes(-5).ToUnixTimeSeconds().ToString();
         var nonce = Guid.NewGuid().ToString("N");
-        var payload = $"tenant_alpha:user1:{oldTimestamp}:{nonce}:products::POST:/graphql";
+        var payload = Autheris.Application.Federation.Services.FederationContextSignature.BuildCanonicalV2("tenant_alpha", "user1", oldTimestamp, nonce, "products", "", "POST", "/graphql", "00");
 
         using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(Secret));
         var signature = Convert.ToHexStringLower(hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(payload)));
@@ -221,7 +233,9 @@ public sealed class SubgraphFederationSecurityTests
             subgraph: "products",
             roles: "",
             method: "POST",
-            path: "/graphql");
+            path: "/graphql",
+            version: "v2",
+            bodySha256: "00");
 
         isValid.ShouldBeFalse();
     }
@@ -245,7 +259,8 @@ public sealed class SubgraphFederationSecurityTests
             subgraph: "products",
             roles: "",
             method: "POST",
-            path: "/graphql");
+            path: "/graphql",
+            allowLegacy: true);
 
         firstResult.ShouldBeTrue();
 
@@ -260,7 +275,8 @@ public sealed class SubgraphFederationSecurityTests
             subgraph: "products",
             roles: "",
             method: "POST",
-            path: "/graphql");
+            path: "/graphql",
+            allowLegacy: true);
 
         replayResult.ShouldBeFalse();
     }
@@ -285,6 +301,88 @@ public sealed class SubgraphFederationSecurityTests
             subgraph: null);
 
         isValid.ShouldBeFalse();
+    }
+
+    private static HttpRequestMessage SignedRequest(HttpContent? content, out string sig, out string ts, out string nonce, out string bodyHash, string roleA = "B", string roleB = "A")
+    {
+        var options = new GatewayOptions
+        {
+            Federation = new FederationOptions { Enabled = true, EnableZeroTrustContextForwarding = true, SignContextHeaders = true, SigningKey = Secret }
+        };
+        var service = new SubgraphContextPropagationService(Options.Create(options), NullLogger<SubgraphContextPropagationService>.Instance);
+        var request = new HttpRequestMessage(HttpMethod.Post, "https://subgraph.internal/graphql") { Content = content };
+        var user = new ClaimsPrincipal(new ClaimsIdentity([
+            new Claim(ClaimTypes.PrimarySid, "S-1"), new Claim(ClaimTypes.Role, roleA), new Claim(ClaimTypes.Role, roleB)], "Test"));
+        service.ApplySecurityHeaders(request, "products", user, "tenant_alpha");
+        sig = request.Headers.GetValues("X-Autheris-Signature").First();
+        ts = request.Headers.GetValues("X-Autheris-Timestamp").First();
+        nonce = request.Headers.GetValues("X-Autheris-Nonce").First();
+        bodyHash = request.Headers.GetValues("X-Autheris-Body-Sha256").First();
+        return request;
+    }
+
+    [Fact]
+    public void SR_M_18_BodyIsBoundToSignature()
+    {
+        var request = SignedRequest(new StringContent("{\"query\":\"{a}\"}"), out var sig, out var ts, out var nonce, out var bodyHash);
+        var expected = Autheris.Application.Federation.Services.FederationContextSignature.HashBody(System.Text.Encoding.UTF8.GetBytes("{\"query\":\"{a}\"}"));
+        bodyHash.ShouldBe(expected);
+        var roles = string.Join(",", request.Headers.GetValues("X-Gateway-Roles"));
+
+        // Tampered body hash is rejected
+        SubgraphSecurityValidator.ValidateSignature("tenant_alpha", "S-1", ts, nonce, sig, Secret, subgraph: "products", roles: roles,
+            method: "POST", path: "/graphql", version: "v2",
+            bodySha256: Autheris.Application.Federation.Services.FederationContextSignature.HashBody(System.Text.Encoding.UTF8.GetBytes("{\"query\":\"{evil}\"}"))).ShouldBeFalse();
+
+        // Genuine one is accepted
+        SubgraphSecurityValidator.ValidateSignature("tenant_alpha", "S-1", ts, nonce, sig, Secret, subgraph: "products", roles: roles,
+            method: "POST", path: "/graphql", version: "v2", bodySha256: bodyHash).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void SR_M_18_RolesHeaderIsSortedCanonical_AndLegacyOrMissingVersionRejected()
+    {
+        var request = SignedRequest(null, out var sig, out var ts, out var nonce, out var bodyHash);
+        var roles = string.Join(",", request.Headers.GetValues("X-Gateway-Roles"));
+        roles.ShouldBe("A,B");
+
+        SubgraphSecurityValidator.ValidateSignature("tenant_alpha", "S-1", ts, nonce, sig, Secret, subgraph: "products", roles: roles,
+            method: "POST", path: "/graphql", version: null, bodySha256: bodyHash).ShouldBeFalse();
+        SubgraphSecurityValidator.ValidateSignature("tenant_alpha", "S-1", ts, nonce, sig, Secret, subgraph: "products", roles: roles,
+            method: "POST", path: "/graphql", version: "v2", bodySha256: bodyHash).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void SR_M_18_CanonicalForm_IsUnambiguous()
+    {
+        var a = Autheris.Application.Federation.Services.FederationContextSignature.BuildCanonicalV2("t:u", "x", "1", "n", "s", "", "POST", "/p", "h");
+        var b = Autheris.Application.Federation.Services.FederationContextSignature.BuildCanonicalV2("t", "u:x", "1", "n", "s", "", "POST", "/p", "h");
+        a.ShouldNotBe(b);
+    }
+
+    [Fact]
+    public async Task SR_M_18_ReplayDetectedViaDistributedClusterState()
+    {
+        SubgraphSecurityValidator.ResetReplayCache();
+        var request = SignedRequest(null, out var sig, out var ts, out var nonce, out var bodyHash);
+        var roles = string.Join(",", request.Headers.GetValues("X-Gateway-Roles"));
+        var cluster = NSubstitute.Substitute.For<Autheris.Application.State.IDistributedClusterStateProvider>();
+        cluster.IncrementAsync(Arg.Any<string>(), Arg.Any<long>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<long?>(2L)); // another node already saw this nonce
+
+        var ok = await SubgraphSecurityValidator.ValidateSignatureAsync("tenant_alpha", "S-1", ts, nonce, sig, Secret, cluster,
+            subgraph: "products", roles: roles, method: "POST", path: "/graphql", version: "v2", bodySha256: bodyHash);
+        ok.ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("9223372036854775807")]
+    [InlineData("-9223372036854775808")]
+    [InlineData("99999999999999")]
+    public void SR_L_17_OutOfRangeTimestamp_ReturnsFalseWithoutThrowing(string timestamp)
+    {
+        SubgraphSecurityValidator.ValidateSignature("tenant_alpha", "S-1", timestamp, "n1", "abc", Secret, subgraph: "products",
+            version: "v2", bodySha256: "00").ShouldBeFalse();
     }
 
     private sealed class CapturingHandler : HttpMessageHandler

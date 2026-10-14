@@ -87,6 +87,7 @@ public static class DocIngestionEndpoints
             string category,
             string docId,
             DepositDocumentBody body,
+            HttpContext httpContext,
             IUniversalDocStore docStore,
             IGatewayEventBus? eventBus,
             CancellationToken ct) =>
@@ -122,7 +123,8 @@ public static class DocIngestionEndpoints
                     DocId: docId,
                     Title: title,
                     SourceFilePath: result.FilePath ?? string.Empty,
-                    Timestamp: DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+                    Timestamp: DateTimeOffset.UtcNow,
+                    TenantId: EndpointSecurity.GetRequestTenant(httpContext).Value), ct).ConfigureAwait(false);
             }
 
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);

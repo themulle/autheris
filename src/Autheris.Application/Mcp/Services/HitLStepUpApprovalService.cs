@@ -12,6 +12,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -27,21 +28,73 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
     private readonly byte[] _hmacKey;
     private static readonly byte[] ProcessFallbackHmacKey = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
 
-    private static byte[] ResolveHitLHmacKey(GatewayOptions? options)
+    private const string DevSentinelKeyRef = "DEV_INSECURE_TEST_KEY_ONLY";
+
+    // SR-M-03: the HMAC key is derived from the RESOLVED secret bytes (never from the Key Vault reference string).
+    // Outside Development an unresolvable secret is fatal (fail closed); the reference-string/process-random
+    // fallbacks only exist for Development and tests (environment == null).
+    internal static byte[] ResolveHitLHmacKey(
+        GatewayOptions? options,
+        Autheris.Application.Interfaces.IKeyVaultSecretProvider? secretProvider = null,
+        Microsoft.Extensions.Hosting.IHostEnvironment? environment = null)
     {
+        var isDevelopment = environment == null || environment.IsDevelopment();
         var rawKey = options?.DataMasking?.HmacSecretKeyVaultRef;
-        if (!string.IsNullOrWhiteSpace(rawKey) && rawKey != "DEV_INSECURE_TEST_KEY_ONLY")
+        var hasRef = !string.IsNullOrWhiteSpace(rawKey) && rawKey != DevSentinelKeyRef;
+        var info = "Autheris:HitLStepUp:v1"u8.ToArray();
+
+        if (hasRef && secretProvider != null)
         {
-            var keyBytes = System.Text.Encoding.UTF8.GetBytes(rawKey);
-            return System.Security.Cryptography.HKDF.DeriveKey(
-                System.Security.Cryptography.HashAlgorithmName.SHA256,
-                keyBytes,
-                32,
-                info: "Autheris:HitLStepUp:v1"u8.ToArray());
+            byte[] secretBytes;
+            try
+            {
+                secretBytes = secretProvider.GetSecretBytes(rawKey!);
+            }
+            catch (Exception ex)
+            {
+                if (isDevelopment)
+                {
+                    return DeriveKey(System.Text.Encoding.UTF8.GetBytes(rawKey!), info);
+                }
+
+                throw new InvalidOperationException(
+                    "Security error: The HitL approval HMAC secret could not be resolved from the secret provider.", ex);
+            }
+
+            if (secretBytes == null || secretBytes.Length == 0)
+            {
+                if (isDevelopment)
+                {
+                    return DeriveKey(System.Text.Encoding.UTF8.GetBytes(rawKey!), info);
+                }
+
+                throw new InvalidOperationException("Security error: The HitL approval HMAC secret resolved to an empty value.");
+            }
+
+            Autheris.Application.Security.SecretKeyRequirements.EnsureMinimumLength(secretBytes, "The HitL approval HMAC secret", isDevelopment);
+            return DeriveKey(secretBytes, info);
+        }
+
+        if (!isDevelopment)
+        {
+            throw new InvalidOperationException(
+                "Security error: Outside Development the HitL approval HMAC key must be resolved through an IKeyVaultSecretProvider (DataMasking.HmacSecretKeyVaultRef).");
+        }
+
+        if (hasRef)
+        {
+            return DeriveKey(System.Text.Encoding.UTF8.GetBytes(rawKey!), info);
         }
 
         return ProcessFallbackHmacKey;
     }
+
+    private static byte[] DeriveKey(byte[] ikm, byte[] info) =>
+        System.Security.Cryptography.HKDF.DeriveKey(
+            System.Security.Cryptography.HashAlgorithmName.SHA256,
+            ikm,
+            32,
+            info: info);
 
     internal static string ComputeTicketSignature(byte[] key, HitLApprovalTicket ticket)
     {
@@ -96,7 +149,9 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
         IServiceScopeFactory? scopeFactory = null,
         Autheris.Application.State.IDistributedClusterStateProvider? clusterState = null,
         Autheris.Application.Security.Totp.Interfaces.ITotpVerificationService? totpVerificationService = null,
-        Autheris.Application.Security.Totp.Interfaces.ITotpSecretStore? totpSecretStore = null)
+        Autheris.Application.Security.Totp.Interfaces.ITotpSecretStore? totpSecretStore = null,
+        Autheris.Application.Interfaces.IKeyVaultSecretProvider? secretProvider = null,
+        Microsoft.Extensions.Hosting.IHostEnvironment? environment = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -104,7 +159,7 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
         _clusterState = clusterState;
         _totpService = totpVerificationService;
         _totpSecretStore = totpSecretStore;
-        _hmacKey = ResolveHitLHmacKey(options.Value);
+        _hmacKey = ResolveHitLHmacKey(options.Value, secretProvider, environment);
     }
 
     public async Task<HitLApprovalResult> RequestStepUpApprovalAsync(
