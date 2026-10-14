@@ -22,6 +22,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using TrinoSqlEngine.Governance;
 
@@ -128,9 +129,7 @@ public sealed class CasbinEnforcementService : IPolicyEnforcementService, IDispo
     private readonly object _syncLock = new();
     private readonly bool _modelSupportsWildcardTenant;
 
-    private sealed record CachedDecision(TableAccessDecision Decision, long CreatedTimestampTicks);
-    private readonly ConcurrentDictionary<DecisionKey, CachedDecision> _decisionCache = new();
-    private static readonly TimeSpan DecisionCacheTtl = TimeSpan.FromSeconds(60);
+    private readonly CasbinDecisionCache _decisionCache;
     private readonly ConcurrentDictionary<string, string> _tenantPolicyFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, FileSystemWatcher> _fileWatchers = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, System.Timers.Timer> _debounceTimers = new(StringComparer.OrdinalIgnoreCase);
@@ -176,8 +175,13 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         string? modelConfigPath = null,
         IRlsFilterGenerator? rlsFilterGenerator = null,
         ILogger<CasbinEnforcementService>? logger = null,
-        Autheris.Application.Policy.RowPolicyFactory? rowPolicies = null)
+        Autheris.Application.Policy.RowPolicyFactory? rowPolicies = null,
+        CasbinDecisionCacheOptions? cacheOptions = null,
+        TimeProvider? timeProvider = null)
     {
+        cacheOptions ??= new CasbinDecisionCacheOptions();
+        _decisionCache = new CasbinDecisionCache(
+            cacheOptions.Capacity, TimeSpan.FromSeconds(cacheOptions.TtlSeconds), timeProvider ?? TimeProvider.System);
         _rowPolicies = rowPolicies;
         _logger = logger;
         _rlsFilterGenerator = rlsFilterGenerator ?? RlsFilterGenerator.Instance;
@@ -704,18 +708,9 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         var tableStr = context.TargetTable.ToString();
         var cacheKey = DecisionKey.Create(snapshot.Epoch, context, requestedAction);
 
-        if (_decisionCache.TryGetValue(cacheKey, out var cachedEntry))
+        if (_decisionCache.TryGet(cacheKey, out var cachedDecision))
         {
-            if (Stopwatch.GetElapsedTime(cachedEntry.CreatedTimestampTicks) <= DecisionCacheTtl)
-            {
-                return ValueTask.FromResult(cachedEntry.Decision);
-            }
-            _decisionCache.TryRemove(cacheKey, out _);
-        }
-
-        if (_decisionCache.Count >= 10_000)
-        {
-            _decisionCache.Clear();
+            return ValueTask.FromResult(cachedDecision);
         }
 
         var sw = Stopwatch.StartNew();
@@ -854,7 +849,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         // E-5: Do not cache decision if the snapshot epoch has changed while evaluating
         if (cacheable && Volatile.Read(ref _currentSnapshot).Epoch == snapshot.Epoch)
         {
-            _decisionCache.TryAdd(cacheKey, new CachedDecision(decision, Stopwatch.GetTimestamp()));
+            _decisionCache.Set(cacheKey, decision);
         }
 
         return ValueTask.FromResult(decision);

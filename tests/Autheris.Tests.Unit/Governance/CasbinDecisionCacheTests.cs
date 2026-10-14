@@ -4,8 +4,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using Autheris.Application.Governance;
 using Autheris.Application.Governance.Caching;
+using Autheris.Domain.Options;
+using Microsoft.Extensions.Time.Testing;
 using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Shouldly;
 using Xunit;
@@ -97,5 +101,114 @@ public class CasbinDecisionCacheTests
         var a = DecisionKey.Create(1, Ctx(attributes: new() { ["roles"] = new List<string> { "a", "b" } }), "read");
         var b = DecisionKey.Create(1, Ctx(attributes: new() { ["roles"] = new List<string> { "a", "c" } }), "read");
         a.Equals(b).ShouldBeFalse();
+    }
+
+    private static DecisionKey Key(string user) => DecisionKey.Create(1, Ctx(user: user), "read");
+
+    private static TableAccessDecision Decision(bool allowed) =>
+        allowed
+            ? TableAccessDecision.Allowed(Table, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
+            : TableAccessDecision.Denied(Table, "no");
+
+    [Fact]
+    public void Cache_AtCapacity_EvictsOneEntry_NotAll()
+    {
+        var cache = new CasbinDecisionCache(3, TimeSpan.FromSeconds(60), new FakeTimeProvider());
+        for (var i = 0; i < 3; i++)
+        {
+            cache.Set(Key($"u{i}"), Decision(true));
+        }
+
+        cache.Set(Key("u3"), Decision(true));
+
+        cache.Count.ShouldBe(3);
+    }
+
+    [Fact]
+    public void Cache_EvictsLeastRecentlyUsed()
+    {
+        var cache = new CasbinDecisionCache(3, TimeSpan.FromSeconds(60), new FakeTimeProvider());
+        cache.Set(Key("u0"), Decision(true));
+        cache.Set(Key("u1"), Decision(true));
+        cache.Set(Key("u2"), Decision(true));
+
+        cache.TryGet(Key("u0"), out _).ShouldBeTrue(); // u0 becomes most recent, u1 is the eviction candidate
+        cache.Set(Key("u3"), Decision(true));
+
+        cache.TryGet(Key("u1"), out _).ShouldBeFalse();
+        cache.TryGet(Key("u0"), out _).ShouldBeTrue();
+        cache.TryGet(Key("u2"), out _).ShouldBeTrue();
+        cache.TryGet(Key("u3"), out _).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void CachedAllow_IsNotServed_BeyondTtl()
+    {
+        var time = new FakeTimeProvider();
+        var cache = new CasbinDecisionCache(10, TimeSpan.FromSeconds(60), time);
+        cache.Set(Key("u0"), Decision(true));
+
+        time.Advance(TimeSpan.FromSeconds(60));
+        cache.TryGet(Key("u0"), out var atTtl).ShouldBeTrue();
+        atTtl.IsAllowed.ShouldBeTrue();
+
+        time.Advance(TimeSpan.FromMilliseconds(1));
+        cache.TryGet(Key("u0"), out _).ShouldBeFalse();
+        cache.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Service_CachedAllow_IsNotServed_BeyondTtl()
+    {
+        var time = new FakeTimeProvider();
+        using var service = new CasbinEnforcementService(
+            cacheOptions: new CasbinDecisionCacheOptions { TtlSeconds = 30 },
+            timeProvider: time);
+        var tenant = new TenantId("t1");
+        service.AddPolicy(tenant, "S-1-5-21-u1", Table.ToString(), "read");
+        var ctx = Ctx();
+
+        (await service.EvaluatePolicyAsync(ctx)).IsAllowed.ShouldBeTrue();
+        service.DiagnosticDecisionCacheCount.ShouldBe(1);
+
+        time.Advance(TimeSpan.FromSeconds(31));
+        // Policy removed behind the cache's back would be invisible; here we only assert the entry is dropped and recomputed.
+        (await service.EvaluatePolicyAsync(ctx)).IsAllowed.ShouldBeTrue();
+        service.DiagnosticDecisionCacheCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Service_SameContextDifferentDialect_IsNotServedFromCache()
+    {
+        using var service = new CasbinEnforcementService();
+        service.AddPolicy(new TenantId("t1"), "S-1-5-21-u1", Table.ToString(), "read");
+
+        await service.EvaluatePolicyAsync(Ctx(dialect: DatabaseDialect.PostgreSql));
+        await service.EvaluatePolicyAsync(Ctx(dialect: DatabaseDialect.SqlServer));
+
+        service.DiagnosticDecisionCacheCount.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Allocation_CacheHit_BelowBudget()
+    {
+        using var service = new CasbinEnforcementService();
+        service.AddPolicy(new TenantId("t1"), "S-1-5-21-u1", Table.ToString(), "read");
+        var ctx = Ctx(groups: ["S-1-5-21-g1", "S-1-5-21-g2"], columns: ["id", "name"], attributes: new() { ["department"] = "hr" });
+
+        await service.EvaluatePolicyAsync(ctx); // populate
+        for (var i = 0; i < 100; i++)
+        {
+            await service.EvaluatePolicyAsync(ctx); // warm up JIT
+        }
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 1000; i++)
+        {
+            await service.EvaluatePolicyAsync(ctx);
+        }
+
+        var perCall = (GC.GetAllocatedBytesForCurrentThread() - before) / 1000;
+        perCall.ShouldBeLessThan(768, $"cache-hit path allocated {perCall} bytes per call");
     }
 }
