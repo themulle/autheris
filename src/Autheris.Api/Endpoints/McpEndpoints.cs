@@ -179,6 +179,11 @@ public static class McpEndpoints
     /// SEC H-16: Resolves subject (<c>GetUserSid()</c>), tenant (<c>context.Items</c>) and authorization attributes
     /// of the current request.
     /// </summary>
+    private static bool IsAppOnlyIdentity(ClaimsPrincipal principal, string userSid) =>
+        string.Equals(principal.FindFirst("idtyp")?.Value, "app", StringComparison.OrdinalIgnoreCase) ||
+        new[] { "client_id", "appid", "azp" }.Any(t =>
+            string.Equals(principal.FindFirst(t)?.Value, userSid, StringComparison.OrdinalIgnoreCase));
+
     internal static McpCaller ResolveCaller(HttpContext context, bool allowOpenMcp)
     {
         var principal = context.User;
@@ -198,6 +203,13 @@ public static class McpEndpoints
 
         var tenantId = (securityContext?.TenantId ?? EndpointSecurity.GetRequestTenant(context)).Value;
         var userSid = isAuthenticated ? (securityContext != null ? securityContext.UserSid.Value : principal.GetUserSid()?.Value) : null;
+        // SR-M-08: a token without a user identity (app-only; the "user" SID resolved to the client id) carries no user SID, so the
+        // session principal stays an application identity and no user-level consent applies.
+        if (userSid != null && isAuthenticated && IsAppOnlyIdentity(principal, userSid))
+        {
+            userSid = null;
+        }
+
         var roles = isAuthenticated
             ? (securityContext != null ? securityContext.TenantRoles.Concat(securityContext.ClusterRoles).ToList() : principal.GetUserRoles().ToList())
             : new List<string>();

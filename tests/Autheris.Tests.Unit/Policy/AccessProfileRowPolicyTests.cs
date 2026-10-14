@@ -55,9 +55,14 @@ public sealed class AccessProfileRowPolicyTests
             Justification = "test",
             CreatedBy = "admin"
         });
+        // SR-M-07: an access profile never creates an allow; the underlying consent decision allows the table here.
+        var resolution = Substitute.For<IConsentResolutionService>();
+        resolution.ResolveAccess(default!, default!, default!, default, default!, default, default, default)
+            .ReturnsForAnyArgs(ci => TableAccessDecision.Allowed(
+                ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
         return new TableAccessPolicy(
             Substitute.For<IConsentRepository>(),
-            Substitute.For<IConsentResolutionService>(),
+            resolution,
             Substitute.For<IConsentCacheService>(),
             Substitute.For<IPolicyEnforcementService>(),
             Substitute.For<IRebacEvaluator>(),

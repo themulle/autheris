@@ -16,6 +16,7 @@ using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -81,6 +82,70 @@ public sealed class McpHybridToolsTests
         resultJson.ShouldNotBeNullOrWhiteSpace();
         resultJson.ShouldContain("a***@example.com");
         resultJson.ShouldContain("\"rowCount\":1");
+    }
+
+    private async Task<ClaimsPrincipal> CaptureQuerySqlPrincipalAsync(McpSessionContext session)
+    {
+        var handler = new McpToolExecutionHandler(
+            _sqlExecutionService, _dataQueryService, _catalogDiscoveryService, _apiDispatcherService, _lineageGraphStore, _metadataRepo);
+        var tool = McpDatasetTools.Definitions().First(t => t.Name == McpDatasetTools.QuerySql);
+        ClaimsPrincipal? captured = null;
+        _sqlExecutionService.ExecuteQueryBufferedAsync(
+            Arg.Any<GovernedSqlQueryRequest>(),
+            Arg.Do<ClaimsPrincipal>(p => captured = p),
+            Arg.Any<TenantId>(),
+            Arg.Any<CancellationToken>())
+            .Returns(new GovernedSqlResult("q", "q", [], [], 0, 1));
+
+        await handler.ExecuteToolAsync(tool, JsonSerializer.Serialize(new { query = "SELECT 1" }), session);
+
+        captured.ShouldNotBeNull();
+        return captured!;
+    }
+
+    [Fact]
+    public async Task SR_M_08_QuerySql_PrincipalIsTheUser_NotTheOAuthClient()
+    {
+        var session = new McpSessionContext(
+            "s1", "client-app-id", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            UserSid: "S-1-5-21-ALICE",
+            Roles: ["DataAnalyst"],
+            GroupSids: ["group-sales"],
+            AdditionalClaims: new Dictionary<string, string> { ["department"] = "sales" });
+
+        var principal = await CaptureQuerySqlPrincipalAsync(session);
+
+        principal.GetUserSid()!.Value.Value.ShouldBe("S-1-5-21-ALICE");
+        principal.GetGroupSids().Select(g => g.Value).ShouldContain("group-sales");
+        principal.IsInRole("DataAnalyst").ShouldBeTrue();
+        principal.FindFirst("department")?.Value.ShouldBe("sales");
+        principal.HasClaim(McpProtocolHandler.IdentityKindClaimType, McpProtocolHandler.ApplicationIdentityKind).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task SR_M_08_QuerySql_ReadOnlyMarkerIsPropagated()
+    {
+        var session = CreateSessionContext() with { IsReadOnly = true };
+
+        var principal = await CaptureQuerySqlPrincipalAsync(session);
+
+        principal.IsReadOnly().ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task SR_M_08_QuerySql_AppOnlySession_IsMarkedAsApplication_WithoutGroups()
+    {
+        var session = new McpSessionContext(
+            "s1", "client-app-id", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            UserSid: null,
+            Roles: ["Reader"],
+            GroupSids: ["group-sales"]);
+
+        var principal = await CaptureQuerySqlPrincipalAsync(session);
+
+        principal.GetUserSid()!.Value.Value.ShouldBe("client-app-id");
+        principal.HasClaim(McpProtocolHandler.IdentityKindClaimType, McpProtocolHandler.ApplicationIdentityKind).ShouldBeTrue();
+        principal.GetGroupSids().ShouldBeEmpty();
     }
 
     [Fact]

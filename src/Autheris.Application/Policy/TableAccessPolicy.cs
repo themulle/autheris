@@ -264,8 +264,13 @@ public sealed class TableAccessPolicy
             return TableAccessDecision.Denied(table, $"Access profile source unavailable (fail-closed): {ex.Message}");
         }
 
-        TableAccessDecision decision;
-        if (profile != null)
+        // SR-M-07: an access profile is a masking exemption only. Consent resolution (Deny consents, purpose limits, consent row
+        // filters) always runs first; the profile is applied on top of an Allow decision and never creates one.
+        TableAccessDecision decision = consentBypassed
+            ? TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true)
+            : await ResolveConsentAsync(query, ct).ConfigureAwait(false);
+
+        if (profile != null && decision.IsAllowed)
         {
             IRowPolicy? profilePolicy = null;
             if (_rowPolicyFactory is { CanParseAdminPredicates: true } && !string.IsNullOrWhiteSpace(profile.RowFilterPredicate))
@@ -282,15 +287,14 @@ public sealed class TableAccessPolicy
                 }
             }
 
-            decision = CreateDecisionFromProfile(profile, table, query.Metadata, profilePolicy);
-        }
-        else if (consentBypassed)
-        {
-            decision = TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true);
-        }
-        else
-        {
-            decision = await ResolveConsentAsync(query, ct).ConfigureAwait(false);
+            try
+            {
+                decision = ApplyProfileToDecision(decision, profile, query.Metadata, profilePolicy);
+            }
+            catch (System.Security.SecurityException)
+            {
+                return TableAccessDecision.Denied(table, "Conflicting row-level security parameters.");
+            }
         }
 
         // Virtual filters: restrictive, AND with the consent decision (after the consent cache, which stays free of them;
@@ -637,51 +641,47 @@ public sealed class TableAccessPolicy
         };
     }
 
-    private static TableAccessDecision CreateDecisionFromProfile(AccessProfile profile, TableIdentifier table, TableMetadata metadata, IRowPolicy? rowPolicy = null)
+    /// <summary>
+    /// SR-M-07: applies an access profile to an already allowed consent decision. <see cref="MaskingPolicyMode.Unmasked"/> relaxes
+    /// masked columns to Clear (a Deny stays a Deny); Default and Strict can only lower the level of sensitive columns. The profile
+    /// row filter is AND-ed with the consent row filter.
+    /// </summary>
+    private static TableAccessDecision ApplyProfileToDecision(TableAccessDecision consent, AccessProfile profile, TableMetadata metadata, IRowPolicy? rowPolicy)
     {
         var colAccess = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
-        if (profile.MaskingMode == MaskingPolicyMode.Unmasked)
+        foreach (var col in metadata.Columns)
         {
-            foreach (var col in metadata.Columns)
+            var raw = consent.GetColumnAccess(col.ColumnName);
+            var effective = consent.GetEffectiveColumnAccess(col.ColumnName, metadata);
+            var sensitive = col.IsSensitive || metadata.ColumnMaskingRules.ContainsKey(col.ColumnName);
+            ColumnAccessLevel level;
+            if (raw == ColumnAccessLevel.Deny)
             {
-                colAccess[col.ColumnName] = ColumnAccessLevel.Clear;
+                level = ColumnAccessLevel.Deny;
             }
-        }
-        else if (profile.MaskingMode == MaskingPolicyMode.Default)
-        {
-            foreach (var col in metadata.Columns)
+            else
             {
-                if (col.IsSensitive || metadata.ColumnMaskingRules.ContainsKey(col.ColumnName))
+                level = profile.MaskingMode switch
                 {
-                    colAccess[col.ColumnName] = ColumnAccessLevel.Mask;
-                }
-                else
-                {
-                    colAccess[col.ColumnName] = ColumnAccessLevel.Clear;
-                }
+                    MaskingPolicyMode.Unmasked => effective == ColumnAccessLevel.Mask ? ColumnAccessLevel.Clear : raw,
+                    MaskingPolicyMode.Default => sensitive && raw == ColumnAccessLevel.Clear && !consent.HasExplicitClear(col.ColumnName) ? ColumnAccessLevel.Mask : raw,
+                    MaskingPolicyMode.Strict => sensitive ? ColumnAccessLevel.Deny : raw,
+                    _ => raw
+                };
             }
-        }
-        else if (profile.MaskingMode == MaskingPolicyMode.Strict)
-        {
-            foreach (var col in metadata.Columns)
-            {
-                if (col.IsSensitive || metadata.ColumnMaskingRules.ContainsKey(col.ColumnName))
-                {
-                    colAccess[col.ColumnName] = ColumnAccessLevel.Deny;
-                }
-                else
-                {
-                    colAccess[col.ColumnName] = ColumnAccessLevel.Clear;
-                }
-            }
+
+            colAccess[col.ColumnName] = level;
         }
 
+        var restricted = consent with { ColumnAccess = colAccess };
         if (rowPolicy != null)
         {
-            return TableAccessDecision.Allowed(table, colAccess, hasUnconstrainedColumnAllow: true).WithAdditionalRowPolicy(rowPolicy);
+            return restricted.WithAdditionalRowPolicy(rowPolicy);
         }
 
-        return TableAccessDecision.Allowed(table, colAccess, rowFilterSql: profile.RowFilterPredicate, hasUnconstrainedColumnAllow: true);
+        return string.IsNullOrWhiteSpace(profile.RowFilterPredicate)
+            ? restricted
+            : restricted.WithAdditionalRowFilter(profile.RowFilterPredicate);
     }
 
     private async Task<AccessProfile?> ResolveActiveAccessProfileAsync(TableAccessQuery query, CancellationToken ct)
