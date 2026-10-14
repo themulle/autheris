@@ -333,6 +333,51 @@ public class AdvancedMaskingRuleTests
             Compile("SELECT department, sum(bonus) FROM sales GROUP BY department HAVING bonus > 1000", "bonus", TargetSqlDialect.SqlServer));
     }
 
+    // WP-FEAT-02: the secured derived table feeds mask output into an aggregate, which is meaningless or an inference channel.
+    // The compiler rejects every aggregate/grouping shape over a masked column with AGGREGATION_ON_MASKED_COLUMN.
+    [Theory]
+    [InlineData("SELECT sum(bonus) FROM sales")]
+    [InlineData("SELECT avg(bonus) FROM sales GROUP BY department")]
+    [InlineData("SELECT min(bonus), max(bonus) FROM sales")]
+    [InlineData("SELECT count(bonus) FROM sales")]
+    [InlineData("SELECT count(DISTINCT bonus) FROM sales")]
+    [InlineData("SELECT sum(bonus * 2) FROM sales")]
+    [InlineData("SELECT department, count(*) FROM sales GROUP BY bonus, department")]
+    [InlineData("SELECT count(*) FROM sales GROUP BY bonus")]
+    [InlineData("SELECT count(*) FILTER (WHERE bonus > 5) FROM sales")]
+    [InlineData("SELECT department, string_agg(department, ',' ORDER BY bonus) FROM sales GROUP BY department")]
+    [InlineData("SELECT department, sum(s.bonus) FROM sales s GROUP BY department")]
+    public void AggregateGuard_MaskedColumnInAggregateOrGroupBy_Throws(string sql)
+    {
+        foreach (var dialect in new[] { TargetSqlDialect.SqlServer, TargetSqlDialect.PostgreSql })
+        {
+            Should.Throw<MaskedAggregationException>(() => Compile(sql, "bonus", dialect));
+        }
+    }
+
+    [Theory]
+    [InlineData("SELECT department, sum(id) FROM sales GROUP BY department")]
+    [InlineData("SELECT count(*) FROM sales")]
+    [InlineData("SELECT department, max(id) FROM sales GROUP BY department")]
+    public void AggregateGuard_AggregateOverClearColumn_Allowed(string sql)
+    {
+        foreach (var dialect in new[] { TargetSqlDialect.SqlServer, TargetSqlDialect.PostgreSql })
+        {
+            Should.NotThrow(() => Compile(sql, "bonus", dialect));
+        }
+    }
+
+    [Fact]
+    public void AggregateGuard_MapsToTypedErrorCode()
+    {
+        var ex = Should.Throw<MaskedAggregationException>(() => Compile("SELECT sum(bonus) FROM sales", "bonus"));
+
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapping).ShouldBeTrue();
+        mapping.Status.ShouldBe(403);
+        mapping.Code.ShouldBe("AGGREGATION_ON_MASKED_COLUMN");
+        ex.Message.ShouldNotContain("bonus");
+    }
+
     [Fact]
     public void PredicateGuard_MaskedColumnInJoinOn_ThrowsSecurityException()
     {

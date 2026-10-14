@@ -213,6 +213,9 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             CheckJoinConditions(node.From, tables);
         }
 
+        EnsureNoMaskedColumnsInAggregatesAndGrouping(node);
+        EnsureNoWholeRowReferencesInProjections(node);
+
         return base.VisitQuerySpecification(node);
     }
 

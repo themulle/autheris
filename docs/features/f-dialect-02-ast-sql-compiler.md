@@ -277,6 +277,7 @@ The client message is always the fixed message of the code; it never contains `E
 | `SqlCompileNotSupportedException` (reason `Dialect`) | 501 | `SQL_DIALECT_NOT_SUPPORTED` |
 | `SqlLimitExceededException` (any `SqlLimitKind`), compile budget (`OperationCanceledException` with inner `TimeoutException`) | 422 | `SQL_LIMIT_EXCEEDED` (+ `limit`) |
 | `UnfilteredDmlException` | 403 | `SQL_UNFILTERED_DML` |
+| `MaskedAggregationException` (masked column as aggregate argument or `GROUP BY` expression) | 403 | `AGGREGATION_ON_MASKED_COLUMN` |
 | `PolicyParseException`, `PolicyConflictException`, `WebSqlTableDeniedException` (table not usable for any reason) | 403 | `SQL_POLICY_DENIED` |
 | Tenant id collision | 403 | `TENANT_ID_COLLISION` |
 | `SecurityCoverageException`, `EmittedSqlInvariantViolationException`, `SqlCompileConfigurationException` (gateway defect) | 500 | `SQL_COMPILER_INVARIANT` |
@@ -469,6 +470,7 @@ Reference for operators and API clients moving from a release with the legacy to
 - `FETCH FIRST ... WITH TIES` is downgraded under an enforced row cap.
 - Recursive CTEs are not usable.
 - HMAC-masked columns are rejected in predicates and joins.
+- A masked column cannot be an aggregate argument (including `FILTER` and the ordered-aggregate `ORDER BY`) or a grouping expression in any SELECT (`AGGREGATION_ON_MASKED_COLUMN`); a bare whole-row reference (`SELECT t FROM t`, `to_json(t)`) to a table with masked columns is rejected in a SELECT list, enforced by the visitor and again by the coverage verifier.
 - An INSERT that names a foreign tenant is a security rejection.
 
 **Public API (embedders and extensions)**
