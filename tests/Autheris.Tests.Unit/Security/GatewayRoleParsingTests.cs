@@ -95,7 +95,9 @@ public class GatewayRoleParsingTests
             [new Claim(ClaimTypes.Role, "ClusterAdmin"), new Claim(ClaimTypes.Role, "tenant-1:DataOwner"), new Claim(ClaimTypes.Role, "*:Consumer")],
             "Test"));
 
-        _evaluator.GetEffectiveRoles(user).ShouldBe([GatewayRole.ClusterAdmin]);
+        var global = _evaluator.GetEffectiveRoles(user);
+        global.Count.ShouldBe(1);
+        global.ShouldContain(GatewayRole.ClusterAdmin);
         _evaluator.GetEffectiveRoles(user, "tenant-1").ShouldContain(GatewayRole.DataOwner);
         _evaluator.GetEffectiveRoles(user, "tenant-2").ShouldContain(GatewayRole.Consumer);
         _evaluator.GetEffectiveRoles(user, "tenant-2").ShouldNotContain(GatewayRole.DataOwner);
