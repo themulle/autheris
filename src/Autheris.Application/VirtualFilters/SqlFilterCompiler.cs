@@ -7,6 +7,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using TrinoSqlEngine;
+using TrinoSqlEngine.Analysis;
 using TrinoSqlEngine.Ast.Builder;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;

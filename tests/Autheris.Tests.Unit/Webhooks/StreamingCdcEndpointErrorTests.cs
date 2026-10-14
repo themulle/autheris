@@ -64,6 +64,7 @@ public sealed class StreamingCdcEndpointErrorTests
         var privateProblem = privateResult.ShouldBeOfType<ProblemHttpResult>();
         var unresolvableProblem = unresolvableResult.ShouldBeOfType<ProblemHttpResult>();
         privateProblem.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+        privateProblem.ProblemDetails.Detail.ShouldNotBeNull();
         privateProblem.ProblemDetails.Detail.ShouldNotContain("SSRF");
         privateProblem.ProblemDetails.Detail.ShouldNotContain("127.0.0.1");
         privateProblem.ProblemDetails.Extensions["code"].ShouldBe("CDC_TARGET_URL_NOT_ALLOWED");
@@ -87,6 +88,7 @@ public sealed class StreamingCdcEndpointErrorTests
 
         var problem = result.ShouldBeOfType<ProblemHttpResult>();
         problem.StatusCode.ShouldBe(StatusCodes.Status429TooManyRequests);
+        problem.ProblemDetails.Detail.ShouldNotBeNull();
         problem.ProblemDetails.Detail.ShouldNotContain(internalDetail);
         problem.ProblemDetails.Extensions["code"].ShouldBe("CDC_SUBSCRIPTION_QUOTA_EXCEEDED");
     }

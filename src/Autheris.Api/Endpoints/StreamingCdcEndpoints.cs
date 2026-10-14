@@ -102,7 +102,7 @@ public static class StreamingCdcEndpoints
 
         // F-EVT-01: CloudEvents Outbound Webhook Subscriptions (interim guard WP-ARC-A-01: 501 unless
         // Gateway:CdcWebhooks:Enabled is true; the subscription store is not registered while disabled).
-        app.MapGet("/api/v1/cdc/subscriptions", ListSubscriptionsAsync)
+        app.MapGet("/api/v1/cdc/subscriptions", (Delegate)ListSubscriptionsAsync)
             .RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         app.MapPost("/api/v1/cdc/subscriptions", CreateSubscriptionAsync)
