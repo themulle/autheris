@@ -13,8 +13,12 @@
 > **Directive for all AI agents and contributors:**
 > 1. **Language:** All plans, requirements, and documentation must be written in **English** (aligned with [README.md](file:///root/autheris/README.md)).
 > 2. **Repository of Requirements:** All new requirements, design documents, and feature requests must be stored in [`doc/plan/`](file:///root/autheris/doc/plan/).
-> 3. **Refinement on the Origin Plan:** When refining an existing feature or adding a new requirement, agents must:
->    - Create or update the detailed plan in `doc/plan/` (e.g., `YYYY-MM-DD-plan-<topic>.md`).
+> 3. **Consolidated Category Structure:** Active work is consolidated under three core categories:
+>    - [`security.md`](security.md): Threat modeling, AppSec code review findings (Waves A–C), hardening, and WORM compliance.
+>    - [`architecture.md`](architecture.md): Full-solution architecture reviews, layering, component decoupling, and strategic waves (R0–R6).
+>    - [`features.md`](features.md): Functional roadmap (aggregations #28, privacy #37, dbt semantic layer #38, REST deep paging).
+> 4. **Refinement on the Origin Plan:** When refining an existing feature or adding a new requirement, agents must:
+>    - Update the corresponding category document (`security.md`, `architecture.md`, or `features.md`).
 >    - Update the execution matrix and status below in this Origin Plan.
 >    - Maintain traceable bidirectional links between parent and child documents.
 
@@ -22,14 +26,12 @@
 
 ## 1. 🚀 Active Execution Tracks & Plan Matrix
 
-| Plan / Document ID | Topic & Scope | Addressed Requirements & Components | Status | Next Milestone |
-|---|---|---|---|---|
-| [`2026-10-14-plan-security-code-review.md`](2026-10-14-plan-security-code-review.md)<br/>`PLAN-SECURITY-REVIEW-2026-10-14` | **Full Security Code Review (follow-up to 2026-10-13 audit)** | Re-review of all 7 production projects + deployment: Wave A High (`SR-H-01`..`06`, `SR-D-01`) and Wave B Medium (`SR-M-01`..`26`, `SR-D-02`..`05`) remediated and verified with regression tests. Consolidated on `feat/ast-x1-security-consolidation`. Detailed area reports in `2026-10-14-security-code-review/`. | **WAVES A & B FIXED & CONSOLIDATED ✅** | Merge consolidated branch to `main`. Next: Wave C Low findings (`SR-L-01`..`24`, `SR-D-06`..`09`). |
-| [`2026-10-14-architecture-code-review.md`](2026-10-14-architecture-code-review.md)<br/>`PLAN-ARCH-REVIEW-2026-10-14` | **Full-Solution Architecture Code Review** | Read-only Solution Architect review of all 7 projects plus tests at `88f7df1c`: 121 findings (0 Critical, 26 High, 62 Medium, 33 Low) in 10 themes - single governed query pipeline (extends X1 scope), audit contract, fat Application layer / dialect port, versioned governance migrations, HA/cluster semantics, eventing/webhooks/plugin contract, config & god-class decomposition, API consistency, hot-path performance, test & doc hygiene. Detail reports in `2026-10-14-architecture-code-review/`. | **REVIEW DELIVERED 📋** | Stakeholder decisions (§6), then child plans per remediation wave R0-R6 (R0: ARC-F-01, ARC-I-03, ARC-C-05, ARC-C-04, ARC-F-02, ARC-S-06) |
-| [`2026-10-12-plan-github-issues-roadmap.md`](2026-10-12-plan-github-issues-roadmap.md)<br/>`PLAN-GH-ISSUES-ROADMAP-2026-10-12` | **GitHub Issues Master Roadmap & Execution Plan** | Remaining open issues of the 19-issue roadmap (#26-#44): #28 governed GraphQL aggregations, #37 minimum group size / k-anonymity, #38 dbt Semantic Layer Stage 2/3 | **ACTIVE & IN EXECUTION 🚀** | #28 after merging consolidation branch to main, then #37 and #38 Stage 2/3 |
-| *Follow-up of* `PLAN-FEDERATED-VF-DUCKDB-15` | **REST dataset `LIMIT`/`OFFSET` cross-source parser bug** | The REST dataset channel (`GET /api/v1/data/{source}/{schema}/{table}`) builds `LIMIT .. OFFSET ..` SQL that the cross-source parser rejects, answering 500 instead of 403 on web-API tables. Pre-existing, independent of Virtual Filters, fails closed (no rows); found in F-GOV-14 Phase 5 review (CR-11). | **IN PROGRESS 🚀** | Being fixed on branch `fix/rest-dataset-limit-offset`; the F-GOV-14 end-to-end test asserts "no rows and zero upstream requests" until then |
-| *Follow-up of* `PLAN-AST-DIALECT-GEN-16` | **REST dataset deep paging** | REST dataset deep paging: emit OFFSET per dialect via the AST target-dialect compiler instead of an in-memory skip. | **PLANNED 📋** | Lift the pagination-window cap once per-dialect OFFSET generation is available |
-| [`README.md`](README.md)<br/>`PLAN-AGENT-GOV-DOCS-01` | **Agent Governance & English Documentation Standards** | Project-wide English documentation policy; central `doc/plan/` repository; agent refinement lifecycle rules; root `AGENTS.md` & `CLAUDE.md` | **ACTIVE & ADOPTED ✅** | Ongoing enforcement across all sub-agent and tool invocations |
+| Plan / Category Document | Topic & Scope | Addressed Requirements & Components | Status | Next Milestone |
+|---|---|---|:---:|---|
+| [`security.md`](security.md)<br/>`PLAN-SECURITY-REVIEW` | **Security Review, Hardening & Compliance** | Wave A High (`SR-H-01`..`06`, `SR-D-01`) and Wave B Medium (`SR-M-01`..`26`, `SR-D-02`..`05`) remediated and verified with regression tests. Consolidated on `feat/ast-x1-security-consolidation`. | **WAVES A & B FIXED ✅** | Merge consolidated branch to `main`. Next: Wave C Low findings (`SR-L-01`..`24`, `SR-D-06`..`09`). |
+| [`architecture.md`](architecture.md)<br/>`PLAN-ARCH-REVIEW` | **Solution Architecture Review & Waves (R0–R6)** | 121 findings across 6 slices synthesized into 10 architectural themes: single query pipeline, audit contract, thinning Application layer, versioned schema migrations, HA readiness, outbox, options split, ProblemDetails, ANTLR pooling. | **REVIEW DELIVERED 📋** | Stakeholder decisions (§6), then execute Wave R0 (correctness/trust) and Wave R1 (unified query pipeline). |
+| [`features.md`](features.md)<br/>`PLAN-FEATURES-ROADMAP` | **Feature Roadmap & Analytics Execution** | Analytics and headless BI: #28 governed GraphQL aggregations, #37 minimum group size & k-anonymity guard, #38 dbt Semantic Layer (Stage 2/3), REST dataset LIMIT/OFFSET fix and deep paging. | **ACTIVE & IN EXECUTION 🚀** | Issue #28 after merging consolidation branch to main, then #37 and #38 Stage 2/3. |
+| [`README.md`](README.md)<br/>`PLAN-AGENT-GOV-DOCS-01` | **Agent Governance & English Documentation Standards** | Project-wide English documentation policy; central `doc/plan/` repository; agent refinement lifecycle rules; root `AGENTS.md` & `CLAUDE.md`. | **ACTIVE & ADOPTED ✅** | Ongoing enforcement across all sub-agent and tool invocations. |
 
 ---
 
@@ -39,29 +41,28 @@
 flowchart TD
     MP["00-master-plan-overview.md<br/>(Master Origin Plan)"]
 
-    subgraph Governance ["Agent Governance & Roadmap"]
-        AG["PLAN-AGENT-GOV-DOCS-01<br/>Agent Governance & English Docs"]
-        GHI["PLAN-GH-ISSUES-ROADMAP-2026-10-12<br/>Open: #28, #37, #38 Stage 2/3"]
+    subgraph Governance ["Agent Governance & Standards"]
+        AG["README.md<br/>Agent Governance & English Docs"]
     end
 
-    subgraph Reviews ["2026-10-14 Reviews"]
-        SR["PLAN-SECURITY-REVIEW-2026-10-14<br/>Security Review (Wave A & B fixed ✅)"]
-        AR["PLAN-ARCH-REVIEW-2026-10-14<br/>Architecture Code Review (R0-R6)"]
+    subgraph Categories ["Consolidated Category Hubs"]
+        SR["security.md<br/>Security Review (Wave A & B fixed ✅, Wave C active)"]
+        AR["architecture.md<br/>Architecture Review & Remediation (R0-R6)"]
+        FT["features.md<br/>Feature Roadmap (#28, #37, #38, REST paging)"]
     end
 
-    subgraph SqlCompiler ["SQL Compiler & Dialect Pushdown"]
-        ADG["F-DIALECT-02 (Delivered ✅)<br/>AST Compiler Single-Path (X1)"]
-        RDP["REST dataset LIMIT/OFFSET bug & deep paging"]
+    subgraph Delivered ["Delivered & Verified Baselines"]
+        ADG["F-DIALECT-02 (Delivered ✅)<br/>AST Target Dialect Compiler (X1 Cutover)"]
+        VF["F-GOV-14 (Delivered ✅)<br/>Federated Virtual Filters (DuckDB)"]
     end
 
     MP --> AG
-    MP --> GHI
     MP --> SR
     MP --> AR
-    MP --> ADG
-    ADG --> RDP
-    GHI -.->|"#28/#37 build on AST compiler"| ADG
-    AR -.->|"T1: single pipeline extends X1 scope"| ADG
+    MP --> FT
+    ADG --> FT
+    VF --> FT
+    AR -.->|"T1: single pipeline builds on AST"| ADG
 ```
 
 ---
