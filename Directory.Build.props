@@ -9,7 +9,7 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <NuGetAudit>true</NuGetAudit>
     <NuGetAuditMode>all</NuGetAuditMode>
-    <NuGetAuditLevel>moderate</NuGetAuditLevel>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <RestoreLockedMode Condition="('$(ContinuousIntegrationBuild)' == 'true' Or '$(GITHUB_ACTIONS)' == 'true') And '$(RuntimeIdentifier)' == ''">true</RestoreLockedMode>
     <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>
