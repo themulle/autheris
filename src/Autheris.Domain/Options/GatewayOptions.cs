@@ -384,7 +384,6 @@ public sealed class HostingLimitsOptions
 public sealed class PluginsOptions
 {
     public string Directory { get; init; } = "plugins";
-    public bool EnableHotReload { get; init; } = false;
     public bool RequireIntegrityManifest { get; init; } = false;
     public Dictionary<string, string> TrustedPluginHashes { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 }
@@ -1404,7 +1403,6 @@ public sealed class ExtensibilityOptions
 
     public string JustificationHeaderName { get; init; } = "X-Access-Justification";
     public string BreakGlassHeaderName { get; init; } = "X-Break-Glass";
-    public string PluginDirectory { get; init; } = "plugins";
 }
 
 public sealed class CasbinOptions

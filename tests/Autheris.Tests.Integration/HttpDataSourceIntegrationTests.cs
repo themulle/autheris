@@ -40,10 +40,6 @@ public sealed class HttpDataSourceIntegrationTests : IClassFixture<WebApplicatio
     {
         public string Name => "IntegrationTestBillingPlugin";
 
-        public void ConfigureServices(IServiceCollection services, IConfiguration configuration)
-        {
-        }
-
         public Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ExecuteAsync(
             PluginExecutionContext context,
             CancellationToken ct = default)

@@ -6,8 +6,8 @@ using System.Threading.Tasks;
 
 /// <summary>
 /// Event bus for broadcast events across cluster nodes.
-/// WICHTIGER SICHERHEITSHINWEIS: Keine Zustellgarantie; nicht für sicherheitsrelevante Korrektheit verwenden.
-/// Korrektheit muss über autoritative Stores und Pull-Validierung (Epochen / Generationen) sichergestellt werden.
+/// SECURITY NOTE: no delivery guarantee; do not rely on it for security-relevant correctness.
+/// Correctness must be ensured through authoritative stores and pull validation (epochs / generations).
 /// </summary>
 public interface IEventBus
 {
