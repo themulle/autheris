@@ -272,21 +272,13 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
 
     private static ClaimsPrincipal BuildUserPrincipal(McpSessionContext session)
     {
-        var claims = new List<Claim>
+        // SR-M-08: same principal as the other MCP paths (user SID, groups, claims, read-only marker); app-only sessions stay marked as such.
+        var principal = McpProtocolHandler.BuildPrincipalFromSession(session)!;
+        if (!string.IsNullOrWhiteSpace(session.TenantId) && principal.Identity is ClaimsIdentity identity)
         {
-            new(ClaimTypes.NameIdentifier, session.ServicePrincipalId),
-            new("sub", session.UserSid ?? session.ServicePrincipalId),
-            new("tid", session.TenantId)
-        };
-
-        if (session.Roles != null)
-        {
-            foreach (var role in session.Roles)
-            {
-                claims.Add(new Claim(ClaimTypes.Role, role));
-            }
+            identity.AddClaim(new Claim("tid", session.TenantId));
         }
 
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "McpSessionAuth"));
+        return principal;
     }
 }

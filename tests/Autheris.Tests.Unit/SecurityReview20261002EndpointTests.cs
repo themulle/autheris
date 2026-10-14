@@ -523,6 +523,21 @@ public class SecurityReview20261002EndpointTests
         caller.Roles.ShouldContain("Reader");
     }
 
+    [Fact]
+    public void SR_M_08_McpCaller_AppOnlyToken_HasNoUserSid()
+    {
+        var context = CreateContext(
+            "tenant-a",
+            ["Reader"],
+            new Claim("client_id", "shared-app"),
+            new Claim("appid", "shared-app"));
+
+        var caller = McpEndpoints.ResolveCaller(context, allowOpenMcp: false);
+
+        caller.UserSid.ShouldBeNull();
+        caller.PrincipalId.ShouldBe("shared-app");
+    }
+
     // =========================================================================
     // M-07: bounded body reads (chunked transfer without Content-Length)
     // =========================================================================
