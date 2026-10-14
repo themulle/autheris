@@ -56,6 +56,15 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
     {
         _logger.LogInformation("AsyncQueryJobBackgroundWorker started.");
 
+        try
+        {
+            await _queue.SweepOrphanedScratchFilesAsync(stoppingToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Sweeping orphaned async job scratch files failed.");
+        }
+
         var purgeTask = RunPurgeLoopAsync(stoppingToken);
 
         try

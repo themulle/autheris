@@ -53,8 +53,17 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         };
         _channel = Channel.CreateBounded<AsyncJobExecutionItem>(boundedOptions);
 
-        var basePath = environment?.ContentRootPath ?? AppContext.BaseDirectory;
-        _scratchDirectory = Path.GetFullPath(Path.Combine(basePath, "scratch", "jobs"));
+        var configured = (_jobOptions?.Value ?? _options?.Value?.AsyncJobs)?.ScratchDirectory;
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            _scratchDirectory = Path.GetFullPath(configured);
+        }
+        else
+        {
+            var basePath = environment?.ContentRootPath ?? AppContext.BaseDirectory;
+            _scratchDirectory = Path.GetFullPath(Path.Combine(basePath, "scratch", "jobs"));
+        }
+
         Directory.CreateDirectory(_scratchDirectory);
     }
 
@@ -318,6 +327,77 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
 
         return true;
     }
+
+    public async ValueTask SweepOrphanedScratchFilesAsync(CancellationToken ct)
+    {
+        var jobs = _jobOptions?.Value ?? _options?.Value?.AsyncJobs ?? new AsyncJobOptions();
+        var now = DateTime.UtcNow;
+        var orphanAge = TimeSpan.FromSeconds(Math.Max(1, jobs.MaxTimeoutSeconds));
+        var maxAge = TimeSpan.FromHours(Math.Max(0, jobs.RetentionHours));
+
+        if (!Directory.Exists(_scratchDirectory))
+        {
+            return;
+        }
+
+        foreach (var tenantDir in Directory.EnumerateDirectories(_scratchDirectory))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (IsReparsePoint(tenantDir))
+            {
+                continue;
+            }
+
+            var tenantId = Path.GetFileName(tenantDir);
+            foreach (var file in Directory.EnumerateFiles(tenantDir))
+            {
+                ct.ThrowIfCancellationRequested();
+                var name = Path.GetFileName(file);
+                var ext = Path.GetExtension(name);
+                var stem = Path.GetFileNameWithoutExtension(name);
+                if (!(string.Equals(ext, ".csv", StringComparison.Ordinal) || string.Equals(ext, ".json", StringComparison.Ordinal)) ||
+                    !Guid.TryParseExact(stem, "D", out _) ||
+                    IsReparsePoint(file))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var age = now - File.GetLastWriteTimeUtc(file);
+                    var delete = age > maxAge;
+                    if (!delete && age > orphanAge)
+                    {
+                        delete = !await IsJobKnownAsync(tenantId, stem, ct).ConfigureAwait(false);
+                    }
+
+                    if (delete)
+                    {
+                        File.Delete(file);
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(ex, "Could not sweep scratch file {FileName}.", name);
+                }
+            }
+        }
+    }
+
+    private static bool IsReparsePoint(string path)
+    {
+        try
+        {
+            return File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
+    private ValueTask<bool> IsJobKnownAsync(string tenantId, string jobId, CancellationToken ct) =>
+        ValueTask.FromResult(_jobs.TryGetValue(jobId, out var job) && string.Equals(job.TenantId, tenantId, StringComparison.Ordinal));
 
     public Task PurgeExpiredJobsAsync(TimeSpan retentionPeriod, CancellationToken ct = default)
     {

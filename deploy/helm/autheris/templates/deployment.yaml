@@ -73,6 +73,9 @@ spec:
               value: {{ .Values.gateway.drainDelaySeconds | quote }}
             - name: Gateway__ShutdownTimeoutSeconds
               value: {{ .Values.gateway.shutdownTimeoutSeconds | quote }}
+            # The root filesystem is read-only; async job results go to the writable /tmp emptyDir.
+            - name: Gateway__AsyncJobs__ScratchDirectory
+              value: "/tmp/autheris-jobs"
             {{- if .Values.gateway.governanceDb.existingSecret }}
             - name: Gateway__GovernanceDb__ConnectionString
               valueFrom:

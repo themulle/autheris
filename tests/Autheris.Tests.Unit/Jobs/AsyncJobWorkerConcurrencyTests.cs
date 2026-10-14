@@ -70,6 +70,8 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
             lock (Transitions) { Transitions.Add(next); }
             return ValueTask.FromResult(true);
         }
+
+        public ValueTask SweepOrphanedScratchFilesAsync(CancellationToken ct) => ValueTask.CompletedTask;
     }
 
     [Fact]
@@ -277,5 +279,94 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
             () => manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), User(), new TenantId("t")));
         // Another tenant is unaffected.
         await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), User("alice", "other"), new TenantId("other"));
+    }
+
+    // ---- scratch directory and sweeper ----
+
+    [Fact]
+    public void ConfiguredScratchDirectory_IsUsed()
+    {
+        var configured = Path.Combine(_dir, "configured-scratch");
+        var manager = new AsyncQueryJobManager(_audit, environment: _env,
+            jobOptions: Options.Create(new AsyncJobOptions { ScratchDirectory = configured }));
+
+        manager.ScratchDirectory.ShouldBe(configured);
+        Directory.Exists(configured).ShouldBeTrue();
+    }
+
+    private static string PlaceFile(string scratch, string tenant, string id, string ext, TimeSpan age)
+    {
+        var dir = Path.Combine(scratch, tenant);
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, $"{id}.{ext}");
+        File.WriteAllText(path, "[]");
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow - age);
+        return path;
+    }
+
+    [Fact]
+    public async Task Sweeper_RemovesOrphanedScratchFiles()
+    {
+        var jobOptions = Options.Create(new AsyncJobOptions { MaxTimeoutSeconds = 60, RetentionHours = 24 });
+        var manager = new AsyncQueryJobManager(_audit, environment: _env, jobOptions: jobOptions);
+        var orphanOld = PlaceFile(manager.ScratchDirectory, "t", Guid.NewGuid().ToString("D"), "json", TimeSpan.FromMinutes(10));
+        var orphanFresh = PlaceFile(manager.ScratchDirectory, "t", Guid.NewGuid().ToString("D"), "csv", TimeSpan.FromSeconds(5));
+        var ancient = PlaceFile(manager.ScratchDirectory, "t", Guid.NewGuid().ToString("D"), "json", TimeSpan.FromHours(30));
+        var foreign = Path.Combine(manager.ScratchDirectory, "t", "not-a-job.txt");
+        File.WriteAllText(foreign, "x");
+        File.SetLastWriteTimeUtc(foreign, DateTime.UtcNow.AddDays(-5));
+
+        await manager.SweepOrphanedScratchFilesAsync(CancellationToken.None);
+
+        File.Exists(orphanOld).ShouldBeFalse();
+        File.Exists(orphanFresh).ShouldBeTrue("a fresh file may belong to a job of another replica");
+        File.Exists(ancient).ShouldBeFalse();
+        File.Exists(foreign).ShouldBeTrue("only {guid}.csv|json files are ever swept");
+    }
+
+    [Fact]
+    public async Task Sweeper_KeepsFilesOfKnownJobs()
+    {
+        var jobOptions = Options.Create(new AsyncJobOptions { MaxTimeoutSeconds = 60, RetentionHours = 24 });
+        var manager = new AsyncQueryJobManager(_audit, environment: _env, jobOptions: jobOptions);
+        var id = Guid.NewGuid().ToString("D");
+        var path = PlaceFile(manager.ScratchDirectory, "t", id, "json", TimeSpan.FromMinutes(10));
+        manager.UpdateJob(new AsyncJobDescriptor(id, "t", "alice", "q", "json", AsyncJobState.Completed, DateTimeOffset.UtcNow, ResultFilePath: path));
+
+        await manager.SweepOrphanedScratchFilesAsync(CancellationToken.None);
+
+        File.Exists(path).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Sweeper_DoesNotFollowSymlinks()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var jobOptions = Options.Create(new AsyncJobOptions { MaxTimeoutSeconds = 60 });
+        var manager = new AsyncQueryJobManager(_audit, environment: _env, jobOptions: jobOptions);
+        var outside = Path.Combine(_dir, "outside");
+        Directory.CreateDirectory(outside);
+        var victim = Path.Combine(outside, $"{Guid.NewGuid():D}.json");
+        File.WriteAllText(victim, "keep");
+        File.SetLastWriteTimeUtc(victim, DateTime.UtcNow.AddDays(-3));
+        Directory.CreateSymbolicLink(Path.Combine(manager.ScratchDirectory, "linked-tenant"), outside);
+
+        await manager.SweepOrphanedScratchFilesAsync(CancellationToken.None);
+
+        File.Exists(victim).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Worker_RunsSweeperAtStart()
+    {
+        var jobOptions = Options.Create(new AsyncJobOptions { MaxTimeoutSeconds = 60 });
+        var manager = new AsyncQueryJobManager(_audit, environment: _env, jobOptions: jobOptions);
+        var orphan = PlaceFile(manager.ScratchDirectory, "t", Guid.NewGuid().ToString("D"), "json", TimeSpan.FromHours(1));
+        var worker = new AsyncQueryJobBackgroundWorker(manager, manager, Scopes(Substitute.For<IGovernedSqlExecutionService>()), _audit,
+            NullLogger<AsyncQueryJobBackgroundWorker>.Instance, jobOptions: jobOptions);
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitUntilAsync(() => !File.Exists(orphan));
+        await worker.StopAsync(CancellationToken.None);
     }
 }

@@ -23,4 +23,10 @@ public interface IAsyncJobQueue
     /// terminal (the caller must discard its result).
     /// </summary>
     ValueTask<bool> TryTransitionAsync(AsyncJobDescriptor next, CancellationToken ct);
+
+    /// <summary>
+    /// Deletes result files in the scratch directory that no job refers to any more (crash leftovers): files of unknown
+    /// jobs older than the maximum job timeout, and any file older than the retention period.
+    /// </summary>
+    ValueTask SweepOrphanedScratchFilesAsync(CancellationToken ct);
 }
