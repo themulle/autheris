@@ -103,6 +103,48 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<WebApplication
     }
 
     [Fact]
+    public void Metrics_RequiresMetricsScrapePolicy()
+    {
+        var endpoint = FindEndpoint(GetRouteEndpoints(), "GET", "/metrics");
+
+        endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().Any(a => a.Policy == "MetricsScrape").ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Metrics_Anonymous_401()
+    {
+        var response = await _factory.CreateClient().GetAsync("/metrics");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task Metrics_AuthenticatedWithoutRole_403()
+    {
+        var response = await MetricsAsync("Reader");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    [Theory]
+    [InlineData("MetricsScraper")]
+    [InlineData("ClusterAdmin")]
+    public async Task Metrics_ScraperRole_200(string role)
+    {
+        var response = await MetricsAsync(role);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    private Task<HttpResponseMessage> MetricsAsync(string roles)
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-METRICS-" + roles);
+        client.DefaultRequestHeaders.Add("X-Test-Roles", roles);
+        return client.GetAsync("/metrics");
+    }
+
+    [Fact]
     public async Task GAP01_AnonymousProbeAndDocsCalls_AreNotRejectedWith401()
     {
         var client = _factory.CreateClient();

@@ -361,7 +361,7 @@ public static class GatewayApplicationBuilderExtensions
 
     public static WebApplication MapGatewayEndpoints(this WebApplication app, GatewayOptions gatewayOptions)
     {
-        app.MapMetrics().RequireAuthorization().WithAuditExemption("Prometheus scrape endpoint");
+        app.MapMetrics().RequireAuthorization(GatewayPolicies.MetricsScrape).WithAuditExemption("Prometheus scrape endpoint");
 
         // 1. Health & Readiness Probes
         app.MapHealthEndpoints(gatewayOptions, app.Environment);

@@ -244,6 +244,10 @@ The monthly FinOps budget is enforced against a cluster-wide counter in the shar
 
 ---
 
+### 4.ad Prometheus scrape access (SEC2-09)
+
+`/metrics` requires the `MetricsScrape` policy: the authenticated principal must carry the `MetricsScraper` (or `ClusterAdmin`) role. Any other authenticated caller gets 403, anonymous callers get 401. Grant the scrape identity (for example the service principal behind the ServiceMonitor bearer token) an app role named `MetricsScraper`; there is no configuration switch that relaxes this.
+
 ## 5. Data Catalog Synchronization Operations
 
 ### 5.1 Monitoring Background Sync

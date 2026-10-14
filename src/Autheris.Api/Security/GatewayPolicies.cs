@@ -23,12 +23,16 @@ public static class GatewayPolicies
     public const string SchemaAdmin = "SchemaAdmin";
     public const string SchemaPublisher = "SchemaPublisher";
 
+    /// <summary>SEC2-09: Prometheus scrape endpoint; any authenticated user is not enough.</summary>
+    public const string MetricsScrape = "MetricsScrape";
+
     public static readonly string[] GovernanceAdminRoles = ["GovernanceAdmin", "ClusterAdmin"];
     public static readonly string[] ApproverRoles = ["DataSteward", "DataOwner", "GovernanceAdmin", "ClusterAdmin"];
     public static readonly string[] ClusterAdminRoles = ["ClusterAdmin"];
     public static readonly string[] PrivacyAdminRoles = ["GovernanceAdmin", "PrivacyAdmin", "DataProtectionOfficer", "ClusterAdmin"];
     public static readonly string[] SchemaAdminRoles = ["GovernanceAdmin", "SchemaAdmin", "GatewayAdmin", "PlatformAdmin", "ClusterAdmin"];
     public static readonly string[] SchemaPublisherRoles = ["GovernanceAdmin", "SchemaAdmin", "GatewayAdmin", "PlatformAdmin", "ClusterAdmin", "Developer", "DataOwner"];
+    public static readonly string[] MetricsScrapeRoles = ["MetricsScraper", "ClusterAdmin"];
 
     /// <summary>
     /// K-K10: Checks if principal satisfies any of the strongly-typed GatewayRole requirements,
@@ -71,6 +75,7 @@ public static class GatewayPolicies
         AddRolePolicy(options, PrivacyAdmin, PrivacyAdminRoles);
         AddRolePolicy(options, SchemaAdmin, SchemaAdminRoles);
         AddRolePolicy(options, SchemaPublisher, SchemaPublisherRoles);
+        AddRolePolicy(options, MetricsScrape, MetricsScrapeRoles);
     }
 
     /// <summary>Roles that satisfy a named role policy (used for diagnostics only).</summary>
@@ -84,6 +89,7 @@ public static class GatewayPolicies
             PrivacyAdmin => PrivacyAdminRoles,
             SchemaAdmin => SchemaAdminRoles,
             SchemaPublisher => SchemaPublisherRoles,
+            MetricsScrape => MetricsScrapeRoles,
             _ => []
         };
         return roles.Length > 0;
