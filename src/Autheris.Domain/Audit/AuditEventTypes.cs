@@ -29,6 +29,7 @@ public static class AuditEventTypes
     public const string WebSqlCrossSourceSourceRead = "WEBSQL_CROSS_SOURCE_SOURCE_READ";
     public const string WebSqlDmlExecuted = "WEBSQL_DML_EXECUTED";
     public const string WebSqlDmlRejected = "WEBSQL_DML_REJECTED";
+    public const string WebSqlDmlFailed = "WEBSQL_DML_FAILED";
     public const string QueryExecutionError = "QUERY_EXECUTION_ERROR";
     public const string StreamSubscribe = "STREAM_SUBSCRIBE";
     public const string EgressShadowCopy = "EGRESS_SHADOW_COPY";

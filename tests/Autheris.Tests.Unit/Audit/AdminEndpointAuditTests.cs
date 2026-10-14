@@ -100,13 +100,38 @@ public sealed class AdminEndpointAuditTests
         var store = Substitute.For<IRebacStore>();
         var evaluator = Substitute.For<IRebacEvaluator>();
         evaluator.InvalidateTenantCacheAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(_ => { cts.Cancel(); return Task.CompletedTask; });
-        var repo = Substitute.For<IAuditLogRepository>();
+        var repo = CancellationAwareRepo();
 
         var result = await RebacEndpoints.AddTuplesAsync([Tuple()], context.Request, store, evaluator, AuditWriterTestServices.Over(repo));
 
         ((IStatusCodeHttpResult)result).StatusCode.ShouldBe(StatusCodes.Status200OK);
         await repo.Received(1).RecordAuditEventAsync(
             Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.RebacTupleAdded), Arg.Is<CancellationToken>(t => !t.CanBeCanceled));
+    }
+
+    private static IAuditLogRepository CancellationAwareRepo()
+    {
+        var repo = Substitute.For<IAuditLogRepository>();
+        repo.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<CancellationToken>(1).IsCancellationRequested ? Task.FromCanceled(call.ArgAt<CancellationToken>(1)) : Task.CompletedTask);
+        return repo;
+    }
+
+    [Fact]
+    public async Task RebacTupleRemove_AuditsWithNonCancelableToken()
+    {
+        var context = AdminContext();
+        using var cts = new CancellationTokenSource();
+        context.RequestAborted = cts.Token;
+        var store = Substitute.For<IRebacStore>();
+        store.DeleteTupleAsync(Arg.Any<RebacTuple>(), Arg.Any<CancellationToken>()).Returns(_ => { cts.Cancel(); return new ValueTask<bool>(true); });
+        var repo = CancellationAwareRepo();
+
+        var result = await RebacEndpoints.RemoveTupleAsync(Tuple(), context.Request, store, Substitute.For<IRebacEvaluator>(), AuditWriterTestServices.Over(repo));
+
+        ((IStatusCodeHttpResult)result).StatusCode.ShouldBe(StatusCodes.Status200OK);
+        await repo.Received(1).RecordAuditEventAsync(
+            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.RebacTupleRemoved), Arg.Is<CancellationToken>(t => !t.CanBeCanceled));
     }
 
     [Fact]

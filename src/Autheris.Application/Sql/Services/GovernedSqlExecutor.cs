@@ -224,7 +224,7 @@ public sealed class GovernedSqlExecutor
                     Decision = "DENY",
                     TraceId = TraceContextResolver.GetCurrentTraceId(),
                     DetailsJson = detailsJson
-                }, ct).ConfigureAwait(false);
+                }, CancellationToken.None).ConfigureAwait(false);   // a DENY record never depends on the request token
             }
             throw;
         }
@@ -390,7 +390,7 @@ public sealed class GovernedSqlExecutor
                     {
                         await RecordDmlAuditAsync(
                             tenantId, user, dsName, dmlContext,
-                            rejected ? AuditEventTypes.WebSqlDmlRejected : "WEBSQL_DML_FAILED", "DENY", compiled,
+                            rejected ? AuditEventTypes.WebSqlDmlRejected : AuditEventTypes.WebSqlDmlFailed, "DENY", compiled,
                             affectedRows: null, reason: rejected ? ErrorCodeOf(dmlEx) : dmlEx.GetType().Name, synthetic: false).ConfigureAwait(false);
                     }
                     catch (Exception auditEx)
@@ -456,34 +456,29 @@ public sealed class GovernedSqlExecutor
 
             if (!dmlContext.IsDml)
             {
-                try
-                {
-                    var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
-                    var userSid = user.GetUserSid() ?? new Sid("anonymous");
-                    // SEC-X1-12: the stable code and the exception type, never ex.Message (a driver message can carry key values).
-                    var detailsJson = new AuditDetailsBuilder()
-                        .WithField("originalSql", redactedOriginalSql)
-                        .WithField("originalSqlHash", originalSqlHash)
-                        .WithField("dataSource", dsName)
-                        .WithField("reasonCode", (ex is OperationCanceledException && ct.IsCancellationRequested) ? "CLIENT_ABORTED" : ex.GetType().Name)
-                        .WithField("errorCode", ErrorCodeOf(reported))
-                        .WithField("errorType", ex.GetType().Name)
-                        .Build();
+                var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
+                var userSid = user.GetUserSid() ?? new Sid("anonymous");
+                // SEC-X1-12: the stable code and the exception type, never ex.Message (a driver message can carry key values).
+                var detailsJson = new AuditDetailsBuilder()
+                    .WithField("originalSql", redactedOriginalSql)
+                    .WithField("originalSqlHash", originalSqlHash)
+                    .WithField("dataSource", dsName)
+                    .WithField("reasonCode", (ex is OperationCanceledException && ct.IsCancellationRequested) ? "CLIENT_ABORTED" : ex.GetType().Name)
+                    .WithField("errorCode", ErrorCodeOf(reported))
+                    .WithField("errorType", ex.GetType().Name)
+                    .Build();
 
-                    await _auditWriter.RecordAsync(new AuditLogEntry
-                    {
-                        TenantId = tenantId,
-                        EventType = AuditEventTypes.QueryExecutionError,
-                        ActorSid = userSid,
-                        TargetTable = dsName,
-                        Decision = "ERROR",
-                        TraceId = TraceContextResolver.GetCurrentTraceId(),
-                        DetailsJson = detailsJson
-                    }, CancellationToken.None).ConfigureAwait(false);
-                }
-                catch
+                // Best effort: the statement's own error surface wins over a failing audit store (counted as tier=best_effort).
+                await _auditWriter.RecordBestEffortAsync(new AuditLogEntry
                 {
-                }
+                    TenantId = tenantId,
+                    EventType = AuditEventTypes.QueryExecutionError,
+                    ActorSid = userSid,
+                    TargetTable = dsName,
+                    Decision = "ERROR",
+                    TraceId = TraceContextResolver.GetCurrentTraceId(),
+                    DetailsJson = detailsJson
+                }, CancellationToken.None).ConfigureAwait(false);
             }
 
             if (tx != null && !txCompleted)

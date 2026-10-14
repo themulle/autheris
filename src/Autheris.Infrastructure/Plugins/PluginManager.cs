@@ -20,6 +20,9 @@ namespace Autheris.Infrastructure.Plugins;
 
 public sealed class PluginManager : IPluginManager, IDisposable
 {
+    private static readonly MethodInfo CreateInvokerMethod =
+        typeof(PluginManager).GetMethod(nameof(CreateInvoker), BindingFlags.NonPublic | BindingFlags.Static)!;
+
     private readonly ILogger<PluginManager> _logger;
     private readonly IServiceProvider? _serviceProvider;
     private readonly IOptions<GatewayOptions>? _options;
@@ -301,9 +304,6 @@ public sealed class PluginManager : IPluginManager, IDisposable
         _logger.LogInformation("Plugin discovery finished. Total plugin artifacts loaded: {Count}", loadedCount);
         return loadedCount;
     }
-
-    private static readonly MethodInfo CreateInvokerMethod =
-        typeof(PluginManager).GetMethod(nameof(CreateInvoker), BindingFlags.NonPublic | BindingFlags.Static)!;
 
     /// <summary>
     /// Builds the typed dispatch delegate once per listener interface. The per-event call is a plain delegate invocation:

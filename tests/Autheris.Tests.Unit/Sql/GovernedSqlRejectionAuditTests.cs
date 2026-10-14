@@ -128,11 +128,23 @@ public sealed class GovernedSqlRejectionAuditTests
         var writer = Substitute.For<global::Autheris.Application.Audit.IAuditWriter>();
         var (service, audit) = CreateService(writer);
 
-        await Should.ThrowAsync<Exception>(() => service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest("SELEC id FROM orders"), Writer(), new TenantId(Tenant)));
+        using var cts = new CancellationTokenSource();
+        var ex = await Should.ThrowAsync<Exception>(() => service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest("SELEC id FROM orders"), Writer(), new TenantId(Tenant), cts.Token));
 
+        ex.ShouldNotBeOfType<OperationCanceledException>();
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out _).ShouldBeTrue("the engine syntax error itself, not a wrapped or audit error");
         audit.ShouldBeEmpty("the repository is only reachable through the writer");
+        // A DENY record never depends on the request token.
         await writer.Received(1).RecordAsync(
-            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.WebSqlQueryDenied && e.Decision == "DENY"), Arg.Any<CancellationToken>());
+            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.WebSqlQueryDenied && e.Decision == "DENY"), Arg.Is<CancellationToken>(t => !t.CanBeCanceled));
+    }
+
+    [Fact]
+    public async Task GovernedSqlExecutor_DmlFailedEvent_HasExplicitPolicy()
+    {
+        AuditEventTypes.WebSqlDmlFailed.ShouldBe("WEBSQL_DML_FAILED");
+        Autheris.Application.Audit.AuditPolicyTable.All.ShouldContainKey(AuditEventTypes.WebSqlDmlFailed);
+        await Task.CompletedTask;
     }
 
     [Fact]

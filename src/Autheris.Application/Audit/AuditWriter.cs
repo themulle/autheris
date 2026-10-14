@@ -26,7 +26,7 @@ public sealed class AuditWriter : IAuditWriter
         {
             await _repository.RecordAuditEventAsync(entry, ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
         }
@@ -50,7 +50,7 @@ public sealed class AuditWriter : IAuditWriter
         {
             await _repository.RecordAuditEventAsync(entry, ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
         }

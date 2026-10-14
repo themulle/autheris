@@ -97,6 +97,15 @@ public sealed class ConsentCacheL2FailureTests
     }
 
     [Fact]
+    public async Task ConsentCache_Cancellation_Propagates()
+    {
+        var (cache, db, _, _) = Create();
+        db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>()).Returns<Task<RedisValue>>(_ => throw new OperationCanceledException());
+
+        await Should.ThrowAsync<OperationCanceledException>(() => cache.GetCachedDecisionAsync(new TenantId("t1"), User, Table));
+    }
+
+    [Fact]
     public async Task ConsentCache_L2WriteFailure_KeepsL1Entry()
     {
         var (cache, db, log, _) = Create();
