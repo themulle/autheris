@@ -138,6 +138,8 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IVirtualFilterPredicateBuilder, StructuredFilterSqlBuilder>();
         services.AddSingleton<MandatoryRowFilterResolver>();
         services.AddSingleton<IMandatoryRowFilterResolver>(sp => sp.GetRequiredService<MandatoryRowFilterResolver>());
+        services.AddSingleton<IEffectiveFilterInspector, EffectiveFilterInspector>();
+        services.AddScoped<Autheris.Application.Governance.IOpenApiIngestionUseCase, Autheris.Application.Governance.OpenApiIngestionUseCase>();
         // F-GOV-14 (M4, SEC-10): authorized key sets from the SQL key source, in a dedicated size-limited cache.
         services.AddSingleton<Autheris.Application.VirtualFilters.Federation.VirtualFilterKeySetCache>();
         services.AddSingleton<Autheris.Application.VirtualFilters.Federation.IVirtualFilterKeySetProvider, Autheris.Application.VirtualFilters.Federation.SqlVirtualFilterKeySetProvider>();

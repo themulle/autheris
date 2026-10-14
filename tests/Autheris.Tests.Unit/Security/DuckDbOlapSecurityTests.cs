@@ -335,7 +335,7 @@ public sealed class DuckDbOlapSecurityTests
         var engine = new DuckDbOlapEngine(options, NullLogger<DuckDbOlapEngine>.Instance);
 
         // Act
-        await Autheris.Api.Endpoints.DuckDbOlapEndpoints.HandleOlapQueryAsync(
+        await Autheris.Tests.Unit.TestDoubles.OlapEndpointTestHost.HandleAsync(
             httpContext,
             engine,
             metadataRepository: null!,
@@ -364,7 +364,7 @@ public sealed class DuckDbOlapSecurityTests
         var engine = new DuckDbOlapEngine(options, NullLogger<DuckDbOlapEngine>.Instance);
 
         // Act
-        await Autheris.Api.Endpoints.DuckDbOlapEndpoints.HandleOlapQueryAsync(
+        await Autheris.Tests.Unit.TestDoubles.OlapEndpointTestHost.HandleAsync(
             httpContext,
             engine,
             metadataRepository: null!,
@@ -466,7 +466,7 @@ public sealed class DuckDbOlapSecurityTests
         });
         var engine = Substitute.For<IDuckDbOlapEngine>();
 
-        await DuckDbOlapEndpoints.HandleOlapQueryAsync(
+        await Autheris.Tests.Unit.TestDoubles.OlapEndpointTestHost.HandleAsync(
             httpContext,
             engine,
             metadataRepo,
@@ -553,7 +553,7 @@ public sealed class DuckDbOlapSecurityTests
             DuckDbOlap = new DuckDbOlapOptions { Enabled = true, MaxTableCount = 10 }
         });
 
-        await DuckDbOlapEndpoints.HandleOlapQueryAsync(
+        await Autheris.Tests.Unit.TestDoubles.OlapEndpointTestHost.HandleAsync(
             httpContext,
             Substitute.For<IDuckDbOlapEngine>(),
             Substitute.For<ITableMetadataRepository>(),
