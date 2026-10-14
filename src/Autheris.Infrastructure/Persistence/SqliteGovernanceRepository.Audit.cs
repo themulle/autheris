@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Autheris.Application.Audit;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -23,9 +24,11 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         }
 
         // Tier-A: Security critical mutations, admin actions, or denied requests are synchronous (Fail-Closed)
-        bool isTierA = string.Equals(entry.Decision, "DENY", StringComparison.OrdinalIgnoreCase) ||
-                       (!string.Equals(entry.EventType, "TABLE_QUERY", StringComparison.OrdinalIgnoreCase) &&
-                        !string.Equals(entry.EventType, "WEBSQL_QUERY", StringComparison.OrdinalIgnoreCase));
+        bool isTierA = AuditChainViolationGate.IsTierA(entry);
+
+        // SR-L-08: a latched chain violation is applied per policy to both tiers (Tier-A is marked, Tier-B refused by default).
+        var violation = Volatile.Read(ref _auditChainViolation);
+        var admitted = AuditChainViolationGate.Admit(entry, isTierA, violation, ViolationPolicy, _logger);
 
         // SEC R2-3: Audit:SynchronousQueryAudit commits query events before the request is answered (no crash window).
         if (isTierA || _options?.Audit?.SynchronousQueryAudit == true)
@@ -33,7 +36,17 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             await _lock.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                await RecordAuditEventInternalAsync(entry, ct).ConfigureAwait(false);
+                await RecordAuditEventInternalAsync(admitted, ct).ConfigureAwait(false);
+                if (!ReferenceEquals(admitted, entry))
+                {
+                    entry.PrevHash = admitted.PrevHash;
+                    entry.EntryHash = admitted.EntryHash;
+                }
+
+                if (violation != null && isTierA && ViolationPolicy != AuditChainViolationPolicy.AlertOnly)
+                {
+                    await EmitChainFaultEventOnceAsync(admitted, violation, ct).ConfigureAwait(false);
+                }
             }
             finally
             {
@@ -45,7 +58,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         if (_isAuditPipelineFaulted)
         {
             _logger?.LogError("Audit pipeline is faulted; failing closed on Tier-B audit event for table {Table}.", entry.TargetTable);
-            throw new InvalidOperationException("Audit pipeline is in a faulted state (fail-closed).");
+            throw new AuditUnavailableException("Audit pipeline is in a faulted state (fail-closed).");
         }
 
         // Tier-B: High-volume query reads (TABLE_QUERY / WEBSQL_QUERY ALLOW) are enqueued to the bounded channel with timeout (fail-closed)
@@ -58,7 +71,29 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             _logger?.LogError("Audit channel saturated; failing closed on Tier-B audit event for table {Table}.", entry.TargetTable);
-            throw new InvalidOperationException("Audit pipeline saturated (fail-closed).");
+            throw new AuditUnavailableException("Audit pipeline saturated (fail-closed).");
+        }
+    }
+
+    private AuditChainViolationPolicy ViolationPolicy => AuditChainViolationGate.ResolvePolicy(_options?.Audit, _isDevOrTest);
+
+    private int _auditFaultEventEmitted;
+
+    /// <summary>SR-L-08: writes exactly one <c>AUDIT_PIPELINE_FAULT</c> event per latch. Caller holds the audit write lock.</summary>
+    private async Task EmitChainFaultEventOnceAsync(AuditLogEntry trigger, string violation, CancellationToken ct)
+    {
+        if (Interlocked.CompareExchange(ref _auditFaultEventEmitted, 1, 0) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await RecordAuditEventInternalAsync(AuditChainViolationGate.CreateFaultEvent(trigger, violation, ViolationPolicy), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogError(ex, "Failed to write the AUDIT_PIPELINE_FAULT event for the latched audit chain violation.");
         }
     }
 
@@ -277,7 +312,8 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             {
                 try
                 {
-                    _auditAnchorStore.Save(CreateSignedAnchor(state.LastSeq, state.LastHash));
+                    // SR-L-07: never move the anchor backwards (same guard as the batch path and PostgreSQL).
+                    SaveAnchorMonotonic(CreateSignedAnchor(state.LastSeq, state.LastHash));
                 }
                 catch (Exception ex)
                 {
@@ -443,7 +479,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
                 {
                     try
                     {
-                        _auditAnchorStore.Save(CreateSignedAnchor(lastSequence, lastEntryHash));
+                        SaveAnchorMonotonic(CreateSignedAnchor(lastSequence, lastEntryHash));
                     }
                     catch (Exception ex)
                     {
@@ -657,7 +693,6 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             using var reader = await cmd.ExecuteReaderAsync(ct);
             var expectedPrevHash = AuditGenesisHash;
             long position = 0;
-            var sequencedSectionStarted = false;
             var anchorEntryMatched = anchor == null || anchor.Sequence == 0;
 
             while (await reader.ReadAsync(ct))
@@ -679,21 +714,23 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
 
                 if (!FixedTimeEqualsString(prevHash, expectedPrevHash))
                 {
+                    FlagAuditChainViolation($"Broken prev_hash chain at position {position} (id {id}).");
                     return false; // Broken chain!
                 }
 
-                // SEC H-17: sequence numbers must be gap-free and equal the ordinal position.
-                if (seq.HasValue)
+                // SEC H-17 / SR-L-09: every row carries a gap-free sequence number equal to its ordinal position. Legacy rows
+                // without a sequence are only accepted after the explicit one-time migration (Audit:AllowLegacyUnsequencedRows).
+                if (!seq.HasValue)
                 {
-                    if (seq.Value != position)
-                    {
-                        return false;
-                    }
-                    sequencedSectionStarted = true;
+                    FlagAuditChainViolation(
+                        $"Unsequenced legacy audit row at position {position} (id {id}). Re-seal it with the one-time migration (Audit:AllowLegacyUnsequencedRows=true) or investigate tampering.");
+                    return false;
                 }
-                else if (sequencedSectionStarted)
+
+                if (seq.Value != position)
                 {
-                    return false; // Unsequenced (legacy-format) row injected after the sequenced section
+                    FlagAuditChainViolation($"Audit entry sequence gap/divergence: expected seq {position}, got {seq.Value}.");
+                    return false;
                 }
 
                 var parsedOccurredAt = DateTimeOffset.Parse(occurredAt);
@@ -701,19 +738,8 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
 
                 if (!FixedTimeEqualsString(entryHash, computedHash))
                 {
-                    if (!seq.HasValue)
-                    {
-                        // Backward-compatibility: legacy v1 rows created before additive sequence migration were sealed under the v1 default key
-                        var legacyComputed = AuditCanonicalizer.ComputeEntryHash("AutherisAuditLogHmacTamperEvidenceSecret2026!"u8.ToArray(), null, id, prevHash, parsedOccurredAt, eventType, actorSid, targetTable, targetColumn, decision, traceId, detailsJson, tenantId);
-                        if (!FixedTimeEqualsString(entryHash, legacyComputed))
-                        {
-                            return false;
-                        }
-                    }
-                    else
-                    {
-                        return false; // Tampered payload!
-                    }
+                    FlagAuditChainViolation($"Invalid entry_hash at position {position} (id {id}). Hash does not match row payload.");
+                    return false; // Tampered payload!
                 }
 
                 if (anchor != null && anchor.Sequence == position)
@@ -913,6 +939,162 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             tenantId);
     }
 
+    private const string LegacyBackupTableName = "AUDIT_LOG_ENTRIES_legacy_backup";
+
+    /// <summary>
+    /// SR-L-09: legacy audit rows without a sequence number were sealed under a compile-time constant key that is no longer
+    /// accepted. Without <c>Audit:AllowLegacyUnsequencedRows=true</c> they latch a chain violation; with it they are re-sealed
+    /// once under the real audit key (see <see cref="MigrateLegacyUnsequencedRows"/>).
+    /// </summary>
+    private void HandleLegacyUnsequencedRows()
+    {
+        long unsequenced;
+        using (var countCmd = _connection.CreateCommand())
+        {
+            countCmd.CommandText = "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES WHERE seq IS NULL";
+            unsequenced = Convert.ToInt64(countCmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        if (unsequenced == 0)
+        {
+            return;
+        }
+
+        if (!_allowLegacyUnsequencedRows)
+        {
+            FlagAuditChainViolation(
+                $"{unsequenced} legacy audit row(s) without a sequence number found. Back up the database, then set Audit:AllowLegacyUnsequencedRows=true for ONE start to re-seal them under the audit key, and set it back to false afterwards.");
+            return;
+        }
+
+        MigrateLegacyUnsequencedRows();
+    }
+
+    private void MigrateLegacyUnsequencedRows()
+    {
+        _lock.Wait();
+        try
+        {
+            using var tx = _connection.BeginTransaction();
+
+            using (var existsCmd = _connection.CreateCommand())
+            {
+                existsCmd.Transaction = tx;
+                existsCmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = @name";
+                existsCmd.Parameters.AddWithValue("@name", LegacyBackupTableName);
+                if (Convert.ToInt64(existsCmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) > 0)
+                {
+                    // A finished migration leaves no unsequenced rows behind; new ones next to an existing backup are injected rows.
+                    FlagAuditChainViolation(
+                        $"Unsequenced audit rows found although the legacy migration backup table {LegacyBackupTableName} already exists. Investigate possible tampering; do not re-run the migration.");
+                    return;
+                }
+            }
+
+            using (var backupCmd = _connection.CreateCommand())
+            {
+                backupCmd.Transaction = tx;
+                backupCmd.CommandText = $"CREATE TABLE {LegacyBackupTableName} AS SELECT * FROM AUDIT_LOG_ENTRIES";
+                backupCmd.ExecuteNonQuery();
+            }
+
+            var rows = new List<(long RowId, string Id, string OccurredAt, string EventType, string ActorSid, string TargetTable, string TargetColumn, string Decision, string TraceId, string DetailsJson, string TenantId, string EntryHash, bool HasSeq)>();
+            using (var readCmd = _connection.CreateCommand())
+            {
+                readCmd.Transaction = tx;
+                readCmd.CommandText = @"SELECT rowid, id, occurred_at, event_type, actor_sid, target_table, target_column,
+                                               decision, trace_id, details_json, tenant_id, entry_hash, seq
+                                        FROM AUDIT_LOG_ENTRIES
+                                        ORDER BY rowid ASC";
+                using var reader = readCmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    rows.Add((
+                        reader.GetInt64(0),
+                        reader.GetString(1),
+                        reader.GetString(2),
+                        reader.GetString(3),
+                        reader.GetString(4),
+                        reader.GetString(5),
+                        reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
+                        reader.GetString(7),
+                        reader.GetString(8),
+                        reader.GetString(9),
+                        reader.IsDBNull(10) ? TenantId.LegacySingleTenant.Value : reader.GetString(10),
+                        reader.GetString(11),
+                        !reader.IsDBNull(12)));
+                }
+            }
+
+            using var updateCmd = _connection.CreateCommand();
+            updateCmd.Transaction = tx;
+            updateCmd.CommandText = "UPDATE AUDIT_LOG_ENTRIES SET prev_hash = @prev, entry_hash = @hash, seq = @seq WHERE rowid = @rowid";
+            var pPrev = updateCmd.Parameters.Add("@prev", SqliteType.Text);
+            var pHash = updateCmd.Parameters.Add("@hash", SqliteType.Text);
+            var pSeq = updateCmd.Parameters.Add("@seq", SqliteType.Integer);
+            var pRowId = updateCmd.Parameters.Add("@rowid", SqliteType.Integer);
+
+            // Rows before the first unsequenced one are an untouched prefix; from there on every row is re-sealed in rowid order
+            // because each hash covers its predecessor.
+            var previousHash = AuditGenesisHash;
+            long position = 0;
+            var resealing = false;
+            foreach (var row in rows)
+            {
+                position++;
+                resealing |= !row.HasSeq;
+                if (!resealing)
+                {
+                    previousHash = row.EntryHash;
+                    continue;
+                }
+
+                var hash = ComputeAuditEntryHash(
+                    position,
+                    row.Id,
+                    previousHash,
+                    DateTimeOffset.Parse(row.OccurredAt, System.Globalization.CultureInfo.InvariantCulture),
+                    row.EventType,
+                    row.ActorSid,
+                    row.TargetTable,
+                    row.TargetColumn,
+                    row.Decision,
+                    row.TraceId,
+                    row.DetailsJson,
+                    row.TenantId);
+                pPrev.Value = previousHash;
+                pHash.Value = hash;
+                pSeq.Value = position;
+                pRowId.Value = row.RowId;
+                updateCmd.ExecuteNonQuery();
+                previousHash = hash;
+            }
+
+            tx.Commit();
+
+            _lastAuditSeq = position;
+            _lastAuditHash = previousHash;
+            _logger?.LogWarning(
+                "SR-L-09: re-sealed legacy audit rows under the audit key (chain now ends at seq {Sequence}); original rows are kept in {Backup}. Set Audit:AllowLegacyUnsequencedRows back to false.",
+                position,
+                LegacyBackupTableName);
+
+            try
+            {
+                // The legacy anchor (if any) covers the old hashes; the boundary is recorded by anchoring the re-sealed tail.
+                _auditAnchorStore.Save(CreateSignedAnchor(position, previousHash));
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to record the legacy migration boundary in the external audit chain anchor (seq {Sequence}).", position);
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     private AuditChainAnchor CreateSignedAnchor(long sequence, string entryHash)
     {
         var updatedAt = DateTimeOffset.UtcNow;
@@ -923,6 +1105,22 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
     {
         var data = Encoding.UTF8.GetBytes($"anchor-v1|{sequence}|{entryHash}|{updatedAt.ToUniversalTime():O}");
         return Convert.ToHexString(HMACSHA256.HashData(_auditAnchorKey, data));
+    }
+
+    /// <summary>SR-L-07: saves the anchor only if it is ahead of the verified anchor currently stored (or none/invalid exists).</summary>
+    private void SaveAnchorMonotonic(AuditChainAnchor anchor)
+    {
+        var current = TryLoadVerifiedAnchor(out var anchorInvalid);
+        if (anchorInvalid)
+        {
+            // An invalid stored anchor is never overwritten by a write path; startup/verification flags it.
+            return;
+        }
+
+        if (current == null || current.Sequence < anchor.Sequence)
+        {
+            _auditAnchorStore.Save(anchor);
+        }
     }
 
     private AuditChainAnchor? TryLoadVerifiedAnchor(out bool invalid)
@@ -986,6 +1184,12 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             if (!isDevOrTest && _auditAnchorStore is InMemoryAuditChainAnchorStore)
             {
                 _logger?.LogWarning("Audit chain anchor is only held in memory; configure Audit:ChainAnchorPath on a separate volume.");
+            }
+
+            // An anchor is never created while a violation is latched (it would launder the suspicious chain).
+            if (Volatile.Read(ref _auditChainViolation) != null)
+            {
+                return;
             }
 
             try

@@ -54,6 +54,10 @@ public sealed class FileAuditChainAnchorStore : IAuditChainAnchorStore
         }
     }
 
+    /// <summary>
+    /// SR-L-07: the anchor never moves backwards. A lower sequence than the one already on disk is ignored. Read-compare-write
+    /// is serialised in-process by <c>_ioLock</c> and across replicas sharing the path by an exclusive sibling <c>.lock</c> file.
+    /// </summary>
     public void Save(AuditChainAnchor anchor)
     {
         ArgumentNullException.ThrowIfNull(anchor);
@@ -63,6 +67,14 @@ public sealed class FileAuditChainAnchorStore : IAuditChainAnchorStore
             if (!string.IsNullOrEmpty(directory))
             {
                 Directory.CreateDirectory(directory);
+            }
+
+            using var processLock = AcquireProcessLock();
+
+            var current = ReadCurrentSequence();
+            if (current.HasValue && current.Value > anchor.Sequence)
+            {
+                return;
             }
 
             // Unique temp file: replicas sharing one anchor path must not write the same temp file.
@@ -76,6 +88,48 @@ public sealed class FileAuditChainAnchorStore : IAuditChainAnchorStore
             {
                 try { File.Delete(tempPath); } catch (IOException) { }
                 throw;
+            }
+        }
+    }
+
+    private long? ReadCurrentSequence()
+    {
+        if (!File.Exists(_path))
+        {
+            return null;
+        }
+
+        try
+        {
+            var json = File.ReadAllText(_path);
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return null;
+            }
+
+            // An unparsable or invalid (negative sequence) file does not block a valid anchor from replacing it.
+            var existing = JsonSerializer.Deserialize<AuditChainAnchor>(json);
+            return existing is { Sequence: >= 0 } ? existing.Sequence : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private FileStream AcquireProcessLock()
+    {
+        var lockPath = _path + ".lock";
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (true)
+        {
+            try
+            {
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (DateTime.UtcNow < deadline)
+            {
+                Thread.Sleep(10);
             }
         }
     }
@@ -94,7 +148,21 @@ public sealed class InMemoryAuditChainAnchorStore : IAuditChainAnchorStore
     public void Save(AuditChainAnchor anchor)
     {
         ArgumentNullException.ThrowIfNull(anchor);
-        Volatile.Write(ref _anchor, anchor);
+
+        // SR-L-07: monotonic, lock-free compare-and-swap; a lower sequence never replaces a higher one.
+        while (true)
+        {
+            var current = Volatile.Read(ref _anchor);
+            if (current != null && current.Sequence > anchor.Sequence)
+            {
+                return;
+            }
+
+            if (ReferenceEquals(Interlocked.CompareExchange(ref _anchor, anchor, current), current))
+            {
+                return;
+            }
+        }
     }
 }
 

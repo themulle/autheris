@@ -431,46 +431,6 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
         (await restarted.VerifyAuditHashChainAsync()).ShouldBeFalse();
     }
 
-    [Fact]
-    public async Task H17_LegacyRowsWithoutSequence_RemainVerifiable_AndNewRowsContinueTheSequence()
-    {
-        var (options, dbFile, anchorFile) = CreateFileAuditOptions();
-        using (GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options))
-        {
-            // creates schema
-        }
-
-        // Simulate a pre-upgrade database: one v1 entry (no seq) and no anchor file yet.
-        var id = Guid.NewGuid().ToString();
-        var occurredAt = DateTimeOffset.UtcNow.ToString("O");
-        const string genesis = "GENESIS_0000000000000000000000000000000000000000000000000000000000000000";
-        var parsed = DateTimeOffset.Parse(occurredAt);
-        var payload = $"{id}|{genesis}|{parsed:O}|LEGACY|S-1-5-21-LEGACY|hr.dbo.salaries||ALLOW|trace-legacy|{{}}|legacy-single-tenant";
-        var legacyHash = Convert.ToHexString(HMACSHA256.HashData("AutherisAuditLogHmacTamperEvidenceSecret2026!"u8.ToArray(), Encoding.UTF8.GetBytes(payload)));
-
-        using (var conn = new SqliteConnection($"Data Source={dbFile}"))
-        {
-            conn.Open();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"INSERT INTO AUDIT_LOG_ENTRIES (id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id)
-                                VALUES (@id, @occ, 'LEGACY', 'S-1-5-21-LEGACY', 'hr.dbo.salaries', NULL, 'ALLOW', 'trace-legacy', '{}', @prev, @hash, 'legacy-single-tenant')";
-            cmd.Parameters.AddWithValue("@id", id);
-            cmd.Parameters.AddWithValue("@occ", occurredAt);
-            cmd.Parameters.AddWithValue("@prev", genesis);
-            cmd.Parameters.AddWithValue("@hash", legacyHash);
-            cmd.ExecuteNonQuery();
-        }
-        File.Delete(anchorFile);
-
-        using var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options);
-        await repo.RecordAuditEventAsync(NewAuditEntry(2));
-        (await repo.VerifyAuditHashChainAsync()).ShouldBeTrue("Legacy (v1) entries must stay verifiable after the additive migration.");
-
-        using var seqCmd = repo.Connection.CreateCommand();
-        seqCmd.CommandText = "SELECT seq FROM AUDIT_LOG_ENTRIES ORDER BY rowid DESC LIMIT 1";
-        Convert.ToInt64(await seqCmd.ExecuteScalarAsync()).ShouldBe(2);
-    }
-
     // =========================================================================
     // M-31: WORM export completeness
     // =========================================================================

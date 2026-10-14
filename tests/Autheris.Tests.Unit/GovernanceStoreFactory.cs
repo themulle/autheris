@@ -22,7 +22,8 @@ public static class GovernanceStoreFactory
         IAuditChainAnchorStore? auditAnchorStore = null,
         ILogger<SqliteGovernanceRepository>? logger = null,
         IAuditAnchorSigner? auditAnchorSigner = null,
-        ICallerContextProvider? callerContextProvider = null)
+        ICallerContextProvider? callerContextProvider = null,
+        IOptions<AuditLegacyMigrationOptions>? legacyMigrationOptions = null)
     {
         var repository = new SqliteGovernanceRepository(
             epochValidationService,
@@ -32,7 +33,8 @@ public static class GovernanceStoreFactory
             auditAnchorStore,
             logger,
             auditAnchorSigner,
-            callerContextProvider);
+            callerContextProvider,
+            legacyMigrationOptions);
         try
         {
             var runner = new SqliteGovernanceMigrationRunner(repository, options ?? Options.Create(new GatewayOptions()));
