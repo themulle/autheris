@@ -100,6 +100,23 @@
         "PostgreSql"
       ],
       "class": "ast-stricter",
+      "reason": "MaskedAggregationException",
+      "statements": [
+        "009901b2b24f",
+        "0a0ba1368f62",
+        "1980b740655e",
+        "5eb80c74cadd"
+      ],
+      "justification": "Intended tightening (AGGREGATION_ON_MASKED_COLUMN): under TenantConsentMask the AST compiler rejects the masked column email in GROUP BY or an aggregate, because grouping on the raw value discloses its cardinality and frequencies; the legacy rewriter returns the grouped rows. Needs security review before approval.",
+      "issue": null,
+      "reviewer": null,
+      "approval": "pending"
+    },
+    {
+      "dialects": [
+        "PostgreSql"
+      ],
+      "class": "ast-stricter",
       "reason": "SecurityException",
       "statements": [
         "0942d51d3edb",
@@ -164,6 +181,23 @@
         "fcd5a192cc16"
       ],
       "justification": "Triage proposal of the gate run: ast-stricter with reason AstBuildException. Needs security review before approval.",
+      "issue": null,
+      "reviewer": null,
+      "approval": "pending"
+    },
+    {
+      "dialects": [
+        "SqlServer"
+      ],
+      "class": "ast-stricter",
+      "reason": "MaskedAggregationException",
+      "statements": [
+        "009901b2b24f",
+        "0a0ba1368f62",
+        "1980b740655e",
+        "5eb80c74cadd"
+      ],
+      "justification": "Intended tightening (AGGREGATION_ON_MASKED_COLUMN): under TenantConsentMask the AST compiler rejects the masked column email in GROUP BY or an aggregate, because grouping on the raw value discloses its cardinality and frequencies; the legacy rewriter returns the grouped rows. Needs security review before approval.",
       "issue": null,
       "reviewer": null,
       "approval": "pending"
@@ -250,6 +284,23 @@
         "b6ef1a9ca0ef"
       ],
       "justification": "Triage proposal of the gate run: ast-stricter with reason AstBuildException. Needs security review before approval.",
+      "issue": null,
+      "reviewer": null,
+      "approval": "pending"
+    },
+    {
+      "dialects": [
+        "Sqlite"
+      ],
+      "class": "ast-stricter",
+      "reason": "MaskedAggregationException",
+      "statements": [
+        "009901b2b24f",
+        "0a0ba1368f62",
+        "1980b740655e",
+        "5eb80c74cadd"
+      ],
+      "justification": "Intended tightening (AGGREGATION_ON_MASKED_COLUMN): under TenantConsentMask the AST compiler rejects the masked column email in GROUP BY or an aggregate, because grouping on the raw value discloses its cardinality and frequencies; the legacy rewriter returns the grouped rows. Needs security review before approval.",
       "issue": null,
       "reviewer": null,
       "approval": "pending"
