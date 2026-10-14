@@ -133,7 +133,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task<DbtSyncResult> IngestManifestFileAsync(string filePath, bool dryRun = false, CancellationToken ct = default)
+    public async Task<DbtSyncResult> IngestManifestFileAsync(string filePath, bool dryRun = false, CancellationToken ct = default, TenantId? tenant = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
         ValidateSafeFilePath(filePath);
@@ -146,7 +146,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         }
 
         await using var stream = File.OpenRead(fullPath);
-        return await IngestManifestStreamAsync(stream, dryRun, ct).ConfigureAwait(false);
+        return await IngestManifestStreamAsync(stream, dryRun, ct, tenant).ConfigureAwait(false);
     }
 
     private static void ValidateSafeFilePath(string fullPath)
@@ -181,7 +181,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         }
     }
 
-    public async Task<DbtSyncResult> IngestManifestStreamAsync(Stream manifestStream, bool dryRun = false, CancellationToken ct = default)
+    public async Task<DbtSyncResult> IngestManifestStreamAsync(Stream manifestStream, bool dryRun = false, CancellationToken ct = default, TenantId? tenant = null)
     {
         ArgumentNullException.ThrowIfNull(manifestStream);
 
@@ -390,7 +390,8 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                 Type: LineageNodeType.Table,
                 DownstreamNodeIds: downstream,
                 OwnerTeam: ownerTeam,
-                OwnerEmail: model.Meta.GetValueOrDefault("owner_email")
+                OwnerEmail: model.Meta.GetValueOrDefault("owner_email"),
+                TenantId: (tenant ?? TenantId.LegacySingleTenant).Value
             ));
 
             // 3. Omnichannel Documentation Sync (F-DOC-01): Synchronize dbt model and column descriptions

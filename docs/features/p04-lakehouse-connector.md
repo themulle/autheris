@@ -63,3 +63,7 @@ query QueryLakehouseTelemetry {
   }
 }
 ```
+
+## Delta Lake read gate
+
+The Delta executor synthesizes rows from file metadata only; it does not read Parquet data. Outside demo mode (`IDemoDataSwitch.Enabled == false`) every Delta read is answered with `501 Not Implemented`, and the decision is taken before the `_delta_log` is touched (the tenant-predicate mismatch check still runs first). When the log is replayed (demo mode), at most `DeltaMetadataReader.MaxLogEntries` (10,000) commit files are processed per snapshot.

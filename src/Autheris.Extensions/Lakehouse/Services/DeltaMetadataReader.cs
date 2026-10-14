@@ -16,6 +16,9 @@ using Microsoft.Extensions.Logging;
 /// </summary>
 public sealed class DeltaMetadataReader : IDeltaMetadataReader
 {
+    /// <summary>SEC SR-L-22: upper bound of commit files replayed per snapshot load (bounds I/O and memory).</summary>
+    public const int MaxLogEntries = 10_000;
+
     private readonly ILakehouseStorageProvider _storageProvider;
     private readonly ILogger<DeltaMetadataReader> _logger;
 
@@ -49,6 +52,11 @@ public sealed class DeltaMetadataReader : IDeltaMetadataReader
             if (asOfVersion.HasValue && currentVersion > asOfVersion.Value)
             {
                 break;
+            }
+
+            if (currentVersion >= MaxLogEntries)
+            {
+                throw new InvalidOperationException($"Delta transaction log exceeds the maximum of {MaxLogEntries} replayed commit entries.");
             }
 
             var commitFileName = $"{currentVersion:D20}.json";
