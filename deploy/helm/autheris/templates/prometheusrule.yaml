@@ -17,7 +17,7 @@ spec:
             severity: critical
           annotations:
             summary: "Autheris 5xx Error Rate > 0.5%"
-            description: "High error rate detected on Autheris gateway replicas ({{ $value }}%)."
+            description: "High error rate detected on Autheris gateway replicas ({{`{{ $value }}`}}%)."
 
         # High P99 Latency
         - alert: AutherisHighP99Latency
@@ -27,7 +27,7 @@ spec:
             severity: warning
           annotations:
             summary: "Autheris P99 Latency > 250ms"
-            description: "GraphQL P99 execution time is {{ $value }}s on cluster replicas."
+            description: "GraphQL P99 execution time is {{`{{ $value }}`}}s on cluster replicas."
 
         # Audit DLQ Growing
         - alert: AutherisAuditDeadLetterQueueGrowing
@@ -47,5 +47,5 @@ spec:
             severity: critical
           annotations:
             summary: "Autheris operating in degraded Redis fallback mode"
-            description: "Pod {{ $labels.pod }} cannot connect to Redis cluster. L2 distributed state inactive."
+            description: "Pod {{`{{ $labels.pod }}`}} cannot connect to Redis cluster. L2 distributed state inactive."
 {{- end }}

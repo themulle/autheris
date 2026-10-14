@@ -29,8 +29,21 @@ public sealed class Query
         int after = 0,
         [Service] IGatewayExecutionService executionService = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
+        [Service] IOptions<GatewayOptions>? gatewayOptions = null,
         CancellationToken ct = default)
     {
+        // SR-M-17: bound the offset like the tree path does (GraphQL.MaxAllowedOffset).
+        var maxOffset = gatewayOptions?.Value?.GraphQL?.MaxAllowedOffset >= 0
+            ? gatewayOptions.Value.GraphQL.MaxAllowedOffset
+            : 10_000;
+        if (after < 0 || after > maxOffset)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("BAD_REQUEST")
+                .SetMessage($"Argument 'after' must be between 0 and {maxOffset}.")
+                .Build());
+        }
+
         var httpContext = httpContextAccessor?.HttpContext;
         var principal = httpContext?.User ?? new ClaimsPrincipal();
         IReadOnlyDictionary<string, string[]>? headers = null;

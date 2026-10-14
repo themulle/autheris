@@ -149,13 +149,11 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
         }
 
         var relativePath = request.RelativeProbePath ?? endpoint.PathTemplate ?? "/";
-        // Enforce strictly relative path to prevent SSRF path overrides
-        if (relativePath.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-            relativePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
-            relativePath.StartsWith("//", StringComparison.Ordinal) ||
-            relativePath.Contains("..", StringComparison.Ordinal))
+        // SR-M-14: fail closed on anything that could re-target the probe (and the vaulted API key) to another
+        // scheme/host/port: backslashes, schemes, network-path references, userinfo, control characters, traversal.
+        if (!OutboundPathPolicy.TryBuild(baseUri, relativePath, preserveBasePath: false, allowDotSegments: false, out var probeUri, out var pathError))
         {
-            var ssrfError = "Invalid relative probe path. Absolute URLs and path traversal sequences are rejected.";
+            var ssrfError = "Invalid relative probe path. Absolute URLs, backslashes, network-path references and path traversal sequences are rejected.";
             return new DatasourceTestResult(
                 DatasourceId: datasourceId,
                 Type: table.Table.DataSourceType,
@@ -171,27 +169,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
                     TlsProtocolVersion: null,
                     AuthHeaderApplied: false,
                     SecretResolutionStatus: "Rejected",
-                    ProbeDetails: new Dictionary<string, string> { ["Error"] = ssrfError }));
-        }
-
-        if (!Uri.TryCreate(baseUri, relativePath, out var probeUri))
-        {
-            return new DatasourceTestResult(
-                DatasourceId: datasourceId,
-                Type: table.Table.DataSourceType,
-                IsSuccess: false,
-                HttpStatusCode: null,
-                LatencyMs: 0,
-                ErrorMessage: "Could not construct valid probe URI from BaseUrl and RelativeProbePath.",
-                Diagnostics: new DatasourceDiagnostics(
-                    TargetHost: baseUri.Host,
-                    TargetPort: baseUri.Port,
-                    DnsResolutionSuccess: false,
-                    TlsHandshakeSuccess: false,
-                    TlsProtocolVersion: null,
-                    AuthHeaderApplied: false,
-                    SecretResolutionStatus: "Failed",
-                    ProbeDetails: new Dictionary<string, string>()));
+                    ProbeDetails: new Dictionary<string, string> { ["Error"] = ssrfError, ["Reason"] = pathError ?? string.Empty }));
         }
 
         bool isDev = _environment?.IsDevelopment() ?? false;

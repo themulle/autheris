@@ -14,11 +14,12 @@ public sealed record TotpEnrollmentResult(
     IReadOnlyList<string> RecoveryCodes);
 
 /// <summary>
-/// Request to verify or activate TOTP 2FA.
+/// Request to verify or activate TOTP 2FA. The seed is never client-supplied (SR-M-01): the code is checked against the
+/// server-side pending seed. <paramref name="CurrentTotpCode"/> is required to replace an already active secret.
 /// </summary>
 public sealed record TotpVerifyRequest(
     string TotpCode,
-    string? SecretBase32 = null);
+    string? CurrentTotpCode = null);
 
 /// <summary>
 /// Verification result for TOTP 2FA.

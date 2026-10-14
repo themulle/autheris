@@ -93,6 +93,17 @@ public class AdvancedMaskingRuleTests
         Convert.ToDouble(lonZeroNoise).ShouldBe(0.0);
     }
 
+    [Theory]
+    [InlineData("not-a-number")]
+    [InlineData("")]
+    [InlineData("51.5074, -0.1278")]
+    public void SR_M_20_GeoJitter_NonNumericInput_FailsClosed(string raw)
+    {
+        var rule = new MaskingRule { RuleType = "GEO_JITTER", Mode = "round", Decimals = 2 };
+
+        _provider.MaskValue("lat", raw, rule).ShouldBeNull();
+    }
+
     [Fact]
     public void GeoJitter_NullCoordinate_ReturnsNull()
     {

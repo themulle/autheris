@@ -73,6 +73,10 @@ public sealed class AccessProfileTests
     {
         var consentRepo = Substitute.For<IConsentRepository>();
         var resolutionService = Substitute.For<IConsentResolutionService>();
+        // SR-M-07: an access profile never creates an allow; the underlying consent decision allows the table here.
+        resolutionService.ResolveAccess(default!, default!, default!, default, default!, default, default, default)
+            .ReturnsForAnyArgs(ci => TableAccessDecision.Allowed(
+                ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
         var cacheService = Substitute.For<IConsentCacheService>();
         var policyEnforcementService = Substitute.For<IPolicyEnforcementService>();
         var rebacEvaluator = Substitute.For<IRebacEvaluator>();
@@ -281,8 +285,111 @@ public sealed class AccessProfileTests
         var query = new TableAccessQuery(new Sid("david-expired"), TenantLiebherr, new HashSet<Sid>(), new HashSet<string>(), meta);
         var decision = await policy.DecideAsync(query, CancellationToken.None);
 
-        // When no active profile matches, it falls through to consent / default denial
+        // An expired profile is not applied: the consent decision stands unchanged (no profile row filter, sensitive columns stay masked).
+        decision.CombinedRowFilterSql.ShouldBeNull();
+        decision.GetEffectiveColumnAccess("latitude", meta).ShouldBe(ColumnAccessLevel.Mask);
+    }
+
+    private static TableAccessPolicy CreatePolicyWithConsent(IAccessProfileRepository repo, TableAccessDecision consentDecision)
+    {
+        var resolution = Substitute.For<IConsentResolutionService>();
+        resolution.ResolveAccess(default!, default!, default!, default, default!, default, default, default)
+            .ReturnsForAnyArgs(consentDecision);
+        return new TableAccessPolicy(
+            Substitute.For<IConsentRepository>(),
+            resolution,
+            Substitute.For<IConsentCacheService>(),
+            Substitute.For<IPolicyEnforcementService>(),
+            Substitute.For<IRebacEvaluator>(),
+            Substitute.For<IClientIpResolver>(),
+            new GatewayOptions(),
+            NullMandatoryRowFilterResolver.Instance,
+            contractManager: null,
+            accessProfileRepository: repo);
+    }
+
+    private static async Task<InMemoryAccessProfileRepository> RepoWithProfileAsync(string subject, MaskingPolicyMode mode, string? rowFilter = null)
+    {
+        var repo = new InMemoryAccessProfileRepository();
+        await repo.UpsertProfileAsync(new AccessProfile
+        {
+            ProfileId = "prof-srm07",
+            Name = "SR-M-07",
+            TenantId = TenantLiebherr,
+            MaskingMode = mode,
+            TargetTables = ["tem.*"],
+            RowFilterPredicate = rowFilter,
+            AssignedSubjects = [subject],
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1)
+        });
+        return repo;
+    }
+
+    [Fact]
+    public async Task SR_M_07_UnmaskedProfile_DoesNotOverrideDenyConsent()
+    {
+        var repo = await RepoWithProfileAsync("srm07-user", MaskingPolicyMode.Unmasked);
+        var meta = CreateTelemetryTableMetadata();
+        var policy = CreatePolicyWithConsent(repo, TableAccessDecision.Denied(TelemetryTable, "Deny consent"));
+        var query = new TableAccessQuery(new Sid("srm07-user"), TenantLiebherr, new HashSet<Sid>(), new HashSet<string>(), meta);
+
+        var decision = await policy.DecideAsync(query, CancellationToken.None);
+
         decision.IsAllowed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task SR_M_07_ProfileWithoutAllowConsent_IsNotAnAllowSource()
+    {
+        var repo = await RepoWithProfileAsync("srm07-user2", MaskingPolicyMode.Unmasked, "status != 'X'");
+        var meta = CreateTelemetryTableMetadata();
+        // The substitute resolution service returns no decision, which is a denial.
+        var resolutionless = new TableAccessPolicy(
+            Substitute.For<IConsentRepository>(),
+            Substitute.For<IConsentResolutionService>(),
+            Substitute.For<IConsentCacheService>(),
+            Substitute.For<IPolicyEnforcementService>(),
+            Substitute.For<IRebacEvaluator>(),
+            Substitute.For<IClientIpResolver>(),
+            new GatewayOptions(),
+            NullMandatoryRowFilterResolver.Instance,
+            contractManager: null,
+            accessProfileRepository: repo);
+        var query = new TableAccessQuery(new Sid("srm07-user2"), TenantLiebherr, new HashSet<Sid>(), new HashSet<string>(), meta);
+
+        var decision = await resolutionless.DecideAsync(query, CancellationToken.None);
+
+        decision.IsAllowed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task SR_M_07_UnmaskedProfile_DoesNotRelaxDeniedColumns_AndKeepsConsentRowFilter()
+    {
+        var repo = await RepoWithProfileAsync("srm07-user3", MaskingPolicyMode.Unmasked, "status != 'X'");
+        var meta = CreateTelemetryTableMetadata();
+        var consent = TableAccessDecision.Allowed(
+            TelemetryTable,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["crane_id"] = ColumnAccessLevel.Clear,
+                ["status"] = ColumnAccessLevel.Clear,
+                ["latitude"] = ColumnAccessLevel.Mask,
+                ["longitude"] = ColumnAccessLevel.Deny,
+                ["customer_id"] = ColumnAccessLevel.Deny
+            },
+            rowFilterSql: "crane_id = 'C1'");
+        var policy = CreatePolicyWithConsent(repo, consent);
+        var query = new TableAccessQuery(new Sid("srm07-user3"), TenantLiebherr, new HashSet<Sid>(), new HashSet<string>(), meta);
+
+        var decision = await policy.DecideAsync(query, CancellationToken.None);
+
+        decision.IsAllowed.ShouldBeTrue();
+        decision.GetEffectiveColumnAccess("latitude", meta).ShouldBe(ColumnAccessLevel.Clear);
+        decision.GetEffectiveColumnAccess("longitude", meta).ShouldBe(ColumnAccessLevel.Deny);
+        decision.GetEffectiveColumnAccess("customer_id", meta).ShouldBe(ColumnAccessLevel.Deny);
+        decision.CombinedRowFilterSql.ShouldNotBeNull();
+        decision.CombinedRowFilterSql.ShouldContain("crane_id = 'C1'");
+        decision.CombinedRowFilterSql.ShouldContain("status != 'X'");
     }
 
     [Fact]
@@ -661,7 +768,60 @@ public sealed class AccessProfileTests
     }
 
     [Fact]
-    public async Task BulkConsent_ValidUnmaskedRequest_CreatesProfileAndLogsAudit()
+    public async Task SR_M_10_BulkConsent_Unmasked_IsRejectedAndNothingStored()
+    {
+        var repo = new InMemoryAccessProfileRepository();
+        var context = CreateEndpointContext(callerSid: "admin", callerName: "admin");
+        var req = new BulkConsentRequest
+        {
+            Subject = "david",
+            MaskingMode = "unmasked",
+            Tables = ["tem.*"],
+            Justification = "Enterprise PoC Telemetry Head cleartext exception approved",
+            ValidDays = 90
+        };
+
+        var result = await GovernanceEndpoints.CreateBulkConsentAsync(req, context, repo, CancellationToken.None);
+        var (status, _) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status403Forbidden);
+        (await repo.GetProfilesForSubjectAsync(TenantLiebherr, "david")).Count.ShouldBe(0);
+    }
+
+    [Theory]
+    [InlineData("ADMIN@AUTHERIS.INTERNAL")]
+    [InlineData("admin")]
+    [InlineData("AUTHERIS\\Admin")]
+    [InlineData("admin@other.example")]
+    [InlineData("S-1-5-21-1-2-3-500")]
+    [InlineData("S-1-5-21-1-2-3-1100")]
+    public async Task SR_M_10_BulkConsent_SelfGrant_AllIdentifierFormsAndGroups_AreRejected(string subject)
+    {
+        var repo = new InMemoryAccessProfileRepository();
+        var context = CreateEndpointContext(callerSid: "S-1-5-21-1-2-3-500", callerName: "Admin User");
+        var identity = (ClaimsIdentity)context.User.Identity!;
+        identity.AddClaim(new Claim(ClaimTypes.Upn, "admin@autheris.internal"));
+        identity.AddClaim(new Claim("preferred_username", "AUTHERIS\\admin"));
+        var sec = (SecurityPrincipalContext)context.Items[SecurityPrincipalContext.ItemKey]!;
+        context.Items[SecurityPrincipalContext.ItemKey] = sec with { GroupSids = new HashSet<Sid> { new("S-1-5-21-1-2-3-1100") } };
+        var req = new BulkConsentRequest
+        {
+            Subject = subject,
+            MaskingMode = "Default",
+            Tables = ["tem.*"],
+            Justification = "Trying to grant myself access via an alternate identifier",
+            ValidDays = 30
+        };
+
+        var result = await GovernanceEndpoints.CreateBulkConsentAsync(req, context, repo, CancellationToken.None);
+        var (status, body) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        body.ShouldContain("Segregation of Duties (SoD) violation");
+    }
+
+    [Fact]
+    public async Task BulkConsent_ValidStrictRequest_CreatesProfileAndLogsAudit()
     {
         var repo = new InMemoryAccessProfileRepository();
         var auditRepo = Substitute.For<IAuditLogRepository>();
@@ -682,7 +842,7 @@ public sealed class AccessProfileTests
         var req = new BulkConsentRequest
         {
             Subject = "david",
-            MaskingMode = "Unmasked",
+            MaskingMode = "Strict",
             Tables = ["tem.*"],
             RowFilter = "status != 'DELIVERED'",
             Justification = "Enterprise PoC Telemetry Head cleartext exception approved",
@@ -693,13 +853,13 @@ public sealed class AccessProfileTests
         var (status, body) = await ExecuteResultAsync(result, context);
 
         status.ShouldBe(StatusCodes.Status201Created);
-        body.ShouldContain("prof-david-unmasked-");
+        body.ShouldContain("prof-david-strict-");
 
         // Verify stored in repository
         var profiles = await repo.GetProfilesForSubjectAsync(TenantLiebherr, "david");
         profiles.Count.ShouldBe(1);
         var stored = profiles[0];
-        stored.MaskingMode.ShouldBe(MaskingPolicyMode.Unmasked);
+        stored.MaskingMode.ShouldBe(MaskingPolicyMode.Strict);
         stored.TargetTables.ShouldContain("tem.*");
         stored.RowFilterPredicate.ShouldBe("status != 'DELIVERED'");
         stored.Justification.ShouldBe(req.Justification);

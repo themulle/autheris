@@ -7,6 +7,7 @@ using System.Security;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Events;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Services;
 using Autheris.Application.Interfaces;
@@ -17,6 +18,7 @@ using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Application.Security.Totp.Services;
 using Autheris.Domain.Common;
+using Autheris.Domain.Events;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -250,6 +252,31 @@ public sealed class AdminMcpTwoPhaseTests
                 !entry.DetailsJson.Contains(cleartextSecret) &&
                 entry.DetailsJson.Contains("isConfigured")),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SR_M_12_PlanAndStateEvents_CarryCallerTenant()
+    {
+        var bus = Substitute.For<IGatewayEventBus>();
+        var service = new AccessPlanningService(
+            _auditRepo, _tableRepo, _rebacStore, _totpService, _totpSecretStore, eventBus: bus);
+
+        var plan = await service.PlanAccessAsync(
+            new AdminPlanAccessRequest(
+                DatasetId,
+                [new PrincipalAccessGrant("analyst_bob", new Dictionary<string, string> { ["id"] = "clear" }, null)],
+                "tenant scoping"),
+            AdminSid,
+            "tenant-a");
+        plan.ShouldNotBeNull();
+
+        await service.SetDatasetStateAsync(
+            new AdminSetDatasetStateRequest(DatasetId, "quarantined", "drift"), AdminSid, "tenant-a");
+
+        await bus.Received(1).PublishAsync(
+            Arg.Is<AccessPlanCreatedEvent>(e => e.TenantId == "tenant-a"), Arg.Any<CancellationToken>());
+        await bus.Received(1).PublishAsync(
+            Arg.Is<DatasetStateChangedEvent>(e => e.TenantId == "tenant-a"), Arg.Any<CancellationToken>());
     }
 
     [Fact]

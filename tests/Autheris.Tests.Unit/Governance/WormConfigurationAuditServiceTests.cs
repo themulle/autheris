@@ -19,7 +19,7 @@ public sealed class WormConfigurationAuditServiceTests
             Classification = new ClassificationOptions()
         };
         var optionsMonitor = new TestOptionsMonitor<GatewayOptions>(gatewayOptions);
-        var auditService = new WormConfigurationAuditService(optionsMonitor, NullLogger<WormConfigurationAuditService>.Instance);
+        var auditService = new WormConfigurationAuditService(optionsMonitor, NullLogger<WormConfigurationAuditService>.Instance, environment: WormTestEnvironment.Development);
 
         // 1. Startup snapshot
         var initialRecord = await auditService.AuditConfigurationSnapshotAsync("STARTUP_BOOTSTRAP", "SYSTEM");

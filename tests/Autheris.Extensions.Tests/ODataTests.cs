@@ -1021,7 +1021,7 @@ public sealed class ODataTests
             }
         );
 
-        execService.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), sampleTable.Identifier, Arg.Any<CancellationToken>())
+        execService.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Is<TableMetadata>(m => m.Identifier == sampleTable.Identifier), false, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(decision));
 
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
@@ -1053,10 +1053,10 @@ public sealed class ODataTests
             .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { table1, table2 }));
 
         // table1 allowed, table2 denied
-        execService.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), table1.Identifier, Arg.Any<CancellationToken>())
+        execService.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Is<TableMetadata>(m => m.Identifier == table1.Identifier), false, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(TableAccessDecision.Allowed(table1.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
 
-        execService.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), table2.Identifier, Arg.Any<CancellationToken>())
+        execService.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Is<TableMetadata>(m => m.Identifier == table2.Identifier), false, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(TableAccessDecision.Denied(table2.Identifier, "Forbidden")));
 
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
@@ -1067,6 +1067,64 @@ public sealed class ODataTests
         value.Count.ShouldBe(1);
         var entry = (Dictionary<string, object?>)value[0];
         entry["name"].ShouldBe("sales_dbo_invoices");
+    }
+
+    [Fact]
+    public async Task SR_M_16_Metadata_AccessCheckThrows_TableOmitted_AndNotCached()
+    {
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var execService = Substitute.For<IGatewayExecutionService>();
+        using var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions { SizeLimit = 1024 * 1024 });
+        var sampleTable = CreateSampleTable();
+        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { sampleTable }));
+        execService.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns<Task<TableAccessDecision>>(_ => throw new InvalidOperationException("boom"));
+
+        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance, environment: null, memoryCache: memoryCache);
+        var user = CreateAuthenticatedUser("sales");
+
+        var xml = await handler.GetMetadataCsdlAsync(user);
+        xml.ShouldNotContain("sales_dbo_invoices");
+        var doc = (Dictionary<string, object?>)await handler.GetServiceDocumentAsync("https://gateway/odata/v4", user);
+        ((List<object>)doc["value"]!).Count.ShouldBe(0);
+
+        // Failure must not be cached: once the check recovers, the table appears.
+        execService.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(TableAccessDecision.Allowed(sampleTable.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
+        (await handler.GetMetadataCsdlAsync(user)).ShouldContain("sales_dbo_invoices");
+    }
+
+    [Fact]
+    public async Task SR_M_16_Metadata_NullDecision_TableOmitted()
+    {
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var execService = Substitute.For<IGatewayExecutionService>();
+        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { CreateSampleTable() }));
+
+        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
+        var xml = await handler.GetMetadataCsdlAsync(CreateAuthenticatedUser("sales"));
+        xml.ShouldNotContain("sales_dbo_invoices");
+    }
+
+    [Fact]
+    public async Task OData_Caching_WithSizeLimitedSharedCache_DoesNotThrow()
+    {
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var execService = Substitute.For<IGatewayExecutionService>();
+        using var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions { SizeLimit = 1024 * 1024 });
+        var sampleTable = CreateSampleTable();
+        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { sampleTable }));
+        execService.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(TableAccessDecision.Allowed(sampleTable.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
+
+        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance, environment: null, memoryCache: memoryCache);
+        var user = CreateAuthenticatedUser("sales");
+
+        (await handler.GetMetadataCsdlAsync(user)).ShouldContain("sales_dbo_invoices");
+        await handler.GetServiceDocumentAsync("https://gateway/odata/v4", user);
     }
 
     [Fact]

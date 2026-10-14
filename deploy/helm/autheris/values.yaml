@@ -5,7 +5,13 @@ replicaCount: 2
 image:
   repository: ghcr.io/themulle/autheris
   pullPolicy: IfNotPresent
-  tag: "latest"
+  # Empty tag falls back to the chart appVersion. Never use a mutable tag such as "latest".
+  tag: ""
+  # Immutable image digest (e.g. "sha256:abc..."). When set, the image renders as repository@digest
+  # and tag is ignored.
+  digest: ""
+  # Fail rendering when no digest is configured (enabled in values.production.yaml).
+  requireDigest: false
 
 imagePullSecrets: []
 nameOverride: ""
@@ -15,6 +21,8 @@ serviceAccount:
   create: true
   annotations: {}
   name: ""
+  # The gateway does not call the Kubernetes API; keep the API token unmounted.
+  automountServiceAccountToken: false
 
 podAnnotations:
   prometheus.io/scrape: "true"
@@ -117,3 +125,34 @@ monitoring:
     enabled: true
 
 terminationGracePeriodSeconds: 60
+
+# NetworkPolicy (SR-D-03). Requires a CNI that enforces NetworkPolicy.
+networkPolicy:
+  enabled: true
+  ingress:
+    # Namespaces/pods allowed to reach the service port. An empty list allows no ingress at all.
+    # Default matches the kube-system namespace (typical for Traefik); adjust to your controller.
+    from:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: kube-system
+  metrics:
+    # Peers allowed to scrape the service port (metrics are served on the same port).
+    from:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: monitoring
+  egress:
+    # DEFAULT IS PERMISSIVE: all egress is allowed so a fresh install works. Set to false in
+    # production and list the required destinations under egress.rules.
+    allowAll: true
+    # Allow DNS to kube-dns (only used when allowAll is false).
+    dns:
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    # Additional raw NetworkPolicy egress rules (only used when allowAll is false).
+    rules: []

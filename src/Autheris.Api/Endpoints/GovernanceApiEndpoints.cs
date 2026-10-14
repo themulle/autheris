@@ -5,7 +5,6 @@ using System.Security.Claims;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Application.Security.Totp.Interfaces;
-using Autheris.Application.State;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -22,12 +21,9 @@ public static class GovernanceApiEndpoints
 {
     public static IEndpointRouteBuilder MapGovernanceApiEndpoints(this IEndpointRouteBuilder app)
     {
-        // 2FA Enrollment: generates shared Base32 secret and otpauth:// URI
-        app.MapPost("/api/v1/governance/2fa/enroll", async (
-            HttpContext context,
-            ITotpVerificationService totpService,
-            IDistributedClusterStateProvider? clusterState,
-            ITotpSecretStore? secretStore) =>
+        // 2FA Enrollment: generates a shared Base32 secret server-side and keeps it as a pending, user-bound seed.
+        // Re-enrollment of an already enrolled user is only completed with a valid code from the current secret (SR-M-01).
+        async Task<IResult> BeginEnrollment(HttpContext context, ITotpEnrollmentService enrollmentService)
         {
             var userSid = ResolveUserSid(context);
             if (string.IsNullOrWhiteSpace(userSid))
@@ -35,94 +31,33 @@ public static class GovernanceApiEndpoints
                 return Results.Unauthorized();
             }
 
-            if (secretStore != null)
-            {
-                var existing = await secretStore.GetSecretAsync(userSid, context.RequestAborted).ConfigureAwait(false);
-                if (!string.IsNullOrEmpty(existing))
-                {
-                    return Results.Conflict(new { error = "2FA is already enrolled for this user." });
-                }
-            }
-
             var email = ResolveUserEmail(context, userSid);
-            var enrollment = totpService.GenerateEnrollment(userSid, email, "Autheris");
-
-            // Cache pending provisional secret with 15 minutes TTL
-            var pendingKey = $"totp:pending:{userSid.Trim().ToLowerInvariant()}";
-            if (clusterState != null)
+            var enrollment = await enrollmentService.BeginEnrollmentAsync(userSid, email, "Autheris", context.RequestAborted).ConfigureAwait(false);
+            if (enrollment == null)
             {
-                try
-                {
-                    await clusterState.SetAsync(pendingKey, enrollment.SecretBase32, TimeSpan.FromMinutes(15), context.RequestAborted).ConfigureAwait(false);
-                }
-                catch
-                {
-                    // Silently tolerate store issues
-                }
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             }
 
             return Results.Ok(enrollment);
-        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRequested);
+        }
+
+        app.MapPost("/api/v1/governance/2fa/enroll", BeginEnrollment)
+            .RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRequested);
 
         // GET convenience alias for enrollment
-        app.MapGet("/api/v1/governance/2fa/enroll", async (
-            HttpContext context,
-            ITotpVerificationService totpService,
-            IDistributedClusterStateProvider? clusterState,
-            ITotpSecretStore? secretStore) =>
-        {
-            var userSid = ResolveUserSid(context);
-            if (string.IsNullOrWhiteSpace(userSid))
-            {
-                return Results.Unauthorized();
-            }
+        app.MapGet("/api/v1/governance/2fa/enroll", BeginEnrollment)
+            .RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRequested);
 
-            if (secretStore != null)
-            {
-                var existing = await secretStore.GetSecretAsync(userSid, context.RequestAborted).ConfigureAwait(false);
-                if (!string.IsNullOrEmpty(existing))
-                {
-                    return Results.Conflict(new { error = "2FA is already enrolled for this user." });
-                }
-            }
-
-            var email = ResolveUserEmail(context, userSid);
-            var enrollment = totpService.GenerateEnrollment(userSid, email, "Autheris");
-
-            var pendingKey = $"totp:pending:{userSid.Trim().ToLowerInvariant()}";
-            if (clusterState != null)
-            {
-                try
-                {
-                    await clusterState.SetAsync(pendingKey, enrollment.SecretBase32, TimeSpan.FromMinutes(15), context.RequestAborted).ConfigureAwait(false);
-                }
-                catch
-                {
-                    // Silently tolerate
-                }
-            }
-
-            return Results.Ok(enrollment);
-        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRequested);
-
-        // 2FA Activation: verifies initial code from authenticator app and activates secret
+        // 2FA Activation: verifies the initial code against the server-side pending seed and activates it
         app.MapPost("/api/v1/governance/2fa/verify-enrollment", async (
             TotpVerifyRequest request,
             HttpContext context,
-            ITotpVerificationService totpService,
-            ITotpSecretStore secretStore,
-            IDistributedClusterStateProvider? clusterState) =>
+            ITotpEnrollmentService enrollmentService) =>
         {
             var userSid = ResolveUserSid(context);
             if (string.IsNullOrWhiteSpace(userSid))
             {
                 return Results.Unauthorized();
-            }
-
-            var existingSecret = await secretStore.GetSecretAsync(userSid, context.RequestAborted).ConfigureAwait(false);
-            if (!string.IsNullOrEmpty(existingSecret))
-            {
-                return Results.Conflict(new TotpVerifyResult(false, "2FA is already enrolled for this user."));
             }
 
             if (string.IsNullOrWhiteSpace(request?.TotpCode))
@@ -130,55 +65,18 @@ public static class GovernanceApiEndpoints
                 return Results.BadRequest(new TotpVerifyResult(false, "TotpCode is required."));
             }
 
-            string? secretBase32 = null;
-            if (clusterState != null)
+            var outcome = await enrollmentService.CompleteEnrollmentAsync(
+                userSid, request.TotpCode, request.CurrentTotpCode, context.RequestAborted).ConfigureAwait(false);
+
+            return outcome switch
             {
-                try
-                {
-                    var pendingKey = $"totp:pending:{userSid.Trim().ToLowerInvariant()}";
-                    secretBase32 = await clusterState.GetAsync<string>(pendingKey, context.RequestAborted).ConfigureAwait(false);
-                }
-                catch
-                {
-                    // Silently tolerate
-                }
-            }
-
-            if (string.IsNullOrWhiteSpace(secretBase32))
-            {
-                if (clusterState == null && !string.IsNullOrWhiteSpace(request?.SecretBase32))
-                {
-                    secretBase32 = request.SecretBase32;
-                }
-                else
-                {
-                    return Results.BadRequest(new TotpVerifyResult(false, "No pending enrollment found. Please call /enroll first."));
-                }
-            }
-
-            var isValid = await totpService.VerifyAndConsumeTotpAsync(userSid, secretBase32, request.TotpCode, context.RequestAborted).ConfigureAwait(false);
-            if (!isValid)
-            {
-                return Results.BadRequest(new TotpVerifyResult(false, "Invalid or expired TOTP code."));
-            }
-
-            // Persist verified secret in secret store for subsequent step-up validations
-            await secretStore.SetSecretAsync(userSid, secretBase32, context.RequestAborted).ConfigureAwait(false);
-
-            if (clusterState != null)
-            {
-                try
-                {
-                    var pendingKey = $"totp:pending:{userSid.Trim().ToLowerInvariant()}";
-                    await clusterState.RemoveAsync(pendingKey, context.RequestAborted).ConfigureAwait(false);
-                }
-                catch
-                {
-                    // Silently tolerate
-                }
-            }
-
-            return Results.Ok(new TotpVerifyResult(true));
+                TotpEnrollmentOutcome.Completed => Results.Ok(new TotpVerifyResult(true)),
+                TotpEnrollmentOutcome.NoPendingEnrollment => Results.BadRequest(new TotpVerifyResult(false, "No pending enrollment found. Please call /enroll first.")),
+                TotpEnrollmentOutcome.CurrentCodeRequired => Results.BadRequest(new TotpVerifyResult(false, "CurrentTotpCode is required to replace an active 2FA secret.")),
+                TotpEnrollmentOutcome.InvalidCurrentCode => Results.BadRequest(new TotpVerifyResult(false, "Invalid or expired code for the current authenticator.")),
+                TotpEnrollmentOutcome.StoreUnavailable => Results.StatusCode(StatusCodes.Status503ServiceUnavailable),
+                _ => Results.BadRequest(new TotpVerifyResult(false, "Invalid or expired TOTP code."))
+            };
         }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
 
         return app;

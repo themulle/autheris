@@ -13,6 +13,22 @@ namespace Autheris.Tests.Unit;
 
 public class GraphQLTests
 {
+    [Theory]
+    [InlineData(10_001)]
+    [InlineData(int.MaxValue)]
+    [InlineData(-1)]
+    public async Task SR_M_17_TableRootField_RejectsAfterBeyondMaxAllowedOffset(int after)
+    {
+        var options = Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions
+        {
+            GraphQL = new Autheris.Domain.Options.GraphQLOptions { MaxAllowedOffset = 10_000 }
+        });
+
+        var ex = await Should.ThrowAsync<HotChocolate.GraphQLException>(() => new Query().GetTableAsync(
+            "sales", "invoices", "dbo", 50, after, null!, null!, options));
+
+        ex.Errors[0].Code.ShouldBe("BAD_REQUEST");
+    }
 
 
 

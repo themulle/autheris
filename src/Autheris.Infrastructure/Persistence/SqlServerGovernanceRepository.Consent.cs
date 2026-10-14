@@ -1374,6 +1374,20 @@ public partial class SqlServerGovernanceRepository
         return await GetConsentRequestAsync(Guid.Parse(idObj.ToString()!), ct).ConfigureAwait(false);
     }
 
+    /// <summary>SR-M-24: tenant-bound ticket lookup in SQL - a ticket id of another tenant never shadows or resolves.</summary>
+    public async Task<ConsentRequest?> GetConsentRequestByTicketIdAsync(string ticketId, TenantId tenantId, CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT TOP (1) id FROM CONSENT_REQUESTS WHERE itsm_ticket_id = @ticket AND tenant_id = @tenant ORDER BY requested_at, id";
+        cmd.Parameters.AddWithValue("@ticket", ticketId);
+        cmd.Parameters.AddWithValue("@tenant", tenantId.Value);
+        var idObj = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        if (idObj == null) return null;
+        var request = await GetConsentRequestAsync(Guid.Parse(idObj.ToString()!), ct).ConfigureAwait(false);
+        return request != null && request.TenantId == tenantId ? request : null;
+    }
+
     public Task ActivateConsentAsync(Guid requestId, CancellationToken ct = default) =>
         ActivateConsentAsync(requestId, null, ct);
 

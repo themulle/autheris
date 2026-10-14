@@ -560,6 +560,61 @@ public static class GovernanceEndpoints
         return Results.Ok(result);
     }
 
+    private static readonly string[] SelfGrantClaimTypes =
+    [
+        ClaimTypes.PrimarySid, ClaimTypes.NameIdentifier, "objectSid", "onprem_sid", "oid", "sub",
+        ClaimTypes.Upn, ClaimTypes.Email, ClaimTypes.Name, "preferred_username", "upn", "email", "name"
+    ];
+
+    private static void AddIdentifierForms(HashSet<string> set, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        var v = value.Trim();
+        set.Add(v);
+        var slash = v.LastIndexOf('\\');
+        if (slash >= 0 && slash < v.Length - 1)
+        {
+            set.Add(v[(slash + 1)..]);
+        }
+
+        var at = v.IndexOf('@', StringComparison.Ordinal);
+        if (at > 0)
+        {
+            set.Add(v[..at]);
+        }
+    }
+
+    /// <summary>SR-M-10: True when the subject is the caller (any identifier form) or a group the caller belongs to.</summary>
+    internal static bool IsSelfGrantSubject(HttpContext context, string subject)
+    {
+        var callerIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var claim in context.User.Claims)
+        {
+            if (SelfGrantClaimTypes.Contains(claim.Type, StringComparer.OrdinalIgnoreCase))
+            {
+                AddIdentifierForms(callerIds, claim.Value);
+            }
+        }
+
+        AddIdentifierForms(callerIds, context.User.GetUserSid()?.Value);
+        AddIdentifierForms(callerIds, context.User.Identity?.Name);
+
+        var security = EndpointSecurity.GetSecurityContext(context);
+        AddIdentifierForms(callerIds, security.UserSid.Value);
+        foreach (var group in security.GroupSids)
+        {
+            AddIdentifierForms(callerIds, group.Value);
+        }
+
+        var subjectForms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        AddIdentifierForms(subjectForms, subject);
+        return subjectForms.Any(f => callerIds.Contains(f));
+    }
+
     internal static async Task<IResult> CreateBulkConsentAsync(
         BulkConsentRequest req,
         HttpContext context,
@@ -586,11 +641,10 @@ public static class GovernanceEndpoints
 
         var trimmedSubject = req.Subject.Trim();
         var callerSid = context.User.GetUserSid()?.Value ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? context.User.Identity?.Name ?? string.Empty;
-        var callerName = context.User.Identity?.Name ?? string.Empty;
 
-        // Segregation of Duties (SoD): self-grant is strictly forbidden
-        if (string.Equals(callerSid, trimmedSubject, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(callerName, trimmedSubject, StringComparison.OrdinalIgnoreCase))
+        // Segregation of Duties (SoD): self-grant is strictly forbidden. SR-M-10: compare against ALL caller identifiers
+        // (SID, name, UPN, e-mail, oid, sub, ...), their account-name forms and the caller's groups, case-insensitively.
+        if (IsSelfGrantSubject(context, trimmedSubject))
         {
             return Results.BadRequest(new { error = "Segregation of Duties (SoD) violation: Self-grant of access profiles is strictly prohibited." });
         }
@@ -626,6 +680,15 @@ public static class GovernanceEndpoints
             {
                 return Results.BadRequest(new { error = "Overbroad wildcard '*.*' is prohibited for Unmasked access profiles. Minimum schema scope required (e.g. 'tem.*')." });
             }
+        }
+
+        // SR-M-10: clear-text (Unmasked) access must pass the Four-Eyes approval workflow of single consents;
+        // the bulk path activates profiles immediately and therefore never creates them.
+        if (mode == MaskingPolicyMode.Unmasked)
+        {
+            return Results.Json(
+                new { error = "Unmasked access profiles cannot be created via bulk consent because they require approval by a different administrator. Use the consent request/approval workflow." },
+                statusCode: StatusCodes.Status403Forbidden);
         }
 
         // RowFilter sandbox AST validation
