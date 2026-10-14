@@ -16,6 +16,7 @@ public interface IAccessPlanningService
     Task<AdminPlanAccessResult> PlanAccessAsync(
         AdminPlanAccessRequest request,
         string adminSid,
+        string? tenantId = null,
         CancellationToken ct = default);
 
     /// <summary>

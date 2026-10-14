@@ -18,15 +18,20 @@ public sealed class InMemoryGatewayEventBus : IGatewayEventBus
     private readonly ILogger<InMemoryGatewayEventBus> _logger;
     private readonly ConcurrentDictionary<Type, List<SubscriptionRecord>> _subscriptions = new();
     private readonly object _lock = new();
+    private readonly TimeSpan _handlerTimeout;
+
+    /// <summary>Default upper bound for a single subscriber invocation (SR-M-13).</summary>
+    public static readonly TimeSpan DefaultHandlerTimeout = TimeSpan.FromSeconds(10);
 
     private sealed record SubscriptionRecord(
         Guid Id,
         Type EventType,
         Func<IGatewayEvent, CancellationToken, Task> Handler);
 
-    public InMemoryGatewayEventBus(ILogger<InMemoryGatewayEventBus> logger)
+    public InMemoryGatewayEventBus(ILogger<InMemoryGatewayEventBus> logger, TimeSpan? handlerTimeout = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _handlerTimeout = handlerTimeout is { } t && t > TimeSpan.Zero ? t : DefaultHandlerTimeout;
     }
 
     public async Task PublishAsync<TEvent>(TEvent @event, CancellationToken ct = default)
@@ -120,12 +125,28 @@ public sealed class InMemoryGatewayEventBus : IGatewayEventBus
     {
         try
         {
-            await sub.Handler(@event, ct).ConfigureAwait(false);
+            // SR-M-13: a slow or hung subscriber must not stall the publisher (request path). WaitAsync also bounds
+            // handlers that ignore the cancellation token; they keep running detached but no longer block the caller.
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(_handlerTimeout);
+            await sub.Handler(@event, timeoutCts.Token).WaitAsync(_handlerTimeout, ct).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning(
+                "Event handler for {EventType} ({EventId}) in subscription {SubscriptionId} exceeded the {TimeoutMs} ms limit",
+                @event.EventType, @event.EventId, sub.Id, (int)_handlerTimeout.TotalMilliseconds);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             // Propagate cancellation or ignore depending on shutdown
             _logger.LogWarning("Event handler for {EventType} cancelled", @event.EventType);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning(
+                "Event handler for {EventType} ({EventId}) in subscription {SubscriptionId} timed out",
+                @event.EventType, @event.EventId, sub.Id);
         }
         catch (Exception ex)
         {
