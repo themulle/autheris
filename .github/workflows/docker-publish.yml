@@ -48,6 +48,10 @@ jobs:
           jq -e '[.projects[].frameworks[]? | (.topLevelPackages // []) + (.transitivePackages // []) | .[]] | length == 0' vulnerable.json \
             || { echo "::error::Vulnerable NuGet packages detected"; jq . vulnerable.json; exit 1; }
 
+      # CR-ADG-11: with CI=true the Spark proxy tests fail without the pinned image (AstCompilerDatabricksSparkExecutionTests.Image).
+      - name: Pull pinned Spark proxy image
+        run: docker pull apache/spark:4.0.0-python3@sha256:9e2f63442ba1a672ea70d780d56da28f42ce515d0be18840569a3054cc6d2314
+
       - name: Run Test Suite
         run: dotnet test Autheris.sln -c Release --no-restore -p:AutherisIncludeTestAuth=true --verbosity normal
 
