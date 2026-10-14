@@ -58,9 +58,12 @@ public sealed class ClassificationWorkflowStateMachineTests
     public async Task TransitionAsync_RequiresStepUpMfa_ForHighSensitivityRank()
     {
         var options = new GatewayOptions { Classification = new ClassificationOptions() };
+        // Step-up tokens are verified (SR-H-04), so a verification service is mandatory here.
         var stateMachine = new ClassificationWorkflowStateMachine(
             new TestOptionsMonitor<GatewayOptions>(options),
-            NullLogger<ClassificationWorkflowStateMachine>.Instance);
+            NullLogger<ClassificationWorkflowStateMachine>.Instance,
+            totpService: new SrH04FakeTotpService("valid-mfa-token-12345"),
+            totpSecretStore: new SrH04FakeTotpSecretStore());
 
         var proposal = new TableClassificationProposal(
             Guid.NewGuid(),
@@ -157,7 +160,9 @@ public sealed class ClassificationWorkflowStateMachineTests
                 new("iban", "ACCEPT_PROPOSAL", "L3_CONFIDENTIAL", 3, "IBAN_STANDARD_4_4")
             });
 
-        var reviewerResult = await stateMachine.TransitionAsync(proposal, reviewerRequest);
+        // Stage 2 operates on the proposal as persisted after Stage 1 (status + recorded Stage 1 approver).
+        var pendingGovernance = proposal with { Status = "PENDING_GOVERNANCE_REVIEW", Stage1ApproverSid = "owner@corp.local" };
+        var reviewerResult = await stateMachine.TransitionAsync(pendingGovernance, reviewerRequest);
         reviewerResult.Success.ShouldBeTrue();
         reviewerResult.NewStatus.ShouldBe("CLASSIFIED");
     }

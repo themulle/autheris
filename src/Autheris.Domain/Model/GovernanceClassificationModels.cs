@@ -106,7 +106,10 @@ public sealed record TableClassificationProposal(
     string? DataOwnerSid,
     string Status, // "UNCLASSIFIED", "PENDING_OWNER_REVIEW", "PENDING_GOVERNANCE_REVIEW", "CLASSIFIED", "REJECTED"
     IReadOnlyList<ColumnClassificationProposal> Columns,
-    DateTimeOffset CreatedAtUtc);
+    DateTimeOffset CreatedAtUtc,
+    string? ProposedBySid = null,
+    string? Stage1ApproverSid = null,
+    string? Stage2ApproverSid = null);
 
 /// <summary>
 /// Column-level human approval or override decision.

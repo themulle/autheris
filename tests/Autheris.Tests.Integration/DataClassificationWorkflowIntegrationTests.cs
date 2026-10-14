@@ -139,88 +139,84 @@ public class DataClassificationWorkflowIntegrationTests : IClassFixture<WebAppli
         proposal.Status.ShouldBe("CLASSIFIED");
     }
 
-    [Fact]
-    public async Task WorkflowTransition_HighSensitivity_EnforcesStepUpMfaAndTwoStageFourEyes()
+    private async Task<TableClassificationProposal> SeedProposalAsync(string? ownerSid, int rank, string status = "PENDING_OWNER_REVIEW")
     {
-        var client = CreateClient(new Sid("S-1-5-21-DATA-OWNER-ALICE"), ["DATA_OWNER"]);
-
         var proposal = new TableClassificationProposal(
             ProposalId: Guid.NewGuid(),
             TableIdentifier: new TableIdentifier("finance", "payroll", "salaries"),
-            Status: "PENDING_OWNER_REVIEW",
-            DataOwnerSid: "S-1-5-21-DATA-OWNER-ALICE",
-            Columns:
-            [
-                new ColumnClassificationProposal("salary_amount", "BIGINT", "CONFIDENTIAL", 4, null, "REDACT_FULL", 0.99, false),
-                new ColumnClassificationProposal("tax_id", "VARCHAR(20)", "RESTRICTED", 4, null, "MASK_TAX_ID", 0.99, false)
-            ],
+            DataOwnerSid: ownerSid,
+            Status: status,
+            Columns: [new ColumnClassificationProposal("salary_amount", "BIGINT", "CONFIDENTIAL", rank, null, "REDACT_FULL", 0.99, false)],
             CreatedAtUtc: DateTimeOffset.UtcNow);
+        await _factory.Services.GetRequiredService<IClassificationProposalStore>().SaveProposalAsync(proposal);
+        return proposal;
+    }
 
-        // 1. Attempt approval without Step-Up MFA -> Must fail
-        var reqNoMfa = new TableClassificationApprovalRequest(
-            proposal.ProposalId,
-            proposal.TableIdentifier,
-            new Sid("S-1-5-21-DATA-OWNER-ALICE"),
-            "DATA_OWNER",
-            "APPROVE",
-            [
-                new ColumnClassificationDecision("salary_amount", "ACCEPT_PROPOSAL", "CONFIDENTIAL", 4, "REDACT_FULL", "Approved"),
-                new ColumnClassificationDecision("tax_id", "ACCEPT_PROPOSAL", "RESTRICTED", 4, "MASK_TAX_ID", "Approved")
-            ],
-            StepUpAuthToken: null);
+    private static TableClassificationApprovalRequest ForgedRequest(TableClassificationProposal p, string sid, string role) =>
+        new(p.ProposalId, p.TableIdentifier, new Sid(sid), role, "APPROVE", [], StepUpAuthToken: "MFA_TOTP_TOKEN_123456");
 
-        var payloadNoMfa = new TableClassificationTransitionPayload(proposal, reqNoMfa);
-        var respNoMfa = await client.PostAsJsonAsync("/api/governance/classification/transition", payloadNoMfa);
-        respNoMfa.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    [Fact]
+    public async Task SR_H_04_Transition_ClientSuppliedProposal_IsRejected()
+    {
+        var client = CreateClient(new Sid("S-1-5-21-ADMIN-1"));
+        var proposal = await SeedProposalAsync("S-1-5-21-ADMIN-1", rank: 4);
 
-        var resultNoMfa = await respNoMfa.Content.ReadFromJsonAsync<TableClassificationApprovalResult>();
-        resultNoMfa.ShouldNotBeNull();
-        resultNoMfa.Success.ShouldBeFalse();
-        resultNoMfa.ErrorCode.ShouldBe("STEP_UP_AUTH_REQUIRED");
-        resultNoMfa.RequiresStepUpAuth.ShouldBeTrue();
+        var forged = proposal with { Status = "PENDING_GOVERNANCE_REVIEW", DataOwnerSid = null };
+        var payload = new TableClassificationTransitionPayload(forged, ForgedRequest(proposal, "S-1-5-21-ADMIN-1", "DATA_GOVERNANCE_REVIEWER"));
+        var resp = await client.PostAsJsonAsync("/api/governance/classification/transition", payload);
 
-        // 2. Submit Stage 1 approval with valid MFA token
-        var reqStage1 = reqNoMfa with { StepUpAuthToken = "MFA_TOTP_TOKEN_123456" };
-        var payloadStage1 = new TableClassificationTransitionPayload(proposal, reqStage1);
-        var respStage1 = await client.PostAsJsonAsync("/api/governance/classification/transition", payloadStage1);
-        respStage1.StatusCode.ShouldBe(HttpStatusCode.OK);
+        resp.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        var stored = await _factory.Services.GetRequiredService<IClassificationProposalStore>().GetProposalByIdAsync(proposal.ProposalId);
+        stored!.Status.ShouldBe("PENDING_OWNER_REVIEW");
+    }
 
-        var resultStage1 = await respStage1.Content.ReadFromJsonAsync<TableClassificationApprovalResult>();
-        resultStage1.ShouldNotBeNull();
-        resultStage1.Success.ShouldBeTrue();
-        resultStage1.NewStatus.ShouldBe("PENDING_GOVERNANCE_REVIEW");
-        resultStage1.RequiresSecondStage.ShouldBeTrue();
+    [Fact]
+    public async Task SR_H_04_Transition_ForgedReviewerIdentity_IsRejected()
+    {
+        var client = CreateClient(new Sid("S-1-5-21-ADMIN-1"));
+        var proposal = await SeedProposalAsync("S-1-5-21-ADMIN-1", rank: 1);
 
-        // 3. Attempt Stage 2 approval by the SAME Data Owner (SoD violation) -> Must fail
-        var reqStage2SameUser = reqStage1 with
-        {
-            ReviewerSid = new Sid("S-1-5-21-DATA-OWNER-ALICE"),
-            ReviewerRole = "DATA_GOVERNANCE_REVIEWER"
-        };
-        var proposalPendingGov = proposal with { Status = "PENDING_GOVERNANCE_REVIEW" };
-        var payloadStage2SameUser = new TableClassificationTransitionPayload(proposalPendingGov, reqStage2SameUser);
-        var respStage2SameUser = await client.PostAsJsonAsync("/api/governance/classification/transition", payloadStage2SameUser);
-        respStage2SameUser.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        // Claims to be someone else / another role.
+        var spoofSid = new TableClassificationTransitionPayload(null, ForgedRequest(proposal, "S-1-5-21-SOMEONE-ELSE", "DATA_OWNER"));
+        (await client.PostAsJsonAsync("/api/governance/classification/transition", spoofSid)).StatusCode.ShouldBe(HttpStatusCode.BadRequest);
 
-        var resultStage2SameUser = await respStage2SameUser.Content.ReadFromJsonAsync<TableClassificationApprovalResult>();
-        resultStage2SameUser.ShouldNotBeNull();
-        resultStage2SameUser.Success.ShouldBeFalse();
-        resultStage2SameUser.ErrorCode.ShouldBe("SOD_ANTI_SELF_APPROVAL_VIOLATION");
+        var spoofRole = new TableClassificationTransitionPayload(null, ForgedRequest(proposal, "S-1-5-21-ADMIN-1", "DATA_GOVERNANCE_REVIEWER"));
+        (await client.PostAsJsonAsync("/api/governance/classification/transition", spoofRole)).StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
 
-        // 4. Submit Stage 2 approval by distinct Governance Compliance Reviewer -> Must succeed
-        var reqStage2Distinct = reqStage1 with
-        {
-            ReviewerSid = new Sid("S-1-5-21-COMPLIANCE-OFFICER-CLARA"),
-            ReviewerRole = "DATA_GOVERNANCE_REVIEWER"
-        };
-        var payloadStage2Distinct = new TableClassificationTransitionPayload(proposalPendingGov, reqStage2Distinct);
-        var respStage2Distinct = await client.PostAsJsonAsync("/api/governance/classification/transition", payloadStage2Distinct);
-        respStage2Distinct.StatusCode.ShouldBe(HttpStatusCode.OK);
+    [Fact]
+    public async Task SR_H_04_Approve_WithUnsetDataOwner_IsForbidden()
+    {
+        var client = CreateClient(new Sid("S-1-5-21-ADMIN-1"), ["DataOwner", "GovernanceAdmin"]);
+        var proposal = await SeedProposalAsync(ownerSid: null, rank: 1, status: "UNCLASSIFIED");
 
-        var resultStage2Distinct = await respStage2Distinct.Content.ReadFromJsonAsync<TableClassificationApprovalResult>();
-        resultStage2Distinct.ShouldNotBeNull();
-        resultStage2Distinct.Success.ShouldBeTrue();
-        resultStage2Distinct.NewStatus.ShouldBe("CLASSIFIED");
+        var resp = await client.PostAsJsonAsync(
+            $"/api/governance/classification/proposals/{proposal.ProposalId}/approve",
+            new ClassificationApprovalPayload(null));
+        resp.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+
+        var rej = await client.PostAsJsonAsync(
+            $"/api/governance/classification/proposals/{proposal.ProposalId}/reject",
+            new ClassificationRejectionPayload("no"));
+        rej.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task SR_H_04_Approve_ByMatchingOwner_ClassifiesLowRiskProposal()
+    {
+        var client = CreateClient(new Sid("S-1-5-21-OWNER-ZED"), ["DataOwner"]);
+        var proposal = await SeedProposalAsync("S-1-5-21-OWNER-ZED", rank: 1);
+
+        var resp = await client.PostAsJsonAsync(
+            $"/api/governance/classification/proposals/{proposal.ProposalId}/approve",
+            new ClassificationApprovalPayload(null));
+        resp.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        // Sealed proposals cannot be approved again.
+        var again = await client.PostAsJsonAsync(
+            $"/api/governance/classification/proposals/{proposal.ProposalId}/approve",
+            new ClassificationApprovalPayload(null));
+        again.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
 
     [Fact]
