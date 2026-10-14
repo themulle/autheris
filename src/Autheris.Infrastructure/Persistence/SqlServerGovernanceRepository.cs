@@ -257,6 +257,9 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, Migr
                 SeedInitialCatalog();
             }
 
+            // The store serves requests only from here on; a failed initialization leaves it closed.
+            _ready = true;
+
             // AU-12: Background processor starts only after keys and stores are completely initialized
             _auditProcessorTask = Task.Run(ProcessAuditChannelAsync, CancellationToken.None);
         }
@@ -269,7 +272,30 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, Migr
         return Task.CompletedTask;
     }
 
+    private volatile bool _ready;
+
+    private void ThrowIfNotReady()
+    {
+        if (!_ready)
+        {
+            throw new Migrations.GovernanceStoreNotReadyException(nameof(SqlServerGovernanceRepository));
+        }
+    }
+
+    // Every request-time connection goes through the guard; only initialization code uses the Core variants.
     private SqlConnection OpenConnection()
+    {
+        ThrowIfNotReady();
+        return OpenConnectionCore();
+    }
+
+    private Task<SqlConnection> OpenConnectionAsync(CancellationToken ct)
+    {
+        ThrowIfNotReady();
+        return OpenConnectionCoreAsync(ct);
+    }
+
+    private SqlConnection OpenConnectionCore()
     {
         var conn = new SqlConnection(_connectionString);
         try
@@ -284,7 +310,7 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, Migr
         }
     }
 
-    private async Task<SqlConnection> OpenConnectionAsync(CancellationToken ct)
+    private async Task<SqlConnection> OpenConnectionCoreAsync(CancellationToken ct)
     {
         var conn = new SqlConnection(_connectionString);
         try
@@ -301,6 +327,11 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, Migr
 
     public async Task<bool> PingAsync(CancellationToken ct = default)
     {
+        if (!_ready)
+        {
+            return false;
+        }
+
         try
         {
             await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);

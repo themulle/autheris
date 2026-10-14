@@ -20,8 +20,18 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
     private readonly SqliteConnection _connection;
     internal SqliteConnection Connection => _connection;
     private readonly IEpochValidationService _epochValidationService;
-    private readonly SemaphoreSlim _lock = new(1, 1);
-    internal Task LockAsync(CancellationToken ct = default) => _lock.WaitAsync(ct);
+    private readonly ReadinessGatedLock _lock;
+    private volatile bool _ready;
+    private void ThrowIfNotReady()
+    {
+        if (!_ready)
+        {
+            throw new Migrations.GovernanceStoreNotReadyException(nameof(SqliteGovernanceRepository));
+        }
+    }
+
+    // The migration runner runs before the store is ready; it is the only caller that may enter the gate unguarded.
+    internal Task LockAsync(CancellationToken ct = default) => _lock.WaitUnguardedAsync(ct);
     internal void ReleaseLock() => _lock.Release();
     private readonly ConcurrentDictionary<string, (TableMetadata? Metadata, long CachedAtTicks)> _metadataCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly long MetadataCacheTtlTicks = TimeSpan.FromSeconds(30).Ticks;
@@ -30,6 +40,11 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
 
     public async Task<bool> PingAsync(CancellationToken ct = default)
     {
+        if (!_ready)
+        {
+            return false;
+        }
+
         await _lock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
@@ -72,6 +87,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
         ICallerContextProvider? callerContextProvider = null)
     {
         _epochValidationService = epochValidationService;
+        _lock = new ReadinessGatedLock(() => _ready, nameof(SqliteGovernanceRepository));
         _logger = logger;
         _options = options?.Value;
         _callerContextProvider = callerContextProvider;
@@ -248,6 +264,9 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
             {
                 SeedInitialCatalog();
             }
+
+            // The store serves requests only from here on; a failed initialization leaves it closed.
+            _ready = true;
 
             // AU-12: Background processor starts only after keys and stores are completely initialized
             _auditProcessorTask = Task.Run(ProcessAuditChannelAsync, CancellationToken.None);

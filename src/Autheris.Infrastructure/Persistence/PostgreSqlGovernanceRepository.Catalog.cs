@@ -19,7 +19,7 @@ public partial class PostgreSqlGovernanceRepository
         Guid? tableId = null;
         Table? tableEntity = null;
 
-        await using (var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false))
+        await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
         {
             await using (var cmd = conn.CreateCommand())
             {
@@ -138,7 +138,7 @@ public partial class PostgreSqlGovernanceRepository
     {
         var tables = new List<TableIdentifier>();
 
-        await using (var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false))
+        await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
         {
             await using (var cmd = conn.CreateCommand())
             {
@@ -166,7 +166,7 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
@@ -319,7 +319,7 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task<long> GetTableEpochAsync(TableIdentifier table, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT epoch FROM POLICY_EPOCHS
                             WHERE LOWER(domain) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
@@ -333,7 +333,7 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task<long> IncrementTableEpochAsync(TableIdentifier table, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
@@ -392,7 +392,7 @@ public partial class PostgreSqlGovernanceRepository
     public async Task<IReadOnlyList<TableRelation>> GetRelationsForTableAsync(TableIdentifier parentTable, CancellationToken ct = default)
     {
         var list = new List<TableRelation>();
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT r.id, r.parent_table_id, r.child_table_id, r.relation_name, r.join_key_parent, r.join_key_child, r.cardinality,
                                    tp.source_name, tp.schema_name, tp.table_name,
@@ -432,7 +432,7 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task CreateRelationAsync(TableRelation relation, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
 
         string? parentTableId = null;
         string? childTableId = null;
@@ -485,7 +485,7 @@ public partial class PostgreSqlGovernanceRepository
     public async Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default)
     {
         var owners = new List<DataOwner>();
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT o.id, o.ad_sid, o.ad_account, o.display_name, o.email, o.is_active
                             FROM DATA_OWNERS o
@@ -523,7 +523,7 @@ public partial class PostgreSqlGovernanceRepository
     private async Task<IReadOnlyCollection<string>> ResolveDataOwnerIdsInternalAsync(IEnumerable<string> identifiers, CancellationToken ct)
     {
         var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         foreach (var identifier in identifiers.Where(i => !string.IsNullOrWhiteSpace(i)))
         {
             await using var cmd = conn.CreateCommand();
@@ -553,7 +553,7 @@ public partial class PostgreSqlGovernanceRepository
 
     private async Task<bool> IsAuthorizedApproverForTableInternalAsync(TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT COUNT(*)
                             FROM TABLES t
@@ -606,7 +606,7 @@ public partial class PostgreSqlGovernanceRepository
     public async Task<IReadOnlySet<string>> GetTransitiveRolesAsync(Sid subjectSid, CancellationToken ct = default)
     {
         var roles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT r.role_name
                             FROM ROLES r
@@ -625,7 +625,7 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"INSERT INTO DATA_OWNER_DELEGATIONS (id, data_owner_id, delegate_sid, valid_from, valid_to, reason)
                             VALUES (@id, @ownerId, @delegateSid, @validFrom, @validTo, @reason)

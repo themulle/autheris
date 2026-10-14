@@ -11,7 +11,7 @@ public partial class PostgreSqlGovernanceRepository : IItsmOutboxRepository
     {
         ArgumentNullException.ThrowIfNull(message);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
             INSERT INTO ITSM_OUTBOX (
@@ -42,7 +42,7 @@ public partial class PostgreSqlGovernanceRepository : IItsmOutboxRepository
 
     public async Task<IReadOnlyList<ItsmOutboxMessage>> GetPendingMessagesAsync(int batchSize = 20, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         var nowStr = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
 
@@ -71,7 +71,7 @@ public partial class PostgreSqlGovernanceRepository : IItsmOutboxRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
             UPDATE ITSM_OUTBOX
@@ -89,7 +89,7 @@ public partial class PostgreSqlGovernanceRepository : IItsmOutboxRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         var nextRetry = DateTimeOffset.UtcNow.Add(nextRetryDelay).ToString("O", CultureInfo.InvariantCulture);
 
@@ -111,7 +111,7 @@ public partial class PostgreSqlGovernanceRepository : IItsmOutboxRepository
 
     public async Task<IReadOnlyList<ItsmOutboxMessage>> GetDeadLetterMessagesAsync(int limit = 50, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
             SELECT id, request_id, tenant_id, event_type, payload_json, preferred_system,

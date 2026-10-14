@@ -18,6 +18,9 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
 {
     public async Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default)
     {
+        // Tier-B events are only enqueued (no gate); they must not be accepted before the audit processor runs.
+        ThrowIfNotReady();
+
         if (entry.Caller == null && _callerContextProvider != null)
         {
             entry.Caller = _callerContextProvider.ResolveCallerContext();

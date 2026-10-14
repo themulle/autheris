@@ -16,6 +16,28 @@ namespace Autheris.Infrastructure.Persistence;
 public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, Migrations.IGovernanceStoreInitializer, IAuditChainExportSource, IDisposable, IAsyncDisposable
 {
     private readonly NpgsqlDataSource _dataSource;
+    private volatile bool _ready;
+
+    private void ThrowIfNotReady()
+    {
+        if (!_ready)
+        {
+            throw new Migrations.GovernanceStoreNotReadyException(nameof(PostgreSqlGovernanceRepository));
+        }
+    }
+
+    // Every request-time connection goes through the guard; only initialization code opens connections directly.
+    private ValueTask<NpgsqlConnection> OpenConnectionAsync(CancellationToken ct)
+    {
+        ThrowIfNotReady();
+        return _dataSource.OpenConnectionAsync(ct);
+    }
+
+    private NpgsqlConnection OpenConnection()
+    {
+        ThrowIfNotReady();
+        return _dataSource.OpenConnection();
+    }
     private readonly IEpochValidationService _epochValidationService;
     private readonly ConcurrentDictionary<string, (TableMetadata? Metadata, long CachedAtTicks)> _metadataCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly long MetadataCacheTtlTicks = TimeSpan.FromSeconds(30).Ticks;
@@ -257,6 +279,9 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, Mig
                 SeedInitialCatalog();
             }
 
+            // The store serves requests only from here on; a failed initialization leaves it closed.
+            _ready = true;
+
             // AU-12: Background processor starts only after keys and stores are completely initialized
             _auditProcessorTask = Task.Run(ProcessAuditChannelAsync, CancellationToken.None);
         }
@@ -271,6 +296,11 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, Mig
 
     public async Task<bool> PingAsync(CancellationToken ct = default)
     {
+        if (!_ready)
+        {
+            return false;
+        }
+
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
