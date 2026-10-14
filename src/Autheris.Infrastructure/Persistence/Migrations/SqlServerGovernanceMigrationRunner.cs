@@ -23,7 +23,13 @@ public sealed class SqlServerGovernanceMigrationRunner : GovernanceMigrationRunn
             {
                 SqlServerBaselineSchema.Apply((SqlConnection)ctx.Connection);
                 return Task.CompletedTask;
-            })
+            }),
+        new MigrationStep(
+            2,
+            "webhook_outbox",
+            MigrationStep.ComputeChecksum("sqlserver:0002:webhook_outbox:v1"),
+            ctx => ExecuteAsync(ctx.Connection, ctx.Transaction, WebhookOutboxSchema.SqlServer, ctx.CancellationToken),
+            Transactional: true)
     ];
 
     private readonly SqlServerGovernanceRepository _repository;

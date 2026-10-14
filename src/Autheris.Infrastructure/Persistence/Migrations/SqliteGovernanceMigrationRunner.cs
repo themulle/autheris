@@ -19,7 +19,13 @@ public sealed class SqliteGovernanceMigrationRunner : GovernanceMigrationRunnerB
             {
                 new SqliteBaselineSchema((SqliteConnection)ctx.Connection, ctx.Logger).Apply();
                 return Task.CompletedTask;
-            })
+            }),
+        new MigrationStep(
+            2,
+            "webhook_outbox",
+            MigrationStep.ComputeChecksum("sqlite:0002:webhook_outbox:v1"),
+            ctx => ExecuteAsync(ctx.Connection, ctx.Transaction, WebhookOutboxSchema.Sqlite, ctx.CancellationToken),
+            Transactional: true)
     ];
 
     private readonly SqliteGovernanceRepository _repository;
