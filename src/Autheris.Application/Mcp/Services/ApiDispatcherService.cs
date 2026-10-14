@@ -335,7 +335,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         };
     }
 
-    private static TableIdentifier? ExtractTableIdentifier(string endpoint, IReadOnlyDictionary<string, object?> parameters)
+    internal static TableIdentifier? ExtractTableIdentifier(string endpoint, IReadOnlyDictionary<string, object?> parameters)
     {
         if (parameters.TryGetValue("dataset", out var dsObj) && dsObj is string dsStr && McpDatasetCatalog.TryParseDatasetId(dsStr, out var tid))
         {

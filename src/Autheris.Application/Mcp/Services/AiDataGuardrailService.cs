@@ -12,6 +12,7 @@ using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Mcp.Diagnostics;
 using Autheris.Application.Mcp.Interfaces;
+using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Events;
 using Autheris.Domain.Interfaces;
@@ -20,6 +21,7 @@ using Autheris.Application.Mcp.Tools;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TrinoSqlEngine;
 
 /// <summary>
 /// Enterprise Guardrail engine enforcing zero-trust data protection, Casbin ABAC enforcement,
@@ -45,6 +47,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
     private readonly IDocSearchService? _docSearchService;
     private readonly IUniversalDocStore? _docStore;
     private readonly IGatewayEventBus? _eventBus;
+    private readonly ISqlEngine? _sqlEngine;
 
     private static readonly TimeSpan DefaultRegexTimeout = TimeSpan.FromMilliseconds(250);
 
@@ -80,8 +83,9 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         IAccessPlanningService? accessPlanningService = null,
         IDocSearchService? docSearchService = null,
         IUniversalDocStore? docStore = null,
-        IGatewayEventBus? eventBus = null)
-        : this(toolRegistry, options, logger, Autheris.Application.Audit.NullAuditLogRepository.Instance, queryExecutor, policyEnforcementService, tableMetadataRepository, sessionStore, promptGuardrail, goldenQueryService, stepUpApprovalService, graphQlCatalogMap, consentRepository, accessPlanningService, docSearchService, docStore, eventBus)
+        IGatewayEventBus? eventBus = null,
+        ISqlEngine? sqlEngine = null)
+        : this(toolRegistry, options, logger, Autheris.Application.Audit.NullAuditLogRepository.Instance, queryExecutor, policyEnforcementService, tableMetadataRepository, sessionStore, promptGuardrail, goldenQueryService, stepUpApprovalService, graphQlCatalogMap, consentRepository, accessPlanningService, docSearchService, docStore, eventBus, sqlEngine)
     {
     }
 
@@ -102,7 +106,8 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         IAccessPlanningService? accessPlanningService = null,
         IDocSearchService? docSearchService = null,
         IUniversalDocStore? docStore = null,
-        IGatewayEventBus? eventBus = null)
+        IGatewayEventBus? eventBus = null,
+        ISqlEngine? sqlEngine = null)
     {
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -121,6 +126,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         _docSearchService = docSearchService;
         _docStore = docStore;
         _eventBus = eventBus;
+        _sqlEngine = sqlEngine;
     }
 
 
@@ -230,12 +236,8 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         // Administrative MCP Tools Execution (Track E, ADR-03, ADR-05, R-60..R-64)
         if (McpAdminTools.IsAdminTool(tool.Name))
         {
-            var roles = sessionContext.Roles ?? [];
-            bool isAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) ||
-                           roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase) ||
-                           roles.Contains("TenantAdmin", StringComparer.OrdinalIgnoreCase);
-
-            if (!isAdmin && !_options.Value.IsMcpAuthBypassed)
+            // SR-H-02: cluster-wide roles only; TenantAdmin must not mutate shared catalog/ReBAC state.
+            if (!McpAdminTools.IsAdminCaller(sessionContext.Roles, _options.Value.IsMcpAuthBypassed))
             {
                 activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
                 McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
@@ -305,9 +307,26 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         }
 
         // Resolve real TargetTable for ABAC policy and Four-Eyes checks
-        var resolvedTables = string.Equals(tool.Name, McpDatasetTools.QueryGraphQl, StringComparison.OrdinalIgnoreCase)
-            ? await ResolveGraphQlTablesAsync(request.ArgumentsJson, cancellationToken).ConfigureAwait(false)
-            : ParseTablesFromTool(tool, request.ArgumentsJson);
+        // SR-H-01: SQL and invoke_api targets come from the SQL AST / the endpoint path, never from a text match.
+        IReadOnlyList<TableIdentifier>? resolvedTables;
+        if (string.Equals(tool.Name, McpDatasetTools.QueryGraphQl, StringComparison.OrdinalIgnoreCase))
+        {
+            resolvedTables = await ResolveGraphQlTablesAsync(request.ArgumentsJson, cancellationToken).ConfigureAwait(false);
+        }
+        else if (string.Equals(tool.Name, McpDatasetTools.QuerySql, StringComparison.OrdinalIgnoreCase))
+        {
+            resolvedTables = McpDatasetTools.TryGetStringArgument(request.ArgumentsJson, "query", out var sqlArg)
+                ? ResolveSqlTables(sqlArg)
+                : null;
+        }
+        else if (string.Equals(tool.Name, McpDatasetTools.InvokeApi, StringComparison.OrdinalIgnoreCase))
+        {
+            resolvedTables = ResolveInvokeApiTables(tool, request.ArgumentsJson);
+        }
+        else
+        {
+            resolvedTables = ParseTablesFromTool(tool, request.ArgumentsJson);
+        }
 
         // 4b.4: For dataset tools requiring a dataset argument, validate argument before fail-closed ABAC.
         if (string.Equals(tool.Name, McpDatasetTools.DescribeDataset, StringComparison.OrdinalIgnoreCase) ||
@@ -325,7 +344,9 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
 
         // Security Hardening: For data access tools, target table must be resolvable.
         // If unresolvable, fail-closed to prevent bypassing Casbin ABAC and Four-Eyes gates.
-        if (resolvedTables == null && (tool.Name.StartsWith("query_", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrWhiteSpace(tool.TargetGraphQLOperation)))
+        if (resolvedTables == null && (tool.Name.StartsWith("query_", StringComparison.OrdinalIgnoreCase) ||
+                                       !string.IsNullOrWhiteSpace(tool.TargetGraphQLOperation) ||
+                                       string.Equals(tool.Name, McpDatasetTools.InvokeApi, StringComparison.OrdinalIgnoreCase)))
         {
             activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
             McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
@@ -859,6 +880,114 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
             { Count: 0 } => [McpDatasetTools.CatalogTable],
             _ => tables
         };
+    }
+
+    /// <summary>
+    /// SR-H-01: Every table of a SQL statement, taken from the SQL AST (joins, subqueries, set operations, comments are
+    /// handled by the parser). Null (fail-closed) without an engine, on analysis failure, or when no table is referenced.
+    /// </summary>
+    private IReadOnlyList<TableIdentifier>? ResolveSqlTables(string? sql)
+    {
+        if (_sqlEngine == null || string.IsNullOrWhiteSpace(sql))
+        {
+            return null;
+        }
+
+        try
+        {
+            var metadata = _sqlEngine.Analyze(sql.AsMemory());
+            if (metadata.ReferencedTables.Count == 0)
+            {
+                return null;
+            }
+
+            var defaultDataSource = _options.Value.WebSql?.DefaultDataSourceName;
+            return metadata.ReferencedTables
+                .Select(t => SqlDataSourceResolver.ResolveTableIdentifier(t, defaultDataSource))
+                .Distinct()
+                .ToList();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "SQL analysis failed while resolving MCP target tables; denying (fail-closed).");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// SR-H-01: invoke_api reads datasets via <c>/api/v1/data/...</c> and runs SQL via <c>/api/v1/statement</c>; the real
+    /// tables are resolved like the dispatcher does. Null (fail-closed) when such an endpoint names no resolvable table.
+    /// Other endpoints keep the constant API tool target (they apply consent filtering themselves).
+    /// </summary>
+    private IReadOnlyList<TableIdentifier>? ResolveInvokeApiTables(McpToolDefinition tool, string? argumentsJson)
+    {
+        string endpoint = string.Empty;
+        var parameters = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        string? sql = null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            if (root.TryGetProperty("endpoint", out var ep) && ep.ValueKind == JsonValueKind.String)
+            {
+                endpoint = ep.GetString() ?? string.Empty;
+            }
+
+            if (root.TryGetProperty("parameters", out var p) && p.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in p.EnumerateObject())
+                {
+                    parameters[prop.Name] = prop.Value.ToString();
+                }
+            }
+
+            sql = parameters.TryGetValue("sql", out var sqlParam) && sqlParam is string sp && !string.IsNullOrWhiteSpace(sp) ? sp
+                : parameters.TryGetValue("query", out var queryParam) && queryParam is string qp && !string.IsNullOrWhiteSpace(qp) ? qp
+                : null;
+
+            if (string.IsNullOrWhiteSpace(sql) && root.TryGetProperty("body", out var body))
+            {
+                var bodyElement = body;
+                if (body.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(body.GetString()))
+                {
+                    using var bodyDoc = JsonDocument.Parse(body.GetString()!);
+                    bodyElement = bodyDoc.RootElement.Clone();
+                }
+
+                if (bodyElement.ValueKind == JsonValueKind.Object)
+                {
+                    if ((bodyElement.TryGetProperty("sql", out var s) || bodyElement.TryGetProperty("query", out s)) &&
+                        s.ValueKind == JsonValueKind.String)
+                    {
+                        sql = s.GetString();
+                    }
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        var normEndpoint = endpoint.Trim().ToLowerInvariant();
+        if (normEndpoint.StartsWith("/api/v1/data", StringComparison.Ordinal))
+        {
+            var table = ApiDispatcherService.ExtractTableIdentifier(normEndpoint, parameters);
+            return table == null ? null : [table.Value];
+        }
+
+        if (normEndpoint.Equals("/api/v1/statement", StringComparison.Ordinal))
+        {
+            return ResolveSqlTables(sql);
+        }
+
+        return ParseTablesFromTool(tool, argumentsJson);
     }
 
     private static bool IsBuiltInTableTool(string name) =>

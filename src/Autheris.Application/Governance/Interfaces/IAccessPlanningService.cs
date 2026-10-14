@@ -2,6 +2,7 @@ namespace Autheris.Application.Governance.Interfaces;
 
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 /// <summary>
@@ -33,6 +34,7 @@ public interface IAccessPlanningService
     Task<AdminApplyAccessResult> ApplyAccessAsync(
         AdminApplyAccessRequest request,
         string adminSid,
+        TenantId? callerTenant = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -41,6 +43,7 @@ public interface IAccessPlanningService
     Task<AdminRegisterDatasourceResult> RegisterDatasourceAsync(
         AdminRegisterDatasourceRequest request,
         string adminSid,
+        TenantId? callerTenant = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -49,6 +52,7 @@ public interface IAccessPlanningService
     Task<AdminSetDatasetStateResult> SetDatasetStateAsync(
         AdminSetDatasetStateRequest request,
         string adminSid,
+        TenantId? callerTenant = null,
         CancellationToken ct = default);
 
     /// <summary>

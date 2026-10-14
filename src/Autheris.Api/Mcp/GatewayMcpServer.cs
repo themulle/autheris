@@ -67,11 +67,8 @@ public static class GatewayMcpServer
         var options = context.Services!.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value;
 
         var roles = session.Roles ?? [];
-        bool isAdmin = options.IsMcpAuthBypassed ||
-                       roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) ||
-                       roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase) ||
-                       roles.Contains("TenantAdmin", StringComparer.OrdinalIgnoreCase) ||
-                       roles.Contains("Admin", StringComparer.OrdinalIgnoreCase);
+        // SR-H-02: same gate as the execution path in AiDataGuardrailService (cluster-wide roles only).
+        bool isAdmin = McpAdminTools.IsAdminCaller(roles, options.IsMcpAuthBypassed);
 
         var available = registry.GetAvailableTools();
         if (!isAdmin)

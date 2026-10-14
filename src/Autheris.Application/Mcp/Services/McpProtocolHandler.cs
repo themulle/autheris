@@ -164,11 +164,8 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
         var tools = _toolRegistry.GetAvailableTools();
 
         var roles = session.Roles ?? [];
-        bool isAdmin = _options.IsMcpAuthBypassed ||
-                       roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) ||
-                       roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase) ||
-                       roles.Contains("TenantAdmin", StringComparer.OrdinalIgnoreCase) ||
-                       roles.Contains("Admin", StringComparer.OrdinalIgnoreCase);
+        // SR-H-02: same gate as the execution path in AiDataGuardrailService (cluster-wide roles only).
+        bool isAdmin = McpAdminTools.IsAdminCaller(roles, _options.IsMcpAuthBypassed);
 
         if (!isAdmin)
         {

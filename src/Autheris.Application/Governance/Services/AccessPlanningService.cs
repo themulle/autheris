@@ -209,6 +209,7 @@ public class AccessPlanningService : IAccessPlanningService
     public async Task<AdminApplyAccessResult> ApplyAccessAsync(
         AdminApplyAccessRequest request,
         string adminSid,
+        TenantId? callerTenant = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -253,7 +254,10 @@ public class AccessPlanningService : IAccessPlanningService
         }
 
         var tableId = ParseTableIdentifier(stored.Request.DatasetId);
-        var tenantId = !string.IsNullOrWhiteSpace(tableId.Domain) ? tableId.Domain : "default";
+        // SR-H-02: an authenticated caller's tenant owns the tuples; the dataset domain is only a fallback for
+        // callers without tenant context (never attacker-selectable for MCP callers).
+        var tenantId = callerTenant?.Value
+            ?? (!string.IsNullOrWhiteSpace(tableId.Domain) ? tableId.Domain : "default");
         var tuples = new List<RebacTuple>();
 
         foreach (var grant in stored.Request.Grants)
@@ -318,6 +322,7 @@ public class AccessPlanningService : IAccessPlanningService
     public async Task<AdminRegisterDatasourceResult> RegisterDatasourceAsync(
         AdminRegisterDatasourceRequest request,
         string adminSid,
+        TenantId? callerTenant = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -339,7 +344,7 @@ public class AccessPlanningService : IAccessPlanningService
         var auditEntry = new AuditLogEntry
         {
             Id = Guid.NewGuid(),
-            TenantId = TenantId.LegacySingleTenant,
+            TenantId = callerTenant ?? TenantId.LegacySingleTenant,
             OccurredAt = DateTimeOffset.UtcNow,
             EventType = "ADMIN_REGISTER_DATASOURCE",
             ActorSid = new Sid(adminSid),
@@ -374,6 +379,7 @@ public class AccessPlanningService : IAccessPlanningService
     public async Task<AdminSetDatasetStateResult> SetDatasetStateAsync(
         AdminSetDatasetStateRequest request,
         string adminSid,
+        TenantId? callerTenant = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -407,7 +413,7 @@ public class AccessPlanningService : IAccessPlanningService
         var auditEntry = new AuditLogEntry
         {
             Id = Guid.NewGuid(),
-            TenantId = TenantId.LegacySingleTenant,
+            TenantId = callerTenant ?? TenantId.LegacySingleTenant,
             OccurredAt = DateTimeOffset.UtcNow,
             EventType = "ADMIN_SET_DATASET_STATE",
             ActorSid = new Sid(adminSid),
