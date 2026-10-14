@@ -326,4 +326,89 @@ public sealed class AccessAuditMiddlewareTests
         entry.DetailsJson.ShouldNotContain("script");
         entry.TenantId.Value.ShouldNotContain("evil");
     }
+
+    [Theory]
+    [InlineData(404)]
+    [InlineData(405)]
+    [InlineData(400)]
+    public async Task InvokeAsync_UnroutedAnonymous4xx_DoesNotRecordTableQueryAllow(int status)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/wp-admin/" + new string('a', 40);
+        var auditContext = new AuditContext();
+
+        var middleware = CreateMiddleware(c => { c.Response.StatusCode = status; return Task.CompletedTask; });
+        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+
+        await _auditRepo.DidNotReceive().RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
+        auditContext.IsHandled.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task InvokeAsync_RoutedEndpoint404_StillRecorded()
+    {
+        AuditLogEntry? recorded = null;
+        _auditRepo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e => recorded = e), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/things/42";
+        context.SetEndpoint(new Endpoint(_ => Task.CompletedTask, new EndpointMetadataCollection(), "routed-test"));
+        var auditContext = new AuditContext();
+
+        var middleware = CreateMiddleware(c => { c.Response.StatusCode = 404; return Task.CompletedTask; });
+        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+
+        recorded.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task InvokeAsync_LongPath_TargetCappedTo256()
+    {
+        AuditLogEntry? recorded = null;
+        _auditRepo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e => recorded = e), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/things/" + new string('x', 1000);
+        context.SetEndpoint(new Endpoint(_ => Task.CompletedTask, new EndpointMetadataCollection(), "routed-test"));
+        var auditContext = new AuditContext();
+
+        var middleware = CreateMiddleware(c => { c.Response.StatusCode = 200; return Task.CompletedTask; });
+        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+
+        recorded.ShouldNotBeNull();
+        recorded.TargetTable.Length.ShouldBe(256);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_Unrouted401_UsesAggregatorOnly()
+    {
+        var aggregator = Substitute.For<IAuthFailureAggregator>();
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/nowhere";
+        var auditContext = new AuditContext();
+
+        var middleware = CreateMiddleware(c => { c.Response.StatusCode = 401; return Task.CompletedTask; }, aggregator);
+        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+
+        await aggregator.Received(1).RecordFailureAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>());
+        await _auditRepo.DidNotReceive().RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_UnroutedException_StillRecordsError()
+    {
+        AuditLogEntry? recorded = null;
+        _auditRepo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e => recorded = e), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/nowhere";
+        context.Response.StatusCode = 404;
+        var auditContext = new AuditContext();
+
+        var middleware = CreateMiddleware(_ => throw new InvalidOperationException("boom"));
+        await Should.ThrowAsync<InvalidOperationException>(() => middleware.InvokeAsync(context, _auditRepo, auditContext));
+
+        recorded.ShouldNotBeNull();
+        recorded.Decision.ShouldBe("ERROR");
+    }
 }

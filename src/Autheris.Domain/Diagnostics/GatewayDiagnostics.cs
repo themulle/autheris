@@ -16,6 +16,9 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> ForbiddenRequestsCounter =
         Meter.CreateCounter<long>("autheris_forbidden_requests_total", description: "Anzahl abgewiesener Anfragen (403/Forbidden)");
 
+    public static readonly Counter<long> UnroutedRequestCounter =
+        Meter.CreateCounter<long>("autheris_unrouted_requests_total", description: "Requests answered by the router without a matching endpoint (404/405/400); not written to the audit chain");
+
     public static readonly Counter<long> QueryTooComplexCounter =
         Meter.CreateCounter<long>("autheris_query_too_complex_total", description: "Number of requests rejected due to AST complexity");
 
