@@ -316,8 +316,11 @@ public sealed class AdminMcpTwoPhaseTests
     [Fact]
     public async Task AdminResolvePrincipal_FuzzySearch_ReturnsMatchingPrincipals()
     {
-        // Arrange
-        var service = _service;
+        // Arrange: the demo directory is only available on a Development host (SR-L-06 Part D)
+        var devEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        devEnv.EnvironmentName.Returns("Development");
+        var service = new AccessPlanningService(
+            _auditRepo, _tableRepo, _rebacStore, _totpService, _totpSecretStore, hostEnvironment: devEnv);
 
         // Act: search with fuzzy query "philipp"
         var result = await service.ResolvePrincipalAsync(new AdminResolvePrincipalRequest("philipp"), AdminSid);

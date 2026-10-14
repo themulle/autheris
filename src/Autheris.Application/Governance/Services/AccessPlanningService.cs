@@ -2,6 +2,7 @@ namespace Autheris.Application.Governance.Services;
 
 using System;
 using System.Collections.Concurrent;
+using System.Buffers.Text;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security;
@@ -21,6 +22,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Events;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -45,9 +47,13 @@ public class AccessPlanningService : IAccessPlanningService
     private readonly IDataOwnershipRepository? _dataOwnershipRepo;
     private readonly ILogger<AccessPlanningService> _logger;
     private readonly IGatewayEventBus? _eventBus;
+    private readonly AccessPlanOptions _planOptions;
+    private readonly TimeProvider _time;
+    private readonly bool _allowDemoDirectory;
+    private long _lastSweepTicks;
 
     private readonly ConcurrentDictionary<string, StoredPlan> _plans = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, bool> _consumedTokens = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _consumedTokens = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte[]> _inMemoryVault = new(StringComparer.OrdinalIgnoreCase);
 
     private sealed record StoredPlan(
@@ -89,7 +95,10 @@ public class AccessPlanningService : IAccessPlanningService
         IDataOwnershipRepository? dataOwnershipRepository = null,
         IOptions<GatewayOptions>? options = null,
         ILogger<AccessPlanningService>? logger = null,
-        IGatewayEventBus? eventBus = null)
+        IGatewayEventBus? eventBus = null,
+        IOptions<AccessPlanOptions>? planOptions = null,
+        IHostEnvironment? hostEnvironment = null,
+        TimeProvider? timeProvider = null)
     {
         _auditRepo = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
         _tableRepo = tableMetadataRepository ?? new NullTableMetadataRepository();
@@ -102,6 +111,10 @@ public class AccessPlanningService : IAccessPlanningService
         _dataOwnershipRepo = dataOwnershipRepository;
         _logger = logger ?? NullLogger<AccessPlanningService>.Instance;
         _eventBus = eventBus;
+        _planOptions = planOptions?.Value ?? new AccessPlanOptions();
+        _time = timeProvider ?? TimeProvider.System;
+        // SR-L-06 Part D: the demo directory is only exposed when the host is explicitly a Development host.
+        _allowDemoDirectory = hostEnvironment?.IsDevelopment() == true;
     }
 
     public async Task<AdminPlanAccessResult> PlanAccessAsync(
@@ -148,8 +161,19 @@ public class AccessPlanningService : IAccessPlanningService
             }
         }
 
+        var now = _time.GetUtcNow();
+        SweepExpired(force: false);
+
+        var pendingForAdmin = _plans.Values.Count(p =>
+            p.Result.ExpiresAt > now && string.Equals(p.AdminSid, adminSid, StringComparison.OrdinalIgnoreCase));
+        if (pendingForAdmin >= _planOptions.MaxPendingPlansPerAdmin)
+        {
+            throw new SecurityException(
+                $"Too many pending access plans for this administrator (limit {_planOptions.MaxPendingPlansPerAdmin}). Apply or wait for existing plans to expire.");
+        }
+
         var planId = $"plan_{Guid.NewGuid():N}";
-        var expiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
+        var expiresAt = now.AddMinutes(_planOptions.PlanTtlMinutes);
         var result = new AdminPlanAccessResult(planId, request.DatasetId, diffs, warnings, expiresAt);
 
         _plans[planId] = new StoredPlan(result, request, adminSid, TenantId: NormalizeTenant(tenantId));
@@ -179,7 +203,8 @@ public class AccessPlanningService : IAccessPlanningService
         ArgumentException.ThrowIfNullOrWhiteSpace(totpCode);
         ArgumentException.ThrowIfNullOrWhiteSpace(adminSid);
 
-        if (!_plans.TryGetValue(planId, out var stored) || stored.Result.ExpiresAt <= DateTimeOffset.UtcNow)
+        SweepExpired(force: false);
+        if (!_plans.TryGetValue(planId, out var stored) || stored.Result.ExpiresAt <= _time.GetUtcNow())
         {
             throw new SecurityException($"Plan '{planId}' does not exist or has expired.");
         }
@@ -206,7 +231,7 @@ public class AccessPlanningService : IAccessPlanningService
             throw new SecurityException("Invalid or already consumed TOTP verification code.");
         }
 
-        var tokenExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
+        var tokenExpiresAt = _time.GetUtcNow().AddMinutes(_planOptions.ConfirmationTokenTtlMinutes);
         var token = GenerateConfirmationToken(planId, adminSid, tokenExpiresAt);
 
         _plans[planId] = stored with { ConfirmedToken = token };
@@ -227,14 +252,28 @@ public class AccessPlanningService : IAccessPlanningService
             throw new SecurityException("Confirmation token is required to apply access changes (ADR-03).");
         }
 
+        SweepExpired(force: false);
         if (!_plans.TryGetValue(request.PlanId, out var stored))
         {
             throw new SecurityException($"Plan '{request.PlanId}' was not found.");
         }
 
-        if (stored.Result.ExpiresAt <= DateTimeOffset.UtcNow)
+        if (stored.Result.ExpiresAt <= _time.GetUtcNow())
         {
             throw new SecurityException($"Plan '{request.PlanId}' has expired.");
+        }
+
+        // SR-L-06: apply is bound to the confirming administrator and the planning tenant.
+        if (!string.Equals(stored.AdminSid, adminSid, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new SecurityException("Plan confirmation must be performed by the initiating administrator.");
+        }
+
+        var callerTenant = NormalizeTenant(tenantId);
+        if (stored.TenantId != null && callerTenant != null &&
+            !string.Equals(stored.TenantId, callerTenant, StringComparison.Ordinal))
+        {
+            throw new SecurityException("Plan belongs to a different tenant.");
         }
 
         if (string.IsNullOrWhiteSpace(stored.ConfirmedToken) ||
@@ -245,17 +284,17 @@ public class AccessPlanningService : IAccessPlanningService
             throw new SecurityException("Confirmation token does not match the confirmed plan token.");
         }
 
-        if (!ValidateConfirmationToken(request.ConfirmationToken, request.PlanId, out var tokenExpiry))
+        if (!ValidateConfirmationToken(request.ConfirmationToken, request.PlanId, adminSid, out var tokenExpiry))
         {
             throw new SecurityException("Invalid or malformed confirmation token.");
         }
 
-        if (tokenExpiry <= DateTimeOffset.UtcNow)
+        if (tokenExpiry <= _time.GetUtcNow())
         {
             throw new SecurityException("Confirmation token has expired.");
         }
 
-        if (!_consumedTokens.TryAdd(request.ConfirmationToken, true))
+        if (!_consumedTokens.TryAdd(request.ConfirmationToken, stored.Result.ExpiresAt))
         {
             throw new SecurityException("Confirmation token has already been consumed (replay prevention).");
         }
@@ -465,9 +504,12 @@ public class AccessPlanningService : IAccessPlanningService
         ArgumentNullException.ThrowIfNull(request);
         var query = request.Query.Trim();
 
-        var candidates = new List<PrincipalResolutionItem>(DefaultDirectory);
+        // SR-L-06 Part D: demo SIDs and the hard-coded sample table owner lookup exist only in Development.
+        var candidates = _allowDemoDirectory
+            ? new List<PrincipalResolutionItem>(DefaultDirectory)
+            : new List<PrincipalResolutionItem>();
 
-        if (_dataOwnershipRepo != null)
+        if (_allowDemoDirectory && _dataOwnershipRepo != null)
         {
             try
             {
@@ -504,45 +546,95 @@ public class AccessPlanningService : IAccessPlanningService
     public AdminPlanAccessResult? GetPlan(string planId) =>
         _plans.TryGetValue(planId, out var stored) ? stored.Result : null;
 
-    private static string GenerateConfirmationToken(string planId, string adminSid, DateTimeOffset expiresAt)
+    /// <summary>
+    /// Removes expired plans and the consumed-token entries that belong to them. Throttled by
+    /// <see cref="AccessPlanOptions.SweepIntervalSeconds"/> unless <paramref name="force"/> is set.
+    /// </summary>
+    internal void SweepExpired(bool force)
     {
-        var unix = expiresAt.ToUnixTimeSeconds();
-        var payload = $"{planId}:{adminSid}:{unix}";
-        var hash = HMACSHA256.HashData(HmacKey, Encoding.UTF8.GetBytes(payload));
-        return $"{payload}:{Convert.ToHexString(hash)}";
+        var now = _time.GetUtcNow();
+        var nowTicks = now.UtcTicks;
+        var last = Interlocked.Read(ref _lastSweepTicks);
+        if (!force && last != 0 && nowTicks - last < TimeSpan.FromSeconds(_planOptions.SweepIntervalSeconds).Ticks)
+        {
+            return;
+        }
+
+        Interlocked.Exchange(ref _lastSweepTicks, nowTicks);
+
+        foreach (var (id, plan) in _plans)
+        {
+            if (plan.Result.ExpiresAt <= now)
+            {
+                _plans.TryRemove(id, out _);
+            }
+        }
+
+        foreach (var (token, planExpiry) in _consumedTokens)
+        {
+            if (planExpiry <= now)
+            {
+                _consumedTokens.TryRemove(token, out _);
+            }
+        }
     }
 
-    private static bool ValidateConfirmationToken(string token, string expectedPlanId, out DateTimeOffset expiresAt)
+    internal int PlanCount => _plans.Count;
+
+    internal int ConsumedTokenCount => _consumedTokens.Count;
+
+    private static string B64(string value) => Base64Url.EncodeToString(Encoding.UTF8.GetBytes(value));
+
+    private static string Sign(string signedPart)
+        => Convert.ToHexString(HMACSHA256.HashData(HmacKey, Encoding.UTF8.GetBytes(signedPart)));
+
+    // Token layout: v1.{b64url(planId)}.{b64url(adminSid)}.{unix}.{hmac-hex}. Base64url never contains '.',
+    // so the encoding is unambiguous even when the SID contains ':' or other separators.
+    private static string GenerateConfirmationToken(string planId, string adminSid, DateTimeOffset expiresAt)
+    {
+        var signedPart = $"v1.{B64(planId)}.{B64(adminSid)}.{expiresAt.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        return $"{signedPart}.{Sign(signedPart)}";
+    }
+
+    private static bool ValidateConfirmationToken(string token, string expectedPlanId, string expectedAdminSid, out DateTimeOffset expiresAt)
     {
         expiresAt = DateTimeOffset.MinValue;
-        var lastColon = token.LastIndexOf(':');
-        if (lastColon <= 0 || lastColon == token.Length - 1) return false;
+        var parts = token.Split('.');
+        if (parts.Length != 5 || parts[0] != "v1") return false;
 
-        var payload = token[..lastColon];
-        var signatureHex = token[(lastColon + 1)..];
-
-        var secondLastColon = payload.LastIndexOf(':');
-        if (secondLastColon <= 0 || secondLastColon == payload.Length - 1) return false;
-
-        var unixStr = payload[(secondLastColon + 1)..];
-        if (!long.TryParse(unixStr, out var unix)) return false;
-
-        var firstColon = payload.IndexOf(':');
-        if (firstColon <= 0) return false;
-
-        var planId = payload[..firstColon];
-        if (!string.Equals(planId, expectedPlanId, StringComparison.OrdinalIgnoreCase)) return false;
-
-        var expectedHash = Convert.ToHexString(HMACSHA256.HashData(HmacKey, Encoding.UTF8.GetBytes(payload)));
-
+        var signedPart = string.Join('.', parts[0], parts[1], parts[2], parts[3]);
         if (!CryptographicOperations.FixedTimeEquals(
-            Encoding.UTF8.GetBytes(signatureHex),
-            Encoding.UTF8.GetBytes(expectedHash)))
+            Encoding.UTF8.GetBytes(parts[4]),
+            Encoding.UTF8.GetBytes(Sign(signedPart))))
         {
             return false;
         }
 
-        expiresAt = DateTimeOffset.FromUnixTimeSeconds(unix);
+        if (!long.TryParse(parts[3], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var unix)) return false;
+
+        string planId, adminSid;
+        try
+        {
+            planId = Encoding.UTF8.GetString(Base64Url.DecodeFromChars(parts[1]));
+            adminSid = Encoding.UTF8.GetString(Base64Url.DecodeFromChars(parts[2]));
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+
+        if (!string.Equals(planId, expectedPlanId, StringComparison.OrdinalIgnoreCase)) return false;
+        if (!string.Equals(adminSid, expectedAdminSid, StringComparison.OrdinalIgnoreCase)) return false;
+
+        try
+        {
+            expiresAt = DateTimeOffset.FromUnixTimeSeconds(unix);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return false;
+        }
+
         return true;
     }
 
