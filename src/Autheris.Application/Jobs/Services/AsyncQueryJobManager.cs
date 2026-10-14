@@ -14,7 +14,9 @@ using Autheris.Application.Jobs.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -26,13 +28,16 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
     private readonly IAuditLogRepository _auditLogRepository;
     private readonly ILogger<AsyncQueryJobManager> _logger;
     private readonly string _scratchDirectory;
+    private readonly IOptions<GatewayOptions>? _options;
 
     public AsyncQueryJobManager(
         IAuditLogRepository auditLogRepository,
         ILogger<AsyncQueryJobManager>? logger = null,
-        IHostEnvironment? environment = null)
+        IHostEnvironment? environment = null,
+        IOptions<GatewayOptions>? options = null)
     {
         ArgumentNullException.ThrowIfNull(auditLogRepository);
+        _options = options;
         _auditLogRepository = auditLogRepository;
         _logger = logger ?? NullLogger<AsyncQueryJobManager>.Instance;
 
@@ -96,11 +101,10 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
 
         _jobs[jobId] = descriptor;
 
+        // SR-H-05: row count and timeout are server-bounded; the client values only narrow them.
+        request = AsyncJobLimits.Normalize(request, _options?.Value);
         var cts = new CancellationTokenSource();
-        if (request.Timeout.HasValue && request.Timeout.Value > TimeSpan.Zero)
-        {
-            cts.CancelAfter(request.Timeout.Value);
-        }
+        cts.CancelAfter(request.Timeout!.Value);
         _activeCts[jobId] = cts;
 
         try
