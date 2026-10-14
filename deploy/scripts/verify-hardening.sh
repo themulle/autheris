@@ -92,6 +92,18 @@ else
     echo "--> helm not installed; skipping Helm render checks."
 fi
 
+# 8. Every container base image is pinned to a full patch tag plus digest (SEC2-08)
+echo "--> Checking base image pins..."
+while IFS= read -r line; do
+    file="${line%%:*}"
+    from="${line#*:}"
+    if ! grep -Eq '^FROM[[:space:]]+(--platform=[^[:space:]]+[[:space:]]+)?[^[:space:]@]+:[0-9]+\.[0-9]+\.[0-9]+[^@[:space:]]*@sha256:[0-9a-f]{64}' <<<"${from}"; then
+        echo "ERROR: ${file#"${REPO_ROOT}"/}: base image is not pinned to <major>.<minor>.<patch>@sha256: (${from})" >&2
+        FAILURES=$((FAILURES + 1))
+    fi
+done < <(grep -rEn --include='Dockerfile*' --include='Containerfile*' '^FROM[[:space:]]' "${REPO_ROOT}" \
+    --exclude-dir=.git --exclude-dir=bin --exclude-dir=obj --exclude-dir=node_modules | sed -E 's/^([^:]+):[0-9]+:/\1:/')
+
 if [ "$FAILURES" -gt 0 ]; then
     echo "❌ Container hardening verification FAILED with ${FAILURES} error(s)." >&2
     exit 1
