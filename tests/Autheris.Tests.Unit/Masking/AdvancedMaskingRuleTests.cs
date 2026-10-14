@@ -227,7 +227,8 @@ public class AdvancedMaskingRuleTests
         };
 
         var result = _provider.MaskValue("ssn", "123-45-6789", rule);
-        result.ShouldBe("1*****9");
+        // WP-ARC-B-04: one semantic with the SQL mask - a fixed-length partial mask reveals nothing, so it is the constant mask.
+        result.ShouldBe("*****");
 
         // When length <= prefix + suffix, it outputs exactly 5 mask chars
         var shortResult = _provider.MaskValue("ssn", "AB", rule);

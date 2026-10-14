@@ -605,6 +605,13 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IReadOnlyDictionary<string, object?>? parameters = null) =>
         InMemoryRowFilterEvaluator.FilterRows(rows, rowFilterSql, metadata, parameters);
 
+    /// <summary>WP-ARC-B-04: filters by the decision's typed row policy (text only for a decision without one).</summary>
+    public static List<IReadOnlyDictionary<string, object?>> FilterRows(
+        List<IReadOnlyDictionary<string, object?>> rows,
+        TableAccessDecision decision,
+        TableMetadata metadata) =>
+        InMemoryRowFilterEvaluator.FilterRows(rows, decision, metadata);
+
     internal static bool IsTypeStrictRowFilter(string normalizedSql, System.Data.DataTable table) =>
         InMemoryRowFilterEvaluator.IsTypeStrictRowFilter(normalizedSql, table);
 
