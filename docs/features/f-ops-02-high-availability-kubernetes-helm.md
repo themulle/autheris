@@ -105,9 +105,21 @@ lifecycle:
 monitoring:
   serviceMonitor:
     enabled: true
+    requireAuth: true        # production: render fails if auth.type is "none"
+    scheme: http             # or https together with tlsConfig
+    auth:
+      type: bearer           # bearer | mtls | none
+      tokenSecret:
+        name: autheris-metrics-scrape
+        key: token
+    tlsConfig: {}
   prometheusRule:
     enabled: true
 ```
+
+### Authenticated Metrics Scraping
+
+The gateway maps `/metrics` with `RequireAuthorization()`, so Prometheus must present credentials. The ServiceMonitor sends `Authorization: Bearer <token>` from the referenced Kubernetes Secret; the token must be accepted by the gateway's JWT bearer authentication. `mtls` renders the supplied `tlsConfig` verbatim. With `requireAuth: true` (set in `values.production.yaml`), `helm template` fails when `auth.type` is `none`. Annotation-based scraping (`prometheus.io/*`) is not configured, because it cannot carry credentials; the NetworkPolicy additionally restricts scrape peers.
 
 ---
 

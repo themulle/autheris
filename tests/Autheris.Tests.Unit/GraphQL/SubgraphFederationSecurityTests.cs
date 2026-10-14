@@ -599,3 +599,21 @@ public sealed class SubgraphFederationSecurityTests
             .Message.ShouldContain("Federation:SigningKey");
     }
 }
+
+[Trait("Category", "Security")]
+public sealed class SubgraphTimestampRangeTests
+{
+    [Theory]
+    [InlineData("9223372036854775807")]
+    [InlineData("-9223372036854775808")]
+    [InlineData("9999999999999999999")]
+    [InlineData("not-a-number")]
+    public void OutOfRangeTimestamp_ReturnsFalseWithoutThrowing(string timestamp)
+    {
+        var result = SubgraphSecurityValidator.ValidateSignature(
+            tenant: "t", userSid: "u", timestampStr: timestamp, nonce: "n", signature: "sig",
+            signingKey: "key-key-key-key-key-key-key-key-key", subgraph: "products");
+
+        result.ShouldBeFalse();
+    }
+}

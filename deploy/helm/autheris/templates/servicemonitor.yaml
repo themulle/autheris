@@ -1,4 +1,22 @@
 {{- if .Values.monitoring.serviceMonitor.enabled }}
+{{- $sm := .Values.monitoring.serviceMonitor }}
+{{- $auth := $sm.auth | default dict }}
+{{- $authType := $auth.type | default "none" }}
+{{- if not (has $authType (list "bearer" "mtls" "none")) }}
+{{- fail (printf "monitoring.serviceMonitor.auth.type must be one of bearer, mtls, none (got %q)" $authType) }}
+{{- end }}
+{{- if and $sm.requireAuth (eq $authType "none") }}
+{{- fail "monitoring.serviceMonitor.auth.type must be bearer or mtls when monitoring.serviceMonitor.requireAuth is true: /metrics must not be scraped unauthenticated" }}
+{{- end }}
+{{- if eq $authType "bearer" }}
+{{- $tokenSecret := $auth.tokenSecret | default dict }}
+{{- if not (and $tokenSecret.name $tokenSecret.key) }}
+{{- fail "monitoring.serviceMonitor.auth.tokenSecret.name and .key are required for bearer auth" }}
+{{- end }}
+{{- end }}
+{{- if and (eq $authType "mtls") (not $sm.tlsConfig) }}
+{{- fail "monitoring.serviceMonitor.tlsConfig is required for mtls auth" }}
+{{- end }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -12,6 +30,18 @@ spec:
   endpoints:
     - port: http
       path: /metrics
-      interval: {{ .Values.monitoring.serviceMonitor.interval | default "15s" }}
-      scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout | default "10s" }}
+      scheme: {{ $sm.scheme | default "http" }}
+      interval: {{ $sm.interval | default "15s" }}
+      scrapeTimeout: {{ $sm.scrapeTimeout | default "10s" }}
+      {{- if eq $authType "bearer" }}
+      authorization:
+        type: Bearer
+        credentials:
+          name: {{ $auth.tokenSecret.name | quote }}
+          key: {{ $auth.tokenSecret.key | quote }}
+      {{- end }}
+      {{- with $sm.tlsConfig }}
+      tlsConfig:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
 {{- end }}
