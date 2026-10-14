@@ -74,23 +74,113 @@ if grep -Eq '\$\{[A-Z_]+:-\$\{GATEWAY_HMAC_SECRET' "${REPO_ROOT}/deploy/podman-c
     FAILURES=$((FAILURES + 1))
 fi
 
-# 7. Helm: production render must fail without authenticated metrics scraping (SR-D-06)
+# 7. Helm: production render must fail without authenticated metrics scraping (SR-D-06) and without the required
+#    authentication / trusted-proxy / tenant-column settings (SEC2-09).
 if command -v helm >/dev/null 2>&1; then
-    echo "--> Checking Helm ServiceMonitor authentication..."
+    echo "--> Checking Helm production render guards..."
     CHART="${REPO_ROOT}/deploy/helm/autheris"
-    if helm template t "${CHART}" -f "${CHART}/values.production.yaml" --set image.digest=sha256:0 \
-        --set monitoring.serviceMonitor.auth.type=none >/dev/null 2>&1; then
-        echo "ERROR: production Helm render accepts an unauthenticated ServiceMonitor" >&2
+    BASE=(-f "${CHART}/values.production.yaml" --set image.digest=sha256:0)
+    ENTRA=(--set gateway.authentication.entraId.enabled=true
+           --set gateway.authentication.entraId.tenantId=tenant
+           --set gateway.authentication.entraId.clientId=client
+           --set gateway.authentication.entraId.audience=api://autheris)
+
+    render() { helm template t "${CHART}" "$@" 2>&1; }
+    # A negative render must fail for the expected reason (error message pattern), not for an unrelated template error.
+    expect_failure() {
+        local label="$1" pattern="$2"; shift 2
+        local out
+        if out="$(helm template t "${CHART}" "$@" 2>&1)"; then
+            echo "ERROR: production Helm render must fail: ${label}" >&2
+            FAILURES=$((FAILURES + 1))
+        elif ! grep -qE "${pattern}" <<<"${out}"; then
+            echo "ERROR: production Helm render failed for the wrong reason (${label}): ${out}" >&2
+            FAILURES=$((FAILURES + 1))
+        fi
+    }
+    expect_success() {
+        local label="$1"; shift
+        local out
+        if ! out="$(helm template t "${CHART}" "$@" 2>&1)"; then
+            echo "ERROR: production Helm render must succeed (${label}): ${out}" >&2
+            FAILURES=$((FAILURES + 1))
+        fi
+    }
+    FWD=(--set gateway.authentication.forwardAuth.enabled=true
+         --set 'gateway.authentication.forwardAuth.trustedProxies={10.1.2.3}'
+         --set 'gateway.authentication.forwardAuth.trustedNetworks={10.1.2.0/24}'
+         --set gateway.authentication.forwardAuth.sharedSecret.existingSecret=fwd-secret)
+
+    # Positive render: a fully configured production release renders and carries the authenticated ServiceMonitor.
+    if ! POSITIVE="$(render "${BASE[@]}" "${ENTRA[@]}")"; then
+        echo "ERROR: fully configured production Helm render failed: ${POSITIVE}" >&2
         FAILURES=$((FAILURES + 1))
+    else
+        grep -q "authorization:" <<<"${POSITIVE}" || { echo "ERROR: production Helm render has no authenticated ServiceMonitor" >&2; FAILURES=$((FAILURES + 1)); }
+        grep -q 'Gateway__DataSources__RequireTenantColumn: "true"' <<<"${POSITIVE}" || { echo "ERROR: production Helm render does not enable RequireTenantColumn" >&2; FAILURES=$((FAILURES + 1)); }
+        grep -q 'Gateway__Authentication__EntraId__Audience: "api://autheris"' <<<"${POSITIVE}" || { echo "ERROR: production Helm render does not carry the EntraId audience" >&2; FAILURES=$((FAILURES + 1)); }
     fi
-    if ! helm template t "${CHART}" -f "${CHART}/values.production.yaml" --set image.digest=sha256:0 2>/dev/null \
-        | grep -q "authorization:"; then
-        echo "ERROR: production Helm render has no authenticated ServiceMonitor" >&2
+
+    expect_failure "unauthenticated ServiceMonitor" "must be bearer or mtls" "${BASE[@]}" "${ENTRA[@]}" --set monitoring.serviceMonitor.auth.type=none
+    expect_failure "no authentication provider" "exactly one of" "${BASE[@]}"
+    expect_failure "two authentication providers" "exactly one of" "${BASE[@]}" "${ENTRA[@]}" \
+        --set gateway.authentication.adfs.enabled=true --set gateway.authentication.adfs.authority=https://adfs.example/adfs \
+        --set gateway.authentication.adfs.audience=api://autheris
+    for field in tenantId clientId audience; do
+        expect_failure "EntraId ${field} missing" "entraId.${field} is required" "${BASE[@]}" "${ENTRA[@]}" --set "gateway.authentication.entraId.${field}="
+    done
+    expect_failure "ADFS authority missing" "adfs.authority is required" "${BASE[@]}" --set gateway.authentication.adfs.enabled=true \
+        --set gateway.authentication.adfs.audience=api://autheris
+    expect_failure "ADFS audience missing" "adfs.audience is required" "${BASE[@]}" --set gateway.authentication.adfs.enabled=true \
+        --set gateway.authentication.adfs.authority=https://adfs.example/adfs
+    expect_failure "forwardAuth without trustedProxies" "trustedProxies must list" "${BASE[@]}" --set gateway.authentication.forwardAuth.enabled=true
+    expect_failure "forwardAuth with empty trustedNetworks" "trustedNetworks must be set explicitly" "${BASE[@]}" "${FWD[@]}" \
+        --set 'gateway.authentication.forwardAuth.trustedNetworks=null'
+    expect_failure "forwardAuth without shared secret" "sharedSecret.existingSecret" "${BASE[@]}" "${FWD[@]}" \
+        --set gateway.authentication.forwardAuth.sharedSecret.existingSecret=
+    expect_failure "RequireTenantColumn disabled without exemption" "requireTenantColumn must be true" "${BASE[@]}" "${ENTRA[@]}" \
+        --set gateway.dataSources.requireTenantColumn=false
+
+    expect_success "explicit RequireTenantColumn exemption" "${BASE[@]}" "${ENTRA[@]}" --set gateway.dataSources.requireTenantColumn=false \
+        --set gateway.dataSources.requireTenantColumnExemption=true
+    expect_success "kerberos only" "${BASE[@]}" --set gateway.authentication.kerberos.enabled=true
+    expect_success "adfs only" "${BASE[@]}" --set gateway.authentication.adfs.enabled=true \
+        --set gateway.authentication.adfs.authority=https://adfs.example/adfs --set gateway.authentication.adfs.audience=api://autheris
+    if ! FWDOUT="$(render "${BASE[@]}" "${FWD[@]}")"; then
+        echo "ERROR: forwardAuth with trusted proxies, networks and shared secret must render: ${FWDOUT}" >&2
+        FAILURES=$((FAILURES + 1))
+    elif ! grep -q 'ForwardAuth__TrustedProxies__0: "10.1.2.3"' <<<"${FWDOUT}" \
+        || ! grep -q 'ForwardAuth__TrustedNetworks__0: "10.1.2.0/24"' <<<"${FWDOUT}" \
+        || ! grep -q 'Gateway__Authentication__ForwardAuth__SharedSecret' <<<"${FWDOUT}"; then
+        echo "ERROR: forwardAuth render does not carry trusted proxies, networks and the shared secret reference" >&2
         FAILURES=$((FAILURES + 1))
     fi
 else
-    echo "--> helm not installed; skipping Helm render checks."
+    echo "--> helm not installed; skipping Helm render checks (CI job helm-render runs them)."
 fi
+
+# 7b. No benchmark connection string may trust the SQL Server certificate blindly (SR-D-08)
+echo "--> Checking TrustServerCertificate..."
+if grep -rniE "TrustServerCertificate=True" "${REPO_ROOT}/deploy" --exclude="verify-hardening.sh" --exclude-dir=certs >/dev/null; then
+    echo "ERROR: deploy/ contains TrustServerCertificate=True" >&2
+    FAILURES=$((FAILURES + 1))
+fi
+if ! sed -n '/^  reverse-proxy:/,/^  load-generator:/p' "${REPO_ROOT}/deploy/podman-compose.yaml" | grep -q "read_only: true"; then
+    echo "ERROR: podman-compose.yaml reverse-proxy does not use a read-only root filesystem" >&2
+    FAILURES=$((FAILURES + 1))
+fi
+
+# 8. Every container base image is pinned to a full patch tag plus digest (SEC2-08)
+echo "--> Checking base image pins..."
+while IFS= read -r line; do
+    file="${line%%:*}"
+    from="${line#*:}"
+    if ! grep -Eq '^FROM[[:space:]]+(--platform=[^[:space:]]+[[:space:]]+)?[^[:space:]@]+:[0-9]+\.[0-9]+\.[0-9]+[^@[:space:]]*@sha256:[0-9a-f]{64}' <<<"${from}"; then
+        echo "ERROR: ${file#"${REPO_ROOT}"/}: base image is not pinned to <major>.<minor>.<patch>@sha256: (${from})" >&2
+        FAILURES=$((FAILURES + 1))
+    fi
+done < <(grep -rEn --include='Dockerfile*' --include='Containerfile*' '^FROM[[:space:]]' "${REPO_ROOT}" \
+    --exclude-dir=.git --exclude-dir=bin --exclude-dir=obj --exclude-dir=node_modules | sed -E 's/^([^:]+):[0-9]+:/\1:/')
 
 if [ "$FAILURES" -gt 0 ]; then
     echo "❌ Container hardening verification FAILED with ${FAILURES} error(s)." >&2

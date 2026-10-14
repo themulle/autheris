@@ -2,19 +2,19 @@
 # Containerfile for reverse-proxy (Nginx ForwardAuth Proxy)
 # ==============================================================================
 
-FROM docker.io/library/nginx:alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
+FROM docker.io/library/nginx:1.31.6-alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
 
 RUN apk add --no-cache wget curl
 
 # Rendered with envsubst at start (official image templates feature) so the ForwardAuth shared
-# secret is injected at runtime instead of being committed. Output replaces /etc/nginx/nginx.conf.
-ENV NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx
+# secret is injected at runtime instead of being committed. The output goes to /tmp/nginx.conf (tmpfs) so the root
+# filesystem can be read-only.
+ENV NGINX_ENVSUBST_OUTPUT_DIR=/tmp
 COPY containers/reverse-proxy/nginx.conf /etc/nginx/templates/nginx.conf.template
 
-# SR-D-08: run as the unprivileged nginx user. Writable paths: rendered nginx.conf (envsubst output),
-# cache/temp dirs and the pid file.
-RUN touch /var/run/nginx.pid \
-    && chown -R nginx:nginx /etc/nginx /var/cache/nginx /var/run/nginx.pid
+# SR-D-08: run as the unprivileged nginx user with a read-only root filesystem (compose mounts tmpfs on
+# /var/cache/nginx, /var/run and /tmp: temp dirs, pid file and the rendered nginx.conf).
+RUN chown -R nginx:nginx /var/cache/nginx
 USER nginx
 
 EXPOSE 8080
@@ -22,4 +22,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=3s --timeout=3s --start-period=3s --retries=10 \
     CMD wget -q -O- http://127.0.0.1:8080/health/live || exit 1
 
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["nginx", "-c", "/tmp/nginx.conf", "-g", "daemon off;"]
