@@ -209,7 +209,8 @@ public class AccessPlanningService : IAccessPlanningService
     public async Task<AdminApplyAccessResult> ApplyAccessAsync(
         AdminApplyAccessRequest request,
         string adminSid,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? tenantId = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(adminSid);
@@ -253,16 +254,17 @@ public class AccessPlanningService : IAccessPlanningService
         }
 
         var tableId = ParseTableIdentifier(stored.Request.DatasetId);
-        var tenantId = !string.IsNullOrWhiteSpace(tableId.Domain) ? tableId.Domain : "default";
+        // SR-H-02: the caller's tenant scopes the ReBAC tuples and audit; the dataset domain is only the legacy fallback.
+        var effectiveTenantId = !string.IsNullOrWhiteSpace(tenantId) ? tenantId : !string.IsNullOrWhiteSpace(tableId.Domain) ? tableId.Domain : "default";
         var tuples = new List<RebacTuple>();
 
         foreach (var grant in stored.Request.Grants)
         {
-            tuples.Add(new RebacTuple(tenantId, $"user:{grant.Principal}", "can_query", $"table:{stored.Request.DatasetId}"));
+            tuples.Add(new RebacTuple(effectiveTenantId, $"user:{grant.Principal}", "can_query", $"table:{stored.Request.DatasetId}"));
 
             foreach (var (column, access) in grant.Columns)
             {
-                tuples.Add(new RebacTuple(tenantId, $"user:{grant.Principal}", $"access:{access}", $"column:{stored.Request.DatasetId}.{column}"));
+                tuples.Add(new RebacTuple(effectiveTenantId, $"user:{grant.Principal}", $"access:{access}", $"column:{stored.Request.DatasetId}.{column}"));
             }
         }
 
@@ -275,13 +277,13 @@ public class AccessPlanningService : IAccessPlanningService
 
         if (_policyEnforcement != null)
         {
-            await _policyEnforcement.ReloadPoliciesAsync(new TenantId(tenantId), ct).ConfigureAwait(false);
+            await _policyEnforcement.ReloadPoliciesAsync(new TenantId(effectiveTenantId), ct).ConfigureAwait(false);
         }
 
         var auditEntry = new AuditLogEntry
         {
             Id = Guid.NewGuid(),
-            TenantId = new TenantId(tenantId),
+            TenantId = new TenantId(effectiveTenantId),
             OccurredAt = DateTimeOffset.UtcNow,
             EventType = "ADMIN_APPLY_ACCESS",
             ActorSid = new Sid(adminSid),
@@ -318,7 +320,8 @@ public class AccessPlanningService : IAccessPlanningService
     public async Task<AdminRegisterDatasourceResult> RegisterDatasourceAsync(
         AdminRegisterDatasourceRequest request,
         string adminSid,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? tenantId = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(adminSid);
@@ -339,7 +342,7 @@ public class AccessPlanningService : IAccessPlanningService
         var auditEntry = new AuditLogEntry
         {
             Id = Guid.NewGuid(),
-            TenantId = TenantId.LegacySingleTenant,
+            TenantId = !string.IsNullOrWhiteSpace(tenantId) ? new TenantId(tenantId) : TenantId.LegacySingleTenant,
             OccurredAt = DateTimeOffset.UtcNow,
             EventType = "ADMIN_REGISTER_DATASOURCE",
             ActorSid = new Sid(adminSid),
@@ -374,7 +377,8 @@ public class AccessPlanningService : IAccessPlanningService
     public async Task<AdminSetDatasetStateResult> SetDatasetStateAsync(
         AdminSetDatasetStateRequest request,
         string adminSid,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? tenantId = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(adminSid);
@@ -407,7 +411,7 @@ public class AccessPlanningService : IAccessPlanningService
         var auditEntry = new AuditLogEntry
         {
             Id = Guid.NewGuid(),
-            TenantId = TenantId.LegacySingleTenant,
+            TenantId = !string.IsNullOrWhiteSpace(tenantId) ? new TenantId(tenantId) : TenantId.LegacySingleTenant,
             OccurredAt = DateTimeOffset.UtcNow,
             EventType = "ADMIN_SET_DATASET_STATE",
             ActorSid = new Sid(adminSid),

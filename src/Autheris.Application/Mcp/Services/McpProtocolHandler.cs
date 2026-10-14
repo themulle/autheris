@@ -163,12 +163,8 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
     {
         var tools = _toolRegistry.GetAvailableTools();
 
-        var roles = session.Roles ?? [];
-        bool isAdmin = _options.IsMcpAuthBypassed ||
-                       roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) ||
-                       roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase) ||
-                       roles.Contains("TenantAdmin", StringComparer.OrdinalIgnoreCase) ||
-                       roles.Contains("Admin", StringComparer.OrdinalIgnoreCase);
+        // SR-H-02: admin tools are listed for the canonical cluster admin only (and never for read-only sessions).
+        bool isAdmin = McpAdminTools.CanUseAdminTools(session, _options.IsMcpAuthBypassed);
 
         if (!isAdmin)
         {

@@ -66,12 +66,8 @@ public static class GatewayMcpServer
         var session = Caller(context.Services!);
         var options = context.Services!.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value;
 
-        var roles = session.Roles ?? [];
-        bool isAdmin = options.IsMcpAuthBypassed ||
-                       roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) ||
-                       roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase) ||
-                       roles.Contains("TenantAdmin", StringComparer.OrdinalIgnoreCase) ||
-                       roles.Contains("Admin", StringComparer.OrdinalIgnoreCase);
+        // SR-H-02: admin tools are listed for the canonical cluster admin only (and never for read-only sessions).
+        bool isAdmin = McpAdminTools.CanUseAdminTools(session, options.IsMcpAuthBypassed);
 
         var available = registry.GetAvailableTools();
         if (!isAdmin)

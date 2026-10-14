@@ -45,6 +45,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
     private readonly IDocSearchService? _docSearchService;
     private readonly IUniversalDocStore? _docStore;
     private readonly IGatewayEventBus? _eventBus;
+    private readonly TrinoSqlEngine.ISqlEngine? _sqlEngine;
 
     private static readonly TimeSpan DefaultRegexTimeout = TimeSpan.FromMilliseconds(250);
 
@@ -80,8 +81,9 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         IAccessPlanningService? accessPlanningService = null,
         IDocSearchService? docSearchService = null,
         IUniversalDocStore? docStore = null,
-        IGatewayEventBus? eventBus = null)
-        : this(toolRegistry, options, logger, Autheris.Application.Audit.NullAuditLogRepository.Instance, queryExecutor, policyEnforcementService, tableMetadataRepository, sessionStore, promptGuardrail, goldenQueryService, stepUpApprovalService, graphQlCatalogMap, consentRepository, accessPlanningService, docSearchService, docStore, eventBus)
+        IGatewayEventBus? eventBus = null,
+        TrinoSqlEngine.ISqlEngine? sqlEngine = null)
+        : this(toolRegistry, options, logger, Autheris.Application.Audit.NullAuditLogRepository.Instance, queryExecutor, policyEnforcementService, tableMetadataRepository, sessionStore, promptGuardrail, goldenQueryService, stepUpApprovalService, graphQlCatalogMap, consentRepository, accessPlanningService, docSearchService, docStore, eventBus, sqlEngine)
     {
     }
 
@@ -102,7 +104,8 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         IAccessPlanningService? accessPlanningService = null,
         IDocSearchService? docSearchService = null,
         IUniversalDocStore? docStore = null,
-        IGatewayEventBus? eventBus = null)
+        IGatewayEventBus? eventBus = null,
+        TrinoSqlEngine.ISqlEngine? sqlEngine = null)
     {
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -121,6 +124,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         _docSearchService = docSearchService;
         _docStore = docStore;
         _eventBus = eventBus;
+        _sqlEngine = sqlEngine;
     }
 
 
@@ -230,12 +234,10 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         // Administrative MCP Tools Execution (Track E, ADR-03, ADR-05, R-60..R-64)
         if (McpAdminTools.IsAdminTool(tool.Name))
         {
-            var roles = sessionContext.Roles ?? [];
-            bool isAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) ||
-                           roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase) ||
-                           roles.Contains("TenantAdmin", StringComparer.OrdinalIgnoreCase);
+            // SR-H-02 / SR-M-09: cluster admin only (admin tools are not tenant scoped); read-only sessions never qualify.
+            bool isAdmin = McpAdminTools.CanUseAdminTools(sessionContext, _options.Value.IsMcpAuthBypassed);
 
-            if (!isAdmin && !_options.Value.IsMcpAuthBypassed)
+            if (!isAdmin)
             {
                 activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
                 McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
@@ -244,7 +246,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
                     tool.Name,
                     sessionContext,
                     decision: "DENY",
-                    details: $"Tool execution denied: Admin tool '{tool.Name}' requires GovernanceAdmin or ClusterAdmin role.",
+                    details: $"Tool execution denied: Admin tool '{tool.Name}' requires the ClusterAdmin role (and a read/write session).",
                     isMasked: false,
                     truncated: false,
                     estimatedTokens: 0,
@@ -253,7 +255,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
                 return new McpToolCallResult(
                     IsSuccess: false,
                     ContentJson: "{}",
-                    ErrorMessage: $"Access denied: Tool '{tool.Name}' requires administrative role (GovernanceAdmin / ClusterAdmin)."
+                    ErrorMessage: $"Access denied: Tool '{tool.Name}' requires the ClusterAdmin role (and a read/write session)."
                 );
             }
 
@@ -307,7 +309,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         // Resolve real TargetTable for ABAC policy and Four-Eyes checks
         var resolvedTables = string.Equals(tool.Name, McpDatasetTools.QueryGraphQl, StringComparison.OrdinalIgnoreCase)
             ? await ResolveGraphQlTablesAsync(request.ArgumentsJson, cancellationToken).ConfigureAwait(false)
-            : ParseTablesFromTool(tool, request.ArgumentsJson);
+            : ParseTablesFromTool(tool, request.ArgumentsJson, _sqlEngine, _options.Value.WebSql?.DefaultDataSourceName);
 
         // 4b.4: For dataset tools requiring a dataset argument, validate argument before fail-closed ABAC.
         if (string.Equals(tool.Name, McpDatasetTools.DescribeDataset, StringComparison.OrdinalIgnoreCase) ||
@@ -828,8 +830,25 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
     /// determined reliably. Curated operations are analysed via the GraphQL AST (root fields and literal
     /// <c>table(domain, name)</c> arguments), never via a guessed first root field.
     /// </summary>
-    internal static IReadOnlyList<TableIdentifier>? ParseTablesFromTool(McpToolDefinition tool, string? argumentsJson = null)
+    internal static IReadOnlyList<TableIdentifier>? ParseTablesFromTool(
+        McpToolDefinition tool,
+        string? argumentsJson = null,
+        TrinoSqlEngine.ISqlEngine? sqlEngine = null,
+        string? defaultDataSourceName = null)
     {
+        // SR-H-01: query_sql / invoke_api read every table of the SQL text / API path, resolved by the real SQL parser.
+        if (string.Equals(tool.Name, McpDatasetTools.QuerySql, StringComparison.OrdinalIgnoreCase))
+        {
+            return McpDataTargetResolver.ResolveSqlTables(
+                McpDatasetTools.TryGetStringArgument(argumentsJson, "query", out var sql) ? sql : null,
+                sqlEngine, defaultDataSourceName);
+        }
+
+        if (string.Equals(tool.Name, McpDatasetTools.InvokeApi, StringComparison.OrdinalIgnoreCase))
+        {
+            return McpDataTargetResolver.ResolveInvokeApiTables(argumentsJson, sqlEngine, defaultDataSourceName);
+        }
+
         if (tool.TargetTable == null && !string.IsNullOrWhiteSpace(tool.TargetGraphQLOperation) &&
             !IsBuiltInTableTool(tool.Name))
         {
