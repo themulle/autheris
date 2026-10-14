@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Caching.Services;
+using Autheris.Application.Consent;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Domain.Common;
@@ -569,7 +570,7 @@ public sealed class SecurityReview20261002GraphQLTests
         var accessor = new IsolatedHttpContextAccessor(new DefaultHttpContext { User = CreatePrincipal("S-1-5-21-ENUM") });
 
         var ex = await Should.ThrowAsync<GraphQLException>(async () =>
-            await new Mutation().RequestTableAccessAsync("hr", "dbo", "secret_probe_table", "Business need for analysis", 7, null, metadata, approvals, accessor));
+            await new Mutation().RequestTableAccessAsync("hr", "dbo", "secret_probe_table", "Business need for analysis", 7, null, new ConsentRequestService(metadata, approvals), accessor));
 
         ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN");
         ex.Errors.ShouldNotContain(e => e.Code == "NOT_FOUND");
