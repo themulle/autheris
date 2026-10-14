@@ -15,6 +15,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Casbin;
 using Casbin.Model;
+using Autheris.Application.Governance.Caching;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
@@ -128,7 +129,7 @@ public sealed class CasbinEnforcementService : IPolicyEnforcementService, IDispo
     private readonly bool _modelSupportsWildcardTenant;
 
     private sealed record CachedDecision(TableAccessDecision Decision, long CreatedTimestampTicks);
-    private readonly ConcurrentDictionary<string, CachedDecision> _decisionCache = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<DecisionKey, CachedDecision> _decisionCache = new();
     private static readonly TimeSpan DecisionCacheTtl = TimeSpan.FromSeconds(60);
     private readonly ConcurrentDictionary<string, string> _tenantPolicyFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, FileSystemWatcher> _fileWatchers = new(StringComparer.OrdinalIgnoreCase);
@@ -701,16 +702,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         var requestedAction = ResolveRequestedAction(context);
 
         var tableStr = context.TargetTable.ToString();
-        var groupsStr = context.GroupSids != null && context.GroupSids.Count > 0
-            ? string.Join(",", context.GroupSids.Select(g => g.Value).OrderBy(s => s, StringComparer.Ordinal))
-            : string.Empty;
-        var attrsStr = context.Attributes != null && context.Attributes.Count > 0
-            ? string.Join(";", context.Attributes.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => $"{kv.Key}={kv.Value}"))
-            : string.Empty;
-        var colsStr = context.RequestedColumns != null && context.RequestedColumns.Count > 0
-            ? string.Join(",", context.RequestedColumns.OrderBy(c => c, StringComparer.OrdinalIgnoreCase))
-            : string.Empty;
-        var cacheKey = $"{snapshot.Epoch}:{context.Tenant.Value}:{context.UserSid.Value}:{tableStr}:{requestedAction}:{context.PurposeId}:{context.Department}:{context.Region}:{context.ClearanceLevel}:{context.ClientIp}:G[{groupsStr}]:A[{attrsStr}]:C[{colsStr}]";
+        var cacheKey = DecisionKey.Create(snapshot.Epoch, context, requestedAction);
 
         if (_decisionCache.TryGetValue(cacheKey, out var cachedEntry))
         {
