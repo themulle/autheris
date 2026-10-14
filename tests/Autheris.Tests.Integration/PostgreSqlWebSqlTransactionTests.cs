@@ -21,7 +21,6 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Npgsql;
 using Shouldly;
-using Testcontainers.PostgreSql;
 using Xunit;
 
 /// <summary>
@@ -34,17 +33,21 @@ public sealed class PostgreSqlWebSqlTransactionTests : IAsyncLifetime
     private const string Tenant = "tenant_test_pg";
     private static readonly TableIdentifier TableId = new("finance", "public", "active_invoices");
 
-    private PostgreSqlContainer? _container;
+    private PostgreSqlTestDatabase? _db;
     private bool _available;
 
     public async Task InitializeAsync()
     {
         try
         {
-            _container = new PostgreSqlBuilder("postgres:16-alpine").Build();
-            await _container.StartAsync();
+            _db = await PostgreSqlTestDatabase.CreateAsync();
+            if (!_db.IsAvailable)
+            {
+                return;
+            }
 
-            await using var conn = new NpgsqlConnection(_container.GetConnectionString());
+
+            await using var conn = new NpgsqlConnection(_db.ConnectionString);
             await conn.OpenAsync();
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = """
@@ -74,9 +77,9 @@ public sealed class PostgreSqlWebSqlTransactionTests : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        if (_container != null)
+        if (_db != null)
         {
-            await _container.DisposeAsync();
+            await _db.DisposeAsync();
         }
     }
 
@@ -97,7 +100,7 @@ public sealed class PostgreSqlWebSqlTransactionTests : IAsyncLifetime
             builder.UseSetting("Gateway:WebSql:Enabled", "true");
             builder.UseSetting("Gateway:WebSql:DefaultDataSourceName", "finance");
             builder.UseSetting("Gateway:DataSources:Connections:finance:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:DataSources:Connections:finance:ConnectionString", _container!.GetConnectionString());
+            builder.UseSetting("Gateway:DataSources:Connections:finance:ConnectionString", _db!.ConnectionString);
             builder.UseSetting("Gateway:DataSources:Connections:finance:DefaultSchema", "public");
         });
 

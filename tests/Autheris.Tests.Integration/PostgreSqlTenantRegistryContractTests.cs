@@ -18,15 +18,19 @@ using Xunit;
 /// <summary>CR-ADG-31 / WP-X0p: the tenant registry contract on real PostgreSql. Needs Docker; without it each test returns early.</summary>
 public sealed class PostgreSqlTenantRegistryContractTests : IAsyncLifetime
 {
-    private Testcontainers.PostgreSql.PostgreSqlContainer? _container;
+    private PostgreSqlTestDatabase? _db;
     private bool _available;
 
     public async Task InitializeAsync()
     {
         try
         {
-            _container = new Testcontainers.PostgreSql.PostgreSqlBuilder("postgres:16-alpine").Build();
-            await _container.StartAsync();
+            _db = await PostgreSqlTestDatabase.CreateAsync();
+            if (!_db.IsAvailable)
+            {
+                return;
+            }
+
             _available = true;
         }
         catch (Exception ex)
@@ -38,9 +42,9 @@ public sealed class PostgreSqlTenantRegistryContractTests : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        if (_container != null)
+        if (_db != null)
         {
-            await _container.DisposeAsync();
+            await _db.DisposeAsync();
         }
     }
 
@@ -50,7 +54,7 @@ public sealed class PostgreSqlTenantRegistryContractTests : IAsyncLifetime
         env.EnvironmentName.Returns("Development");
         return GovernanceStoreFactory.CreatePostgreSql(Substitute.For<IEpochValidationService>(), Options.Create(new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = _container!.GetConnectionString(), EnableOutboxProcessor = false, SeedDemoData = false }
+            GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = _db!.ConnectionString, EnableOutboxProcessor = false, SeedDemoData = false }
         }), env);
     }
 

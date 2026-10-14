@@ -15,7 +15,6 @@ using Autheris.Infrastructure.Persistence;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using Shouldly;
-using Testcontainers.PostgreSql;
 using Xunit;
 
 /// <summary>
@@ -24,15 +23,19 @@ using Xunit;
 /// </summary>
 public sealed class PostgreSqlRowScopeContractTests : IAsyncLifetime
 {
-    private PostgreSqlContainer? _container;
+    private PostgreSqlTestDatabase? _db;
     private bool _available;
 
     public async Task InitializeAsync()
     {
         try
         {
-            _container = new PostgreSqlBuilder("postgres:16-alpine").Build();
-            await _container.StartAsync();
+            _db = await PostgreSqlTestDatabase.CreateAsync();
+            if (!_db.IsAvailable)
+            {
+                return;
+            }
+
             _available = true;
         }
         catch (Exception ex)
@@ -42,7 +45,7 @@ public sealed class PostgreSqlRowScopeContractTests : IAsyncLifetime
             return;
         }
 
-        await using var conn = new NpgsqlConnection(_container.GetConnectionString());
+        await using var conn = new NpgsqlConnection(_db.ConnectionString);
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
@@ -58,9 +61,9 @@ INSERT INTO md.client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
 
     public async Task DisposeAsync()
     {
-        if (_container != null)
+        if (_db != null)
         {
-            await _container.DisposeAsync();
+            await _db.DisposeAsync();
         }
     }
 
@@ -72,7 +75,7 @@ INSERT INTO md.client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>
                 {
-                    ["erp"] = new() { Provider = "PostgreSql", ConnectionString = _container!.GetConnectionString(), DefaultSchema = "public" }
+                    ["erp"] = new() { Provider = "PostgreSql", ConnectionString = _db!.ConnectionString, DefaultSchema = "public" }
                 }
             }
         }));
