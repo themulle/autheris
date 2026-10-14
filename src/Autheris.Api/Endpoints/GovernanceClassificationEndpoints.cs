@@ -68,12 +68,42 @@ public static class GovernanceClassificationEndpoints
         }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ClassificationProposed);
 
         // 2. Submit Approval / Review Transition (1-Stage or 2-Stage SoD)
+        // SR-H-04: the proposal is loaded by ID from the store and the reviewer identity/role are derived from the
+        // authenticated principal. The proposal, ReviewerSid and ReviewerRole in the payload are ignored.
         app.MapPost("/api/governance/classification/transition", async (
             TableClassificationTransitionPayload payload,
+            HttpContext httpContext,
+            IClassificationProposalStore store,
             IClassificationWorkflowStateMachine stateMachine,
             CancellationToken ct) =>
         {
-            var result = await stateMachine.TransitionAsync(payload.Proposal, payload.Request, ct).ConfigureAwait(false);
+            if (payload?.Request == null)
+            {
+                return Results.BadRequest(new { error = "A transition request is required." });
+            }
+
+            var proposal = await store.GetProposalByIdAsync(payload.Request.ProposalId, ct).ConfigureAwait(false);
+            if (proposal == null)
+            {
+                return Results.NotFound(new { error = $"Proposal with ID '{payload.Request.ProposalId}' was not found." });
+            }
+
+            var denied = TryResolveReviewer(httpContext.User, out var reviewerSid, out var reviewerRole);
+            if (denied != null)
+            {
+                return denied;
+            }
+
+            var request = payload.Request with
+            {
+                ProposalId = proposal.ProposalId,
+                TableIdentifier = proposal.TableIdentifier,
+                ReviewerSid = reviewerSid,
+                ReviewerRole = reviewerRole,
+                ColumnDecisions = payload.Request.ColumnDecisions ?? Array.Empty<ColumnClassificationDecision>()
+            };
+
+            var result = await stateMachine.TransitionAsync(proposal, request, ct).ConfigureAwait(false);
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);
         }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ClassificationTransitioned);
 
@@ -114,38 +144,11 @@ public static class GovernanceClassificationEndpoints
                 return Results.NotFound(new { error = $"Proposal with ID '{proposalId}' was not found." });
             }
 
-            var callerSid = httpContext.User.GetUserSid();
-            if (callerSid == null || string.IsNullOrWhiteSpace(callerSid.Value.Value))
+            var denied = TryResolveReviewer(httpContext.User, out var reviewerSid, out var reviewerRole);
+            if (denied != null)
             {
-                return Results.Unauthorized();
+                return denied;
             }
-
-            string? resolvedRole = null;
-            if (httpContext.User.IsInRole("ComplianceReviewer") || httpContext.User.IsInRole("ComplianceOfficer"))
-            {
-                resolvedRole = "DATA_GOVERNANCE_REVIEWER";
-            }
-            else if (httpContext.User.IsInRole("DataOwner") || EndpointSecurity.IsGlobalGovernanceAdmin(httpContext.User))
-            {
-                resolvedRole = "DATA_OWNER";
-            }
-
-            if (resolvedRole == null)
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            if (resolvedRole == "DATA_OWNER" && !EndpointSecurity.IsGlobalGovernanceAdmin(httpContext.User))
-            {
-                if (!string.IsNullOrWhiteSpace(proposal.DataOwnerSid) &&
-                    !string.Equals(proposal.DataOwnerSid, callerSid.Value.Value, StringComparison.OrdinalIgnoreCase))
-                {
-                    return Results.StatusCode(StatusCodes.Status403Forbidden);
-                }
-            }
-
-            var reviewerSid = callerSid.Value;
-            var reviewerRole = resolvedRole;
 
             var request = new TableClassificationApprovalRequest(
                 proposal.ProposalId,
@@ -177,38 +180,11 @@ public static class GovernanceClassificationEndpoints
                 return Results.NotFound(new { error = $"Proposal with ID '{proposalId}' was not found." });
             }
 
-            var callerSid = httpContext.User.GetUserSid();
-            if (callerSid == null || string.IsNullOrWhiteSpace(callerSid.Value.Value))
+            var denied = TryResolveReviewer(httpContext.User, out var reviewerSid, out var reviewerRole);
+            if (denied != null)
             {
-                return Results.Unauthorized();
+                return denied;
             }
-
-            string? resolvedRole = null;
-            if (httpContext.User.IsInRole("ComplianceReviewer") || httpContext.User.IsInRole("ComplianceOfficer"))
-            {
-                resolvedRole = "DATA_GOVERNANCE_REVIEWER";
-            }
-            else if (httpContext.User.IsInRole("DataOwner") || EndpointSecurity.IsGlobalGovernanceAdmin(httpContext.User))
-            {
-                resolvedRole = "DATA_OWNER";
-            }
-
-            if (resolvedRole == null)
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            if (resolvedRole == "DATA_OWNER" && !EndpointSecurity.IsGlobalGovernanceAdmin(httpContext.User))
-            {
-                if (!string.IsNullOrWhiteSpace(proposal.DataOwnerSid) &&
-                    !string.Equals(proposal.DataOwnerSid, callerSid.Value.Value, StringComparison.OrdinalIgnoreCase))
-                {
-                    return Results.StatusCode(StatusCodes.Status403Forbidden);
-                }
-            }
-
-            var reviewerSid = callerSid.Value;
-            var reviewerRole = resolvedRole;
 
             var request = new TableClassificationApprovalRequest(
                 proposal.ProposalId,
@@ -251,6 +227,39 @@ public static class GovernanceClassificationEndpoints
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.GovernanceConfigHashRead);
 
         return app;
+    }
+
+    /// <summary>
+    /// SR-H-04: derives the reviewer identity and workflow role exclusively from the authenticated principal.
+    /// Returns a failure result (401/403) when the caller cannot act as a reviewer; the data-owner match and the
+    /// stage preconditions are enforced by the workflow state machine.
+    /// </summary>
+    private static IResult? TryResolveReviewer(ClaimsPrincipal user, out Sid reviewerSid, out string reviewerRole)
+    {
+        reviewerSid = default;
+        reviewerRole = string.Empty;
+
+        var callerSid = user.GetUserSid();
+        if (callerSid == null || string.IsNullOrWhiteSpace(callerSid.Value.Value))
+        {
+            return Results.Unauthorized();
+        }
+
+        if (user.IsInRole("ComplianceReviewer") || user.IsInRole("ComplianceOfficer"))
+        {
+            reviewerRole = "DATA_GOVERNANCE_REVIEWER";
+        }
+        else if (user.IsInRole("DataOwner") || EndpointSecurity.IsGlobalGovernanceAdmin(user))
+        {
+            reviewerRole = "DATA_OWNER";
+        }
+        else
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        reviewerSid = callerSid.Value;
+        return null;
     }
 }
 

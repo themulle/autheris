@@ -106,7 +106,8 @@ public sealed record TableClassificationProposal(
     string? DataOwnerSid,
     string Status, // "UNCLASSIFIED", "PENDING_OWNER_REVIEW", "PENDING_GOVERNANCE_REVIEW", "CLASSIFIED", "REJECTED"
     IReadOnlyList<ColumnClassificationProposal> Columns,
-    DateTimeOffset CreatedAtUtc);
+    DateTimeOffset CreatedAtUtc,
+    string? Stage1ApproverSid = null); // SR-H-04: server-recorded stage-1 approver; stage 2 must be a distinct identity.
 
 /// <summary>
 /// Column-level human approval or override decision.

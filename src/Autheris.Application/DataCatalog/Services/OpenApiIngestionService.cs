@@ -68,6 +68,18 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
         return await IngestOpenApiJsonAsync(openApiJson, domain, defaultBaseUrl, auth: null, dryRun: false, ct: ct).ConfigureAwait(false);
     }
 
+    // SR-H-03: a raw secret always gets a server-generated reference in the "datasource:" namespace (the client-supplied
+    // SecretRef is ignored); a reference without raw secret must already live in that namespace.
+    private static string ResolveDatasourceSecretRef(DatasourceAuthDto auth, string? rawSecret, string domain, string kind)
+    {
+        if (string.IsNullOrEmpty(rawSecret) && !string.IsNullOrWhiteSpace(auth.SecretRef))
+        {
+            return Autheris.Application.Security.DatasourceSecretNamespace.RequireNamespaced(auth.SecretRef);
+        }
+
+        return Autheris.Application.Security.DatasourceSecretNamespace.Build(domain, kind, Guid.NewGuid().ToString("N"));
+    }
+
     public async Task<OpenApiIngestionResult> IngestOpenApiJsonAsync(
         string openApiJson,
         string domain,
@@ -197,7 +209,7 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
             {
                 effectiveAuthMode = HttpAuthMode.StaticApiKey;
                 apiKeyHeaderName = auth.Name ?? "X-API-KEY";
-                apiKeySecretName = auth.SecretRef ?? $"datasource:{domain}:apikey:{Guid.NewGuid():N}";
+                apiKeySecretName = ResolveDatasourceSecretRef(auth, auth.Value, domain, "apikey");
 
                 if (!dryRun && !string.IsNullOrEmpty(auth.Value) && _secretProvider != null)
                 {
@@ -209,7 +221,7 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
             {
                 effectiveAuthMode = HttpAuthMode.ClientCredentials;
                 apiKeyHeaderName = "Authorization";
-                apiKeySecretName = auth.SecretRef ?? $"datasource:{domain}:bearer:{Guid.NewGuid():N}";
+                apiKeySecretName = ResolveDatasourceSecretRef(auth, auth.Value ?? auth.ClientSecret, domain, "bearer");
 
                 var secretVal = auth.Value ?? auth.ClientSecret;
                 if (!dryRun && !string.IsNullOrEmpty(secretVal) && _secretProvider != null)
@@ -220,7 +232,7 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
             else if (string.Equals(auth.Type, "oauth2", StringComparison.OrdinalIgnoreCase))
             {
                 effectiveAuthMode = HttpAuthMode.ClientCredentials;
-                apiKeySecretName = auth.SecretRef ?? $"datasource:{domain}:oauth2:{Guid.NewGuid():N}";
+                apiKeySecretName = ResolveDatasourceSecretRef(auth, auth.ClientSecret ?? auth.Value, domain, "oauth2");
 
                 var secretVal = auth.ClientSecret ?? auth.Value;
                 if (!dryRun && !string.IsNullOrEmpty(secretVal) && _secretProvider != null)

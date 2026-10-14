@@ -247,7 +247,12 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
                 !string.IsNullOrWhiteSpace(endpoint.ApiKeyHeaderName) &&
                 !string.IsNullOrWhiteSpace(endpoint.ApiKeySecretName))
             {
-                if (_secretProvider != null)
+                if (!Autheris.Application.Security.DatasourceSecretNamespace.IsNamespaced(endpoint.ApiKeySecretName))
+                {
+                    // SR-H-03: never resolve arbitrary configuration keys / env vars / files for a datasource probe.
+                    secretStatus = "SecretRefOutsideDatasourceNamespace";
+                }
+                else if (_secretProvider != null)
                 {
                     try
                     {

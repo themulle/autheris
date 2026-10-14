@@ -36,6 +36,15 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(secretRef);
         ArgumentNullException.ThrowIfNull(secretBytes);
+
+        // SR-H-03: the in-memory override is checked first on read, so it must never shadow configured secrets.
+        if (!Autheris.Application.Security.DatasourceSecretNamespace.IsNamespaced(secretRef))
+        {
+            throw new ArgumentException(
+                $"Security error: Runtime secrets may only be written to the '{Autheris.Application.Security.DatasourceSecretNamespace.Prefix}' namespace.",
+                nameof(secretRef));
+        }
+
         _inMemorySecrets[secretRef] = secretBytes;
     }
 

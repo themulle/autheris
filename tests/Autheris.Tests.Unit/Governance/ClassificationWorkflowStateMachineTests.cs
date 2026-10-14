@@ -2,13 +2,16 @@ namespace Autheris.Tests.Unit.Governance;
 
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Services;
+using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -58,9 +61,18 @@ public sealed class ClassificationWorkflowStateMachineTests
     public async Task TransitionAsync_RequiresStepUpMfa_ForHighSensitivityRank()
     {
         var options = new GatewayOptions { Classification = new ClassificationOptions() };
+
+        // SR-H-04: the step-up token is verified as a TOTP (fail closed without a verification service).
+        var totp = Substitute.For<ITotpVerificationService>();
+        var secrets = Substitute.For<ITotpSecretStore>();
+        secrets.GetSecretAsync("owner@corp.local", Arg.Any<CancellationToken>()).Returns("JBSWY3DPEHPK3PXP");
+        totp.VerifyAndConsumeTotpAsync("owner@corp.local", "JBSWY3DPEHPK3PXP", "valid-mfa-token-12345", Arg.Any<CancellationToken>()).Returns(true);
+
         var stateMachine = new ClassificationWorkflowStateMachine(
             new TestOptionsMonitor<GatewayOptions>(options),
-            NullLogger<ClassificationWorkflowStateMachine>.Instance);
+            NullLogger<ClassificationWorkflowStateMachine>.Instance,
+            totpService: totp,
+            totpSecretStore: secrets);
 
         var proposal = new TableClassificationProposal(
             Guid.NewGuid(),
@@ -157,7 +169,9 @@ public sealed class ClassificationWorkflowStateMachineTests
                 new("iban", "ACCEPT_PROPOSAL", "L3_CONFIDENTIAL", 3, "IBAN_STANDARD_4_4")
             });
 
-        var reviewerResult = await stateMachine.TransitionAsync(proposal, reviewerRequest);
+        // SR-H-04: stage 2 operates on the proposal as advanced by stage 1 (status + recorded stage-1 approver).
+        var stage2Proposal = proposal with { Status = "PENDING_GOVERNANCE_REVIEW", Stage1ApproverSid = "owner@corp.local" };
+        var reviewerResult = await stateMachine.TransitionAsync(stage2Proposal, reviewerRequest);
         reviewerResult.Success.ShouldBeTrue();
         reviewerResult.NewStatus.ShouldBe("CLASSIFIED");
     }

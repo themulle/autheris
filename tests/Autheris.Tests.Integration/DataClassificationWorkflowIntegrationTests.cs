@@ -142,13 +142,18 @@ public class DataClassificationWorkflowIntegrationTests : IClassFixture<WebAppli
     [Fact]
     public async Task WorkflowTransition_HighSensitivity_EnforcesStepUpMfaAndTwoStageFourEyes()
     {
-        var client = CreateClient(new Sid("S-1-5-21-DATA-OWNER-ALICE"), ["DATA_OWNER"]);
+        // SR-H-04: proposal comes from the server-side store; reviewer identity and role come from the principal.
+        const string aliceSid = "S-1-5-21-DATA-OWNER-ALICE";
+        const string claraSid = "S-1-5-21-COMPLIANCE-OFFICER-CLARA";
+        var aliceClient = CreateClient(new Sid(aliceSid), ["GovernanceAdmin", "DataOwner"]);
+        var aliceAsReviewerClient = CreateClient(new Sid(aliceSid), ["GovernanceAdmin", "ComplianceReviewer"]);
+        var claraClient = CreateClient(new Sid(claraSid), ["GovernanceAdmin", "ComplianceReviewer"]);
 
         var proposal = new TableClassificationProposal(
             ProposalId: Guid.NewGuid(),
             TableIdentifier: new TableIdentifier("finance", "payroll", "salaries"),
             Status: "PENDING_OWNER_REVIEW",
-            DataOwnerSid: "S-1-5-21-DATA-OWNER-ALICE",
+            DataOwnerSid: aliceSid,
             Columns:
             [
                 new ColumnClassificationProposal("salary_amount", "BIGINT", "CONFIDENTIAL", 4, null, "REDACT_FULL", 0.99, false),
@@ -156,12 +161,23 @@ public class DataClassificationWorkflowIntegrationTests : IClassFixture<WebAppli
             ],
             CreatedAtUtc: DateTimeOffset.UtcNow);
 
-        // 1. Attempt approval without Step-Up MFA -> Must fail
+        var store = _factory.Services.GetRequiredService<IClassificationProposalStore>();
+        await store.SaveProposalAsync(proposal);
+
+        // Real TOTP secrets for both reviewers (the step-up token is verified, not just checked for presence).
+        var totpSecrets = _factory.Services.GetRequiredService<Autheris.Application.Security.Totp.Interfaces.ITotpSecretStore>();
+        var totp = _factory.Services.GetRequiredService<Autheris.Application.Security.Totp.Interfaces.ITotpVerificationService>();
+        var aliceSecret = totp.GenerateEnrollment(aliceSid, "alice@corp.local").SecretBase32;
+        var claraSecret = totp.GenerateEnrollment(claraSid, "clara@corp.local").SecretBase32;
+        await totpSecrets.SetSecretAsync(aliceSid, aliceSecret);
+        await totpSecrets.SetSecretAsync(claraSid, claraSecret);
+
+        // The reviewer identity / role in the body are ignored; they are set to forged values on purpose.
         var reqNoMfa = new TableClassificationApprovalRequest(
             proposal.ProposalId,
             proposal.TableIdentifier,
-            new Sid("S-1-5-21-DATA-OWNER-ALICE"),
-            "DATA_OWNER",
+            new Sid("S-1-5-21-FORGED"),
+            "DATA_GOVERNANCE_REVIEWER",
             "APPROVE",
             [
                 new ColumnClassificationDecision("salary_amount", "ACCEPT_PROPOSAL", "CONFIDENTIAL", 4, "REDACT_FULL", "Approved"),
@@ -169,8 +185,8 @@ public class DataClassificationWorkflowIntegrationTests : IClassFixture<WebAppli
             ],
             StepUpAuthToken: null);
 
-        var payloadNoMfa = new TableClassificationTransitionPayload(proposal, reqNoMfa);
-        var respNoMfa = await client.PostAsJsonAsync("/api/governance/classification/transition", payloadNoMfa);
+        // 1. Attempt approval without Step-Up MFA -> Must fail
+        var respNoMfa = await aliceClient.PostAsJsonAsync("/api/governance/classification/transition", new TableClassificationTransitionPayload(proposal, reqNoMfa));
         respNoMfa.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
 
         var resultNoMfa = await respNoMfa.Content.ReadFromJsonAsync<TableClassificationApprovalResult>();
@@ -179,10 +195,9 @@ public class DataClassificationWorkflowIntegrationTests : IClassFixture<WebAppli
         resultNoMfa.ErrorCode.ShouldBe("STEP_UP_AUTH_REQUIRED");
         resultNoMfa.RequiresStepUpAuth.ShouldBeTrue();
 
-        // 2. Submit Stage 1 approval with valid MFA token
-        var reqStage1 = reqNoMfa with { StepUpAuthToken = "MFA_TOTP_TOKEN_123456" };
-        var payloadStage1 = new TableClassificationTransitionPayload(proposal, reqStage1);
-        var respStage1 = await client.PostAsJsonAsync("/api/governance/classification/transition", payloadStage1);
+        // 2. Stage 1 approval with a valid TOTP -> Must succeed and be recorded server-side
+        var reqStage1 = reqNoMfa with { StepUpAuthToken = totp.GenerateTotpCode(aliceSecret) };
+        var respStage1 = await aliceClient.PostAsJsonAsync("/api/governance/classification/transition", new TableClassificationTransitionPayload(proposal, reqStage1));
         respStage1.StatusCode.ShouldBe(HttpStatusCode.OK);
 
         var resultStage1 = await respStage1.Content.ReadFromJsonAsync<TableClassificationApprovalResult>();
@@ -191,15 +206,12 @@ public class DataClassificationWorkflowIntegrationTests : IClassFixture<WebAppli
         resultStage1.NewStatus.ShouldBe("PENDING_GOVERNANCE_REVIEW");
         resultStage1.RequiresSecondStage.ShouldBeTrue();
 
-        // 3. Attempt Stage 2 approval by the SAME Data Owner (SoD violation) -> Must fail
-        var reqStage2SameUser = reqStage1 with
-        {
-            ReviewerSid = new Sid("S-1-5-21-DATA-OWNER-ALICE"),
-            ReviewerRole = "DATA_GOVERNANCE_REVIEWER"
-        };
-        var proposalPendingGov = proposal with { Status = "PENDING_GOVERNANCE_REVIEW" };
-        var payloadStage2SameUser = new TableClassificationTransitionPayload(proposalPendingGov, reqStage2SameUser);
-        var respStage2SameUser = await client.PostAsJsonAsync("/api/governance/classification/transition", payloadStage2SameUser);
+        var afterStage1 = await store.GetProposalByIdAsync(proposal.ProposalId);
+        afterStage1.ShouldNotBeNull();
+        afterStage1.Stage1ApproverSid.ShouldBe(aliceSid);
+
+        // 3. Stage 2 by the SAME identity (now acting as reviewer) -> SoD violation
+        var respStage2SameUser = await aliceAsReviewerClient.PostAsJsonAsync("/api/governance/classification/transition", new TableClassificationTransitionPayload(proposal, reqStage1));
         respStage2SameUser.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
 
         var resultStage2SameUser = await respStage2SameUser.Content.ReadFromJsonAsync<TableClassificationApprovalResult>();
@@ -207,20 +219,19 @@ public class DataClassificationWorkflowIntegrationTests : IClassFixture<WebAppli
         resultStage2SameUser.Success.ShouldBeFalse();
         resultStage2SameUser.ErrorCode.ShouldBe("SOD_ANTI_SELF_APPROVAL_VIOLATION");
 
-        // 4. Submit Stage 2 approval by distinct Governance Compliance Reviewer -> Must succeed
-        var reqStage2Distinct = reqStage1 with
-        {
-            ReviewerSid = new Sid("S-1-5-21-COMPLIANCE-OFFICER-CLARA"),
-            ReviewerRole = "DATA_GOVERNANCE_REVIEWER"
-        };
-        var payloadStage2Distinct = new TableClassificationTransitionPayload(proposalPendingGov, reqStage2Distinct);
-        var respStage2Distinct = await client.PostAsJsonAsync("/api/governance/classification/transition", payloadStage2Distinct);
+        // 4. Stage 2 by a distinct reviewer with a valid TOTP -> Must succeed
+        var reqStage2 = reqStage1 with { StepUpAuthToken = totp.GenerateTotpCode(claraSecret) };
+        var respStage2Distinct = await claraClient.PostAsJsonAsync("/api/governance/classification/transition", new TableClassificationTransitionPayload(proposal, reqStage2));
         respStage2Distinct.StatusCode.ShouldBe(HttpStatusCode.OK);
 
         var resultStage2Distinct = await respStage2Distinct.Content.ReadFromJsonAsync<TableClassificationApprovalResult>();
         resultStage2Distinct.ShouldNotBeNull();
         resultStage2Distinct.Success.ShouldBeTrue();
         resultStage2Distinct.NewStatus.ShouldBe("CLASSIFIED");
+
+        // 5. A finalized proposal cannot be transitioned again
+        var respAgain = await claraClient.PostAsJsonAsync("/api/governance/classification/transition", new TableClassificationTransitionPayload(proposal, reqStage2));
+        respAgain.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
 
     [Fact]

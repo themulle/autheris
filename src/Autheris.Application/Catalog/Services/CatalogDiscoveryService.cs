@@ -330,6 +330,14 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             throw new ArgumentException("Either SpecContent or SpecUrl must be provided.", nameof(request));
         }
 
+        // SR-H-03: fail closed on a client-supplied reference outside the datasource namespace (no raw secret supplied).
+        if (request.Auth != null &&
+            string.IsNullOrEmpty(request.Auth.Value) && string.IsNullOrEmpty(request.Auth.ClientSecret) &&
+            !string.IsNullOrEmpty(request.Auth.SecretRef))
+        {
+            Autheris.Application.Security.DatasourceSecretNamespace.RequireNamespaced(request.Auth.SecretRef);
+        }
+
         var isConfigured = request.Auth != null &&
             (!string.IsNullOrEmpty(request.Auth.Value) ||
              !string.IsNullOrEmpty(request.Auth.ClientSecret) ||
@@ -342,7 +350,9 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             var rawSecret = request.Auth.Value ?? request.Auth.ClientSecret;
             if (!string.IsNullOrEmpty(rawSecret))
             {
-                var secretRef = request.Auth.SecretRef ?? $"datasource:{request.Domain}:{request.Name.ToLowerInvariant()}:secret";
+                // SR-H-03: the vault key is always server-generated; a client-supplied SecretRef is ignored when a raw secret is given.
+                var secretRef = Autheris.Application.Security.DatasourceSecretNamespace.Build(
+                    context.TenantId.ToString(), request.Domain, request.Name, "secret");
                 _secretProvider.SetSecret(secretRef, System.Text.Encoding.UTF8.GetBytes(rawSecret));
                 effectiveAuth = request.Auth with { SecretRef = secretRef, Value = null, ClientSecret = null };
             }
