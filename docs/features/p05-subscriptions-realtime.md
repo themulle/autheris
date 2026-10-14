@@ -21,6 +21,7 @@ Real-time subscriptions in enterprise applications present a severe security ris
 
 ## 3. Architecture & Capabilities
 
+- Token revocation watch (WebSocket sessions and SSE/multipart streams): the revocation store is re-checked periodically. A revoked token ends the session immediately. If the revocation status cannot be verified (store unavailable or unexpected error) the session is terminated after `Gateway:Subscriptions:RevocationCheckMaxConsecutiveFailures` consecutive failures (default `3`; a successful check resets the counter). `Gateway:Subscriptions:RevocationCheckFailClosed` (default `true`) can be set to `false` to only log check failures.
 - Authenticated WebSocket connection initialization (`connection_init`) via JWT Bearer or session cookie.
 - Dynamic Casbin ABAC evaluation on each individual event in the stream.
 - Per-subscriber column masking applied to event payloads before serialization.

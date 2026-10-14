@@ -575,6 +575,10 @@ public static class GatewayServiceCollectionExtensions
             sp.GetService<ILogger<CatalogGraphQlTypeModule>>(),
             TimeSpan.FromSeconds(gatewayOptions.GraphQL.CatalogSchemaRefreshSeconds)));
         services.AddSingleton<ISocketTokenValidator, JwtSocketTokenValidator>();
+        services.AddOptions<RevocationWatchOptions>()
+            .BindConfiguration(RevocationWatchOptions.SectionName)
+            .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<RevocationWatchOptions>, RevocationWatchOptionsValidator>();
         services.AddSingleton<WebSocketAuthInterceptor>();
 
         var gqlBuilder = services
