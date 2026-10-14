@@ -129,10 +129,10 @@ public sealed class WebhookDispatcherServiceTests
     [InlineData(0, 1)]
     [InlineData(-5, 1)]
     [InlineData(3, 3)]
-    [InlineData(int.MaxValue, WebhookSubscription.MaxAllowedRetries)]
-    public void SR_M_13_MaxRetries_IsClamped(int configured, int expected)
+    [InlineData(int.MaxValue, WebhookSubscription.MaxAllowedAttempts)]
+    public void SR_M_13_MaxAttempts_IsClamped(int configured, int expected)
     {
-        new WebhookSubscription { MaxRetries = configured }.EffectiveMaxRetries.ShouldBe(expected);
+        new WebhookSubscription { MaxAttempts = configured }.EffectiveMaxAttempts.ShouldBe(expected);
     }
 
     [Fact]
@@ -157,7 +157,7 @@ public sealed class WebhookDispatcherServiceTests
                         EventFilters = ["governance.*"],
                         Secret = "secret-key-456",
                         IsClusterWide = true,
-                        MaxRetries = 1
+                        MaxAttempts = 1
                     }
                 ]
             }

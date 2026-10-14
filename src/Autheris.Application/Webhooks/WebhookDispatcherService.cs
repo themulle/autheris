@@ -89,7 +89,7 @@ public sealed class WebhookDispatcherService : IWebhookDispatcherService
         CancellationToken ct)
     {
         var timestamp = WebhookSignature.FormatTimestamp(DateTimeOffset.UtcNow);
-        var maxRetries = subscription.EffectiveMaxRetries;
+        var maxRetries = subscription.EffectiveMaxAttempts;
 
         if (!Uri.TryCreate(subscription.TargetUrl, UriKind.Absolute, out var targetUri))
         {

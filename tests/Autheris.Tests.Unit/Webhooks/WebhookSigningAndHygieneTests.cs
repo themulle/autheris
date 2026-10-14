@@ -144,7 +144,7 @@ public sealed class WebhookSigningAndHygieneTests
                 RequireSecret = requireSecret,
                 Subscriptions =
                 [
-                    new WebhookSubscription { Id = "s1", TargetUrl = url, Secret = secret, IsClusterWide = true, MaxRetries = 1 }
+                    new WebhookSubscription { Id = "s1", TargetUrl = url, Secret = secret, IsClusterWide = true, MaxAttempts = 1 }
                 ]
             }
         });
