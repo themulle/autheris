@@ -55,7 +55,7 @@ public sealed class SubgraphResultMaskingMiddleware
             var principal = httpContext?.User;
             var doc = context.OperationDocumentInfo?.Document;
             var aliasMap = ExtractAliasToFieldMap(doc);
-            var maskedObj = masker.MaskResultData(originalData.Value, principal, aliasMap);
+            var maskedObj = await masker.MaskResultDataAsync(originalData.Value, principal, aliasMap, context.RequestAborted).ConfigureAwait(false);
 
             if (maskedObj != null)
             {
@@ -123,9 +123,17 @@ public sealed class SubgraphResultMaskingMiddleware
                 if (hasAlias)
                 {
                     // The same path can be produced by different type conditions (unions/interfaces); keep a sensitive target.
-                    if (!map.TryGetValue(path, out var existing) || !SubgraphResultMasker.IsSensitiveField(existing))
+                    // SR-L-12: when neither target is name-sensitive, catalog/config classification (resolved later by the masker)
+                    // may still apply to either, so all candidates are kept ('|' cannot occur in GraphQL names) and masked if any matches.
+                    if (!map.TryGetValue(path, out var existing))
                     {
                         map[path] = field.Name.Value;
+                    }
+                    else if (!SubgraphResultMasker.IsSensitiveField(existing))
+                    {
+                        map[path] = SubgraphResultMasker.IsSensitiveField(field.Name.Value)
+                            ? field.Name.Value
+                            : SubgraphResultMasker.MergeAliasTargets(existing, field.Name.Value);
                     }
                 }
 
