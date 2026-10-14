@@ -20,7 +20,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
-public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
+public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
 {
     private readonly Channel<AsyncJobExecutionItem> _channel;
     private readonly ConcurrentDictionary<string, AsyncJobDescriptor> _jobs = new();
@@ -54,13 +54,21 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
         Directory.CreateDirectory(_scratchDirectory);
     }
 
-    public ChannelReader<AsyncJobExecutionItem> ChannelReader => _channel.Reader;
+    public ChannelReader<AsyncJobExecutionItem> Reader => _channel.Reader;
     public string ScratchDirectory => _scratchDirectory;
 
+    /// <summary>Unconditionally stores a descriptor (seeding and tests); the worker uses <see cref="TryTransitionAsync"/>.</summary>
     public void UpdateJob(AsyncJobDescriptor descriptor)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         _jobs[descriptor.JobId] = descriptor;
+    }
+
+    public ValueTask<bool> TryTransitionAsync(AsyncJobDescriptor next, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(next);
+        _jobs[next.JobId] = next;
+        return ValueTask.FromResult(true);
     }
 
     public async Task<AsyncJobDescriptor> SubmitJobAsync(

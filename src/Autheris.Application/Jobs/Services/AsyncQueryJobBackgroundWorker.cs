@@ -23,6 +23,7 @@ using Microsoft.Extensions.Options;
 public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
 {
     private readonly IAsyncQueryJobManager _jobManager;
+    private readonly IAsyncJobQueue _queue;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IAuditLogRepository _auditLogRepository;
     private readonly ILogger<AsyncQueryJobBackgroundWorker> _logger;
@@ -30,6 +31,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
 
     public AsyncQueryJobBackgroundWorker(
         IAsyncQueryJobManager jobManager,
+        IAsyncJobQueue queue,
         IServiceScopeFactory scopeFactory,
         IAuditLogRepository auditLogRepository,
         ILogger<AsyncQueryJobBackgroundWorker>? logger = null,
@@ -37,9 +39,11 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
     {
         _options = options;
         ArgumentNullException.ThrowIfNull(jobManager);
+        ArgumentNullException.ThrowIfNull(queue);
         ArgumentNullException.ThrowIfNull(scopeFactory);
         ArgumentNullException.ThrowIfNull(auditLogRepository);
         _jobManager = jobManager;
+        _queue = queue;
         _scopeFactory = scopeFactory;
         _auditLogRepository = auditLogRepository;
         _logger = logger ?? NullLogger<AsyncQueryJobBackgroundWorker>.Instance;
@@ -47,21 +51,15 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (_jobManager is not AsyncQueryJobManager concreteManager)
-        {
-            _logger.LogWarning("AsyncQueryJobBackgroundWorker requires concrete AsyncQueryJobManager. Worker exiting.");
-            return;
-        }
-
         _logger.LogInformation("AsyncQueryJobBackgroundWorker started.");
 
-        var purgeTask = RunPurgeLoopAsync(concreteManager, stoppingToken);
+        var purgeTask = RunPurgeLoopAsync(stoppingToken);
 
         try
         {
-            await foreach (var item in concreteManager.ChannelReader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
+            await foreach (var item in _queue.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
             {
-                await ProcessJobItemAsync(concreteManager, item, stoppingToken).ConfigureAwait(false);
+                await ProcessJobItemAsync(item, stoppingToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -77,7 +75,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
     }
 
     /// <summary>SR-M-21: periodically removes finished jobs and their result files after the retention period.</summary>
-    private async Task RunPurgeLoopAsync(AsyncQueryJobManager manager, CancellationToken stoppingToken)
+    private async Task RunPurgeLoopAsync(CancellationToken stoppingToken)
     {
         var interval = TimeSpan.FromMinutes(Math.Max(1, (_options?.Value?.AsyncJobs ?? new AsyncJobOptions()).PurgeIntervalMinutes));
         try
@@ -85,7 +83,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
             using var timer = new PeriodicTimer(interval);
             while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
             {
-                await PurgeOnceAsync(manager, stoppingToken).ConfigureAwait(false);
+                await PurgeOnceAsync(stoppingToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -93,12 +91,12 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         }
     }
 
-    internal async Task PurgeOnceAsync(AsyncQueryJobManager manager, CancellationToken ct)
+    internal async Task PurgeOnceAsync(CancellationToken ct)
     {
         var retention = TimeSpan.FromHours(Math.Max(0, (_options?.Value?.AsyncJobs ?? new AsyncJobOptions()).RetentionHours));
         try
         {
-            await manager.PurgeExpiredJobsAsync(retention, ct).ConfigureAwait(false);
+            await _jobManager.PurgeExpiredJobsAsync(retention, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -107,7 +105,6 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
     }
 
     private async Task ProcessJobItemAsync(
-        AsyncQueryJobManager manager,
         AsyncJobExecutionItem item,
         CancellationToken stoppingToken)
     {
@@ -117,7 +114,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
             State = AsyncJobState.Running,
             StartedAt = startedAt
         };
-        manager.UpdateJob(runningJob);
+        await _queue.TryTransitionAsync(runningJob, stoppingToken).ConfigureAwait(false);
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, item.Cts.Token);
 
@@ -142,7 +139,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
                 linkedCts.Token).ConfigureAwait(false);
 
             // Persist output to scratch directory (Pre-Storage DDM & RLS applied by GovernedSqlExecutionService)
-            var tenantDir = Path.Combine(manager.ScratchDirectory, item.Job.TenantId);
+            var tenantDir = Path.Combine(_queue.ScratchDirectory, item.Job.TenantId);
             Directory.CreateDirectory(tenantDir);
 
             var ext = item.Job.Format.Equals("csv", StringComparison.OrdinalIgnoreCase) ? "csv" : "json";
@@ -166,7 +163,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
                 RowsProduced = result.RowCount,
                 BytesProduced = fileInfo.Length
             };
-            manager.UpdateJob(completed);
+            await _queue.TryTransitionAsync(completed, stoppingToken).ConfigureAwait(false);
 
             await RecordAuditAsync(completed, item.User, AuditEventTypes.AsyncJobCompleted, "ALLOW", "Job completed successfully.", stoppingToken).ConfigureAwait(false);
         }
@@ -179,7 +176,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
                 CompletedAt = DateTimeOffset.UtcNow,
                 ErrorMessage = "Job execution cancelled or timed out."
             };
-            manager.UpdateJob(cancelled);
+            await _queue.TryTransitionAsync(cancelled, stoppingToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -191,7 +188,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
                 CompletedAt = DateTimeOffset.UtcNow,
                 ErrorMessage = sanitized
             };
-            manager.UpdateJob(failed);
+            await _queue.TryTransitionAsync(failed, stoppingToken).ConfigureAwait(false);
             _logger.LogError(ex, "Failed to execute async query job {JobId}", item.Job.JobId);
         }
     }

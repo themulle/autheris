@@ -58,7 +58,7 @@ public sealed class AsyncJobSr_H_05Tests : IDisposable
             .Returns(Task.FromResult(new GovernedSqlResult("s", ["id"], new List<IReadOnlyDictionary<string, object?>>(), 0, 1)));
         var services = new ServiceCollection();
         services.AddScoped(_ => sql);
-        var worker = new AsyncQueryJobBackgroundWorker(manager, services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _audit, NullLogger<AsyncQueryJobBackgroundWorker>.Instance, options);
+        var worker = new AsyncQueryJobBackgroundWorker(manager, manager, services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _audit, NullLogger<AsyncQueryJobBackgroundWorker>.Instance, options);
         var d = await manager.SubmitJobAsync(request, User(), new TenantId("t"));
         await worker.StartAsync(CancellationToken.None);
         for (int i = 0; i < 100 && captured is null; i++) await Task.Delay(50);
@@ -109,7 +109,7 @@ public sealed class AsyncJobSr_H_05Tests : IDisposable
         var manager = new AsyncQueryJobManager(_audit, environment: _env, options: options);
         var services = new ServiceCollection();
         services.AddScoped(_ => sql);
-        var worker = new AsyncQueryJobBackgroundWorker(manager, services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _audit, NullLogger<AsyncQueryJobBackgroundWorker>.Instance, options);
+        var worker = new AsyncQueryJobBackgroundWorker(manager, manager, services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _audit, NullLogger<AsyncQueryJobBackgroundWorker>.Instance, options);
 
         var request = new AsyncQueryJobRequest("SELECT 1", MaxRows: int.MaxValue, Timeout: TimeSpan.FromDays(30));
         var descriptor = new AsyncJobDescriptor("j1", "t", "alice", "SELECT 1", "json", AsyncJobState.Queued, DateTimeOffset.UtcNow);
@@ -133,7 +133,7 @@ public sealed class AsyncJobSr_H_05Tests : IDisposable
 
         await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1", MaxRows: int.MaxValue, Timeout: TimeSpan.FromDays(365)), User(), new TenantId("t"));
 
-        manager.ChannelReader.TryRead(out var item).ShouldBeTrue();
+        manager.Reader.TryRead(out var item).ShouldBeTrue();
         item!.Request.Timeout.ShouldBe(TimeSpan.FromSeconds(60));
         item.Request.MaxRows.ShouldBe(500);
     }
@@ -146,7 +146,7 @@ public sealed class AsyncJobSr_H_05Tests : IDisposable
 
         await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1", Timeout: timeout), User(), new TenantId("t"));
 
-        manager.ChannelReader.TryRead(out var item).ShouldBeTrue();
+        manager.Reader.TryRead(out var item).ShouldBeTrue();
         item!.Request.Timeout.ShouldBe(TimeSpan.FromSeconds(20));
     }
 
@@ -164,7 +164,7 @@ public sealed class AsyncJobSr_H_05Tests : IDisposable
 
         await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1", Timeout: TimeSpan.FromSeconds(5)), User(), new TenantId("t"));
 
-        manager.ChannelReader.TryRead(out var item).ShouldBeTrue();
+        manager.Reader.TryRead(out var item).ShouldBeTrue();
         item!.Request.Timeout.ShouldBe(TimeSpan.FromSeconds(5));
     }
 
@@ -173,11 +173,11 @@ public sealed class AsyncJobSr_H_05Tests : IDisposable
     {
         var manager = new AsyncQueryJobManager(_audit, environment: _env, options: Opts(purgeMinutes: 1));
         var options = Options.Create(new GatewayOptions { AsyncJobs = new AsyncJobOptions { PurgeIntervalMinutes = 1, RetentionHours = 0 } });
-        var worker = new AsyncQueryJobBackgroundWorker(manager, new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _audit, NullLogger<AsyncQueryJobBackgroundWorker>.Instance, options);
+        var worker = new AsyncQueryJobBackgroundWorker(manager, manager, new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _audit, NullLogger<AsyncQueryJobBackgroundWorker>.Instance, options);
         var d = new AsyncJobDescriptor("old", "t", "alice", "q", "json", AsyncJobState.Completed, DateTimeOffset.UtcNow.AddHours(-2), CompletedAt: DateTimeOffset.UtcNow.AddHours(-2));
         manager.UpdateJob(d);
 
-        await worker.PurgeOnceAsync(manager, CancellationToken.None);
+        await worker.PurgeOnceAsync(CancellationToken.None);
 
         (await manager.GetJobAsync("old", new TenantId("t"), "alice")).ShouldBeNull();
     }

@@ -182,7 +182,7 @@ public sealed class AsyncQueryJobManagerTests : IDisposable
         var services = new ServiceCollection();
         services.AddScoped(_ => sqlService);
         var scopeFactory = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
-        var worker = new AsyncQueryJobBackgroundWorker(manager, scopeFactory, _auditLogRepo, logger: NullLogger<AsyncQueryJobBackgroundWorker>.Instance);
+        var worker = new AsyncQueryJobBackgroundWorker(manager, manager, scopeFactory, _auditLogRepo, logger: NullLogger<AsyncQueryJobBackgroundWorker>.Instance);
         var descriptor = await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELEC 1", Format: "json"), CreateUser("alice"), new TenantId("tenant-a"));
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -260,6 +260,7 @@ public sealed class AsyncQueryJobManagerTests : IDisposable
         var scopeFactory = serviceProvider.GetRequiredService<IServiceScopeFactory>();
 
         var worker = new AsyncQueryJobBackgroundWorker(
+            manager,
             manager,
             scopeFactory,
             _auditLogRepo,

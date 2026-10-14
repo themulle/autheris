@@ -261,7 +261,7 @@ public sealed class SqlErrorSurfacesTests
             var services = new ServiceCollection();
             services.AddScoped(_ => sql);
             var worker = new AsyncQueryJobBackgroundWorker(
-                manager, services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), audit, NullLogger<AsyncQueryJobBackgroundWorker>.Instance);
+                manager, manager, services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), audit, NullLogger<AsyncQueryJobBackgroundWorker>.Instance);
             var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "alice"), new Claim("sub", "alice"), new Claim("tenant_id", "t")], "T"));
             var descriptor = await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1", Format: "json"), user, new TenantId("t"));
 
