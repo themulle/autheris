@@ -71,6 +71,14 @@ builder.Services.AddPlan9Services(builder.Configuration);
 // 4. Build and Pipeline Configuration
 var app = builder.Build();
 
+// SEC H-01 / AR-06: Start embedded Garnet server imperatively before the host runs
+// to prevent race conditions where hosted services or constructors connect to Redis during startup.
+if (gatewayOptions.Caching.Garnet.EnableEmbeddedServer)
+{
+    var garnet = app.Services.GetService<Autheris.Infrastructure.Garnet.IGarnetServerManager>();
+    garnet?.StartServer();
+}
+
 app.UseGatewayPipeline(gatewayOptions);
 app.MapGatewayEndpoints(gatewayOptions);
 

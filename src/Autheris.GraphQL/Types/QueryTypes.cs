@@ -366,7 +366,8 @@ public sealed class Query
         var groupSids = principal.GetGroupSids();
         var roles = principal.GetUserRoles();
 
-        var isGlobalAdmin = roles.Contains("GovernanceAdmin") || roles.Contains("ClusterAdmin");
+        var isGlobalAdmin = roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase) ||
+                            Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
         var allowDiscovery = options?.Value?.Catalog?.AllowAuthenticatedCatalogDiscovery == true;
 
         var allTables = await metadataRepository.GetAllTablesAsync(ct);

@@ -222,10 +222,39 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
         Directory.CreateDirectory(targetDir);
 
         using var archive = new ZipArchive(zipStream, ZipArchiveMode.Read, leaveOpen: true);
+        const int MaxEntries = 1000;
+        const long MaxTotalUncompressedBytes = 100 * 1024 * 1024; // 100 MB
+
+        if (archive.Entries.Count > MaxEntries)
+        {
+            _logger.LogError("Zip Bomb detected: entry count {Count} exceeds limit {MaxEntries} for bundle '{AppId}'",
+                archive.Entries.Count, MaxEntries, SanitizeForLog(appId));
+            return new DepositDocResult(
+                Success: false,
+                ChunkId: null,
+                FilePath: null,
+                Message: $"Security violation: Archive entry count ({archive.Entries.Count}) exceeds maximum allowed threshold of {MaxEntries} (Zip bomb protection).",
+                ErrorCode: "ZIP_BOMB_DETECTED");
+        }
+
         var extractedFiles = new List<string>();
+        long cumulativeUncompressedBytes = 0;
 
         foreach (var entry in archive.Entries)
         {
+            cumulativeUncompressedBytes += entry.Length;
+            if (cumulativeUncompressedBytes > MaxTotalUncompressedBytes)
+            {
+                _logger.LogError("Zip Bomb detected: cumulative size {Bytes} exceeds limit {MaxBytes} for bundle '{AppId}'",
+                    cumulativeUncompressedBytes, MaxTotalUncompressedBytes, SanitizeForLog(appId));
+                return new DepositDocResult(
+                    Success: false,
+                    ChunkId: null,
+                    FilePath: null,
+                    Message: "Security violation: Archive uncompressed size exceeds maximum allowed threshold of 100MB (Zip bomb protection).",
+                    ErrorCode: "ZIP_BOMB_DETECTED");
+            }
+
             // OWASP AppSec: Zip Slip Defense - reject traversal indicators immediately
             if (string.IsNullOrWhiteSpace(entry.FullName) ||
                 entry.FullName.Contains("..", StringComparison.Ordinal) ||

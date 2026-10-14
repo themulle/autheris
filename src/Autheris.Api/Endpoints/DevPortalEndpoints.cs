@@ -20,6 +20,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 public static class DevPortalEndpoints
 {
@@ -103,6 +104,15 @@ public static class DevPortalEndpoints
                 return Results.BadRequest(new { error = "Code and secret are required." });
             }
 
+            if (secretStore != null)
+            {
+                var existing = await secretStore.GetSecretAsync(userSid, ct).ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(existing))
+                {
+                    return Results.BadRequest(new { error = "User already has an active 2FA secret enrolled. Contact an administrator to reset 2FA." });
+                }
+            }
+
             bool valid = await totpService.VerifyAndConsumeTotpAsync(userSid, secret, code, ct);
             if (!valid)
             {
@@ -115,13 +125,24 @@ public static class DevPortalEndpoints
             }
 
             return Results.Ok(new { success = true, message = "2FA Enrollment completed successfully." });
-        }).WithAudit(AuditLevel.Full, AuditEventTypes.TwoFactorEnrollmentVerified);
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.TwoFactorEnrollmentVerified);
 
         // R-64 UX: DevPortal HitL Step-Up Approvals Console
         app.MapGet("/portal/approvals", (
             HttpContext context,
-            IHitLStepUpApprovalService hitlService) =>
+            IHitLStepUpApprovalService hitlService,
+            IOptions<GatewayOptions> options) =>
         {
+            if (!options.Value.HitLStepUp.Enabled)
+            {
+                return Results.NotFound(new { error = "HitL step-up approval is disabled." });
+            }
+
+            if (!EndpointSecurity.IsApprover(context.User))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             var nonce = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
             SetPortalSecurityHeaders(context, nonce, noStore: true);
 
@@ -130,14 +151,25 @@ public static class DevPortalEndpoints
 
             var html = GenerateApprovalsHtml(tenant.Value, tickets, nonce);
             return Results.Content(html, "text/html;charset=utf-8");
-        }).WithAudit(AuditLevel.Summarized, AuditEventTypes.StepUpApprovalsListed);
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.StepUpApprovalsListed);
 
         app.MapPost("/portal/approvals/{ticketId}/step-up", async (
             string ticketId,
             HttpContext context,
             IHitLStepUpApprovalService hitlService,
+            IOptions<GatewayOptions> options,
             CancellationToken ct) =>
         {
+            if (!options.Value.HitLStepUp.Enabled)
+            {
+                return Results.NotFound(new { error = "HitL step-up approval is disabled." });
+            }
+
+            if (!EndpointSecurity.IsApprover(context.User) || string.IsNullOrWhiteSpace(ticketId))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             string totpCode = string.Empty;
             if (context.Request.HasFormContentType)
             {
@@ -163,6 +195,12 @@ public static class DevPortalEndpoints
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
+            var forbidden = await HitLEndpoints.EnsureTableApproverAsync(context, hitlService, ticketId, approver).ConfigureAwait(false);
+            if (forbidden != null)
+            {
+                return forbidden;
+            }
+
             var result = await hitlService.ApproveStepUpRequestAsync(ticketId, approver, totpCode, ct);
             if (!result.IsApproved)
             {
@@ -170,7 +208,7 @@ public static class DevPortalEndpoints
             }
 
             return Results.Ok(new { success = true, confirmationToken = result.Ticket?.Signature ?? result.Ticket?.ApprovalId ?? ticketId });
-        }).WithAudit(AuditLevel.Full, AuditEventTypes.StepUpApprovalAttempted);
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.StepUpApprovalAttempted);
 
         return app;
     }
@@ -466,6 +504,9 @@ public static class DevPortalEndpoints
 
     private static string Generate2FaEnrollHtml(string userSid, string formattedSecret, string rawSecret, string svgQrCode, string nonce)
     {
+        var encFormattedSecret = System.Net.WebUtility.HtmlEncode(formattedSecret);
+        var encRawSecret = System.Net.WebUtility.HtmlEncode(rawSecret);
+
         return $$"""
         <!DOCTYPE html>
         <html lang="en">
@@ -502,9 +543,9 @@ public static class DevPortalEndpoints
               {{svgQrCode}}
             </div>
             <p style="text-align: center; margin-bottom: 0.5rem; font-size: 0.85rem;">Or enter key manually:</p>
-            <div class="secret-box">{{formattedSecret}}</div>
+            <div class="secret-box">{{encFormattedSecret}}</div>
             <form id="verifyForm">
-              <input type="hidden" id="secret" value="{{rawSecret}}" />
+              <input type="hidden" id="secret" value="{{encRawSecret}}" />
               <div class="form-group">
                 <label for="totpCode">Enter 6-digit Code from Authenticator App:</label>
                 <input type="text" id="totpCode" maxlength="6" pattern="[0-9]{6}" placeholder="123456" required autocomplete="off" />
@@ -552,17 +593,23 @@ public static class DevPortalEndpoints
 
     private static string GenerateApprovalsHtml(string tenantId, System.Collections.Generic.IReadOnlyList<HitLApprovalTicket> tickets, string nonce)
     {
+        var encTenantId = System.Net.WebUtility.HtmlEncode(tenantId);
         var sb = new System.Text.StringBuilder();
         foreach (var t in tickets)
         {
+            var encApprovalId = System.Net.WebUtility.HtmlEncode(t.ApprovalId);
+            var encRequesterSid = System.Net.WebUtility.HtmlEncode(t.RequesterSid);
+            var encTargetTable = System.Net.WebUtility.HtmlEncode(t.TargetTable.ToString());
+            var encToolName = System.Net.WebUtility.HtmlEncode(t.ToolName);
+
             sb.Append($$"""
             <tr>
-              <td><code>{{t.ApprovalId}}</code></td>
-              <td>{{t.RequesterSid}}</td>
-              <td><code>{{t.TargetTable}}</code></td>
-              <td>{{t.ToolName}}</td>
+              <td><code>{{encApprovalId}}</code></td>
+              <td>{{encRequesterSid}}</td>
+              <td><code>{{encTargetTable}}</code></td>
+              <td>{{encToolName}}</td>
               <td>
-                <form class="step-up-form" data-ticket="{{t.ApprovalId}}">
+                <form class="step-up-form" data-ticket="{{encApprovalId}}">
                   <input type="text" class="totp-input" maxlength="6" placeholder="TOTP" required style="width: 80px; padding: 4px; text-align: center; border-radius: 4px; background: #0b1120; border: 1px solid #334155; color: #fff;" />
                   <button type="submit" style="padding: 4px 10px; background: #38bdf8; border: none; border-radius: 4px; color: #0f172a; font-weight: bold; cursor: pointer;">Approve</button>
                 </form>
@@ -598,7 +645,7 @@ public static class DevPortalEndpoints
         <body>
           <div class="container">
             <h1>🛡️ Human-in-the-Loop Step-Up Approvals</h1>
-            <p>Pending authorization tickets for tenant <code>{{tenantId}}</code>. Enter your 6-digit TOTP code to confirm step-up approvals.</p>
+            <p>Pending authorization tickets for tenant <code>{{encTenantId}}</code>. Enter your 6-digit TOTP code to confirm step-up approvals.</p>
             <div id="statusBanner" class="status-banner"></div>
             <table>
               <thead>

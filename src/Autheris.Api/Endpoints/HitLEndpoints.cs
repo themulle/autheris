@@ -193,7 +193,7 @@ public static class HitLEndpoints
     /// SEC C-05: Non-global approvers (DataSteward/DataOwner) must additionally be registered owner or delegate
     /// of the ticket's target table. GovernanceAdmin/ClusterAdmin are exempt.
     /// </summary>
-    private static async Task<IResult?> EnsureTableApproverAsync(
+    internal static async Task<IResult?> EnsureTableApproverAsync(
         HttpContext context,
         IHitLStepUpApprovalService hitlService,
         string approvalId,

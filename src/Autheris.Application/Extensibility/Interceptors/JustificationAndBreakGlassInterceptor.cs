@@ -116,12 +116,6 @@ public sealed partial class JustificationAndBreakGlassInterceptor : IIngressInte
                 }
             }
 
-            context.Items["IsBreakGlass"] = true;
-            _logger.LogWarning(
-                "[AUDIT: BREAK-GLASS ACTIVATED] Emergency elevated access invoked by user '{User}' with ticket '{Ticket}'.",
-                context.User?.Identity?.Name ?? "Anonymous",
-                justification);
-
             if (_governanceRepo != null)
             {
                 // Audit attribution uses the canonical SID/tenant (SecurityPrincipalContext, else SID/tenant claims), never Identity.Name.
@@ -168,6 +162,13 @@ public sealed partial class JustificationAndBreakGlassInterceptor : IIngressInte
                     return IngressResult.Deny("Audit recording failed during emergency break-glass invocation. Access denied (fail-closed).", 500);
                 }
             }
+
+            // SEC-MED-08: Set IsBreakGlass only AFTER audit log record completes successfully
+            context.Items["IsBreakGlass"] = true;
+            _logger.LogWarning(
+                "[AUDIT: BREAK-GLASS ACTIVATED] Emergency elevated access invoked by user '{User}' with ticket '{Ticket}'.",
+                context.User?.Identity?.Name ?? "Anonymous",
+                justification);
         }
 
         return IngressResult.Continue();

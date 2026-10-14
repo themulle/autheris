@@ -1,6 +1,7 @@
 namespace Autheris.GraphQL.Federation;
 
 using System;
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -10,6 +11,13 @@ using System.Text;
 /// </summary>
 public static class SubgraphSecurityValidator
 {
+    private static readonly ConcurrentDictionary<string, DateTimeOffset> SeenNonces = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Clears the internal replay cache (primarily for unit tests and diagnostics).
+    /// </summary>
+    public static void ResetReplayCache() => SeenNonces.Clear();
+
     public static bool ValidateSignature(
         string? tenant,
         string? userSid,
@@ -23,11 +31,13 @@ public static class SubgraphSecurityValidator
         string? method = null,
         string? path = null)
     {
+        // SEC-MED-23: Disallow 4-field signature downgrade; target subgraph must be specified
         if (string.IsNullOrWhiteSpace(tenant) ||
             string.IsNullOrWhiteSpace(timestampStr) ||
             string.IsNullOrWhiteSpace(nonce) ||
             string.IsNullOrWhiteSpace(signature) ||
-            string.IsNullOrWhiteSpace(signingKey))
+            string.IsNullOrWhiteSpace(signingKey) ||
+            string.IsNullOrWhiteSpace(subgraph))
         {
             return false;
         }
@@ -45,15 +55,40 @@ public static class SubgraphSecurityValidator
             return false;
         }
 
-        var payload = (subgraph != null || roles != null || method != null || path != null)
-            ? $"{tenant}:{userSid ?? string.Empty}:{timestampStr}:{nonce}:{subgraph ?? string.Empty}:{roles ?? string.Empty}:{method ?? string.Empty}:{path ?? string.Empty}"
-            : $"{tenant}:{userSid ?? string.Empty}:{timestampStr}:{nonce}";
+        // Full 8-field context payload
+        var payload = $"{tenant}:{userSid ?? string.Empty}:{timestampStr}:{nonce}:{subgraph}:{roles ?? string.Empty}:{method ?? string.Empty}:{path ?? string.Empty}";
 
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(signingKey));
         var expectedSignature = Convert.ToHexStringLower(hmac.ComputeHash(Encoding.UTF8.GetBytes(payload)));
 
-        return CryptographicOperations.FixedTimeEquals(
+        var isSignatureValid = CryptographicOperations.FixedTimeEquals(
             Encoding.UTF8.GetBytes(signature.ToLowerInvariant()),
             Encoding.UTF8.GetBytes(expectedSignature));
+
+        if (!isSignatureValid)
+        {
+            return false;
+        }
+
+        // SEC-MED-23: Nonce replay defense within time-drift window
+        var replayKey = $"{tenant}:{nonce}";
+        if (!SeenNonces.TryAdd(replayKey, now))
+        {
+            return false;
+        }
+
+        if (SeenNonces.Count > 10_000)
+        {
+            var cutoff = now - TimeSpan.FromMinutes(10);
+            foreach (var kvp in SeenNonces)
+            {
+                if (kvp.Value < cutoff)
+                {
+                    SeenNonces.TryRemove(kvp.Key, out _);
+                }
+            }
+        }
+
+        return true;
     }
 }
