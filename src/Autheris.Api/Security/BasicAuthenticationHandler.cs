@@ -311,6 +311,27 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
             return;
         }
 
+        // OData v4 Protocol Compliance:
+        // Requests under /odata MUST return an OData-compliant JSON error payload with OData-Version: 4.0,
+        // NEVER HTML. When Microsoft Excel / Power Query encounters an HTML response to an unauthenticated
+        // challenge, it fails with "The feed's metadata document appears to be invalid" / "We couldn't parse
+        // OData response result" and refuses to prompt the user for HTTP Basic credentials.
+        if (Request.Path.StartsWithSegments("/odata", StringComparison.OrdinalIgnoreCase))
+        {
+            Response.Headers["OData-Version"] = "4.0";
+            Response.ContentType = "application/json;odata.metadata=minimal;charset=utf-8";
+            var odataError = new
+            {
+                error = new
+                {
+                    code = "UNAUTHORIZED",
+                    message = "Authentication required. Provide HTTP Basic credentials."
+                }
+            };
+            await Response.WriteAsJsonAsync(odataError, options: null, contentType: "application/json;odata.metadata=minimal;charset=utf-8");
+            return;
+        }
+
         var acceptsHtml = Request.Headers.Accept.Any(a => a != null && a.Contains("text/html", StringComparison.OrdinalIgnoreCase));
         if (acceptsHtml)
         {

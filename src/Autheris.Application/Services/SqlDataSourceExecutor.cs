@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Security;
 using System.Text;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Sql.Policy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
@@ -13,8 +14,11 @@ using Microsoft.Extensions.Options;
 
 namespace Autheris.Application.Services;
 
-public sealed class SqlDataSourceExecutor : IDataSourceExecutor
+public sealed partial class SqlDataSourceExecutor : IDataSourceExecutor
 {
+    private const string PaginationLimitName = "gql_limit";
+    private const string PaginationOffsetName = "gql_offset";
+
     private readonly ISqlConnectionFactory? _connectionFactory;
     private readonly IOptions<GatewayOptions>? _options;
     private readonly ILogger<SqlDataSourceExecutor>? _logger;
@@ -132,6 +136,25 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         await using var command = connection.CreateCommand();
         command.CommandTimeout = Math.Max(1, connOptions.CommandTimeoutSeconds);
 
+        // SEC-ADG-02: every parameter of the statement is bound through this set; a duplicate bare name (a row filter value that names the
+        // tenant, another filter value, an argument) fails closed instead of letting the provider pick one of two values.
+        var boundNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void BindUnique(DbParameter parameter)
+        {
+            if (!boundNames.Add(RowFilterParameterNames.Bare(parameter.ParameterName)))
+            {
+                throw new SecurityException("A statement parameter name is bound twice (fail-closed).");
+            }
+
+            command.Parameters.Add(parameter);
+        }
+
+        if (dialect == DatabaseDialect.Oracle)
+        {
+            // SEC-ADG-03: ODP.NET binds by position unless BindByName is set; every marker below is also dialect-aware.
+            Autheris.Application.Sql.OracleBindByName.Enable(command);
+        }
+
         // 1. Column Projections (Zero-Trust: Only authorized requested fields + dialect-specific special type mapping)
         var columnsToSelect = (context.RequestedFields != null && context.RequestedFields.Count > 0)
             ? context.RequestedFields
@@ -152,6 +175,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             ?? context.Principal?.FindFirst("tenant")?.Value
             ?? TenantId.LegacySingleTenant.Value;
         var gatewayHmacColumns = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
+        var maskParameters = new Dictionary<string, object?>(StringComparer.Ordinal);
 
         foreach (var col in authorizedColumns)
         {
@@ -172,7 +196,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                 }
                 else
                 {
-                    selectParts.Add(BuildMaskedColumnProjection(col, colDef?.DataType, dialect, metadata));
+                    selectParts.Add(BuildMaskedColumnProjection(col, colDef?.DataType, dialect, metadata, maskParameters));
                 }
             }
             else
@@ -191,6 +215,15 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             selectParts.Add("1 AS __unauthorized_placeholder");
         }
 
+        foreach (var (marker, value) in maskParameters)
+        {
+            // WP-X0f: the bound values of typed masks (marker keyed, e.g. @__gql_mask_x_pre).
+            var maskParameter = command.CreateParameter();
+            maskParameter.ParameterName = dialect.FormatParameterName(marker.TrimStart('@', ':'));
+            maskParameter.Value = value ?? DBNull.Value;
+            BindUnique(maskParameter);
+        }
+
         var selectClause = string.Join(", ", selectParts);
         var fromTable = dialect.FormatTableIdentifier(metadata.Identifier);
 
@@ -206,27 +239,37 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             _options?.Value?.DataSources?.TenantColumnExemptTables);
         if (tenantColumn != null)
         {
-            var pTenant = $"@p_tenant_{paramIndex++}";
+            var tenantParamName = $"p_tenant_{paramIndex++}";
+            var pTenant = dialect.FormatParameterMarker(tenantParamName);
             whereParts.Add($"{dialect.QuoteIdentifier(tenantColumn)} = {pTenant}");
             var tp = command.CreateParameter();
-            tp.ParameterName = pTenant;
+            tp.ParameterName = dialect.FormatParameterName(tenantParamName);
             tp.Value = tenantVal;
-            command.Parameters.Add(tp);
+            BindUnique(tp);
         }
 
         if (!string.IsNullOrWhiteSpace(context.AccessDecision.CombinedRowFilterSql))
         {
             Autheris.Application.Sql.SqlSecurityValidator.ValidateRowFilter(context.AccessDecision);
-            whereParts.Add($"({context.AccessDecision.CombinedRowFilterSql})");
+            var rowFilterSql = context.AccessDecision.CombinedRowFilterSql;
+            if (dialect == DatabaseDialect.Oracle)
+            {
+                // The producers render @name markers; Oracle only knows :name (and is bound by name).
+                var rowFilterNames = (context.AccessDecision.RowFilterParameters?.Keys ?? Enumerable.Empty<string>())
+                    .Select(k => k.TrimStart('@', ':')).ToHashSet(StringComparer.Ordinal);
+                rowFilterSql = Autheris.Application.Sql.OracleBindByName.RewriteMarkers(rowFilterSql, rowFilterNames);
+            }
+
+            whereParts.Add($"({rowFilterSql})");
 
             if (context.AccessDecision.RowFilterParameters != null)
             {
                 foreach (var (pName, pVal) in context.AccessDecision.RowFilterParameters)
                 {
                     var p = command.CreateParameter();
-                    p.ParameterName = pName;
+                    p.ParameterName = dialect.FormatParameterName(pName.TrimStart('@', ':'));
                     p.Value = pVal ?? DBNull.Value;
-                    command.Parameters.Add(p);
+                    BindUnique(p);
                 }
             }
         }
@@ -249,13 +292,13 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                     throw new SecurityException($"Zero-Trust violation: Filtering on column '{matchingCol.ColumnName}' in table '{metadata.Identifier}' is not permitted (access level: {access}).");
                 }
 
-                var paramName = $"@p{paramIndex++}";
-                whereParts.Add($"{dialect.QuoteIdentifier(matchingCol.ColumnName)} = {paramName}");
+                var argParamName = $"p{paramIndex++}";
+                whereParts.Add($"{dialect.QuoteIdentifier(matchingCol.ColumnName)} = {dialect.FormatParameterMarker(argParamName)}");
 
                 var p = command.CreateParameter();
-                p.ParameterName = paramName;
+                p.ParameterName = dialect.FormatParameterName(argParamName);
                 p.Value = argVal;
-                command.Parameters.Add(p);
+                BindUnique(p);
             }
         }
 
@@ -276,14 +319,20 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             }
 
             var filterPredicate = filterClause.GetSqlPredicate(dialect);
+            if (dialect == DatabaseDialect.Oracle)
+            {
+                filterPredicate = Autheris.Application.Sql.OracleBindByName.RewriteMarkers(
+                    filterPredicate, filterClause.Parameters.Keys.Select(k => k.TrimStart('@', ':')).ToHashSet(StringComparer.Ordinal));
+            }
+
             whereParts.Add($"({filterPredicate})");
 
             foreach (var (pName, pVal) in filterClause.Parameters)
             {
                 var p = command.CreateParameter();
-                p.ParameterName = pName;
+                p.ParameterName = dialect.FormatParameterName(pName.TrimStart('@', ':'));
                 p.Value = pVal ?? DBNull.Value;
-                command.Parameters.Add(p);
+                BindUnique(p);
             }
         }
 
@@ -302,15 +351,29 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         var limit = Math.Max(1, context.Limit);
         var offset = Math.Max(0, context.Offset);
 
-        var limitParam = command.CreateParameter();
-        limitParam.ParameterName = "@gql_limit";
-        limitParam.Value = limit;
-        command.Parameters.Add(limitParam);
+        var limitMarker = dialect.FormatParameterMarker(PaginationLimitName);
+        var offsetMarker = dialect.FormatParameterMarker(PaginationOffsetName);
 
-        var offsetParam = command.CreateParameter();
-        offsetParam.ParameterName = "@gql_offset";
-        offsetParam.Value = offset;
-        command.Parameters.Add(offsetParam);
+        // Parameters are added in the order their markers appear in the statement text (SQL Server and Oracle: OFFSET first,
+        // SQLite and PostgreSQL: LIMIT first). Oracle is additionally bound by name.
+        void AddPaginationParameter(string logicalName, int value)
+        {
+            var pagination = command.CreateParameter();
+            pagination.ParameterName = dialect.FormatParameterName(logicalName);
+            pagination.Value = value;
+            BindUnique(pagination);
+        }
+
+        if (dialect is DatabaseDialect.SqlServer or DatabaseDialect.Oracle)
+        {
+            AddPaginationParameter(PaginationOffsetName, offset);
+            AddPaginationParameter(PaginationLimitName, limit);
+        }
+        else
+        {
+            AddPaginationParameter(PaginationLimitName, limit);
+            AddPaginationParameter(PaginationOffsetName, offset);
+        }
 
         switch (dialect)
         {
@@ -321,7 +384,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                 var pkCol = metadata.PrimaryKeyColumns.FirstOrDefault(pk => metadata.HasColumn(pk));
                 var orderCol = pkCol ?? metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, "id", StringComparison.OrdinalIgnoreCase))?.ColumnName;
                 var orderClause = requestedOrder ?? (orderCol != null ? dialect.QuoteIdentifier(orderCol) : "(SELECT 1)");
-                sqlBuilder.Append($" ORDER BY {orderClause} OFFSET @gql_offset ROWS FETCH NEXT @gql_limit ROWS ONLY");
+                sqlBuilder.Append($" ORDER BY {orderClause} OFFSET {offsetMarker} ROWS FETCH NEXT {limitMarker} ROWS ONLY");
                 break;
 
             case DatabaseDialect.Oracle:
@@ -329,7 +392,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                 {
                     sqlBuilder.Append($" ORDER BY {requestedOrder}");
                 }
-                sqlBuilder.Append(" OFFSET @gql_offset ROWS FETCH NEXT @gql_limit ROWS ONLY");
+                sqlBuilder.Append($" OFFSET {offsetMarker} ROWS FETCH NEXT {limitMarker} ROWS ONLY");
                 break;
 
             case DatabaseDialect.Sqlite:
@@ -339,7 +402,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                 {
                     sqlBuilder.Append($" ORDER BY {requestedOrder}");
                 }
-                sqlBuilder.Append(" LIMIT @gql_limit OFFSET @gql_offset");
+                sqlBuilder.Append($" LIMIT {limitMarker} OFFSET {offsetMarker}");
                 break;
         }
 
@@ -389,10 +452,15 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                 await using var countCommand = connection.CreateCommand();
                 countCommand.CommandTimeout = command.CommandTimeout;
                 countCommand.Transaction = tx;
+                if (dialect == DatabaseDialect.Oracle)
+                {
+                    Autheris.Application.Sql.OracleBindByName.Enable(countCommand);
+                }
+
                 countCommand.CommandText = $"SELECT COUNT(*){fromClause}{whereClause}";
                 foreach (DbParameter parameter in command.Parameters)
                 {
-                    if (parameter.ParameterName is "@gql_limit" or "@gql_offset")
+                    if (parameter.ParameterName.TrimStart('@', ':') is PaginationLimitName or PaginationOffsetName)
                     {
                         continue;
                     }
@@ -547,182 +615,6 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             _ => 16
         };
 
-    public static string BuildMaskedColumnProjection(string columnName, string? dataType, DatabaseDialect dialect, TableMetadata tableMeta)
-    {
-        ArgumentNullException.ThrowIfNull(tableMeta);
-        DatabaseDialectExtensions.ValidateIdentifier(columnName);
-        var quotedCol = dialect.QuoteIdentifier(columnName);
-        string maskExpr;
-
-        if (tableMeta.ColumnMaskingRules.TryGetValue(columnName, out var rule))
-        {
-            var ruleType = rule.RuleType?.ToUpperInvariant() ?? "REDACT";
-            var effectiveDataType = dataType ?? tableMeta.Columns?.FirstOrDefault(c => string.Equals(c.ColumnName, columnName, StringComparison.OrdinalIgnoreCase))?.DataType;
-            if (ruleType == "NULLIFY" || (ruleType == "REDACT" && IsNumericOrTemporalType(effectiveDataType)))
-            {
-                maskExpr = "NULL";
-            }
-            else if (ruleType == "GEO_JITTER")
-            {
-                var targetDialect = dialect switch
-                {
-                    DatabaseDialect.SqlServer => TrinoSqlEngine.TargetSqlDialect.SqlServer,
-                    DatabaseDialect.Sqlite => TrinoSqlEngine.TargetSqlDialect.Sqlite,
-                    DatabaseDialect.Oracle => TrinoSqlEngine.TargetSqlDialect.Oracle,
-                    _ => TrinoSqlEngine.TargetSqlDialect.PostgreSql
-                };
-                maskExpr = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.BuildDialectMaskExpression(
-                    columnName,
-                    "GEO_JITTER",
-                    targetDialect,
-                    decimals: rule.Decimals ?? 2);
-            }
-            else if (ruleType == "PARTIAL_MASK")
-            {
-                var targetDialect = dialect switch
-                {
-                    DatabaseDialect.SqlServer => TrinoSqlEngine.TargetSqlDialect.SqlServer,
-                    DatabaseDialect.Sqlite => TrinoSqlEngine.TargetSqlDialect.Sqlite,
-                    DatabaseDialect.Oracle => TrinoSqlEngine.TargetSqlDialect.Oracle,
-                    _ => TrinoSqlEngine.TargetSqlDialect.PostgreSql
-                };
-                maskExpr = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.BuildDialectMaskExpression(
-                    columnName,
-                    "PARTIAL_MASK",
-                    targetDialect,
-                    keepPrefix: rule.KeepPrefix ?? 1,
-                    keepSuffix: rule.KeepSuffix ?? 0,
-                    maskChar: rule.MaskChar ?? '*',
-                    fixedLength: rule.FixedLength ?? false);
-            }
-            else if (IsHmacRule(rule))
-            {
-                // SEC H-13: No unkeyed in-DB hash. HMAC columns are pseudonymized in the gateway (IColumnMaskingProvider);
-                // without a masking provider the column is redacted (fail-closed).
-                maskExpr = "'***'";
-            }
-            else if (!string.IsNullOrWhiteSpace(rule.Replacement))
-            {
-                var prefix = dialect == DatabaseDialect.SqlServer ? "N" : string.Empty;
-                maskExpr = $"{prefix}'{dialect.EscapeSqlLiteral(rule.Replacement)}'";
-            }
-            else
-            {
-                maskExpr = "'***'";
-            }
-        }
-        else
-        {
-            maskExpr = "'***'";
-        }
-
-        return $"{maskExpr} AS {quotedCol}";
-    }
-
-    private static bool IsHmacRule(MaskingRule rule) => rule.IsHmac;
-
-    private static bool IsNumericOrTemporalType(string? dataType)
-    {
-        if (string.IsNullOrWhiteSpace(dataType)) return false;
-        var dt = dataType.Trim().ToLowerInvariant();
-        if (dt.Contains('(')) dt = dt[..dt.IndexOf('(')].Trim();
-        return dt is "int" or "integer" or "bigint" or "smallint" or "tinyint" or "numeric" or "decimal"
-            or "money" or "smallmoney" or "real" or "float" or "double precision" or "double"
-            or "bit" or "bool" or "boolean" or "date" or "datetime" or "datetime2" or "smalldatetime"
-            or "timestamp" or "timestamptz" or "time" or "uniqueidentifier" or "uuid";
-    }
-
-    /// <summary>
-    /// SEC H-13: Derives a tenant-scoped HMAC key id so pseudonyms cannot be correlated across tenants.
-    /// The actual key derivation (HMAC over the master secret) happens inside <see cref="IColumnMaskingProvider"/>.
-    /// </summary>
-    private static MaskingRule CreateTenantScopedHmacRule(MaskingRule rule, string tenant, string? defaultKeyId) =>
-        MaskingRule.CreateTenantScopedHmacRule(rule, tenant, defaultKeyId);
-
-    public static string BuildColumnProjection(string columnName, string? dataType, DatabaseDialect dialect)
-    {
-        DatabaseDialectExtensions.ValidateIdentifier(columnName);
-        var quotedCol = dialect.QuoteIdentifier(columnName);
-
-        if (string.IsNullOrWhiteSpace(dataType))
-        {
-            return quotedCol;
-        }
-
-        var normalizedType = dataType.Trim().ToLowerInvariant();
-
-        // Special case MSSQL: "timestamp" is a deprecated synonym for "rowversion" (8-byte binary token, NOT datetime!)
-        if (dialect == DatabaseDialect.SqlServer && normalizedType is "timestamp" or "rowversion")
-        {
-            return quotedCol; // Handled as binary in reader -> Base64
-        }
-
-        // 1. Geospatial Types (geometry, geography, spatial, point, polygon, linestring, multipolygon, multipoint, sdo_geometry)
-        if (normalizedType is "geometry" or "geography" or "spatial" or "point" or "polygon" or "linestring" or "multipolygon" or "multipoint" or "sdo_geometry")
-        {
-            return dialect switch
-            {
-                DatabaseDialect.PostgreSql => $"ST_AsGeoJSON({quotedCol}) AS {quotedCol}",
-                DatabaseDialect.SqlServer => $"({quotedCol}.STAsText()) AS {quotedCol}",
-                DatabaseDialect.Sqlite => $"AsGeoJSON({quotedCol}) AS {quotedCol}",
-                DatabaseDialect.Oracle => $"SDO_UTIL.TO_GEOJSON({quotedCol}) AS {quotedCol}",
-                _ => quotedCol
-            };
-        }
-
-        // 2. Binary Types (bytea, binary, varbinary, blob, image, raw, long raw)
-        if (normalizedType is "bytea" or "binary" or "varbinary" or "blob" or "image" or "raw" or "long raw")
-        {
-            return dialect switch
-            {
-                DatabaseDialect.PostgreSql => $"encode({quotedCol}, 'base64') AS {quotedCol}",
-                DatabaseDialect.Sqlite => $"hex({quotedCol}) AS {quotedCol}",
-                DatabaseDialect.Oracle => $"RAWTOHEX({quotedCol}) AS {quotedCol}",
-                _ => quotedCol
-            };
-        }
-
-        // 3. High-precision / timezone timestamps (timestamp, timestamptz, datetime2, datetimeoffset, etc.)
-        if (normalizedType is "timestamptz" or "datetimeoffset" or "datetime2" or "datetime" or "smalldatetime" or "timestamp" or "timestamp_ntz" or "timestamp with time zone" or "timestamp with local time zone")
-        {
-            return dialect switch
-            {
-                DatabaseDialect.PostgreSql => $"to_char({quotedCol}, 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS {quotedCol}",
-                DatabaseDialect.SqlServer => $"CONVERT(VARCHAR(33), {quotedCol}, 126) AS {quotedCol}",
-                DatabaseDialect.Sqlite => $"strftime('%Y-%m-%dT%H:%M:%fZ', {quotedCol}) AS {quotedCol}",
-                DatabaseDialect.Oracle => $"TO_CHAR({quotedCol}, 'YYYY-MM-DD\"T\"HH24:MI:SS.FF6\"Z\"') AS {quotedCol}",
-                _ => quotedCol
-            };
-        }
-
-        // 4. Date-only (date)
-        if (normalizedType is "date")
-        {
-            return dialect switch
-            {
-                DatabaseDialect.PostgreSql => $"to_char({quotedCol}, 'YYYY-MM-DD') AS {quotedCol}",
-                DatabaseDialect.SqlServer => $"CONVERT(VARCHAR(10), {quotedCol}, 23) AS {quotedCol}",
-                DatabaseDialect.Oracle => $"TO_CHAR({quotedCol}, 'YYYY-MM-DD') AS {quotedCol}",
-                DatabaseDialect.Sqlite => $"strftime('%Y-%m-%d', {quotedCol}) AS {quotedCol}",
-                _ => quotedCol
-            };
-        }
-
-        // 5. Time-only (time, timetz, time without time zone)
-        if (normalizedType is "time" or "timetz" or "time without time zone")
-        {
-            return dialect switch
-            {
-                DatabaseDialect.PostgreSql => $"to_char({quotedCol}, 'HH24:MI:SS.US') AS {quotedCol}",
-                DatabaseDialect.SqlServer => $"CONVERT(VARCHAR(16), {quotedCol}, 114) AS {quotedCol}",
-                DatabaseDialect.Sqlite => $"strftime('%H:%M:%f', {quotedCol}) AS {quotedCol}",
-                _ => quotedCol
-            };
-        }
-
-        return quotedCol;
-    }
-
     public static object? NormalizeReadValue(object? rawValue, string? columnName = null)
     {
         if (rawValue == null || rawValue is DBNull)
@@ -788,98 +680,4 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         return rawValue;
     }
 
-    private static IReadOnlyList<IReadOnlyDictionary<string, object?>> GenerateSyntheticRows(DataSourceExecutionContext context)
-    {
-        context.Items["IsSyntheticMock"] = true;
-        var rows = new List<IReadOnlyDictionary<string, object?>>();
-        var metadata = context.Metadata;
-        var count = Math.Max(1, context.Limit);
-        var offset = Math.Max(0, context.Offset);
-
-        if (context.Items.TryGetValue(TableQueryItems.Filter, out var filterObj) &&
-            filterObj is TableFilterClause filterClause &&
-            filterClause.ReferencedColumns.Any(c => c.Equals("parent_id", StringComparison.OrdinalIgnoreCase) || c.Equals("invoice_id", StringComparison.OrdinalIgnoreCase)))
-        {
-            var joinCol = metadata.Columns.FirstOrDefault(c => c.ColumnName.Equals("parent_id", StringComparison.OrdinalIgnoreCase))?.ColumnName
-                ?? metadata.Columns.FirstOrDefault(c => c.ColumnName.Equals("invoice_id", StringComparison.OrdinalIgnoreCase))?.ColumnName
-                ?? "parent_id";
-
-            foreach (var pVal in filterClause.Parameters.Values)
-            {
-                var parentId = pVal?.ToString() ?? "";
-                if (string.IsNullOrEmpty(parentId)) continue;
-
-                for (int i = 1; i <= 2; i++)
-                {
-                    var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-                    {
-                        ["id"] = $"{parentId}-ITEM-{i}",
-                        [joinCol] = parentId,
-                        ["product_name"] = $"Enterprise License Pack {i}",
-                        ["price"] = 1250.00m * i,
-                        ["sensitive_note"] = $"Confidential spec for item {i} of invoice {parentId}"
-                    };
-                    rows.Add(dict);
-                }
-            }
-            return rows;
-        }
-
-        for (int i = 1; i <= count; i++)
-        {
-            var rowNum = offset + i;
-            var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var col in metadata.Columns)
-            {
-                // SEC-AC-02: Zero-Trust: Do not emit synthetic data for Denied columns
-                if (context.AccessDecision.GetColumnAccess(col.ColumnName) == ColumnAccessLevel.Deny)
-                {
-                    continue;
-                }
-
-                object? rawVal = col.ColumnName.ToLowerInvariant() switch
-                {
-                    "id" => rowNum,
-                    "name" => $"Sample {metadata.Identifier.TableName} Record #{rowNum}",
-                    "amount" => 100.50m * rowNum,
-                    "email" => $"user{rowNum}@corp.local",
-                    "created_at" => DateTimeOffset.UtcNow.AddDays(-rowNum),
-                    _ => GenerateSyntheticValueForType(col.DataType, rowNum)
-                };
-
-                dict[col.ColumnName] = rawVal;
-            }
-
-            rows.Add(dict);
-        }
-
-        return rows;
-    }
-
-    private static object? GenerateSyntheticValueForType(string? dataType, int rowNum)
-    {
-        if (string.IsNullOrWhiteSpace(dataType))
-        {
-            return $"Value_{rowNum}";
-        }
-
-        var normalizedType = dataType.Trim().ToLowerInvariant();
-        if (normalizedType is "geometry" or "geography" or "spatial" or "point" or "polygon" or "linestring")
-        {
-            return $$"""{"type":"Point","coordinates":[13.4{{rowNum}},52.5{{rowNum}}]}""";
-        }
-
-        if (normalizedType is "bytea" or "binary" or "varbinary" or "blob" or "image")
-        {
-            return Convert.ToBase64String(Encoding.UTF8.GetBytes($"binary_payload_{rowNum}"));
-        }
-
-        if (normalizedType is "timestamptz" or "datetimeoffset" or "datetime2" or "timestamp")
-        {
-            return DateTimeOffset.UtcNow.AddDays(-rowNum).ToString("O", CultureInfo.InvariantCulture);
-        }
-
-        return $"Value_{rowNum}";
-    }
 }

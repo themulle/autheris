@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
@@ -29,6 +30,8 @@ using TrinoSqlEngine;
 
 public static class GovernanceEndpoints
 {
+    private static readonly JsonSerializerOptions GitOpsJsonOptions = new() { PropertyNameCaseInsensitive = true };
+
     internal static async Task<bool> IsAuthorizedForSimulationAsync(HttpContext context, string? targetTable)
     {
         var user = context.User;
@@ -495,6 +498,95 @@ public static class GovernanceEndpoints
         app.MapGet("/api/v1/profiles", GetProfilesAsync).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         app.MapGet("/api/v1/profiles/{id}", GetProfileByIdAsync).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         app.MapDelete("/api/v1/profiles/{id}", DeleteProfileAsync).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+
+        // Issue #40: GitOps / Declarative Consent & Row Filter Import API
+        app.MapPost("/api/v1/governance/consents/apply", async (
+            HttpContext context,
+            Autheris.Application.Governance.Interfaces.IDeclarativeConsentApplyService applyService,
+            CancellationToken ct) =>
+        {
+            var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin]);
+            if (!isPrivileged)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var dryRun = context.Request.Query.TryGetValue("dryRun", out var dryRunVal) &&
+                         bool.TryParse(dryRunVal, out var parsedDryRun) && parsedDryRun;
+
+            var (json, tooLarge) = await EndpointSecurity.TryReadBodyAsync(
+                context.Request,
+                10 * 1024 * 1024,
+                "Declarative consent manifest exceeds maximum allowed size (10 MB).",
+                ct);
+
+            if (json == null)
+            {
+                return tooLarge!;
+            }
+
+            DeclarativeConsentManifest? manifest;
+            try
+            {
+                manifest = JsonSerializer.Deserialize<DeclarativeConsentManifest>(json, GitOpsJsonOptions);
+            }
+            catch (JsonException ex)
+            {
+                return Results.BadRequest(new { error = "Invalid JSON in consent manifest.", details = ex.Message });
+            }
+
+            if (manifest == null)
+            {
+                return Results.BadRequest(new { error = "Manifest payload is null or empty." });
+            }
+
+            var result = await applyService.ApplyManifestAsync(context.User, manifest, dryRun, ct);
+            return Results.Ok(result);
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApplied);
+
+        app.MapPost("/api/governance/consents/apply", async (
+            HttpContext context,
+            Autheris.Application.Governance.Interfaces.IDeclarativeConsentApplyService applyService,
+            CancellationToken ct) =>
+        {
+            var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin]);
+            if (!isPrivileged)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var dryRun = context.Request.Query.TryGetValue("dryRun", out var dryRunVal) &&
+                         bool.TryParse(dryRunVal, out var parsedDryRun) && parsedDryRun;
+
+            var (json, tooLarge) = await EndpointSecurity.TryReadBodyAsync(
+                context.Request,
+                10 * 1024 * 1024,
+                "Declarative consent manifest exceeds maximum allowed size (10 MB).",
+                ct);
+
+            if (json == null)
+            {
+                return tooLarge!;
+            }
+
+            DeclarativeConsentManifest? manifest;
+            try
+            {
+                manifest = JsonSerializer.Deserialize<DeclarativeConsentManifest>(json, GitOpsJsonOptions);
+            }
+            catch (JsonException ex)
+            {
+                return Results.BadRequest(new { error = "Invalid JSON in consent manifest.", details = ex.Message });
+            }
+
+            if (manifest == null)
+            {
+                return Results.BadRequest(new { error = "Manifest payload is null or empty." });
+            }
+
+            var result = await applyService.ApplyManifestAsync(context.User, manifest, dryRun, ct);
+            return Results.Ok(result);
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApplied);
 
         return app;
     }

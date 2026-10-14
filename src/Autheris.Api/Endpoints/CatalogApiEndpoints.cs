@@ -116,7 +116,7 @@ public static class CatalogApiEndpoints
             var results = await resolverService.ResolvePrincipalAsync(q, context, ct);
             return Results.Ok(results);
         })
-        .RequireAuthorization()
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // R-55: POST /api/v1/catalog/datasources/{id}/test
@@ -134,7 +134,35 @@ public static class CatalogApiEndpoints
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.DatasourceTested);
 
+        // B-15: PUT /api/v1/catalog/datasets/{id}/state
+        group.MapPut("/datasets/{id}/state", SetDatasetStateHandler)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApplied);
+
         return app;
+    }
+
+    internal static async Task<IResult> SetDatasetStateHandler(
+        string id,
+        AdminSetDatasetStateDto? request,
+        Autheris.Application.Governance.Interfaces.IAccessPlanningService accessPlanningService,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        if (request == null || string.IsNullOrWhiteSpace(request.State))
+        {
+            return Results.BadRequest(new { error = "State is required." });
+        }
+
+        var adminSid = httpContext.User.GetUserSid()?.Value ?? httpContext.User.Identity?.Name ?? "system-admin";
+        var planningRequest = new AdminSetDatasetStateRequest(id, request.State, request.Reason);
+        var result = await accessPlanningService.SetDatasetStateAsync(planningRequest, adminSid, ct);
+        if (!result.Success)
+        {
+            return Results.NotFound(new { error = result.Message });
+        }
+
+        return Results.Ok(result);
     }
 
     private static async Task<IResult> RegisterDatasourceHandler(
@@ -161,3 +189,5 @@ public static class CatalogApiEndpoints
         return new RequestContext(tenant, sid, roles, httpContext.TraceIdentifier, httpContext.User);
     }
 }
+
+public sealed record AdminSetDatasetStateDto(string State, string? Reason = null);

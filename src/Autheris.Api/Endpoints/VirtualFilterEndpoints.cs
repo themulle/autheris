@@ -148,7 +148,8 @@ public static class VirtualFilterEndpoints
                 return Forbidden();
             }
 
-            var saved = await service.SaveProfileAsync(body.ToModel(name, tenant.Value), actor, context.RequestAborted).ConfigureAwait(false);
+            var model = body.ToModel(name, tenant.Value);
+            var saved = await service.SaveProfileAsync(model, actor, body.ExplicitKeyBudgets(model), context.RequestAborted).ConfigureAwait(false);
             return Results.Ok(ProfileView(saved));
         });
 
@@ -349,7 +350,7 @@ public static class VirtualFilterEndpoints
             profile = p.Profile,
             scope = p.Scope,
             in_scope = p.InScope,
-            uncovered = p.Uncovered?.ToString().ToLowerInvariant(),
+            uncovered = p.Uncovered is { } uncovered ? VirtualFilterBindingValidator.FormatEnum(uncovered) : null,
             bindings = p.Bindings.Select(b => new
             {
                 filter = b.Filter,
@@ -575,6 +576,10 @@ public static class VirtualFilterEndpoints
             var message = isDev ? ex.Message : "The requested virtual filter operation is invalid.";
             return Results.Json(new { error = message }, statusCode: StatusCodes.Status400BadRequest);
         }
+        catch (VirtualFilterBindingException ex)
+        {
+            return Results.Json(new { error = ex.Message, code = ex.Code }, statusCode: StatusCodes.Status400BadRequest);
+        }
         catch (Exception ex) when (ex is ArgumentException or JsonException or FormatException)
         {
             return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status400BadRequest);
@@ -612,11 +617,26 @@ public static class VirtualFilterEndpoints
             throw new ArgumentException("A sync needs the path and commit of the file repository.");
         }
 
+        var profiles = (body.Profiles ?? []).Select(p => p.Value.ToModel(p.Key, tenant.Value)).ToList();
         return new VirtualFilterSyncRequest(
             tenant.Value,
             new ManagedBy(body.Path, body.Commit),
             (body.Filters ?? []).Select(p => p.Value.ToModel(p.Key, tenant.Value)).ToList(),
-            (body.Profiles ?? []).Select(p => p.Value.ToModel(p.Key, tenant.Value)).ToList());
+            profiles)
+        {
+            ExplicitKeyBudgets = ExplicitKeyBudgets((body.Profiles ?? []).Select(p => p.Value), profiles)
+        };
+    }
+
+    private static HashSet<FilterBinding> ExplicitKeyBudgets(IEnumerable<ProfileBody> bodies, IEnumerable<VirtualFilterAccessProfile> models)
+    {
+        var set = new HashSet<FilterBinding>(ReferenceEqualityComparer.Instance);
+        foreach (var (body, model) in bodies.Zip(models))
+        {
+            set.UnionWith(body.ExplicitKeyBudgets(model));
+        }
+
+        return set;
     }
 
     private static IResult Forbidden() => Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -656,14 +676,17 @@ public static class VirtualFilterEndpoints
         name = p.Name,
         grantee = new { type = p.GranteeType.ToString().ToLowerInvariant(), sid = p.GranteeSid?.Value, role = p.RoleName },
         scope = p.Scope,
-        uncovered = p.Uncovered?.ToString().ToLowerInvariant(),
+        uncovered = p.Uncovered is { } uncovered ? VirtualFilterBindingValidator.FormatEnum(uncovered) : null,
         bindings = p.Bindings.Select(b => new
         {
             filter = b.FilterName,
             target = b.TargetPattern,
             object_kinds = b.ObjectKinds.ToString(),
             time_column = b.TimeColumn,
-            map = b.ColumnMap
+            map = b.ColumnMap,
+            strategy = VirtualFilterBindingValidator.FormatEnum(b.Strategy),
+            pushdown_format = b.PushdownFormat is { } format ? VirtualFilterBindingValidator.FormatEnum(format) : null,
+            max_pushdown_keys = b.MaxPushdownKeys
         }),
         managed_by = p.ManagedBy,
         definition_hash = p.ComputeDefinitionHash(),
@@ -799,6 +822,9 @@ public static class VirtualFilterEndpoints
         [JsonPropertyName("object_kinds")] public List<string>? ObjectKinds { get; set; }
         [JsonPropertyName("time_column")] public string? TimeColumn { get; set; }
         [JsonPropertyName("map")] public Dictionary<string, string>? Map { get; set; }
+        [JsonPropertyName("strategy")] public string? Strategy { get; set; }
+        [JsonPropertyName("pushdown_format")] public string? PushdownFormat { get; set; }
+        [JsonPropertyName("max_pushdown_keys")] public int? MaxPushdownKeys { get; set; }
 
         public FilterBinding ToModel()
         {
@@ -813,14 +839,23 @@ public static class VirtualFilterEndpoints
                 };
             }
 
-            return new FilterBinding
+            var binding = new FilterBinding
             {
                 FilterName = Filter,
                 TargetPattern = Target,
                 ObjectKinds = kinds,
                 TimeColumn = TimeColumn,
-                ColumnMap = Map
+                ColumnMap = Map,
+                Strategy = Strategy == null
+                    ? VirtualFilterExecutionStrategy.Adaptive
+                    : VirtualFilterBindingValidator.ParseEnum<VirtualFilterExecutionStrategy>(Strategy, "strategy"),
+                PushdownFormat = PushdownFormat == null
+                    ? null
+                    : VirtualFilterBindingValidator.ParseEnum<PushdownParameterFormat>(PushdownFormat, "pushdown_format"),
             };
+
+            // An omitted field keeps the model's own default; only an explicit value is a request.
+            return MaxPushdownKeys is { } keys ? binding with { MaxPushdownKeys = keys } : binding;
         }
     }
 
@@ -831,6 +866,21 @@ public static class VirtualFilterEndpoints
         [JsonPropertyName("scope")] public string Scope { get; set; } = string.Empty;
         [JsonPropertyName("uncovered")] public string? Uncovered { get; set; }
         [JsonPropertyName("bindings")] public List<BindingBody>? Bindings { get; set; }
+
+        /// <summary>The bindings of <paramref name="model"/> (built by <see cref="ToModel"/>) whose body stated <c>max_pushdown_keys</c>.</summary>
+        public HashSet<FilterBinding> ExplicitKeyBudgets(VirtualFilterAccessProfile model)
+        {
+            var set = new HashSet<FilterBinding>(ReferenceEqualityComparer.Instance);
+            foreach (var (body, binding) in (Bindings ?? []).Zip(model.Bindings))
+            {
+                if (body.MaxPushdownKeys.HasValue)
+                {
+                    set.Add(binding);
+                }
+            }
+
+            return set;
+        }
 
         public VirtualFilterAccessProfile ToModel(string name, TenantId tenant)
         {
@@ -852,13 +902,7 @@ public static class VirtualFilterEndpoints
                 GranteeSid = string.IsNullOrWhiteSpace(grantee.Sid) ? (Sid?)null : new Sid(grantee.Sid),
                 RoleName = grantee.Role,
                 Scope = Scope,
-                Uncovered = Uncovered?.ToLowerInvariant() switch
-                {
-                    null => null,
-                    "deny" => UncoveredPolicy.Deny,
-                    "skip" => UncoveredPolicy.Skip,
-                    _ => throw new ArgumentException($"Unknown uncovered '{Uncovered}' (deny, skip).")
-                },
+                Uncovered = Uncovered == null ? null : VirtualFilterBindingValidator.ParseEnum<UncoveredPolicy>(Uncovered, "uncovered", ignoreCase: true),
                 Bindings = (Bindings ?? []).Select(b => b.ToModel()).ToList()
             };
         }

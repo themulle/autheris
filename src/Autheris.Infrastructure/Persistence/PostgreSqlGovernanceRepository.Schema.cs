@@ -132,8 +132,10 @@ public partial class PostgreSqlGovernanceRepository
                 consent_id TEXT NOT NULL,
                 table_column_id TEXT NOT NULL,
                 column_name TEXT NOT NULL,
-                access_level INTEGER NOT NULL
+                access_level INTEGER NOT NULL,
+                applicable_scopes TEXT NOT NULL DEFAULT ''
             );
+            ALTER TABLE CONSENT_COLUMN_RULES ADD COLUMN IF NOT EXISTS applicable_scopes TEXT NOT NULL DEFAULT '';
 
             CREATE TABLE IF NOT EXISTS CONSENT_ROW_FILTERS (
                 id TEXT PRIMARY KEY,
@@ -346,6 +348,14 @@ public partial class PostgreSqlGovernanceRepository
             );
 
             INSERT INTO VIRTUAL_FILTER_GENERATION (id, generation) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
+
+            -- CR-ADG-31: tenant registry (grouped by NFKC + upper-case key; collided = 1 denies every spelling of the group)
+            CREATE TABLE IF NOT EXISTS TENANT_REGISTRY (
+                normalized_key TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                collided INTEGER NOT NULL DEFAULT 0,
+                first_seen_at TEXT NOT NULL
+            );
         ";
 
         // Review PG-1: concurrent replica starts must not run the DDL at the same time ("tuple concurrently updated").

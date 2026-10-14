@@ -122,8 +122,17 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
         // Generate synthetic row data for pruned files respecting schema & partition values
         var rawRows = new List<Dictionary<string, object?>>();
         var selectedCols = context.RequestedFields != null && context.RequestedFields.Count > 0
-            ? context.RequestedFields
-            : snapshot.Metadata.Schema.Fields.Select(f => f.Name).ToList();
+            ? new HashSet<string>(context.RequestedFields, StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(snapshot.Metadata.Schema.Fields.Select(f => f.Name), StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(context.AccessDecision.CombinedRowFilterSql))
+        {
+            var filterCols = Autheris.Application.Data.Services.DataApiFilterTranslator.ExtractReferencedColumns(context.AccessDecision.CombinedRowFilterSql, context.Metadata);
+            foreach (var fc in filterCols)
+            {
+                selectedCols.Add(fc);
+            }
+        }
 
         foreach (var file in prunedFiles)
         {
@@ -187,7 +196,8 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
             candidateRows = Autheris.Application.Services.GatewayExecutionService.FilterRows(
                 candidateRows,
                 context.AccessDecision.CombinedRowFilterSql,
-                context.Metadata);
+                context.Metadata,
+                context.AccessDecision.RowFilterParameters);
             context.Items["RlsPushdownExecuted"] = true;
         }
 
@@ -200,6 +210,12 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
             var cleanRow = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             foreach (var kvp in row)
             {
+                if (context.RequestedFields != null && context.RequestedFields.Count > 0 &&
+                    !context.RequestedFields.Contains(kvp.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    continue; // Skip filter-only auxiliary columns from final projection
+                }
+
                 var access = context.AccessDecision.GetEffectiveColumnAccess(kvp.Key, context.Metadata);
                 if (access == ColumnAccessLevel.Deny)
                 {

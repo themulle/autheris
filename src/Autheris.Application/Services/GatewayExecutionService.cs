@@ -60,8 +60,10 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
         Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null,
         IAccessProfileRepository? accessProfileRepository = null,
-        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null)
+        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
+        TypedPolicySources? typedPolicies = null)
     {
+        _typedPolicies = typedPolicies;
         _accessProfileRepository = accessProfileRepository;
         _memoryCache = memoryCache;
         _contractManager = contractManager;
@@ -342,6 +344,14 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 Items: pageItems
             );
 
+            // CR-10 (D-12): a declarative HTTP table cannot evaluate the row filter nor attest a pushdown. When the filter carries
+            // a Virtual Filter predicate this channel (OData, REST, GraphQL) does not federate, so it is denied here, before
+            // the upstream is called, not after unauthorized rows were fetched into gateway memory.
+            if (metadata.DataSourceType == DataSourceType.HttpDeclarative && !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
+            {
+                EnsureInMemoryFilterIsEnforceable(decision);
+            }
+
             rawRows = await executor.ExecuteAsync(execContext, ct);
 
             rlsPushdownAlreadyOccurred = execContext.Items.TryGetValue("RlsPushdownExecuted", out var p2) && p2 is true;
@@ -561,8 +571,9 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     private readonly Autheris.Application.Governance.Contracts.ISchemaContractManager? _contractManager;
     private readonly IAccessProfileRepository? _accessProfileRepository;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
+    private readonly TypedPolicySources? _typedPolicies;
 
-    private TableAccessPolicy AccessPolicy() =>
+    internal TableAccessPolicy AccessPolicy() =>
         new(_consentRepository, _resolutionService,
             _cacheService,
             _policyEnforcementService ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
@@ -572,7 +583,9 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
             _contractManager,
             _accessProfileRepository,
-            _memoryCache);
+            _memoryCache,
+            rowPolicyFactory: _typedPolicies?.RowPolicies,
+            maskPolicyFactory: _typedPolicies?.MaskPolicies);
 
     /// <summary>
     /// Virtual filters: an in-memory row filter cannot evaluate their subqueries (it would return nothing and look like
@@ -588,8 +601,9 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     public static List<IReadOnlyDictionary<string, object?>> FilterRows(
         List<IReadOnlyDictionary<string, object?>> rows,
         string rowFilterSql,
-        TableMetadata metadata) =>
-        InMemoryRowFilterEvaluator.FilterRows(rows, rowFilterSql, metadata);
+        TableMetadata metadata,
+        IReadOnlyDictionary<string, object?>? parameters = null) =>
+        InMemoryRowFilterEvaluator.FilterRows(rows, rowFilterSql, metadata, parameters);
 
     internal static bool IsTypeStrictRowFilter(string normalizedSql, System.Data.DataTable table) =>
         InMemoryRowFilterEvaluator.IsTypeStrictRowFilter(normalizedSql, table);
@@ -599,6 +613,24 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         TableIdentifier table,
         CancellationToken ct = default)
     {
+        var metadata = await _metadataRepository.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
+        if (metadata == null || !metadata.Table.IsActive)
+        {
+            return TableAccessDecision.Denied(table, $"Table '{table}' not found in metadata catalog.");
+        }
+
+        return await CheckTableAccessAsync(principal, metadata, recordAudit: true, ct).ConfigureAwait(false);
+    }
+
+    public async Task<TableAccessDecision> CheckTableAccessAsync(
+        ClaimsPrincipal? principal,
+        TableMetadata metadata,
+        bool recordAudit = true,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        var table = metadata.Identifier;
+
         using var _ = _drainController?.TrackQuery();
         if (principal == null || principal.Identity?.IsAuthenticated != true)
         {
@@ -612,8 +644,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         }
         var userSid = userSidNullable.Value;
 
-        var metadata = await _metadataRepository.GetTableMetadataAsync(table, ct);
-        if (metadata == null || !metadata.Table.IsActive)
+        if (!metadata.Table.IsActive)
         {
             return TableAccessDecision.Denied(table, $"Table '{table}' not found in metadata catalog.");
         }
@@ -623,18 +654,21 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         // Architecture 1: same decision as ResolveTableAccessAsync (OData metadata must not show more than a query returns).
         var decision = await AccessPolicy().DecideAsync(TableAccessQuery.ForPrincipal(principal, userSid, tenantId, metadata), ct).ConfigureAwait(false);
 
-        // F-OPS-02: W3C Trace Correlation
-        var traceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId();
-        await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+        if (recordAudit)
         {
-            TenantId = tenantId,
-            EventType = "CHILD_RELATION_CHECK",
-            ActorSid = userSid,
-            TargetTable = table.ToString(),
-            Decision = decision.IsAllowed ? "ALLOW" : "DENY",
-            TraceId = traceId,
-            DetailsJson = JsonSerializer.Serialize(new { is_allowed = decision.IsAllowed, reasons = decision.DeniedReasons })
-        }, ct);
+            // F-OPS-02: W3C Trace Correlation
+            var traceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId();
+            await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+            {
+                TenantId = tenantId,
+                EventType = "CHILD_RELATION_CHECK",
+                ActorSid = userSid,
+                TargetTable = table.ToString(),
+                Decision = decision.IsAllowed ? "ALLOW" : "DENY",
+                TraceId = traceId,
+                DetailsJson = JsonSerializer.Serialize(new { is_allowed = decision.IsAllowed, reasons = decision.DeniedReasons })
+            }, ct);
+        }
 
         return decision;
     }

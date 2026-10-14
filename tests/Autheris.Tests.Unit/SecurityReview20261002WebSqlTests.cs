@@ -712,8 +712,10 @@ public sealed class SecurityReview20261002WebSqlTests
     {
         var (status, body) = await InvokeEndpointAsync(new WebSqlPolicyException("DDL statements are strictly forbidden in WebSQL."));
 
+        // WP-X0a (SEC-X1-01): the message of the exception is never returned; the body carries the stable code and the fixed message.
         status.ShouldBe(StatusCodes.Status403Forbidden);
-        body.ShouldContain("DDL statements");
+        body.ShouldNotContain("DDL statements");
+        body.ShouldContain("SQL_POLICY_VIOLATION");
     }
 
     [Fact]

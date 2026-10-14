@@ -7,17 +7,20 @@ using Autheris.Application.Caching.Services;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Application.Services;
+using Autheris.Application.Sql.Catalog;
 using Autheris.Application.State;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Cache;
+using Autheris.Infrastructure.Databricks;
 using Autheris.Infrastructure.Diagnostics;
 using Autheris.Infrastructure.Garnet;
 using Autheris.Infrastructure.Health;
 using Autheris.Infrastructure.Idempotency;
 using Autheris.Infrastructure.Messaging;
 using Autheris.Infrastructure.Persistence;
+using Autheris.Infrastructure.Persistence.Catalog;
 using Autheris.Infrastructure.RateLimiting;
 using Autheris.Infrastructure.Security;
 using Autheris.Infrastructure.Serialization;
@@ -42,13 +45,16 @@ public static class GatewayStorageServiceExtensions
         if (gatewayOptions.Caching.Garnet.EnableEmbeddedServer)
         {
             // SEC H-01 / AR-06: Register GarnetServerManager as singleton and hosted service.
-            // Do NOT call StartServer() here; it will be called asynchronously in IHostedService.StartAsync.
             services.AddSingleton<IGarnetServerManager, GarnetServerManager>();
             services.AddHostedService(sp => (GarnetServerManager)sp.GetRequiredService<IGarnetServerManager>());
 
             services.AddSingleton<IConnectionMultiplexer>(sp =>
             {
                 var garnetManager = sp.GetRequiredService<IGarnetServerManager>();
+                // SEC H-01 / AR-06: Imperatively ensure Garnet is running before establishing RESP connection
+                // to prevent race conditions when services resolve multiplexer before HostedService.StartAsync.
+                garnetManager.StartServer();
+
                 var garnetConfig = new ConfigurationOptions
                 {
                     EndPoints = { $"{gatewayOptions.Caching.Garnet.Host}:{gatewayOptions.Caching.Garnet.Port}" },
@@ -100,11 +106,29 @@ public static class GatewayStorageServiceExtensions
         services.AddSingleton<ITableSensitivityLookup>(sp => new TableMetadataSensitivityLookup(
             () => sp.GetService<ITableMetadataRepository>(),
             sp.GetService<Microsoft.Extensions.Logging.ILogger<TableMetadataSensitivityLookup>>()));
-        services.AddSingleton<IEpochValidationService, EpochValidationService>();
+        services.AddSingleton<EpochValidationService>();
+        services.AddSingleton<IEpochValidationService>(sp => sp.GetRequiredService<EpochValidationService>());
         services.AddSingleton<IParameterBudgetProvider, DatabaseParameterBudgetProvider>();
 
         // SQL Connection Factory & Health Checks
+        // WP-X0j: Databricks is opened through the REST facade over the Statement Execution client. Wired but Experimental: it is not
+        // admitted to WebSQL (SqlDialectMapper.IsExecutable, S-4) until a green G9 run.
+        services.AddDatabricksStatementExecution();
         services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
+
+        // WP-X0c (CR-ADG-47): column types and collations from database metadata. The TTL is validated here, so a value above
+        // the 300 s maximum fails the startup (SEC-X1-09). Nothing consumes the provider before X1.
+        var catalogOptions = new GovernedCatalogOptions { CacheTtlSeconds = gatewayOptions.DataSources.CatalogCacheTtlSeconds };
+        catalogOptions.Validate();
+        services.AddSingleton(catalogOptions);
+        services.AddSingleton<IColumnMetadataReader, PostgreSqlColumnMetadataReader>();
+        services.AddSingleton<IColumnMetadataReader, SqlServerColumnMetadataReader>();
+        services.AddSingleton<IColumnMetadataReader, OracleColumnMetadataReader>();
+        services.AddSingleton<IColumnMetadataReader, SqliteColumnMetadataReader>();
+        services.AddSingleton<IColumnMetadataReader, DuckDbColumnMetadataReader>();
+        services.AddSingleton<IColumnMetadataReader, DatabricksColumnMetadataReader>();
+        services.AddSingleton<GovernedCatalogProvider>();
+        services.AddSingleton<IGovernedCatalogProvider>(sp => sp.GetRequiredService<GovernedCatalogProvider>());
         services.AddSingleton<AuditChainIntegrityMonitor>();
         services.AddHostedService(sp => sp.GetRequiredService<AuditChainIntegrityMonitor>());
         // SEC R3-4: anonymous /health/ready must not drive the DB probe per request -> cached, single-flight decorator.

@@ -550,6 +550,10 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
         {
             var safeLockApprovalId = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
             _logger.LogWarning(ex, "Failed to acquire distributed lock for ticket '{ApprovalId}'.", safeLockApprovalId);
+            if (_options.Value.HitLStepUp.FailClosedOnClusterPartition)
+            {
+                return (false, null);
+            }
             return (true, null);
         }
     }
@@ -633,6 +637,7 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
         }
 
         if (!approver.IsCrossTenantAdmin &&
+            approver.TenantId != null &&
             !string.Equals(entry.Ticket.TenantId, approver.TenantId, StringComparison.OrdinalIgnoreCase))
         {
             var safeApproverSidForLog = (approver.ApproverSid ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
@@ -691,7 +696,28 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
         {
             try
             {
-                return await _clusterState.GetAsync<HitLApprovalTicket>($"hitl:ticket:{approvalId}", ct).ConfigureAwait(false);
+                var ticket = await _clusterState.GetAsync<HitLApprovalTicket>($"hitl:ticket:{approvalId}", ct).ConfigureAwait(false);
+                if (ticket != null)
+                {
+                    if (string.IsNullOrWhiteSpace(ticket.Signature))
+                    {
+                        var safeApprovalId = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+                        _logger.LogWarning("Remote HitL ticket '{ApprovalId}' rejected: missing HMAC signature.", safeApprovalId);
+                        return null;
+                    }
+
+                    var expectedSig = ComputeTicketSignature(_hmacKey, ticket);
+                    if (!System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                        System.Text.Encoding.UTF8.GetBytes(ticket.Signature),
+                        System.Text.Encoding.UTF8.GetBytes(expectedSig)))
+                    {
+                        var safeApprovalId = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+                        _logger.LogWarning("Remote HitL ticket '{ApprovalId}' rejected: invalid HMAC signature (tampering detected).", safeApprovalId);
+                        return null;
+                    }
+
+                    return ticket;
+                }
             }
             catch (Exception ex)
             {

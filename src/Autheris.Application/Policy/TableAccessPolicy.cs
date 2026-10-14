@@ -97,6 +97,8 @@ public sealed class TableAccessPolicy
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly GatewayOptions _options;
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
+    private readonly RowPolicyFactory? _rowPolicyFactory;
+    private readonly ColumnMaskPolicyFactory? _maskPolicyFactory;
     private readonly ISchemaContractManager? _contractManager;
     private readonly IAccessProfileRepository? _accessProfileRepository;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
@@ -118,8 +120,12 @@ public sealed class TableAccessPolicy
         ISchemaContractManager? contractManager = null,
         IAccessProfileRepository? accessProfileRepository = null,
         Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
-        Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null)
+        Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null,
+        RowPolicyFactory? rowPolicyFactory = null,
+        ColumnMaskPolicyFactory? maskPolicyFactory = null)
     {
+        _rowPolicyFactory = rowPolicyFactory;
+        _maskPolicyFactory = maskPolicyFactory;
         _mandatoryFilters = mandatoryFilters ?? throw new ArgumentNullException(nameof(mandatoryFilters));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _resolutionService = resolutionService ?? throw new ArgumentNullException(nameof(resolutionService));
@@ -148,6 +154,35 @@ public sealed class TableAccessPolicy
     public async Task<TableAccessDecision> DecideAsync(TableAccessQuery query, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(query);
+        var decision = await DecideCoreAsync(query, ct).ConfigureAwait(false);
+        return AttachTypedMasks(decision, query);
+    }
+
+    /// <summary>
+    /// WP-X0l: the typed masks come from the final column levels (after the Casbin restriction), with the catalog rules of the same
+    /// table. A mask that cannot be expressed as a typed spec leaves the decision string-only, which the compiler path denies
+    /// (<see cref="TableAccessDecision.RequireTypedColumnMasks"/>); the string consumers are not affected.
+    /// </summary>
+    private TableAccessDecision AttachTypedMasks(TableAccessDecision decision, TableAccessQuery query)
+    {
+        if (_maskPolicyFactory == null || !decision.IsAllowed || decision.ColumnMasks != null)
+        {
+            return decision;
+        }
+
+        try
+        {
+            var masks = _maskPolicyFactory.ForDecision(decision, query.Metadata, query.Tenant);
+            return masks == null ? decision : decision with { ColumnMasks = masks };
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or ArgumentException)
+        {
+            return decision;
+        }
+    }
+
+    private async Task<TableAccessDecision> DecideCoreAsync(TableAccessQuery query, CancellationToken ct)
+    {
         var table = query.Metadata.Identifier;
 
         // SG-12: Inactive tables are treated as not found / denied centrally
@@ -232,7 +267,22 @@ public sealed class TableAccessPolicy
         TableAccessDecision decision;
         if (profile != null)
         {
-            decision = CreateDecisionFromProfile(profile, table, query.Metadata);
+            IRowPolicy? profilePolicy = null;
+            if (_rowPolicyFactory is { CanParseAdminPredicates: true } && !string.IsNullOrWhiteSpace(profile.RowFilterPredicate))
+            {
+                // WP-X0e: the admin-authored predicate is parsed once into a typed policy; an invalid predicate denies the table
+                // (fail closed). The denial reason never echoes the predicate text.
+                try
+                {
+                    profilePolicy = _rowPolicyFactory.FromAccessProfile(profile.RowFilterPredicate, query.Metadata);
+                }
+                catch (Exception ex) when (ex is System.Security.SecurityException or ArgumentException)
+                {
+                    return TableAccessDecision.Denied(table, "Access profile row filter is invalid (fail-closed).");
+                }
+            }
+
+            decision = CreateDecisionFromProfile(profile, table, query.Metadata, profilePolicy);
         }
         else if (consentBypassed)
         {
@@ -257,7 +307,11 @@ public sealed class TableAccessPolicy
 
             if (mandatory.PredicateSql != null)
             {
-                decision = decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters);
+                // WP-X0g: with a RowPolicyFactory the typed predicate is attached (values bound, passes RequireTypedRowPolicy);
+                // without one, or when a builder has no typed form, the legacy text path stays until X1.
+                decision = _rowPolicyFactory != null && mandatory.TypedPredicate != null
+                    ? decision.WithMandatoryPredicate(_rowPolicyFactory.FromPredicate(mandatory.TypedPredicate, query.Metadata.Dialect), mandatory.AppliedFilters, mandatory.AppliedBindings)
+                    : decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters, mandatory.AppliedBindings);
             }
         }
 
@@ -361,40 +415,78 @@ public sealed class TableAccessPolicy
             }
         }
 
-        var mergedFilter = consentDecision.CombinedRowFilterSql;
-        if (!string.IsNullOrWhiteSpace(policyDecision.CombinedRowFilterSql))
+
+        // WP-X0e: a typed Casbin policy is AND-merged as a typed policy (one projection, one marker namespace). Parameter names bound
+        // to different values deny, exactly like the text path below.
+        if (policyDecision.RowPolicy is { } typedPolicy && metadata.DataSourceType == DataSourceType.Sql)
         {
-            mergedFilter = !string.IsNullOrWhiteSpace(mergedFilter)
-                ? $"({mergedFilter}) AND ({policyDecision.CombinedRowFilterSql})"
-                : policyDecision.CombinedRowFilterSql;
+            TableAccessDecision typed;
+            try
+            {
+                typed = consentDecision.WithAdditionalRowPolicy(typedPolicy);
+            }
+            catch (System.Security.SecurityException)
+            {
+                return TableAccessDecision.Denied(consentDecision.Table, "Conflicting row-level security parameters.");
+            }
+
+            var projected = typedPolicy.Project().Parameters;
+            var others = policyDecision.RowFilterParameters?.Where(p => !projected.ContainsKey(p.Key)).ToList();
+            var typedParameters = typed.RowFilterParameters;
+            if (others is { Count: > 0 })
+            {
+                if (!TryMergeParameters(out var mergedOthers, typedParameters, others.ToDictionary(p => p.Key, p => p.Value, StringComparer.OrdinalIgnoreCase)))
+                {
+                    return TableAccessDecision.Denied(consentDecision.Table, "Conflicting row-level security parameters.");
+                }
+
+                typedParameters = mergedOthers;
+            }
+
+            return typed with { ColumnAccess = mergedColumns, RowFilterParameters = typedParameters };
         }
 
         var mergedParameters = consentDecision.RowFilterParameters;
         if (policyDecision.RowFilterParameters is { Count: > 0 })
         {
-            var merged = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            foreach (var source in new[] { consentDecision.RowFilterParameters, policyDecision.RowFilterParameters })
+            if (!TryMergeParameters(out var merged, consentDecision.RowFilterParameters, policyDecision.RowFilterParameters))
             {
-                foreach (var (name, value) in source ?? new Dictionary<string, object?>())
-                {
-                    if (merged.TryGetValue(name, out var existing) && !Equals(existing, value))
-                    {
-                        return TableAccessDecision.Denied(consentDecision.Table, "Conflicting row-level security parameters.");
-                    }
-
-                    merged[name] = value;
-                }
+                return TableAccessDecision.Denied(consentDecision.Table, "Conflicting row-level security parameters.");
             }
 
             mergedParameters = merged;
         }
 
-        return consentDecision with
+        // F-GOV-14 WI-3: the ABAC filter is added through the decision helper so it survives the removal of an enforced
+        // Virtual Filter predicate (WithoutEnforcedVirtualFilters).
+        return consentDecision.WithAdditionalRowFilter(policyDecision.CombinedRowFilterSql ?? string.Empty) with
         {
             ColumnAccess = mergedColumns,
-            CombinedRowFilterSql = mergedFilter,
             RowFilterParameters = mergedParameters
         };
+    }
+
+    private static bool TryMergeParameters(
+        out IReadOnlyDictionary<string, object?>? merged,
+        params IReadOnlyDictionary<string, object?>?[] sources)
+    {
+        var result = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var source in sources)
+        {
+            foreach (var (name, value) in source ?? new Dictionary<string, object?>())
+            {
+                if (result.TryGetValue(name, out var existing) && !Equals(existing, value))
+                {
+                    merged = null;
+                    return false;
+                }
+
+                result[name] = value;
+            }
+        }
+
+        merged = result;
+        return true;
     }
 
     private async Task<bool> IsRebacDeniedAsync(TableAccessQuery query, CancellationToken ct)
@@ -417,14 +509,15 @@ public sealed class TableAccessPolicy
     private async Task<TableAccessDecision> ResolveConsentAsync(TableAccessQuery query, CancellationToken ct)
     {
         var table = query.Metadata.Identifier;
+        var scopes = Autheris.Domain.Security.TokenAccessScope.GetScopeSet(query.Claims);
         string? contextHash = null;
         if (_cacheService != null)
         {
-            contextHash = IConsentCacheService.ComputeSubjectContextHash(query.GroupSids, query.Roles);
+            contextHash = IConsentCacheService.ComputeSubjectContextHash(query.GroupSids, query.Roles, scopes);
             var cached = await _cacheService.GetCachedDecisionAsync(query.Tenant, query.UserSid, table, contextHash, ct).ConfigureAwait(false);
-            if (cached != null)
+            if (cached != null && !IsUntypedConsentFilter(cached, query.Metadata))
             {
-                return cached;
+                return WithTypedConsentPolicy(cached, query.Metadata);
             }
         }
 
@@ -444,7 +537,15 @@ public sealed class TableAccessPolicy
         var allSids = query.AllUserSids != null && query.AllUserSids.Any(s => s != query.UserSid)
             ? query.AllUserSids
             : null;
-        var decision = _resolutionService.ResolveAccess(query.UserSid, query.GroupSids, query.Roles, table, activeConsents, query.Metadata.Dialect, allSids);
+        var decision = _resolutionService.ResolveAccess(
+            query.UserSid,
+            query.GroupSids,
+            query.Roles,
+            table,
+            activeConsents,
+            query.Metadata.Dialect,
+            allSids,
+            scopes is { Count: > 0 } ? scopes : null);
         if (decision == null)
         {
             return TableAccessDecision.Denied(table, "Access denied: consent resolution returned no decision.");
@@ -457,7 +558,44 @@ public sealed class TableAccessPolicy
             await _cacheService.SetCachedDecisionAsync(query.Tenant, query.UserSid, table, decision, ttl, contextHash!, epochAtLoad, ct).ConfigureAwait(false);
         }
 
-        return decision;
+        return WithTypedConsentPolicy(decision, query.Metadata);
+    }
+
+    /// <summary>The compiler path needs the typed form only for SQL sources; the other sources keep the legacy text (no marker consumers there).</summary>
+    private bool WantsTypedConsentPolicy(TableMetadata metadata) =>
+        _rowPolicyFactory != null && metadata.DataSourceType == DataSourceType.Sql;
+
+    /// <summary>
+    /// WP-X0l: a cached decision that carries a consent row filter as text only (an entry written before the recipe existed, or one whose
+    /// recipe did not survive the L2 round trip) cannot be typed. It is treated as a miss, so the consents are resolved again.
+    /// </summary>
+    private bool IsUntypedConsentFilter(TableAccessDecision cached, TableMetadata metadata) =>
+        WantsTypedConsentPolicy(metadata) && cached.IsAllowed && cached.ConsentFilterRecipe == null &&
+        !string.IsNullOrWhiteSpace(cached.CombinedRowFilterSql);
+
+    /// <summary>
+    /// WP-X0l: replaces the legacy consent text by the typed row policy built from the same filter inputs (the decision's
+    /// <see cref="ConsentRowFilterRecipe"/>). The text becomes the projection of the policy and the values become bound parameters. A
+    /// filter that cannot be typed leaves the decision string-only, which the compiler path denies.
+    /// </summary>
+    private TableAccessDecision WithTypedConsentPolicy(TableAccessDecision decision, TableMetadata metadata)
+    {
+        if (!WantsTypedConsentPolicy(metadata) || !decision.IsAllowed || decision.RowPolicy != null || decision.ConsentFilterRecipe == null)
+        {
+            return decision;
+        }
+
+        try
+        {
+            var policy = _rowPolicyFactory!.FromConsentFilters(decision.ConsentFilterRecipe, metadata.Dialect);
+            return policy == null
+                ? decision
+                : (decision with { CombinedRowFilterSql = null, RowFilterParameters = null }).WithAdditionalRowPolicy(policy);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Security.SecurityException or ArgumentException or NotSupportedException)
+        {
+            return decision;
+        }
     }
 
     private SecurityEvaluationContext BuildEvaluationContext(TableAccessQuery query)
@@ -493,10 +631,13 @@ public sealed class TableAccessPolicy
             Timestamp: DateTimeOffset.UtcNow,
             PurposeId: purpose,
             Attributes: attributes,
-            TargetDialect: query.Metadata.Dialect);
+            TargetDialect: query.Metadata.Dialect)
+        {
+            TableColumns = query.Metadata.Columns.Select(c => c.ColumnName).ToList()
+        };
     }
 
-    private static TableAccessDecision CreateDecisionFromProfile(AccessProfile profile, TableIdentifier table, TableMetadata metadata)
+    private static TableAccessDecision CreateDecisionFromProfile(AccessProfile profile, TableIdentifier table, TableMetadata metadata, IRowPolicy? rowPolicy = null)
     {
         var colAccess = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
         if (profile.MaskingMode == MaskingPolicyMode.Unmasked)
@@ -533,6 +674,11 @@ public sealed class TableAccessPolicy
                     colAccess[col.ColumnName] = ColumnAccessLevel.Clear;
                 }
             }
+        }
+
+        if (rowPolicy != null)
+        {
+            return TableAccessDecision.Allowed(table, colAccess, hasUnconstrainedColumnAllow: true).WithAdditionalRowPolicy(rowPolicy);
         }
 
         return TableAccessDecision.Allowed(table, colAccess, rowFilterSql: profile.RowFilterPredicate, hasUnconstrainedColumnAllow: true);

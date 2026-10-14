@@ -80,7 +80,8 @@ public sealed class LakehouseDataSourceExecutor : ILakehouseDataSourceExecutor, 
             rawRows = Autheris.Application.Services.GatewayExecutionService.FilterRows(
                 rawRows,
                 context.AccessDecision.CombinedRowFilterSql,
-                context.Metadata);
+                context.Metadata,
+                context.AccessDecision.RowFilterParameters);
             context.Items["RlsPushdownExecuted"] = true;
         }
 

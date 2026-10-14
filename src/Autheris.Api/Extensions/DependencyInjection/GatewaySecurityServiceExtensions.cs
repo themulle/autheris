@@ -62,7 +62,9 @@ public static class GatewaySecurityServiceExtensions
             var service = new CasbinEnforcementService(
                 string.IsNullOrWhiteSpace(options.Casbin.ModelPath) ? null : options.Casbin.ModelPath,
                 rlsGen,
-                logger);
+                logger,
+                // WP-X0l: lets the Casbin decisions carry their row filters as typed policies.
+                sp.GetService<Autheris.Application.Policy.RowPolicyFactory>());
             if (options.Casbin.Enabled && !string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
             {
                 service.LoadPolicyFromFile(options.Casbin.PolicyPath, options.Casbin.WatchPolicyFile);
@@ -91,7 +93,9 @@ public static class GatewaySecurityServiceExtensions
         services.AddHostedService<RebacSeedHostedService>();
 
         // Security, Context & Audit
+        services.AddHttpContextAccessor();
         services.AddScoped<IClientIpResolver, HttpContextClientIpResolver>();
+        services.AddSingleton<Autheris.Application.Interfaces.ICallerContextProvider, Autheris.Api.Security.HttpCallerContextProvider>();
         services.AddScoped<AuditContext>();
         services.AddSingleton<IAuthFailureAggregator, AuthFailureAggregator>();
         services.AddSingleton<ITableReadConcurrencyGate, TableReadConcurrencyGate>();

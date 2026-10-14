@@ -1,0 +1,75 @@
+{
+  "operator-004": {
+    "*": "semantic-note: integer / integer is emitted unchanged, so the result type is backend semantics (plan 3.3): integer division on PostgreSQL, SQL Server and SQLite, exact NUMBER division on Oracle, DOUBLE on Databricks."
+  },
+  "operator-012": {
+    "SqlServer": "semantic-note: || becomes +, so NULL propagation follows CONCAT_NULL_YIELDS_NULL (ON in every supported configuration)."
+  },
+  "order-page-001": {
+    "*": "semantic-note: the default null ordering is backend semantics (plan 3.3); the emitter injects no NULLS FIRST/LAST."
+  },
+  "order-page-005": {
+    "SqlServer": "semantic-note: ASC NULLS FIRST is the native T-SQL ordering, so the clause is omitted."
+  },
+  "order-page-008": {
+    "SqlServer": "semantic-note: DESC NULLS LAST is the native T-SQL ordering, so the clause is omitted."
+  },
+  "select-024": {
+    "PostgreSql": "semantic-note: LIKE is case-sensitive.",
+    "DuckDb": "semantic-note: LIKE is case-sensitive.",
+    "Oracle": "semantic-note: LIKE is case-sensitive (the session NLS_COMP/NLS_SORT is pinned by the gateway).",
+    "Databricks": "semantic-note: LIKE is case-sensitive.",
+    "SqlServer": "semantic-note: LIKE follows the column collation (usually case-insensitive).",
+    "Sqlite": "semantic-note: LIKE is ASCII case-insensitive (SEC-ADG-18)."
+  },
+  "literal-013": {
+    "Oracle": "semantic-note: the empty string is NULL in Oracle, so the bound '' is NULL (SEC-ADG-17)."
+  },
+  "complex-018": {
+    "Oracle": "semantic-note: NULLIF(a, '') compares with NULL on Oracle because '' is NULL (SEC-ADG-17)."
+  },
+  "literal-021": {
+    "SqlServer": "semantic-note: the boolean literal is emitted as the integer 1 (no boolean type).",
+    "Sqlite": "semantic-note: the boolean literal is emitted as the integer 1 (no boolean type).",
+    "Oracle": "semantic-note: the boolean literal is emitted as the integer 1 (no SQL boolean in SELECT lists)."
+  },
+  "fn-string-009": {
+    "Oracle": "semantic-note: the three-argument CONCAT is emitted as nested two-argument CONCAT calls; Oracle treats NULL as the empty string (Trino returns NULL)."
+  },
+  "fn-string-010": {
+    "SqlServer": "semantic-note: SUBSTR is emitted as SUBSTRING and the missing length as 2147483647; a start below 1 is backend semantics (Trino counts a negative start from the end)."
+  },
+  "fn-string-011": {
+    "SqlServer": "semantic-note: SUBSTR is emitted as SUBSTRING and the missing length as 2147483647; a start below 1 is backend semantics (Trino counts a negative start from the end)."
+  },
+  "fn-string-012": {
+    "SqlServer": "semantic-note: the two-argument SUBSTRING gets the missing length as 2147483647; a start below 1 is backend semantics (Trino counts a negative start from the end).",
+    "Oracle": "semantic-note: SUBSTRING is emitted as SUBSTR; a start of 0 is treated as 1 (Trino returns the empty string)."
+  },
+  "fn-string-017": {
+    "PostgreSql": "semantic-note: the two-argument REPLACE is emitted with an empty bound string as the replacement.",
+    "SqlServer": "semantic-note: the two-argument REPLACE is emitted with an empty bound string as the replacement."
+  },
+  "fn-string-018": {
+    "SqlServer": "semantic-note: rejected (SqlCompileNotSupportedException); T-SQL has no LPAD and no exact equivalent exists (truncation and a repeated pad string)."
+  },
+  "fn-string-019": {
+    "SqlServer": "semantic-note: rejected (SqlCompileNotSupportedException); T-SQL has no RPAD and no exact equivalent exists (truncation and a repeated pad string)."
+  },
+  "fn-string-051": {
+    "SqlServer": "semantic-note: rejected (SqlCompileNotSupportedException); DATALENGTH counts UTF-16 bytes of nvarchar, Trino counts UTF-8 bytes.",
+    "Oracle": "semantic-note: OCTET_LENGTH is emitted as LENGTHB (bytes of the database character set, UTF-8 on AL32UTF8)."
+  },
+  "fn-string-052": {
+    "Oracle": "semantic-note: CHAR_LENGTH is emitted as LENGTH (characters)."
+  },
+  "fn-string-053": {
+    "Oracle": "semantic-note: CHARACTER_LENGTH is emitted as LENGTH (characters)."
+  },
+  "fn-math-013": {
+    "Oracle": "semantic-note: LOG10(x) is emitted as LOG(10, x); a non-positive argument raises ORA-01428 where Trino returns NaN or -Infinity."
+  },
+  "setop-010": {
+    "*": "semantic-note: a parenthesized query primary is rejected with AstBuildException (KD-1); the AST has no node that keeps the ORDER BY and LIMIT of a parenthesized query."
+  }
+}

@@ -179,6 +179,11 @@ public static class GatewayServiceCollectionExtensions
                 "Security critical: Demo or production-targeted ReBAC seed tuples are not permitted outside Development.")
             .ValidateOnStart();
 
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<GatewayOptions>>(sp =>
+            new Autheris.Api.Extensions.DependencyInjection.GatewayEmptyListConfigurationValidator(
+                configuration,
+                sp.GetService<Microsoft.Extensions.Logging.ILogger<Autheris.Api.Extensions.DependencyInjection.GatewayEmptyListConfigurationValidator>>()));
+
         var gatewayOptions = configuration.GetSection(GatewayOptions.SectionName).Get<GatewayOptions>() ?? new GatewayOptions();
         ValidateGatewayOptions(gatewayOptions, environment);
 
@@ -198,7 +203,7 @@ public static class GatewayServiceCollectionExtensions
                 options.KnownProxies.Add(System.Net.IPAddress.Loopback);
                 options.KnownProxies.Add(System.Net.IPAddress.IPv6Loopback);
 
-                foreach (var netStr in gatewayOptions.ReverseProxy.KnownNetworks)
+                foreach (var netStr in gatewayOptions.ReverseProxy.GetEffectiveKnownNetworks())
                 {
                     if (System.Net.IPNetwork.TryParse(netStr, out var network))
                     {
@@ -231,6 +236,7 @@ public static class GatewayServiceCollectionExtensions
     {
         var hostEnv = environment ?? (services.FirstOrDefault(d => d.ServiceType == typeof(IHostEnvironment))?.ImplementationInstance as IHostEnvironment);
 
+        services.AddAutherisEvents(gatewayOptions);
         services.AddAutherisStorage(gatewayOptions, hostEnv);
         services.AddAutherisGovernance(gatewayOptions);
         services.AddAutherisSecurity(gatewayOptions, hostEnv);
@@ -299,6 +305,7 @@ public static class GatewayServiceCollectionExtensions
         }
         else
 #endif
+        if (gatewayOptions.Authentication.IsKerberosConfigured)
         {
             // Review E-2: never persist credentials on the (possibly shared, reverse-proxied) upstream connection, and
             // with RequireKerberosOnly reject every Negotiate identity that is not Kerberos (e.g. NTLM).
@@ -428,24 +435,32 @@ public static class GatewayServiceCollectionExtensions
                 {
                     if (gatewayOptions.Authentication.RequireKerberosOnly)
                     {
-                        return NegotiateDefaults.AuthenticationScheme;
+                        return gatewayOptions.Authentication.IsKerberosConfigured
+                            ? NegotiateDefaults.AuthenticationScheme
+                            : GatewayAuthSchemes.JwtBearer;
                     }
                     if (gatewayOptions.Authentication.BasicAuth.Enabled)
                     {
                         return GatewayAuthSchemes.Basic;
                     }
-                    return NegotiateDefaults.AuthenticationScheme;
+                    return gatewayOptions.Authentication.IsKerberosConfigured
+                        ? NegotiateDefaults.AuthenticationScheme
+                        : GatewayAuthSchemes.JwtBearer;
                 }
 
                 if (authHeader.StartsWith("Negotiate ", StringComparison.OrdinalIgnoreCase))
                 {
-                    return NegotiateDefaults.AuthenticationScheme;
+                    return gatewayOptions.Authentication.IsKerberosConfigured
+                        ? NegotiateDefaults.AuthenticationScheme
+                        : GatewayAuthSchemes.JwtBearer;
                 }
 
                 if (!gatewayOptions.Authentication.RequireKerberosOnly &&
                     authHeader.StartsWith("NTLM ", StringComparison.OrdinalIgnoreCase))
                 {
-                    return NegotiateDefaults.AuthenticationScheme;
+                    return gatewayOptions.Authentication.IsKerberosConfigured
+                        ? NegotiateDefaults.AuthenticationScheme
+                        : GatewayAuthSchemes.JwtBearer;
                 }
 
                 // 2. ForwardAuth (Traefik / Kubernetes Ingress) when enabled and proxy headers are present
@@ -498,7 +513,12 @@ public static class GatewayServiceCollectionExtensions
                     return GatewayAuthSchemes.Basic;
                 }
 
-                return NegotiateDefaults.AuthenticationScheme;
+                if (gatewayOptions.Authentication.IsKerberosConfigured)
+                {
+                    return NegotiateDefaults.AuthenticationScheme;
+                }
+
+                return GatewayAuthSchemes.JwtBearer;
             };
         });
 
@@ -585,6 +605,8 @@ public static class GatewayServiceCollectionExtensions
             .UseRequest<Autheris.GraphQL.Interceptors.DbtHealthExecutionMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.SchemaSunsettingExecutionMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.CdnCacheTagMiddleware>()
+            .UseRequest<Autheris.GraphQL.Interceptors.MaskedFieldsMiddleware>()
+            .UseRequest<Autheris.GraphQL.Interceptors.PaginationTruncationMiddleware>()
             .UseRequest<Autheris.GraphQL.Federation.SubgraphResultMaskingMiddleware>()
             .UseRequest<Autheris.GraphQL.Catalog.CatalogOperationCleanupMiddleware>()
             .UseOperationCache()

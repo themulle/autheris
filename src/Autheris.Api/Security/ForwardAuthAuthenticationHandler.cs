@@ -229,7 +229,7 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
 
         if (!string.IsNullOrWhiteSpace(rolesRaw))
         {
-            var allowedRoles = new HashSet<string>(forwardAuthOptions.AllowedRoles ?? [], StringComparer.OrdinalIgnoreCase);
+            var allowedRoles = new HashSet<string>(forwardAuthOptions.GetEffectiveAllowedRoles(), StringComparer.OrdinalIgnoreCase);
             var roles = rolesRaw.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             foreach (var r in roles)
             {

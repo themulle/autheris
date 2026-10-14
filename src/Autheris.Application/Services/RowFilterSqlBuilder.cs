@@ -4,9 +4,11 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Sql.Policy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Options;
+using TrinoSqlEngine;
 
 namespace Autheris.Application.Services;
 
@@ -22,6 +24,8 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
 
     private readonly IRlsFilterGenerator _rlsFilterGenerator;
     private readonly RowFilterSubqueryStrategy _subqueryStrategy;
+    private static readonly TypedRowFilterBuilder _typedBuilder = new();
+    private static readonly PolicyPredicateRenderer _renderer = new();
 
     public RowFilterSqlBuilder(IRlsFilterGenerator? rlsFilterGenerator = null, IOptions<Autheris.Domain.Options.GatewayOptions>? options = null)
     {
@@ -97,113 +101,25 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
         return null;
     }
 
+    /// <summary>
+    /// Combined filter with bound values. It is rendered from the typed predicate (<see cref="TypedRowFilterBuilder"/>) through the
+    /// dialect generator, so the text and the AST path cannot drift; every value, including those of correlated and cross-source
+    /// filters, is a parameter keyed by its marker (<c>@__gql_rls_N</c>).
+    /// </summary>
     public ParameterizedRowFilter BuildCombinedRowFilterParameterized(
         IReadOnlyList<Consent> aConsents,
         IReadOnlyList<Consent> dConsents,
         DatabaseDialect dialect = DatabaseDialect.SqlServer)
     {
-        var parameters = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        int paramIndex = 0;
-
-        var hasUnconstrainedAllow = aConsents.Any(c => c.RowFilters.Count == 0);
-
-        string? aSql = null;
-        if (!hasUnconstrainedAllow)
+        var target = PolicyParameterNamer.ToTargetDialect(dialect);
+        var predicate = _typedBuilder.BuildCombined(aConsents, dConsents, default, target);
+        if (predicate is null)
         {
-            var consentPredicates = new List<string>();
-            foreach (var consent in aConsents)
-            {
-                var consentSql = BuildConsentFilterPredicateParameterized(consent.RowFilters, dialect, parameters, ref paramIndex, isDeny: false);
-                if (!string.IsNullOrEmpty(consentSql))
-                {
-                    consentPredicates.Add(consentSql);
-                }
-            }
-
-            if (consentPredicates.Count > 0)
-            {
-                aSql = consentPredicates.Count == 1
-                    ? consentPredicates[0]
-                    : $"({string.Join(" OR ", consentPredicates)})";
-            }
+            return new ParameterizedRowFilter(null, new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase));
         }
 
-        var denyPredicates = new List<string>();
-        foreach (var denyConsent in dConsents)
-        {
-            if (denyConsent.RowFilters.Count == 0) continue;
-
-            var dPredicate = BuildConsentFilterPredicateParameterized(denyConsent.RowFilters, dialect, parameters, ref paramIndex, isDeny: true);
-            if (!string.IsNullOrEmpty(dPredicate))
-            {
-                denyPredicates.Add(dPredicate);
-            }
-        }
-
-        string? dSql = null;
-        if (denyPredicates.Count > 0)
-        {
-            var combinedDeny = denyPredicates.Count == 1
-                ? denyPredicates[0]
-                : $"({string.Join(" OR ", denyPredicates)})";
-            dSql = $"NOT ({combinedDeny})";
-        }
-
-        string? finalSql = null;
-        if (aSql != null && dSql != null)
-        {
-            finalSql = $"({aSql} AND {dSql})";
-        }
-        else if (aSql != null)
-        {
-            finalSql = aSql;
-        }
-        else if (dSql != null)
-        {
-            finalSql = dSql;
-        }
-
-        return new ParameterizedRowFilter(finalSql, parameters);
-    }
-
-    private string? BuildConsentFilterPredicateParameterized(
-        IReadOnlyList<ConsentRowFilter> filters,
-        DatabaseDialect dialect,
-        Dictionary<string, object?> parameters,
-        ref int paramIndex,
-        bool isDeny = false)
-    {
-        if (filters.Count == 0) return null;
-
-        var groups = filters.GroupBy(f => f.FilterGroup).ToList();
-        var groupPredicates = new List<string>();
-
-        foreach (var group in groups)
-        {
-            var groupConditions = new List<string>();
-            foreach (var f in group)
-            {
-                var cond = FormatConditionParameterized(f, dialect, parameters, ref paramIndex, isDeny);
-                if (!string.IsNullOrEmpty(cond))
-                {
-                    groupConditions.Add(cond);
-                }
-            }
-
-            if (groupConditions.Count > 0)
-            {
-                var groupSql = groupConditions.Count == 1
-                    ? groupConditions[0]
-                    : $"({string.Join(" AND ", groupConditions)})";
-                groupPredicates.Add(groupSql);
-            }
-        }
-
-        if (groupPredicates.Count == 0) return null;
-
-        return groupPredicates.Count == 1
-            ? groupPredicates[0]
-            : $"({string.Join(" OR ", groupPredicates)})";
+        var rendered = _renderer.Render(predicate, target, RowFilterAliases.Target);
+        return new ParameterizedRowFilter(rendered.Sql, rendered.Parameters);
     }
 
     public string FormatConditionParameterized(

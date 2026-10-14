@@ -8,3 +8,4 @@ Dockerfile*                        @themulle
 Directory.Build.props              @themulle
 NuGet.config                       @themulle
 **/packages.lock.json              @themulle
+tests/Autheris.Tests.SqlCompilerGate/Corpus/accepted-differences*.json  @themulle

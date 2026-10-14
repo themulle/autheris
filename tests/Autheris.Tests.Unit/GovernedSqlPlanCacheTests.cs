@@ -32,6 +32,9 @@ public sealed class GovernedSqlPlanCacheTests
 
         public TrackingSqlEngine(ISqlEngine inner) => _inner = inner;
 
+        public TrinoSqlEngine.Ast.Emit.CompiledSql Compile(ReadOnlyMemory<char> sql, CompileRequest request, CancellationToken cancellationToken)
+            => _inner.Compile(sql, request, cancellationToken);
+
         public string RewriteRls(ReadOnlyMemory<char> sql, RlsOptions? options = null)
         {
             RewriteRlsCallCount++;

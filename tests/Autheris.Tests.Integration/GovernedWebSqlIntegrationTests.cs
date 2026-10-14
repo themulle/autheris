@@ -93,7 +93,9 @@ public class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactor
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
 
         var body = await response.Content.ReadAsStringAsync();
-        body.ShouldContain("DDL statements");
+        // WP-X0a (SEC-X1-05): a fixed message and a stable code; the response no longer explains the rejected statement class
+        body.ShouldContain("SQL_POLICY_VIOLATION");
+        body.ShouldNotContain("DDL statements");
     }
 
     [Fact]
@@ -111,7 +113,8 @@ public class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactor
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
 
         var body = await response.Content.ReadAsStringAsync();
-        body.ShouldContain("SELECT statements");
+        body.ShouldContain("SQL_POLICY_VIOLATION");
+        body.ShouldNotContain("SELECT statements");
     }
 
     [Fact]

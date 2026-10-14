@@ -154,8 +154,15 @@ CREATE TABLE dbo.CONSENT_COLUMN_RULES (
     consent_id NVARCHAR(128) NOT NULL,
     table_column_id NVARCHAR(128) NOT NULL,
     column_name NVARCHAR(256) NOT NULL,
-    access_level INT NOT NULL
+    access_level INT NOT NULL,
+    applicable_scopes NVARCHAR(MAX) NOT NULL DEFAULT ''
 );
+
+IF COL_LENGTH(N'dbo.CONSENT_COLUMN_RULES', N'applicable_scopes') IS NULL
+    ALTER TABLE dbo.CONSENT_COLUMN_RULES ADD applicable_scopes NVARCHAR(MAX) NOT NULL DEFAULT '';
+
+IF COL_LENGTH(N'dbo.TABLE_COLUMNS', N'meta_json') IS NULL
+    ALTER TABLE dbo.TABLE_COLUMNS ADD meta_json NVARCHAR(MAX) NULL;
 
 IF OBJECT_ID(N'dbo.CONSENT_ROW_FILTERS', N'U') IS NULL
 CREATE TABLE dbo.CONSENT_ROW_FILTERS (
@@ -401,6 +408,15 @@ CREATE TABLE dbo.VIRTUAL_FILTER_GENERATION (
 
 IF NOT EXISTS (SELECT 1 FROM dbo.VIRTUAL_FILTER_GENERATION WHERE id = 1)
     INSERT INTO dbo.VIRTUAL_FILTER_GENERATION (id, generation) VALUES (1, 0);
+
+-- CR-ADG-31: tenant registry (grouped by NFKC + upper-case key; collided = 1 denies every spelling of the group)
+IF OBJECT_ID(N'dbo.TENANT_REGISTRY', N'U') IS NULL
+CREATE TABLE dbo.TENANT_REGISTRY (
+    normalized_key NVARCHAR(256) NOT NULL PRIMARY KEY,
+    tenant_id NVARCHAR(256) NOT NULL,
+    collided INT NOT NULL DEFAULT 0,
+    first_seen_at NVARCHAR(64) NOT NULL
+);
 
 -- SQL Server cannot attach a trigger to TRUNCATE TABLE. A table that is referenced by a foreign key cannot be truncated,
 -- so this (always empty) guard table blocks TRUNCATE on the audit table, mirroring the PostgreSQL TRUNCATE trigger.

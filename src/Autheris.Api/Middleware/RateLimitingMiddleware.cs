@@ -44,26 +44,18 @@ public sealed class PreAuthIpRateLimitingMiddleware
             return;
         }
 
-        string ip = "127.0.0.1";
-        if (_gatewayOptions.ReverseProxy.Enabled && context.Connection.RemoteIpAddress != null)
+        // Issue #44: Exempt requests carrying an Authorization Bearer token from the pre-auth IP limit.
+        // They are strictly governed downstream by PostAuthSidRateLimitingMiddleware (per-identity SID bucket) and CostQuota.
+        if (_options.ExemptAuthenticatedRequests &&
+            context.Request.Headers.TryGetValue("Authorization", out var authHeader) &&
+            authHeader.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         {
-            ip = context.Connection.RemoteIpAddress.ToString();
+            context.Items["Autheris_PreAuthExempted"] = true;
+            await _next(context);
+            return;
         }
-        else if (context.Items.TryGetValue("OriginalTcpRemoteIp", out var origIpObj))
-        {
-            if (origIpObj is System.Net.IPAddress origIp)
-            {
-                ip = origIp.ToString();
-            }
-            else if (origIpObj is string origIpStr && !string.IsNullOrWhiteSpace(origIpStr))
-            {
-                ip = origIpStr;
-            }
-        }
-        else if (context.Connection.RemoteIpAddress != null)
-        {
-            ip = context.Connection.RemoteIpAddress.ToString();
-        }
+
+        string ip = ResolveClientIp(context, _gatewayOptions);
 
         // SEC M-08: Aggregate IPv6 clients to /64 so address rotation within a prefix does not yield fresh buckets.
         ip = Autheris.Infrastructure.RateLimiting.ClientIpRateLimitKey.Normalize(ip);
@@ -91,6 +83,31 @@ public sealed class PreAuthIpRateLimitingMiddleware
         }
 
         await _next(context);
+    }
+
+    internal static string ResolveClientIp(HttpContext context, GatewayOptions gatewayOptions)
+    {
+        string ip = "127.0.0.1";
+        if (gatewayOptions.ReverseProxy.Enabled && context.Connection.RemoteIpAddress != null)
+        {
+            ip = context.Connection.RemoteIpAddress.ToString();
+        }
+        else if (context.Items.TryGetValue("OriginalTcpRemoteIp", out var origIpObj))
+        {
+            if (origIpObj is System.Net.IPAddress origIp)
+            {
+                ip = origIp.ToString();
+            }
+            else if (origIpObj is string origIpStr && !string.IsNullOrWhiteSpace(origIpStr))
+            {
+                ip = origIpStr;
+            }
+        }
+        else if (context.Connection.RemoteIpAddress != null)
+        {
+            ip = context.Connection.RemoteIpAddress.ToString();
+        }
+        return ip;
     }
 }
 
@@ -125,6 +142,35 @@ public sealed class PostAuthSidRateLimitingMiddleware
 
         if (context.User.Identity?.IsAuthenticated != true)
         {
+            if (context.Items.ContainsKey("Autheris_PreAuthExempted"))
+            {
+                // Request bypassed pre-auth rate limiting by supplying a Bearer token,
+                // but authentication failed or was anonymous. We must subject it to pre-auth IP rate limiting.
+                string clientIp = PreAuthIpRateLimitingMiddleware.ResolveClientIp(context, _gatewayOptions);
+                clientIp = Autheris.Infrastructure.RateLimiting.ClientIpRateLimitKey.Normalize(clientIp);
+                var preAuthOptions = _gatewayOptions.RateLimiting.PreAuthIpRateLimit;
+                var ipResult = await _rateLimiter.CheckPreAuthIpAsync(clientIp, preAuthOptions, context.RequestAborted);
+                if (!ipResult.Allowed)
+                {
+                    PreAuthIpRateLimitingMiddleware.RateLimitExceededCounter.WithLabels("pre_auth_ip").Inc();
+                    context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                    context.Response.Headers.RetryAfter = ipResult.RetryAfterSeconds.ToString();
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync(JsonSerializer.Serialize(new
+                    {
+                        errors = new[]
+                        {
+                            new
+                            {
+                                message = "Pre-auth IP rate limit exceeded. Wait before retrying.",
+                                extensions = new { code = "RATE_LIMIT_EXCEEDED" }
+                            }
+                        }
+                    }));
+                    return;
+                }
+            }
+
             // Anonymous requests proceed to endpoint for authorization / authentication challenge
             await _next(context);
             return;

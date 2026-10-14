@@ -18,6 +18,13 @@ public static class GatewayMcpServiceExtensions
     {
         // Model Context Protocol (MCP) Server & AI Data Guardrails
         services.AddSingleton<ISemanticPromptGuardrail, SemanticPromptGuardrail>();
+        services.AddSingleton<Autheris.Application.Docs.Interfaces.IDocSearchService, Autheris.Application.Docs.Services.InMemoryDocSearchService>();
+        services.AddSingleton<Autheris.Application.Docs.Interfaces.IDocIngestor, Autheris.Application.Docs.Services.MarkdownDocIngestor>();
+        services.AddSingleton<Autheris.Application.Docs.Interfaces.IUniversalDocStore>(sp => new Autheris.Application.Docs.Services.FileSystemUniversalDocStore(
+            null,
+            sp.GetRequiredService<Autheris.Application.Docs.Interfaces.IDocSearchService>(),
+            sp.GetRequiredService<Autheris.Application.Docs.Interfaces.IDocIngestor>(),
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Autheris.Application.Docs.Services.FileSystemUniversalDocStore>>()));
         services.AddSingleton<IGoldenQueryService, GoldenQueryService>();
         services.AddSingleton<ISemanticMcpCompiler, SemanticMcpCompiler>();
         services.AddScoped<IMcpDatasetCatalog, McpDatasetCatalog>();
@@ -36,6 +43,7 @@ public static class GatewayMcpServiceExtensions
         services.AddScoped<IMcpProtocolHandler, McpProtocolHandler>();
         services.AddScoped<IMcpStdioRunner, McpStdioRunner>();
         services.AddHostedService<McpSchemaDiscoveryService>();
+        services.AddHostedService<Autheris.Application.Docs.Services.DocStoreStartupSyncService>();
 
         // Human-in-the-Loop Step-Up Approval (F-AI-05)
         services.AddSingleton<IHitLStepUpApprovalService, HitLStepUpApprovalService>();

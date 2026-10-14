@@ -19,6 +19,12 @@ public sealed record SecurityEvaluationContext(
     DatabaseDialect? TargetDialect = null
 )
 {
+    /// <summary>
+    /// The catalog columns of the target table (WP-X0l). A typed row filter parsed from a rule's admin text may reference only these;
+    /// without it, the requested columns bound the check.
+    /// </summary>
+    public IReadOnlyList<string>? TableColumns { get; init; }
+
     public string? Department => GetAttribute("department") ?? GetAttribute("dept");
     public string? Region => GetAttribute("region") ?? GetAttribute("country");
     public string? ClearanceLevel => GetAttribute("clearance") ?? GetAttribute("clearance_level");

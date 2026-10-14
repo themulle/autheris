@@ -52,6 +52,7 @@ public sealed class EndToEndSqliteTests : IClassFixture<WebApplicationFactory<Pr
             b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-EndToEndSqliteTests-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
             b.UseSetting("Gateway:OpenSchema", "true");
+            b.UseSetting("Gateway:Rebac:Enabled", "false");
 
             // Echte Datenquelle: SQLite-Datei
             b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
@@ -193,6 +194,21 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran',100),(2,'LTM-1230','Mobi
         var r = await Client().PostAsJsonAsync("/api/sql", new { sql = "SELECT COUNT(*) AS n FROM e2e_cranes" });
         r.StatusCode.ShouldBe(HttpStatusCode.OK);
         (await r.Content.ReadAsStringAsync()).ShouldContain("4");
+    }
+
+    [Fact]
+    public async Task RestDataset_Pagination_WorksAgainstSqliteSource()
+    {
+        await RegisterCatalogAsync();
+        var r = await Client().GetAsync("/api/v1/data/default/main/e2e_cranes?select=id,serial_number&orderBy=id&limit=2&offset=1");
+        var body = await r.Content.ReadAsStringAsync();
+        r.StatusCode.ShouldBe(HttpStatusCode.OK, body);
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("data").GetArrayLength().ShouldBe(2);
+        doc.RootElement.GetProperty("hasMore").GetBoolean().ShouldBeTrue();
+        body.ShouldContain("LTM-1230");
+        body.ShouldContain("LR-1600");
+        body.ShouldNotContain("LTM-1100");
     }
 
     // ---------- 4. Deklarative SQL-Endpunkte ----------

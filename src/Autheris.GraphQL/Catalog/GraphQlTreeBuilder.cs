@@ -49,13 +49,23 @@ public static class GraphQlTreeBuilder
 
     private static long EstimateRows(TreeQueryNode node, long parentMultiplier, bool isList = true)
     {
-        long currentRows = isList ? parentMultiplier * node.Limit : parentMultiplier;
-        long total = currentRows;
-        foreach (var rel in node.Relations)
+        try
         {
-            total += EstimateRows(rel.Child, currentRows, rel.IsList);
+            checked
+            {
+                long currentRows = isList ? parentMultiplier * node.Limit : parentMultiplier;
+                long total = currentRows;
+                foreach (var rel in node.Relations)
+                {
+                    total += EstimateRows(rel.Child, currentRows, rel.IsList);
+                }
+                return total;
+            }
         }
-        return total;
+        catch (OverflowException)
+        {
+            return long.MaxValue;
+        }
     }
 
     private static TreeQueryNode BuildNode(
@@ -66,8 +76,14 @@ public static class GraphQlTreeBuilder
         CatalogSchemaModel schema,
         int maxAllowedLimit,
         bool isRoot,
-        int maxAllowedOffset = 10_000)
+        int maxAllowedOffset = 10_000,
+        int depth = 0)
     {
+        if (depth > 10)
+        {
+            throw new GatewayInvalidQueryException("Query nesting depth exceeds maximum permitted limit of 10.");
+        }
+
         // 1. Parse Arguments (where, orderBy, first, offset)
         var whereFilter = ParseWhereArgument(currentSelection, currentTable, context);
         var orderByList = ParseOrderByArgument(currentSelection, currentTable, context);
@@ -151,7 +167,8 @@ public static class GraphQlTreeBuilder
                     targetTable,
                     schema,
                     TreeSqlCompiler.MaxLimit,
-                    isRoot: false);
+                    isRoot: false,
+                    depth: depth + 1);
 
                 relations.Add(new TreeRelationNode(
                     ResponseKey: sel.ResponseName,

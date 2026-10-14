@@ -9,6 +9,7 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -51,12 +52,14 @@ public sealed class AccessAuditMiddleware
         auditContext.SourceIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         auditContext.TraceId = Activity.Current?.TraceId.ToString() ?? context.TraceIdentifier;
 
+        var exceptionOccurred = false;
         try
         {
             await _next(context).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
         {
+            exceptionOccurred = true;
             if (!auditContext.IsHandled)
             {
                 auditContext.Error("CLIENT_ABORTED", AuditEventTypes.QueryExecutionError);
@@ -65,6 +68,7 @@ public sealed class AccessAuditMiddleware
         }
         catch (Exception ex)
         {
+            exceptionOccurred = true;
             if (!auditContext.IsHandled)
             {
                 auditContext.Error(ex.Message, AuditEventTypes.QueryExecutionError);
@@ -73,11 +77,11 @@ public sealed class AccessAuditMiddleware
         }
         finally
         {
-            await FinalizeAuditAsync(context, auditRepository, auditContext).ConfigureAwait(false);
+            await FinalizeAuditAsync(context, auditRepository, auditContext, exceptionOccurred).ConfigureAwait(false);
         }
     }
 
-    private async Task FinalizeAuditAsync(HttpContext context, IAuditLogRepository auditRepository, AuditContext auditContext)
+    private async Task FinalizeAuditAsync(HttpContext context, IAuditLogRepository auditRepository, AuditContext auditContext, bool exceptionOccurred)
     {
         if (auditContext.IsHandled)
         {
@@ -92,14 +96,17 @@ public sealed class AccessAuditMiddleware
         }
 
         var policy = endpoint?.Metadata.GetMetadata<AuditPolicy>();
-        if (policy?.Level == AuditLevel.Delegated)
+        int statusCode = context.Response.StatusCode;
+        var isDelegated = policy?.Level == AuditLevel.Delegated;
+        if (isDelegated && !exceptionOccurred && statusCode < StatusCodes.Status400BadRequest)
         {
+            // Delegated routes audit their successful path in the domain layer (which calls MarkHandled).
+            // Denials, failures and exceptions are never delegated away: they are finalized here (fail-closed).
             return;
         }
 
         ResolveSecurityContext(context, auditContext);
 
-        int statusCode = context.Response.StatusCode;
         if (statusCode == StatusCodes.Status401Unauthorized)
         {
             auditContext.Deny("UNAUTHORIZED", AuditEventTypes.AuthFailed);
@@ -115,6 +122,10 @@ public sealed class AccessAuditMiddleware
         else if (statusCode >= 500 && auditContext.Decision != "DENY")
         {
             auditContext.Error($"HTTP_{statusCode}", AuditEventTypes.QueryExecutionError);
+        }
+        else if (isDelegated && statusCode >= StatusCodes.Status400BadRequest && statusCode < 500 && auditContext.Decision == "ALLOW")
+        {
+            auditContext.Deny($"HTTP_{statusCode}", AuditEventTypes.AuthzEndpointDenied);
         }
 
         var eventType = auditContext.EventType ?? policy?.EventType ?? (auditContext.Decision == "DENY" ? AuditEventTypes.AuthzEndpointDenied : AuditEventTypes.TableQuery);
@@ -199,12 +210,23 @@ public sealed class AccessAuditMiddleware
                 auditContext.ActorSid = new Sid(sidClaim);
             }
 
-            var tidClaim = context.User.FindFirst("tid")?.Value
-                ?? context.User.FindFirst("tenant_id")?.Value;
-
-            if (!string.IsNullOrWhiteSpace(tidClaim))
+            // Tenant attribution uses the same precedence as the rest of the pipeline: the resolved SecurityPrincipalContext
+            // first, then the canonical claim resolution. An invalid claim never fails the audit finalizer (API-7: that
+            // surfaced as a 500); the entry keeps the default tenant, is flagged, and never records the raw claim value.
+            if (context.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var item) && item is SecurityPrincipalContext principalContext)
             {
-                auditContext.TenantId = new TenantId(tidClaim);
+                auditContext.TenantId = principalContext.TenantId;
+            }
+            else
+            {
+                try
+                {
+                    auditContext.TenantId = context.User.GetTenantId();
+                }
+                catch (System.Security.SecurityException)
+                {
+                    auditContext.AdditionalDetails["tenantClaim"] = "INVALID";
+                }
             }
         }
     }

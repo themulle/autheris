@@ -467,7 +467,7 @@ Schützt vor IP-Spoofing hinter Load Balancern (K8s Ingress, F5, Envoy, NGINX).
 | Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
 | `Enabled` | `bool` | `true \| false` | `true` | Aktiviert die Auswertung von `X-Forwarded-For` und `X-Forwarded-Proto`. |
-| `KnownNetworks` | `List<string>` | CIDR-Notation | `["127.0.0.1/32", "::1/128"]` | Vertrauenswürdige IP-Netzwerke (z. B. internes Pod-Subnetz). |
+| `KnownNetworks` | `List<string>` | CIDR-Notation | `["127.0.0.1/32", "::1/128"]` | Trusted IP networks (e.g. internal pod subnet). A configured list replaces the default entirely (no merging). Loopback is always trusted for `X-Forwarded-*` headers, so an empty array (`[]`) is treated as not configured and logs a startup warning. |
 | `KnownProxies` | `List<string>` | IP-Adressen | `[]` | Feste IP-Adressen vorgelagerter Reverse Proxies. |
 
 ```json

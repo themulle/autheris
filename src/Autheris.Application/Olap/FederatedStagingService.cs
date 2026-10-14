@@ -11,6 +11,7 @@ using Autheris.Application.Connectors;
 using Autheris.Application.Connectors.Adapters;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Services;
+using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Connectors;
@@ -94,10 +95,19 @@ public sealed class FederatedStagingService : IFederatedStagingService
                     throw new GatewaySecurityException($"HTTP table '{req.Metadata.Identifier}' does not declare CompleteResponse=true and cannot be federated.", "INCOMPLETE_HTTP_RESPONSE");
                 }
 
+                // ForwardBearerToken is never federated (stable code), even if an operator lists it in the allowlist.
                 if (desc.AuthMode == HttpAuthMode.ForwardBearerToken)
                 {
                     _logger.LogWarning("Federated staging rejected HTTP table {Table}: ForwardBearerToken is not supported.", req.Metadata.Identifier);
                     throw new GatewaySecurityException($"HTTP table '{req.Metadata.Identifier}' uses ForwardBearerToken which is not permitted in cross-source federation.", "AUTH_MODE_UNSUPPORTED");
+                }
+
+                // CrossSource.AllowedHttpAuthModes (fail-closed): the mode must be listed (default: None, StaticApiKey, ClientCredentials).
+                var allowedModes = (_gatewayOptions.Value.WebSql?.CrossSource ?? new CrossSourceOptions()).GetEffectiveAllowedHttpAuthModes();
+                if (!allowedModes.Contains(desc.AuthMode.ToString(), StringComparer.OrdinalIgnoreCase))
+                {
+                    _logger.LogWarning("Federated staging rejected HTTP table {Table}: auth mode {AuthMode} is not in CrossSource:AllowedHttpAuthModes.", req.Metadata.Identifier, desc.AuthMode);
+                    throw new GatewaySecurityException($"HTTP table '{req.Metadata.Identifier}' uses an authentication mode that is not permitted in cross-source federation.", "HTTP_AUTH_MODE_DENIED");
                 }
             }
         }
@@ -110,20 +120,6 @@ public sealed class FederatedStagingService : IFederatedStagingService
 
         foreach (var req in tables)
         {
-            if (req.PreloadedRows != null)
-            {
-                var preloaded = req.PreloadedRows.ToList();
-                totalStagedRows += preloaded.Count;
-                totalStagedBytes += GovernedConnectorReader.EstimateBytes(preloaded);
-                stagedSources.Add(new OlapTableSource(
-                    Table: req.Metadata.Identifier,
-                    GovernedRows: preloaded,
-                    Metadata: req.Metadata,
-                    StagingTableName: req.StagingName,
-                    MaskedColumns: new HashSet<string>(StringComparer.OrdinalIgnoreCase)));
-                continue;
-            }
-
             var connector = ResolveConnector(req.Metadata);
             if (connector == null)
             {
@@ -132,11 +128,21 @@ public sealed class FederatedStagingService : IFederatedStagingService
             }
 
             var sessionArgs = new Dictionary<string, object?> { ["limit"] = budget.MaxStagedRowsPerTable + 1 };
-            if (req.CustomArguments != null)
+            // F-GOV-14 (AC-8.5): the pushdown restricts what is fetched; it can never overwrite a gateway argument. A path
+            // lookup does not pass its key list to the connector (the executor would fan out and concatenate the answers);
+            // the lookup reader below sends one request per key and restricts and de-duplicates the answers (CR-01).
+            var vfPlan = req.VirtualFilterPlan;
+            var pathLookup = vfPlan is { SkipUpstream: false } ? vfPlan.PathLookup : null;
+            if (pathLookup != null)
             {
-                foreach (var (k, v) in req.CustomArguments)
+                EnsureNoArgumentConflict(sessionArgs, pathLookup.Argument, req.Metadata);
+            }
+            else if (vfPlan?.PushdownArguments is { } pushdown)
+            {
+                foreach (var (name, value) in pushdown)
                 {
-                    sessionArgs[k] = v;
+                    EnsureNoArgumentConflict(sessionArgs, name, req.Metadata);
+                    sessionArgs[name] = value;
                 }
             }
 
@@ -150,14 +156,6 @@ public sealed class FederatedStagingService : IFederatedStagingService
                 Limit: budget.MaxStagedRowsPerTable + 1,
                 Offset: 0);
 
-            if (req.SessionItems != null)
-            {
-                foreach (var (k, v) in req.SessionItems)
-                {
-                    session.Items[k] = v;
-                }
-            }
-
             if (req.PushdownFilter != null && req.Metadata.Table.DataSourceType == DataSourceType.Sql)
             {
                 session.Items[TableQueryItems.Filter] = req.PushdownFilter;
@@ -168,13 +166,25 @@ public sealed class FederatedStagingService : IFederatedStagingService
                 HmacKeyId: _gatewayOptions.Value.DataMasking?.HmacKeyId,
                 MaskingDisabled: _gatewayOptions.Value.IsColumnMaskingDisabled,
                 MaxRows: budget.MaxStagedRowsPerTable,
-                MaxBytes: budget.MaxStagedBytesPerTable);
+                MaxBytes: budget.MaxStagedBytesPerTable,
+                // F-GOV-14 (C-6): the enforcement travels as a typed parameter, never through session.Items. A skipped
+                // upstream read (Tier 0) runs after the guards above and the connector resolution (SEC-13).
+                VirtualFilterEnforcement: req.VirtualFilterPlan?.Enforcement,
+                SkipUpstream: req.VirtualFilterPlan?.SkipUpstream == true);
+
+            var readConnector = connector;
+            PathLookupConnector? lookupConnector = null;
+            if (pathLookup != null)
+            {
+                lookupConnector = new PathLookupConnector(connector, pathLookup, req.Metadata.HttpEndpoint?.MaxConcurrentRequests ?? 1);
+                readConnector = lookupConnector;
+            }
 
             GovernedReadResult readResult;
             try
             {
                 readResult = await GovernedConnectorReader.ReadAsync(
-                    connector,
+                    readConnector,
                     session,
                     req.Metadata,
                     rowPolicy,
@@ -207,7 +217,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
             {
                 var auditDetails = new Dictionary<string, object?>
                 {
-                    ["table"] = req.Metadata.Identifier.ToQualifiedName(),
+                    ["table"] = req.Metadata.Identifier.ToString(),   // with the domain: two sources may share schema.table (SEC-1)
                     ["stagingName"] = req.StagingName,
                     ["dataSourceType"] = req.Metadata.Table.DataSourceType.ToString(),
                     ["sourceName"] = req.Metadata.Table.SourceName ?? req.Metadata.Identifier.Domain,
@@ -216,15 +226,39 @@ public sealed class FederatedStagingService : IFederatedStagingService
                     ["inDbMaskingExecuted"] = readResult.InDbMaskingExecuted,
                     ["filterPushedDown"] = req.PushdownFilter != null
                 };
+                if (vfPlan != null)
+                {
+                    // F-GOV-14 (FR-9): which tier read the table and how many rows the gateway enforcement removed (no key values).
+                    auditDetails["vfTier"] = vfPlan.Tier.ToString();
+                    auditDetails["upstreamCalled"] = !vfPlan.SkipUpstream;
+                    auditDetails["pushdownKeyCount"] = vfPlan.PushdownArguments?.Values.OfType<System.Collections.ICollection>().Sum(c => c.Count) ?? 0;
+                    auditDetails["rowsReceived"] = readResult.RowsBeforeVirtualFilter ?? 0;
+                    auditDetails["rowsKept"] = rows.Count;
+                    if (lookupConnector != null)
+                    {
+                        // CR-01: the upstream was asked once per key; a 404 means "key not present" and is recorded here.
+                        auditDetails["upstreamRequests"] = lookupConnector.Stats.Requests;
+                        auditDetails["upstreamKeysNotFound"] = lookupConnector.Stats.KeysNotFound;
+                    }
+                    else if (vfPlan.SkipUpstream)
+                    {
+                        auditDetails["upstreamRequests"] = 0;
+                    }
+                    else if (req.Metadata.HttpEndpoint is { Pagination: null or { Strategy: HttpPaginationStrategy.None } })
+                    {
+                        // CR-05: one request. A paged read issues one request per page and is not counted here.
+                        auditDetails["upstreamRequests"] = 1;
+                    }
+                }
 
                 await _auditRepo.RecordAuditEventAsync(new AuditLogEntry
                 {
                     TenantId = tenantId.Value,
                     EventType = AuditEventTypes.WebSqlCrossSourceSourceRead,
                     ActorSid = actorSid,
-                    TargetTable = req.Metadata.Identifier.ToQualifiedName(),
+                    TargetTable = req.Metadata.Identifier.ToString(),
                     Decision = "ALLOW",
-                    TraceId = Guid.NewGuid().ToString("N"),
+                    TraceId = budget.AuditCorrelationId ?? Guid.NewGuid().ToString("N"),
                     DetailsJson = JsonSerializer.Serialize(auditDetails)
                 }, ct).ConfigureAwait(false);
             }
@@ -255,6 +289,17 @@ public sealed class FederatedStagingService : IFederatedStagingService
         }
 
         return stagedSources;
+    }
+
+    private void EnsureNoArgumentConflict(Dictionary<string, object?> sessionArgs, string name, TableMetadata metadata)
+    {
+        if (sessionArgs.Keys.Any(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            _logger.LogWarning("Federated staging denied table {Table}: the pushdown argument collides with a gateway argument.", metadata.Identifier);
+            throw new GatewaySecurityException(
+                $"The Virtual Filter pushdown of '{metadata.Identifier}' conflicts with a gateway argument.",
+                Autheris.Application.VirtualFilters.Federation.VirtualFilterErrorCodes.PushdownArgumentConflict);
+        }
     }
 
     private IAutherisConnector? ResolveConnector(TableMetadata metadata)

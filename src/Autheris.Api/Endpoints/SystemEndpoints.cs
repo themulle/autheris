@@ -34,7 +34,7 @@ public static class SystemEndpoints
                 return Results.NotFound(new { error = "System metrics endpoints are disabled." });
             }
 
-            if (!IsAuthorized(context.User, sysOpts.AllowedRoles))
+            if (!IsAuthorized(context.User, sysOpts.GetEffectiveAllowedRoles()))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
@@ -55,7 +55,7 @@ public static class SystemEndpoints
                 return Results.NotFound(new { error = "System metrics endpoints are disabled." });
             }
 
-            if (!IsAuthorized(context.User, sysOpts.AllowedRoles))
+            if (!IsAuthorized(context.User, sysOpts.GetEffectiveAllowedRoles()))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
@@ -83,7 +83,7 @@ public static class SystemEndpoints
                 return Results.NotFound(new { error = "System metrics endpoints are disabled." });
             }
 
-            if (!IsAuthorized(context.User, sysOpts.AllowedRoles))
+            if (!IsAuthorized(context.User, sysOpts.GetEffectiveAllowedRoles()))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }

@@ -16,6 +16,11 @@ public partial class PostgreSqlGovernanceRepository
 {
     public async Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default)
     {
+        if (entry.Caller == null && _callerContextProvider != null)
+        {
+            entry.Caller = _callerContextProvider.ResolveCallerContext();
+        }
+
         // Tier-A: Security critical mutations, admin actions, or denied requests are synchronous (Fail-Closed)
         bool isTierA = string.Equals(entry.Decision, "DENY", StringComparison.OrdinalIgnoreCase) ||
                        (!string.Equals(entry.EventType, "TABLE_QUERY", StringComparison.OrdinalIgnoreCase) &&
@@ -521,14 +526,14 @@ public partial class PostgreSqlGovernanceRepository
         _lastAuditHash = lastEntryHash;
         Interlocked.Exchange(ref _lastAuditSeq, lastSequence);
 
-        if (_auditAnchorStore != null)
+        if (Volatile.Read(ref _auditChainViolation) == null && _auditAnchorStore != null)
         {
             var anchor = CreateSignedAnchor(lastSequence, lastEntryHash);
             try
             {
                 // Monotonic: replicas sharing one anchor store must never move the anchor backwards.
-                var current = _auditAnchorStore.Load();
-                if (current == null || current.Sequence < anchor.Sequence)
+                var current = TryLoadVerifiedAnchor(out var anchorInvalid);
+                if (!anchorInvalid && (current == null || current.Sequence < anchor.Sequence))
                 {
                     _auditAnchorStore.Save(anchor);
                 }

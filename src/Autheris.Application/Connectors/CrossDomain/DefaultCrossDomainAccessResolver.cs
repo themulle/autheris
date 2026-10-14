@@ -25,6 +25,7 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
 {
     private readonly TableAccessPolicy _policy;
     private readonly GatewayOptions? _options;
+    private readonly TypedPolicySources? _typedPolicies;
 
     public DefaultCrossDomainAccessResolver(
         IConsentRepository consentRepository,
@@ -34,8 +35,10 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
         IOptions<GatewayOptions>? options = null,
         IConsentCacheService? consentCache = null,
         IRebacEvaluator? rebacEvaluator = null,
-        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null)
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
+        TypedPolicySources? typedPolicies = null)
     {
+        _typedPolicies = typedPolicies;
         _options = options?.Value ?? new GatewayOptions();
         _policy = new TableAccessPolicy(
             consentRepository ?? throw new ArgumentNullException(nameof(consentRepository)),
@@ -45,7 +48,9 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
             rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver,
             _options,
-            mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance);
+            mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
+            rowPolicyFactory: typedPolicies?.RowPolicies,
+            maskPolicyFactory: typedPolicies?.MaskPolicies);
     }
 
     public Task<TableAccessDecision> ResolveAccessAsync(

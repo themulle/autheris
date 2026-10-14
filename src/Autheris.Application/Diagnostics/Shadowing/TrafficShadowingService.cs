@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using Autheris.Application.Security;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -145,7 +146,21 @@ public sealed class TrafficShadowingService : ITrafficShadowingService, IHostedS
     private async Task ProcessChannelAsync(CancellationToken ct)
     {
         var options = _gatewayOptions.Value.TrafficShadowing;
-        var targetBaseUri = new Uri(options.TargetBaseUrl.TrimEnd('/'));
+        if (!Uri.TryCreate(options.TargetBaseUrl?.TrimEnd('/'), UriKind.Absolute, out var targetBaseUri))
+        {
+            _logger.LogWarning("Traffic shadowing disabled: invalid target URL '{TargetUrl}'.", options.TargetBaseUrl);
+            return;
+        }
+
+        try
+        {
+            await EgressUrlPolicy.ValidateResolvedAsync(targetBaseUri, isDev: false, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Traffic shadowing disabled: target base URL '{TargetUrl}' violated egress SSRF policy.", options.TargetBaseUrl);
+            return;
+        }
 
         while (await _channel.Reader.WaitToReadAsync(ct).ConfigureAwait(false))
         {
@@ -176,7 +191,13 @@ public sealed class TrafficShadowingService : ITrafficShadowingService, IHostedS
             {
                 if (string.Equals(headerKey, "Host", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(headerKey, "Content-Length", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(headerKey, "Content-Type", StringComparison.OrdinalIgnoreCase))
+                    string.Equals(headerKey, "Content-Type", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(headerKey, "Authorization", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(headerKey, "Cookie", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(headerKey, "Set-Cookie", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(headerKey, "X-Api-Key", StringComparison.OrdinalIgnoreCase) ||
+                    headerKey.Contains("token", StringComparison.OrdinalIgnoreCase) ||
+                    headerKey.Contains("secret", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }

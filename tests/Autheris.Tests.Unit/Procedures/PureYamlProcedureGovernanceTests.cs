@@ -236,6 +236,208 @@ public class PureYamlProcedureGovernanceTests
     }
 
     [Fact]
+    public async Task Execute_DeclaredProcedure_WhenUserHasClearConsentOnSourceColumn_ReturnsClearText()
+    {
+        const string yaml = """
+            name: get_orders_clear
+            procedure: api.usp_GetOrders
+            validation: declared
+            result_table: sales.orders
+            referenced_tables:
+              - sales.orders
+            outputs:
+              - name: order_id
+                type: int
+                source_table: sales.orders
+                source_column: id
+              - name: sensitive_note
+                type: varchar(255)
+                source_table: sales.orders
+                source_column: note
+            """;
+
+        var def = ProcedureDefinitionParser.ParseYaml(yaml, "orders", allowRlsNone: false, 60);
+        var registry = new InMemoryProcedureRegistry();
+        registry.Register(def);
+
+        var validation = new ProcedureValidationResult(
+            IsValid: true,
+            Errors: [],
+            ResultColumns: def.DeclaredOutputs,
+            ReferencedTables: ["sales.orders"],
+            ParameterSqlTypes: new Dictionary<string, string>(),
+            ResultColumnSources: def.DeclaredOutputSources);
+
+        registry.MarkActive(def.Name, validation);
+
+        var invoker = Substitute.For<IProcedureInvoker>();
+        invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<CancellationToken>())
+            .Returns(new RawProcedureResult(
+                Columns: ["order_id", "sensitive_note"],
+                Rows:
+                [
+                    new object?[] { 100, "secret financial data" }
+                ],
+                Truncated: false));
+
+        var tables = Substitute.For<ITableMetadataRepository>();
+        tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(new TableMetadata
+            {
+                Identifier = new TableIdentifier("default", "sales", "orders"),
+                Columns =
+                [
+                    new TableColumn { ColumnName = "id" },
+                    new TableColumn { ColumnName = "note", IsSensitive = true }
+                ]
+            });
+
+        var consents = Substitute.For<IConsentRepository>();
+        consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Consent>());
+
+        var resolution = Substitute.For<IConsentResolutionService>();
+        // Explicit Clear consent for both columns!
+        var columnDecisions = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = ColumnAccessLevel.Clear,
+            ["note"] = ColumnAccessLevel.Clear
+        };
+        resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
+            .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), columnDecisions, null));
+
+        var masking = Substitute.For<IColumnMaskingProvider>();
+        var opt = Options.Create(new GatewayOptions
+        {
+            SqlEndpoints = new SqlEndpointsOptions
+            {
+                Procedures = new ProcedureEndpointsOptions { Enabled = true, AllowedSchemas = ["api"] }
+            }
+        });
+
+        var audit = Substitute.For<IAuditLogRepository>();
+        var executionService = new GovernedProcedureExecutionService(
+            registry,
+            invoker,
+            opt,
+            audit,
+            tables,
+            consents,
+            resolution,
+            masking);
+
+        var result = await executionService.ExecuteAsync("get_orders_clear", null, User("Reader"), Tenant);
+
+        // When user has Clear consent, note must remain cleartext
+        result.Rows.Count.ShouldBe(1);
+        result.Rows[0]["order_id"].ShouldBe(100);
+        result.Rows[0]["sensitive_note"].ShouldBe("secret financial data");
+    }
+
+    [Fact]
+    public async Task Execute_DeclaredProcedure_WhenColumnInClearedResultColumns_ReturnsClearTextEvenIfSourceMasked()
+    {
+        const string yaml = """
+            name: get_orders_override
+            procedure: api.usp_GetOrders
+            validation: declared
+            result_table: sales.orders
+            referenced_tables:
+              - sales.orders
+            outputs:
+              - name: order_id
+                type: int
+                source_table: sales.orders
+                source_column: id
+              - name: sensitive_note
+                type: varchar(255)
+                source_table: sales.orders
+                source_column: note
+            """;
+
+        var def = ProcedureDefinitionParser.ParseYaml(yaml, "orders", allowRlsNone: false, 60);
+        // Author marked sensitive_note as ClearedResultColumn
+        def = def with { ClearedResultColumns = ["sensitive_note"] };
+        var registry = new InMemoryProcedureRegistry();
+        registry.Register(def);
+
+        var validation = new ProcedureValidationResult(
+            IsValid: true,
+            Errors: [],
+            ResultColumns: def.DeclaredOutputs,
+            ReferencedTables: ["sales.orders"],
+            ParameterSqlTypes: new Dictionary<string, string>(),
+            ResultColumnSources: def.DeclaredOutputSources);
+
+        registry.MarkActive(def.Name, validation);
+
+        var invoker = Substitute.For<IProcedureInvoker>();
+        invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<CancellationToken>())
+            .Returns(new RawProcedureResult(
+                Columns: ["order_id", "sensitive_note"],
+                Rows:
+                [
+                    new object?[] { 100, "secret financial data" }
+                ],
+                Truncated: false));
+
+        var tables = Substitute.For<ITableMetadataRepository>();
+        tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(new TableMetadata
+            {
+                Identifier = new TableIdentifier("default", "sales", "orders"),
+                Columns =
+                [
+                    new TableColumn { ColumnName = "id" },
+                    new TableColumn { ColumnName = "note", IsSensitive = true }
+                ]
+            });
+
+        var consents = Substitute.For<IConsentRepository>();
+        consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Consent>());
+
+        var resolution = Substitute.For<IConsentResolutionService>();
+        // Caller only has Mask for note on the underlying table
+        var columnDecisions = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = ColumnAccessLevel.Clear,
+            ["note"] = ColumnAccessLevel.Mask
+        };
+        resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
+            .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), columnDecisions, null));
+
+        var masking = Substitute.For<IColumnMaskingProvider>();
+        masking.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>()).Returns("***MASKED***");
+
+        var opt = Options.Create(new GatewayOptions
+        {
+            SqlEndpoints = new SqlEndpointsOptions
+            {
+                Procedures = new ProcedureEndpointsOptions { Enabled = true, AllowedSchemas = ["api"] }
+            }
+        });
+
+        var audit = Substitute.For<IAuditLogRepository>();
+        var executionService = new GovernedProcedureExecutionService(
+            registry,
+            invoker,
+            opt,
+            audit,
+            tables,
+            consents,
+            resolution,
+            masking);
+
+        var result = await executionService.ExecuteAsync("get_orders_override", null, User("Reader"), Tenant);
+
+        // ClearedResultColumn in procedure contract overrides masking to Clear
+        result.Rows.Count.ShouldBe(1);
+        result.Rows[0]["order_id"].ShouldBe(100);
+        result.Rows[0]["sensitive_note"].ShouldBe("secret financial data");
+    }
+
+    [Fact]
     public void ProcedureYamlGenerator_GeneratesValidYaml_MatchingParser()
     {
         var generator = new ProcedureYamlGenerator();

@@ -84,25 +84,46 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         return (Expression)Visit(context.expression());
     }
 
+    // The depth check walks the whole tree once per compile; the work stack is reused per thread instead of growing a new one each time.
+    [ThreadStatic]
+    private static Stack<(IParseTree Node, int Depth)>? _depthStack;
+
+    private const int MaxRetainedDepthStack = 4096;
+
     private static void EnsureParseTreeDepthWithinLimit(IParseTree root, int maxDepth)
     {
         if (maxDepth <= 0) return;
-        var stack = new Stack<(IParseTree node, int depth)>();
-        stack.Push((root, 1));
-        while (stack.Count > 0)
+        var stack = _depthStack ??= new Stack<(IParseTree Node, int Depth)>(256);
+        stack.Clear();
+        int peak = 0;
+        try
         {
-            var (node, depth) = stack.Pop();
-            if (depth > maxDepth)
+            stack.Push((root, 1));
+            while (stack.Count > 0)
             {
-                throw new SecurityException($"SQL parse tree depth exceeds the maximum allowed limit of {maxDepth}.");
-            }
-            for (int i = 0; i < node.ChildCount; i++)
-            {
-                var child = node.GetChild(i);
-                if (child.ChildCount > 0)
+                peak = Math.Max(peak, stack.Count);
+                var (node, depth) = stack.Pop();
+                if (depth > maxDepth)
                 {
-                    stack.Push((child, depth + 1));
+                    throw new SecurityException($"SQL parse tree depth exceeds the maximum allowed limit of {maxDepth}.");
                 }
+
+                for (int i = 0; i < node.ChildCount; i++)
+                {
+                    var child = node.GetChild(i);
+                    if (child.ChildCount > 0)
+                    {
+                        stack.Push((child, depth + 1));
+                    }
+                }
+            }
+        }
+        finally
+        {
+            stack.Clear();
+            if (peak > MaxRetainedDepthStack)
+            {
+                _depthStack = null;
             }
         }
     }
@@ -146,7 +167,8 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
             if (stmt is not SqlBaseParser.StatementDefaultContext &&
                 stmt is not SqlBaseParser.DeleteContext &&
                 stmt is not SqlBaseParser.UpdateContext &&
-                stmt is not SqlBaseParser.InsertIntoContext)
+                stmt is not SqlBaseParser.InsertIntoContext &&
+                stmt is not SqlBaseParser.MergeContext)
             {
                 throw new SecurityException($"Unsupported or unsafe statement type: {stmt.GetType().Name}");
             }
@@ -383,11 +405,13 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         return new ValuesQueryBody(rows);
     }
 
-    public override SqlNode VisitSubquery(SqlBaseParser.SubqueryContext context)
-    {
-        using var _ = EnterScope();
-        return BuildQueryNoWith(context.queryNoWith(), null);
-    }
+    /// <summary>
+    /// A parenthesized query primary (KD-1). The AST has no query body that wraps a <see cref="SelectStatement"/> (with its own
+    /// ORDER BY / LIMIT), and the generators do not parenthesize set-operation operands, so unwrapping it could change the
+    /// precedence of the emitted statement. It is rejected with a typed exception instead of an unhandled cast failure.
+    /// </summary>
+    public override SqlNode VisitSubquery(SqlBaseParser.SubqueryContext context) =>
+        throw Unsupported("parenthesized query primary");
 
     public override SqlNode VisitQuerySpecification(SqlBaseParser.QuerySpecificationContext context)
     {
@@ -639,14 +663,71 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     public override SqlNode VisitDelete(SqlBaseParser.DeleteContext context)
     {
         using var _ = EnterScope();
+        RejectBranch(context.branch);
         var target = new NamedTableSource(ToSqlQualifiedName(context.qualifiedName()), null);
         Expression? where = context.booleanExpression() != null ? (Expression)Visit(context.booleanExpression()) : null;
         return new DeleteStatement(target, where);
     }
 
+    /// <summary>The table branch suffix (<c>t@branch</c>) has no governed meaning: it is rejected, never silently dropped.</summary>
+    private static void RejectBranch(SqlBaseParser.IdentifierContext? branch)
+    {
+        if (branch != null)
+        {
+            throw Unsupported("a table branch (table@branch)");
+        }
+    }
+
+    public override SqlNode VisitMerge(SqlBaseParser.MergeContext context)
+    {
+        using var _ = EnterScope();
+        RejectBranch(context.branch);
+        var alias = context.alias != null ? ToSqlIdentifier(context.alias) : null;
+        var target = new NamedTableSource(ToSqlQualifiedName(context.qualifiedName()), alias);
+        var source = (TableSource)Visit(context.relation());
+        var on = (Expression)Visit(context.expression());
+        var clauses = new List<MergeClause>();
+        foreach (var mergeCase in context.mergeCase())
+        {
+            clauses.Add((MergeClause)Visit(mergeCase));
+        }
+
+        return new MergeStatement(target, source, on, clauses);
+    }
+
+    public override SqlNode VisitMergeUpdate(SqlBaseParser.MergeUpdateContext context)
+    {
+        using var _ = EnterScope();
+        var condition = context.condition != null ? (Expression)Visit(context.condition) : null;
+        var assignments = new List<UpdateAssignment>();
+        for (int i = 0; i < context._targets.Count; i++)
+        {
+            assignments.Add(new UpdateAssignment(ToSqlIdentifier(context._targets[i]), (Expression)Visit(context._values[i])));
+        }
+
+        return new MergeUpdateClause(condition, assignments);
+    }
+
+    public override SqlNode VisitMergeDelete(SqlBaseParser.MergeDeleteContext context)
+    {
+        using var _ = EnterScope();
+        var condition = context.condition != null ? (Expression)Visit(context.condition) : null;
+        return new MergeDeleteClause(condition);
+    }
+
+    public override SqlNode VisitMergeInsert(SqlBaseParser.MergeInsertContext context)
+    {
+        using var _ = EnterScope();
+        var condition = context.condition != null ? (Expression)Visit(context.condition) : null;
+        IReadOnlyList<SqlIdentifier>? columns = context._targets.Count > 0 ? context._targets.Select(ToSqlIdentifier).ToList() : null;
+        var values = context._values.Select(v => (Expression)Visit(v)).ToList();
+        return new MergeInsertClause(condition, columns, values);
+    }
+
     public override SqlNode VisitUpdate(SqlBaseParser.UpdateContext context)
     {
         using var _ = EnterScope();
+        RejectBranch(context.branch);
         var target = new NamedTableSource(ToSqlQualifiedName(context.qualifiedName()), null);
         var assignments = new List<UpdateAssignment>();
         foreach (var ua in context.updateAssignment())
@@ -662,6 +743,7 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     public override SqlNode VisitInsertInto(SqlBaseParser.InsertIntoContext context)
     {
         using var _ = EnterScope();
+        RejectBranch(context.branch);
         var target = new NamedTableSource(ToSqlQualifiedName(context.qualifiedName()), null);
         IReadOnlyList<SqlIdentifier>? cols = null;
         if (context.columnAliases()?.identifier() != null)
@@ -670,6 +752,12 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         }
 
         var rootSelect = (SelectStatement)Visit(context.rootQuery());
+        if (rootSelect.With != null || rootSelect.OrderBy != null || rootSelect.Pagination != null)
+        {
+            // Dropping WITH, ORDER BY or LIMIT of the source would silently change which rows are written.
+            throw Unsupported("WITH, ORDER BY or LIMIT on an INSERT source");
+        }
+
         return new InsertStatement(target, cols, rootSelect.Body);
     }
 
@@ -921,6 +1009,18 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     public override SqlNode VisitDereference(SqlBaseParser.DereferenceContext context)
     {
         using var _ = EnterScope();
+
+        // Fast path for the common "alias.column": build the two-part name directly instead of a one-part ColumnReference that is
+        // immediately copied into a longer list (same node as the generic path below).
+        if (context.baseExpression is SqlBaseParser.ColumnReferenceContext columnBase)
+        {
+            var baseId = ToSqlIdentifier(columnBase.identifier());
+            if (baseId.IsQuoted || !baseId.Value.StartsWith("__param_", StringComparison.OrdinalIgnoreCase))
+            {
+                return new ColumnReference(new SqlQualifiedName(new[] { baseId, ToSqlIdentifier(context.fieldName) }));
+            }
+        }
+
         var baseExpr = (Expression)Visit(context.baseExpression);
         var field = ToSqlIdentifier(context.fieldName);
 
@@ -948,7 +1048,7 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         {
             case SqlBaseParser.NumericLiteralContext num:
                 {
-                    string text = num.GetText();
+                    string text = SingleTokenText(num);
                     if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out long intVal))
                     {
                         return new LiteralExpression(intVal, LiteralType.Integer);
@@ -961,7 +1061,7 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
                 }
             case SqlBaseParser.StringLiteralContext str:
                 {
-                    string unquoted = SqlIdentifierHelper.UnquoteStringLiteral(str.GetText());
+                    string unquoted = SqlIdentifierHelper.UnquoteStringLiteral(SingleTokenText(str));
                     return new LiteralExpression(unquoted, LiteralType.String);
                 }
             case SqlBaseParser.BooleanLiteralContext boolLit:
@@ -1130,6 +1230,12 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         if (context.nullTreatment() != null) throw Unsupported("IGNORE/RESPECT NULLS");
 
         var qName = ToSqlQualifiedName(context.qualifiedName());
+        if (qName.Parts.Any(part => part.IsQuoted))
+        {
+            // CR-ADG-26: a delimited name is case-exact and may resolve to a user function instead of the built-in.
+            throw new SecurityException($"Function '{name}' is delimited; delimited function names are not permitted.");
+        }
+
         var args = new List<Expression>();
         // Wunsch 4: argument() is an empty array (never null) for COUNT(*), so the star must be checked first.
         bool isStar = context.ASTERISK() != null;
@@ -1313,9 +1419,16 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         return new ExtractExpression(field, source);
     }
 
+    /// <summary>
+    /// The text of a rule that is a single token (every <c>identifier</c> alternative): the token text itself, without the
+    /// <c>StringBuilder</c> walk of <c>RuleContext.GetText()</c>. Anything else falls back to <c>GetText()</c>.
+    /// </summary>
+    private static string SingleTokenText(ParserRuleContext context) =>
+        context.Start is { } start && ReferenceEquals(start, context.Stop) ? start.Text : context.GetText();
+
     private static SqlIdentifier ToSqlIdentifier(SqlBaseParser.IdentifierContext context)
     {
-        string text = context.GetText();
+        string text = SingleTokenText(context);
         bool isQuoted = IsQuotedIdentifier(text);
         string normalized = UnquoteIdentifier(text, isQuoted);
         return new SqlIdentifier(normalized, isQuoted);
@@ -1323,14 +1436,35 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
 
     private static SqlQualifiedName ToSqlQualifiedName(SqlBaseParser.QualifiedNameContext context)
     {
-        var ids = context.identifier();
-        if (ids == null || ids.Length == 0)
+        // The identifier children are read straight from the parse tree: the generated identifier() accessor copies them into a list
+        // and an array first.
+        var children = context.children;
+        int count = 0;
+        if (children != null)
+        {
+            for (int i = 0; i < children.Count; i++)
+            {
+                if (children[i] is SqlBaseParser.IdentifierContext) count++;
+            }
+        }
+
+        if (count == 0)
         {
             string t = context.GetText();
             bool isQ = IsQuotedIdentifier(t);
             return new SqlQualifiedName(new[] { new SqlIdentifier(UnquoteIdentifier(t, isQ), isQ) });
         }
-        var parts = ids.Select(ToSqlIdentifier).ToList();
+
+        var parts = new SqlIdentifier[count];
+        int next = 0;
+        for (int i = 0; i < children!.Count; i++)
+        {
+            if (children[i] is SqlBaseParser.IdentifierContext identifier)
+            {
+                parts[next++] = ToSqlIdentifier(identifier);
+            }
+        }
+
         return new SqlQualifiedName(parts);
     }
 

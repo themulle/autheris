@@ -10,6 +10,7 @@ using Autheris.Application.Governance;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
+using Autheris.Infrastructure.Databricks;
 using Autheris.Infrastructure.Persistence;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -29,6 +30,11 @@ public static class GatewayStartupValidator
         bool isDevEnvironment = environment.IsDevelopment();
 
         ValidateObjectRecursively(options);
+
+        ValidateOracleRuntime(options, environment, logger);
+        ValidateDatabricks(options, environment);
+        ValidateDefaultSchemas(options);
+        ValidateTenantCollisions(options, environment, logger);
 
         // SEC E-01: the egress allowlist is validated in every environment; invalid or too broad entries abort the start.
         var egressErrors = EgressAllowlist.Validate(options.Egress);
@@ -112,7 +118,7 @@ public static class GatewayStartupValidator
         // RR-L1-01: Validate ReverseProxy.KnownNetworks and KnownProxies against invalid formats and wildcard spoofing
         if (options.ReverseProxy.Enabled)
         {
-            foreach (var netStr in options.ReverseProxy.KnownNetworks)
+            foreach (var netStr in options.ReverseProxy.GetEffectiveKnownNetworks())
             {
                 if (!System.Net.IPNetwork.TryParse(netStr, out var network))
                 {
@@ -567,6 +573,169 @@ public static class GatewayStartupValidator
         {
             throw new ValidationException("Security violation (E-2): Multi-node cluster mode and more than 1 replica are not allowed with SQLite, because SQLite uses local database files per instance. Configure GovernanceDb.Provider = 'PostgreSql' or 'SqlServer' for cluster operation.");
         }
+    }
+
+    /// <summary>WP-X0i / SEC-ADG-09: validates every Databricks data source (exact host, auth mode, Pat only in Development).</summary>
+    public static void ValidateDatabricks(GatewayOptions options, IHostEnvironment environment)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(environment);
+
+        foreach (var (name, connection) in options.DataSources.Connections)
+        {
+            if (!DataSourceProvider.Is(connection.Provider, DatabaseDialect.Databricks))
+            {
+                continue;
+            }
+
+            var db = connection.Databricks
+                ?? throw new ValidationException($"Databricks data source '{name}' requires a DataSources:Connections:{name}:Databricks section.");
+            if (!DatabricksHostPolicy.IsValidHost(db.Host))
+            {
+                throw new ValidationException($"Databricks data source '{name}': Host must be one exact DNS name (no scheme, port, path, wildcard or IP literal).");
+            }
+
+            if (string.IsNullOrWhiteSpace(db.WarehouseId))
+            {
+                throw new ValidationException($"Databricks data source '{name}': WarehouseId is required.");
+            }
+
+            if (db.Auth.Mode == DatabricksAuthMode.Pat)
+            {
+                if (!environment.IsDevelopment())
+                {
+                    throw new ValidationException($"Security violation: Databricks data source '{name}' uses Auth.Mode Pat, which is allowed in Development only.");
+                }
+
+                if (string.IsNullOrWhiteSpace(db.Auth.PatRef))
+                {
+                    throw new ValidationException($"Databricks data source '{name}': Auth.PatRef is required for Pat mode.");
+                }
+            }
+            else if (string.IsNullOrWhiteSpace(db.Auth.ClientId) || string.IsNullOrWhiteSpace(db.Auth.ClientSecretRef))
+            {
+                throw new ValidationException($"Databricks data source '{name}': OAuthM2M requires Auth.ClientId and Auth.ClientSecretRef (Key Vault reference).");
+            }
+        }
+    }
+
+    /// <summary>
+    /// WP-F1 / CR-ADG-08: outside Development an Oracle data source never carries a plaintext password (the connection string
+    /// has no <c>Password</c>; <c>PasswordKeyVaultRef</c> names the Key Vault secret) and always uses the policy-compliant account.
+    /// </summary>
+    public static void ValidateOracleRuntime(GatewayOptions options, IHostEnvironment environment, ILogger? logger = null)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(environment);
+        bool development = environment.IsDevelopment();
+
+        foreach (var (name, connection) in options.DataSources.Connections)
+        {
+            if (!DataSourceProvider.Is(connection.Provider, DatabaseDialect.Oracle) || string.IsNullOrWhiteSpace(connection.ConnectionString))
+            {
+                continue;
+            }
+
+            if (development)
+            {
+                if (OracleConnectionStringPolicy.HasPlaintextPassword(connection.ConnectionString))
+                {
+                    logger?.LogWarning("Oracle data source '{DataSource}' uses a plaintext password (allowed in Development only).", name);
+                }
+
+                continue;
+            }
+
+            OracleConnectionStringPolicy.Validate(connection.ConnectionString, requireTcps: true);
+            if (OracleConnectionStringPolicy.HasPlaintextPassword(connection.ConnectionString))
+            {
+                throw new ValidationException(
+                    $"Security violation: Oracle data source '{name}' has a plaintext password in its connection string. Outside Development the password must come from Key Vault (DataSources:Connections:{name}:PasswordKeyVaultRef).");
+            }
+
+            if (string.IsNullOrWhiteSpace(connection.PasswordKeyVaultRef))
+            {
+                throw new ValidationException(
+                    $"Security violation: Oracle data source '{name}' needs DataSources:Connections:{name}:PasswordKeyVaultRef outside Development.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// WP-X0b, SEC-X1-08: <c>DefaultSchema</c> must match the strict identifier rule in every environment, and a WebSQL-reachable
+    /// PostgreSQL or Oracle data source must have one (the session pin needs it).
+    /// </summary>
+    public static void ValidateDefaultSchemas(GatewayOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var webSqlSources = options.WebSql.Enabled
+            ? WebSqlReachableDataSources(options)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (name, connection) in options.DataSources.Connections)
+        {
+            if (connection.DefaultSchema is not null && !DefaultSchemaPolicy.IsValid(connection.DefaultSchema))
+            {
+                throw new ValidationException(
+                    $"Security violation: DataSources:Connections:{name}:DefaultSchema must match ^[A-Za-z_][A-Za-z0-9_$#]{{0,127}}$.");
+            }
+
+            bool pinned = DataSourceProvider.Is(connection.Provider, DatabaseDialect.PostgreSql) || DataSourceProvider.Is(connection.Provider, DatabaseDialect.Oracle);
+            if (pinned && connection.DefaultSchema is null && webSqlSources.Contains(name))
+            {
+                throw new ValidationException(
+                    $"WebSQL data source '{name}' ({connection.Provider}) needs DataSources:Connections:{name}:DefaultSchema; the session pin cannot be applied without it.");
+            }
+        }
+    }
+
+    private static HashSet<string> WebSqlReachableDataSources(GatewayOptions options)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { options.WebSql.DefaultDataSourceName };
+        names.UnionWith(options.WebSql.AllowedDataSources);
+        names.UnionWith(options.WebSql.DataSourceMappings.Values);
+        foreach (var list in options.WebSql.TenantDataSourceAllowlist.Values)
+        {
+            names.UnionWith(list);
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// Decision B-1: tenant ids that collide case-insensitively are reported. By default the start only logs a critical warning:
+    /// the colliding tenants are denied per request (<c>SecurityContextResolutionMiddleware</c>, 403 <c>TENANT_ID_COLLISION</c>)
+    /// and every other tenant keeps working. <c>Gateway:TenantIsolation:StrictCollisionStartup</c> refuses the start outside
+    /// Development instead. Ids are never rewritten.
+    /// </summary>
+    public static void ValidateTenantCollisions(GatewayOptions options, IHostEnvironment environment, ILogger? logger = null)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(environment);
+
+        var collisions = TenantCollisionCheck.FindCollisions(TenantCollisionGuard.ConfiguredTenantIds(options));
+        if (collisions.Count == 0)
+        {
+            return;
+        }
+
+        string description = string.Join("; ", collisions.Select(c => string.Join(" / ", c.Spellings)));
+        if (environment.IsDevelopment())
+        {
+            logger?.LogWarning("Tenant ids collide case-insensitively (decision B-1): {Collisions}. Resolve before production.", description);
+            return;
+        }
+
+        if (options.TenantIsolation.StrictCollisionStartup)
+        {
+            throw new ValidationException(
+                $"Security violation (B-1): tenant ids that differ only in case are configured ({description}). Strict mode refuses the start; rename one of them.");
+        }
+
+        logger?.LogCritical(
+            "Security (B-1): tenant ids that differ only in case are configured ({Collisions}). Requests of these tenants are denied with 403 TENANT_ID_COLLISION until an operator renames one of them.",
+            description);
     }
 
     internal static bool IsSupportedGovernanceDbProvider(string? provider) =>

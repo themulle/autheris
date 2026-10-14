@@ -226,6 +226,67 @@ public sealed class SubgraphFederationSecurityTests
         isValid.ShouldBeFalse();
     }
 
+    [Fact]
+    public void SubgraphSecurityValidator_ReusedNonce_ReturnsFalseOnReplay()
+    {
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+        var nonce = "nonce-" + Guid.NewGuid().ToString("N");
+        var payload = $"tenant_alpha:user1:{timestamp}:{nonce}:products::POST:/graphql";
+        using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(Secret));
+        var signature = Convert.ToHexStringLower(hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(payload)));
+
+        var firstResult = SubgraphSecurityValidator.ValidateSignature(
+            tenant: "tenant_alpha",
+            userSid: "user1",
+            timestampStr: timestamp,
+            nonce: nonce,
+            signature: signature,
+            signingKey: Secret,
+            subgraph: "products",
+            roles: "",
+            method: "POST",
+            path: "/graphql");
+
+        firstResult.ShouldBeTrue();
+
+        // Second submission with exact same nonce within clock drift must fail closed as replay attack
+        var replayResult = SubgraphSecurityValidator.ValidateSignature(
+            tenant: "tenant_alpha",
+            userSid: "user1",
+            timestampStr: timestamp,
+            nonce: nonce,
+            signature: signature,
+            signingKey: Secret,
+            subgraph: "products",
+            roles: "",
+            method: "POST",
+            path: "/graphql");
+
+        replayResult.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void SubgraphSecurityValidator_MissingSubgraph_RejectsSignatureDowngrade()
+    {
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+        var nonce = "nonce-" + Guid.NewGuid().ToString("N");
+        var payload = $"tenant_alpha:user1:{timestamp}:{nonce}";
+        using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(Secret));
+        var signature = Convert.ToHexStringLower(hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(payload)));
+
+        // Attempting to validate a 4-part signature without target subgraph binding must be rejected
+        var isValid = SubgraphSecurityValidator.ValidateSignature(
+            tenant: "tenant_alpha",
+            userSid: "user1",
+            timestampStr: timestamp,
+            nonce: nonce,
+            signature: signature,
+            signingKey: Secret,
+            subgraph: null);
+
+        isValid.ShouldBeFalse();
+    }
+
     private sealed class CapturingHandler : HttpMessageHandler
     {
         public HttpRequestMessage? CapturedRequest { get; private set; }

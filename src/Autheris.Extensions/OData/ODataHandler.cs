@@ -11,13 +11,15 @@ using Autheris.Application.Interfaces;
 using System.Text.RegularExpressions;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
 public sealed partial class ODataHandler(
     ITableMetadataRepository metadataRepo,
     IGatewayExecutionService executionService,
     ILogger<ODataHandler> logger,
-    Microsoft.Extensions.Hosting.IHostEnvironment? environment = null) : IODataHandler
+    Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
+    Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null) : IODataHandler
 {
     private const string GenericDenied = "Access denied.";
 
@@ -40,18 +42,47 @@ public sealed partial class ODataHandler(
     private readonly ITableMetadataRepository _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
     private readonly IGatewayExecutionService _executionService = executionService ?? throw new ArgumentNullException(nameof(executionService));
     private readonly ILogger<ODataHandler> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache = memoryCache;
 
     public async Task<string> GetMetadataCsdlAsync(ClaimsPrincipal? principal = null, CancellationToken ct = default)
     {
-        var tables = await GetAuthorizedTablesAsync(principal, ct).ConfigureAwait(false);
-        return ODataCsdlGenerator.GenerateMetadataXml(tables);
+        if (principal?.Identity?.IsAuthenticated == true && _memoryCache != null)
+        {
+            var cacheKey = $"odata:csdl:{principal.GetTenantId().Value}:{principal.GetUserSid()?.Value}";
+            if (_memoryCache.TryGetValue(cacheKey, out string? cachedXml) && cachedXml != null)
+            {
+                return cachedXml;
+            }
+
+            var tables = await GetAuthorizedTablesAsync(principal, ct).ConfigureAwait(false);
+            var xml = ODataCsdlGenerator.GenerateMetadataXml(tables);
+            _memoryCache.Set(cacheKey, xml, TimeSpan.FromSeconds(60));
+            return xml;
+        }
+
+        var directTables = await GetAuthorizedTablesAsync(principal, ct).ConfigureAwait(false);
+        return ODataCsdlGenerator.GenerateMetadataXml(directTables);
     }
 
     public async Task<object> GetServiceDocumentAsync(string serviceRootUrl, ClaimsPrincipal? principal = null, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serviceRootUrl);
-        var tables = await GetAuthorizedTablesAsync(principal, ct).ConfigureAwait(false);
-        return ODataResponseFormatter.FormatServiceDocument(serviceRootUrl, tables);
+        if (principal?.Identity?.IsAuthenticated == true && _memoryCache != null)
+        {
+            var cacheKey = $"odata:servicedoc:{principal.GetTenantId().Value}:{principal.GetUserSid()?.Value}:{serviceRootUrl}";
+            if (_memoryCache.TryGetValue(cacheKey, out object? cachedDoc) && cachedDoc != null)
+            {
+                return cachedDoc;
+            }
+
+            var tables = await GetAuthorizedTablesAsync(principal, ct).ConfigureAwait(false);
+            var doc = ODataResponseFormatter.FormatServiceDocument(serviceRootUrl, tables);
+            _memoryCache.Set(cacheKey, doc, TimeSpan.FromSeconds(60));
+            return doc;
+        }
+
+        var directTables = await GetAuthorizedTablesAsync(principal, ct).ConfigureAwait(false);
+        return ODataResponseFormatter.FormatServiceDocument(serviceRootUrl, directTables);
     }
 
     private async Task<IReadOnlyList<Autheris.Domain.Model.TableMetadata>> GetAuthorizedTablesAsync(ClaimsPrincipal? principal, CancellationToken ct)
@@ -59,6 +90,15 @@ public sealed partial class ODataHandler(
         if (principal?.Identity?.IsAuthenticated != true)
         {
             return Array.Empty<Autheris.Domain.Model.TableMetadata>();
+        }
+
+        if (_memoryCache != null)
+        {
+            var cacheKey = $"odata:tables:{principal.GetTenantId().Value}:{principal.GetUserSid()?.Value}";
+            if (_memoryCache.TryGetValue(cacheKey, out IReadOnlyList<Autheris.Domain.Model.TableMetadata>? cachedTables) && cachedTables != null)
+            {
+                return cachedTables;
+            }
         }
 
         var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
@@ -75,7 +115,28 @@ public sealed partial class ODataHandler(
         {
             try
             {
-                var decision = await _executionService.CheckTableAccessAsync(principal, tableMeta.Identifier, ct).ConfigureAwait(false);
+                TableAccessDecision? decision = null;
+                try
+                {
+                    decision = await _executionService.CheckTableAccessAsync(principal, tableMeta, recordAudit: false, ct).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Fallback to table identifier check
+                }
+
+                if (decision == null)
+                {
+                    try
+                    {
+                        decision = await _executionService.CheckTableAccessAsync(principal, tableMeta.Identifier, ct).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // Ignore
+                    }
+                }
+
                 if (decision != null && !decision.IsAllowed)
                 {
                     continue;
@@ -106,6 +167,12 @@ public sealed partial class ODataHandler(
             {
                 _logger.LogWarning(ex, "Failed to check access for table {Table} during OData metadata generation.", tableMeta.Identifier);
             }
+        }
+
+        if (_memoryCache != null)
+        {
+            var cacheKey = $"odata:tables:{principal.GetTenantId().Value}:{principal.GetUserSid()?.Value}";
+            _memoryCache.Set(cacheKey, (IReadOnlyList<Autheris.Domain.Model.TableMetadata>)authorizedTables, TimeSpan.FromSeconds(60));
         }
 
         return authorizedTables;

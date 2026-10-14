@@ -13,6 +13,7 @@ public static class McpDatasetTools
 {
     public const string ListDatasets = "list_datasets";
     public const string DescribeDataset = "describe_dataset";
+    public const string DescribeMyAccess = "describe_my_access";
     public const string SampleRows = "sample_rows";
     public const string QueryGraphQl = "query_graphql";
 
@@ -41,6 +42,7 @@ public static class McpDatasetTools
     public static bool IsDatasetTool(string? toolName) =>
         string.Equals(toolName, ListDatasets, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, DescribeDataset, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, DescribeMyAccess, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, SampleRows, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, QueryGraphQl, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, QuerySql, StringComparison.OrdinalIgnoreCase) ||
@@ -57,7 +59,42 @@ public static class McpDatasetTools
         string.Equals(toolName, SampleRows, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, QueryGraphQl, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, QuerySql, StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(toolName, QueryDataset, StringComparison.OrdinalIgnoreCase);
+        string.Equals(toolName, QueryDataset, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, InvokeApi, StringComparison.OrdinalIgnoreCase);
+
+    private static readonly System.Text.RegularExpressions.Regex FromTableRegex = new(
+        @"\bFROM\s+([a-zA-Z0-9_\.]+)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled,
+        TimeSpan.FromMilliseconds(250));
+
+    private static TableIdentifier? ExtractTableFromSql(string sql)
+    {
+        try
+        {
+            var match = FromTableRegex.Match(sql);
+            if (match.Success)
+            {
+                var candidate = match.Groups[1].Value.Trim('"', '`', '[', ']');
+                if (McpDatasetCatalog.TryParseDatasetId(candidate, out var tableId))
+                {
+                    return tableId;
+                }
+                var parts = candidate.Split('.');
+                if (parts.Length == 2)
+                {
+                    return new TableIdentifier(parts[0], "public", parts[1]);
+                }
+                if (parts.Length == 1 && !string.IsNullOrWhiteSpace(parts[0]))
+                {
+                    return new TableIdentifier("default", "public", parts[0]);
+                }
+            }
+        }
+        catch (System.Text.RegularExpressions.RegexMatchTimeoutException)
+        {
+        }
+        return null;
+    }
 
     /// <summary>
     /// The table a dataset tool call targets. Null (fail-closed) when a table tool has no valid <c>dataset</c> argument.
@@ -87,6 +124,14 @@ public static class McpDatasetTools
 
         if (string.Equals(toolName, QuerySql, StringComparison.OrdinalIgnoreCase))
         {
+            if (TryGetStringArgument(argumentsJson, "query", out var sql) && !string.IsNullOrWhiteSpace(sql))
+            {
+                var table = ExtractTableFromSql(sql);
+                if (table != null)
+                {
+                    return table;
+                }
+            }
             return new TableIdentifier("governance", "sql", "query");
         }
 
@@ -96,9 +141,17 @@ public static class McpDatasetTools
             return null;
         }
 
+        if (string.Equals(toolName, DescribeMyAccess, StringComparison.OrdinalIgnoreCase))
+        {
+            return (TryGetStringArgument(argumentsJson, "dataset", out var ds) || TryGetStringArgument(argumentsJson, "table", out ds)) &&
+                   McpDatasetCatalog.TryParseDatasetId(ds, out var id)
+                ? id
+                : null;
+        }
+
         return TryGetStringArgument(argumentsJson, "dataset", out var dataset) &&
-               McpDatasetCatalog.TryParseDatasetId(dataset, out var id)
-            ? id
+               McpDatasetCatalog.TryParseDatasetId(dataset, out var matchId)
+            ? matchId
             : null;
     }
 
@@ -128,6 +181,7 @@ public static class McpDatasetTools
               "properties": {
                 "search": { "type": "string", "description": "Optional text matched against dataset ids, descriptions and column names." },
                 "domain": { "type": "string", "description": "Optional business domain filter (e.g. 'sales')." },
+                "tag": { "type": "string", "description": "Optional tag filter to find datasets with a matching tag (e.g. 'finance', 'pii', 'sales')." },
                 "offset": { "type": "integer", "minimum": 0, "description": "Optional pagination offset (default 0)." },
                 "limit": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Optional maximum datasets to return per page (default 50, max 100)." }
               }
@@ -163,6 +217,20 @@ public static class McpDatasetTools
             }
             """,
             TargetGraphQLOperation: SampleRows);
+
+        yield return new McpToolDefinition(
+            Name: DescribeMyAccess,
+            Description: "Explains effective permissions, active row filters, and column masks for the caller on a specific dataset without data leakage.",
+            InputJsonSchema: """
+            {
+              "type": "object",
+              "required": ["dataset"],
+              "properties": {
+                "dataset": { "type": "string", "description": "Dataset id as returned by list_datasets (domain.schema.table)." }
+              }
+            }
+            """,
+            TargetGraphQLOperation: DescribeMyAccess);
 
         yield return new McpToolDefinition(
             Name: QuerySql,

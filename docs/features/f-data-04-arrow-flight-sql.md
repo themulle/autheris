@@ -25,6 +25,23 @@ Transferring multi-million-row datasets over standard HTTP/REST or ODBC/JDBC cre
 - Binary token authentication propagating user SIDs and tenancy in gRPC call metadata.
 - Centralized RLS and format-preserving column masking applied directly to binary Arrow vectors.
 
+### Federated Query Transport Opt-In (`WebSql:CrossSource:AllowedTransports`)
+
+Federated queries that span several data sources are only available when `Gateway:WebSql:CrossSource:Enabled` is true, and only for transports that are explicitly listed in `Gateway:WebSql:CrossSource:AllowedTransports`. Valid names are the constants of `SqlTransports`: `WebSql`, `Trino`, `Rest`, `Mcp`, `ArrowExport`, `FlightSql`, `SqlEndpoints` and `AsyncJob`. When nothing is configured, only `WebSql` and `Trino` are allowed. Every other channel is rejected on federated queries (generic "not supported" response) unless its name is listed. Flight SQL queries use the transport name `FlightSql`; the Arrow IPC export endpoint uses `ArrowExport`. An explicitly empty list allows no transport at all (fail-closed). A configured list replaces the default; it is not merged with it.
+
+```json
+{
+  "Gateway": {
+    "WebSql": {
+      "CrossSource": {
+        "Enabled": true,
+        "AllowedTransports": [ "WebSql", "Trino", "FlightSql" ]
+      }
+    }
+  }
+}
+```
+
 ---
 
 ## 4. Usage Example

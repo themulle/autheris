@@ -97,7 +97,7 @@ public sealed partial class JustificationAndBreakGlassInterceptor : IIngressInte
 
                 var user = context.User;
                 bool isAuthorized = false;
-                foreach (var role in extOptions.BreakGlassAllowedRoles)
+                foreach (var role in extOptions.GetEffectiveBreakGlassAllowedRoles())
                 {
                     if (user.IsInRole(role) || user.HasClaim(c => c.Type == System.Security.Claims.ClaimTypes.Role && string.Equals(c.Value, role, StringComparison.OrdinalIgnoreCase)))
                     {
@@ -111,16 +111,10 @@ public sealed partial class JustificationAndBreakGlassInterceptor : IIngressInte
                     _logger.LogWarning(
                         "Break-glass access denied: User '{User}' does not possess any authorized break-glass role ({Roles}).",
                         user.Identity?.Name ?? "Anonymous",
-                        string.Join(", ", extOptions.BreakGlassAllowedRoles));
+                        string.Join(", ", extOptions.GetEffectiveBreakGlassAllowedRoles()));
                     return IngressResult.Deny("User is not authorized to invoke emergency break-glass bypass.", 403);
                 }
             }
-
-            context.Items["IsBreakGlass"] = true;
-            _logger.LogWarning(
-                "[AUDIT: BREAK-GLASS ACTIVATED] Emergency elevated access invoked by user '{User}' with ticket '{Ticket}'.",
-                context.User?.Identity?.Name ?? "Anonymous",
-                justification);
 
             if (_governanceRepo != null)
             {
@@ -168,6 +162,13 @@ public sealed partial class JustificationAndBreakGlassInterceptor : IIngressInte
                     return IngressResult.Deny("Audit recording failed during emergency break-glass invocation. Access denied (fail-closed).", 500);
                 }
             }
+
+            // SEC-MED-08: Set IsBreakGlass only AFTER audit log record completes successfully
+            context.Items["IsBreakGlass"] = true;
+            _logger.LogWarning(
+                "[AUDIT: BREAK-GLASS ACTIVATED] Emergency elevated access invoked by user '{User}' with ticket '{Ticket}'.",
+                context.User?.Identity?.Name ?? "Anonymous",
+                justification);
         }
 
         return IngressResult.Continue();

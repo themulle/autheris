@@ -312,9 +312,15 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
                 throw new ArgumentException($"Invalid spec URL: {request.SpecUrl}", nameof(request));
             }
 
-            EgressUrlPolicy.ValidateStatic(specUri, isDev: false, enforceHttps: false);
+            await EgressUrlPolicy.ValidateResolvedAsync(specUri, isDev: false, ct).ConfigureAwait(false);
 
-            using var httpClient = new HttpClient();
+            using var handler = SecureOutboundHttp.CreatePrimaryHandler(
+                isDevelopment: false,
+                allowlist: EgressAllowlist.Create(null, null),
+                allowUntrustedCertificates: false,
+                resolver: SecureOutboundHttp.DefaultResolver);
+
+            using var httpClient = new HttpClient(handler);
             httpClient.Timeout = TimeSpan.FromSeconds(30);
             specContent = await httpClient.GetStringAsync(specUri, ct).ConfigureAwait(false);
         }

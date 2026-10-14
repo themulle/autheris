@@ -9,6 +9,9 @@ using Autheris.Application.Audit;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
+using Autheris.Domain.Common;
+using Autheris.Domain.Security;
+using System.Collections.Generic;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -166,5 +169,161 @@ public sealed class AccessAuditMiddlewareTests
         recorded.ShouldNotBeNull();
         recorded.Decision.ShouldBe("DENY");
         recorded.EventType.ShouldBe(expectedEventType);
+    }
+
+    private static void SetDelegatedEndpoint(DefaultHttpContext context) =>
+        context.SetEndpoint(new Endpoint(
+            _ => Task.CompletedTask,
+            new EndpointMetadataCollection(new AuditPolicy(AuditLevel.Delegated, AuditEventTypes.AsyncJobSubmitted)),
+            "delegated-test"));
+
+    [Theory]
+    [InlineData(401, "DENY", "AUTH_FAILED")]
+    [InlineData(403, "DENY", "AUTHZ_ENDPOINT_DENIED")]
+    [InlineData(404, "DENY", "AUTHZ_ENDPOINT_DENIED")]
+    [InlineData(500, "ERROR", "QUERY_EXECUTION_ERROR")]
+    public async Task InvokeAsync_DelegatedRoute_NotHandled_FinalizesFailureStatuses(int status, string decision, string eventType)
+    {
+        AuditLogEntry? recorded = null;
+        _auditRepo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e => recorded = e), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/jobs/query";
+        SetDelegatedEndpoint(context);
+        var auditContext = new AuditContext();
+
+        var middleware = CreateMiddleware(c => { c.Response.StatusCode = status; return Task.CompletedTask; });
+        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+
+        recorded.ShouldNotBeNull();
+        recorded.Decision.ShouldBe(decision);
+        recorded.EventType.ShouldBe(eventType);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_DelegatedRoute_Unauthorized_FeedsAuthFailureAggregator()
+    {
+        var aggregator = Substitute.For<IAuthFailureAggregator>();
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/jobs/query";
+        SetDelegatedEndpoint(context);
+        var auditContext = new AuditContext();
+
+        var middleware = CreateMiddleware(c => { c.Response.StatusCode = 401; return Task.CompletedTask; }, aggregator);
+        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+
+        await aggregator.Received(1).RecordFailureAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_DelegatedRoute_ExceptionBeforeDomainAudit_RecordsErrorAndRethrows()
+    {
+        AuditLogEntry? recorded = null;
+        _auditRepo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e => recorded = e), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/jobs/query";
+        SetDelegatedEndpoint(context);
+        var auditContext = new AuditContext();
+
+        var middleware = CreateMiddleware(_ => throw new InvalidOperationException("boom"));
+        await Should.ThrowAsync<InvalidOperationException>(() => middleware.InvokeAsync(context, _auditRepo, auditContext));
+
+        recorded.ShouldNotBeNull();
+        recorded.Decision.ShouldBe("ERROR");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_DelegatedRoute_SuccessWithoutDomainAudit_RecordsNothing()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/jobs/query";
+        SetDelegatedEndpoint(context);
+        var auditContext = new AuditContext();
+
+        var middleware = CreateMiddleware(c => { c.Response.StatusCode = 202; return Task.CompletedTask; });
+        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+
+        await _auditRepo.DidNotReceive().RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_DelegatedRoute_Handled_DoesNotDoubleRecordOnFailureStatus()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/jobs/query";
+        SetDelegatedEndpoint(context);
+        var auditContext = new AuditContext();
+
+        var middleware = CreateMiddleware(c => { auditContext.MarkHandled(); c.Response.StatusCode = 500; return Task.CompletedTask; });
+        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+
+        await _auditRepo.DidNotReceive().RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
+    }
+
+    private const string MalformedTenant = "evil<script>tenant";
+
+    private async Task<AuditLogEntry> RunWithClaimsAsync(int status, Action<DefaultHttpContext>? configure, params Claim[] claims)
+    {
+        AuditLogEntry? recorded = null;
+        _auditRepo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e => recorded = e), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/data";
+        context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+        configure?.Invoke(context);
+        var auditContext = new AuditContext();
+
+        var middleware = CreateMiddleware(c => { c.Response.StatusCode = status; return Task.CompletedTask; });
+        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+
+        recorded.ShouldNotBeNull();
+        return recorded;
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ValidTenantIdWithMalformedTid_AttributesToValidTenant()
+    {
+        var entry = await RunWithClaimsAsync(200, null,
+            new Claim("sid", "S-1-5-21-USER1"),
+            new Claim("tenant_id", "tenant-a"),
+            new Claim("tid", MalformedTenant));
+
+        entry.TenantId.Value.ShouldBe("tenant-a");
+        entry.DetailsJson.ShouldNotContain("evil");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_UsesTenantFromResolvedSecurityPrincipalContext()
+    {
+        var entry = await RunWithClaimsAsync(200,
+            c => c.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
+            {
+                UserSid = new Sid("S-1-5-21-USER1"),
+                TenantId = new TenantId("tenant-ctx"),
+                GroupSids = new HashSet<Sid>(),
+                TenantRoles = new HashSet<string>(),
+                ClusterRoles = new HashSet<string>(),
+                AuthenticationScheme = "TestAuth"
+            },
+            new Claim("sid", "S-1-5-21-USER1"),
+            new Claim("tid", "tenant-claim"));
+
+        entry.TenantId.Value.ShouldBe("tenant-ctx");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_MalformedTenantClaim_And403_RecordsDenyWithoutRawValue()
+    {
+        var entry = await RunWithClaimsAsync(403, null,
+            new Claim("sid", "S-1-5-21-USER1"),
+            new Claim("tid", MalformedTenant));
+
+        entry.Decision.ShouldBe("DENY");
+        entry.EventType.ShouldBe(AuditEventTypes.AuthzEndpointDenied);
+        entry.DetailsJson.ShouldContain("\"tenantClaim\":\"INVALID\"");
+        entry.DetailsJson.ShouldNotContain("evil");
+        entry.DetailsJson.ShouldNotContain("script");
+        entry.TenantId.Value.ShouldNotContain("evil");
     }
 }

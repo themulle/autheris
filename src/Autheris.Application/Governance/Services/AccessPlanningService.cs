@@ -11,11 +11,13 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
+using Autheris.Application.Events;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Events;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -41,6 +43,7 @@ public class AccessPlanningService : IAccessPlanningService
     private readonly IPolicyEnforcementService? _policyEnforcement;
     private readonly IDataOwnershipRepository? _dataOwnershipRepo;
     private readonly ILogger<AccessPlanningService> _logger;
+    private readonly IGatewayEventBus? _eventBus;
 
     private readonly ConcurrentDictionary<string, StoredPlan> _plans = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, bool> _consumedTokens = new(StringComparer.OrdinalIgnoreCase);
@@ -80,7 +83,8 @@ public class AccessPlanningService : IAccessPlanningService
         IPolicyEnforcementService? policyEnforcementService = null,
         IDataOwnershipRepository? dataOwnershipRepository = null,
         IOptions<GatewayOptions>? options = null,
-        ILogger<AccessPlanningService>? logger = null)
+        ILogger<AccessPlanningService>? logger = null,
+        IGatewayEventBus? eventBus = null)
     {
         _auditRepo = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
         _tableRepo = tableMetadataRepository ?? new NullTableMetadataRepository();
@@ -92,6 +96,7 @@ public class AccessPlanningService : IAccessPlanningService
         _policyEnforcement = policyEnforcementService;
         _dataOwnershipRepo = dataOwnershipRepository;
         _logger = logger ?? NullLogger<AccessPlanningService>.Instance;
+        _eventBus = eventBus;
     }
 
     public async Task<AdminPlanAccessResult> PlanAccessAsync(
@@ -142,6 +147,18 @@ public class AccessPlanningService : IAccessPlanningService
         var result = new AdminPlanAccessResult(planId, request.DatasetId, diffs, warnings, expiresAt);
 
         _plans[planId] = new StoredPlan(result, request, adminSid);
+
+        if (_eventBus != null)
+        {
+            await _eventBus.PublishAsync(new AccessPlanCreatedEvent(
+                EventId: Guid.NewGuid().ToString("N"),
+                PlanId: planId,
+                DatasetId: request.DatasetId,
+                RequesterSid: adminSid,
+                GrantCount: request.Grants.Count,
+                Timestamp: DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+        }
+
         return result;
     }
 
@@ -160,13 +177,26 @@ public class AccessPlanningService : IAccessPlanningService
             throw new SecurityException($"Plan '{planId}' does not exist or has expired.");
         }
 
-        if (_totpService != null && _totpSecretStore != null)
+        if (!string.Equals(stored.AdminSid, adminSid, StringComparison.OrdinalIgnoreCase))
         {
-            var secret = await _totpSecretStore.GetSecretAsync(adminSid, ct).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(secret) || !_totpService.VerifyTotp(secret, totpCode))
-            {
-                throw new SecurityException("Invalid TOTP verification code.");
-            }
+            throw new SecurityException("Plan confirmation must be performed by the initiating administrator.");
+        }
+
+        if (_totpService == null || _totpSecretStore == null)
+        {
+            throw new SecurityException("Two-factor authentication (TOTP) service is required to confirm access plans (ADR-03 / ADR-05).");
+        }
+
+        var secret = await _totpSecretStore.GetSecretAsync(adminSid, ct).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(secret))
+        {
+            throw new SecurityException("No 2FA secret enrolled for administrator. Step-up verification required.");
+        }
+
+        var isValidTotp = await _totpService.VerifyAndConsumeTotpAsync(adminSid, secret, totpCode, ct).ConfigureAwait(false);
+        if (!isValidTotp)
+        {
+            throw new SecurityException("Invalid or already consumed TOTP verification code.");
         }
 
         var tokenExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
@@ -199,6 +229,14 @@ public class AccessPlanningService : IAccessPlanningService
             throw new SecurityException($"Plan '{request.PlanId}' has expired.");
         }
 
+        if (string.IsNullOrWhiteSpace(stored.ConfirmedToken) ||
+            !CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(request.ConfirmationToken),
+                Encoding.UTF8.GetBytes(stored.ConfirmedToken)))
+        {
+            throw new SecurityException("Confirmation token does not match the confirmed plan token.");
+        }
+
         if (!ValidateConfirmationToken(request.ConfirmationToken, request.PlanId, out var tokenExpiry))
         {
             throw new SecurityException("Invalid or malformed confirmation token.");
@@ -214,8 +252,8 @@ public class AccessPlanningService : IAccessPlanningService
             throw new SecurityException("Confirmation token has already been consumed (replay prevention).");
         }
 
-        var tenantId = "default";
         var tableId = ParseTableIdentifier(stored.Request.DatasetId);
+        var tenantId = !string.IsNullOrWhiteSpace(tableId.Domain) ? tableId.Domain : "default";
         var tuples = new List<RebacTuple>();
 
         foreach (var grant in stored.Request.Grants)
@@ -262,6 +300,18 @@ public class AccessPlanningService : IAccessPlanningService
         };
 
         await _auditRepo.RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
+
+        if (_eventBus != null)
+        {
+            await _eventBus.PublishAsync(new AccessPlanAppliedEvent(
+                EventId: Guid.NewGuid().ToString("N"),
+                PlanId: request.PlanId,
+                DatasetId: stored.Request.DatasetId,
+                ApproverSid: adminSid,
+                AppliedGrantCount: tuples.Count,
+                Timestamp: DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+        }
+
         return new AdminApplyAccessResult(true, request.PlanId, tuples.Count, "Access applied successfully.");
     }
 
@@ -346,16 +396,9 @@ public class AccessPlanningService : IAccessPlanningService
             bool isActive = string.Equals(newState, "active", StringComparison.OrdinalIgnoreCase);
             var updated = existing with
             {
-                Table = new Table
+                Table = existing.Table with
                 {
-                    Id = existing.Table.Id,
-                    SchemaName = existing.Table.SchemaName,
-                    TableName = existing.Table.TableName,
-                    Sensitivity = existing.Table.Sensitivity,
-                    RequiresFourEyes = existing.Table.RequiresFourEyes,
-                    IsActive = isActive,
-                    Description = existing.Table.Description,
-                    DisplayName = existing.Table.DisplayName
+                    IsActive = isActive
                 }
             };
             await _tableRepo.UpsertTableMetadataAsync(updated, ct).ConfigureAwait(false);
@@ -381,6 +424,19 @@ public class AccessPlanningService : IAccessPlanningService
         };
 
         await _auditRepo.RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
+
+        if (_eventBus != null)
+        {
+            await _eventBus.PublishAsync(new DatasetStateChangedEvent(
+                EventId: Guid.NewGuid().ToString("N"),
+                DatasetId: request.DatasetId,
+                OldState: string.Equals(previousState, "active", StringComparison.OrdinalIgnoreCase),
+                NewState: string.Equals(newState, "active", StringComparison.OrdinalIgnoreCase),
+                ChangedBySid: adminSid,
+                Reason: request.Reason,
+                Timestamp: DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+        }
+
         return new AdminSetDatasetStateResult(request.DatasetId, previousState, newState, true);
     }
 

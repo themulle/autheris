@@ -24,6 +24,8 @@ public sealed class VirtualFilterAuditTests
     private sealed class FixedOutcome(MandatoryFilterOutcome outcome) : IMandatoryRowFilterResolver
     {
         public ValueTask<MandatoryFilterOutcome> ResolveAsync(MandatoryFilterQuery query, CancellationToken ct = default) => ValueTask.FromResult(outcome);
+
+        public ValueTask<bool> HasActiveProfilesAsync(Autheris.Domain.Common.TenantId tenant, CancellationToken ct = default) => ValueTask.FromResult(false);
     }
 
     private static readonly MandatoryFilterOutcome Applied = new(false, null, "1 = 1", ["nicht_ausgelieferte_krane"]);

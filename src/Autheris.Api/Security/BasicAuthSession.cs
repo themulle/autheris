@@ -56,7 +56,7 @@ public static class BasicAuthSession
             return false;
         }
 
-        return basic.Session.AllowedEnvironments.Any(e =>
+        return basic.Session.GetEffectiveAllowedEnvironments().Any(e =>
             string.Equals(e, environment.EnvironmentName, StringComparison.OrdinalIgnoreCase));
     }
 
@@ -84,14 +84,14 @@ public static class BasicAuthSession
         }
 
         if (environment.IsProduction() ||
-            session.AllowedEnvironments.Any(e => string.Equals(e, Environments.Production, StringComparison.OrdinalIgnoreCase)))
+            session.GetEffectiveAllowedEnvironments().Any(e => string.Equals(e, Environments.Production, StringComparison.OrdinalIgnoreCase)))
         {
             errors.Add("Security violation: BasicAuth.Session is prohibited in the Production environment.");
         }
-        else if (!session.AllowedEnvironments.Any(e => string.Equals(e, environment.EnvironmentName, StringComparison.OrdinalIgnoreCase)))
+        else if (!session.GetEffectiveAllowedEnvironments().Any(e => string.Equals(e, environment.EnvironmentName, StringComparison.OrdinalIgnoreCase)))
         {
             errors.Add($"Security violation: BasicAuth.Session is not approved for the environment '{environment.EnvironmentName}' " +
-                       $"(BasicAuth.Session.AllowedEnvironments: {string.Join(", ", session.AllowedEnvironments)}).");
+                       $"(BasicAuth.Session.AllowedEnvironments: {string.Join(", ", session.GetEffectiveAllowedEnvironments())}).");
         }
 
         if (string.IsNullOrWhiteSpace(session.CookieName) ||

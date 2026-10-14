@@ -9,7 +9,7 @@ services:
   # Target A: Hasura GraphQL Engine
   # ==========================================
   hasura:
-    image: hasura/graphql-engine:v2.44.0
+    image: hasura/graphql-engine:v2.51.0
     container_name: bench-hasura
     restart: unless-stopped
     networks:

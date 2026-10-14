@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "description": "G8 allocation baseline of the SQL compiler (plan 9.3). Time is never frozen: it is compared by ratio on the same runner.",
+  "capturedOn": "2026-10-11",
+  "machine": "AMD Ryzen 7 8840U, 16 logical cores, 7.5 GB RAM under load, Linux (WSL2), .NET 10.0.12, ShortRun in-process; allocation only; AST side re-frozen 2026-10-11 after the G8 performance work (legacy numbers unchanged)",
+  "buckets": {
+    "0.5KB": {
+      "legacyAllocatedBytesPerOp": 105290,
+      "astAllocatedBytesPerOp": 126969,
+      "legacyGen2PerThousandOps": 0
+    },
+    "4KB": {
+      "legacyAllocatedBytesPerOp": 997527,
+      "astAllocatedBytesPerOp": 1041873,
+      "legacyGen2PerThousandOps": 0
+    },
+    "64KB": {
+      "legacyAllocatedBytesPerOp": 15512901,
+      "astAllocatedBytesPerOp": 16173528,
+      "legacyGen2PerThousandOps": 250
+    }
+  }
+}

@@ -263,6 +263,20 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
                 ElapsedTimeMillis: elapsedMillis);
         }
 
+        // ParseCanceledException derives from OperationCanceledException, so a statement that does not parse (or whose parser timed out)
+        // ends as a canceled task. Only a cancellation that is not a governed SQL error is a CANCELED statement.
+        if (session.ExecutionTask.IsCanceled && CanceledGovernedError(session.ExecutionTask) is { } governedFailure)
+        {
+            return new StatementExecutionStatus(
+                session.StatementId,
+                "FAILED",
+                Columns: null,
+                Data: null,
+                NextUri: null,
+                ErrorMessage: SanitizeErrorMessage(governedFailure),
+                ElapsedTimeMillis: elapsedMillis);
+        }
+
         if (session.ExecutionTask.IsCanceled)
         {
             return new StatementExecutionStatus(
@@ -431,6 +445,23 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         _sessions.Clear();
     }
 
+    private static Exception? CanceledGovernedError(Task task)
+    {
+        try
+        {
+            task.GetAwaiter().GetResult();
+            return null;
+        }
+        catch (Exception ex) when (Errors.SqlCompilerErrorMapper.TryMap(ex, out _))
+        {
+            return ex;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static string SanitizeErrorMessage(Exception? ex)
     {
         if (ex == null)
@@ -438,15 +469,20 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
             return "Statement execution failed.";
         }
 
+        // WP-X0a (SEC-X1-01): a governed SQL error is stored as the fixed message of its stable code, never as Exception.Message.
+        if (Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped))
+        {
+            return mapped.Title;
+        }
+
         if (ex is OperationCanceledException or TimeoutException)
         {
             return "Query execution timed out or was canceled.";
         }
 
-        if (ex is Autheris.Domain.Exceptions.GatewayInvalidQueryException or
-                  Antlr4.Runtime.Misc.ParseCanceledException)
+        if (ex is Autheris.Domain.Exceptions.GatewayInvalidQueryException)
         {
-            return ex.Message;
+            return "The SQL request is invalid.";
         }
 
         if (ex is Autheris.Domain.Exceptions.GatewaySecurityException or

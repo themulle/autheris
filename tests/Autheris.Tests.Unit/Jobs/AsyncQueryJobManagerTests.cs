@@ -12,6 +12,7 @@ using Autheris.Application.Jobs.Interfaces;
 using Autheris.Application.Jobs.Services;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.DependencyInjection;
@@ -171,6 +172,62 @@ public sealed class AsyncQueryJobManagerTests : IDisposable
         purged.ShouldBeNull();
     }
 
+    private async Task<AsyncJobDescriptor?> RunWorkerWithFailingSqlAsync(Exception failure)
+    {
+        var manager = new AsyncQueryJobManager(_auditLogRepo, environment: _environment);
+        var sqlService = Substitute.For<IGovernedSqlExecutionService>();
+        sqlService.ExecuteQueryBufferedAsync(
+            Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<GovernedSqlResult>(failure));
+        var services = new ServiceCollection();
+        services.AddScoped(_ => sqlService);
+        var scopeFactory = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+        var worker = new AsyncQueryJobBackgroundWorker(manager, scopeFactory, _auditLogRepo, logger: NullLogger<AsyncQueryJobBackgroundWorker>.Instance);
+        var descriptor = await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELEC 1", Format: "json"), CreateUser("alice"), new TenantId("tenant-a"));
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await worker.StartAsync(cts.Token);
+        AsyncJobDescriptor? job = null;
+        for (int i = 0; i < 100; i++)
+        {
+            job = await manager.GetJobAsync(descriptor.JobId, new TenantId("tenant-a"), "alice");
+            if (job is { State: AsyncJobState.Failed or AsyncJobState.Cancelled or AsyncJobState.Completed }) break;
+            await Task.Delay(50);
+        }
+
+        await worker.StopAsync(CancellationToken.None);
+        return job;
+    }
+
+    [Fact]
+    public async Task BackgroundWorker_StatementThatDoesNotParse_IsFailedWithTheSyntaxMessage_NotCancelled()
+    {
+        var job = await RunWorkerWithFailingSqlAsync(new Antlr4.Runtime.Misc.ParseCanceledException("line 1:0: mismatched input"));
+
+        job.ShouldNotBeNull();
+        job.State.ShouldBe(AsyncJobState.Failed);
+        job.ErrorMessage.ShouldBe(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.SyntaxError));
+    }
+
+    [Fact]
+    public async Task BackgroundWorker_ParserTimeout_IsFailedWithTheLimitMessage_NotCancelled()
+    {
+        var job = await RunWorkerWithFailingSqlAsync(new Antlr4.Runtime.Misc.ParseCanceledException("budget", new TimeoutException()));
+
+        job.ShouldNotBeNull();
+        job.State.ShouldBe(AsyncJobState.Failed);
+        job.ErrorMessage.ShouldBe(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.LimitExceeded));
+    }
+
+    [Fact]
+    public async Task BackgroundWorker_PlainCancellation_StaysCancelled()
+    {
+        var job = await RunWorkerWithFailingSqlAsync(new OperationCanceledException());
+
+        job.ShouldNotBeNull();
+        job.State.ShouldBe(AsyncJobState.Cancelled);
+    }
+
     [Fact]
     public async Task BackgroundWorker_ExecutesGovernedSql_AndProducesResultFileWithDdm()
     {
@@ -245,5 +302,108 @@ public sealed class AsyncQueryJobManagerTests : IDisposable
         using var reader = new StreamReader(stream);
         var content = await reader.ReadToEndAsync();
         content.ShouldContain("a***@example.com");
+    }
+
+    [Fact]
+    public async Task GetJob_ForeignOwnerOrTenant_RecordsDenyAuditWithoutLeakingOwner()
+    {
+        var recorded = new List<AuditLogEntry>();
+        _auditLogRepo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(recorded.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        var manager = new AsyncQueryJobManager(_auditLogRepo, environment: _environment);
+        var descriptor = await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), CreateUser("alice", "tenant-a"), new TenantId("tenant-a"));
+        recorded.Clear();
+
+        var result = await manager.GetJobAsync(descriptor.JobId, new TenantId("tenant-a"), "mallory");
+
+        result.ShouldBeNull();
+        var deny = recorded.ShouldHaveSingleItem();
+        deny.Decision.ShouldBe("DENY");
+        deny.EventType.ShouldBe("ASYNC_JOB_ACCESS_DENIED");
+        deny.TargetTable.ShouldBe($"job:{descriptor.JobId}");
+        deny.ActorSid.Value.ShouldBe("mallory");
+        deny.TenantId.Value.ShouldBe("tenant-a");
+        deny.DetailsJson.ShouldNotContain("alice");
+
+        recorded.Clear();
+        (await manager.GetJobAsync(descriptor.JobId, new TenantId("tenant-b"), "alice")).ShouldBeNull();
+        var crossTenant = recorded.ShouldHaveSingleItem();
+        crossTenant.TenantId.Value.ShouldBe("tenant-b");
+        crossTenant.DetailsJson.ShouldNotContain("tenant-a");
+    }
+
+    [Fact]
+    public async Task GetJobResultStream_WhenAllowAuditFails_ThrowsAndReturnsNoStream()
+    {
+        var manager = new AsyncQueryJobManager(_auditLogRepo, environment: _environment);
+        var descriptor = await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), CreateUser("alice", "tenant-a"), new TenantId("tenant-a"));
+        var resultFile = Path.Combine(manager.ScratchDirectory, descriptor.JobId + ".json");
+        await File.WriteAllTextAsync(resultFile, "[]");
+        manager.UpdateJob(descriptor with { State = AsyncJobState.Completed, ResultFilePath = resultFile });
+
+        _auditLogRepo.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new InvalidOperationException("audit store down")));
+
+        await Should.ThrowAsync<InvalidOperationException>(() =>
+            manager.GetJobResultStreamAsync(descriptor.JobId, new TenantId("tenant-a"), "alice"));
+    }
+
+    private static ClaimsPrincipal CreateUserWithSidClaims(string primarySid, string sub, string tenantId = "tenant-a") =>
+        new(new ClaimsIdentity(new[]
+        {
+            new Claim(ClaimTypes.PrimarySid, primarySid),
+            new Claim("sub", sub),
+            new Claim("tenant_id", tenantId)
+        }, "TestAuth"));
+
+    [Fact]
+    public async Task SubmitJob_OwnerWithPrimarySid_IsAccessibleWithCanonicalOwnerResolution()
+    {
+        var manager = new AsyncQueryJobManager(_auditLogRepo, environment: _environment);
+        var owner = CreateUserWithSidClaims("S-1-5-21-ALICE", "sub-alice");
+
+        var descriptor = await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), owner, new TenantId("tenant-a"));
+
+        // The endpoints resolve the caller with AsyncJobOwner.Resolve for status/result/cancel.
+        descriptor.SubmittedByUserId.ShouldBe("S-1-5-21-ALICE");
+        var ownerKey = AsyncJobOwner.Resolve(owner)!;
+        (await manager.GetJobAsync(descriptor.JobId, new TenantId("tenant-a"), ownerKey)).ShouldNotBeNull();
+        (await manager.CancelJobAsync(descriptor.JobId, new TenantId("tenant-a"), ownerKey)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task SubmitJob_DifferentPrincipalSharingOnlySub_CannotAccessJob()
+    {
+        var manager = new AsyncQueryJobManager(_auditLogRepo, environment: _environment);
+        var owner = CreateUserWithSidClaims("S-1-5-21-ALICE", "shared-sub");
+        var other = CreateUserWithSidClaims("S-1-5-21-MALLORY", "shared-sub");
+
+        var descriptor = await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), owner, new TenantId("tenant-a"));
+
+        (await manager.GetJobAsync(descriptor.JobId, new TenantId("tenant-a"), AsyncJobOwner.Resolve(other)!)).ShouldBeNull();
+        (await manager.CancelJobAsync(descriptor.JobId, new TenantId("tenant-a"), AsyncJobOwner.Resolve(other)!)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task SubmitJob_PrincipalWithoutIdentity_IsRejected()
+    {
+        var manager = new AsyncQueryJobManager(_auditLogRepo, environment: _environment);
+        var anonymous = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("tenant_id", "tenant-a") }, "TestAuth"));
+
+        var ex = await Should.ThrowAsync<Autheris.Domain.Exceptions.GatewaySecurityException>(() =>
+            manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), anonymous, new TenantId("tenant-a")));
+        ex.ErrorCode.ShouldBe("ASYNC_JOB_OWNER_UNRESOLVABLE");
+    }
+
+    [Theory]
+    [InlineData("=cmd|'/C calc'!A0", "'=cmd|'/C calc'!A0")]
+    [InlineData("+1+2", "'+1+2")]
+    [InlineData("-1+2", "'-1+2")]
+    [InlineData("@SUM(A1:A10)", "'@SUM(A1:A10)")]
+    [InlineData("\tmalicious", "'\tmalicious")]
+    [InlineData("normal text", "normal text")]
+    public void EscapeCsv_NeutralizesFormulaInjection(string input, string expected)
+    {
+        var result = AsyncQueryJobBackgroundWorker.EscapeCsv(input);
+        result.ShouldBe(expected);
     }
 }

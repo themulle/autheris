@@ -21,7 +21,7 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
     private static readonly long MetadataCacheTtlTicks = TimeSpan.FromSeconds(30).Ticks;
     private readonly SemaphoreSlim _auditLock = new(1, 1);
     private volatile bool _isAuditPipelineFaulted = false;
-    public bool IsAuditPipelineFaulted => _isAuditPipelineFaulted;
+    public bool IsAuditPipelineFaulted => _isAuditPipelineFaulted || Volatile.Read(ref _auditChainViolation) != null;
 
     private readonly Channel<AuditLogEntry> _auditChannel;
     private readonly CancellationTokenSource _auditCts = new();
@@ -37,6 +37,7 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
     private readonly ILogger<PostgreSqlGovernanceRepository>? _logger;
     private string? _auditChainViolation;
     private readonly GatewayOptions? _options;
+    private readonly ICallerContextProvider? _callerContextProvider;
 
     public PostgreSqlGovernanceRepository(
         IEpochValidationService epochValidationService,
@@ -45,7 +46,8 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
         IKeyVaultSecretProvider? secretProvider = null,
         IAuditChainAnchorStore? auditAnchorStore = null,
         ILogger<PostgreSqlGovernanceRepository>? logger = null,
-        IAuditAnchorSigner? auditAnchorSigner = null)
+        IAuditAnchorSigner? auditAnchorSigner = null,
+        ICallerContextProvider? callerContextProvider = null)
     {
         ArgumentNullException.ThrowIfNull(epochValidationService);
         ArgumentNullException.ThrowIfNull(options);
@@ -53,6 +55,7 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
         _epochValidationService = epochValidationService;
         _logger = logger;
         _options = options.Value;
+        _callerContextProvider = callerContextProvider;
 
         var connStr = options?.Value?.GovernanceDb?.ConnectionString;
         var transportEnv = environment?.EnvironmentName ??

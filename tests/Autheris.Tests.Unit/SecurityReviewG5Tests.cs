@@ -224,6 +224,15 @@ public sealed class SecurityReviewG5Tests : IDisposable
             EgressUrlPolicy.ValidateResolvedAsync(new Uri("https://does-not-exist.invalid/x"), isDev: false));
     }
 
+    [Theory]
+    [InlineData("https://[::ffff:127.0.0.1]/test")]
+    [InlineData("https://[::ffff:10.0.0.1]/test")]
+    [InlineData("https://[::ffff:169.254.169.254]/test")]
+    public void EgressUrlPolicy_ValidateStatic_RejectsIpv4MappedIpv6Restricted(string url)
+    {
+        Should.Throw<SecurityException>(() => EgressUrlPolicy.ValidateStatic(new Uri(url), isDev: false));
+    }
+
     [Fact]
     public void I1_PrimaryHandler_DoesNotUseSystemProxyByDefault()
     {
@@ -334,6 +343,33 @@ public sealed class SecurityReviewG5Tests : IDisposable
         captured.ShouldNotBeNull();
         captured.ActorSid.Value.ShouldBe("S-1-5-21-OPS");
         captured.TenantId.Value.ShouldBe("tenant-x");
+    }
+
+    [Fact]
+    public async Task BreakGlass_AuditRecordingFails_FailsClosedAndDoesNotSetIsBreakGlass()
+    {
+        var repo = Substitute.For<IGovernanceRepository>();
+        repo.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new InvalidOperationException("DB unavailable"));
+
+        var interceptor = new JustificationAndBreakGlassInterceptor(
+            Options.Create(new GatewayOptions()), NullLogger<JustificationAndBreakGlassInterceptor>.Instance, repo);
+
+        var user = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.Name, "operator"), new Claim(ClaimTypes.Role, "BreakGlassOperator"),
+             new Claim(ClaimTypes.PrimarySid, "S-1-5-21-OPS"), new Claim("tenant_id", "tenant-x")], "TestAuth"));
+
+        var context = new IngressContext
+        {
+            Headers = new Dictionary<string, string> { ["X-Break-Glass"] = "true", ["X-Access-Justification"] = "INC-1" },
+            User = user
+        };
+
+        var result = await interceptor.OnIngressAsync(context);
+
+        result.Decision.ShouldBe(IngressDecision.Deny);
+        result.StatusCode.ShouldBe(500);
+        context.Items.ContainsKey("IsBreakGlass").ShouldBeFalse();
     }
 
     // ---------------------------------------------------------------- Iceberg guard
