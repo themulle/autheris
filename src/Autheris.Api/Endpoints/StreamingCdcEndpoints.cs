@@ -7,6 +7,7 @@ using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Events.Interfaces;
+using Autheris.Application.Interfaces;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
@@ -59,32 +60,24 @@ public static class StreamingCdcEndpoints
                 // A-1: caller tenant comes from the resolved request context (same source as the rest of the pipeline).
                 var callerTenant = EndpointSecurity.GetRequestTenant(request.HttpContext).Value;
 
+                // SR-L-20: the row tenant is read from the registered tenant column of the target table.
                 var cdcEvent = DebeziumCdcParser.Parse(body);
-
-                // A-1: even canonical cluster admins must name the target tenant explicitly (no implicit/null tenant).
-                if (isClusterAdmin && string.IsNullOrWhiteSpace(cdcEvent.TenantId))
+                var services = request.HttpContext.RequestServices;
+                var metadataRepository = services.GetService<ITableMetadataRepository>();
+                var metadata = metadataRepository == null
+                    ? null
+                    : await metadataRepository.GetTableMetadataAsync(cdcEvent.Table, request.HttpContext.RequestAborted);
+                var tenantColumn = metadata?.TenantColumnName;
+                if (tenantColumn != null)
                 {
-                    return Results.BadRequest(new { error = "CDC event must carry an explicit tenant" });
+                    cdcEvent = DebeziumCdcParser.Parse(body, null, tenantColumn);
                 }
 
-                // SEC-4: Enforce strict fail-closed tenant isolation on ingested CDC events
-                if (!isClusterAdmin)
+                var requireTenantColumn = services.GetService<IOptions<GatewayOptions>>()?.Value.DataSources.RequireTenantColumn == true;
+                var rejection = ApplyIngestTenantPolicy(cdcEvent, isClusterAdmin, callerTenant, tenantColumn != null, requireTenantColumn, out cdcEvent);
+                if (rejection != null)
                 {
-                    if (string.IsNullOrWhiteSpace(callerTenant))
-                    {
-                        return Results.StatusCode(StatusCodes.Status403Forbidden);
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(cdcEvent.TenantId) &&
-                        !string.Equals(cdcEvent.TenantId, callerTenant, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return Results.StatusCode(StatusCodes.Status403Forbidden);
-                    }
-
-                    if (string.IsNullOrWhiteSpace(cdcEvent.TenantId))
-                    {
-                        cdcEvent = cdcEvent with { TenantId = callerTenant };
-                    }
+                    return rejection;
                 }
 
                 await ingestionService.PublishEventAsync(cdcEvent, request.HttpContext.RequestAborted);
@@ -112,6 +105,59 @@ public static class StreamingCdcEndpoints
             .RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         return app;
+    }
+
+    /// <summary>
+    /// A-1 / SEC-4 / SR-L-20: fail-closed tenant policy for ingested CDC events. Returns a rejection result or <c>null</c>;
+    /// <paramref name="resolved"/> is the (possibly tenant-stamped) event.
+    /// </summary>
+    internal static IResult? ApplyIngestTenantPolicy(
+        CdcEvent cdcEvent,
+        bool isClusterAdmin,
+        string? callerTenant,
+        bool tableHasTenantColumn,
+        bool requireTenantColumn,
+        out CdcEvent resolved)
+    {
+        resolved = cdcEvent;
+
+        // A-1: even canonical cluster admins must name the target tenant explicitly (no implicit/null tenant).
+        if (isClusterAdmin && string.IsNullOrWhiteSpace(cdcEvent.TenantId))
+        {
+            return Results.BadRequest(new { error = "CDC event must carry an explicit tenant" });
+        }
+
+        if (isClusterAdmin)
+        {
+            return null;
+        }
+
+        // SEC-4: Enforce strict fail-closed tenant isolation on ingested CDC events
+        if (string.IsNullOrWhiteSpace(callerTenant))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        if (!string.IsNullOrWhiteSpace(cdcEvent.TenantId))
+        {
+            return string.Equals(cdcEvent.TenantId, callerTenant, StringComparison.OrdinalIgnoreCase)
+                ? null
+                : Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        // No tenant value on the row: never stamp the caller tenant onto a tenant-scoped table.
+        if (tableHasTenantColumn)
+        {
+            return Results.BadRequest(new { error = "CDC row must carry a tenant value" });
+        }
+
+        if (requireTenantColumn)
+        {
+            return Results.BadRequest(new { error = "CDC target table has no tenant column" });
+        }
+
+        resolved = cdcEvent with { TenantId = callerTenant };
+        return null;
     }
 
     /// <summary>Returns a 501 problem result while the CDC webhook feature flag is off; otherwise <c>null</c>.</summary>

@@ -136,7 +136,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         DmlAuditContext? dmlContext,
         CancellationToken ct,
         SqlRowLimit? rowLimit = null,
-        bool probeExtraRow = false)
+        bool probeExtraRow = false,
+        bool plannedTableRead = false)
     {
         if (string.IsNullOrWhiteSpace(rawSql))
         {
@@ -146,7 +147,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         ArgumentNullException.ThrowIfNull(user);
 
         var webSqlOptions = _options.Value.WebSql;
-        if (!webSqlOptions.Enabled)
+        // WebSql:Enabled switches the client SQL endpoints; a gateway-planned table read is governed below like any other statement.
+        if (!webSqlOptions.Enabled && !plannedTableRead)
         {
             throw new WebSqlPolicyException("WebSQL execution is disabled by gateway configuration.");
         }

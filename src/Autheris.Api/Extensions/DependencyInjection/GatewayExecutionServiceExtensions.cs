@@ -53,21 +53,19 @@ public static class GatewayExecutionServiceExtensions
         services.AddSingleton<IAutherisConnectorRegistry>(sp =>
         {
             var registry = new InMemoryConnectorRegistry();
-            var sqlConnFactory = sp.GetService<ISqlConnectionFactory>();
             var metaRepo = sp.GetService<ITableMetadataRepository>();
             var opts = sp.GetService<IOptions<GatewayOptions>>();
-            var env = sp.GetService<IHostEnvironment>();
             var maskingProvider = sp.GetService<IColumnMaskingProvider>();
 
-            if (sqlConnFactory != null && metaRepo != null)
+            // WP-ARC-B-02 / ARC-I-13: the default SQL connector reads through the governed pipeline and requires the masking provider.
+            if (metaRepo != null && maskingProvider != null)
             {
                 var defaultSqlConnector = new SqlConnector(
                     connectorId: "default-sql",
-                    connectionFactory: sqlConnFactory,
                     metadataRepository: metaRepo,
-                    options: opts,
-                    environment: env,
-                    maskingProvider: maskingProvider);
+                    maskingProvider: maskingProvider,
+                    scopeFactory: sp.GetRequiredService<IServiceScopeFactory>(),
+                    options: opts);
                 registry.RegisterConnector("default-sql", defaultSqlConnector);
                 registry.RegisterConnector("sql", defaultSqlConnector);
             }
@@ -93,7 +91,8 @@ public static class GatewayExecutionServiceExtensions
             sp.GetService<ITableReadConcurrencyGate>(),
             sp.GetService<IRebacEvaluator>(),
             sp.GetRequiredService<IMandatoryRowFilterResolver>(),
-            typedPolicies: sp.GetService<Autheris.Application.Policy.TypedPolicySources>()));
+            typedPolicies: sp.GetService<Autheris.Application.Policy.TypedPolicySources>(),
+            auditWriter: sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>()));
         services.AddScoped<IGatewayExecutionService>(sp => sp.GetRequiredService<GatewayExecutionService>());
         services.AddScoped<ITableAccessResolver>(sp => sp.GetRequiredService<GatewayExecutionService>());
         services.AddScoped<IGovernedTreeQueryService, GovernedTreeQueryService>();

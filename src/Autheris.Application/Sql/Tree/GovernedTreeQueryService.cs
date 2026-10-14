@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Policy;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -72,6 +73,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
     private readonly ITableAccessResolver _accessResolver;
     private readonly ISqlConnectionFactory _connectionFactory;
     private readonly IAuditLogRepository _auditLog;
+    private readonly Autheris.Application.Audit.IAuditWriter _auditWriter;
     private readonly IColumnMaskingProvider _maskingProvider;
     private readonly GatewayOptions _options;
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
@@ -91,11 +93,13 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         IOptions<GatewayOptions> options,
         ITableReadConcurrencyGate? concurrencyGate = null,
         ILogger<GovernedTreeQueryService>? logger = null,
-        IDbSessionContextInitializer? sessionInitializer = null)
+        IDbSessionContextInitializer? sessionInitializer = null,
+        Autheris.Application.Audit.IAuditWriter? auditWriter = null)
     {
         _accessResolver = accessResolver ?? throw new ArgumentNullException(nameof(accessResolver));
         _connectionFactory = connectionFactory ?? throw new ArgumentNullException(nameof(connectionFactory));
         _auditLog = auditLog ?? throw new ArgumentNullException(nameof(auditLog));
+        _auditWriter = auditWriter ?? new Autheris.Application.Audit.AuditWriter(_auditLog, Microsoft.Extensions.Logging.Abstractions.NullLogger<Autheris.Application.Audit.AuditWriter>.Instance);
         _maskingProvider = maskingProvider ?? throw new ArgumentNullException(nameof(maskingProvider));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _concurrencyGate = concurrencyGate;
@@ -353,16 +357,9 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             return;
         }
 
-        await _auditLog.RecordAuditEventAsync(new AuditLogEntry
-        {
-            TenantId = access.Tenant,
-            EventType = "TABLE_QUERY",
-            ActorSid = access.UserSid,
-            TargetTable = table.ToString(),
-            Decision = access.Decision.IsAllowed ? "ALLOW" : "DENY",
-            TraceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId(),
-            DetailsJson = JsonSerializer.Serialize(new { is_allowed = access.Decision.IsAllowed, reasons = access.Decision.DeniedReasons, path = "graphql_tree", virtual_filters = access.Decision.AppliedVirtualFilters })
-        }, ct).ConfigureAwait(false);
+        await GovernedQueryStages.RecordTableReadAsync(
+            _auditWriter, access.Tenant, access.UserSid, table, access.Decision.IsAllowed,
+            GovernedQueryStages.DecisionDetails(access.Decision, path: "graphql_tree"), ct).ConfigureAwait(false);
     }
 
     private IDisposable? AcquireLease(ResolvedTableAccess rootAccess)

@@ -45,7 +45,7 @@ public sealed class AuditWormExportTests
 
         try
         {
-            var auditRepo = Substitute.For<IAuditLogRepository>();
+            var auditRepo = Substitute.For<IAuditLogRepository, IAuditChainExportSource>();
             auditRepo.VerifyAuditHashChainAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(true));
 
             var now = DateTimeOffset.UtcNow;
@@ -77,8 +77,7 @@ public sealed class AuditWormExportTests
                 }
             };
 
-            auditRepo.QueryAuditLogsAsync(Arg.Any<string?>(), Arg.Any<Sid?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<int>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-                .Returns(Task.FromResult<IReadOnlyList<AuditLogEntry>>(entries));
+            SetupChainExport((IAuditChainExportSource)auditRepo, entries);
 
             var options = Options.Create(new GatewayOptions
             {
@@ -130,7 +129,7 @@ public sealed class AuditWormExportTests
     public async Task AuditWormExportService_ShouldAbortWhenHashChainIsCompromised()
     {
         // Arrange
-        var auditRepo = Substitute.For<IAuditLogRepository>();
+        var auditRepo = Substitute.For<IAuditLogRepository, IAuditChainExportSource>();
         auditRepo.VerifyAuditHashChainAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
 
         var options = Options.Create(new GatewayOptions());
@@ -156,7 +155,7 @@ public sealed class AuditWormExportTests
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
 
-        var auditRepo = Substitute.For<IAuditLogRepository>();
+        var auditRepo = Substitute.For<IAuditLogRepository, IAuditChainExportSource>();
         auditRepo.VerifyAuditHashChainAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(true));
 
         var now = DateTimeOffset.UtcNow;
@@ -176,8 +175,7 @@ public sealed class AuditWormExportTests
             }
         };
 
-        auditRepo.QueryAuditLogsAsync(Arg.Any<string?>(), Arg.Any<Sid?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<int>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<AuditLogEntry>>(entries));
+        SetupChainExport((IAuditChainExportSource)auditRepo, entries);
 
         var options = Options.Create(new GatewayOptions
         {
@@ -218,5 +216,17 @@ public sealed class AuditWormExportTests
             req.Headers.Contains("Authorization").ShouldBeTrue();
             req.Headers.GetValues("Authorization").First().ShouldStartWith("AWS4-HMAC-SHA256");
         }
+    }
+
+    /// <summary>Serves the entries as a gap-free audit chain (rowid == sequence == position), as the SQL repositories do.</summary>
+    private static void SetupChainExport(IAuditChainExportSource source, IReadOnlyList<AuditLogEntry> entries)
+    {
+        var records = entries.Select((e, i) => new AuditChainRecord(i + 1, i + 1, e)).ToList();
+        source.GetAuditChainRangeAsync(Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<AuditChainRange?>(new AuditChainRange(1, records.Count, records.Count)));
+        source.GetAuditChainPageAsync(Arg.Any<long>(), Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(
+                Task.FromResult<IReadOnlyList<AuditChainRecord>>(records),
+                Task.FromResult<IReadOnlyList<AuditChainRecord>>(new List<AuditChainRecord>()));
     }
 }

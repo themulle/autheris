@@ -250,8 +250,13 @@ Method call syntax (`expr.method(...)`, `Type::method(...)`) is always rejected.
 | `MaxNestingDepth` | 100 | Token-level nesting depth (parentheses, brackets, `CASE`, lambdas, unary chains). |
 | `MaxParseTreeDepth` | 3,000 | Maximum parse tree depth, checked iteratively. |
 | `ParseTimeout` | 5 s | Time budget per parse, including the wait for a parser slot. |
-| `ParseThreadStackSize` | 16 MB | Stack of the dedicated parser thread (minimum 256 KB). |
-| `ParseConcurrencyLimiter` | `null` | Limits concurrent parser threads; `null` uses the process-wide limiter (`ProcessorCount * 2`). |
+| `ParseThreadStackSize` | 16 MB | Stack of the pooled parser threads (minimum 256 KB). Parsing runs on long-lived worker threads (at most `ProcessorCount * 2`, created on demand) fed by a bounded queue; the queue wait counts against `ParseTimeout`. |
+| `ParseConcurrencyLimiter` | `null` | Limits concurrently running parses; `null` uses the process-wide limiter (`ProcessorCount * 2`). |
+| `InlineParseMaxLength` | 0 (off) | Statements up to this length parse on the calling thread when enough stack is left. Limiter and time budget still apply. |
+| `LlFallbackTimeout` | 1 s | Budget of the LL pass that follows a failed SLL pass (also bound by `ParseTimeout`). |
+| `SkipLlFallbackOnTokenMismatch` | `false` | When enabled, a plain token mismatch in the SLL pass is final; prediction failures still retry in LL mode. Off by default because an SLL mis-prediction can surface as a token mismatch on valid SQL. |
+| `SyntaxErrorCacheTtl` | 30 s | How long a parser syntax failure is remembered so repeated invalid input is rejected without parsing (`0` disables). Successes, timeouts and token-security rejections are never cached. |
+| `SyntaxErrorCacheMaxEntries` | 256 | Bound of that cache (statements above 4,096 characters are never cached). |
 
 The `Reject*` properties of the engine apply only to direct `Parse`, `ParseExpression` and `Analyze` calls without explicit
 `SqlTokenSecurityOptions` (default `false`, so plain syntax parsing keeps working). `Compile` never reads them.

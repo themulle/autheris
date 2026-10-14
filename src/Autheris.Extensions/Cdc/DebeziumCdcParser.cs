@@ -12,6 +12,15 @@ using Autheris.Domain.Options;
 public static class DebeziumCdcParser
 {
     public static CdcEvent Parse(string jsonString, string? defaultTenantId = null)
+        => Parse(jsonString, defaultTenantId, null);
+
+    /// <summary>
+    /// SEC SR-L-20: parses a Debezium event and reads the row tenant from <paramref name="tenantColumn"/> (the registered tenant
+    /// column of the table). Falls back to <c>tenant_id</c> and then to any column whose name equals <c>tenantid</c> after
+    /// removing <c>_</c>/<c>-</c> (same rule as <c>TableMetadata.TenantColumnName</c>). A conflicting tenant between the
+    /// before and after image is rejected with an <see cref="InvalidOperationException"/>.
+    /// </summary>
+    public static CdcEvent Parse(string jsonString, string? defaultTenantId, string? tenantColumn)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jsonString);
 
@@ -58,16 +67,15 @@ public static class DebeziumCdcParser
         var eventId = Guid.NewGuid().ToString("N");
         var timestamp = DateTimeOffset.FromUnixTimeMilliseconds(tsMs);
 
-        // Check for tenant_id in after or before
-        var tenantId = defaultTenantId;
-        if (after?.TryGetValue("tenant_id", out var tVal) == true && tVal != null)
+        var afterTenant = ExtractTenant(after, tenantColumn);
+        var beforeTenant = ExtractTenant(before, tenantColumn);
+        if (afterTenant != null && beforeTenant != null &&
+            !string.Equals(afterTenant, beforeTenant, StringComparison.OrdinalIgnoreCase))
         {
-            tenantId = tVal.ToString();
+            throw new InvalidOperationException("CDC event carries different tenant values in the before and after image.");
         }
-        else if (before?.TryGetValue("tenant_id", out var bVal) == true && bVal != null)
-        {
-            tenantId = bVal.ToString();
-        }
+
+        var tenantId = afterTenant ?? beforeTenant ?? defaultTenantId;
 
         return new CdcEvent(
             EventId: eventId,
@@ -78,6 +86,47 @@ public static class DebeziumCdcParser
             After: after,
             Timestamp: timestamp
         );
+    }
+
+    private static string? ExtractTenant(IReadOnlyDictionary<string, object?>? row, string? tenantColumn)
+    {
+        if (row == null)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(tenantColumn) && TryGetNonEmpty(row, tenantColumn, out var configured))
+        {
+            return configured;
+        }
+
+        if (TryGetNonEmpty(row, "tenant_id", out var exact))
+        {
+            return exact;
+        }
+
+        foreach (var (key, value) in row)
+        {
+            if (string.Equals(key.Replace("_", string.Empty, StringComparison.Ordinal).Replace("-", string.Empty, StringComparison.Ordinal), "tenantid", StringComparison.OrdinalIgnoreCase)
+                && value != null && !string.IsNullOrWhiteSpace(value.ToString()))
+            {
+                return value.ToString();
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryGetNonEmpty(IReadOnlyDictionary<string, object?> row, string column, out string? value)
+    {
+        value = null;
+        if (row.TryGetValue(column, out var raw) && raw != null && !string.IsNullOrWhiteSpace(raw.ToString()))
+        {
+            value = raw.ToString();
+            return true;
+        }
+
+        return false;
     }
 
     private static IReadOnlyDictionary<string, object?>? ExtractRow(JsonElement root, string propertyName)

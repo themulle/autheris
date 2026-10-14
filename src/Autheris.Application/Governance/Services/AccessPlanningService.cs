@@ -1,7 +1,6 @@
 namespace Autheris.Application.Governance.Services;
 
 using System;
-using System.Collections.Concurrent;
 using System.Buffers.Text;
 using System.Collections.Generic;
 using System.Linq;
@@ -18,6 +17,7 @@ using Autheris.Application.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Security.Totp.Interfaces;
+using Autheris.Application.State;
 using Autheris.Domain.Common;
 using Autheris.Domain.Events;
 using Autheris.Domain.Model;
@@ -34,7 +34,10 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public class AccessPlanningService : IAccessPlanningService
 {
-    private static readonly byte[] HmacKey = RandomNumberGenerator.GetBytes(32);
+    private const string SigningKeyInfo = "autheris/access-plan/confirmation-token/v1";
+
+    private readonly byte[] _hmacKey;
+    private readonly IAccessPlanStore _store;
 
     private readonly ITableMetadataRepository _tableRepo;
     private readonly IRebacStore _rebacStore;
@@ -50,18 +53,6 @@ public class AccessPlanningService : IAccessPlanningService
     private readonly AccessPlanOptions _planOptions;
     private readonly TimeProvider _time;
     private readonly bool _allowDemoDirectory;
-    private long _lastSweepTicks;
-
-    private readonly ConcurrentDictionary<string, StoredPlan> _plans = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, DateTimeOffset> _consumedTokens = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, byte[]> _inMemoryVault = new(StringComparer.OrdinalIgnoreCase);
-
-    private sealed record StoredPlan(
-        AdminPlanAccessResult Result,
-        AdminPlanAccessRequest Request,
-        string AdminSid,
-        string? ConfirmedToken = null,
-        string? TenantId = null);
 
     private static string? NormalizeTenant(string? tenantId)
         => string.IsNullOrWhiteSpace(tenantId) ? null : tenantId;
@@ -98,7 +89,9 @@ public class AccessPlanningService : IAccessPlanningService
         IGatewayEventBus? eventBus = null,
         IOptions<AccessPlanOptions>? planOptions = null,
         IHostEnvironment? hostEnvironment = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IAccessPlanStore? accessPlanStore = null,
+        IClusterStateTopology? clusterTopology = null)
     {
         _auditRepo = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
         _tableRepo = tableMetadataRepository ?? new NullTableMetadataRepository();
@@ -113,6 +106,9 @@ public class AccessPlanningService : IAccessPlanningService
         _eventBus = eventBus;
         _planOptions = planOptions?.Value ?? new AccessPlanOptions();
         _time = timeProvider ?? TimeProvider.System;
+        _store = accessPlanStore
+            ?? new InMemoryAccessPlanStore(_time, TimeSpan.FromSeconds(_planOptions.SweepIntervalSeconds));
+        _hmacKey = ResolveSigningKey(_secretProvider, _planOptions.SigningKeyRef, clusterTopology?.IsClusterWide == true);
         // SR-L-06 Part D: the demo directory is only exposed when the host is explicitly a Development host.
         _allowDemoDirectory = hostEnvironment?.IsDevelopment() == true;
     }
@@ -162,21 +158,22 @@ public class AccessPlanningService : IAccessPlanningService
         }
 
         var now = _time.GetUtcNow();
-        SweepExpired(force: false);
+        var planId = $"plan_{Guid.NewGuid():N}";
+        var planTtl = TimeSpan.FromMinutes(_planOptions.PlanTtlMinutes);
+        var expiresAt = now.Add(planTtl);
+        var result = new AdminPlanAccessResult(planId, request.DatasetId, diffs, warnings, expiresAt);
 
-        var pendingForAdmin = _plans.Values.Count(p =>
-            p.Result.ExpiresAt > now && string.Equals(p.AdminSid, adminSid, StringComparison.OrdinalIgnoreCase));
-        if (pendingForAdmin >= _planOptions.MaxPendingPlansPerAdmin)
+        // ARC-C-05: plans live in the shared store with a TTL; an unavailable store fails the operation.
+        var saved = await _store.TrySavePlanAsync(
+            new StoredAccessPlan(result, request, adminSid, TenantId: NormalizeTenant(tenantId)),
+            planTtl,
+            _planOptions.MaxPendingPlansPerAdmin,
+            ct).ConfigureAwait(false);
+        if (!saved)
         {
             throw new SecurityException(
                 $"Too many pending access plans for this administrator (limit {_planOptions.MaxPendingPlansPerAdmin}). Apply or wait for existing plans to expire.");
         }
-
-        var planId = $"plan_{Guid.NewGuid():N}";
-        var expiresAt = now.AddMinutes(_planOptions.PlanTtlMinutes);
-        var result = new AdminPlanAccessResult(planId, request.DatasetId, diffs, warnings, expiresAt);
-
-        _plans[planId] = new StoredPlan(result, request, adminSid, TenantId: NormalizeTenant(tenantId));
 
         if (_eventBus != null)
         {
@@ -203,8 +200,8 @@ public class AccessPlanningService : IAccessPlanningService
         ArgumentException.ThrowIfNullOrWhiteSpace(totpCode);
         ArgumentException.ThrowIfNullOrWhiteSpace(adminSid);
 
-        SweepExpired(force: false);
-        if (!_plans.TryGetValue(planId, out var stored) || stored.Result.ExpiresAt <= _time.GetUtcNow())
+        var stored = await _store.GetPlanAsync(planId, ct).ConfigureAwait(false);
+        if (stored == null || stored.Result.ExpiresAt <= _time.GetUtcNow())
         {
             throw new SecurityException($"Plan '{planId}' does not exist or has expired.");
         }
@@ -234,7 +231,11 @@ public class AccessPlanningService : IAccessPlanningService
         var tokenExpiresAt = _time.GetUtcNow().AddMinutes(_planOptions.ConfirmationTokenTtlMinutes);
         var token = GenerateConfirmationToken(planId, adminSid, tokenExpiresAt);
 
-        _plans[planId] = stored with { ConfirmedToken = token };
+        if (!await _store.SetConfirmedTokenAsync(planId, HashToken(token), ct).ConfigureAwait(false))
+        {
+            throw new SecurityException($"Plan '{planId}' does not exist or has expired.");
+        }
+
         return new AdminConfirmPlanResult(token, tokenExpiresAt);
     }
 
@@ -252,8 +253,8 @@ public class AccessPlanningService : IAccessPlanningService
             throw new SecurityException("Confirmation token is required to apply access changes (ADR-03).");
         }
 
-        SweepExpired(force: false);
-        if (!_plans.TryGetValue(request.PlanId, out var stored))
+        var stored = await _store.GetPlanAsync(request.PlanId, ct).ConfigureAwait(false);
+        if (stored == null)
         {
             throw new SecurityException($"Plan '{request.PlanId}' was not found.");
         }
@@ -276,10 +277,10 @@ public class AccessPlanningService : IAccessPlanningService
             throw new SecurityException("Plan belongs to a different tenant.");
         }
 
-        if (string.IsNullOrWhiteSpace(stored.ConfirmedToken) ||
+        if (string.IsNullOrWhiteSpace(stored.ConfirmedTokenHash) ||
             !CryptographicOperations.FixedTimeEquals(
-                Encoding.UTF8.GetBytes(request.ConfirmationToken),
-                Encoding.UTF8.GetBytes(stored.ConfirmedToken)))
+                Encoding.UTF8.GetBytes(HashToken(request.ConfirmationToken)),
+                Encoding.UTF8.GetBytes(stored.ConfirmedTokenHash)))
         {
             throw new SecurityException("Confirmation token does not match the confirmed plan token.");
         }
@@ -294,7 +295,9 @@ public class AccessPlanningService : IAccessPlanningService
             throw new SecurityException("Confirmation token has expired.");
         }
 
-        if (!_consumedTokens.TryAdd(request.ConfirmationToken, stored.Result.ExpiresAt))
+        // Cluster-wide single use: the first caller wins; an unavailable store throws (no apply).
+        var consumeTtl = stored.Result.ExpiresAt - _time.GetUtcNow();
+        if (!await _store.TryConsumeTokenAsync(HashToken(request.ConfirmationToken), consumeTtl, ct).ConfigureAwait(false))
         {
             throw new SecurityException("Confirmation token has already been consumed (replay prevention).");
         }
@@ -382,8 +385,23 @@ public class AccessPlanningService : IAccessPlanningService
 
         if (!string.IsNullOrWhiteSpace(request.Auth?.Secret))
         {
-            secretRef = $"vault://datasources/{request.Domain.ToLowerInvariant()}/{request.Name.ToLowerInvariant()}/auth_secret";
-            _inMemoryVault[secretRef] = Encoding.UTF8.GetBytes(request.Auth.Secret);
+            // ARC-C-05: no plaintext copy in process memory; the secret goes to the secret provider or the request fails.
+            if (_secretProvider == null)
+            {
+                throw new InvalidOperationException(
+                    "Inline datasource secrets require a writable IKeyVaultSecretProvider; supply Auth.SecretRef instead.");
+            }
+
+            secretRef = $"{DatasourceSecretRefPolicy.DomainPrefix(request.Domain.ToLowerInvariant())}{request.Name.ToLowerInvariant()}:auth_secret";
+            try
+            {
+                _secretProvider.SetSecret(secretRef, Encoding.UTF8.GetBytes(request.Auth.Secret));
+            }
+            catch (NotSupportedException ex)
+            {
+                throw new InvalidOperationException(
+                    "The configured secret provider is read-only and cannot store inline datasource secrets; supply Auth.SecretRef instead.", ex);
+            }
         }
         else if (!string.IsNullOrWhiteSpace(request.Auth?.SecretRef))
         {
@@ -543,60 +561,67 @@ public class AccessPlanningService : IAccessPlanningService
         return new AdminResolvePrincipalResult(matches);
     }
 
-    public AdminPlanAccessResult? GetPlan(string planId) =>
-        _plans.TryGetValue(planId, out var stored) ? stored.Result : null;
-
-    /// <summary>
-    /// Removes expired plans and the consumed-token entries that belong to them. Throttled by
-    /// <see cref="AccessPlanOptions.SweepIntervalSeconds"/> unless <paramref name="force"/> is set.
-    /// </summary>
-    internal void SweepExpired(bool force)
+    public async Task<AdminPlanAccessResult?> GetPlanAsync(string planId, CancellationToken ct = default)
     {
-        var now = _time.GetUtcNow();
-        var nowTicks = now.UtcTicks;
-        var last = Interlocked.Read(ref _lastSweepTicks);
-        if (!force && last != 0 && nowTicks - last < TimeSpan.FromSeconds(_planOptions.SweepIntervalSeconds).Ticks)
-        {
-            return;
-        }
-
-        Interlocked.Exchange(ref _lastSweepTicks, nowTicks);
-
-        foreach (var (id, plan) in _plans)
-        {
-            if (plan.Result.ExpiresAt <= now)
-            {
-                _plans.TryRemove(id, out _);
-            }
-        }
-
-        foreach (var (token, planExpiry) in _consumedTokens)
-        {
-            if (planExpiry <= now)
-            {
-                _consumedTokens.TryRemove(token, out _);
-            }
-        }
+        var stored = await _store.GetPlanAsync(planId, ct).ConfigureAwait(false);
+        return stored?.Result;
     }
 
-    internal int PlanCount => _plans.Count;
+    internal void SweepExpired(bool force) => (_store as InMemoryAccessPlanStore)?.Sweep(force);
 
-    internal int ConsumedTokenCount => _consumedTokens.Count;
+    internal int PlanCount => (_store as InMemoryAccessPlanStore)?.PlanCount ?? 0;
+
+    internal int ConsumedTokenCount => (_store as InMemoryAccessPlanStore)?.ConsumedTokenCount ?? 0;
+
+    private static string HashToken(string token)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
+
+    /// <summary>
+    /// Derives the confirmation-token HMAC key (HKDF-SHA256) from the configured secret. Without a configured secret a
+    /// per-process random key is used, which is only acceptable when the state is not shared across replicas.
+    /// </summary>
+    private static byte[] ResolveSigningKey(IKeyVaultSecretProvider? provider, string? signingKeyRef, bool clusterWide)
+    {
+        if (string.IsNullOrWhiteSpace(signingKeyRef))
+        {
+            if (clusterWide)
+            {
+                throw new InvalidOperationException(
+                    $"{AccessPlanOptions.SectionName}:SigningKeyRef is required when the cluster state is shared across replicas.");
+            }
+
+            return RandomNumberGenerator.GetBytes(32);
+        }
+
+        if (provider == null)
+        {
+            throw new InvalidOperationException(
+                $"{AccessPlanOptions.SectionName}:SigningKeyRef is configured but no IKeyVaultSecretProvider is registered.");
+        }
+
+        var ikm = provider.GetSecretBytes(signingKeyRef);
+        if (ikm == null || ikm.Length == 0)
+        {
+            throw new InvalidOperationException($"The secret referenced by {AccessPlanOptions.SectionName}:SigningKeyRef is empty.");
+        }
+
+        return HKDF.DeriveKey(HashAlgorithmName.SHA256, ikm, 32, salt: null, info: Encoding.UTF8.GetBytes(SigningKeyInfo));
+    }
 
     private static string B64(string value) => Base64Url.EncodeToString(Encoding.UTF8.GetBytes(value));
 
-    private static string Sign(string signedPart)
-        => Convert.ToHexString(HMACSHA256.HashData(HmacKey, Encoding.UTF8.GetBytes(signedPart)));
+    private string Sign(string signedPart)
+        => Convert.ToHexString(HMACSHA256.HashData(_hmacKey, Encoding.UTF8.GetBytes(signedPart)));
 
     // Token layout: v1.{b64url(planId)}.{b64url(adminSid)}.{unix}.{hmac-hex}. Base64url never contains '.',
     // so the encoding is unambiguous even when the SID contains ':' or other separators.
-    private static string GenerateConfirmationToken(string planId, string adminSid, DateTimeOffset expiresAt)
+    private string GenerateConfirmationToken(string planId, string adminSid, DateTimeOffset expiresAt)
     {
         var signedPart = $"v1.{B64(planId)}.{B64(adminSid)}.{expiresAt.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture)}";
         return $"{signedPart}.{Sign(signedPart)}";
     }
 
-    private static bool ValidateConfirmationToken(string token, string expectedPlanId, string expectedAdminSid, out DateTimeOffset expiresAt)
+    private bool ValidateConfirmationToken(string token, string expectedPlanId, string expectedAdminSid, out DateTimeOffset expiresAt)
     {
         expiresAt = DateTimeOffset.MinValue;
         var parts = token.Split('.');

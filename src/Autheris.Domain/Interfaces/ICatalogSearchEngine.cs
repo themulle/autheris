@@ -49,12 +49,3 @@ public interface ICatalogSearchEngine
         CatalogSearchQuery query, 
         Func<TableIdentifier, bool> isVisiblePredicate);
 }
-
-/// <summary>
-/// Handler für Katalog-Änderungen zur automatischen Aktualisierung des Suchindex.
-/// </summary>
-public interface ICatalogChangeNotificationHandler
-{
-    Task NotifyTableChangedAsync(TableIdentifier tableId, CancellationToken ct = default);
-    Task NotifyCatalogReloadRequiredAsync(CancellationToken ct = default);
-}

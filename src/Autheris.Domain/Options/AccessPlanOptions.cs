@@ -24,4 +24,11 @@ public sealed class AccessPlanOptions
     /// <summary>Minimum interval between opportunistic sweeps of expired plan state, in seconds.</summary>
     [Range(1, 86400)]
     public int SweepIntervalSeconds { get; set; } = 60;
+
+    /// <summary>
+    /// Secret reference (resolved through <c>IKeyVaultSecretProvider</c>) from which the confirmation-token HMAC key is
+    /// derived. Required when the cluster state is shared across replicas, so every node signs and verifies with the
+    /// same key; without it a per-process random key is used (single node only).
+    /// </summary>
+    public string? SigningKeyRef { get; set; }
 }

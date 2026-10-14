@@ -32,6 +32,28 @@ The audit subsystem decouples in-memory high-throughput hash chaining from asymm
 - In case of storage latency or transient network partitions, audit entries apply backpressure to callers rather than silently dropping security events.
 - Failed deliveries are routed to an isolated Dead-Letter Queue (DLQ) with alert probes.
 
+### 6. Latched Chain Violation Policy (SR-L-08)
+- A detected audit hash chain violation is latched in its own field for the process lifetime. A successful write after a transient failure never clears it; recovery is a restart after forensic review (there is deliberately no reset endpoint).
+- `Gateway:Audit:OnChainViolation` selects the reaction. Default: `DenyDataAccess` outside Development/Test, `AlertOnly` in Development/Test.
+  - `DenyDataAccess`: query (Tier-B) audit events are refused with an `AuditUnavailableException`, so the data request fails closed. Security and admin (Tier-A) events are still written, carry `chainViolation=true` in their details, and one `AUDIT_PIPELINE_FAULT` event is written per latch.
+  - `DenyAll`: every audit event is refused.
+  - `AlertOnly`: the violation is logged and fails readiness only (`FailReadinessOnChainViolation`).
+
+### 7. Anchor Monotonicity (SR-L-07)
+- Anchor stores never move backwards: the file store (read-compare-write under an in-process lock and an exclusive sibling `<anchor>.lock` file for replicas sharing a path), the in-memory store and all three repositories ignore an anchor with a lower sequence than the stored one. The WORM directory store is append-only and always loads the highest sequence.
+
+### 8. Unsequenced Rows
+- Every audit row is written with a sequence number; there is no legacy HMAC key and no migration path for rows without one.
+- On startup, SQLite audit rows without a sequence number latch a chain violation, and chain verification rejects them.
+
+### 9. Unified Audit Contract (`IAuditWriter`)
+- Endpoints and services write audit records through `Autheris.Application.Audit.IAuditWriter` instead of resolving `IAuditLogRepository` ad hoc.
+  - `RecordRequiredAsync` throws `AuditUnavailableException` when the record cannot be written ("no audit, no data"); the API maps it to `503` with `Retry-After`. Used for ALLOW records and administrative changes.
+  - `RecordBestEffortAsync` logs and counts (`autheris_audit_write_failed_total{tier}`) but never throws. Used where a failing sink must not change the outcome (for example tenant-collision denials).
+  - `RecordAsync` dispatches through `AuditPolicyTable`, which assigns an explicit `AuditFailurePolicy` (`FailClosed` or `BestEffort`) to every `AuditEventTypes` entry; unknown types are `FailClosed`.
+- A denial is never turned into an allow by an audit failure.
+- The ReBAC table gate keeps denying when its dependency fails, now records `authz_dependency_failure_total`, and lets cancellation propagate.
+
 ---
 
 ## Configuration Example
@@ -46,7 +68,8 @@ The audit subsystem decouples in-memory high-throughput hash chaining from asymm
       "ChainAnchorSignerKeyVaultRef": "azure-keyvault://my-vault/keys/audit-signer",
       "FlushIntervalSeconds": 10,
       "MaxBatchSize": 500,
-      "SanitizeLiterals": true
+      "SanitizeLiterals": true,
+      "OnChainViolation": "DenyDataAccess"
     },
     "GovernanceDb": {
       "Provider": "sqlserver",

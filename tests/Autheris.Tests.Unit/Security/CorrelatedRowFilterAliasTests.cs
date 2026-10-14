@@ -100,12 +100,12 @@ public sealed class CorrelatedRowFilterAliasTests : IDisposable
     }
 
     [Fact]
-    public async Task SqlDataSourceExecutor_AppliesCorrelatedFilter_AgainstRealSqlite()
+    public async Task SqlTableReadExecutor_AppliesCorrelatedPolicy_AgainstRealSqlite()
     {
-        using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        using var conn = new SqliteConnection($"Data Source={_dbPath}");
+        conn.Open();
+        using (var cmd = conn.CreateCommand())
         {
-            conn.Open();
-            using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
 CREATE TABLE customers (id INTEGER PRIMARY KEY, country TEXT NOT NULL);
 CREATE TABLE invoices (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL, amount INTEGER NOT NULL);
@@ -116,7 +116,7 @@ INSERT INTO invoices VALUES (10, 1, 100), (11, 2, 200), (12, 1, 300);";
 
         var metadata = new TableMetadata
         {
-            Identifier = new TableIdentifier("default", "main", "invoices"),
+            Identifier = new TableIdentifier("erp", "main", "invoices"),
             Table = new Table { SourceName = "erp", SchemaName = "main", TableName = "invoices", DataSourceType = DataSourceType.Sql, SourceType = "Sqlite" },
             Columns =
             [
@@ -126,7 +126,6 @@ INSERT INTO invoices VALUES (10, 1, 100), (11, 2, 200), (12, 1, 300);";
             ]
         };
 
-        var rowFilter = AdvancedRlsFilterGenerator.BuildCorrelatedSubquery(CustomerCountryFilter(), DatabaseDialect.Sqlite);
         var columnAccess = new Dictionary<string, ColumnAccessLevel>
         {
             ["id"] = ColumnAccessLevel.Clear,
@@ -138,22 +137,16 @@ INSERT INTO invoices VALUES (10, 1, 100), (11, 2, 200), (12, 1, 300);";
             SourceName: "erp",
             Metadata: metadata,
             Principal: principal,
-            AccessDecision: TableAccessDecision.Allowed(metadata.Identifier, columnAccess, rowFilterSql: rowFilter),
+            AccessDecision: TableAccessDecision.Allowed(metadata.Identifier, columnAccess),
             Arguments: new Dictionary<string, object?>(),
             RequestedFields: ["id", "amount"]);
 
-        var options = Options.Create(new GatewayOptions
-        {
-            DataSources = new SqlDataSourceOptions
-            {
-                Connections = new Dictionary<string, DataSourceConnectionOptions>
-                {
-                    ["erp"] = new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = $"Data Source={_dbPath}" }
-                }
-            }
-        });
-
-        var executor = new SqlDataSourceExecutor(new SqlConnectionFactory(), options, NullLogger<SqlDataSourceExecutor>.Instance);
+        // The correlated row policy (EXISTS over customers of country CH) is applied by the compiler, not spliced as text.
+        var env = new TestCompileEnv(TargetSqlDialect.Sqlite)
+            .Table("invoices", null, "id:INTEGER", "customer_id:INTEGER", "amount:INTEGER")
+            .Table("customers", null, "id:INTEGER", "country")
+            .Policy("invoices", CustomerCountryPolicy());
+        var executor = new Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService(conn, env).Executor();
         var rows = await executor.ExecuteAsync(context);
 
         rows.Select(r => Convert.ToInt64(r["id"])).OrderBy(x => x).ShouldBe(new long[] { 10, 12 });
@@ -171,6 +164,19 @@ INSERT INTO invoices VALUES (10, 1, 100), (11, 2, 200), (12, 1, 300);";
                 new BinaryExpression(Col("c", "id"), BinaryOperator.Equal, Col(RowFilterAliases.Target, "customer_id")),
                 null, null), null, null)),
         new Dictionary<string, PolicyValue>());
+
+    /// <summary>EXISTS (SELECT 1 FROM customers c WHERE c.id = autheris_target.customer_id AND c.country = 'CH').</summary>
+    private static PolicyPredicate CustomerCountryPolicy() => PolicyPredicate.Create(
+        new ExistsExpression(new SelectStatement(null,
+            new QuerySpecification(false,
+                new SelectItem[] { new ColumnSelectItem(new LiteralExpression(1L, LiteralType.Integer), null) },
+                new NamedTableSource(new SqlQualifiedName(new[] { new SqlIdentifier("customers", false) }), new SqlIdentifier("c", false)),
+                new BinaryExpression(
+                    new BinaryExpression(Col("c", "id"), BinaryOperator.Equal, Col(RowFilterAliases.Target, "customer_id")),
+                    BinaryOperator.And,
+                    new BinaryExpression(Col("c", "country"), BinaryOperator.Equal, new PolicyParameterExpression("__pol_country", SqlParameterType.String))),
+                null, null), null, null)),
+        new Dictionary<string, PolicyValue> { ["__pol_country"] = new("CH", SqlParameterType.String) });
 
     private static PolicyPredicate AmountPolicy() => PolicyPredicate.Create(
         new BinaryExpression(Col("amount"), BinaryOperator.Equal, new PolicyParameterExpression("__pol_amount", SqlParameterType.Int64)),

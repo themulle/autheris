@@ -32,6 +32,14 @@ public static partial class TreeSqlCompiler
 
     private static readonly string TargetAlias = TrinoSqlEngine.RowFilterAliases.Target;
 
+    /// <summary>
+    /// WP-ARC-B-03 / G-6: the dialects whose single-statement JSON aggregation the tree compiler implements (the constant
+    /// stand-in for the dialect provider capability <c>SupportsTreeCompile</c>). Tables of other dialects remain readable
+    /// as flat tables through the governed compile path but offer no nested relation fields.
+    /// </summary>
+    public static bool SupportsTreeCompile(DatabaseDialect dialect) =>
+        dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite;
+
     [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
     private static partial Regex SafeNameRegex();
 
@@ -44,7 +52,7 @@ public static partial class TreeSqlCompiler
         ArgumentNullException.ThrowIfNull(root);
         ArgumentNullException.ThrowIfNull(access);
 
-        if (dialect is not (DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite))
+        if (!SupportsTreeCompile(dialect))
         {
             throw new NotSupportedException($"Dialect '{dialect}' does not support single-statement JSON queries.");
         }

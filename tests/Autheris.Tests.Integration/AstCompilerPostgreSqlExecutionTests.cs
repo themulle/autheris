@@ -11,28 +11,28 @@ using System.Threading;
 using System.Threading.Tasks;
 using Npgsql;
 using Shouldly;
-using Testcontainers.PostgreSql;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Governance;
 using Xunit;
 
-/// <summary>One PostgreSQL container with the fixture schema; ICU nondeterministic collations are optional.</summary>
+/// <summary>One PostgreSQL database with the fixture schema; ICU nondeterministic collations are optional.</summary>
 public sealed class AstCompilerPostgreSqlFixture : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:16-alpine")
-        .WithDatabase("ast_gate")
-        .WithUsername("postgres")
-        .WithPassword("postgres_password_2026")
-        .Build();
+    private PostgreSqlTestDatabase? _db;
 
-    public string ConnectionString => _container.GetConnectionString();
+    public string ConnectionString => _db?.ConnectionString ?? string.Empty;
     public bool IcuCollationAvailable { get; private set; }
 
     public async Task InitializeAsync()
     {
-        await _container.StartAsync();
+        _db = await PostgreSqlTestDatabase.CreateAsync();
+        if (!_db.IsAvailable)
+        {
+            throw new InvalidOperationException("The PostgreSQL test database is not available (Docker missing?).");
+        }
+
         await using var conn = new NpgsqlConnection(ConnectionString);
         await conn.OpenAsync();
 
@@ -85,7 +85,13 @@ public sealed class AstCompilerPostgreSqlFixture : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
 
-    public async Task DisposeAsync() => await _container.DisposeAsync();
+    public async Task DisposeAsync()
+    {
+        if (_db is not null)
+        {
+            await _db.DisposeAsync();
+        }
+    }
 }
 
 /// <summary>

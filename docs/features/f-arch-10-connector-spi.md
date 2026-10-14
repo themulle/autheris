@@ -70,3 +70,9 @@ public class CustomWarehouseConnector : IConnectorPlugin
   }
 }
 ```
+
+---
+
+## 4. SQL connector
+
+The default `SqlConnector` (`sql`, `default-sql`) reads through the governed SQL pipeline: its record source resolves the `IDataSourceExecutor` of `DataSourceType.Sql` (`SqlTableReadExecutor`) in a fresh DI scope per read, which plans the read and executes it through `IGovernedSqlExecutionService` (compiler, binder, tenant, row policy, masks). The constructor requires an `IColumnMaskingProvider` and an `IServiceScopeFactory`; it no longer takes an `ISqlConnectionFactory`. The connector reports `RlsPushdownExecuted` and `InDbColumnMaskingExecuted` in the session items.

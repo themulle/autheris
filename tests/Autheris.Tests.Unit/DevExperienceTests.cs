@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using Autheris.Application.Interfaces;
+using Autheris.Tests.Unit.TestDoubles;
 using System.Text.Json;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Extensions;
@@ -55,6 +57,7 @@ public sealed class DevExperienceTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(auth);
+        services.AddAuditWriterOver(Substitute.For<IAuditLogRepository>());
         var context = new DefaultHttpContext { RequestServices = services.BuildServiceProvider() };
         context.Response.Body = new MemoryStream();
         return context;

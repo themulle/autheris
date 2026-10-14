@@ -43,11 +43,12 @@ public static class GovernancePlanEndpoints
         }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRequested);
 
         // 2. Get Plan by ID
-        app.MapGet("/api/governance/plans/{planId}", (
+        app.MapGet("/api/governance/plans/{planId}", async (
             string planId,
-            IAccessPlanningService planningService) =>
+            IAccessPlanningService planningService,
+            CancellationToken ct) =>
         {
-            var plan = planningService.GetPlan(planId);
+            var plan = await planningService.GetPlanAsync(planId, ct).ConfigureAwait(false);
             return plan != null ? Results.Ok(plan) : Results.NotFound(new { error = $"Plan '{planId}' not found or expired." });
         }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Summarized, AuditEventTypes.AccessPlanRead);
 

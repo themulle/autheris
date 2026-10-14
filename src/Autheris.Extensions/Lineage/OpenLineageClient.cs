@@ -57,22 +57,21 @@ public sealed class OpenLineageClient : IOpenLineageClient
         var outputs = new List<OpenLineageDataset>();
         var rootNamespace = tenant.Value;
 
-        // Build dataset list from active LineageGraphStore
-        foreach (var node in _graphStore.GetAllNodes())
-        {
-            // SEC SG-30: Filter nodes by tenant namespace if the node ID contains tenant scoping
-            if (node.Id.Contains(':') && !node.Id.StartsWith($"{tenant.Value}:", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
+        // SEC SR-L-19: only this tenant's nodes are pushed. Nodes without a tenant are legacy (single-tenant) data and are
+        // pushed only for the legacy tenant (fail-closed).
+        var tenantNodes = _graphStore.GetAllNodes().Where(node => BelongsToTenant(node, tenant)).ToList();
+        var tenantNodeIds = new HashSet<string>(tenantNodes.Select(n => n.Id), StringComparer.Ordinal);
 
+        foreach (var node in tenantNodes)
+        {
             var dataset = new OpenLineageDataset(rootNamespace, node.Id, new Dictionary<string, object>
             {
                 ["type"] = node.Type.ToString(),
                 ["name"] = node.Name
             });
 
-            if (node.DownstreamNodeIds.Count > 0)
+            // Downstream references to nodes of other tenants are dropped.
+            if (node.DownstreamNodeIds.Any(tenantNodeIds.Contains))
             {
                 inputs.Add(dataset);
             }
@@ -103,6 +102,11 @@ public sealed class OpenLineageClient : IOpenLineageClient
         return await PushLineageEventAsync(runEvent, ct).ConfigureAwait(false);
     }
 
+    private static bool BelongsToTenant(LineageNode node, TenantId tenant)
+        => string.IsNullOrWhiteSpace(node.TenantId)
+            ? tenant == TenantId.LegacySingleTenant
+            : string.Equals(node.TenantId, tenant.Value, StringComparison.OrdinalIgnoreCase);
+
     public async Task<bool> PushLineageEventAsync(OpenLineageRunEvent runEvent, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(runEvent);
@@ -129,7 +133,7 @@ public sealed class OpenLineageClient : IOpenLineageClient
 
         try
         {
-            var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 var body = await BoundedHttpContent.ReadBoundedStringAsync(response, "OpenLineage", ct: ct).ConfigureAwait(false);

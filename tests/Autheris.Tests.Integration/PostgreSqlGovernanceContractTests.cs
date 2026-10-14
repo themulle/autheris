@@ -13,7 +13,6 @@ using Microsoft.Extensions.Options;
 using Npgsql;
 using NSubstitute;
 using Shouldly;
-using Testcontainers.PostgreSql;
 using Xunit;
 
 /// <summary>
@@ -22,15 +21,19 @@ using Xunit;
 /// </summary>
 public sealed class PostgreSqlGovernanceContractTests : IAsyncLifetime
 {
-    private PostgreSqlContainer? _container;
+    private PostgreSqlTestDatabase? _db;
     private bool _available;
 
     public async Task InitializeAsync()
     {
         try
         {
-            _container = new PostgreSqlBuilder("postgres:16-alpine").Build();
-            await _container.StartAsync();
+            _db = await PostgreSqlTestDatabase.CreateAsync();
+            if (!_db.IsAvailable)
+            {
+                return;
+            }
+
             _available = true;
         }
         catch (Exception ex)
@@ -42,9 +45,9 @@ public sealed class PostgreSqlGovernanceContractTests : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        if (_container != null)
+        if (_db != null)
         {
-            await _container.DisposeAsync();
+            await _db.DisposeAsync();
         }
     }
 
@@ -58,7 +61,7 @@ public sealed class PostgreSqlGovernanceContractTests : IAsyncLifetime
             GovernanceDb = new GovernanceDbOptions
             {
                 Provider = "PostgreSql",
-                ConnectionString = _container!.GetConnectionString(),
+                ConnectionString = _db!.ConnectionString,
                 EnableOutboxProcessor = false,
                 SeedDemoData = false
             }
@@ -94,7 +97,7 @@ public sealed class PostgreSqlGovernanceContractTests : IAsyncLifetime
         (await a.VerifyAuditHashChainAsync()).ShouldBeTrue();
         (await b.VerifyAuditHashChainAsync()).ShouldBeTrue();
 
-        await using var conn = new NpgsqlConnection(_container!.GetConnectionString());
+        await using var conn = new NpgsqlConnection(_db!.ConnectionString);
         await conn.OpenAsync();
         await using var cmd = new NpgsqlCommand("SELECT count(*), count(DISTINCT seq), max(seq), min(seq) FROM audit_log_entries", conn);
         await using var r = await cmd.ExecuteReaderAsync();
@@ -114,7 +117,7 @@ public sealed class PostgreSqlGovernanceContractTests : IAsyncLifetime
         await repo.RecordAuditEventAsync(Entry("TEST_EVENT", "S-1-1"));
         await repo.FlushAuditChannelAsync();
 
-        await using var conn = new NpgsqlConnection(_container!.GetConnectionString());
+        await using var conn = new NpgsqlConnection(_db!.ConnectionString);
         await conn.OpenAsync();
         foreach (var sql in new[]
                  {

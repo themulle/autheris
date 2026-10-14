@@ -55,6 +55,7 @@ public static class GatewayMcpServiceExtensions
                 Microsoft.Extensions.Configuration.ConfigurationBinder.Bind(cfg.GetSection(AccessPlanOptions.SectionName), o))
             .ValidateDataAnnotations()
             .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<AccessPlanOptions>, AccessPlanOptionsValidator>();
         services.AddAutherisGovernancePlans();
 
         return services;

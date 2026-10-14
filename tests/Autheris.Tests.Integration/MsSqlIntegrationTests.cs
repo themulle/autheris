@@ -1,6 +1,5 @@
 using Microsoft.Data.SqlClient;
 using Shouldly;
-using Testcontainers.MsSql;
 using TrinoSqlEngine;
 using Xunit;
 
@@ -8,20 +7,25 @@ namespace Autheris.Tests.Integration;
 
 public sealed class MsSqlContainerFixture : IAsyncLifetime
 {
-    public MsSqlContainer Container { get; } = new MsSqlBuilder("mcr.microsoft.com/azure-sql-edge:1.0.7")
-        .WithPassword("Strong_P@ssw0rd_2026!")
-        .Build();
+    private SqlServerTestDatabase? _db;
 
-    public string ConnectionString => Container.GetConnectionString();
+    public string ConnectionString => _db?.ConnectionString ?? string.Empty;
 
     public async Task InitializeAsync()
     {
-        await Container.StartAsync();
+        _db = await SqlServerTestDatabase.CreateAsync();
+        if (!_db.IsAvailable)
+        {
+            throw new InvalidOperationException("The SQL Server test database is not available (Docker missing?).");
+        }
     }
 
     public async Task DisposeAsync()
     {
-        await Container.DisposeAsync();
+        if (_db is not null)
+        {
+            await _db.DisposeAsync();
+        }
     }
 }
 

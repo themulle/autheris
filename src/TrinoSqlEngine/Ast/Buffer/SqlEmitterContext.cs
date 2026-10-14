@@ -1,6 +1,7 @@
 namespace TrinoSqlEngine.Ast.Buffer;
 
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Globalization;
@@ -271,53 +272,40 @@ public sealed class SqlEmitterContext
         }
     }
 
-    public string NextParameterMarker()
-    {
-        CheckParameterBudget(1);
-        return Dialect switch
+    // Dialects without a capability entry (string-only generation for Ansi and Snowflake) keep an explicit marker style; any other
+    // dialect without an entry fails closed instead of falling back to a silent default.
+    private static readonly FrozenDictionary<TargetSqlDialect, ParameterMarkerStyle> UnboundOnlyMarkerStyles =
+        new Dictionary<TargetSqlDialect, ParameterMarkerStyle>
         {
-            TargetSqlDialect.SqlServer => $"@p{ParameterCount++}",
-            TargetSqlDialect.PostgreSql => $"${++ParameterCount}",
-            TargetSqlDialect.Sqlite => $"?{++ParameterCount}",
-            TargetSqlDialect.DuckDb => $"${++ParameterCount}",
-            TargetSqlDialect.Snowflake => $":{++ParameterCount}",
-            TargetSqlDialect.Oracle => $":p{++ParameterCount}",
-            _ => $"?{++ParameterCount}"
-        };
-    }
+            [TargetSqlDialect.Ansi] = ParameterMarkerStyle.QuestionOrdinal,
+            [TargetSqlDialect.Snowflake] = ParameterMarkerStyle.ColonOrdinal
+        }.ToFrozenDictionary();
 
+    /// <summary>
+    /// Appends the next positional marker of an unbound (string-only) emission. The style comes from the capability table, so
+    /// marker syntax is data and not an enum switch.
+    /// </summary>
     public void FormatNextParameterMarker(ref ValueStringBuilder builder)
     {
         CheckParameterBudget(1);
-        switch (Dialect)
+        var style = Capabilities?.MarkerStyle ?? ResolveUnboundMarkerStyle(Dialect);
+        var (marker, _) = MarkerAndName(style, ParameterCount);
+        ParameterCount++;
+        builder.Append(marker);
+    }
+
+    private static ParameterMarkerStyle ResolveUnboundMarkerStyle(TargetSqlDialect dialect)
+    {
+        if (DialectCapabilityTable.Default.TryGet(dialect, out var caps))
         {
-            case TargetSqlDialect.SqlServer:
-                builder.Append('@');
-                builder.Append('p');
-                builder.Append(ParameterCount++);
-                break;
-            case TargetSqlDialect.PostgreSql:
-            case TargetSqlDialect.DuckDb:
-                builder.Append('$');
-                builder.Append(++ParameterCount);
-                break;
-            case TargetSqlDialect.Sqlite:
-                builder.Append('?');
-                builder.Append(++ParameterCount);
-                break;
-            case TargetSqlDialect.Snowflake:
-                builder.Append(':');
-                builder.Append(++ParameterCount);
-                break;
-            case TargetSqlDialect.Oracle:
-                builder.Append(':');
-                builder.Append('p');
-                builder.Append(++ParameterCount);
-                break;
-            default:
-                builder.Append('?');
-                builder.Append(++ParameterCount);
-                break;
+            return caps.MarkerStyle;
         }
+
+        if (UnboundOnlyMarkerStyles.TryGetValue(dialect, out var style))
+        {
+            return style;
+        }
+
+        throw new ArgumentOutOfRangeException(nameof(dialect), dialect, "No parameter marker style is defined for this dialect.");
     }
 }

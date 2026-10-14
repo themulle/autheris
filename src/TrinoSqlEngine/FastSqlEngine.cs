@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using Antlr4.Runtime;
@@ -11,6 +12,7 @@ using Antlr4.Runtime.Atn;
 using Antlr4.Runtime.Misc;
 using Antlr4.Runtime.Tree;
 using Microsoft.Extensions.ObjectPool;
+using TrinoSqlEngine.Parsing;
 
 public sealed class ThrowingErrorListener : BaseErrorListener, IAntlrErrorListener<int>
 {
@@ -99,6 +101,44 @@ public sealed partial class FastSqlEngine : ISqlEngine
     /// </summary>
     public SemaphoreSlim? ParseConcurrencyLimiter { get; set; }
 
+    /// <summary>
+    /// ARC-S-03: Statements up to this many characters are parsed on the calling thread when enough stack is left (no thread
+    /// hand-off). 0 (default) disables the inline path; every parse then runs on the pooled parser threads. The concurrency
+    /// limiter and the time budget apply unchanged.
+    /// </summary>
+    public int InlineParseMaxLength { get; set; }
+
+    /// <summary>
+    /// ARC-S-09: Time budget of the LL fallback pass that follows a failed SLL pass (default 1 s). The pass is also bound by
+    /// <see cref="ParseTimeout"/>. <see cref="TimeSpan.Zero"/> or a negative value disables the separate budget.
+    /// </summary>
+    public TimeSpan LlFallbackTimeout { get; set; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// ARC-S-09: When true, an SLL failure caused by a plain token mismatch is final and the LL pass is skipped.
+    /// Prediction failures (no viable alternative, failed predicate) always retry in LL mode. Off by default: an SLL
+    /// mis-prediction can surface as a later token mismatch on valid SQL (for example quantified comparisons and some
+    /// function-call shapes), so skipping LL would reject statements the full grammar accepts.
+    /// </summary>
+    public bool SkipLlFallbackOnTokenMismatch { get; set; }
+
+    /// <summary>
+    /// ARC-S-09: How long a parser syntax failure is remembered so that repeated invalid input is rejected without parsing again
+    /// (default 30 s). <see cref="TimeSpan.Zero"/> disables the cache.
+    /// </summary>
+    public TimeSpan SyntaxErrorCacheTtl { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>ARC-S-09: Maximum number of remembered syntax failures (default 256).</summary>
+    public int SyntaxErrorCacheMaxEntries { get; set; } = 256;
+
+    private readonly SyntaxErrorNegativeCache _syntaxErrors = new();
+
+    /// <summary>Number of remembered syntax failures (diagnostics and tests).</summary>
+    internal int SyntaxErrorCacheCount => _syntaxErrors.Count;
+
+    private const int StatementRule = 1;
+    private const int ExpressionRule = 2;
+
     // Defaults for direct Parse/ParseExpression/Analyze calls without explicit SqlTokenSecurityOptions.
     // SEC P-06: These stay false so that plain syntax parsing (Trino compliance fixtures with comments, time travel,
     // quoted dotted identifiers) keeps working. The governed compile path (Compile) never uses them; it takes its
@@ -167,8 +207,10 @@ public sealed partial class FastSqlEngine : ISqlEngine
         }
 
         var effectiveOptions = tokenOptions ?? CreateDefaultTokenSecurityOptions();
+        ThrowIfKnownSyntaxError(sql, StatementRule, effectiveOptions);
         return RunWithParseBudget(
-            cancellation => ParseOnCurrentThread(sql, effectiveOptions, cancellation, static parser => parser.singleStatement()),
+            cancellation => ParseOnCurrentThread(sql, effectiveOptions, cancellation, StatementRule, static parser => parser.singleStatement()),
+            sql.Length,
             cancellationToken);
     }
 
@@ -188,18 +230,20 @@ public sealed partial class FastSqlEngine : ISqlEngine
         }
 
         var effectiveOptions = tokenOptions ?? CreateDefaultTokenSecurityOptions();
+        ThrowIfKnownSyntaxError(sql, ExpressionRule, effectiveOptions);
         return RunWithParseBudget(
-            cancellation => ParseOnCurrentThread(sql, effectiveOptions, cancellation, static parser => parser.standaloneExpression()),
+            cancellation => ParseOnCurrentThread(sql, effectiveOptions, cancellation, ExpressionRule, static parser => parser.standaloneExpression()),
+            sql.Length,
             cancellationToken);
     }
 
     /// <summary>
-    /// SQ-08: Runs <paramref name="work"/> on a dedicated thread with <see cref="ParseThreadStackSize"/> and waits at most
-    /// <see cref="ParseTimeout"/>. On timeout or cancellation the parse is aborted cooperatively via
-    /// <see cref="ParseCancellation"/>. The parser thread slot is released by the parser thread itself, so the limiter
-    /// bounds the number of live parser threads even when callers time out.
+    /// SQ-08: Runs <paramref name="work"/> on a pooled parser thread (own large stack, <see cref="ParseThreadStackSize"/>) and waits
+    /// at most <see cref="ParseTimeout"/>, queue wait included. On timeout or cancellation the parse is aborted cooperatively via
+    /// <see cref="ParseCancellation"/>. The parser thread releases the concurrency slot itself, so the limiter bounds the number of
+    /// running parses even when callers time out. Short statements may run inline (<see cref="InlineParseMaxLength"/>, off by default).
     /// </summary>
-    private TResult RunWithParseBudget<TResult>(Func<ParseCancellation, TResult> work, CancellationToken cancellationToken)
+    private TResult RunWithParseBudget<TResult>(Func<ParseCancellation, TResult> work, int sqlLength, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -209,17 +253,33 @@ public sealed partial class FastSqlEngine : ISqlEngine
 
         if (!limiter.Wait(RemainingMilliseconds(budget, startTimestamp), cancellationToken))
         {
-            throw new ParseCanceledException(
-                "SQL parsing was rejected: all concurrent parser slots are in use and none became free within the parse time budget.",
-                new TimeoutException("No parser thread slot became available within the parse time budget."));
+            throw RejectedParse("all concurrent parser slots are in use and none became free within the parse time budget.");
         }
 
         var cancellation = new ParseCancellation();
+
+        if (InlineParseMaxLength > 0 && sqlLength <= InlineParseMaxLength && RuntimeHelpers.TryEnsureSufficientExecutionStack())
+        {
+            try
+            {
+                if (budget > TimeSpan.Zero)
+                {
+                    cancellation.TightenDeadline(budget - Stopwatch.GetElapsedTime(startTimestamp), $"SQL parsing exceeded the time budget of {budget.TotalMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture)} ms.");
+                }
+
+                return work(cancellation);
+            }
+            finally
+            {
+                limiter.Release();
+            }
+        }
+
         var completed = new ManualResetEventSlim(false);
         TResult? result = default;
         ExceptionDispatchInfo? failure = null;
 
-        var thread = new Thread(
+        var item = new ParseWork(
             () =>
             {
                 try
@@ -236,21 +296,30 @@ public sealed partial class FastSqlEngine : ISqlEngine
                     completed.Set();
                 }
             },
-            ParseThreadStackSize)
-        {
-            IsBackground = true,
-            Name = "FastSqlEngine.Parse"
-        };
+            onCanceledWhileQueued: () =>
+            {
+                limiter.Release();
+                completed.Dispose();
+            });
 
+        var pool = ParseWorkerPool.ForStackSize(_parseThreadStackSize);
+        bool queued;
         try
         {
-            thread.Start();
+            queued = pool.TrySubmit(item, RemainingMilliseconds(budget, startTimestamp), cancellationToken);
         }
         catch
         {
             limiter.Release();
             completed.Dispose();
             throw;
+        }
+
+        if (!queued)
+        {
+            limiter.Release();
+            completed.Dispose();
+            throw RejectedParse("the parser queue stayed full within the parse time budget.");
         }
 
         bool finished;
@@ -261,13 +330,16 @@ public sealed partial class FastSqlEngine : ISqlEngine
         catch (OperationCanceledException)
         {
             cancellation.Cancel();
+            pool.Abandon(item);
             throw;
         }
 
         if (!finished)
         {
-            // The parser thread observes the flag on its next token access, returns its pooled parser and releases its slot.
+            // The parser thread observes the flag on its next token access, returns its pooled parser and releases its slot;
+            // the pool retires and replaces that thread once the work returns.
             cancellation.Cancel();
+            pool.Abandon(item);
             throw new ParseCanceledException(
                 $"SQL parsing exceeded the time budget of {budget.TotalMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture)} ms.",
                 new TimeoutException("SQL parsing exceeded the configured time budget."));
@@ -277,6 +349,22 @@ public sealed partial class FastSqlEngine : ISqlEngine
         failure?.Throw();
         return result!;
     }
+
+    private static ParseCanceledException RejectedParse(string reason) =>
+        new($"SQL parsing was rejected: {reason}", new TimeoutException("No parser capacity became available within the parse time budget."));
+
+    private int LimitsFingerprint() => HashCode.Combine(MaxNestingDepth, MaxParseTreeDepth, MaxQueryLength);
+
+    private void ThrowIfKnownSyntaxError(ReadOnlyMemory<char> sql, int ruleKind, SqlTokenSecurityOptions options)
+    {
+        if (_syntaxErrors.TryGet(sql.Span, ruleKind, options, LimitsFingerprint(), out var message))
+        {
+            throw new ParseCanceledException(message);
+        }
+    }
+
+    private void RememberSyntaxError(ReadOnlyMemory<char> sql, int ruleKind, SqlTokenSecurityOptions options, string message) =>
+        _syntaxErrors.Add(sql.Span, ruleKind, options, LimitsFingerprint(), message, SyntaxErrorCacheTtl, SyntaxErrorCacheMaxEntries);
 
     private static int RemainingMilliseconds(TimeSpan budget, long startTimestamp)
     {
@@ -302,9 +390,12 @@ public sealed partial class FastSqlEngine : ISqlEngine
         ReadOnlyMemory<char> sql,
         SqlTokenSecurityOptions tokenOptions,
         ParseCancellation cancellation,
+        int ruleKind,
         Func<SqlBaseParser, TTree> entryRule)
         where TTree : ParserRuleContext
     {
+        // A parse that was abandoned while it waited in the queue stops here, before any lexing.
+        cancellation.ThrowIfCanceled();
         ExecutionStackGuard.Ensure();
 
         var charStream = new ZeroCopyCaseInsensitiveStream(sql);
@@ -334,9 +425,25 @@ public sealed partial class FastSqlEngine : ISqlEngine
             {
                 tree = entryRule(parser);
             }
-            catch (ParseCanceledException) when (!cancellation.IsCanceled)
+            catch (ParseCanceledException sllFailure) when (!cancellation.IsCanceled && sllFailure.InnerException is not TimeoutException)
             {
-                // Stufe 2: Fallback auf LL(*)-Modus
+                // ARC-S-09: a plain token mismatch is not a prediction problem; LL would report the same error, so it is final.
+                if (SkipLlFallbackOnTokenMismatch && sllFailure.InnerException is InputMismatchException mismatch)
+                {
+                    var offending = mismatch.OffendingToken;
+                    var message = offending is null
+                        ? "Parsing failed: mismatched input."
+                        : $"line {offending.Line}:{offending.Column}: mismatched input '{offending.Text}'";
+                    RememberSyntaxError(sql, ruleKind, tokenOptions, message);
+                    throw new ParseCanceledException(message, mismatch);
+                }
+
+                // Stufe 2: Fallback auf LL(*)-Modus, mit eigenem (kleineren) Zeitbudget
+                if (LlFallbackTimeout > TimeSpan.Zero)
+                {
+                    cancellation.TightenDeadline(LlFallbackTimeout, "SQL parsing exceeded the LL fallback time budget.");
+                }
+
                 tokens.Reset();
                 parser.Reset();
                 parser.AddErrorListener(ThrowingErrorListener.Instance);
@@ -344,10 +451,18 @@ public sealed partial class FastSqlEngine : ISqlEngine
                 parser.ErrorHandler = new DefaultErrorStrategy();
                 parser.Interpreter.PredictionMode = PredictionMode.LL;
 
-                tree = entryRule(parser);
-                if (parser.NumberOfSyntaxErrors > 0)
+                try
                 {
-                    throw new ParseCanceledException($"Parsing failed with {parser.NumberOfSyntaxErrors} syntax errors.");
+                    tree = entryRule(parser);
+                    if (parser.NumberOfSyntaxErrors > 0)
+                    {
+                        throw new ParseCanceledException($"Parsing failed with {parser.NumberOfSyntaxErrors} syntax errors.");
+                    }
+                }
+                catch (ParseCanceledException llFailure) when (!cancellation.IsCanceled && llFailure.InnerException is not TimeoutException)
+                {
+                    RememberSyntaxError(sql, ruleKind, tokenOptions, llFailure.Message);
+                    throw;
                 }
             }
 

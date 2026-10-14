@@ -14,6 +14,7 @@ using Autheris.GraphQL.Catalog;
 using HotChocolate.Types;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -22,88 +23,16 @@ namespace Autheris.Tests.Unit.Security;
 public sealed class MustFixRemediationTests
 {
     // =========================================================================
-    // 1. R-SQL-1: SqlDataSourceExecutor synthetic data fallback in Dev vs Prod
+    // 1. R-SQL-1: the SQL table read executor never fabricates rows (the synthetic fallback is gone, WP-ARC-B-02)
     // =========================================================================
 
     [Fact]
-    public async Task R_SQL_1_SqlDataSourceExecutor_ThrowsNotSupported_InProduction_WhenNoConnectionConfigured()
+    public async Task R_SQL_1_SqlTableReadExecutor_ReturnsOnlyTheRowsOfTheGovernedPipeline()
     {
-        var prodEnv = new TestHostEnvironment { EnvironmentName = Environments.Production };
-        var executor = new SqlDataSourceExecutor(
-            environment: prodEnv,
-            logger: NullLogger<SqlDataSourceExecutor>.Instance);
-
-        var table = new Table
-        {
-            Id = Guid.NewGuid(),
-            SourceName = "prod_db",
-            SchemaName = "public",
-            TableName = "sensitive_data",
-            DataSourceType = DataSourceType.Sql,
-            SourceType = "PostgreSQL"
-        };
-        var metadata = new TableMetadata
-        {
-            Table = table,
-            Identifier = table.ToIdentifier("prod_db"),
-            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
-        };
-
-        var context = new DataSourceExecutionContext(
-            SourceName: "prod_db",
-            Metadata: metadata,
-            Principal: new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "user1")])),
-            AccessDecision: TableAccessDecision.Allowed(metadata.Identifier, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear }),
-            Arguments: new Dictionary<string, object?> { ["id"] = 1 },
-            RequestedFields: ["id"]);
-
-        var ex = await Should.ThrowAsync<GatewayNotImplementedException>(() => executor.ExecuteAsync(context));
-        ex.Message.ShouldContain("Synthetic data fallback is disabled outside the Development environment");
-    }
-
-    [Fact]
-    public async Task R_SQL_1_SqlDataSourceExecutor_ThrowsGatewayNotImplemented_WhenEnvironmentIsNull()
-    {
-        // Fail-closed: environment == null is treated as production (SEC M-11)
-        var executor = new SqlDataSourceExecutor(
-            environment: null,
-            logger: NullLogger<SqlDataSourceExecutor>.Instance);
-
-        var table = new Table
-        {
-            Id = Guid.NewGuid(),
-            SourceName = "prod_db",
-            SchemaName = "public",
-            TableName = "sensitive_data",
-            DataSourceType = DataSourceType.Sql,
-            SourceType = "PostgreSQL"
-        };
-        var metadata = new TableMetadata
-        {
-            Table = table,
-            Identifier = table.ToIdentifier("prod_db"),
-            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
-        };
-
-        var context = new DataSourceExecutionContext(
-            SourceName: "prod_db",
-            Metadata: metadata,
-            Principal: new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "user1")])),
-            AccessDecision: TableAccessDecision.Allowed(metadata.Identifier, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear }),
-            Arguments: new Dictionary<string, object?> { ["id"] = 1 },
-            RequestedFields: ["id"]);
-
-        var ex = await Should.ThrowAsync<GatewayNotImplementedException>(() => executor.ExecuteAsync(context));
-        ex.Message.ShouldContain("Synthetic data fallback is disabled outside the Development environment");
-    }
-
-    [Fact]
-    public async Task R_SQL_1_SqlDataSourceExecutor_GeneratesSyntheticData_InDevelopmentOrUnitTests()
-    {
-        // Explicit Development environment allows synthetic fallback
-        var executor = new SqlDataSourceExecutor(
-            environment: new TestHostEnvironment { EnvironmentName = Environments.Development },
-            logger: NullLogger<SqlDataSourceExecutor>.Instance);
+        var governed = NSubstitute.Substitute.For<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>();
+        governed.ExecuteQueryBufferedAsync(default!, default!, default, default)
+            .ReturnsForAnyArgs(new Autheris.Application.Sql.Interfaces.GovernedSqlResult("", [], [], 0, 0));
+        var executor = new SqlTableReadExecutor(new Autheris.Application.Data.Services.GovernedTableReadPlanner(), () => governed);
 
         var table = new Table
         {
@@ -137,8 +66,10 @@ public sealed class MustFixRemediationTests
             RequestedFields: ["id", "name"]);
 
         var rows = await executor.ExecuteAsync(context);
-        rows.ShouldNotBeNull();
-        rows.Count.ShouldBeGreaterThan(0);
+
+        rows.ShouldBeEmpty();
+        context.Items.ContainsKey("IsSyntheticMock").ShouldBeFalse();
+        await governed.ReceivedWithAnyArgs(1).ExecuteQueryBufferedAsync(default!, default!, default, default);
     }
 
     // =========================================================================

@@ -70,7 +70,8 @@ public sealed class AuditWormExportService : IAuditWormExportService
         // 2. SEC M-31: fetch the complete, contiguous chain segment for the window (paged by rowid, no capping)
         var segment = _auditRepo is IAuditChainExportSource chainSource
             ? await LoadChainSegmentAsync(chainSource, windowFrom, windowTo, ct).ConfigureAwait(false)
-            : await LoadLegacySegmentAsync(windowFrom, windowTo, ct).ConfigureAwait(false);
+            : new ChainSegment(Array.Empty<AuditLogEntry>(), null, 0, null,
+                "Audit repository does not implement IAuditChainExportSource; gap-free chain export is unavailable.");
 
         if (segment.Error != null)
         {
@@ -175,7 +176,6 @@ public sealed class AuditWormExportService : IAuditWormExportService
     }
 
     private const int ExportPageSize = 1000;
-    private const int LegacyQueryCap = 5000;
 
     private sealed record ChainSegment(
         IReadOnlyList<AuditLogEntry> Entries,
@@ -241,33 +241,6 @@ public sealed class AuditWormExportService : IAuditWormExportService
         }
 
         return new ChainSegment(records.Select(r => r.Entry).ToList(), records, range.Count, anchor, null);
-    }
-
-    private async Task<ChainSegment> LoadLegacySegmentAsync(DateTimeOffset windowFrom, DateTimeOffset windowTo, CancellationToken ct)
-    {
-        var allEntries = await _auditRepo.QueryAuditLogsAsync(since: windowFrom, limit: LegacyQueryCap, ct: ct).ConfigureAwait(false);
-        if (allEntries.Count >= LegacyQueryCap)
-        {
-            // SEC M-31: never report success for a possibly capped result.
-            return new ChainSegment(Array.Empty<AuditLogEntry>(), null, allEntries.Count, null,
-                $"Audit export window contains {LegacyQueryCap} or more entries; the repository does not support gap-free paged export.");
-        }
-
-        var windowEntries = allEntries
-            .Where(e => e.OccurredAt >= windowFrom && e.OccurredAt <= windowTo)
-            .OrderBy(e => e.OccurredAt)
-            .ToList();
-
-        for (var i = 1; i < windowEntries.Count; i++)
-        {
-            if (!string.Equals(windowEntries[i].PrevHash, windowEntries[i - 1].EntryHash, StringComparison.Ordinal))
-            {
-                return new ChainSegment(Array.Empty<AuditLogEntry>(), null, windowEntries.Count, null,
-                    $"Audit export continuity check failed at entry {windowEntries[i].Id}: PrevHash does not match the preceding entry.");
-            }
-        }
-
-        return new ChainSegment(windowEntries, null, windowEntries.Count, null, null);
     }
 
     private async Task<string> ExportToLocalWormAsync(

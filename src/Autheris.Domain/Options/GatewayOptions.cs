@@ -954,8 +954,30 @@ public sealed class AuditRetentionOptions
     [Range(7, 7300)] public int OperationsDays { get; init; } = 30;
 }
 
+/// <summary>
+/// SR-L-08: reaction of the audit pipeline once an audit hash chain violation has been detected. The violation state is latched
+/// for the process lifetime; recovery is a restart after forensic review.
+/// </summary>
+public enum AuditChainViolationPolicy
+{
+    /// <summary>Data-access (Tier-B query) audit events are refused, so the data request fails closed; security and admin (Tier-A) events are still written and carry <c>chainViolation=true</c>.</summary>
+    DenyDataAccess = 0,
+
+    /// <summary>Every audit event (Tier-A and Tier-B) is refused.</summary>
+    DenyAll = 1,
+
+    /// <summary>The violation is logged and reported by the health check only; audit writes continue unchanged.</summary>
+    AlertOnly = 2
+}
+
 public sealed class AuditOptions
 {
+    /// <summary>
+    /// SR-L-08: reaction to a detected audit chain violation. <c>null</c> (default) selects <see cref="AuditChainViolationPolicy.DenyDataAccess"/>
+    /// outside Development/Test and <see cref="AuditChainViolationPolicy.AlertOnly"/> in Development/Test.
+    /// </summary>
+    public AuditChainViolationPolicy? OnChainViolation { get; init; }
+
     /// <summary>
     /// Obsolete / no-op (L-7): Fail-closed tiering is now intrinsic to the audit pipeline.
     /// </summary>
@@ -1309,6 +1331,13 @@ public sealed class DataCatalogOptions
     /// Standard: false (Zero-Trust: Benutzer sehen im Katalog nur Tabellen, für die sie Consents besitzen).
     /// </summary>
     public bool AllowAuthenticatedCatalogDiscovery { get; init; } = false;
+
+    /// <summary>
+    /// SR-L-21: Tables (<c>domain.schema.table</c>) visible in the GraphQL catalog to every tenant's administrators and in
+    /// discovery mode, in addition to the tables on which the tenant holds a consent. Only relevant in multi-tenant deployments.
+    /// Standard: empty (a tenant sees only tables it has a consent record on).
+    /// </summary>
+    public IReadOnlyList<string> SharedTables { get; init; } = [];
 
     /// <summary>
     /// SEC M-34: Erlaubt (abwärtskompatibel) Katalog-Webhook-Signaturen nur über den Payload statt über

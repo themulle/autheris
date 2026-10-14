@@ -101,13 +101,26 @@ public sealed partial class CatalogSchemaModel
 
         var allTables = await metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
 
-        // Filter: only active SQL tables whose dialect the tree compiler supports (R-GQL-13: Oracle/Databricks tables
-        // appeared in the schema but every query failed with NotSupported), ordered deterministically
-        var activeSqlTables = allTables
-            .Where(t => t.Table.IsActive &&
-                        t.DataSourceType == DataSourceType.Sql &&
-                        DatabaseDialectExtensions.TryParseDialect(t.Table.SourceType, out var dialect) &&
-                        dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite)
+        // Filter: only active SQL tables whose dialect the tree compiler supports. Every root query of this schema runs through
+        // the tree compiler (TreeSqlCompiler.SupportsTreeCompile, G-6), so an admitted dialect without tree support (Oracle) would
+        // appear in the schema while every query failed (R-GQL-13); those tables are excluded and logged once. They stay
+        // readable as flat tables through OData, REST and MCP (governed compile path), ordered deterministically
+        var sqlTables = allTables
+            .Where(t => t.Table.IsActive && t.DataSourceType == DataSourceType.Sql)
+            .ToList();
+        foreach (var excluded in sqlTables.Where(t =>
+                     DatabaseDialectExtensions.TryParseDialect(t.Table.SourceType, out var d) &&
+                     Autheris.Application.Sql.SqlDialectMapper.IsExecutable(d) &&
+                     !Autheris.Application.Sql.Tree.TreeSqlCompiler.SupportsTreeCompile(d)))
+        {
+            logger?.LogInformation(
+                "GraphQL catalog schema: table '{Table}' (dialect '{Dialect}') is not exposed because the GraphQL tree compiler does not support its dialect; it stays available through OData, REST and MCP.",
+                excluded.Identifier.ToQualifiedName(), excluded.Table.SourceType);
+        }
+
+        var activeSqlTables = sqlTables
+            .Where(t => DatabaseDialectExtensions.TryParseDialect(t.Table.SourceType, out var dialect) &&
+                        Autheris.Application.Sql.Tree.TreeSqlCompiler.SupportsTreeCompile(dialect))
             .OrderBy(t => t.Identifier.Domain, StringComparer.Ordinal)
             .ThenBy(t => t.Identifier.Schema, StringComparer.Ordinal)
             .ThenBy(t => t.Identifier.TableName, StringComparer.Ordinal)

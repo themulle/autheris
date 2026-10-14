@@ -155,28 +155,25 @@ public sealed class StructuredFilterSqlTests : IDisposable
         try { File.Delete(_dbPath); } catch { /* best effort */ }
     }
 
+    /// <summary>
+    /// Executes the generated predicate text against the real SQLite database, exactly as a text consumer splices it: the filtered
+    /// table carries the reserved <c>autheris_target</c> alias so that correlated filters can bind to it.
+    /// </summary>
     private async Task<IReadOnlyList<long>> ReadAir1IdsAsync(string predicate)
     {
-        var metadata = Air1(DatabaseDialect.Sqlite) with
+        await using var conn = new SqliteConnection($"Data Source={_dbPath}");
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT id FROM air1 AS autheris_target WHERE ({predicate})";
+        var ids = new List<long>();
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
         {
-            Identifier = new TableIdentifier("erp", "main", "air1"),
-            Table = new Table { SourceName = "erp", SchemaName = "main", TableName = "air1", SourceType = "Sqlite", DataSourceType = DataSourceType.Sql }
-        };
-        var decision = TableAccessDecision.Allowed(metadata.Identifier,
-                new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear, ["client_id"] = ColumnAccessLevel.Clear, ["ts"] = ColumnAccessLevel.Clear })
-            .WithMandatoryPredicate(predicate, ["nicht_ausgelieferte_krane"]);
-        var executor = new SqlDataSourceExecutor(new SqlConnectionFactory(), Options.Create(new GatewayOptions
-        {
-            DataSources = new SqlDataSourceOptions
-            {
-                Connections = new Dictionary<string, DataSourceConnectionOptions> { ["erp"] = new() { Provider = "Sqlite", ConnectionString = $"Data Source={_dbPath}" } }
-            }
-        }), NullLogger<SqlDataSourceExecutor>.Instance);
+            ids.Add(reader.GetInt64(0));
+        }
 
-        var rows = await executor.ExecuteAsync(new DataSourceExecutionContext(
-            "erp", metadata, new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-LWE-DAVID")], "Test")),
-            decision, new Dictionary<string, object?>(), ["id"], Limit: 100));
-        return rows.Select(r => Convert.ToInt64(r["id"])).Order().ToList();
+        ids.Sort();
+        return ids;
     }
 
     private void Seed()

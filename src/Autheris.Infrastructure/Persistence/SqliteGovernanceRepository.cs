@@ -230,6 +230,9 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
 
         try
         {
+            // SEC H-17: unsequenced rows are latched as a violation before the tail is read.
+            LatchUnsequencedAuditRows();
+
             // Startup reference only; it is cross-checked against the external signed anchor (SEC H-17)
             // in InitializeAuditChainAnchor and never silently re-synchronised from the DB afterwards.
             var (tailHash, tailSeq) = ReadAuditTail(null);

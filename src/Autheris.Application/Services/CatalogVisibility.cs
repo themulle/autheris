@@ -142,6 +142,38 @@ public static class CatalogVisibility
         return visible;
     }
 
+    /// <summary>
+    /// SR-L-21 / decision G-11: restricts <paramref name="tables"/> to those that belong to <paramref name="tenantId"/>.
+    /// <c>TableMetadata</c> has no owner tenant, so ownership is derived from consents: a table is tenant-visible when the
+    /// tenant holds at least one consent record on it (<paramref name="tenantConsentTables"/>, Allow or Deny) or when it is
+    /// listed in <paramref name="sharedTables"/> (<c>Gateway:Catalog:SharedTables</c>, entries <c>domain.schema.table</c>).
+    /// The single-tenant deployment (<see cref="TenantId.LegacySingleTenant"/>) is not restricted.
+    /// </summary>
+    public static IReadOnlyList<TableMetadata> FilterToTenant(
+        IEnumerable<TableMetadata> tables,
+        TenantId tenantId,
+        IEnumerable<TableIdentifier>? tenantConsentTables,
+        IEnumerable<string>? sharedTables)
+    {
+        ArgumentNullException.ThrowIfNull(tables);
+
+        if (tenantId == TenantId.LegacySingleTenant)
+        {
+            return tables.ToList();
+        }
+
+        var allowed = new HashSet<TableIdentifier>(tenantConsentTables ?? []);
+        foreach (var shared in sharedTables ?? [])
+        {
+            if (TableIdentifier.TryParse(shared, out var id))
+            {
+                allowed.Add(id);
+            }
+        }
+
+        return tables.Where(t => allowed.Contains(t.Identifier)).ToList();
+    }
+
     public static IReadOnlyList<TableMetadata> FilterByContract(
         IEnumerable<TableMetadata> tables,
         Autheris.Application.Governance.Contracts.SchemaContractDefinition? contract)
@@ -206,7 +238,7 @@ public static class CatalogVisibility
         ArgumentNullException.ThrowIfNull(principal);
 
         var roles = principal.GetUserRoles();
-        if (roles.Contains("GovernanceAdmin") || roles.Contains("ClusterAdmin"))
+        if (roles.Contains("GovernanceAdmin") || Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal))
         {
             return FilterByContract(allTables, contract);
         }

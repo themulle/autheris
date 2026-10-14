@@ -13,21 +13,24 @@ using Microsoft.Extensions.Options;
 using Npgsql;
 using NSubstitute;
 using Shouldly;
-using Testcontainers.PostgreSql;
 using Xunit;
 
 /// <summary>Review PG-9/PG-12: contract tests for the PostgreSQL consent workflow. Need Docker; without it they return early.</summary>
 public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
 {
-    private PostgreSqlContainer? _container;
+    private PostgreSqlTestDatabase? _db;
     private bool _available;
 
     public async Task InitializeAsync()
     {
         try
         {
-            _container = new PostgreSqlBuilder("postgres:16-alpine").Build();
-            await _container.StartAsync();
+            _db = await PostgreSqlTestDatabase.CreateAsync();
+            if (!_db.IsAvailable)
+            {
+                return;
+            }
+
             _available = true;
         }
         catch (Exception ex)
@@ -39,9 +42,9 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        if (_container != null)
+        if (_db != null)
         {
-            await _container.DisposeAsync();
+            await _db.DisposeAsync();
         }
     }
 
@@ -54,7 +57,7 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
             GovernanceDb = new GovernanceDbOptions
             {
                 Provider = "PostgreSql",
-                ConnectionString = _container!.GetConnectionString(),
+                ConnectionString = _db!.ConnectionString,
                 EnableOutboxProcessor = false,
                 SeedDemoData = false
             }
@@ -79,7 +82,7 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
         if (!_available) return;
 
         await using var repo = NewRepository();
-        await using var conn = new NpgsqlConnection(_container!.GetConnectionString());
+        await using var conn = new NpgsqlConnection(_db!.ConnectionString);
         await conn.OpenAsync();
         await using var cmd = new NpgsqlCommand(
             "SELECT indexdef FROM pg_indexes WHERE indexname = 'ux_consent_requests_ticket'", conn);
@@ -131,7 +134,7 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
         var approver1 = new Sid("S-1-5-21-APP1");
         var approver2 = new Sid("S-1-5-21-APP2");
 
-        await using (var conn = new NpgsqlConnection(_container!.GetConnectionString()))
+        await using (var conn = new NpgsqlConnection(_db!.ConnectionString))
         {
             await conn.OpenAsync();
             await using var roleCmd = new NpgsqlCommand(@"

@@ -266,7 +266,7 @@ public sealed class SecurityAttackVectorTests
     // =========================================================================
 
     [Fact]
-    public async Task SqlDataSourceExecutor_FilteringOnNonClearColumn_ShouldThrowSecurityException()
+    public async Task SqlTableReadExecutor_FilteringOnNonClearColumn_ShouldThrowBeforeAnyRead()
     {
         // Arrange: Table with sensitive 'salary' column. User access is Masked (not Clear).
         var table = new TableIdentifier("hr", "dbo", "employees");
@@ -312,16 +312,18 @@ public sealed class SecurityAttackVectorTests
             },
             RequestedFields: ["id", "name"]);
 
-        var executor = new SqlDataSourceExecutor(logger: NullLogger<SqlDataSourceExecutor>.Instance);
+        var governed = NSubstitute.Substitute.For<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>();
+        var executor = new SqlTableReadExecutor(new Autheris.Application.Data.Services.GovernedTableReadPlanner(), () => governed);
 
         // Act & Assert: Must reject query to prevent boolean-based / count-based side-channel inference
-        var ex = await Should.ThrowAsync<SecurityException>(async () =>
+        var ex = await Should.ThrowAsync<ArgumentException>(async () =>
         {
             await executor.ExecuteAsync(context);
         });
 
-        ex.Message.ShouldContain("Zero-Trust violation");
         ex.Message.ShouldContain("salary");
+        ex.Message.ShouldContain("oracle inference");
+        await governed.DidNotReceiveWithAnyArgs().ExecuteQueryBufferedAsync(default!, default!, default, default);
     }
 
     [Fact]

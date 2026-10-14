@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.VirtualFilters;
 
+using Autheris.Tests.Unit.TestDoubles;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -47,7 +48,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
     {
         var context = new DefaultHttpContext
         {
-            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider()
+            RequestServices = new ServiceCollection().AddLogging().AddAuditWriterOver(Substitute.For<IAuditLogRepository>()).BuildServiceProvider()
         };
         context.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
         {
@@ -346,6 +347,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         var services = new ServiceCollection();
         services.AddSingleton(prodEnv);
         services.AddLogging();
+        services.AddAuditWriterOver(Substitute.For<IAuditLogRepository>());
         var sp = services.BuildServiceProvider();
 
         var context = Context(Tenant, DavidFilterBody(), "FilterAdmin");

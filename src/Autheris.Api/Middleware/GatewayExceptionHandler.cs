@@ -107,6 +107,7 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
     {
         GatewayInvalidQueryException e => (StatusCodes.Status400BadRequest, e.Message, null),
         GatewayThrottledException e => (StatusCodes.Status429TooManyRequests, "Too many concurrent requests. Retry later.", e.RetryAfterSeconds),
+        Autheris.Application.Audit.AuditUnavailableException => (StatusCodes.Status503ServiceUnavailable, "The audit store is temporarily unavailable. Retry later.", UnavailableRetryAfterSeconds),
         GatewayNotImplementedException => (StatusCodes.Status501NotImplemented, "The requested feature or data source capability is not implemented.", null),
         GatewayUnsupportedColumnTypeException => (StatusCodes.Status501NotImplemented, "The requested column type is not supported.", null),
         NotSupportedException => (StatusCodes.Status501NotImplemented, "The requested operation is not supported.", null),

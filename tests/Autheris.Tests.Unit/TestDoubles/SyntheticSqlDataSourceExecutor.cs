@@ -1,20 +1,61 @@
-using System.Data;
-using System.Data.Common;
+namespace Autheris.Tests.Unit.TestDoubles;
+
+using System;
+using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Security;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
-using Autheris.Domain.Common;
-using Autheris.Domain.Exceptions;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
-using Autheris.Domain.Options;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
-namespace Autheris.Application.Services;
-
-public sealed partial class SqlDataSourceExecutor : IDataSourceExecutor
+/// <summary>
+/// Test-only <see cref="IDataSourceExecutor"/> for SQL sources that returns deterministic synthetic rows (the former development
+/// fallback of the removed <c>SqlDataSourceExecutor</c>). It keeps the Zero-Trust pre-checks (denied table, filtering on a column that
+/// is not effectively clear) so tests of the gateway pipeline that need rows without a database stay meaningful. Never referenced
+/// by production code.
+/// </summary>
+public sealed class SyntheticSqlDataSourceExecutor : IDataSourceExecutor
 {
+    public DataSourceType SupportedType => DataSourceType.Sql;
+
+    public Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ExecuteAsync(DataSourceExecutionContext context, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        if (!context.AccessDecision.IsAllowed)
+        {
+            var reasons = context.AccessDecision.DeniedReasons.Count > 0
+                ? string.Join("; ", context.AccessDecision.DeniedReasons)
+                : "Table is blocked by access policy.";
+            throw new SecurityException($"Zero-Trust violation: Access to table '{context.Metadata.Identifier}' denied: {reasons}");
+        }
+
+        foreach (var (argKey, argVal) in context.Arguments)
+        {
+            if (string.Equals(argKey, "limit", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(argKey, "offset", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var matchingCol = context.Metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, argKey, StringComparison.OrdinalIgnoreCase));
+            if (matchingCol != null && argVal != null)
+            {
+                var access = context.AccessDecision.GetEffectiveColumnAccess(matchingCol.ColumnName, context.Metadata);
+                if (access != ColumnAccessLevel.Clear)
+                {
+                    throw new SecurityException($"Zero-Trust violation: Filtering on column '{matchingCol.ColumnName}' in table '{context.Metadata.Identifier}' is not permitted (access level: {access}).");
+                }
+            }
+        }
+
+        return Task.FromResult(GenerateSyntheticRows(context));
+    }
+
     private static IReadOnlyList<IReadOnlyDictionary<string, object?>> GenerateSyntheticRows(DataSourceExecutionContext context)
     {
         context.Items["IsSyntheticMock"] = true;

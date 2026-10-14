@@ -29,11 +29,11 @@ public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicate
     private readonly ISqlEngine _engine;
 
     /// <param name="options">Row filter options (the subquery strategy of the legacy string path).</param>
-    /// <param name="engine">Parses sql-defined filters for the typed path; a parser-only <see cref="FastSqlEngine"/> when none is injected.</param>
+    /// <param name="engine">Parses sql-defined filters for the typed path; the shared <see cref="FastSqlEngine.Default"/> when none is injected.</param>
     public StructuredFilterSqlBuilder(IOptions<GatewayOptions>? options = null, ISqlEngine? engine = null)
     {
         _strategy = options?.Value?.RowFilters?.SubqueryStrategy ?? RowFilterSubqueryStrategy.Exists;
-        _engine = engine ?? new FastSqlEngine();
+        _engine = engine ?? FastSqlEngine.Default;
     }
 
     [GeneratedRegex(@"^-?(0|[1-9]\d{0,17})(\.\d{1,18})?$", RegexOptions.CultureInvariant)]

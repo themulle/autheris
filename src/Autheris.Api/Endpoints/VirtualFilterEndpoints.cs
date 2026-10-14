@@ -229,20 +229,17 @@ public static class VirtualFilterEndpoints
         var security = EndpointSecurity.GetSecurityContext(context);
         if (!security.HasRole(GatewayRole.FilterAdmin) && !security.HasRole(GatewayRole.GovernanceAdmin) && !security.HasRole(GatewayRole.SecurityAuditor))
         {
-            var auditDenied = context.RequestServices.GetService<IAuditLogRepository>();
-            if (auditDenied != null)
+            var auditDenied = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
+            await auditDenied.RecordRequiredAsync(new AuditLogEntry
             {
-                await auditDenied.RecordAuditEventAsync(new AuditLogEntry
-                {
-                    EventType = "VIRTUAL_FILTER_ADMIN_DENIED",
-                    TargetTable = "effective-filters",
-                    ActorSid = security.UserSid,
-                    TenantId = security.TenantId,
-                    Decision = "DENY",
-                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { error = "Forbidden: missing required role for effective-filters" }),
-                    OccurredAt = DateTimeOffset.UtcNow
-                }, context.RequestAborted).ConfigureAwait(false);
-            }
+                EventType = "VIRTUAL_FILTER_ADMIN_DENIED",
+                TargetTable = "effective-filters",
+                ActorSid = security.UserSid,
+                TenantId = security.TenantId,
+                Decision = "DENY",
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { error = "Forbidden: missing required role for effective-filters" }),
+                OccurredAt = DateTimeOffset.UtcNow
+            }, context.RequestAborted).ConfigureAwait(false);
             return Forbidden();
         }
 
@@ -281,20 +278,17 @@ public static class VirtualFilterEndpoints
 
             var explanation = await resolver.ExplainAsync(For(table), context.RequestAborted).ConfigureAwait(false);
 
-            var auditTable = context.RequestServices.GetService<IAuditLogRepository>();
-            if (auditTable != null)
+            var auditTable = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
+            await auditTable.RecordRequiredAsync(new AuditLogEntry
             {
-                await auditTable.RecordAuditEventAsync(new AuditLogEntry
-                {
-                    EventType = "VIRTUAL_FILTER_EFFECTIVE_INSPECTED",
-                    TargetTable = table.Identifier.ToString(),
-                    ActorSid = security.UserSid,
-                    TenantId = tenant.Value,
-                    Decision = "ALLOW",
-                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { user, table = table.Identifier.ToString() }),
-                    OccurredAt = DateTimeOffset.UtcNow
-                }, context.RequestAborted).ConfigureAwait(false);
-            }
+                EventType = "VIRTUAL_FILTER_EFFECTIVE_INSPECTED",
+                TargetTable = table.Identifier.ToString(),
+                ActorSid = security.UserSid,
+                TenantId = tenant.Value,
+                Decision = "ALLOW",
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { user, table = table.Identifier.ToString() }),
+                OccurredAt = DateTimeOffset.UtcNow
+            }, context.RequestAborted).ConfigureAwait(false);
 
             return Results.Ok(ExplanationView(user, table, explanation));
         }
@@ -317,20 +311,17 @@ public static class VirtualFilterEndpoints
             });
         }
 
-        var auditBatch = context.RequestServices.GetService<IAuditLogRepository>();
-        if (auditBatch != null)
+        var auditBatch = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
+        await auditBatch.RecordRequiredAsync(new AuditLogEntry
         {
-            await auditBatch.RecordAuditEventAsync(new AuditLogEntry
-            {
-                EventType = "VIRTUAL_FILTER_EFFECTIVE_INSPECTED",
-                TargetTable = "all_tables",
-                ActorSid = security.UserSid,
-                TenantId = tenant.Value,
-                Decision = "ALLOW",
-                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { user, count = objects.Count }),
-                OccurredAt = DateTimeOffset.UtcNow
-            }, context.RequestAborted).ConfigureAwait(false);
-        }
+            EventType = "VIRTUAL_FILTER_EFFECTIVE_INSPECTED",
+            TargetTable = "all_tables",
+            ActorSid = security.UserSid,
+            TenantId = tenant.Value,
+            Decision = "ALLOW",
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { user, count = objects.Count }),
+            OccurredAt = DateTimeOffset.UtcNow
+        }, context.RequestAborted).ConfigureAwait(false);
 
         return Results.Ok(new { user, page, page_size = pageSize, total = tables.Count, objects });
     }
@@ -535,20 +526,17 @@ public static class VirtualFilterEndpoints
         var security = EndpointSecurity.GetSecurityContext(context);
         if (!security.HasRole(requiredRole))
         {
-            var audit = context.RequestServices.GetService<IAuditLogRepository>();
-            if (audit != null)
+            var audit = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
+            await audit.RecordRequiredAsync(new AuditLogEntry
             {
-                await audit.RecordAuditEventAsync(new AuditLogEntry
-                {
-                    EventType = "VIRTUAL_FILTER_ADMIN_DENIED",
-                    TargetTable = context.Request.Path.Value ?? "virtual_filter",
-                    ActorSid = security.UserSid,
-                    TenantId = security.TenantId,
-                    Decision = "DENY",
-                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { error = "Forbidden: missing required role", requiredRole = requiredRole.ToString() }),
-                    OccurredAt = DateTimeOffset.UtcNow
-                }, context.RequestAborted).ConfigureAwait(false);
-            }
+                EventType = "VIRTUAL_FILTER_ADMIN_DENIED",
+                TargetTable = context.Request.Path.Value ?? "virtual_filter",
+                ActorSid = security.UserSid,
+                TenantId = security.TenantId,
+                Decision = "DENY",
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { error = "Forbidden: missing required role", requiredRole = requiredRole.ToString() }),
+                OccurredAt = DateTimeOffset.UtcNow
+            }, context.RequestAborted).ConfigureAwait(false);
             return Forbidden();
         }
 

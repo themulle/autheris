@@ -137,19 +137,6 @@ public sealed partial class RendererInvariantTests(ITestOutputHelper output)
         ReservedNameRegex().IsMatch("@p_tenant_0").ShouldBeFalse();
     }
 
-    [Fact]
-    public void Oracle_MarkerRewrite_MapsEveryMarkerToANamedBind()
-    {
-        foreach (var (parityCase, ir) in Produced(new ParityContext(GateDialect.Oracle, "GATE_APP")))
-        {
-            var names = ir.Parameters.Keys.Select(k => k.TrimStart('@')).ToHashSet(StringComparer.Ordinal);
-            string rewritten = OracleBindByName.RewriteMarkers(ir.Sql, names);
-
-            MarkerRegex().Matches(StripQuoted(rewritten)).ShouldBeEmpty($"{parityCase.Id}: an @ marker is left in the Oracle text: {rewritten}");
-            foreach (var name in names) rewritten.ShouldContain(":" + name, customMessage: parityCase.Id);
-        }
-    }
-
     private static string StripQuoted(string sql) => Regex.Replace(sql, "'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"|\\[[^\\]]*\\]", "''", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 }
 

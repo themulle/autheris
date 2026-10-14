@@ -111,7 +111,7 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
             bool failReadiness = _options.Value.Audit.FailReadinessOnChainViolation;
             bool chainHealthy = !_auditChainMonitor.IsViolated;
             string chainDesc = _auditChainMonitor.IsViolated
-                ? "Audit hash chain verification FAILED."
+                ? $"Audit hash chain verification FAILED (OnChainViolation policy: {_options.Value.Audit.OnChainViolation?.ToString() ?? "environment default"}; restart after forensic review)."
                 : _auditChainMonitor.LastCheckedAt == null
                     ? "Audit hash chain not verified yet."
                     : _auditChainMonitor.LastRunFailed

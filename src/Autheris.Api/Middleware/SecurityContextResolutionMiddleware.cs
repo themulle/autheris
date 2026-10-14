@@ -150,20 +150,18 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
     {
         try
         {
-            var audit = context.RequestServices?.GetService<IAuditLogRepository>();
-            if (audit != null)
+            // A denial never depends on the audit write: the best-effort helper logs and counts a failing sink instead of throwing.
+            var audit = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
+            await audit.RecordBestEffortAsync(new AuditLogEntry
             {
-                await audit.RecordAuditEventAsync(new AuditLogEntry
-                {
-                    TenantId = securityContext.TenantId,
-                    EventType = AuditEventTypes.TenantCollisionDenied,
-                    ActorSid = securityContext.UserSid,
-                    TargetTable = string.Empty,
-                    Decision = "DENY",
-                    TraceId = context.TraceIdentifier,
-                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason, path = context.Request.Path.Value })
-                }, context.RequestAborted).ConfigureAwait(false);
-            }
+                TenantId = securityContext.TenantId,
+                EventType = AuditEventTypes.TenantCollisionDenied,
+                ActorSid = securityContext.UserSid,
+                TargetTable = string.Empty,
+                Decision = "DENY",
+                TraceId = context.TraceIdentifier,
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason, path = context.Request.Path.Value })
+            }, context.RequestAborted).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

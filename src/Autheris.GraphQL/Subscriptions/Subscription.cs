@@ -111,11 +111,15 @@ public sealed class Subscription
         using var guardCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         using var expiryCts = new CancellationTokenSource(remaining, timeProvider);
         using var expiryReg = expiryCts.Token.Register(static s => ((CancellationTokenSource)s!).Cancel(), guardCts);
+        var watchPolicy = RevocationWatchPolicy.From(services.GetService<IOptions<RevocationWatchOptions>>());
+        var failureCounter = new RevocationFailureCounter(watchPolicy);
+        ILogger? watchLogger = services.GetService<ILogger<Subscription>>();
         using var revocationTimer = revocation == null ? null : timeProvider.CreateTimer(static state =>
         {
-            var (cts, svc, p) = ((CancellationTokenSource, ITokenRevocationService, ClaimsPrincipal))state!;
-            _ = CheckRevocationAsync(cts, svc, p);
-        }, (guardCts, revocation, principal), interval, interval);
+            var (cts, svc, p, counter, logger) =
+                ((CancellationTokenSource, ITokenRevocationService, ClaimsPrincipal, RevocationFailureCounter, ILogger?))state!;
+            _ = CheckRevocationAsync(cts, svc, p, counter, logger);
+        }, (guardCts, revocation, principal, failureCounter, watchLogger), interval, interval);
 
         // GQL-3 / GQL-4: topic admission (catalog + access decision, cdc_all for admins), per-subject limit, audit.
         var governor = services.GetService<CdcSubscriptionGovernor>()
@@ -168,11 +172,23 @@ public sealed class Subscription
         }
     }
 
-    private static async Task CheckRevocationAsync(CancellationTokenSource cts, ITokenRevocationService svc, ClaimsPrincipal principal)
+    internal static async Task CheckRevocationAsync(
+        CancellationTokenSource cts,
+        ITokenRevocationService svc,
+        ClaimsPrincipal principal,
+        RevocationFailureCounter failures,
+        ILogger? logger = null)
     {
         try
         {
-            if (!cts.IsCancellationRequested && await svc.IsRevokedAsync(principal, CancellationToken.None).ConfigureAwait(false))
+            if (cts.IsCancellationRequested)
+            {
+                return;
+            }
+
+            var revoked = await svc.IsRevokedAsync(principal, CancellationToken.None).ConfigureAwait(false);
+            failures.RecordSuccess();
+            if (revoked)
             {
                 cts.Cancel();
             }
@@ -181,21 +197,26 @@ public sealed class Subscription
         {
             // Stream already ended.
         }
-        catch (TokenRevocationUnavailableException)
+        catch (Exception ex)
         {
-            // SR-L-10: fail closed; end the stream when the revocation status cannot be determined.
-            try
+            // SR-L-18: fail closed after the configured number of consecutive failures (store unavailable or
+            // unexpected error); a single transient error keeps the stream alive.
+            if (failures.RecordFailure())
             {
-                cts.Cancel();
+                logger?.LogWarning(
+                    ex,
+                    "Subscription stream closed: token revocation status could not be verified ({Failures} consecutive failures, fail-closed). CorrelationId={CorrelationId}",
+                    failures.ConsecutiveFailures,
+                    Guid.NewGuid().ToString("N"));
+                try
+                {
+                    cts.Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Stream already ended.
+                }
             }
-            catch (ObjectDisposedException)
-            {
-                // Stream already ended.
-            }
-        }
-        catch (Exception)
-        {
-            // Fail open on transient check errors; the next tick retries (same as the WebSocket watch).
         }
     }
 }

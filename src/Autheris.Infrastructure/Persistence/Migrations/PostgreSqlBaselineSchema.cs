@@ -15,7 +15,6 @@ internal static class PostgreSqlBaselineSchema
 
     internal static void Apply(NpgsqlConnection conn, ILogger? logger)
     {
-        DeduplicateDataOwnersBeforeIndex(conn, logger);
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS TABLES (
@@ -358,71 +357,4 @@ internal static class PostgreSqlBaselineSchema
             FOR EACH STATEMENT EXECUTE FUNCTION autheris_audit_append_only()");
     }
 
-    private static void DeduplicateDataOwnersBeforeIndex(NpgsqlConnection conn, ILogger? logger)
-    {
-        try
-        {
-            using var checkCmd = conn.CreateCommand();
-            checkCmd.CommandText = "SELECT 1 FROM information_schema.tables WHERE table_name = 'data_owners' LIMIT 1;";
-            if (checkCmd.ExecuteScalar() == null) return;
-
-            using var dupCmd = conn.CreateCommand();
-            dupCmd.CommandText = "SELECT ad_sid FROM DATA_OWNERS WHERE ad_sid IS NOT NULL AND ad_sid != '' GROUP BY ad_sid HAVING COUNT(*) > 1;";
-            var duplicateSids = new List<string>();
-            using (var reader = dupCmd.ExecuteReader())
-            {
-                while (reader.Read())
-                {
-                    duplicateSids.Add(reader.GetString(0));
-                }
-            }
-
-            if (duplicateSids.Count == 0) return;
-
-            logger?.LogWarning("Found {Count} duplicate ad_sid values in DATA_OWNERS; merging duplicates before applying unique constraint (B-05).", duplicateSids.Count);
-
-            foreach (var sid in duplicateSids)
-            {
-                using var fetchCmd = conn.CreateCommand();
-                fetchCmd.CommandText = "SELECT id, is_active FROM DATA_OWNERS WHERE ad_sid = @sid ORDER BY is_active DESC, id ASC;";
-                fetchCmd.Parameters.AddWithValue("@sid", sid);
-                var rows = new List<(string id, int active)>();
-                using (var reader = fetchCmd.ExecuteReader())
-                {
-                    while (reader.Read())
-                    {
-                        rows.Add((reader.GetString(0), Convert.ToInt32(reader.GetValue(1))));
-                    }
-                }
-
-                if (rows.Count <= 1) continue;
-
-                var primaryId = rows[0].id;
-                for (int i = 1; i < rows.Count; i++)
-                {
-                    var secondaryId = rows[i].id;
-                    logger?.LogInformation("Merging duplicate DATA_OWNERS id '{SecondaryId}' into primary id '{PrimaryId}' for ad_sid '{Sid}'.", secondaryId, primaryId, sid);
-
-                    using var updateTableOwnersCmd = conn.CreateCommand();
-                    updateTableOwnersCmd.CommandText = @"
-                        UPDATE TABLE_OWNERS SET data_owner_id = @primaryId WHERE data_owner_id = @secondaryId
-                        AND NOT EXISTS (SELECT 1 FROM TABLE_OWNERS WHERE data_owner_id = @primaryId);
-                        DELETE FROM TABLE_OWNERS WHERE data_owner_id = @secondaryId;
-                    ";
-                    updateTableOwnersCmd.Parameters.AddWithValue("@primaryId", primaryId);
-                    updateTableOwnersCmd.Parameters.AddWithValue("@secondaryId", secondaryId);
-                    updateTableOwnersCmd.ExecuteNonQuery();
-
-                    using var deleteCmd = conn.CreateCommand();
-                    deleteCmd.CommandText = "DELETE FROM DATA_OWNERS WHERE id = @secondaryId;";
-                    deleteCmd.Parameters.AddWithValue("@secondaryId", secondaryId);
-                    deleteCmd.ExecuteNonQuery();
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            logger?.LogError(ex, "Error while deduplicating DATA_OWNERS table before unique index creation.");
-        }
-    }
 }

@@ -1,6 +1,5 @@
 using Npgsql;
 using Shouldly;
-using Testcontainers.PostgreSql;
 using TrinoSqlEngine;
 using Xunit;
 
@@ -8,22 +7,25 @@ namespace Autheris.Tests.Integration;
 
 public sealed class PostgreSqlContainerFixture : IAsyncLifetime
 {
-    public PostgreSqlContainer Container { get; } = new PostgreSqlBuilder("postgres:16-alpine")
-        .WithDatabase("autheris_test")
-        .WithUsername("postgres")
-        .WithPassword("postgres_password_2026")
-        .Build();
+    private PostgreSqlTestDatabase? _db;
 
-    public string ConnectionString => Container.GetConnectionString();
+    public string ConnectionString => _db?.ConnectionString ?? string.Empty;
 
     public async Task InitializeAsync()
     {
-        await Container.StartAsync();
+        _db = await PostgreSqlTestDatabase.CreateAsync();
+        if (!_db.IsAvailable)
+        {
+            throw new InvalidOperationException("The PostgreSQL test database is not available (Docker missing?).");
+        }
     }
 
     public async Task DisposeAsync()
     {
-        await Container.DisposeAsync();
+        if (_db is not null)
+        {
+            await _db.DisposeAsync();
+        }
     }
 }
 

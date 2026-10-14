@@ -68,16 +68,3 @@ public sealed record CatalogSearchHit(
     IReadOnlyList<string> RelevantColumns,
     IReadOnlyList<TableRelationship> RelatedJoinPaths,
     string? SuggestedGraphQlField);
-
-/// <summary>
-/// Strukturiertes Dokument für die Indexierung einer Tabelle im Vektor- und Keyword-Index.
-/// </summary>
-public sealed record TableSearchDocument(
-    TableIdentifier Identifier,
-    string NormalizedText,
-    IReadOnlyList<string> Tokens,
-    IReadOnlyList<string> ColumnNames,
-    IReadOnlyList<string> PrimaryKeys,
-    IReadOnlyList<TableRelationship> ForeignKeys,
-    string Sensitivity,
-    ReadOnlyMemory<float> NormalizedVector);

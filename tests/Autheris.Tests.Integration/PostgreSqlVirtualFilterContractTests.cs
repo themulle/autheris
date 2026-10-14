@@ -12,7 +12,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
-using Testcontainers.PostgreSql;
 using Xunit;
 
 /// <summary>
@@ -22,15 +21,19 @@ using Xunit;
 public sealed class PostgreSqlVirtualFilterContractTests : IAsyncLifetime
 {
     private static readonly TenantId Tenant = new("tenant_lwe");
-    private PostgreSqlContainer? _container;
+    private PostgreSqlTestDatabase? _db;
     private bool _available;
 
     public async Task InitializeAsync()
     {
         try
         {
-            _container = new PostgreSqlBuilder("postgres:16-alpine").Build();
-            await _container.StartAsync();
+            _db = await PostgreSqlTestDatabase.CreateAsync();
+            if (!_db.IsAvailable)
+            {
+                return;
+            }
+
             _available = true;
         }
         catch (Exception ex)
@@ -42,9 +45,9 @@ public sealed class PostgreSqlVirtualFilterContractTests : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        if (_container != null)
+        if (_db != null)
         {
-            await _container.DisposeAsync();
+            await _db.DisposeAsync();
         }
     }
 
@@ -57,7 +60,7 @@ public sealed class PostgreSqlVirtualFilterContractTests : IAsyncLifetime
             GovernanceDb = new GovernanceDbOptions
             {
                 Provider = "PostgreSql",
-                ConnectionString = _container!.GetConnectionString(),
+                ConnectionString = _db!.ConnectionString,
                 EnableOutboxProcessor = false,
                 SeedDemoData = false
             }

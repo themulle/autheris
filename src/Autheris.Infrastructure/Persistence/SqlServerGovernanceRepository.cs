@@ -41,6 +41,7 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, Migr
     private readonly ILogger<SqlServerGovernanceRepository>? _logger;
     private string? _auditChainViolation;
     private readonly GatewayOptions? _options;
+    private readonly ICallerContextProvider? _callerContextProvider;
 
     public SqlServerGovernanceRepository(
         IEpochValidationService epochValidationService,
@@ -49,7 +50,8 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, Migr
         IKeyVaultSecretProvider? secretProvider = null,
         IAuditChainAnchorStore? auditAnchorStore = null,
         ILogger<SqlServerGovernanceRepository>? logger = null,
-        IAuditAnchorSigner? auditAnchorSigner = null)
+        IAuditAnchorSigner? auditAnchorSigner = null,
+        ICallerContextProvider? callerContextProvider = null)
     {
         ArgumentNullException.ThrowIfNull(epochValidationService);
         ArgumentNullException.ThrowIfNull(options);
@@ -57,6 +59,7 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, Migr
         _epochValidationService = epochValidationService;
         _logger = logger;
         _options = options.Value;
+        _callerContextProvider = callerContextProvider;
 
         var connStr = options?.Value?.GovernanceDb?.ConnectionString;
         var transportEnv = environment?.EnvironmentName ??

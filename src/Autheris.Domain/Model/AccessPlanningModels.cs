@@ -4,13 +4,6 @@ using System;
 using System.Collections.Generic;
 
 /// <summary>
-/// Column-level access grant specifying clear, mask, or deny.
-/// </summary>
-public sealed record ColumnAccessGrant(
-    string Column,
-    string AccessLevel); // "clear", "mask", "deny"
-
-/// <summary>
 /// Access grant definition for a specific principal (user, group, or service principal).
 /// </summary>
 public sealed record PrincipalAccessGrant(

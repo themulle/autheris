@@ -25,12 +25,18 @@ public static class SqlTransports
     public const string AsyncJob = "AsyncJob";
 }
 
+/// <param name="PlannedTableRead">
+/// True only for a table read whose SQL the gateway planned itself (OData, GraphQL, MCP, connectors). Such a read is not
+/// client SQL and is therefore not gated by <c>WebSql:Enabled</c>; it still runs through the full governed pipeline.
+/// Never set from client input.
+/// </param>
 public sealed record GovernedSqlQueryRequest(
     string Sql,
     IReadOnlyDictionary<string, object?>? Parameters = null,
     string? DataSourceName = null,
     SqlRowLimit? RowLimit = null,
-    string? Transport = null);
+    string? Transport = null,
+    bool PlannedTableRead = false);
 
 public sealed record GovernedSqlResult(
     string OriginalSql,
@@ -39,7 +45,8 @@ public sealed record GovernedSqlResult(
     int RowCount,
     long ElapsedMilliseconds,
     bool Truncated = false,
-    [property: System.Text.Json.Serialization.JsonIgnore] IReadOnlyList<SqlResultColumn>? ColumnDescriptions = null);
+    [property: System.Text.Json.Serialization.JsonIgnore] IReadOnlyList<SqlResultColumn>? ColumnDescriptions = null,
+    [property: System.Text.Json.Serialization.JsonIgnore] bool InDbColumnMaskingExecuted = false);
 
 public interface IGovernedSqlExecutionService
 {

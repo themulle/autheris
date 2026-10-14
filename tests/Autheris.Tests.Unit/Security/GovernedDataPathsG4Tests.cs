@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Unit.TestDoubles;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -402,7 +403,7 @@ public sealed class GovernedDataPathsG4Tests
     {
         var context = new DefaultHttpContext();
         var services = new ServiceCollection();
-        if (audit != null) services.AddSingleton(audit);
+        if (audit != null) services.AddAuditWriterOver(audit);
         context.RequestServices = services.BuildServiceProvider();
         context.Items["SecurityPrincipalContext"] = new SecurityPrincipalContext
         {
@@ -456,8 +457,8 @@ public sealed class GovernedDataPathsG4Tests
         failed.Response.Body.Position = 0;
         new StreamReader(failed.Response.Body).ReadToEnd().ShouldNotContain("totalRows");
 
-        var (missing, _) = await RunOlapAsync(null);
-        missing.Response.StatusCode.ShouldBe(StatusCodes.Status503ServiceUnavailable);
+        // WP-ARC-A-06: a missing audit writer is a composition error, never a silently unaudited read.
+        await Should.ThrowAsync<InvalidOperationException>(() => RunOlapAsync(null));
     }
 
     // ------------------------------------------------------------------ Low: Arrow Flight SQL tickets

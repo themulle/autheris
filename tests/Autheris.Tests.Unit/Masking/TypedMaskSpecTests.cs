@@ -361,34 +361,4 @@ public sealed class TypedMaskSpecTests
             Run(sql, parameters).ShouldAllBe(v => (string?)v == "#####");
         }
     }
-
-    // --- the projection used by the SQL data source executor (added after the code; not a Red step) ---
-
-    private static TableMetadata PartialMaskMeta() => new()
-    {
-        Table = new Table { TableName = "t", SchemaName = "main", SourceName = "d", SourceType = "Sqlite" },
-        Columns = [new TableColumn { ColumnName = "col", DataType = "text" }],
-        ColumnMaskingRules = new Dictionary<string, MaskingRule>
-        {
-            ["col"] = new() { RuleType = "PARTIAL_MASK", KeepPrefix = 2, KeepSuffix = 1, MaskChar = '#' }
-        }
-    };
-
-    [Fact]
-    public void ExecutorProjection_PartialMask_ReturnsBoundValues_NotText()
-    {
-        var parameters = new Dictionary<string, object?>();
-
-        var projection = Autheris.Application.Services.SqlDataSourceExecutor.BuildMaskedColumnProjection(
-            "col", "text", DatabaseDialect.Sqlite, PartialMaskMeta(), parameters);
-
-        projection.ShouldNotContain("#");
-        parameters.Values.ShouldContain("#####");
-        parameters.Keys.ShouldAllBe(k => projection.Contains(k));
-    }
-
-    [Fact]
-    public void ExecutorProjection_WithoutParameterSink_RefusesAMaskWithBoundValues() =>
-        Should.Throw<InvalidOperationException>(() => Autheris.Application.Services.SqlDataSourceExecutor.BuildMaskedColumnProjection(
-            "col", "text", DatabaseDialect.Sqlite, PartialMaskMeta()));
 }

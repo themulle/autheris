@@ -477,4 +477,105 @@ public sealed class GovernedDataQueryServiceTests
         await Should.ThrowAsync<ArgumentException>(() => CreateService().ExecuteQueryAsync(
             new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "name" }, Limit: 50, Offset: 980), Ctx()));
     }
+
+    [Fact]
+    public async Task ExecuteQueryAsync_WhenInDbColumnMaskingExecuted_SkipsSecondMaskPass()
+    {
+        var metadata = CreateCustomerTableMetadata();
+        _metadataRepo.GetTableMetadataAsync(_customerTable, Arg.Any<CancellationToken>()).Returns(metadata);
+        _pdp.EvaluateAccessAsync(
+                _customerTable,
+                metadata,
+                Arg.Any<Autheris.Domain.Security.SecurityPrincipalContext>(),
+                Arg.Any<IReadOnlyList<string>?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(TableAccessDecision.Allowed(
+                _customerTable,
+                new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["id"] = ColumnAccessLevel.Clear,
+                    ["email"] = ColumnAccessLevel.Mask
+                },
+                hasUnconstrainedColumnAllow: true));
+
+        const string alreadyMaskedBySql = "a1b2c3d4e5f6";
+        var sqlResult = new GovernedSqlResult(
+            OriginalSql: "SELECT id, email FROM sales.dbo.customers LIMIT 51",
+            Columns: new[] { "id", "email" },
+            Rows: new IReadOnlyDictionary<string, object?>[]
+            {
+                new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["id"] = 1, ["email"] = alreadyMaskedBySql }
+            },
+            RowCount: 1,
+            ElapsedMilliseconds: 1,
+            InDbColumnMaskingExecuted: true);
+
+        _sqlExecutionService.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(sqlResult);
+
+        var result = await CreateService().ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "email" }), Ctx());
+
+        result.Columns.Single(c => c.Name == "email").Masked.ShouldBeTrue();
+        result.Data[0]["email"].ShouldBe(alreadyMaskedBySql);
+        _maskingProvider.DidNotReceive().MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>());
+    }
+
+    [Fact]
+    public async Task ExecuteQueryAsync_FallbackInMemoryMasking_ScopesHmacRuleToTenant()
+    {
+        var baseMetadata = CreateCustomerTableMetadata();
+        var metadata = new TableMetadata
+        {
+            Identifier = baseMetadata.Identifier,
+            Table = baseMetadata.Table,
+            Columns = baseMetadata.Columns,
+            PrimaryKeyColumns = baseMetadata.PrimaryKeyColumns,
+            ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["email"] = new MaskingRule { RuleType = "HMAC" }
+            }
+        };
+        _metadataRepo.GetTableMetadataAsync(_customerTable, Arg.Any<CancellationToken>()).Returns(metadata);
+        _pdp.EvaluateAccessAsync(
+                _customerTable,
+                metadata,
+                Arg.Any<Autheris.Domain.Security.SecurityPrincipalContext>(),
+                Arg.Any<IReadOnlyList<string>?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(TableAccessDecision.Allowed(
+                _customerTable,
+                new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["id"] = ColumnAccessLevel.Clear,
+                    ["email"] = ColumnAccessLevel.Mask
+                },
+                hasUnconstrainedColumnAllow: true));
+
+        var sqlResult = new GovernedSqlResult(
+            OriginalSql: "SELECT id, email FROM sales.dbo.customers LIMIT 51",
+            Columns: new[] { "id", "email" },
+            Rows: new IReadOnlyDictionary<string, object?>[]
+            {
+                new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["id"] = 1, ["email"] = "alice@example.com" }
+            },
+            RowCount: 1,
+            ElapsedMilliseconds: 1,
+            InDbColumnMaskingExecuted: false);
+
+        _sqlExecutionService.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(sqlResult);
+
+        MaskingRule? capturedRule = null;
+        _maskingProvider.MaskValue("email", "alice@example.com", Arg.Do<MaskingRule>(r => capturedRule = r))
+            .Returns("hmac-masked");
+
+        var result = await CreateService().ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "email" }), Ctx());
+
+        result.Data[0]["email"].ShouldBe("hmac-masked");
+        capturedRule.ShouldNotBeNull();
+        capturedRule.RuleType.ShouldBe("HMAC_SHA256");
+        capturedRule.HmacKeyId.ShouldBe("key-2026-q1|tenant:default");
+    }
 }

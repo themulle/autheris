@@ -51,12 +51,21 @@ public static class ODataFilterParser
         var paramCtx = new SqlGenerationContext(defaultDialect, paramPrefix);
         var defaultPredicate = ast.ToSql(paramCtx);
 
+        // WP-ARC-B-01: the same AST rendered in Trino syntax for the governed compile path. Parameters are numbered in
+        // render order, so the names (and values) equal those of the dialect rendering above.
+        string TrinoBuilder(Func<string, string> columnResolver)
+        {
+            var ctx = new SqlGenerationContext(defaultDialect, paramPrefix, trino: true, columnResolver);
+            return ast.ToSql(ctx);
+        }
+
         return new TableFilterClause(
             SqlPredicate: defaultPredicate,
             Parameters: paramCtx.Parameters,
             ReferencedColumns: distinctCols)
         {
-            DialectSqlFactory = SqlBuilder
+            DialectSqlFactory = SqlBuilder,
+            TrinoSqlFactory = TrinoBuilder
         };
     }
 
@@ -564,9 +573,16 @@ public static class ODataFilterParser
         private int _counter;
         public int Depth { get; set; }
 
-        public SqlGenerationContext(DatabaseDialect dialect, string paramPrefix)
+        /// <summary>True when identifiers are rendered as Trino delimited identifiers of the catalog spelling.</summary>
+        public bool Trino { get; }
+
+        private readonly Func<string, string>? _columnResolver;
+
+        public SqlGenerationContext(DatabaseDialect dialect, string paramPrefix, bool trino = false, Func<string, string>? columnResolver = null)
         {
             Dialect = dialect;
+            Trino = trino;
+            _columnResolver = columnResolver;
             ParamPrefix = paramPrefix;
             _counter = 0;
             Depth = 0;
@@ -583,6 +599,11 @@ public static class ODataFilterParser
         }
 
         public void ExitDepth() => Depth--;
+
+        public string QuoteColumn(string name) =>
+            Trino
+                ? Autheris.Application.Data.Services.DataApiFilterTranslator.QuoteIdentifier(_columnResolver?.Invoke(name) ?? name)
+                : Dialect.QuoteIdentifier(name);
 
         public string AddParameter(object? value)
         {
@@ -630,7 +651,7 @@ public static class ODataFilterParser
     {
         public string Name { get; } = name.Contains('/') ? name.Split('/')[^1] : name;
 
-        public override string ToSql(SqlGenerationContext ctx) => ctx.Dialect.QuoteIdentifier(Name);
+        public override string ToSql(SqlGenerationContext ctx) => ctx.QuoteColumn(Name);
 
         public override void CollectReferencedColumns(List<string> columns, int depth = 0) => columns.Add(Name);
     }
@@ -763,23 +784,23 @@ public static class ODataFilterParser
                     case "contains":
                         if (Args.Count != 2) throw new GatewayInvalidQueryException("Function 'contains' requires 2 arguments.");
                         var targetContains = Args[0].ToSql(ctx);
-                        var patternContains = GetLikePattern(Args[1], "%{0}%");
+                        var patternContains = GetLikePattern(Args[1], "%{0}%", ctx.Trino);
                         var pContains = ctx.AddParameter(patternContains);
-                        return $"({targetContains} LIKE {pContains} ESCAPE '\\')";
+                        return $"({targetContains} LIKE {pContains} ESCAPE {LikeEscapeLiteral(ctx.Trino)})";
 
                     case "startswith":
                         if (Args.Count != 2) throw new GatewayInvalidQueryException("Function 'startswith' requires 2 arguments.");
                         var targetStarts = Args[0].ToSql(ctx);
-                        var patternStarts = GetLikePattern(Args[1], "{0}%");
+                        var patternStarts = GetLikePattern(Args[1], "{0}%", ctx.Trino);
                         var pStarts = ctx.AddParameter(patternStarts);
-                        return $"({targetStarts} LIKE {pStarts} ESCAPE '\\')";
+                        return $"({targetStarts} LIKE {pStarts} ESCAPE {LikeEscapeLiteral(ctx.Trino)})";
 
                     case "endswith":
                         if (Args.Count != 2) throw new GatewayInvalidQueryException("Function 'endswith' requires 2 arguments.");
                         var targetEnds = Args[0].ToSql(ctx);
-                        var patternEnds = GetLikePattern(Args[1], "%{0}");
+                        var patternEnds = GetLikePattern(Args[1], "%{0}", ctx.Trino);
                         var pEnds = ctx.AddParameter(patternEnds);
-                        return $"({targetEnds} LIKE {pEnds} ESCAPE '\\')";
+                        return $"({targetEnds} LIKE {pEnds} ESCAPE {LikeEscapeLiteral(ctx.Trino)})";
 
                     case "tolower":
                         if (Args.Count != 1) throw new GatewayInvalidQueryException("Function 'tolower' requires 1 argument.");
@@ -799,21 +820,31 @@ public static class ODataFilterParser
             }
         }
 
-        private static string GetLikePattern(AstNode node, string format)
+        private static string GetLikePattern(AstNode node, string format, bool trino)
         {
             if (node is LiteralNode lit && lit.Value != null)
             {
                 var val = lit.Value.ToString() ?? string.Empty;
-                return string.Format(CultureInfo.InvariantCulture, format, EscapeLike(val));
+                return string.Format(CultureInfo.InvariantCulture, format, EscapeLike(val, trino ? TrinoLikeEscape : DialectLikeEscape));
             }
             throw new GatewayInvalidQueryException("String functions (contains, startswith, endswith) require a literal string as the pattern argument.");
         }
 
-        private static string EscapeLike(string value) =>
-            value.Replace("\\", "\\\\", StringComparison.Ordinal)
-                 .Replace("%", "\\%", StringComparison.Ordinal)
-                 .Replace("_", "\\_", StringComparison.Ordinal)
-                 .Replace("[", "\\[", StringComparison.Ordinal);
+        // The governed (Trino) path rejects backslashes in string literals (dialect lexer differentials), so it escapes
+        // LIKE wildcards with '!' instead. The escape character travels as an explicit ESCAPE clause to every dialect.
+        private const char TrinoLikeEscape = '!';
+        private const char DialectLikeEscape = '\\';
+
+        private static string LikeEscapeLiteral(bool trino) => trino ? "'!'" : "'\\'";
+
+        private static string EscapeLike(string value, char escape)
+        {
+            string e = new(escape, 1);
+            return value.Replace(e, e + e, StringComparison.Ordinal)
+                 .Replace("%", e + "%", StringComparison.Ordinal)
+                 .Replace("_", e + "_", StringComparison.Ordinal)
+                 .Replace("[", e + "[", StringComparison.Ordinal);
+        }
 
         public override void CollectReferencedColumns(List<string> columns, int depth = 0)
         {

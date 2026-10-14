@@ -193,7 +193,8 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             rows,
             rows.Count,
             (long)duckDbResult.ExecutionDuration.TotalMilliseconds,
-            truncated);
+            truncated,
+            InDbColumnMaskingExecuted: !_options.Value.IsColumnMaskingDisabled);
     }
 
     public async Task ValidateAsync(

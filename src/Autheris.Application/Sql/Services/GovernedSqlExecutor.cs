@@ -145,7 +145,8 @@ public sealed class GovernedSqlExecutor
             RowCount: rows.Count,
             ElapsedMilliseconds: sw.ElapsedMilliseconds,
             Truncated: isTruncated,
-            ColumnDescriptions: columnDescriptions);
+            ColumnDescriptions: columnDescriptions,
+            InDbColumnMaskingExecuted: !_options.Value.IsColumnMaskingDisabled);
     }
 
     private async Task<string> ExecuteCoreAsync(
@@ -184,7 +185,7 @@ public sealed class GovernedSqlExecutor
         GovernedRewrite rewrite;
         try
         {
-            rewrite = await _rewriter.RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit, probeExtraRow: true).ConfigureAwait(false);
+            rewrite = await _rewriter.RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit, probeExtraRow: true, plannedTableRead: request.PlannedTableRead).ConfigureAwait(false);
         }
         catch (Exception policyEx) when (IsAuditedRejection(policyEx, ct))
         {
@@ -221,7 +222,7 @@ public sealed class GovernedSqlExecutor
                     ActorSid = userSid,
                     TargetTable = auditDs,
                     Decision = "DENY",
-                    TraceId = Guid.NewGuid().ToString("N"),
+                    TraceId = TraceContextResolver.GetCurrentTraceId(),
                     DetailsJson = detailsJson
                 }, ct).ConfigureAwait(false);
             }
@@ -267,7 +268,7 @@ public sealed class GovernedSqlExecutor
                 ActorSid = userSid,
                 TargetTable = dsName,
                 Decision = "ALLOW",
-                TraceId = Guid.NewGuid().ToString("N"),
+                TraceId = TraceContextResolver.GetCurrentTraceId(),
                 DetailsJson = System.Text.Json.JsonSerializer.Serialize(fields)
             }, ct).ConfigureAwait(false);
         }
@@ -476,7 +477,7 @@ public sealed class GovernedSqlExecutor
                         ActorSid = userSid,
                         TargetTable = dsName,
                         Decision = "ERROR",
-                        TraceId = Guid.NewGuid().ToString("N"),
+                        TraceId = TraceContextResolver.GetCurrentTraceId(),
                         DetailsJson = detailsJson
                     }, CancellationToken.None).ConfigureAwait(false);
                 }
@@ -653,7 +654,7 @@ public sealed class GovernedSqlExecutor
             ActorSid = user.GetUserSid() ?? new Sid("anonymous"),
             TargetTable = string.Join(",", dmlContext.Tables),
             Decision = decision,
-            TraceId = Guid.NewGuid().ToString("N"),
+            TraceId = TraceContextResolver.GetCurrentTraceId(),
             DetailsJson = System.Text.Json.JsonSerializer.Serialize(fields)
             // M-1: a DML audit never takes the request token. The statement may already be committed; a client that disconnects must not
             // leave it without its audit record.

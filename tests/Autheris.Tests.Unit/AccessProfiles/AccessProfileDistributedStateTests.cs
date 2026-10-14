@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.AccessProfiles;
 
+using Autheris.Tests.Unit.TestDoubles;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -291,7 +292,7 @@ public sealed class AccessProfileDistributedStateTests
 
         var services = new ServiceCollection();
         services.AddSingleton(failingCache);
-        services.AddSingleton(auditRepo);
+        services.AddAuditWriterOver(auditRepo);
         services.AddSingleton<IAccessProfileRepository>(profileRepo);
         var serviceProvider = services.BuildServiceProvider();
 

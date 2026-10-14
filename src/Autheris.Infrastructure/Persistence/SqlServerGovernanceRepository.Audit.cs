@@ -2,10 +2,12 @@ using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Autheris.Application.Audit;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Data.SqlClient;
 
@@ -15,10 +17,17 @@ public partial class SqlServerGovernanceRepository
 {
     public async Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default)
     {
+        if (entry.Caller == null && _callerContextProvider != null)
+        {
+            entry.Caller = _callerContextProvider.ResolveCallerContext();
+        }
+
         // Tier-A: Security critical mutations, admin actions, or denied requests are synchronous (Fail-Closed)
-        bool isTierA = string.Equals(entry.Decision, "DENY", StringComparison.OrdinalIgnoreCase) ||
-                       (!string.Equals(entry.EventType, "TABLE_QUERY", StringComparison.OrdinalIgnoreCase) &&
-                        !string.Equals(entry.EventType, "WEBSQL_QUERY", StringComparison.OrdinalIgnoreCase));
+        bool isTierA = AuditChainViolationGate.IsTierA(entry);
+
+        // SR-L-08: a latched chain violation is applied per policy to both tiers (Tier-A is marked, Tier-B refused by default).
+        var violation = Volatile.Read(ref _auditChainViolation);
+        var admitted = AuditChainViolationGate.Admit(entry, isTierA, violation, ViolationPolicy, _logger);
 
         // SEC R2-3: Audit:SynchronousQueryAudit commits query events before the request is answered (no crash window).
         if (isTierA || _options?.Audit?.SynchronousQueryAudit == true)
@@ -26,7 +35,17 @@ public partial class SqlServerGovernanceRepository
             await _auditLock.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                await RecordAuditEventInternalAsync(entry, ct).ConfigureAwait(false);
+                await RecordAuditEventInternalAsync(admitted, ct).ConfigureAwait(false);
+                if (!ReferenceEquals(admitted, entry))
+                {
+                    entry.PrevHash = admitted.PrevHash;
+                    entry.EntryHash = admitted.EntryHash;
+                }
+
+                if (violation != null && isTierA && ViolationPolicy != AuditChainViolationPolicy.AlertOnly)
+                {
+                    await EmitChainFaultEventOnceAsync(admitted, violation, ct).ConfigureAwait(false);
+                }
             }
             finally
             {
@@ -38,7 +57,7 @@ public partial class SqlServerGovernanceRepository
         if (_isAuditPipelineFaulted)
         {
             _logger?.LogError("Audit pipeline is faulted; failing closed on Tier-B audit event for table {Table}.", entry.TargetTable);
-            throw new InvalidOperationException("Audit pipeline is in a faulted state (fail-closed).");
+            throw new AuditUnavailableException("Audit pipeline is in a faulted state (fail-closed).");
         }
 
         // Tier-B: High-volume query reads are enqueued to the bounded channel with timeout (fail-closed)
@@ -51,7 +70,29 @@ public partial class SqlServerGovernanceRepository
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             _logger?.LogError("Audit channel saturated; failing closed on Tier-B audit event for table {Table}.", entry.TargetTable);
-            throw new InvalidOperationException("Audit pipeline saturated (fail-closed).");
+            throw new AuditUnavailableException("Audit pipeline saturated (fail-closed).");
+        }
+    }
+
+    private AuditChainViolationPolicy ViolationPolicy => AuditChainViolationGate.ResolvePolicy(_options?.Audit, _isDevOrTest);
+
+    private int _auditFaultEventEmitted;
+
+    /// <summary>SR-L-08: writes exactly one <c>AUDIT_PIPELINE_FAULT</c> event per latch. Caller holds the audit write lock.</summary>
+    private async Task EmitChainFaultEventOnceAsync(AuditLogEntry trigger, string violation, CancellationToken ct)
+    {
+        if (Interlocked.CompareExchange(ref _auditFaultEventEmitted, 1, 0) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await RecordAuditEventInternalAsync(AuditChainViolationGate.CreateFaultEvent(trigger, violation, ViolationPolicy), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogError(ex, "Failed to write the AUDIT_PIPELINE_FAULT event for the latched audit chain violation.");
         }
     }
 
@@ -477,8 +518,13 @@ public partial class SqlServerGovernanceRepository
         // rewriting, unless a signed anchor explains it.
         var (dbTailHash, dbTailSeq) = ReadAuditTail(tx);
         var effectiveDbHash = dbTailHash ?? AuditGenesisHash;
-        var knownSeq = Interlocked.Read(ref _lastAuditSeq);
-        var knownHash = _lastAuditHash;
+        long knownSeq;
+        string knownHash;
+        lock (_pendingAuditTxStates)
+        {
+            knownSeq = _lastAuditSeq;
+            knownHash = _lastAuditHash;
+        }
         if (dbTailSeq < knownSeq || (dbTailSeq == knownSeq && !FixedTimeEqualsString(effectiveDbHash, knownHash)))
         {
             FlagAuditChainViolation(
@@ -559,8 +605,14 @@ public partial class SqlServerGovernanceRepository
 
         await tx.CommitAsync(ct).ConfigureAwait(false);
 
-        _lastAuditHash = lastEntryHash;
-        Interlocked.Exchange(ref _lastAuditSeq, lastSequence);
+        lock (_pendingAuditTxStates)
+        {
+            if (lastSequence >= _lastAuditSeq)
+            {
+                _lastAuditSeq = lastSequence;
+                _lastAuditHash = lastEntryHash;
+            }
+        }
 
         if (Volatile.Read(ref _auditChainViolation) == null && _auditAnchorStore != null)
         {
@@ -700,8 +752,11 @@ public partial class SqlServerGovernanceRepository
         await _auditLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            knownSeq = Interlocked.Read(ref _lastAuditSeq);
-            knownHash = _lastAuditHash;
+            lock (_pendingAuditTxStates)
+            {
+                knownSeq = _lastAuditSeq;
+                knownHash = _lastAuditHash;
+            }
         }
         finally
         {
@@ -807,10 +862,13 @@ public partial class SqlServerGovernanceRepository
             await _auditLock.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                if (position > Interlocked.Read(ref _lastAuditSeq))
+                lock (_pendingAuditTxStates)
                 {
-                    _lastAuditHash = expectedPrevHash;
-                    Interlocked.Exchange(ref _lastAuditSeq, position);
+                    if (position > _lastAuditSeq)
+                    {
+                        _lastAuditSeq = position;
+                        _lastAuditHash = expectedPrevHash;
+                    }
                 }
             }
             finally
@@ -1066,9 +1124,12 @@ public partial class SqlServerGovernanceRepository
 
     private void FlagAuditChainViolation(string reason)
     {
-        _auditChainViolation ??= reason;
-        _isAuditPipelineFaulted = true;
-        _logger?.LogCritical("AUDIT CHAIN INTEGRITY VIOLATION: {Reason}", reason);
+        // SR-L-08: the violation is latched in its own field and never cleared; it deliberately does not touch the recoverable
+        // write-failure flag, so a successful retry of the batch writer cannot mask it.
+        if (Interlocked.CompareExchange(ref _auditChainViolation, reason, null) == null)
+        {
+            _logger?.LogCritical("AUDIT CHAIN INTEGRITY VIOLATION: {Reason}", reason);
+        }
     }
 
     private static string EscapeField(string? v) => Autheris.Domain.Audit.AuditCanonicalizer.CanonicalizeField(v);

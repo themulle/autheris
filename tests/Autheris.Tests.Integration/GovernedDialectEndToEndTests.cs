@@ -17,7 +17,6 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Shouldly;
-using Testcontainers.PostgreSql;
 using TrinoSqlEngine.Ast.Emit;
 using Xunit;
 
@@ -273,7 +272,7 @@ public sealed class SqliteGovernedEndToEndTests : GovernedDialectEndToEndBase
 
 public sealed class PostgreSqlGovernedEndToEndTests : GovernedDialectEndToEndBase, IAsyncLifetime
 {
-    private PostgreSqlContainer? _container;
+    private PostgreSqlTestDatabase? _db;
     private DialectTarget? _target;
     protected override DialectTarget? Target => _target;
 
@@ -281,9 +280,13 @@ public sealed class PostgreSqlGovernedEndToEndTests : GovernedDialectEndToEndBas
     {
         try
         {
-            _container = new PostgreSqlBuilder("postgres:16-alpine").Build();
-            await _container.StartAsync();
-            await using var conn = new NpgsqlConnection(_container.GetConnectionString());
+            _db = await PostgreSqlTestDatabase.CreateAsync();
+            if (!_db.IsAvailable)
+            {
+                return;
+            }
+
+            await using var conn = new NpgsqlConnection(_db.ConnectionString);
             await conn.OpenAsync();
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = """
@@ -291,7 +294,7 @@ public sealed class PostgreSqlGovernedEndToEndTests : GovernedDialectEndToEndBas
                 INSERT INTO public.x1_orders VALUES (1,'acme','EU','alice@x.example'),(2,'acme','US','bob@x.example'),(3,'acme','EU','cara@x.example'),(5,'other','EU','dan@x.example'),(6,'ACME','EU','eve@x.example');
                 """;
             await cmd.ExecuteNonQueryAsync();
-            _target = new DialectTarget("PostgreSql", "PostgreSql", _container.GetConnectionString(), "public", "public", "x1_orders", ConversionFails: true);
+            _target = new DialectTarget("PostgreSql", "PostgreSql", _db.ConnectionString, "public", "public", "x1_orders", ConversionFails: true);
         }
         catch (Exception ex)
         {
@@ -304,9 +307,9 @@ public sealed class PostgreSqlGovernedEndToEndTests : GovernedDialectEndToEndBas
     public async Task DisposeAsync()
     {
         Dispose();
-        if (_container is not null)
+        if (_db is not null)
         {
-            await _container.DisposeAsync();
+            await _db.DisposeAsync();
         }
     }
 }

@@ -7,14 +7,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Connectors;
 using Autheris.Application.Interfaces;
-using Autheris.Application.Services;
-using Autheris.Application.Sql;
 using Autheris.Domain.Common;
 using Autheris.Domain.Connectors;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 namespace Autheris.Infrastructure.Connectors;
@@ -28,27 +26,32 @@ public sealed class SqlConnector : IAutherisConnector
     public IConnectorSplitManager SplitManager { get; }
     public IConnectorRecordSource RecordSource { get; }
 
+    /// <param name="connectorId">Connector id (default <c>sql</c>).</param>
+    /// <param name="metadataRepository">Catalog access for schema and table listing.</param>
+    /// <param name="maskingProvider">
+    /// Required (ARC-I-13): a connector never degrades to a masking-free read because the provider was forgotten.
+    /// </param>
+    /// <param name="scopeFactory">
+    /// Creates the scope in which the governed <see cref="IDataSourceExecutor"/> of SQL sources is resolved for one read (the
+    /// connector is a singleton, the governed execution service is scoped).
+    /// </param>
+    /// <param name="options">Gateway options (read ceilings).</param>
+    /// <param name="customCapabilities">Overrides <see cref="ConnectorCapabilities.DefaultSql"/>.</param>
     public SqlConnector(
         string connectorId,
-        ISqlConnectionFactory connectionFactory,
         ITableMetadataRepository metadataRepository,
+        IColumnMaskingProvider maskingProvider,
+        IServiceScopeFactory scopeFactory,
         IOptions<GatewayOptions>? options = null,
-        ILogger<SqlConnector>? logger = null,
-        Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
-        ConnectorCapabilities? customCapabilities = null,
-        IColumnMaskingProvider? maskingProvider = null)
+        ConnectorCapabilities? customCapabilities = null)
     {
+        ArgumentNullException.ThrowIfNull(maskingProvider);
+        ArgumentNullException.ThrowIfNull(scopeFactory);
         ConnectorId = string.IsNullOrWhiteSpace(connectorId) ? "sql" : connectorId;
         Capabilities = customCapabilities ?? ConnectorCapabilities.DefaultSql;
         Metadata = new SqlConnectorMetadata(metadataRepository);
         SplitManager = new SqlConnectorSplitManager();
-        RecordSource = new SqlConnectorRecordSource(
-            connectionFactory,
-            options,
-            logger,
-            environment,
-            ConnectorId,
-            maskingProvider);
+        RecordSource = new SqlConnectorRecordSource(scopeFactory, options, ConnectorId);
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
@@ -110,20 +113,16 @@ public sealed class SqlConnector : IAutherisConnector
 
     private sealed class SqlConnectorRecordSource : IConnectorRecordSource
     {
-        private readonly SqlDataSourceExecutor _executor;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly string _connectorId;
         private readonly IOptions<GatewayOptions>? _options;
 
         public SqlConnectorRecordSource(
-            ISqlConnectionFactory connectionFactory,
+            IServiceScopeFactory scopeFactory,
             IOptions<GatewayOptions>? options,
-            ILogger<SqlConnector>? logger,
-            Microsoft.Extensions.Hosting.IHostEnvironment? environment,
-            string connectorId,
-            IColumnMaskingProvider? maskingProvider)
+            string connectorId)
         {
-            // SEC H-13: Without the masking provider HMAC columns would only be redacted instead of pseudonymized.
-            _executor = new SqlDataSourceExecutor(connectionFactory, options, null, environment, maskingProvider);
+            _scopeFactory = scopeFactory;
             _connectorId = connectorId;
             _options = options;
         }
@@ -182,7 +181,11 @@ public sealed class SqlConnector : IAutherisConnector
                 Tenant: session.Tenant,
                 Items: session.Items);
 
-            return await _executor.ExecuteAsync(dsContext, ct);
+            // WP-ARC-B-02: the read runs through the governed pipeline (planner + compiler + binder), resolved in its own scope.
+            using var scope = _scopeFactory.CreateScope();
+            var executor = scope.ServiceProvider.GetServices<IDataSourceExecutor>().FirstOrDefault(e => e.SupportedType == DataSourceType.Sql)
+                ?? throw new InvalidOperationException("No SQL table read executor is registered.");
+            return await executor.ExecuteAsync(dsContext, ct);
         }
     }
 }

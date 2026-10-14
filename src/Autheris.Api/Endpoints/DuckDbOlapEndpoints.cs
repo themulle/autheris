@@ -107,22 +107,16 @@ public static class DuckDbOlapEndpoints
         }
 
         // SEC D-4: every staged table and every query is audited BEFORE data is returned; an audit failure fails the request closed.
-        var auditRepo = httpContext.RequestServices?.GetService<IAuditLogRepository>();
+        var auditWriter = httpContext.RequestServices!.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
         var actorSid = secContext.UserSid;
         var stagedCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var sqlHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(dto.Sql)));
 
         async Task<bool> TryAuditAsync(string eventType, string targetTable, object details)
         {
-            if (auditRepo == null)
-            {
-                logger.LogError("No audit repository available; OLAP request is rejected (fail-closed).");
-                return false;
-            }
-
             try
             {
-                await auditRepo.RecordAuditEventAsync(new AuditLogEntry
+                await auditWriter.RecordRequiredAsync(new AuditLogEntry
                 {
                     TenantId = tenantId,
                     EventType = eventType,

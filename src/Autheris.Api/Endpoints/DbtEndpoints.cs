@@ -45,7 +45,7 @@ public static class DbtEndpoints
 
             return await EndpointSecurity.WithBodyLimitAsync(async () =>
             {
-                var result = await dbtService.IngestManifestStreamAsync(context.Request.Body, dryRun, context.RequestAborted);
+                var result = await dbtService.IngestManifestStreamAsync(context.Request.Body, dryRun, EndpointSecurity.GetRequestTenant(context), context.RequestAborted);
                 return result.Success ? Results.Ok(result) : Results.BadRequest(result);
             }, manifestTooLarge);
         }).RequireAuthorization()

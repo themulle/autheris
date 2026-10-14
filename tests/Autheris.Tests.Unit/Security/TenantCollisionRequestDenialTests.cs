@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Unit.TestDoubles;
 using System.Security.Claims;
 using Autheris.Api.Middleware;
 using Autheris.Application.Interfaces;
@@ -40,7 +41,7 @@ public sealed class TenantCollisionRequestDenialTests
         var audit = Substitute.For<IAuditLogRepository>();
         var services = new ServiceCollection();
         if (registerOptions) services.AddSingleton(monitor ?? new MutableMonitor(Colliding()));
-        services.AddSingleton(audit);
+        services.AddAuditWriterOver(audit);
         var context = new DefaultHttpContext { RequestServices = services.BuildServiceProvider() };
         context.Response.Body = new MemoryStream();
         context.User = new ClaimsPrincipal(new ClaimsIdentity(new[]
