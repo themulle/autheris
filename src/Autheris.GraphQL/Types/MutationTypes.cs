@@ -4,17 +4,15 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Consent;
 using Autheris.Application.Interfaces;
 using Autheris.Application.OpenMetadata.Interfaces;
 using Autheris.Application.DataCatalog.Interfaces;
-using Autheris.Application.Workflows;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
-using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using HotChocolate;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Options;
 
 namespace Autheris.GraphQL.Types;
 
@@ -77,7 +75,18 @@ public sealed class Mutation
     /// </summary>
     internal static TenantId ResolveMutationTenantId(IHttpContextAccessor? httpContextAccessor, ClaimsPrincipal? principal, bool isCrossTenantAdmin)
     {
-        var principalTenant = principal?.GetTenantId() ?? TenantId.LegacySingleTenant;
+        try
+        {
+            return ConsentRequestService.ResolveTenantId(principal, GetContextTenantId(httpContextAccessor), isCrossTenantAdmin);
+        }
+        catch (ConsentRequestException ex)
+        {
+            throw new GraphQLException(ErrorBuilder.New().SetCode(ex.Code).SetMessage(ex.Message).Build());
+        }
+    }
+
+    private static TenantId GetContextTenantId(IHttpContextAccessor? httpContextAccessor)
+    {
         var contextTenant = TenantId.LegacySingleTenant;
         if (httpContextAccessor?.HttpContext?.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var secObj) == true && secObj is SecurityPrincipalContext secCtx)
         {
@@ -88,18 +97,7 @@ public sealed class Mutation
             contextTenant = tid;
         }
 
-        if (principalTenant != TenantId.LegacySingleTenant &&
-            contextTenant != TenantId.LegacySingleTenant &&
-            principalTenant != contextTenant &&
-            !isCrossTenantAdmin)
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("FORBIDDEN")
-                .SetMessage("Cross-tenant access forbidden: The token tenant does not match the tenant of the connection context.")
-                .Build());
-        }
-
-        return contextTenant != TenantId.LegacySingleTenant ? contextTenant : principalTenant;
+        return contextTenant;
     }
 
     /// <summary>
@@ -154,20 +152,6 @@ public sealed class Mutation
         await idempotencyStore.SetIfNotExistsAsync(compositeKey, payload, TimeSpan.FromHours(24), ct).ConfigureAwait(false);
     }
 
-    [GraphQLIgnore]
-    public Task<ConsentRequestPayload> RequestTableAccessAsync(
-        string domain,
-        string schema,
-        string tableName,
-        string justification,
-        int durationDays,
-        string? idempotencyKey,
-        [Service] IGovernanceRepository repository,
-        [Service] IHttpContextAccessor httpContextAccessor,
-        [Service] IIdempotencyStore idempotencyStore = default!,
-        CancellationToken ct = default)
-        => RequestTableAccessAsync(domain, schema, tableName, justification, durationDays, idempotencyKey, repository, repository, httpContextAccessor, idempotencyStore, null, null, ct);
-
     public async Task<ConsentRequestPayload> RequestTableAccessAsync(
         string domain,
         string schema,
@@ -175,174 +159,32 @@ public sealed class Mutation
         string justification,
         int durationDays,
         string? idempotencyKey,
-        [Service] ITableMetadataRepository metadataRepository = default!,
-        [Service] IConsentApprovalRepository approvalRepository = default!,
-        [Service] IHttpContextAccessor httpContextAccessor = default!,
-        [Service] IIdempotencyStore idempotencyStore = default!,
-        [Service] ItsmWorkflowDispatcher? itsmDispatcher = default!,
-        [Service] IOptions<GatewayOptions>? gatewayOptions = default!,
+        [Service] IConsentRequestService consentRequestService,
+        [Service] IHttpContextAccessor httpContextAccessor,
         CancellationToken ct = default)
     {
         var userSid = GetAuthenticatedUserSid(httpContextAccessor);
         var principal = httpContextAccessor?.HttpContext?.User;
 
-        if (string.IsNullOrWhiteSpace(domain) || string.IsNullOrWhiteSpace(schema) || string.IsNullOrWhiteSpace(tableName))
+        try
         {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("INVALID_ARGUMENT")
-                .SetMessage("Domain, Schema and TableName must be valid, non-empty values.")
-                .Build());
-        }
+            var result = await consentRequestService.SubmitAsync(
+                new SubmitConsentRequestCommand(
+                    domain, schema, tableName, justification, durationDays, idempotencyKey,
+                    userSid, principal, GetContextTenantId(httpContextAccessor)),
+                ct);
 
-        if (string.IsNullOrWhiteSpace(justification) || justification.Trim().Length < 5)
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("INVALID_ARGUMENT")
-                .SetMessage("A justification of at least 5 characters is required.")
-                .Build());
-        }
-
-        if (justification.Length > 2000)
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("INVALID_ARGUMENT")
-                .SetMessage("The justification must not exceed 2000 characters.")
-                .Build());
-        }
-
-        if (durationDays < 1 || durationDays > 365)
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("INVALID_ARGUMENT")
-                .SetMessage("The duration (durationDays) must be between 1 and 365 days.")
-                .Build());
-        }
-
-        var requestFingerprint = IdempotencyFingerprint(
-            ResolveMutationTenantId(httpContextAccessor, principal, Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal)).Value,
-            domain, schema, tableName, justification.Trim(), durationDays);
-        var existing = await TryGetIdempotentAsync(userSid, "RequestTableAccess", idempotencyKey, requestFingerprint, idempotencyStore, ct);
-        if (existing != null)
-        {
-            return existing;
-        }
-
-        var tableId = new TableIdentifier(domain, schema, tableName);
-        var meta = await metadataRepository.GetTableMetadataAsync(tableId, ct);
-        if (meta == null)
-        {
-            // SEC (Niedrig): Keine Tabellen-Enumeration über NOT_FOUND + Tabellenname; neutrale FORBIDDEN-Antwort.
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("FORBIDDEN")
-                .SetMessage("Access request for the specified table is not possible.")
-                .Build());
-        }
-
-        // R-GQL-9: same ClusterAdmin exception as approve, reject and revoke.
-        bool isCrossTenantAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
-        var tenantId = ResolveMutationTenantId(httpContextAccessor, principal, isCrossTenantAdmin);
-
-        bool isItsmEnabled = itsmDispatcher != null && (gatewayOptions?.Value.Itsm.Enabled == true);
-
-        var request = new ConsentRequest
-        {
-            TableId = meta.Table.Id,
-            TableIdentifier = tableId,
-            RequesterSid = userSid,
-            RequestedGranteeType = GranteeType.User,
-            RequestedGranteeRef = userSid.Value,
-            BusinessJustification = justification.Trim(),
-            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(durationDays),
-            Status = isItsmEnabled ? "PENDING_EXTERNAL_APPROVAL" : "PENDING",
-            TenantId = tenantId,
-            RequesterIdentifiers = ExtractPrincipalIdentifiers(principal, userSid.Value)
-        };
-
-        var created = await approvalRepository.CreateConsentRequestAsync(request, ct);
-
-        if (gatewayOptions?.Value.IsAutoApproveEnabled == true)
-        {
-            await approvalRepository.ActivateConsentForAutoApproveAsync(created.Id, ct);
-            var payload = new ConsentRequestPayload
+            return new ConsentRequestPayload
             {
-                RequestId = created.Id,
-                Status = "APPROVED",
-                Message = "[INSECURE GETTING STARTED] Consent request auto-approved."
+                RequestId = result.RequestId,
+                Status = result.Status,
+                Message = result.Message,
+                ItsmTicketReference = result.ItsmTicketReference
             };
-            await StoreIdempotentAsync(userSid, "RequestTableAccess", idempotencyKey, requestFingerprint, payload, idempotencyStore, ct);
-            return payload;
         }
-
-        if (isItsmEnabled)
+        catch (ConsentRequestException ex)
         {
-            ItsmTicketResult? ticketResult = null;
-            try
-            {
-                var itsmRequest = new ItsmTicketRequest(
-                    tenantId,
-                    userSid,
-                    tableId,
-                    justification,
-                    Math.Clamp(durationDays, 1, 365),
-                    null,
-                    null);
-
-                var preferredSystem = gatewayOptions?.Value.Itsm.DefaultSystem ?? ItsmSystemType.ServiceNow;
-                ticketResult = await itsmDispatcher!.DispatchTicketRequestAsync(itsmRequest, preferredSystem, ct);
-            }
-            catch (Exception ex)
-            {
-                await approvalRepository.DeleteConsentRequestAsync(created.Id, ct);
-                throw new GraphQLException(ErrorBuilder.New()
-                    .SetCode("ITSM_UNAVAILABLE")
-                    .SetMessage($"ITSM system unavailable: {ex.Message}")
-                    .Build());
-            }
-
-            if (ticketResult == null || !ticketResult.Success)
-            {
-                await approvalRepository.DeleteConsentRequestAsync(created.Id, ct);
-                throw new GraphQLException(ErrorBuilder.New()
-                    .SetCode(ticketResult?.ErrorCode ?? "ITSM_UNAVAILABLE")
-                    .SetMessage(ticketResult?.ErrorMessage ?? "Failed to create external ITSM ticket.")
-                    .Build());
-            }
-
-            try
-            {
-                await approvalRepository.UpdateConsentRequestTicketIdAsync(created.Id, ticketResult.TicketReference!.TicketId, ct);
-            }
-            catch
-            {
-                await approvalRepository.DeleteConsentRequestAsync(created.Id, ct);
-                throw new GraphQLException(ErrorBuilder.New()
-                    .SetCode("ITSM_UNAVAILABLE")
-                    .SetMessage("Failed to record ITSM ticket reference.")
-                    .Build());
-            }
-
-            var payload = new ConsentRequestPayload
-            {
-                RequestId = created.Id,
-                Status = "PENDING_EXTERNAL_APPROVAL",
-                Message = "Consent request submitted to ITSM for external approval.",
-                ItsmTicketReference = ticketResult.TicketReference
-            };
-
-            await StoreIdempotentAsync(userSid, "RequestTableAccess", idempotencyKey, requestFingerprint, payload, idempotencyStore, ct);
-            return payload;
-        }
-        else
-        {
-            var payload = new ConsentRequestPayload
-            {
-                RequestId = created.Id,
-                Status = created.Status,
-                Message = "Consent request submitted successfully."
-            };
-
-            await StoreIdempotentAsync(userSid, "RequestTableAccess", idempotencyKey, requestFingerprint, payload, idempotencyStore, ct);
-            return payload;
+            throw new GraphQLException(ErrorBuilder.New().SetCode(ex.Code).SetMessage(ex.Message).Build());
         }
     }
 
@@ -800,37 +642,7 @@ public sealed class Mutation
     }
 
     private static List<string> ExtractPrincipalIdentifiers(ClaimsPrincipal? principal, string? fallbackSid = null)
-    {
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (!string.IsNullOrWhiteSpace(fallbackSid))
-        {
-            set.Add(fallbackSid.Trim());
-        }
-
-        if (principal != null)
-        {
-            foreach (var claim in principal.Claims)
-            {
-                if (claim.Type is ClaimTypes.PrimarySid
-                                or ClaimTypes.NameIdentifier
-                                or "objectSid"
-                                or "onprem_sid"
-                                or "oid"
-                                or "sub"
-                                or ClaimTypes.Upn
-                                or ClaimTypes.Email
-                                or ClaimTypes.Name)
-                {
-                    if (!string.IsNullOrWhiteSpace(claim.Value))
-                    {
-                        set.Add(claim.Value.Trim());
-                    }
-                }
-            }
-        }
-
-        return set.ToList();
-    }
+        => ConsentRequestService.ExtractPrincipalIdentifiers(principal, fallbackSid);
 
     private static bool IsSameIdentity(ConsentRequest req, ClaimsPrincipal? principal)
     {

@@ -36,6 +36,7 @@ public static class GatewayMcpServiceExtensions
         services.AddSingleton<ISemanticToolPruner, SemanticToolPruner>();
         services.AddSingleton<IPersistedToolValidator, PersistedToolValidator>();
         services.AddScoped<IApiDispatcherService, ApiDispatcherService>();
+        services.AddScoped<IMcpResourceProvider, McpResourceProvider>();
         services.AddScoped<IMcpToolExecutionHandler, McpToolExecutionHandler>();
         services.AddScoped<IMcpQueryExecutor, GatewayMcpQueryExecutor>();
         GatewayMcpServer.AddGatewayMcpServer(services, gatewayOptions);

@@ -40,4 +40,5 @@ Federated queries that span several data sources are only available when `Gatewa
 
 - **Transport:** Streamable HTTP with Server-Sent Events (SSE) and stateless request handling at `/mcp`.
 - **Discovery Endpoint:** `/.well-known/oauth-protected-resource/mcp`.
+- **Native resources:** rendered by `IMcpResourceProvider` (`src/Autheris.Application/Mcp/Services/McpResourceProvider.cs`); `src/Autheris.Api/Mcp/GatewayMcpServer.cs` only maps the result to the MCP SDK types.
 - **Implementation:** `src/Autheris.Application/Mcp/Server/GatewayMcpServer.cs` and `src/Autheris.Application/Mcp/Tools/HybridMcpTools.cs`.

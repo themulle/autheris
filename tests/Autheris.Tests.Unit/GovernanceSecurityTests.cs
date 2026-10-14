@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Autheris.Application.Consent;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -233,10 +234,10 @@ public class GovernanceSecurityTests : IDisposable
         var accessorB = CreateAccessor(userB);
 
         var payloadA = await _mutation.RequestTableAccessAsync(
-            "finance", "dbo", "finance_table_1", "Reason A", 7, sharedIdempotencyKey, _repository, accessorA);
+            "finance", "dbo", "finance_table_1", "Reason A", 7, sharedIdempotencyKey, new ConsentRequestService(_repository, _repository), accessorA);
 
         var payloadB = await _mutation.RequestTableAccessAsync(
-            "finance", "dbo", "finance_table_1", "Reason B", 7, sharedIdempotencyKey, _repository, accessorB);
+            "finance", "dbo", "finance_table_1", "Reason B", 7, sharedIdempotencyKey, new ConsentRequestService(_repository, _repository), accessorB);
 
         // Payloads must not collide!
         payloadA.RequestId.ShouldNotBe(payloadB.RequestId);
@@ -639,7 +640,7 @@ public class GovernanceSecurityTests : IDisposable
         var accessor = CreateAccessor(new Sid("S-1-5-21-USER-1"));
         var ex = await Should.ThrowAsync<GraphQLException>(async () =>
         {
-            await _mutation.RequestTableAccessAsync("finance", "dbo", "finance_table_1", justification, 7, null, _repository, _repository, accessor);
+            await _mutation.RequestTableAccessAsync("finance", "dbo", "finance_table_1", justification, 7, null, new ConsentRequestService(_repository, _repository), accessor);
         });
         ex.Errors.ShouldContain(e => e.Code == "INVALID_ARGUMENT");
     }
@@ -653,7 +654,7 @@ public class GovernanceSecurityTests : IDisposable
         var accessor = CreateAccessor(new Sid("S-1-5-21-USER-1"));
         var ex = await Should.ThrowAsync<GraphQLException>(async () =>
         {
-            await _mutation.RequestTableAccessAsync("finance", "dbo", "finance_table_1", "Valid justification here", durationDays, null, _repository, _repository, accessor);
+            await _mutation.RequestTableAccessAsync("finance", "dbo", "finance_table_1", "Valid justification here", durationDays, null, new ConsentRequestService(_repository, _repository), accessor);
         });
         ex.Errors.ShouldContain(e => e.Code == "INVALID_ARGUMENT");
     }

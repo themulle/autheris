@@ -1,7 +1,7 @@
 # P10: Enterprise Governance Mutations & 4-Eyes SoD
 
 **Status:** [Done] (100% GA – Core Foundation)  
-**Components:** [`MutationTypes.cs`](file:///root/autheris/src/Autheris.GraphQL/Types/MutationTypes.cs), [`RedisIdempotencyStore.cs`](file:///root/autheris/src/Autheris.Infrastructure/Caching/RedisIdempotencyStore.cs), [`ConsentRecertificationWorkflowService.cs`](file:///root/autheris/src/Autheris.Application/Workflows/ConsentRecertificationWorkflowService.cs)
+**Components:** [`MutationTypes.cs`](file:///root/autheris/src/Autheris.GraphQL/Types/MutationTypes.cs), [`ConsentRequestService.cs`](file:///root/autheris/src/Autheris.Application/Consent/ConsentRequestService.cs), [`RedisIdempotencyStore.cs`](file:///root/autheris/src/Autheris.Infrastructure/Caching/RedisIdempotencyStore.cs), [`ConsentRecertificationWorkflowService.cs`](file:///root/autheris/src/Autheris.Application/Workflows/ConsentRecertificationWorkflowService.cs)
 
 ---
 
@@ -26,6 +26,8 @@ Granting database access permissions must never be a single-click action perform
 - Automated recertification workflow with ServiceNow and Jira outbox integration.
 
 ---
+
+The `requestTableAccess` use case (validation, idempotency, tenant resolution, auto-approve, external approval hand-off) lives in `IConsentRequestService` (Application layer); the GraphQL mutation only maps arguments and error codes. The external hand-off goes through the `IConsentRequestDispatcher` seam.
 
 ## 4. Usage Example
 
