@@ -718,6 +718,12 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
 
     private string ResolveSecretValue(string secretRefOrValue)
     {
+        // SR-H-03: descriptors are API-created; a persisted reference outside the datasource namespace is refused (fail-closed).
+        if (!Autheris.Application.Security.DatasourceSecretRefPolicy.IsInDatasourceNamespace(secretRefOrValue))
+        {
+            throw new System.Security.SecurityException("The declarative HTTP API credential reference is outside the datasource secret namespace (fail-closed).");
+        }
+
         // Review G5: the secret reference is never logged or embedded in exception messages (central resolver, description only).
         return Autheris.Application.Security.SecretReferenceResolver.Resolve(
                    _secretProvider,

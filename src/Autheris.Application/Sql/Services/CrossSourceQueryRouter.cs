@@ -91,6 +91,10 @@ public sealed class CrossSourceQueryRouter : ICrossSourceQueryRouter
             var schema = !string.IsNullOrWhiteSpace(target.Schema) ? target.Schema : "public";
             var tableId = new TableIdentifier(domain, schema, target.TableName);
 
+            // SR-H-06: same data-source allowlists as the single-catalog path, for every referenced catalog,
+            // before any metadata lookup or data read.
+            DataSourceAllowlistGuard.EnsureAllowed(_webSqlOptions, tenantId, domain);
+
             var meta = await _tableRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
             if (meta == null && !string.Equals(tableId.Domain, "default", StringComparison.OrdinalIgnoreCase))
             {

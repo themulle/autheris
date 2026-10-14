@@ -359,7 +359,7 @@ public sealed class AdminMcpTwoPhaseTests
         // Assert
         result.IsSuccess.ShouldBeFalse();
         result.ErrorMessage.ShouldNotBeNull();
-        result.ErrorMessage.ShouldContain("administrative role");
+        result.ErrorMessage.ShouldContain("requires the ClusterAdmin role");
     }
 
     [Fact]
@@ -379,7 +379,7 @@ public sealed class AdminMcpTwoPhaseTests
             TenantId: "default",
             CreatedAt: DateTimeOffset.UtcNow,
             LastActiveAt: DateTimeOffset.UtcNow,
-            Roles: ["GovernanceAdmin"]);
+            Roles: ["ClusterAdmin"]); // SR-H-02: MCP admin tools are cluster-admin only
 
         var planCall = new McpToolCallRequest(
             ToolName: McpAdminTools.PlanAccess,
@@ -517,7 +517,7 @@ public sealed class AdminMcpTwoPhaseTests
     }
 
     [Fact]
-    public async Task McpProtocolHandler_ToolsList_ExposesAdminToolsForGovernanceAdmin_B16()
+    public async Task McpProtocolHandler_ToolsList_ExposesAdminToolsForClusterAdmin_B16_SR_H_02()
     {
         // Arrange
         var sessionStore = new McpSessionStore(NullLogger<McpSessionStore>.Instance);
@@ -525,7 +525,7 @@ public sealed class AdminMcpTwoPhaseTests
         var guardrail = Substitute.For<IAiDataGuardrailService>();
         var handler = new McpProtocolHandler(sessionStore, toolRegistry, guardrail, NullLogger<McpProtocolHandler>.Instance);
 
-        var adminSession = handler.CreateSession("admin-app", "tenant-1", userSid: "user-admin", roles: ["GovernanceAdmin"]);
+        var adminSession = handler.CreateSession("admin-app", "tenant-1", userSid: "user-admin", roles: ["ClusterAdmin"]);
 
         // Act
         var responseJson = await handler.HandleMessageAsync(adminSession.SessionId, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");

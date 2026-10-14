@@ -52,7 +52,7 @@ public sealed class DatasourceTestingServiceTests
             PathTemplate = pathTemplate ?? "/api/items",
             AuthMode = HttpAuthMode.StaticApiKey,
             ApiKeyHeaderName = "X-Api-Key",
-            ApiKeySecretName = "secret-key-1"
+            ApiKeySecretName = "datasource:payments:secret-key-1"
         };
 
         var table = new Table

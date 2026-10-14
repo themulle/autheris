@@ -33,6 +33,7 @@ public interface IAccessPlanningService
     Task<AdminApplyAccessResult> ApplyAccessAsync(
         AdminApplyAccessRequest request,
         string adminSid,
+        string? tenantId = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -41,6 +42,7 @@ public interface IAccessPlanningService
     Task<AdminRegisterDatasourceResult> RegisterDatasourceAsync(
         AdminRegisterDatasourceRequest request,
         string adminSid,
+        string? tenantId = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -49,6 +51,7 @@ public interface IAccessPlanningService
     Task<AdminSetDatasetStateResult> SetDatasetStateAsync(
         AdminSetDatasetStateRequest request,
         string adminSid,
+        string? tenantId = null,
         CancellationToken ct = default);
 
     /// <summary>

@@ -37,6 +37,7 @@ public sealed class GatewayOptions
     [Required] public HitLStepUpOptions HitLStepUp { get; init; } = new();
     [Required] public WebSqlOptions WebSql { get; init; } = new();
     [Required] public TransportRowLimitsOptions RowLimits { get; init; } = new();
+    [Required] public AsyncJobOptions AsyncJobs { get; init; } = new();
     [Required] public SqlEndpointsOptions SqlEndpoints { get; init; } = new();
     [Required] public InsecureGettingStartedOptions Insecure { get; init; } = new();
     [Required] public DevOptions Dev { get; init; } = new();
@@ -1553,6 +1554,25 @@ public sealed class TransportRowLimitsOptions
 
     /// <summary>Arrow Flight SQL (/api/v1/flight/sql/*).</summary>
     public ChannelRowLimitOptions FlightSql { get; init; } = new();
+
+    /// <summary>Asynchronous query jobs (POST /api/v1/jobs/query); the client MaxRows is clamped to MaxAllowedRows (SR-H-05).</summary>
+    public ChannelRowLimitOptions AsyncJob { get; init; } = new();
+}
+
+/// <summary>Server-side bounds of asynchronous query jobs. Client-supplied timeout and row count never exceed them (SR-H-05).</summary>
+public sealed class AsyncJobOptions
+{
+    /// <summary>Timeout applied when the client supplies none (or a non-positive one).</summary>
+    public int DefaultTimeoutSeconds { get; init; } = 300;
+
+    /// <summary>Upper bound for a client-supplied timeout.</summary>
+    public int MaxTimeoutSeconds { get; init; } = 900;
+
+    /// <summary>How often finished jobs and their result files are purged.</summary>
+    public int PurgeIntervalMinutes { get; init; } = 15;
+
+    /// <summary>How long a finished job and its result file are kept.</summary>
+    public int RetentionHours { get; init; } = 24;
 }
 
 /// <summary>Row limits of one transport; null keeps the WebSql value.</summary>

@@ -62,40 +62,6 @@ public static class McpDatasetTools
         string.Equals(toolName, QueryDataset, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, InvokeApi, StringComparison.OrdinalIgnoreCase);
 
-    private static readonly System.Text.RegularExpressions.Regex FromTableRegex = new(
-        @"\bFROM\s+([a-zA-Z0-9_\.]+)",
-        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled,
-        TimeSpan.FromMilliseconds(250));
-
-    private static TableIdentifier? ExtractTableFromSql(string sql)
-    {
-        try
-        {
-            var match = FromTableRegex.Match(sql);
-            if (match.Success)
-            {
-                var candidate = match.Groups[1].Value.Trim('"', '`', '[', ']');
-                if (McpDatasetCatalog.TryParseDatasetId(candidate, out var tableId))
-                {
-                    return tableId;
-                }
-                var parts = candidate.Split('.');
-                if (parts.Length == 2)
-                {
-                    return new TableIdentifier(parts[0], "public", parts[1]);
-                }
-                if (parts.Length == 1 && !string.IsNullOrWhiteSpace(parts[0]))
-                {
-                    return new TableIdentifier("default", "public", parts[0]);
-                }
-            }
-        }
-        catch (System.Text.RegularExpressions.RegexMatchTimeoutException)
-        {
-        }
-        return null;
-    }
-
     /// <summary>
     /// The table a dataset tool call targets. Null (fail-closed) when a table tool has no valid <c>dataset</c> argument.
     /// </summary>
@@ -117,22 +83,12 @@ public static class McpDatasetTools
             return new TableIdentifier("governance", "api", "describe");
         }
 
-        if (string.Equals(toolName, InvokeApi, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(toolName, InvokeApi, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(toolName, QuerySql, StringComparison.OrdinalIgnoreCase))
         {
-            return new TableIdentifier("governance", "api", "invoke");
-        }
-
-        if (string.Equals(toolName, QuerySql, StringComparison.OrdinalIgnoreCase))
-        {
-            if (TryGetStringArgument(argumentsJson, "query", out var sql) && !string.IsNullOrWhiteSpace(sql))
-            {
-                var table = ExtractTableFromSql(sql);
-                if (table != null)
-                {
-                    return table;
-                }
-            }
-            return new TableIdentifier("governance", "sql", "query");
+            // SR-H-01: these tools read any number of tables chosen by the caller (SQL text, API path). A single table cannot
+            // describe them; AiDataGuardrailService resolves all of them via McpDataTargetResolver. Null is fail-closed.
+            return null;
         }
 
         if (string.Equals(toolName, QueryGraphQl, StringComparison.OrdinalIgnoreCase))

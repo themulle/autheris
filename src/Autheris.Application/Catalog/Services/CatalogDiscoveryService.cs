@@ -330,6 +330,10 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             throw new ArgumentException("Either SpecContent or SpecUrl must be provided.", nameof(request));
         }
 
+        // SR-H-03: a client-supplied SecretRef is never trusted as vault key; it must lie inside the datasource's own namespace.
+        var secretNamespace = $"{DatasourceSecretRefPolicy.DomainPrefix(request.Domain)}{request.Name.ToLowerInvariant()}:";
+        DatasourceSecretRefPolicy.ValidateClientRef(request.Auth?.SecretRef, secretNamespace);
+
         var isConfigured = request.Auth != null &&
             (!string.IsNullOrEmpty(request.Auth.Value) ||
              !string.IsNullOrEmpty(request.Auth.ClientSecret) ||
@@ -342,7 +346,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             var rawSecret = request.Auth.Value ?? request.Auth.ClientSecret;
             if (!string.IsNullOrEmpty(rawSecret))
             {
-                var secretRef = request.Auth.SecretRef ?? $"datasource:{request.Domain}:{request.Name.ToLowerInvariant()}:secret";
+                var secretRef = request.Auth.SecretRef ?? $"{secretNamespace}secret";
                 _secretProvider.SetSecret(secretRef, System.Text.Encoding.UTF8.GetBytes(rawSecret));
                 effectiveAuth = request.Auth with { SecretRef = secretRef, Value = null, ClientSecret = null };
             }

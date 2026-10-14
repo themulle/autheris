@@ -2,6 +2,7 @@ namespace Autheris.Application.Mcp.Tools;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security;
 using System.Text.Json;
 using System.Threading;
@@ -9,6 +10,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 
 /// <summary>
 /// Model Context Protocol (MCP) administrative tool definitions for access planning and governance.
@@ -35,6 +37,22 @@ public static class McpAdminTools
         string.Equals(toolName, RegisterDatasource, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, SetDatasetState, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, ResolvePrincipal, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// SR-H-02 / SR-M-09: The admin tools mutate the shared catalog and ReBAC state, which is not tenant scoped, so only the
+    /// canonical cluster administrator (<see cref="ClusterAdminPolicy.IsClusterAdminRole"/>) may call or even see them.
+    /// Tenant-scoped admin roles (TenantAdmin, GovernanceAdmin, Admin, ...) never qualify, and read-only sessions never
+    /// qualify (not even under the MCP auth bypass).
+    /// </summary>
+    public static bool CanUseAdminTools(McpSessionContext? session, bool authBypassed)
+    {
+        if (session == null || session.IsReadOnly)
+        {
+            return false;
+        }
+
+        return authBypassed || (session.Roles ?? []).Any(ClusterAdminPolicy.IsClusterAdminRole);
+    }
 
     public static IEnumerable<McpToolDefinition> Definitions()
     {
@@ -164,7 +182,7 @@ public static class McpAdminTools
             {
                 var req = JsonSerializer.Deserialize<AdminApplyAccessRequest>(argumentsJson, JsonOptions)
                     ?? throw new ArgumentException("Invalid arguments for admin_apply_access.");
-                var result = await planningService.ApplyAccessAsync(req, adminSid, ct).ConfigureAwait(false);
+                var result = await planningService.ApplyAccessAsync(req, adminSid, sessionContext.TenantId, ct).ConfigureAwait(false);
                 return new McpToolCallResult(true, JsonSerializer.Serialize(result, JsonOptions));
             }
 
@@ -172,7 +190,7 @@ public static class McpAdminTools
             {
                 var req = JsonSerializer.Deserialize<AdminRegisterDatasourceRequest>(argumentsJson, JsonOptions)
                     ?? throw new ArgumentException("Invalid arguments for admin_register_datasource.");
-                var result = await planningService.RegisterDatasourceAsync(req, adminSid, ct).ConfigureAwait(false);
+                var result = await planningService.RegisterDatasourceAsync(req, adminSid, sessionContext.TenantId, ct).ConfigureAwait(false);
                 return new McpToolCallResult(true, JsonSerializer.Serialize(result, JsonOptions));
             }
 
@@ -180,7 +198,7 @@ public static class McpAdminTools
             {
                 var req = JsonSerializer.Deserialize<AdminSetDatasetStateRequest>(argumentsJson, JsonOptions)
                     ?? throw new ArgumentException("Invalid arguments for admin_set_dataset_state.");
-                var result = await planningService.SetDatasetStateAsync(req, adminSid, ct).ConfigureAwait(false);
+                var result = await planningService.SetDatasetStateAsync(req, adminSid, sessionContext.TenantId, ct).ConfigureAwait(false);
                 return new McpToolCallResult(true, JsonSerializer.Serialize(result, JsonOptions));
             }
 

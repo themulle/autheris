@@ -166,38 +166,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
                 return SerializeError("ServiceUnavailable", 503, "GovernedSqlExecutionService is not registered.");
             }
 
-            var sql = ExtractString(paramDict, "sql") ?? ExtractString(paramDict, "query");
-            if (string.IsNullOrWhiteSpace(sql) && body != null)
-            {
-                try
-                {
-                    if (body is JsonElement jsonElem)
-                    {
-                        if (jsonElem.TryGetProperty("sql", out var s) || jsonElem.TryGetProperty("query", out s))
-                        {
-                            sql = s.GetString();
-                        }
-                    }
-                    else if (body is string rawJson && !string.IsNullOrWhiteSpace(rawJson))
-                    {
-                        using var doc = JsonDocument.Parse(rawJson);
-                        if (doc.RootElement.TryGetProperty("sql", out var s) || doc.RootElement.TryGetProperty("query", out s))
-                        {
-                            sql = s.GetString();
-                        }
-                    }
-                    else
-                    {
-                        var serialized = JsonSerializer.Serialize(body);
-                        using var doc = JsonDocument.Parse(serialized);
-                        if (doc.RootElement.TryGetProperty("sql", out var s) || doc.RootElement.TryGetProperty("query", out s))
-                        {
-                            sql = s.GetString();
-                        }
-                    }
-                }
-                catch (JsonException) { }
-            }
+            var sql = ExtractStatementSql(paramDict, body);
 
             if (string.IsNullOrWhiteSpace(sql))
             {
@@ -335,7 +304,49 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         };
     }
 
-    private static TableIdentifier? ExtractTableIdentifier(string endpoint, IReadOnlyDictionary<string, object?> parameters)
+    /// <summary>
+    /// The SQL text of a <c>POST /api/v1/statement</c> call (parameters first, then the body). Shared with the MCP guardrail so
+    /// it checks exactly the statement the dispatcher executes.
+    /// </summary>
+    internal static string? ExtractStatementSql(IReadOnlyDictionary<string, object?> paramDict, object? body)
+    {
+        var sql = ExtractString(paramDict, "sql") ?? ExtractString(paramDict, "query");
+        if (string.IsNullOrWhiteSpace(sql) && body != null)
+        {
+            try
+            {
+                if (body is JsonElement jsonElem)
+                {
+                    if (jsonElem.TryGetProperty("sql", out var s) || jsonElem.TryGetProperty("query", out s))
+                    {
+                        sql = s.GetString();
+                    }
+                }
+                else if (body is string rawJson && !string.IsNullOrWhiteSpace(rawJson))
+                {
+                    using var doc = JsonDocument.Parse(rawJson);
+                    if (doc.RootElement.TryGetProperty("sql", out var s) || doc.RootElement.TryGetProperty("query", out s))
+                    {
+                        sql = s.GetString();
+                    }
+                }
+                else
+                {
+                    var serialized = JsonSerializer.Serialize(body);
+                    using var doc = JsonDocument.Parse(serialized);
+                    if (doc.RootElement.TryGetProperty("sql", out var s) || doc.RootElement.TryGetProperty("query", out s))
+                    {
+                        sql = s.GetString();
+                    }
+                }
+            }
+            catch (JsonException) { }
+        }
+
+        return sql;
+    }
+
+    internal static TableIdentifier? ExtractTableIdentifier(string endpoint, IReadOnlyDictionary<string, object?> parameters)
     {
         if (parameters.TryGetValue("dataset", out var dsObj) && dsObj is string dsStr && McpDatasetCatalog.TryParseDatasetId(dsStr, out var tid))
         {
