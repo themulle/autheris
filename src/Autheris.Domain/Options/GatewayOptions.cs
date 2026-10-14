@@ -379,6 +379,13 @@ public sealed class HostingLimitsOptions
     [Range(1, 1000000)] public long MaxConcurrentUpgradedConnections { get; init; } = 1000;
     /// <summary>0 = unlimited (Kestrel default).</summary>
     [Range(0, 10000000)] public long MaxConcurrentConnections { get; init; } = 0;
+
+    /// <summary>
+    /// SR-L-02: accepted <c>Host</c> values (exact host, <c>host:port</c>, <c>*.suffix</c>). Required outside Development
+    /// (startup fails when empty); in Development an empty list accepts loopback host names only.
+    /// Also the allow-list for the CSRF Origin check.
+    /// </summary>
+    public List<string> AllowedHosts { get; init; } = [];
 }
 
 public sealed class PluginsOptions

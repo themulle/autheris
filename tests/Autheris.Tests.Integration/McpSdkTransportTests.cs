@@ -177,6 +177,7 @@ public sealed class McpSdkTransportTests : IClassFixture<WebApplicationFactory<P
             var prodFactory = _factory.WithWebHostBuilder(b =>
             {
                 b.UseEnvironment("Production");
+                b.UseSetting("Gateway:Hosting:AllowedHosts:0", "localhost");
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source={tempDb}");
                 b.UseSetting("Gateway:GovernanceDb:ChainAnchorPath", tempAnchor);
                 b.UseSetting("Gateway:Audit:ChainAnchorPath", tempAnchor);

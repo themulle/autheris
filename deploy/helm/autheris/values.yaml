@@ -92,7 +92,12 @@ gateway:
   drainDelaySeconds: 5
   shutdownTimeoutSeconds: 30
   aspnetcoreEnvironment: "Production"
-  
+
+  # Gateway:Hosting:AllowedHosts (SR-L-02): Host values the gateway accepts and the CSRF Origin allow-list.
+  # Required outside Development (the gateway refuses to start without it). When empty, the ingress hosts are used.
+  # Entries: exact host, host:port, or *.suffix. /health* is exempt, so pod-IP probes keep working.
+  allowedHosts: []
+
   # Governance Database Configuration
   governanceDb:
     provider: "PostgreSql"

@@ -18,6 +18,10 @@ public static class GatewayApplicationBuilderExtensions
 {
     public static WebApplication UseGatewayPipeline(this WebApplication app, GatewayOptions gatewayOptions)
     {
+        // SR-L-02 / G-4: outside Development the host allow-list is mandatory (fail-closed).
+        Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator.ValidateAllowedHosts(gatewayOptions, app.Environment);
+        var hostAllowList = Autheris.Api.Security.HostAllowList.Resolve(gatewayOptions.Hosting, app.Environment.IsDevelopment());
+
         // O9: first middleware, so it catches everything below it. In Development ASP.NET Core puts the developer
         // exception page in front of the pipeline; it never sees an exception because this handler answers first.
         app.UseExceptionHandler();
@@ -49,6 +53,9 @@ public static class GatewayApplicationBuilderExtensions
             });
             app.UseForwardedHeaders();
         }
+
+        // SR-L-02: validate Host (the forwarded host when the reverse proxy is enabled) before CORS/CSRF.
+        app.UseMiddleware<HostAllowListMiddleware>(hostAllowList);
         app.UseCors();
 
         // SEC C-1 Edge Stripping: Strip any client-supplied x-autheris-* headers from untrusted clients
@@ -221,7 +228,8 @@ public static class GatewayApplicationBuilderExtensions
                     bool isOriginTrusted = gatewayOptions.IsAllCorsAllowed;
                     if (!isOriginTrusted && Uri.TryCreate(originHeader, UriKind.Absolute, out var originUri))
                     {
-                        if (string.Equals(originUri.Authority, context.Request.Host.Value, StringComparison.OrdinalIgnoreCase))
+                        // SR-L-02: the Origin must be on the host allow-list; Origin == Host alone is not proof of same-origin.
+                        if (hostAllowList.IsAllowed(originUri.Authority))
                         {
                             isOriginTrusted = true;
                         }
