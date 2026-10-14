@@ -23,10 +23,11 @@ public static class GovernanceStoreFactory
         IAuditChainAnchorStore? auditAnchorStore = null,
         ILogger<SqliteGovernanceRepository>? logger = null,
         IAuditAnchorSigner? auditAnchorSigner = null,
-        ICallerContextProvider? callerContextProvider = null)
+        ICallerContextProvider? callerContextProvider = null,
+        IGatewayStatePaths? statePaths = null)
     {
         var repository = CreateUnmigratedSqlite(
-            epochValidationService, options, environment, secretProvider, auditAnchorStore, logger, auditAnchorSigner, callerContextProvider);
+            epochValidationService, options, environment, secretProvider, auditAnchorStore, logger, auditAnchorSigner, callerContextProvider, statePaths);
         var gateway = options ?? Options.Create(new GatewayOptions());
         try
         {
@@ -51,19 +52,21 @@ public static class GovernanceStoreFactory
         IAuditChainAnchorStore? auditAnchorStore = null,
         ILogger<SqliteGovernanceRepository>? logger = null,
         IAuditAnchorSigner? auditAnchorSigner = null,
-        ICallerContextProvider? callerContextProvider = null)
+        ICallerContextProvider? callerContextProvider = null,
+        IGatewayStatePaths? statePaths = null)
     {
         var gateway = options ?? Options.Create(new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=governance_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" }
         });
         var env = environment ?? DefaultEnvironment();
+        var paths = statePaths ?? DefaultStatePaths(env);
         var secrets = secretProvider ?? Substitute.For<IKeyVaultSecretProvider>();
         // Outside Development/Test the anchor factory (AU-01/AU-03) is covered by its own tests; here a stand-in lets the
         // constructor-level checks (for example the audit key length) be reached.
         var anchorStore = auditAnchorStore
             ?? (IsDevOrTest(env)
-                ? AuditChainAnchorStoreFactory.CreateForGovernance(gateway.Value, env, secrets, auditAnchorSigner, logger)
+                ? AuditChainAnchorStoreFactory.CreateForGovernance(gateway.Value, env, secrets, auditAnchorSigner, logger, paths)
                 : Substitute.For<IAuditChainAnchorStore>());
         return new SqliteGovernanceRepository(
             epochValidationService,
@@ -72,6 +75,7 @@ public static class GovernanceStoreFactory
             secrets,
             anchorStore,
             callerContextProvider ?? Substitute.For<ICallerContextProvider>(),
+            paths,
             logger);
     }
 
@@ -108,6 +112,10 @@ public static class GovernanceStoreFactory
             AuditChainAnchorStoreFactory.CreateForGovernance(options.Value, env, secrets, null, null),
             Substitute.For<ICallerContextProvider>());
     }
+
+    /// <summary>State paths under a per-process temp directory; Development/Test without a connection string use a private memory database.</summary>
+    public static IGatewayStatePaths DefaultStatePaths(IHostEnvironment env) =>
+        new GatewayStatePaths(Options.Create(new StateOptions { StateDirectory = Path.Combine(Path.GetTempPath(), "autheris-test-state") }), env);
 
     private static bool IsDevOrTest(IHostEnvironment env) =>
         string.Equals(env.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase) ||

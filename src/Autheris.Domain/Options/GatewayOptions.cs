@@ -635,7 +635,11 @@ public sealed class AdfsAuthOptions
 public sealed class GovernanceDbOptions
 {
     public string Provider { get; init; } = "Sqlite"; // "Sqlite", "PostgreSql" ("Postgres", "PgSql") or "SqlServer" ("MsSql")
-    public string ConnectionString { get; init; } = "Data Source=governance.db;Cache=Shared";
+    /// <summary>
+    /// ADO.NET connection string. Empty (default) for SQLite: Development/Test use a private in-memory database, every other environment
+    /// the governance database file in <c>Gateway:State:StateDirectory</c> (WP-ARC-B-13).
+    /// </summary>
+    public string ConnectionString { get; init; } = string.Empty;
     [Range(1, 60)] public int CommandTimeoutSeconds { get; init; } = 15;
     public bool EnableOutboxProcessor { get; init; } = true;
     public bool? SeedDemoData { get; init; } = null;

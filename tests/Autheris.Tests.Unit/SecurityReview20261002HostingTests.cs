@@ -159,7 +159,9 @@ public sealed class SecurityReview20261002HostingTests
         var dockerfile = File.ReadAllText(Path.Combine(root!, "Dockerfile"));
         dockerfile.ShouldContain("mkdir -p /app/data && chown -R $APP_UID:$APP_UID /app/data");
         dockerfile.ShouldContain("VOLUME /app/data");
-        dockerfile.ShouldContain("Gateway__GovernanceDb__ConnectionString=\"Data Source=/app/data/governance.db;Cache=Shared\"");
+        dockerfile.ShouldContain("Gateway__GovernanceDb__ConnectionString=\"Data Source=/app/data/governance.db\"");
+        dockerfile.ShouldContain("Gateway__State__StateDirectory=/app/data");
+        dockerfile.ShouldNotContain("Cache=Shared");
 
         var compose = File.ReadAllText(Path.Combine(root!, "docker-compose.yml"));
         compose.ShouldContain("/app/data");

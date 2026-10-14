@@ -47,13 +47,19 @@ public static class GatewayGovernanceServiceExtensions
     {
         services.AddSingleton<Autheris.Application.Audit.IAuditWriter, Autheris.Application.Audit.AuditWriter>();
 
+        // WP-ARC-B-13: one state directory for the SQLite governance database and the audit anchor next to it.
+        services.AddOptions<StateOptions>().BindConfiguration(StateOptions.SectionName).ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<StateOptions>, StateOptionsValidator>();
+        services.AddSingleton<IGatewayStatePaths, GatewayStatePaths>();
+
         // ARC-I-13: the anchor store is a required repository dependency; AU-01/AU-03 are enforced when it is built.
         services.AddSingleton<IAuditChainAnchorStore>(sp => AuditChainAnchorStoreFactory.CreateForGovernance(
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value,
             sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>(),
             sp.GetRequiredService<IKeyVaultSecretProvider>(),
             sp.GetService<IAuditAnchorSigner>(),
-            sp.GetService<Microsoft.Extensions.Logging.ILoggerFactory>()?.CreateLogger("Autheris.Infrastructure.Persistence.AuditChainAnchorStore")));
+            sp.GetService<Microsoft.Extensions.Logging.ILoggerFactory>()?.CreateLogger("Autheris.Infrastructure.Persistence.AuditChainAnchorStore"),
+            sp.GetRequiredService<IGatewayStatePaths>()));
 
         if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.PostgreSql))
         {

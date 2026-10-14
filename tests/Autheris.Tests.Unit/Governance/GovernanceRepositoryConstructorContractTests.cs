@@ -55,11 +55,12 @@ public sealed class GovernanceRepositoryConstructorContractTests
         var secrets = nullParameter == "secrets" ? null! : Substitute.For<IKeyVaultSecretProvider>();
         var store = nullParameter == "anchor" ? null! : anchor ?? new InMemoryAuditChainAnchorStore();
         var caller = nullParameter == "caller" ? null! : Substitute.For<ICallerContextProvider>();
+        var statePaths = nullParameter == "statePaths" ? null! : GovernanceStoreFactory.DefaultStatePaths(Env(environmentName));
         return backend switch
         {
             "PostgreSql" => new PostgreSqlGovernanceRepository(epoch, options, env, secrets, store, caller),
             "SqlServer" => new SqlServerGovernanceRepository(epoch, options, env, secrets, store, caller),
-            _ => new SqliteGovernanceRepository(epoch, options, env, secrets, store, caller),
+            _ => new SqliteGovernanceRepository(epoch, options, env, secrets, store, caller, statePaths),
         };
     }
 
@@ -68,8 +69,13 @@ public sealed class GovernanceRepositoryConstructorContractTests
         var data = new TheoryData<string, string>();
         foreach (var backend in new[] { "Sqlite", "PostgreSql", "SqlServer" })
         {
-            foreach (var parameter in new[] { "epoch", "options", "environment", "secrets", "anchor", "caller" })
+            foreach (var parameter in new[] { "epoch", "options", "environment", "secrets", "anchor", "caller", "statePaths" })
             {
+                if (parameter == "statePaths" && backend != "Sqlite")
+                {
+                    continue;
+                }
+
                 data.Add(backend, parameter);
             }
         }

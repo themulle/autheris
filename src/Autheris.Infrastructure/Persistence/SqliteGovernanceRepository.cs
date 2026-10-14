@@ -83,6 +83,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
         IKeyVaultSecretProvider secretProvider,
         IAuditChainAnchorStore auditAnchorStore,
         ICallerContextProvider callerContextProvider,
+        IGatewayStatePaths statePaths,
         ILogger<SqliteGovernanceRepository>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(epochValidationService);
@@ -91,13 +92,14 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
         ArgumentNullException.ThrowIfNull(secretProvider);
         ArgumentNullException.ThrowIfNull(auditAnchorStore);
         ArgumentNullException.ThrowIfNull(callerContextProvider);
+        ArgumentNullException.ThrowIfNull(statePaths);
 
         _epochValidationService = epochValidationService;
         _lock = new ReadinessGatedLock(() => _ready, nameof(SqliteGovernanceRepository));
         _logger = logger;
-        _options = options?.Value;
+        _options = options.Value;
         _callerContextProvider = callerContextProvider;
-        var connStr = options?.Value?.GovernanceDb?.ConnectionString ?? $"Data Source=governance_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        var connStr = statePaths.ResolveGovernanceConnectionString(options.Value?.GovernanceDb?.ConnectionString);
         EnsureSqliteDirectoryExists(connStr);
         _connection = new SqliteConnection(connStr);
         _connection.Open();

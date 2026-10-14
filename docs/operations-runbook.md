@@ -243,6 +243,13 @@ The monthly FinOps budget is enforced against a cluster-wide counter in the shar
 - Helm: `governanceMigrationJob.enabled=true` renders this as a `pre-install,pre-upgrade` hook Job (`<release>-autheris-migrate`, `Migrations:Mode=Apply`) and sets the application to `Migrations:Mode=Verify`. The job runs with the same configuration and secrets as the application (governance connection string, audit and masking keys, Redis); set `governanceMigrationJob.migrationConnectionStringSecretKey` to a key of `gateway.governanceDb.existingSecret` that holds a DDL-capable connection string. It is not supported for the SQLite provider. A failed job (`backoffLimit: 0`) aborts the release before any application pod is replaced; read the job pod log for the migration error.
 - Migrations are forward-only. Rolling back to an older build means restoring a database backup taken before the upgrade; an older build refuses to start against a newer schema unless `GovernanceDb:Migrations:AllowNewerSchema=true`.
 
+### 4.ad State directory (SQLite governance provider, WP-ARC-B-13)
+
+- `Gateway:State:StateDirectory` (default `./state`; the container images set `/app/data`) is the one writable location for local state. With the SQLite provider and no `GovernanceDb:ConnectionString` it holds `governance.db`; Development and Test without a connection string use a private in-memory database instead. An explicitly configured connection string always wins, and an in-memory database is rejected outside Development.
+- The audit chain anchor defaults to `<governance database file>.audit-anchor.json` next to the database; `Audit:ChainAnchorPath` overrides it (keep it on a separately protected volume).
+- Backup set: back up `governance.db` together with its `-wal` and `-shm` side files (or checkpoint first) and the `.audit-anchor.json` file as one unit. Restoring the database without the matching anchor makes the audit chain verification report a violation.
+- In a container the directory must be an absolute path on a mounted volume and not `/app`; the gateway refuses to start otherwise. `Cache=Shared` is ignored for file databases (connections are pooled per operation); WAL is the default journal mode, use `GovernanceDb:JournalMode=DELETE` on filesystems without shared-memory support (for example WSL bind mounts or network shares).
+
 ---
 
 ## 5. Data Catalog Synchronization Operations

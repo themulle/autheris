@@ -525,7 +525,8 @@ public static class AuditChainAnchorStoreFactory
         Microsoft.Extensions.Hosting.IHostEnvironment environment,
         IKeyVaultSecretProvider secrets,
         IAuditAnchorSigner? signer,
-        ILogger? logger)
+        ILogger? logger,
+        IGatewayStatePaths? statePaths = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(environment);
@@ -553,7 +554,9 @@ public static class AuditChainAnchorStoreFactory
             ? (!string.IsNullOrWhiteSpace(audit?.ChainAnchorPath)
                 ? new FileAuditChainAnchorStore(audit.ChainAnchorPath)
                 : (IAuditChainAnchorStore)new InMemoryAuditChainAnchorStore())
-            : CreateSqliteDefaultStore(options.GovernanceDb?.ConnectionString, audit?.ChainAnchorPath);
+            : CreateSqliteDefaultStore(
+                statePaths?.ResolveGovernanceConnectionString(options.GovernanceDb?.ConnectionString) ?? options.GovernanceDb?.ConnectionString,
+                audit?.ChainAnchorPath);
 
         return Create(audit, primary, secrets, signer, logger);
     }
@@ -589,7 +592,7 @@ public static class AuditChainAnchorStoreFactory
             return new InMemoryAuditChainAnchorStore();
         }
 
-        return new FileAuditChainAnchorStore(dataSource + ".audit-anchor.json");
+        return new FileAuditChainAnchorStore(GatewayStatePaths.AuditAnchorFileFor(dataSource));
     }
 
     private static IAuditAnchorSigner? CreateSigner(AuditOptions? options, IKeyVaultSecretProvider? secrets)

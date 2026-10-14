@@ -501,10 +501,10 @@ public static class GatewayStartupValidator
                 throw new ValidationException("Security violation: Outside Development, S3 WORM with EnforceObjectLock requires S3AccessKey and S3SecretKey to be configured.");
             }
 
+            // WP-ARC-B-13: the check applies to the EFFECTIVE connection string. An unset value resolves to the state-directory file
+            // (WP-ARC-B-13), but an explicitly configured in-memory database is rejected.
             if (DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite) &&
-                !string.IsNullOrWhiteSpace(options.GovernanceDb.ConnectionString) &&
-                (options.GovernanceDb.ConnectionString.Contains(":memory:", StringComparison.OrdinalIgnoreCase) ||
-                 options.GovernanceDb.ConnectionString.Contains("Mode=Memory", StringComparison.OrdinalIgnoreCase)))
+                IsInMemorySqlite(options.GovernanceDb.ConnectionString))
             {
                 throw new ValidationException("Security violation: In-memory SQLite databases (GovernanceDb.ConnectionString) are strictly prohibited outside Development.");
             }
@@ -527,7 +527,7 @@ public static class GatewayStartupValidator
                             throw new ValidationException(
                                 "Security and configuration error (DEP-4): In the container, the process runs as non-root user ($APP_UID). " +
                                 $"The SQLite path '{builder.DataSource}' is located directly in the non-writable application directory (/app). " +
-                                "Use the writable data directory '/app/data' (e.g. 'Data Source=/app/data/governance.db;Cache=Shared').");
+                                "Use the writable data directory '/app/data' (for example Gateway:State:StateDirectory=/app/data).");
                         }
                     }
                 }
@@ -547,8 +547,14 @@ public static class GatewayStartupValidator
                                string.Equals(envName, "Test", StringComparison.OrdinalIgnoreCase);
 
             bool isSqliteFile = false;
+
+            // WP-ARC-B-13: an unset connection string resolves to the governance database file in the state directory outside Development/Test.
             if (DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite) &&
-                !string.IsNullOrWhiteSpace(options.GovernanceDb.ConnectionString))
+                string.IsNullOrWhiteSpace(options.GovernanceDb.ConnectionString))
+            {
+                isSqliteFile = true;
+            }
+            else if (DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite))
             {
                 try
                 {
@@ -885,6 +891,26 @@ public static class GatewayStartupValidator
 
     internal static bool IsSupportedGovernanceDbProvider(string? provider) =>
         DataSourceProvider.Is(provider, DatabaseDialect.Sqlite) || DataSourceProvider.Is(provider, DatabaseDialect.PostgreSql) || DataSourceProvider.Is(provider, DatabaseDialect.SqlServer);
+
+    private static bool IsInMemorySqlite(string? connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return false;
+        }
+
+        try
+        {
+            var builder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(connectionString);
+            return builder.DataSource.StartsWith(":memory:", StringComparison.OrdinalIgnoreCase) ||
+                   builder.Mode == Microsoft.Data.Sqlite.SqliteOpenMode.Memory;
+        }
+        catch (ArgumentException)
+        {
+            return connectionString.Contains(":memory:", StringComparison.OrdinalIgnoreCase) ||
+                   connectionString.Contains("Mode=Memory", StringComparison.OrdinalIgnoreCase);
+        }
+    }
 
     private static bool IsTruthy(string? value)
     {
