@@ -54,9 +54,13 @@ public sealed partial class ODataHandler(
                 return cachedXml;
             }
 
-            var tables = await GetAuthorizedTablesAsync(principal, ct).ConfigureAwait(false);
+            var (tables, complete) = await GetAuthorizedTablesCoreAsync(principal, ct).ConfigureAwait(false);
             var xml = ODataCsdlGenerator.GenerateMetadataXml(tables);
-            _memoryCache.Set(cacheKey, xml, TimeSpan.FromSeconds(60));
+            if (complete)
+            {
+                SetCache(cacheKey, xml, xml.Length * 2L);
+            }
+
             return xml;
         }
 
@@ -75,9 +79,13 @@ public sealed partial class ODataHandler(
                 return cachedDoc;
             }
 
-            var tables = await GetAuthorizedTablesAsync(principal, ct).ConfigureAwait(false);
+            var (tables, complete) = await GetAuthorizedTablesCoreAsync(principal, ct).ConfigureAwait(false);
             var doc = ODataResponseFormatter.FormatServiceDocument(serviceRootUrl, tables);
-            _memoryCache.Set(cacheKey, doc, TimeSpan.FromSeconds(60));
+            if (complete)
+            {
+                SetCache(cacheKey, doc, 1024L + tables.Count * 256L + serviceRootUrl.Length * 2L);
+            }
+
             return doc;
         }
 
@@ -86,10 +94,34 @@ public sealed partial class ODataHandler(
     }
 
     private async Task<IReadOnlyList<Autheris.Domain.Model.TableMetadata>> GetAuthorizedTablesAsync(ClaimsPrincipal? principal, CancellationToken ct)
+        => (await GetAuthorizedTablesCoreAsync(principal, ct).ConfigureAwait(false)).Tables;
+
+    /// <summary>
+    /// The shared L1 cache has a SizeLimit, so every entry must declare a Size. Sizes are rough byte estimates.
+    /// </summary>
+    private void SetCache(string key, object value, long size) =>
+        _memoryCache?.Set(key, value, new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(60),
+            Size = Math.Max(1, size)
+        });
+
+    private static long EstimateTablesSize(IReadOnlyList<Autheris.Domain.Model.TableMetadata> tables)
+    {
+        long size = 256;
+        foreach (var t in tables)
+        {
+            size += 512 + t.Columns.Count * 128L;
+        }
+
+        return size;
+    }
+
+    private async Task<(IReadOnlyList<Autheris.Domain.Model.TableMetadata> Tables, bool Complete)> GetAuthorizedTablesCoreAsync(ClaimsPrincipal? principal, CancellationToken ct)
     {
         if (principal?.Identity?.IsAuthenticated != true)
         {
-            return Array.Empty<Autheris.Domain.Model.TableMetadata>();
+            return (Array.Empty<Autheris.Domain.Model.TableMetadata>(), true);
         }
 
         if (_memoryCache != null)
@@ -97,10 +129,11 @@ public sealed partial class ODataHandler(
             var cacheKey = $"odata:tables:{principal.GetTenantId().Value}:{principal.GetUserSid()?.Value}";
             if (_memoryCache.TryGetValue(cacheKey, out IReadOnlyList<Autheris.Domain.Model.TableMetadata>? cachedTables) && cachedTables != null)
             {
-                return cachedTables;
+                return (cachedTables, true);
             }
         }
 
+        var complete = true;
         var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
         var tenant = principal.GetTenantId();
         var candidateTables = allTables
@@ -115,37 +148,25 @@ public sealed partial class ODataHandler(
         {
             try
             {
-                TableAccessDecision? decision = null;
-                try
-                {
-                    decision = await _executionService.CheckTableAccessAsync(principal, tableMeta, recordAudit: false, ct).ConfigureAwait(false);
-                }
-                catch
-                {
-                    // Fallback to table identifier check
-                }
+                TableAccessDecision? decision = await _executionService
+                    .CheckTableAccessAsync(principal, tableMeta, recordAudit: false, ct).ConfigureAwait(false);
 
+                // SR-M-16: fail closed. A null decision is treated as deny.
                 if (decision == null)
                 {
-                    try
-                    {
-                        decision = await _executionService.CheckTableAccessAsync(principal, tableMeta.Identifier, ct).ConfigureAwait(false);
-                    }
-                    catch
-                    {
-                        // Ignore
-                    }
+                    complete = false;
+                    _logger.LogWarning("Access check for table {Table} returned no decision during OData metadata generation; table omitted.", tableMeta.Identifier);
+                    continue;
                 }
 
-                if (decision != null && !decision.IsAllowed)
+                if (!decision.IsAllowed)
                 {
                     continue;
                 }
 
                 // SEC EX-05: filter columns based on caller's effective permissions (omit Deny columns).
-                var allowedColumns = decision != null
-                    ? tableMeta.Columns.Where(c => decision.GetEffectiveColumnAccess(c.ColumnName, tableMeta) != ColumnAccessLevel.Deny).ToList()
-                    : tableMeta.Columns;
+                var allowedColumns = tableMeta.Columns
+                    .Where(c => decision.GetEffectiveColumnAccess(c.ColumnName, tableMeta) != ColumnAccessLevel.Deny).ToList();
 
                 if (allowedColumns.Count == 0 && tableMeta.Columns.Count > 0)
                 {
@@ -163,19 +184,21 @@ public sealed partial class ODataHandler(
 
                 authorizedTables.Add(filteredMeta);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogWarning(ex, "Failed to check access for table {Table} during OData metadata generation.", tableMeta.Identifier);
+                // SR-M-16: fail closed - table is omitted and the (partial) result is not cached.
+                complete = false;
+                _logger.LogWarning(ex, "Failed to check access for table {Table} during OData metadata generation; table omitted.", tableMeta.Identifier);
             }
         }
 
-        if (_memoryCache != null)
+        if (_memoryCache != null && complete)
         {
             var cacheKey = $"odata:tables:{principal.GetTenantId().Value}:{principal.GetUserSid()?.Value}";
-            _memoryCache.Set(cacheKey, (IReadOnlyList<Autheris.Domain.Model.TableMetadata>)authorizedTables, TimeSpan.FromSeconds(60));
+            SetCache(cacheKey, (IReadOnlyList<Autheris.Domain.Model.TableMetadata>)authorizedTables, EstimateTablesSize(authorizedTables));
         }
 
-        return authorizedTables;
+        return (authorizedTables, complete);
     }
 
     public Task<ODataQueryResult> ExecuteEntitySetQueryAsync(
