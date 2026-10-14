@@ -141,7 +141,7 @@ public sealed class CompositionRootModularizationTests
             store,
             Options.Create(options),
             NullLogger<RebacSeedHostedService>.Instance,
-            audit,
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(audit),
             env);
 
         await hostedService.StartAsync(CancellationToken.None);

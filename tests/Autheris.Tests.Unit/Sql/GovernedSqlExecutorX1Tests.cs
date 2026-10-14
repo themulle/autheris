@@ -141,7 +141,7 @@ public sealed class GovernedSqlExecutorX1Tests
         var log = new CapturingLogger<GovernedSqlExecutor>();
         var opts = Options.Create(gateway);
         var executor = new GovernedSqlExecutor(
-            new GovernedSqlRewriter(opts, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance), opts, auditRepo, guard ?? PassThroughExecutionGuard.Instance, factory, environment: environment, logger: log, sessionInitializer: session, secretProvider: secrets);
+            new GovernedSqlRewriter(opts, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance), opts, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(auditRepo), guard ?? PassThroughExecutionGuard.Instance, factory, environment: environment, logger: log, sessionInitializer: session, secretProvider: secrets);
         return new Harness { Executor = executor, Factory = factory, Connection = connection, Audit = audit, Log = log };
     }
 
@@ -338,7 +338,7 @@ public sealed class GovernedSqlExecutorX1Tests
                 .Returns(Task.FromResult<DbTransaction?>(null));
             var opts = Options.Create(gateway);
             var executor = new GovernedSqlExecutor(
-                new GovernedSqlRewriter(opts, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance), opts, Substitute.For<IAuditLogRepository>(), new Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard(),
+                new GovernedSqlRewriter(opts, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance), opts, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), new Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard(),
                 factory, null, NullLogger.Instance, null, session);
             var clock = System.Diagnostics.Stopwatch.StartNew();
 

@@ -64,6 +64,10 @@ public static class AuditPolicyTable
         [AuditEventTypes.DocIngestionBundleApplied] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DocIngestionDocumentApplied] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DocDiscoveryRead] = AuditFailurePolicy.BestEffort,
+        [AuditEventTypes.RebacTupleAdded] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.RebacTupleRemoved] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.RebacInvalidationFailed] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.RebacTupleSeed] = AuditFailurePolicy.BestEffort,
     };
 
     public static IReadOnlyDictionary<string, AuditFailurePolicy> All => Table;

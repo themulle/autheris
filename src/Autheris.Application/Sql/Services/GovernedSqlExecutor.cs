@@ -48,7 +48,7 @@ public sealed class GovernedSqlExecutor
 
     private readonly GovernedSqlRewriter _rewriter;
     private readonly IOptions<GatewayOptions> _options;
-    private readonly IAuditLogRepository _auditLogRepository;
+    private readonly IAuditWriter _auditWriter;
     private readonly ISqlConnectionFactory? _connectionFactory;
     private readonly IHostEnvironment? _environment;
     private readonly ILogger? _logger;
@@ -61,7 +61,7 @@ public sealed class GovernedSqlExecutor
     public GovernedSqlExecutor(
         GovernedSqlRewriter rewriter,
         IOptions<GatewayOptions> options,
-        IAuditLogRepository auditLogRepository,
+        IAuditWriter auditWriter,
         IProviderExecutionGuard executionGuard,
         ISqlConnectionFactory? connectionFactory = null,
         IHostEnvironment? environment = null,
@@ -73,7 +73,7 @@ public sealed class GovernedSqlExecutor
     {
         _rewriter = rewriter ?? throw new ArgumentNullException(nameof(rewriter));
         _options = options ?? throw new ArgumentNullException(nameof(options));
-        _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
+        _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
         _connectionFactory = connectionFactory;
         _environment = environment;
         _logger = logger;
@@ -196,9 +196,9 @@ public sealed class GovernedSqlExecutor
             string reason = DeniedReason(policyEx);
             if (dmlContext.IsDml)
             {
-                await RecordDmlAuditAsync(tenantId, user, auditDs, dmlContext, "WEBSQL_DML_REJECTED", "DENY", compiled: null, affectedRows: null, reason: reason, synthetic: false, originalSql: request.Sql).ConfigureAwait(false);
+                await RecordDmlAuditAsync(tenantId, user, auditDs, dmlContext, AuditEventTypes.WebSqlDmlRejected, "DENY", compiled: null, affectedRows: null, reason: reason, synthetic: false, originalSql: request.Sql).ConfigureAwait(false);
             }
-            else if (_auditLogRepository != null)
+            else
             {
                 var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
                 var userSid = user.GetUserSid() ?? new Sid("anonymous");
@@ -215,7 +215,7 @@ public sealed class GovernedSqlExecutor
                     .WithField("error", reason)
                     .Build();
 
-                await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+                await _auditWriter.RecordAsync(new AuditLogEntry
                 {
                     TenantId = tenantId,
                     EventType = AuditEventTypes.WebSqlQueryDenied,
@@ -249,7 +249,7 @@ public sealed class GovernedSqlExecutor
         var compiled = rewrite.Compiled;
         string dsName = rewrite.DataSourceName;
 
-        if (_auditLogRepository != null && !dmlContext.IsDml)
+        if (!dmlContext.IsDml)
         {
             var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
             var userSid = user.GetUserSid() ?? new Sid("anonymous");
@@ -261,7 +261,7 @@ public sealed class GovernedSqlExecutor
                 ["virtual_filters"] = rewrite.VirtualFilters
             };
             AddCompiledAuditFields(fields, compiled);
-            await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+            await _auditWriter.RecordAsync(new AuditLogEntry
             {
                 TenantId = tenantId,
                 EventType = AuditEventTypes.WebSqlQuery,
@@ -288,7 +288,7 @@ public sealed class GovernedSqlExecutor
 
             if (dmlContext.IsDml)
             {
-                await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_EXECUTED", "ALLOW", compiled, affectedRows: 0, reason: null, synthetic: true).ConfigureAwait(false);
+                await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, AuditEventTypes.WebSqlDmlExecuted, "ALLOW", compiled, affectedRows: 0, reason: null, synthetic: true).ConfigureAwait(false);
             }
 
             // G-11: only after a successful Compile, and only the compiled text (markers, never a bound value).
@@ -390,7 +390,7 @@ public sealed class GovernedSqlExecutor
                     {
                         await RecordDmlAuditAsync(
                             tenantId, user, dsName, dmlContext,
-                            rejected ? "WEBSQL_DML_REJECTED" : "WEBSQL_DML_FAILED", "DENY", compiled,
+                            rejected ? AuditEventTypes.WebSqlDmlRejected : "WEBSQL_DML_FAILED", "DENY", compiled,
                             affectedRows: null, reason: rejected ? ErrorCodeOf(dmlEx) : dmlEx.GetType().Name, synthetic: false).ConfigureAwait(false);
                     }
                     catch (Exception auditEx)
@@ -454,7 +454,7 @@ public sealed class GovernedSqlExecutor
             var sanitized = SanitizeProviderError(ex, binderDialect, dsName);
             var reported = sanitized ?? ex;
 
-            if (_auditLogRepository != null && !dmlContext.IsDml)
+            if (!dmlContext.IsDml)
             {
                 try
                 {
@@ -470,7 +470,7 @@ public sealed class GovernedSqlExecutor
                         .WithField("errorType", ex.GetType().Name)
                         .Build();
 
-                    await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+                    await _auditWriter.RecordAsync(new AuditLogEntry
                     {
                         TenantId = tenantId,
                         EventType = AuditEventTypes.QueryExecutionError,
@@ -622,11 +622,6 @@ public sealed class GovernedSqlExecutor
         bool synthetic,
         string? originalSql = null)
     {
-        if (_auditLogRepository == null)
-        {
-            return;
-        }
-
         var fields = new Dictionary<string, object?>
         {
             ["statementType"] = dmlContext.StatementType?.ToString(),
@@ -647,7 +642,7 @@ public sealed class GovernedSqlExecutor
             fields["originalSqlHash"] = _digester.Anonymize(originalSql).OriginalSqlHash;
         }
 
-        await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+        await _auditWriter.RecordAsync(new AuditLogEntry
         {
             TenantId = tenantId,
             EventType = eventType,

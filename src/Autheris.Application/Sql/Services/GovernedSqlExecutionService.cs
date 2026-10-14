@@ -9,6 +9,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Audit;
 using Autheris.Application.Governance.Contracts;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
@@ -46,7 +47,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
 
     public GovernedSqlExecutionService(
         IOptions<GatewayOptions> options,
-        IAuditLogRepository auditLogRepository,
+        IAuditWriter auditWriter,
         IProviderExecutionGuard executionGuard,
         GovernedSqlRewriteDependencies rewrite,
         GovernedSqlExecutionDependencies execution,
@@ -80,7 +81,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         _executor = new GovernedSqlExecutor(
             _rewriter,
             options,
-            auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository)),
+            auditWriter ?? throw new ArgumentNullException(nameof(auditWriter)),
             executionGuard,
             execution.ConnectionFactory,
             execution.Environment,

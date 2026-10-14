@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.TestDoubles;
 
 using System;
+using Autheris.Application.Audit;
 using Autheris.Application.Governance.Contracts;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
@@ -17,6 +18,7 @@ using Autheris.Domain.Options;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using TrinoSqlEngine;
 
@@ -52,7 +54,8 @@ public static class GovernedSqlExecutionServiceFactory
         IFederatedQueryExecutionService? federatedExecutionService = null,
         TypedPolicySources? typedPolicies = null,
         GovernancePolicyFactory? policyFactory = null,
-        CompiledSqlAuditDigester? auditDigester = null)
+        CompiledSqlAuditDigester? auditDigester = null,
+        IAuditWriter? auditWriter = null)
     {
         var rewrite = new GovernedSqlRewriteDependencies(
             policyEnforcement, consentResolution, tableRepository, clientIpResolver, consentRepository, sqlEngine, policyFactory,
@@ -60,6 +63,6 @@ public static class GovernedSqlExecutionServiceFactory
             memoryCache, typedPolicies);
         var execution = new GovernedSqlExecutionDependencies(connectionFactory, environment, concurrencyGate, sessionInitializer, secretProvider, auditDigester);
         var lazyFederated = federatedExecutionService is null ? null : new Lazy<IFederatedQueryExecutionService>(() => federatedExecutionService);
-        return new GovernedSqlExecutionService(options, auditLogRepository, executionGuard, rewrite, execution, lazyFederated, logger);
+        return new GovernedSqlExecutionService(options, auditWriter ?? new AuditWriter(auditLogRepository, NullLogger<AuditWriter>.Instance), executionGuard, rewrite, execution, lazyFederated, logger);
     }
 }
