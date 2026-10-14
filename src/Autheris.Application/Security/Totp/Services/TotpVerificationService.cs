@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Application.State;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 
 /// <summary>
 /// Universal RFC 6238 TOTP verification service.
@@ -21,11 +22,20 @@ public sealed class TotpVerificationService : ITotpVerificationService
 {
     private const string Base32Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
     private readonly IDistributedClusterStateProvider? _clusterState;
+    private static readonly TimeSpan ReplayTtl = TimeSpan.FromSeconds(90);
     private readonly ConcurrentDictionary<string, DateTimeOffset> _localConsumed = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _replayLock = new();
+    private readonly Dictionary<string, (int Count, DateTimeOffset WindowEnd)> _localFailures = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _failureLock = new();
+    private readonly int _maxFailedAttempts;
+    private readonly TimeSpan _lockoutWindow;
 
-    public TotpVerificationService(IDistributedClusterStateProvider? clusterState = null)
+    public TotpVerificationService(IDistributedClusterStateProvider? clusterState = null, TotpOptions? options = null)
     {
         _clusterState = clusterState;
+        var effective = options ?? new TotpOptions();
+        _maxFailedAttempts = Math.Max(1, effective.MaxFailedAttempts);
+        _lockoutWindow = TimeSpan.FromMinutes(Math.Max(1, effective.LockoutMinutes));
     }
 
     public TotpEnrollmentResult GenerateEnrollment(string userSid, string email, string issuer = "Autheris")
@@ -86,56 +96,141 @@ public sealed class TotpVerificationService : ITotpVerificationService
             return false;
         }
 
-        var now = DateTimeOffset.UtcNow;
-        if (!TryMatchStep(secretBase32, totpCode, toleranceSteps: 1, now, out var matchedStep))
+        // SR-M-05: per-user failed-attempt throttle; a locked-out user is rejected without evaluating the code.
+        var normalizedSid = userSid.Trim().ToLowerInvariant();
+        var failureKey = $"totp:fail:{normalizedSid}";
+        if (await GetFailureCountAsync(failureKey, ct).ConfigureAwait(false) >= _maxFailedAttempts)
         {
             return false;
         }
 
-        // Replay key: totp:consumed:{userSid}:{epochStep}
-        var replayKey = $"totp:consumed:{userSid.Trim().ToLowerInvariant()}:{matchedStep}";
-
-        // Check local replay cache
-        PurgeExpiredLocalReplay();
-        if (_localConsumed.TryGetValue(replayKey, out var expiry) && now < expiry)
+        var now = DateTimeOffset.UtcNow;
+        if (!TryMatchStep(secretBase32, totpCode, toleranceSteps: 1, now, out var matchedStep))
         {
+            await RegisterFailureAsync(failureKey, ct).ConfigureAwait(false);
+            return false;
+        }
+
+        // Replay key: totp:consumed:{userSid}:{epochStep}
+        var replayKey = $"totp:consumed:{normalizedSid}:{matchedStep}";
+
+        // SR-M-04: atomic consume (a single winner per userSid/time step, in-process and cluster-wide)
+        if (!await TryConsumeStepAsync(replayKey, now, ct).ConfigureAwait(false))
+        {
+            await RegisterFailureAsync(failureKey, ct).ConfigureAwait(false);
             return false; // Replay attempt rejected
         }
 
-        // Check distributed cluster state if present
-        if (_clusterState != null)
-        {
-            try
-            {
-                var existing = await _clusterState.GetAsync<string>(replayKey, ct).ConfigureAwait(false);
-                if (!string.IsNullOrEmpty(existing))
-                {
-                    return false; // Replay attempt rejected by distributed state
-                }
-            }
-            catch
-            {
-                // Fall back to local check if cluster state is unreachable
-            }
-        }
-
-        // Mark as consumed for 90 seconds (well past the 30s +/- 30s tolerance window)
-        var ttl = TimeSpan.FromSeconds(90);
-        _localConsumed[replayKey] = now.Add(ttl);
-
-        if (_clusterState != null)
-        {
-            try
-            {
-                await _clusterState.SetAsync(replayKey, "1", ttl, ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                // Silently tolerate store write issue; local protection is active
-            }
-        }
-
+        await ResetFailuresAsync(failureKey, ct).ConfigureAwait(false);
         return true;
+    }
+
+    private async Task<bool> TryConsumeStepAsync(string replayKey, DateTimeOffset now, CancellationToken ct)
+    {
+        // In-process: check and mark under one lock.
+        lock (_replayLock)
+        {
+            PurgeExpiredLocalReplay();
+            if (_localConsumed.TryGetValue(replayKey, out var expiry) && now < expiry)
+            {
+                return false;
+            }
+
+            _localConsumed[replayKey] = now.Add(ReplayTtl);
+        }
+
+        if (_clusterState == null)
+        {
+            return true;
+        }
+
+        try
+        {
+            // Atomic counter: only the node/request that creates the key (value 1) wins; the TTL is well past the
+            // 30s +/- 30s tolerance window.
+            var count = await _clusterState.IncrementAsync(replayKey, 1, ReplayTtl, ct).ConfigureAwait(false);
+            return count is null or <= 1;
+        }
+        catch
+        {
+            // Cluster state unreachable: the in-process guard above stays active.
+            return true;
+        }
+    }
+
+    private async Task<long> GetFailureCountAsync(string failureKey, CancellationToken ct)
+    {
+        long local;
+        lock (_failureLock)
+        {
+            local = _localFailures.TryGetValue(failureKey, out var entry) && entry.WindowEnd > DateTimeOffset.UtcNow
+                ? entry.Count
+                : 0;
+        }
+
+        if (_clusterState == null)
+        {
+            return local;
+        }
+
+        try
+        {
+            // Delta 0 reads the shared counter atomically without changing it.
+            var remote = await _clusterState.IncrementAsync(failureKey, 0, _lockoutWindow, ct).ConfigureAwait(false);
+            return Math.Max(local, remote ?? 0);
+        }
+        catch
+        {
+            return local;
+        }
+    }
+
+    private async Task RegisterFailureAsync(string failureKey, CancellationToken ct)
+    {
+        lock (_failureLock)
+        {
+            var now = DateTimeOffset.UtcNow;
+            if (_localFailures.TryGetValue(failureKey, out var entry) && entry.WindowEnd > now)
+            {
+                _localFailures[failureKey] = (entry.Count + 1, entry.WindowEnd);
+            }
+            else
+            {
+                _localFailures[failureKey] = (1, now.Add(_lockoutWindow));
+            }
+        }
+
+        if (_clusterState != null)
+        {
+            try
+            {
+                await _clusterState.IncrementAsync(failureKey, 1, _lockoutWindow, ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Local counter remains active.
+            }
+        }
+    }
+
+    private async Task ResetFailuresAsync(string failureKey, CancellationToken ct)
+    {
+        lock (_failureLock)
+        {
+            _localFailures.Remove(failureKey);
+        }
+
+        if (_clusterState != null)
+        {
+            try
+            {
+                await _clusterState.RemoveAsync(failureKey, ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Counter expires with its window.
+            }
+        }
     }
 
     public string GenerateTotpCode(string secretBase32, DateTimeOffset? timestamp = null)

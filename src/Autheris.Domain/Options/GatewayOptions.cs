@@ -35,6 +35,7 @@ public sealed class GatewayOptions
     [Required] public ParquetEgressOptions ParquetEgress { get; init; } = new();
     [Required] public OutboundEgressOptions Egress { get; init; } = new();
     [Required] public HitLStepUpOptions HitLStepUp { get; init; } = new();
+    public TotpOptions Totp { get; init; } = new();
     [Required] public WebSqlOptions WebSql { get; init; } = new();
     [Required] public TransportRowLimitsOptions RowLimits { get; init; } = new();
     [Required] public AsyncJobOptions AsyncJobs { get; init; } = new();
@@ -1512,6 +1513,27 @@ public sealed class ParquetEgressOptions
 
     /// <summary>Maximum size of a buffered JSON source response (GraphQL) that is converted to Parquet.</summary>
     public long MaxBufferedSourceBytes { get; init; } = 64 * 1024 * 1024;
+}
+
+/// <summary>
+/// SR-M-05 / SR-L-05: TOTP attempt throttling, enrollment lifetime and seed encryption at rest.
+/// </summary>
+public sealed class TotpOptions
+{
+    /// <summary>Failed TOTP verifications per user within <see cref="LockoutMinutes"/> before further attempts are rejected.</summary>
+    public int MaxFailedAttempts { get; init; } = 5;
+
+    /// <summary>Length of the failed-attempt window and of the resulting lockout.</summary>
+    public int LockoutMinutes { get; init; } = 15;
+
+    /// <summary>Lifetime of a server-side pending (not yet verified) enrollment seed.</summary>
+    public int PendingEnrollmentMinutes { get; init; } = 10;
+
+    /// <summary>
+    /// Encrypts TOTP seeds at rest with ASP.NET Data Protection. Requires a persisted key ring shared by all nodes
+    /// (otherwise seeds become unreadable after a restart or on other nodes), hence off by default.
+    /// </summary>
+    public bool EncryptSecretsAtRest { get; init; } = false;
 }
 
 public sealed class HitLStepUpOptions

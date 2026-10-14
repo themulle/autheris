@@ -45,9 +45,10 @@ public static class DevPortalEndpoints
         app.MapGet("/getting-started", HandleDevPortal).AllowAnonymous().WithAuditExemption("Developer getting started guide");
 
         // R-60 / R-64: DevPortal 2FA Enrollment Web Console
-        app.MapGet("/portal/2fa/enroll", (
+        app.MapGet("/portal/2fa/enroll", async (
             HttpContext context,
-            ITotpVerificationService totpService) =>
+            ITotpEnrollmentService enrollmentService,
+            CancellationToken ct) =>
         {
             var nonce = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
             SetPortalSecurityHeaders(context, nonce, noStore: true);
@@ -56,30 +57,37 @@ public static class DevPortalEndpoints
                           ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
                           ?? "developer";
 
-            var enrollment = totpService.GenerateEnrollment(userSid, $"{userSid}@autheris.local", "Autheris Gateway");
+            // SR-M-01: the seed is generated and kept server-side (pending, bound to the user); the page never sends it back.
+            var enrollment = await enrollmentService.BeginEnrollmentAsync(userSid, $"{userSid}@autheris.local", "Autheris Gateway", ct).ConfigureAwait(false);
+            if (enrollment == null)
+            {
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
+
+            var requiresCurrentCode = await enrollmentService.HasActiveSecretAsync(userSid, ct).ConfigureAwait(false);
             var svg = SvgQrCodeGenerator.GenerateSvg(enrollment.QrCodeUri);
 
             var formattedSecret = string.Join(" ", Enumerable.Range(0, Math.Max(1, enrollment.SecretBase32.Length / 4))
                 .Select(i => enrollment.SecretBase32.Substring(i * 4, Math.Min(4, enrollment.SecretBase32.Length - i * 4))));
 
-            var html = Generate2FaEnrollHtml(userSid, formattedSecret, enrollment.SecretBase32, svg, nonce);
+            var html = Generate2FaEnrollHtml(userSid, formattedSecret, svg, nonce, requiresCurrentCode);
             return Results.Content(html, "text/html;charset=utf-8");
         }).WithAudit(AuditLevel.Full, AuditEventTypes.TwoFactorEnrollmentStarted);
 
         app.MapPost("/portal/2fa/enroll/verify", async (
             HttpContext context,
-            ITotpVerificationService totpService,
-            ITotpSecretStore? secretStore,
+            ITotpEnrollmentService enrollmentService,
             CancellationToken ct) =>
         {
             string code = string.Empty;
-            string secret = string.Empty;
+            string currentCode = string.Empty;
 
+            // SR-M-01: a client supplied "secret" is deliberately ignored; only the server-side pending seed is verified.
             if (context.Request.HasFormContentType)
             {
                 var form = await context.Request.ReadFormAsync(ct);
                 code = form["totpCode"].ToString();
-                secret = form["secret"].ToString();
+                currentCode = form["currentTotpCode"].ToString();
             }
             else
             {
@@ -87,7 +95,7 @@ public static class DevPortalEndpoints
                 {
                     var body = await context.Request.ReadFromJsonAsync<System.Text.Json.JsonElement>(ct);
                     code = body.TryGetProperty("totpCode", out var c) ? c.GetString() ?? "" : "";
-                    secret = body.TryGetProperty("secret", out var s) ? s.GetString() ?? "" : "";
+                    currentCode = body.TryGetProperty("currentTotpCode", out var cc) ? cc.GetString() ?? "" : "";
                 }
                 catch
                 {
@@ -99,32 +107,23 @@ public static class DevPortalEndpoints
                           ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
                           ?? "developer";
 
-            if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(secret))
+            if (string.IsNullOrWhiteSpace(code))
             {
-                return Results.BadRequest(new { error = "Code and secret are required." });
+                return Results.BadRequest(new { error = "Code is required." });
             }
 
-            if (secretStore != null)
-            {
-                var existing = await secretStore.GetSecretAsync(userSid, ct).ConfigureAwait(false);
-                if (!string.IsNullOrWhiteSpace(existing))
-                {
-                    return Results.BadRequest(new { error = "User already has an active 2FA secret enrolled. Contact an administrator to reset 2FA." });
-                }
-            }
+            var outcome = await enrollmentService.CompleteEnrollmentAsync(
+                userSid, code, string.IsNullOrWhiteSpace(currentCode) ? null : currentCode, ct).ConfigureAwait(false);
 
-            bool valid = await totpService.VerifyAndConsumeTotpAsync(userSid, secret, code, ct);
-            if (!valid)
+            return outcome switch
             {
-                return Results.BadRequest(new { error = "Invalid or expired TOTP code." });
-            }
-
-            if (secretStore != null)
-            {
-                await secretStore.SetSecretAsync(userSid, secret, ct);
-            }
-
-            return Results.Ok(new { success = true, message = "2FA Enrollment completed successfully." });
+                TotpEnrollmentOutcome.Completed => Results.Ok(new { success = true, message = "2FA Enrollment completed successfully." }),
+                TotpEnrollmentOutcome.NoPendingEnrollment => Results.BadRequest(new { error = "No pending enrollment found. Reload the enrollment page first." }),
+                TotpEnrollmentOutcome.CurrentCodeRequired => Results.BadRequest(new { error = "A code from the currently enrolled authenticator is required to replace the 2FA secret." }),
+                TotpEnrollmentOutcome.InvalidCurrentCode => Results.BadRequest(new { error = "Invalid or expired code for the current authenticator." }),
+                TotpEnrollmentOutcome.StoreUnavailable => Results.StatusCode(StatusCodes.Status503ServiceUnavailable),
+                _ => Results.BadRequest(new { error = "Invalid or expired TOTP code." })
+            };
         }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.TwoFactorEnrollmentVerified);
 
         // R-64 UX: DevPortal HitL Step-Up Approvals Console
@@ -502,10 +501,17 @@ public static class DevPortalEndpoints
         }
     }
 
-    private static string Generate2FaEnrollHtml(string userSid, string formattedSecret, string rawSecret, string svgQrCode, string nonce)
+    private static string Generate2FaEnrollHtml(string userSid, string formattedSecret, string svgQrCode, string nonce, bool requiresCurrentCode)
     {
         var encFormattedSecret = System.Net.WebUtility.HtmlEncode(formattedSecret);
-        var encRawSecret = System.Net.WebUtility.HtmlEncode(rawSecret);
+        var currentCodeField = requiresCurrentCode
+            ? """
+              <div class="form-group">
+                <label for="currentTotpCode">Enter 6-digit Code from your CURRENT Authenticator entry:</label>
+                <input type="text" id="currentTotpCode" maxlength="6" pattern="[0-9]{6}" placeholder="123456" required autocomplete="off" />
+              </div>
+              """
+            : string.Empty;
 
         return $$"""
         <!DOCTYPE html>
@@ -545,7 +551,7 @@ public static class DevPortalEndpoints
             <p style="text-align: center; margin-bottom: 0.5rem; font-size: 0.85rem;">Or enter key manually:</p>
             <div class="secret-box">{{encFormattedSecret}}</div>
             <form id="verifyForm">
-              <input type="hidden" id="secret" value="{{encRawSecret}}" />
+              {{currentCodeField}}
               <div class="form-group">
                 <label for="totpCode">Enter 6-digit Code from Authenticator App:</label>
                 <input type="text" id="totpCode" maxlength="6" pattern="[0-9]{6}" placeholder="123456" required autocomplete="off" />
@@ -558,14 +564,15 @@ public static class DevPortalEndpoints
             document.getElementById('verifyForm').addEventListener('submit', async (e) => {
               e.preventDefault();
               const code = document.getElementById('totpCode').value.trim();
-              const secret = document.getElementById('secret').value.trim();
+              const currentEl = document.getElementById('currentTotpCode');
+              const currentTotpCode = currentEl ? currentEl.value.trim() : '';
               const statusDiv = document.getElementById('status');
 
               try {
                 const res = await fetch('/portal/2fa/enroll/verify', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ totpCode: code, secret: secret })
+                  body: JSON.stringify({ totpCode: code, currentTotpCode: currentTotpCode })
                 });
                 const data = await res.json();
                 statusDiv.style.display = 'block';
