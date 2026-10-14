@@ -13,6 +13,9 @@ public sealed class PostgreSqlGovernanceMigrationRunner : GovernanceMigrationRun
     /// <summary>Session-level advisory lock that serialises the schema DDL of concurrently starting replicas ("AUTH" "SCHE").</summary>
     private const long SchemaAdvisoryLockKey = 0x41555448_53434845L;
 
+    /// <summary>Durable, fenced CDC watermarks (WP-ARC-A-11).</summary>
+    private const string CdcWatermarksDdl = @"CREATE TABLE IF NOT EXISTS autheris_cdc_watermarks (source TEXT NOT NULL, domain_name TEXT NOT NULL, schema_name TEXT NOT NULL, table_name TEXT NOT NULL, watermark BIGINT NOT NULL, fencing_token BIGINT NOT NULL, updated_at TEXT NOT NULL, updated_by TEXT NOT NULL, PRIMARY KEY (source, domain_name, schema_name, table_name))";
+
     private static readonly IReadOnlyList<MigrationStep> Catalogue =
     [
         new MigrationStep(
@@ -29,7 +32,12 @@ public sealed class PostgreSqlGovernanceMigrationRunner : GovernanceMigrationRun
             "webhook_outbox",
             MigrationStep.ComputeChecksum("postgresql:0002:webhook_outbox:v1"),
             ctx => ExecuteAsync(ctx.Connection, ctx.Transaction, WebhookOutboxSchema.PostgreSql, ctx.CancellationToken),
-            Transactional: true)
+            Transactional: true),
+        new MigrationStep(
+            3,
+            "cdc_watermarks",
+            MigrationStep.ComputeChecksum("postgresql:0003:cdc_watermarks:v1"),
+            ctx => ExecuteAsync(ctx.Connection, ctx.Transaction, CdcWatermarksDdl, ctx.CancellationToken), Transactional: true)
     ];
 
     private readonly PostgreSqlGovernanceRepository _repository;

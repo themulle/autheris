@@ -19,12 +19,15 @@ public sealed class RedisClusterStateProvider : IDistributedClusterStateProvider
     private readonly IConnectionMultiplexer _multiplexer;
     private readonly ILogger<RedisClusterStateProvider> _logger;
     private readonly string _prefix;
+    private readonly TimeProvider _time;
 
     public RedisClusterStateProvider(
         IConnectionMultiplexer multiplexer,
         IOptions<GatewayOptions> options,
-        ILogger<RedisClusterStateProvider> logger)
+        ILogger<RedisClusterStateProvider> logger,
+        TimeProvider? timeProvider = null)
     {
+        _time = timeProvider ?? TimeProvider.System;
         _multiplexer = multiplexer ?? throw new ArgumentNullException(nameof(multiplexer));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         ArgumentNullException.ThrowIfNull(options);
@@ -48,6 +51,33 @@ public sealed class RedisClusterStateProvider : IDistributedClusterStateProvider
 
     private static readonly Prometheus.Counter SubscriberHandlerFailures = Prometheus.Metrics.CreateCounter(
         "autheris_cluster_state_handler_failure_total", "Number of failed cluster event handler invocations");
+
+    private static readonly Prometheus.Counter LeaseLostTotal = Prometheus.Metrics.CreateCounter(
+        "autheris_cluster_lease_lost_total", "Number of distributed leases declared lost by their holder",
+        new Prometheus.CounterConfiguration { LabelNames = ["reason"] });
+
+    private static readonly Prometheus.Counter LeaseRenewFailureTotal = Prometheus.Metrics.CreateCounter(
+        "autheris_cluster_lease_renew_failure_total", "Number of failed distributed lease renewal attempts");
+
+    // Acquire: KEYS[1]=lease key, KEYS[2]=fence counter (no TTL, so tokens stay strictly increasing), ARGV[1]=owner, ARGV[2]=ttl ms, ARGV[3]=fence seed (unix ms * 1000).
+    // The seed keeps tokens above those of a previous generation when the counter was lost (restart without persistence).
+    private const string AcquireLeaseScript = @"
+if redis.call('EXISTS', KEYS[1]) == 1 then return -1 end
+if redis.call('EXISTS', KEYS[2]) == 0 then redis.call('SET', KEYS[2], ARGV[3]) end
+local f = redis.call('INCR', KEYS[2])
+redis.call('SET', KEYS[1], ARGV[1] .. ':' .. f, 'PX', ARGV[2])
+return f
+";
+
+    private const string ExtendLeaseScript = @"
+if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('PEXPIRE', KEYS[1], ARGV[2]) end
+return 0
+";
+
+    private const string ReleaseLeaseScript = @"
+if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
+return 0
+";
 
     private string BuildKey(string key) => _prefix + key;
 
@@ -273,6 +303,89 @@ end
             // null is reserved for "lock busy"; an unreachable store must not look like a busy lock.
             throw Unavailable("lock", resourceKey, ex);
         }
+    }
+
+    public async ValueTask<IDistributedLease?> TryAcquireLeaseAsync(string resourceKey, TimeSpan ttl, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(resourceKey);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(ttl, TimeSpan.Zero);
+        if (resourceKey.AsSpan().IndexOfAny('{', '}') >= 0)
+        {
+            // Braces delimit the hash tag; a key containing them could collide with another resource's tag.
+            throw new ArgumentException("Lease resource keys must not contain '{' or '}'.", nameof(resourceKey));
+        }
+
+        try
+        {
+            var db = _multiplexer.GetDatabase();
+            // The braces keep the lease and fence keys in one hash slot on clustered Redis.
+            var leaseKey = (RedisKey)(_prefix + "lease:{" + resourceKey + "}");
+            var fenceKey = (RedisKey)(_prefix + "lease:{" + resourceKey + "}:fence");
+            var owner = Guid.NewGuid().ToString("N");
+            var ttlMs = (long)ttl.TotalMilliseconds;
+
+            var result = await db.ScriptEvaluateAsync(AcquireLeaseScript, [leaseKey, fenceKey], [owner, ttlMs, _time.GetUtcNow().ToUnixTimeMilliseconds() * 1000]).ConfigureAwait(false);
+            var fence = (long)result;
+            if (fence < 0)
+            {
+                return null;
+            }
+
+            return new RedisLease(this, db, leaseKey, owner + ":" + fence.ToString(System.Globalization.CultureInfo.InvariantCulture), resourceKey, fence, ttl);
+        }
+        catch (Exception ex) when (IsInfrastructureFailure(ex))
+        {
+            throw Unavailable("lease", resourceKey, ex);
+        }
+    }
+
+    private sealed class RedisLease : DistributedLeaseBase
+    {
+        private readonly RedisClusterStateProvider _provider;
+        private readonly IDatabase _db;
+        private readonly RedisKey _key;
+        private readonly RedisValue _value;
+        private readonly long _ttlMs;
+
+        public RedisLease(RedisClusterStateProvider provider, IDatabase db, RedisKey key, string value, string resourceKey, long token, TimeSpan ttl)
+            : base(provider._time, ttl, resourceKey, token, provider._logger)
+        {
+            _provider = provider;
+            _db = db;
+            _key = key;
+            _value = value;
+            _ttlMs = (long)ttl.TotalMilliseconds;
+            StartHeartbeat();
+        }
+
+        protected override async ValueTask<bool> TryExtendAsync(CancellationToken ct)
+        {
+            try
+            {
+                var result = await _db.ScriptEvaluateAsync(ExtendLeaseScript, [_key], [_value, _ttlMs]).ConfigureAwait(false);
+                return (long)result == 1;
+            }
+            catch (Exception ex) when (IsInfrastructureFailure(ex))
+            {
+                throw _provider.Unavailable("lease_extend", ResourceKey, ex);
+            }
+        }
+
+        protected override async ValueTask ReleaseAsync()
+        {
+            try
+            {
+                await _db.ScriptEvaluateAsync(ReleaseLeaseScript, [_key], [_value]).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (IsInfrastructureFailure(ex))
+            {
+                throw _provider.Unavailable("lease_release", ResourceKey, ex);
+            }
+        }
+
+        protected override void OnLeaseLost(string reason) => LeaseLostTotal.WithLabels(reason).Inc();
+
+        protected override void OnRenewFailure() => LeaseRenewFailureTotal.Inc();
     }
 
     private sealed class RedisSubscriptionLease : IAsyncDisposable

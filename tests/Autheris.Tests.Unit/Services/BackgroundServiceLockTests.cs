@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.DataCatalog.Interfaces;
+using Autheris.Application.DataCatalog.Models;
 using Autheris.Application.Interfaces;
 using Autheris.Application.OpenMetadata.Interfaces;
 using Autheris.Application.OpenMetadata.Models;
@@ -17,17 +18,31 @@ using Autheris.Extensions.DataCatalog;
 using Autheris.Extensions.OpenMetadata;
 using Autheris.Infrastructure.Itsm;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
+using Autheris.Tests.Common;
 using NSubstitute;
 using Shouldly;
 using Xunit;
 
 public sealed class BackgroundServiceLockTests
 {
-    private sealed class DummyLockLease : IAsyncDisposable
+    private sealed class DummyLease : IDistributedLease
     {
+        private readonly CancellationTokenSource _lost = new();
+
         public bool Disposed { get; private set; }
+
+        public string ResourceKey => "dummy";
+
+        public long Token => 7;
+
+        public CancellationToken LeaseLost => _lost.Token;
+
+        public DateTimeOffset LastConfirmedAt => DateTimeOffset.UtcNow;
+
         public ValueTask DisposeAsync()
         {
             Disposed = true;
@@ -35,239 +50,202 @@ public sealed class BackgroundServiceLockTests
         }
     }
 
-    [Fact]
-    public async Task MssqlChangeTrackingHostedService_WhenLockAcquired_ExecutesPoller()
+    private sealed class DummyLockLease : IAsyncDisposable
     {
-        // Arrange
-        var poller = Substitute.For<IMssqlChangeTrackingPoller>();
-        poller.PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(1));
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
 
+    private static IDistributedClusterStateProvider ClusterState(string keyFragment, bool acquired)
+    {
         var clusterState = Substitute.For<IDistributedClusterStateProvider>();
-        clusterState.TryAcquireLockAsync(Arg.Is<string>(s => s.Contains("cdc:mssql")), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<IAsyncDisposable?>(new DummyLockLease()));
+        clusterState.TryAcquireLeaseAsync(Arg.Is<string>(s => s.Contains(keyFragment)), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(_ => new ValueTask<IDistributedLease?>(acquired ? new DummyLease() : null));
+        return clusterState;
+    }
 
-        var options = Options.Create(new GatewayOptions
-        {
-            MssqlChangeTracking = new MssqlChangeTrackingOptions
-            {
-                Enabled = true,
-                PollingIntervalMilliseconds = 100,
-                TrackedTables = new List<string> { "catalog.schema.orders" }
-            }
-        });
-
-        var service = new MssqlChangeTrackingHostedService(
-            poller,
-            options,
-            NullLogger<MssqlChangeTrackingHostedService>.Instance,
-            clusterState);
-
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
-
-        // Act
+    private static async Task RunAsync(BackgroundService service, FakeTimeProvider time, TimeSpan advance)
+    {
+        await service.StartAsync(CancellationToken.None);
         try
         {
-            await service.StartAsync(cts.Token);
-            await Task.Delay(150, cts.Token);
+            for (var i = 0; i < (int)advance.TotalSeconds; i++)
+            {
+                time.Advance(TimeSpan.FromSeconds(1));
+                await Task.Delay(3);
+            }
+
+            await Task.Delay(100);
         }
-        catch (OperationCanceledException) { }
         finally
         {
             await service.StopAsync(CancellationToken.None);
         }
+    }
 
-        // Assert
-        await poller.Received().PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>());
+    internal static IHostEnvironment DevelopmentEnvironment()
+    {
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Development");
+        return env;
+    }
+
+    private static IOptionsMonitor<GatewayOptions> Monitor(GatewayOptions options) => new StaticOptionsMonitor<GatewayOptions>(options);
+
+    private static GatewayOptions CdcOptions() => new()
+    {
+        MssqlChangeTracking = new MssqlChangeTrackingOptions
+        {
+            Enabled = true,
+            PollingIntervalMilliseconds = 100,
+            TrackedTables = new List<string> { "catalog.schema.orders" }
+        }
+    };
+
+    private static (MssqlChangeTrackingHostedService Service, IMssqlChangeTrackingPoller Poller) CreateCdc(
+        IDistributedClusterStateProvider clusterState, FakeTimeProvider time)
+    {
+        var poller = Substitute.For<IMssqlChangeTrackingPoller>();
+        poller.PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(1));
+        var services = new ServiceCollection();
+        services.AddSingleton(poller);
+        services.AddScoped<MssqlChangeTrackingPollJob>();
+        services.AddSingleton(Monitor(CdcOptions()));
+        services.AddLogging();
+        var sp = services.BuildServiceProvider();
+        var service = new MssqlChangeTrackingHostedService(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            Monitor(CdcOptions()),
+            clusterState,
+            new InMemoryMssqlWatermarkStore(),
+            DevelopmentEnvironment(),
+            NullLogger<MssqlChangeTrackingHostedService>.Instance,
+            time);
+        return (service, poller);
+    }
+
+    [Fact]
+    public async Task MssqlChangeTrackingHostedService_WhenLockAcquired_ExecutesPoller()
+    {
+        var time = new FakeTimeProvider();
+        var (service, poller) = CreateCdc(ClusterState("cdc:mssql", acquired: true), time);
+
+        await RunAsync(service, time, TimeSpan.FromSeconds(2));
+
+        // The lease's fencing token must reach the poller.
+        await poller.Received().PollTableChangesAsync(Arg.Any<TableIdentifier>(), 7, Arg.Any<CancellationToken>());
     }
 
     [Fact]
     public async Task MssqlChangeTrackingHostedService_WhenLockBusy_SkipsPoller()
     {
-        // Arrange
-        var poller = Substitute.For<IMssqlChangeTrackingPoller>();
+        var time = new FakeTimeProvider();
+        var (service, poller) = CreateCdc(ClusterState("cdc:mssql", acquired: false), time);
 
+        await RunAsync(service, time, TimeSpan.FromSeconds(2));
+
+        await poller.DidNotReceive().PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<long>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task MssqlChangeTrackingHostedService_WhenStateUnavailable_DoesNotPollOrCrash()
+    {
+        var time = new FakeTimeProvider();
         var clusterState = Substitute.For<IDistributedClusterStateProvider>();
-        clusterState.TryAcquireLockAsync(Arg.Is<string>(s => s.Contains("cdc:mssql")), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<IAsyncDisposable?>((IAsyncDisposable?)null));
+        clusterState.TryAcquireLeaseAsync(Arg.Any<string>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns<ValueTask<IDistributedLease?>>(_ => throw new ClusterStateUnavailableException("lease", "cdc", null));
+        var (service, poller) = CreateCdc(clusterState, time);
 
-        var options = Options.Create(new GatewayOptions
-        {
-            MssqlChangeTracking = new MssqlChangeTrackingOptions
-            {
-                Enabled = true,
-                PollingIntervalMilliseconds = 100,
-                TrackedTables = new List<string> { "catalog.schema.orders" }
-            }
-        });
+        await RunAsync(service, time, TimeSpan.FromSeconds(2));
 
-        var service = new MssqlChangeTrackingHostedService(
-            poller,
-            options,
-            NullLogger<MssqlChangeTrackingHostedService>.Instance,
-            clusterState);
+        await poller.DidNotReceive().PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<long>(), Arg.Any<CancellationToken>());
+        service.ExecuteTask!.IsFaulted.ShouldBeFalse();
+    }
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
-
-        // Act
-        try
-        {
-            await service.StartAsync(cts.Token);
-            await Task.Delay(150, cts.Token);
-        }
-        catch (OperationCanceledException) { }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None);
-        }
-
-        // Assert
-        await poller.DidNotReceive().PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>());
+    private static (OpenMetadataSyncBackgroundService Service, IOpenMetadataSyncService Sync) CreateOpenMetadata(
+        IDistributedClusterStateProvider clusterState, FakeTimeProvider time)
+    {
+        var syncService = Substitute.For<IOpenMetadataSyncService>();
+        syncService.SyncPermissionsAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new OpenMetadataSyncResult(0, 0, 0, Array.Empty<TableIdentifier>(), Array.Empty<string>(), true)));
+        var services = new ServiceCollection();
+        services.AddSingleton(syncService);
+        services.AddScoped<OpenMetadataSyncJob>();
+        services.AddLogging();
+        var sp = services.BuildServiceProvider();
+        var options = new GatewayOptions { OpenMetadata = new OpenMetadataOptions { Enabled = true, SyncIntervalMinutes = 1 } };
+        var service = new OpenMetadataSyncBackgroundService(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            Monitor(options),
+            clusterState,
+            NullLogger<OpenMetadataSyncBackgroundService>.Instance,
+            time);
+        return (service, syncService);
     }
 
     [Fact]
     public async Task OpenMetadataSyncBackgroundService_WhenLockAcquired_ExecutesSync()
     {
-        // Arrange
-        var syncService = Substitute.For<IOpenMetadataSyncService>();
-        syncService.SyncPermissionsAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new OpenMetadataSyncResult(0, 0, 0, Array.Empty<TableIdentifier>(), Array.Empty<string>(), true)));
+        var time = new FakeTimeProvider();
+        var (service, sync) = CreateOpenMetadata(ClusterState("openmetadata:sync", acquired: true), time);
 
-        var services = new ServiceCollection();
-        services.AddSingleton(syncService);
-        var sp = services.BuildServiceProvider();
-        var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+        await RunAsync(service, time, TimeSpan.FromSeconds(10));
 
-        var clusterState = Substitute.For<IDistributedClusterStateProvider>();
-        clusterState.TryAcquireLockAsync(Arg.Is<string>(s => s.Contains("openmetadata:sync")), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<IAsyncDisposable?>(new DummyLockLease()));
-
-        var options = Options.Create(new GatewayOptions
-        {
-            OpenMetadata = new OpenMetadataOptions
-            {
-                Enabled = true,
-                SyncIntervalMinutes = 1
-            }
-        });
-
-        var service = new OpenMetadataSyncBackgroundService(
-            scopeFactory,
-            options,
-            NullLogger<OpenMetadataSyncBackgroundService>.Instance,
-            clusterState);
-
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
-
-        // Act
-        try
-        {
-            await service.StartAsync(cts.Token);
-            await Task.Delay(80, cts.Token);
-        }
-        catch (OperationCanceledException) { }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None);
-        }
-
-        // Assert
-        await syncService.Received().SyncPermissionsAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>());
+        await sync.Received().SyncPermissionsAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
     public async Task OpenMetadataSyncBackgroundService_WhenLockBusy_SkipsSync()
     {
-        // Arrange
-        var syncService = Substitute.For<IOpenMetadataSyncService>();
+        var time = new FakeTimeProvider();
+        var (service, sync) = CreateOpenMetadata(ClusterState("openmetadata:sync", acquired: false), time);
 
+        await RunAsync(service, time, TimeSpan.FromSeconds(10));
+
+        await sync.DidNotReceive().SyncPermissionsAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>());
+    }
+
+    private static (DataCatalogSyncBackgroundService Service, IDataCatalogSyncService Sync) CreateDataCatalog(
+        IDistributedClusterStateProvider clusterState, FakeTimeProvider time)
+    {
+        var syncService = Substitute.For<IDataCatalogSyncService>();
+        syncService.SyncCatalogAsync(Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new CatalogSyncResult(0, 0, 0, 0, Array.Empty<TableIdentifier>(), Array.Empty<string>(), true)));
         var services = new ServiceCollection();
         services.AddSingleton(syncService);
+        services.AddScoped<DataCatalogSyncJob>();
+        services.AddLogging();
         var sp = services.BuildServiceProvider();
-        var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+        var options = new GatewayOptions { Catalog = new DataCatalogOptions { Enabled = true, SyncIntervalMinutes = 1 } };
+        var service = new DataCatalogSyncBackgroundService(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            Monitor(options),
+            clusterState,
+            NullLogger<DataCatalogSyncBackgroundService>.Instance,
+            time);
+        return (service, syncService);
+    }
 
-        var clusterState = Substitute.For<IDistributedClusterStateProvider>();
-        clusterState.TryAcquireLockAsync(Arg.Is<string>(s => s.Contains("openmetadata:sync")), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<IAsyncDisposable?>((IAsyncDisposable?)null));
+    [Fact]
+    public async Task DataCatalogSyncBackgroundService_WhenLockAcquired_ExecutesSync()
+    {
+        var time = new FakeTimeProvider();
+        var (service, sync) = CreateDataCatalog(ClusterState("datacatalog:sync", acquired: true), time);
 
-        var options = Options.Create(new GatewayOptions
-        {
-            OpenMetadata = new OpenMetadataOptions
-            {
-                Enabled = true,
-                SyncIntervalMinutes = 1
-            }
-        });
+        await RunAsync(service, time, TimeSpan.FromSeconds(30));
 
-        var service = new OpenMetadataSyncBackgroundService(
-            scopeFactory,
-            options,
-            NullLogger<OpenMetadataSyncBackgroundService>.Instance,
-            clusterState);
-
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
-
-        // Act
-        try
-        {
-            await service.StartAsync(cts.Token);
-            await Task.Delay(80, cts.Token);
-        }
-        catch (OperationCanceledException) { }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None);
-        }
-
-        // Assert
-        await syncService.DidNotReceive().SyncPermissionsAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>());
+        await sync.Received().SyncCatalogAsync(Arg.Any<bool>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
     public async Task DataCatalogSyncBackgroundService_WhenLockBusy_SkipsSync()
     {
-        // Arrange
-        var syncService = Substitute.For<IDataCatalogSyncService>();
+        var time = new FakeTimeProvider();
+        var (service, sync) = CreateDataCatalog(ClusterState("datacatalog:sync", acquired: false), time);
 
-        var clusterState = Substitute.For<IDistributedClusterStateProvider>();
-        clusterState.TryAcquireLockAsync(Arg.Is<string>(s => s.Contains("datacatalog:sync")), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<IAsyncDisposable?>((IAsyncDisposable?)null));
+        await RunAsync(service, time, TimeSpan.FromSeconds(30));
 
-        var services = new ServiceCollection();
-        services.AddSingleton(syncService);
-        var sp = services.BuildServiceProvider();
-
-        var options = Options.Create(new GatewayOptions
-        {
-            Catalog = new DataCatalogOptions
-            {
-                Enabled = true,
-                SyncIntervalMinutes = 1
-            }
-        });
-
-        var service = new DataCatalogSyncBackgroundService(
-            sp,
-            options,
-            NullLogger<DataCatalogSyncBackgroundService>.Instance,
-            clusterState);
-
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
-
-        // Act
-        try
-        {
-            await service.StartAsync(cts.Token);
-            await Task.Delay(80, cts.Token);
-        }
-        catch (OperationCanceledException) { }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None);
-        }
-
-        // Assert
-        await syncService.DidNotReceive().SyncCatalogAsync(Arg.Any<bool>(), Arg.Any<CancellationToken>());
+        await sync.DidNotReceive().SyncCatalogAsync(Arg.Any<bool>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

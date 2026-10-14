@@ -119,7 +119,9 @@ public sealed class GarnetServerManager : IGarnetServerManager, IHostedService
             "--port", options.Port.ToString(),
             "--bind", options.Host,
             "--auth", "Password",
-            "--password", password
+            "--password", password,
+            // Lease acquisition/renewal and budget consumption run as Lua scripts; Garnet disables scripting by default.
+            "--lua"
         };
 
         if (options.EnableTls)

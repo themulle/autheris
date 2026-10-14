@@ -1,90 +1,47 @@
+using Autheris.Application.Hosting;
 using Autheris.Application.OpenMetadata.Interfaces;
+using Autheris.Application.State;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Autheris.Extensions.OpenMetadata;
 
-public sealed class OpenMetadataSyncBackgroundService : BackgroundService
+/// <summary>
+/// Periodic OpenMetadata permission sync, run by exactly one cluster replica at a time under a renewed lease.
+/// The sync is idempotent and therefore not fenced: a replica that loses its lease stops through the job's cancellation token.
+/// </summary>
+public sealed class OpenMetadataSyncBackgroundService(
+    IServiceScopeFactory scopeFactory,
+    IOptionsMonitor<GatewayOptions> options,
+    IDistributedClusterStateProvider clusterState,
+    ILogger<OpenMetadataSyncBackgroundService> logger,
+    TimeProvider? timeProvider = null)
+    : ClusterScheduledService<OpenMetadataSyncJob>(scopeFactory, clusterState, logger, timeProvider)
 {
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IOptions<GatewayOptions> _options;
-    private readonly ILogger<OpenMetadataSyncBackgroundService> _logger;
-    private readonly Autheris.Application.State.IDistributedClusterStateProvider? _clusterState;
+    protected override string LeaseKey => "catalog:openmetadata:sync";
 
-    public OpenMetadataSyncBackgroundService(
-        IServiceScopeFactory scopeFactory,
-        IOptions<GatewayOptions> options,
-        ILogger<OpenMetadataSyncBackgroundService> logger,
-        Autheris.Application.State.IDistributedClusterStateProvider? clusterState = null)
+    protected override ClusterSchedule GetSchedule()
     {
-        _scopeFactory = scopeFactory;
-        _options = options;
-        _logger = logger;
-        _clusterState = clusterState;
+        var openMetadata = options.CurrentValue.OpenMetadata;
+        var interval = TimeSpan.FromMinutes(Math.Clamp(openMetadata.SyncIntervalMinutes, 1, 1440));
+        return new ClusterSchedule(
+            openMetadata.Enabled,
+            interval,
+            InitialDelay: TimeSpan.Zero,
+            LeaseTtl: TimeSpan.FromMinutes(2),
+            MaxJitter: interval / 10);
     }
+}
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+/// <summary>One OpenMetadata permission synchronization run.</summary>
+public sealed class OpenMetadataSyncJob(IOpenMetadataSyncService syncService) : IClusterScheduledJob
+{
+    public async Task ExecuteAsync(ClusterJobContext context, CancellationToken ct)
     {
-        var omOptions = _options.Value.OpenMetadata;
-        if (!omOptions.Enabled)
-        {
-            _logger.LogInformation("OpenMetadata integration is disabled. Background sync will not run.");
-            return;
-        }
+        ArgumentNullException.ThrowIfNull(context);
 
-        _logger.LogInformation("OpenMetadata background sync service started. Sync interval: {Interval} minutes.", omOptions.SyncIntervalMinutes);
-
-        var leaseDuration = TimeSpan.FromMinutes(Math.Max(5, omOptions.SyncIntervalMinutes));
-
-        // Initial sync on startup
-        await ExecuteSyncWithLockAsync(leaseDuration, stoppingToken).ConfigureAwait(false);
-
-        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(Math.Max(1, omOptions.SyncIntervalMinutes)));
-
-        while (!stoppingToken.IsCancellationRequested && await timer.WaitForNextTickAsync(stoppingToken))
-        {
-            await ExecuteSyncWithLockAsync(leaseDuration, stoppingToken).ConfigureAwait(false);
-        }
-    }
-
-    private async Task ExecuteSyncWithLockAsync(TimeSpan leaseDuration, CancellationToken stoppingToken)
-    {
-        IAsyncDisposable? syncLock = null;
-        if (_clusterState != null)
-        {
-            try
-            {
-                syncLock = await _clusterState.TryAcquireLockAsync("catalog:openmetadata:sync", leaseDuration, stoppingToken).ConfigureAwait(false);
-            }
-            catch (Autheris.Application.State.ClusterStateUnavailableException ex)
-            {
-                // The cluster state is unavailable: skip this cycle (never run unguarded, never crash the host).
-                _logger.LogWarning(ex, "OpenMetadata sync skipped: cluster state unavailable.");
-                return;
-            }
-
-            if (syncLock == null)
-            {
-                _logger.LogDebug("OpenMetadata sync lock held by another cluster replica; skipping sync cycle.");
-                return;
-            }
-        }
-
-        await using (syncLock)
-        {
-            try
-            {
-                await using var scope = _scopeFactory.CreateAsyncScope();
-                var syncService = scope.ServiceProvider.GetRequiredService<IOpenMetadataSyncService>();
-                await syncService.SyncPermissionsAsync(dryRun: false, ct: stoppingToken).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogError(ex, "OpenMetadata sync failed.");
-            }
-        }
+        await syncService.SyncPermissionsAsync(dryRun: false, ct: ct).ConfigureAwait(false);
     }
 }

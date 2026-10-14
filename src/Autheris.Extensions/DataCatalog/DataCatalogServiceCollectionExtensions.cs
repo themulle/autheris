@@ -40,6 +40,7 @@ public static class DataCatalogServiceCollectionExtensions
 
         if (gatewayOptions.Catalog.Enabled)
         {
+            services.TryAddScoped<DataCatalogSyncJob>();
             services.AddHostedService<DataCatalogSyncBackgroundService>();
         }
 
