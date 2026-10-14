@@ -13,6 +13,9 @@ public sealed class SqlServerGovernanceMigrationRunner : GovernanceMigrationRunn
     /// <summary>Application lock resource that serialises the schema DDL of concurrently starting replicas.</summary>
     private const string SchemaAppLockResource = "autheris:governance:schema";
 
+    /// <summary>Durable, fenced CDC watermarks (WP-ARC-A-11).</summary>
+    private const string CdcWatermarksDdl = @"IF OBJECT_ID(N'dbo.autheris_cdc_watermarks', N'U') IS NULL CREATE TABLE dbo.autheris_cdc_watermarks (source NVARCHAR(32) NOT NULL, domain_name NVARCHAR(128) NOT NULL, schema_name NVARCHAR(128) NOT NULL, table_name NVARCHAR(128) NOT NULL, watermark BIGINT NOT NULL, fencing_token BIGINT NOT NULL, updated_at NVARCHAR(64) NOT NULL, updated_by NVARCHAR(256) NOT NULL, CONSTRAINT PK_autheris_cdc_watermarks PRIMARY KEY (source, domain_name, schema_name, table_name))";
+
     private static readonly IReadOnlyList<MigrationStep> Catalogue =
     [
         new MigrationStep(
@@ -23,7 +26,12 @@ public sealed class SqlServerGovernanceMigrationRunner : GovernanceMigrationRunn
             {
                 SqlServerBaselineSchema.Apply((SqlConnection)ctx.Connection);
                 return Task.CompletedTask;
-            })
+            }),
+        new MigrationStep(
+            2,
+            "cdc_watermarks",
+            MigrationStep.ComputeChecksum("sqlserver:0002:cdc_watermarks:v1"),
+            ctx => ExecuteAsync(ctx.Connection, ctx.Transaction, CdcWatermarksDdl, ctx.CancellationToken), Transactional: true)
     ];
 
     private readonly SqlServerGovernanceRepository _repository;

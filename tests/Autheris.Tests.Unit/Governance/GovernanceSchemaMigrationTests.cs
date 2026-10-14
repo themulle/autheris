@@ -72,7 +72,7 @@ public sealed class GovernanceSchemaMigrationTests
         await NewRunner(repository, cs).RunAsync();
 
         Scalar(repository, "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('TABLES', 'AUDIT_LOG_ENTRIES', 'CONSENTS', 'autheris_schema_migrations')").ShouldBe(4);
-        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations").ShouldBe(1);
+        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations").ShouldBe(NewRunner(repository, cs).Steps.Count);
         Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 1 AND name = 'baseline_governance_schema' AND length(checksum) = 64").ShouldBe(1);
     }
 
@@ -86,7 +86,7 @@ public sealed class GovernanceSchemaMigrationTests
         await runner.RunAsync();
         await runner.RunAsync();
 
-        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations").ShouldBe(1);
+        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations").ShouldBe(runner.Steps.Count);
     }
 
     [Fact]
