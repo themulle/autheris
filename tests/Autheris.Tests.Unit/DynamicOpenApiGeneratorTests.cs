@@ -77,10 +77,10 @@ public sealed class DynamicOpenApiGeneratorTests
         getInvoices.GetProperty("summary").GetString().ShouldBe("Query finance.invoices");
 
         var parameters = getInvoices.GetProperty("parameters");
-        // O3: only implemented options are advertised ($filter and $count answer 501 until they are implemented).
         parameters.EnumerateArray().Select(p => p.GetProperty("name").GetString()!).ToArray()
-            .ShouldBe(new[] { "$select", "$top", "$skip" }, ignoreOrder: false);
-        getInvoices.GetProperty("description").GetString()!.ShouldNotContain("$filter");
+            .ShouldBe(new[] { "$select", "$top", "$skip", "$filter", "$orderby", "$count", "$format" }, ignoreOrder: false);
+        getInvoices.GetProperty("description").GetString()!.ShouldContain("$filter");
+        getInvoices.GetProperty("description").GetString()!.ShouldContain("$orderby");
 
         var schemas = root.GetProperty("components").GetProperty("schemas");
         schemas.TryGetProperty("finance_dbo_invoices", out var invoiceSchema).ShouldBeTrue();

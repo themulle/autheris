@@ -433,4 +433,114 @@ public sealed class AdminMcpTwoPhaseTests
         applyResult.Success.ShouldBeTrue();
         applyResult.AppliedTuplesCount.ShouldBeGreaterThan(0);
     }
+
+    [Fact]
+    public async Task SetDatasetStateAsync_PreservesAllTableProperties_B18Fix()
+    {
+        // Arrange
+        var tableId = Guid.NewGuid();
+        var existingMetadata = new TableMetadata
+        {
+            Identifier = new TableIdentifier("sales", "public", "http_orders"),
+            Table = new Table
+            {
+                Id = tableId,
+                SourceType = "HTTP",
+                SourceName = "api_gateway",
+                SchemaName = "public",
+                TableName = "http_orders",
+                Sensitivity = "CONFIDENTIAL",
+                IsActive = false,
+                DataSourceType = DataSourceType.HttpDeclarative,
+                HttpEndpoint = new HttpEndpointDescriptor { BaseUrl = "https://orders.internal.org/api/v1", Method = "GET" },
+                PluginName = "orders-plugin",
+                Location = "https://orders.internal.org/api/v1",
+                Tags = ["finance", "external"],
+                Visibility = DatasetVisibility.Full
+            }
+        };
+
+        _tableRepo.GetTableMetadataAsync(existingMetadata.Identifier, Arg.Any<CancellationToken>())
+            .Returns(existingMetadata);
+
+        TableMetadata? savedMetadata = null;
+        await _tableRepo.UpsertTableMetadataAsync(Arg.Do<TableMetadata>(m => savedMetadata = m), Arg.Any<CancellationToken>());
+
+        // Act
+        var result = await _service.SetDatasetStateAsync(
+            new AdminSetDatasetStateRequest("sales.public.http_orders", "active"),
+            AdminSid);
+
+        // Assert
+        result.Success.ShouldBeTrue();
+        result.NewState.ShouldBe("active");
+
+        savedMetadata.ShouldNotBeNull();
+        savedMetadata.Table.IsActive.ShouldBeTrue();
+        savedMetadata.Table.DataSourceType.ShouldBe(DataSourceType.HttpDeclarative);
+        savedMetadata.Table.HttpEndpoint.ShouldNotBeNull();
+        savedMetadata.Table.HttpEndpoint.BaseUrl.ShouldBe("https://orders.internal.org/api/v1");
+        savedMetadata.Table.PluginName.ShouldBe("orders-plugin");
+        savedMetadata.Table.Location.ShouldBe("https://orders.internal.org/api/v1");
+        savedMetadata.Table.Tags.ShouldBe(["finance", "external"]);
+        savedMetadata.Table.Visibility.ShouldBe(DatasetVisibility.Full);
+        savedMetadata.Table.SourceType.ShouldBe("HTTP");
+        savedMetadata.Table.SourceName.ShouldBe("api_gateway");
+    }
+
+    [Fact]
+    public async Task McpProtocolHandler_ToolsList_HidesAdminToolsForNonAdmin_B16()
+    {
+        // Arrange
+        var sessionStore = new McpSessionStore(NullLogger<McpSessionStore>.Instance);
+        var toolRegistry = new McpToolRegistry();
+        var guardrail = Substitute.For<IAiDataGuardrailService>();
+        var handler = new McpProtocolHandler(sessionStore, toolRegistry, guardrail, NullLogger<McpProtocolHandler>.Instance);
+
+        var consumerSession = handler.CreateSession("consumer-app", "tenant-1", userSid: "user-david", roles: ["DataConsumer"]);
+
+        // Act
+        var responseJson = await handler.HandleMessageAsync(consumerSession.SessionId, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
+
+        // Assert
+        responseJson.ShouldNotBeNull();
+        using var doc = JsonDocument.Parse(responseJson);
+        var tools = doc.RootElement.GetProperty("result").GetProperty("tools").EnumerateArray()
+            .Select(t => t.GetProperty("name").GetString())
+            .ToList();
+
+        tools.ShouldNotContain(McpAdminTools.PlanAccess);
+        tools.ShouldNotContain(McpAdminTools.ApplyAccess);
+        tools.ShouldNotContain(McpAdminTools.RegisterDatasource);
+        tools.ShouldNotContain(McpAdminTools.SetDatasetState);
+        tools.ShouldNotContain(McpAdminTools.ResolvePrincipal);
+    }
+
+    [Fact]
+    public async Task McpProtocolHandler_ToolsList_ExposesAdminToolsForGovernanceAdmin_B16()
+    {
+        // Arrange
+        var sessionStore = new McpSessionStore(NullLogger<McpSessionStore>.Instance);
+        var toolRegistry = new McpToolRegistry();
+        var guardrail = Substitute.For<IAiDataGuardrailService>();
+        var handler = new McpProtocolHandler(sessionStore, toolRegistry, guardrail, NullLogger<McpProtocolHandler>.Instance);
+
+        var adminSession = handler.CreateSession("admin-app", "tenant-1", userSid: "user-admin", roles: ["GovernanceAdmin"]);
+
+        // Act
+        var responseJson = await handler.HandleMessageAsync(adminSession.SessionId, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
+
+        // Assert
+        responseJson.ShouldNotBeNull();
+        using var doc = JsonDocument.Parse(responseJson);
+        var tools = doc.RootElement.GetProperty("result").GetProperty("tools").EnumerateArray()
+            .Select(t => t.GetProperty("name").GetString())
+            .ToList();
+
+        tools.ShouldContain(McpAdminTools.PlanAccess);
+        tools.ShouldContain(McpAdminTools.ApplyAccess);
+        tools.ShouldContain(McpAdminTools.RegisterDatasource);
+        tools.ShouldContain(McpAdminTools.SetDatasetState);
+        tools.ShouldContain(McpAdminTools.ResolvePrincipal);
+    }
 }

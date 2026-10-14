@@ -55,6 +55,7 @@ public sealed class GatewayOptions
     [Required] public ClassificationOptions Classification { get; init; } = new();
     [Required] public TenantIsolationOptions TenantIsolation { get; init; } = new();
     [Required] public ODataOptions OData { get; init; } = new();
+    [Required] public WebhooksOptions Webhooks { get; init; } = new();
 
     /// <summary>
     /// Getting Started Preset Profile: "Strict" (Default) or "Quickstart".

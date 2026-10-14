@@ -88,6 +88,20 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<WebApplication
         endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().ShouldNotBeEmpty();
     }
 
+    [Theory]
+    [InlineData("POST", "/api/governance/plans")]
+    [InlineData("GET", "/api/governance/plans/{planId}")]
+    [InlineData("POST", "/api/governance/plans/{planId}/confirm")]
+    [InlineData("POST", "/api/governance/plans/{planId}/apply")]
+    [InlineData("GET", "/api/governance/principals")]
+    public void B10_GovernancePlanAndPrincipalEndpoints_RequireGovernanceAdminPolicy(string method, string rawPattern)
+    {
+        var endpoint = FindEndpoint(GetRouteEndpoints(), method, rawPattern);
+        var authData = endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>();
+        authData.ShouldNotBeEmpty();
+        authData.Any(a => a.Policy == "GovernanceAdmin").ShouldBeTrue();
+    }
+
     [Fact]
     public async Task GAP01_AnonymousProbeAndDocsCalls_AreNotRejectedWith401()
     {

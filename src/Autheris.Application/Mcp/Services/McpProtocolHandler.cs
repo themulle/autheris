@@ -2,12 +2,16 @@ namespace Autheris.Application.Mcp.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Mcp.Interfaces;
+using Autheris.Application.Mcp.Tools;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// JSON-RPC 2.0 Protocol Handler implementing the Model Context Protocol (MCP) specification (2024-11-05), used by the
@@ -21,6 +25,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
     private readonly ISemanticMcpCompiler? _semanticCompiler;
     private readonly Autheris.Application.Mcp.Pruning.ISemanticToolPruner? _toolPruner;
     private readonly ILogger<McpProtocolHandler> _logger;
+    private readonly GatewayOptions _options;
 
     public McpProtocolHandler(
         IMcpSessionStore sessionStore,
@@ -28,7 +33,8 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
         IAiDataGuardrailService guardrailService,
         ILogger<McpProtocolHandler> logger,
         ISemanticMcpCompiler? semanticCompiler = null,
-        Autheris.Application.Mcp.Pruning.ISemanticToolPruner? toolPruner = null)
+        Autheris.Application.Mcp.Pruning.ISemanticToolPruner? toolPruner = null,
+        IOptions<GatewayOptions>? options = null)
     {
         _sessionStore = sessionStore ?? throw new ArgumentNullException(nameof(sessionStore));
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
@@ -36,6 +42,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _semanticCompiler = semanticCompiler;
         _toolPruner = toolPruner;
+        _options = options?.Value ?? new GatewayOptions();
     }
 
     public McpSessionContext CreateSession(string servicePrincipalId, string tenantId)
@@ -107,7 +114,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
         {
             "initialize" => HandleInitialize(rpcId),
             "ping" => HandlePing(rpcId),
-            "tools/list" => await HandleToolsListAsync(rpcId, root, cancellationToken).ConfigureAwait(false),
+            "tools/list" => await HandleToolsListAsync(rpcId, root, session, cancellationToken).ConfigureAwait(false),
             "tools/call" => await HandleToolsCallAsync(rpcId, root, session, cancellationToken).ConfigureAwait(false),
             "resources/list" => await HandleResourcesListAsync(rpcId, session, cancellationToken).ConfigureAwait(false),
             "resources/read" => await HandleResourcesReadAsync(rpcId, root, session, cancellationToken).ConfigureAwait(false),
@@ -151,9 +158,22 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
     private async ValueTask<string> HandleToolsListAsync(
         object? id,
         JsonElement root,
+        McpSessionContext session,
         CancellationToken cancellationToken)
     {
         var tools = _toolRegistry.GetAvailableTools();
+
+        var roles = session.Roles ?? [];
+        bool isAdmin = _options.IsMcpAuthBypassed ||
+                       roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) ||
+                       roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase) ||
+                       roles.Contains("TenantAdmin", StringComparer.OrdinalIgnoreCase) ||
+                       roles.Contains("Admin", StringComparer.OrdinalIgnoreCase);
+
+        if (!isAdmin)
+        {
+            tools = tools.Where(t => !McpAdminTools.IsAdminTool(t.Name)).ToList();
+        }
 
         // F-AI-07: Extract prompt if provided in params for dynamic Just-in-Time pruning
         string? prompt = null;
