@@ -268,7 +268,7 @@ public sealed class Wave2GovernanceTests
             }
         });
 
-        var repo = new SqliteGovernanceRepository(epochService, options, logger: NullLogger<SqliteGovernanceRepository>.Instance);
+        var repo = GovernanceStoreFactory.CreateSqlite(epochService, options, logger: NullLogger<SqliteGovernanceRepository>.Instance);
 
         var requesterSid = new Sid("S-1-5-21-REQUESTER-1");
         var tableIdentifier = new TableIdentifier("default", "sales", "invoices");

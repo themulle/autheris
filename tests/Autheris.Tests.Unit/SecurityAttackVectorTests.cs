@@ -362,7 +362,7 @@ public sealed class SecurityAttackVectorTests
     public async Task SqliteGovernanceRepository_AuditHashChain_TamperingShouldBeDetected()
     {
         // Arrange
-        using var repo = new SqliteGovernanceRepository(new StubEpochValidationService());
+        using var repo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
 
         // Insert valid consecutive audit records
         var entry1 = new AuditLogEntry

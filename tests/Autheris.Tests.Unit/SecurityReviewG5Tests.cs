@@ -476,7 +476,7 @@ public sealed class SecurityReviewG5Tests : IDisposable
 
     private static async Task<(SqliteGovernanceRepository repo, ConsentRequest request)> PendingExternalRequestAsync(string status = "PENDING_EXTERNAL_APPROVAL")
     {
-        var repo = new SqliteGovernanceRepository(new StubEpochValidationService());
+        var repo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
         var tableId = new TableIdentifier("sales", "crm", "g5_" + Guid.NewGuid().ToString("N")[..8]);
         var table = new Table { Id = Guid.NewGuid(), SourceName = tableId.Domain, SchemaName = tableId.Schema, TableName = tableId.TableName, IsActive = true };
         var meta = await repo.UpsertTableMetadataAsync(new TableMetadata

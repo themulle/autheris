@@ -272,7 +272,7 @@ public class ItsmClientsAndRecertificationTests
     public async Task SqliteGovernanceRepository_GetExpiringConsentsAsync_ShouldReadStringEnumsCorrectly()
     {
         // Arrange: Real in-memory SQLite database
-        using var repo = new Autheris.Infrastructure.Persistence.SqliteGovernanceRepository(new StubEpochValidationService());
+        using var repo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
 
         var table = new TableIdentifier("crm", "dbo", "customers");
         var tableEntity = new Table

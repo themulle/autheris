@@ -28,7 +28,7 @@ public class DelegationAndFourEyesStressTests : IDisposable
                 ConnectionString = $"Data Source=delegation_4eyes_test_{Guid.NewGuid():N};Mode=Memory;Cache=Shared"
             }
         });
-        _repository = new SqliteGovernanceRepository(_epochService, options);
+        _repository = GovernanceStoreFactory.CreateSqlite(_epochService, options);
     }
 
     public void Dispose()

@@ -31,7 +31,7 @@ public sealed class SqliteGovernanceLintSourceTests : IDisposable
     public async Task LoadAsync_ReadsCatalogAndProfiles_AndTheLintFlagsTheBrokenOne()
     {
         var connection = $"Data Source={_path}";
-        using (var repo = new SqliteGovernanceRepository(new EpochValidationService(),
+        using (var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(),
                    Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = connection } })))
         {
             var table = new Table { SourceType = "PostgreSQL", SourceName = "erp", SchemaName = "main", TableName = "orders" };

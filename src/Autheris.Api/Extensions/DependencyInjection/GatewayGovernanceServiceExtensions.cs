@@ -25,11 +25,22 @@ using Autheris.Infrastructure.Cache;
 using Autheris.Infrastructure.Itsm;
 using Autheris.Infrastructure.Lineage;
 using Autheris.Infrastructure.Persistence;
+using Autheris.Infrastructure.Persistence.Migrations;
 using Autheris.Infrastructure.Security;
 using Microsoft.Extensions.DependencyInjection;
 
 public static class GatewayGovernanceServiceExtensions
 {
+    /// <summary>
+    /// Registers the hosted service that migrates and initializes the governance store (WP-ARC-B-12, decision G-8). Must be called
+    /// before any other hosted service is registered so <c>StartAsync</c> blocks the rest of the host until the schema is ready.
+    /// </summary>
+    public static IServiceCollection AddAutherisGovernanceMigrations(this IServiceCollection services)
+    {
+        services.AddHostedService<GovernanceMigrationHostedService>();
+        return services;
+    }
+
     public static IServiceCollection AddAutherisGovernance(
         this IServiceCollection services,
         GatewayOptions gatewayOptions)
@@ -37,6 +48,8 @@ public static class GatewayGovernanceServiceExtensions
         if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.PostgreSql))
         {
             services.AddSingleton<PostgreSqlGovernanceRepository>();
+            services.AddSingleton<IGovernanceStoreInitializer>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
+            services.AddSingleton<IGovernanceMigrationRunner, PostgreSqlGovernanceMigrationRunner>();
             services.AddSingleton<IGovernanceRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<ITableMetadataRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<IConsentRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
@@ -53,6 +66,8 @@ public static class GatewayGovernanceServiceExtensions
         else if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.SqlServer))
         {
             services.AddSingleton<SqlServerGovernanceRepository>();
+            services.AddSingleton<IGovernanceStoreInitializer>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
+            services.AddSingleton<IGovernanceMigrationRunner, SqlServerGovernanceMigrationRunner>();
             services.AddSingleton<IGovernanceRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
             services.AddSingleton<ITableMetadataRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
             services.AddSingleton<IConsentRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
@@ -69,6 +84,8 @@ public static class GatewayGovernanceServiceExtensions
         else
         {
             services.AddSingleton<SqliteGovernanceRepository>();
+            services.AddSingleton<IGovernanceStoreInitializer>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+            services.AddSingleton<IGovernanceMigrationRunner, SqliteGovernanceMigrationRunner>();
             services.AddSingleton<IGovernanceRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<ITableMetadataRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<IConsentRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());

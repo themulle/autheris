@@ -30,7 +30,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
                 ConnectionString = $"Data Source=concurrency_audit_test_{Guid.NewGuid():N};Mode=Memory;Cache=Shared"
             }
         });
-        _repository = new SqliteGovernanceRepository(_epochService, options);
+        _repository = GovernanceStoreFactory.CreateSqlite(_epochService, options);
     }
 
     public void Dispose()
@@ -132,7 +132,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
         });
 
         // Instance 1: records events 1..5
-        using (var inst1 = new SqliteGovernanceRepository(_epochService, opts))
+        using (var inst1 = GovernanceStoreFactory.CreateSqlite(_epochService, opts))
         {
             for (int i = 1; i <= 5; i++)
             {
@@ -148,7 +148,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
         }
 
         // Instance 2: records events 6..10
-        using (var inst2 = new SqliteGovernanceRepository(_epochService, opts))
+        using (var inst2 = GovernanceStoreFactory.CreateSqlite(_epochService, opts))
         {
             for (int i = 6; i <= 10; i++)
             {
@@ -164,7 +164,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
         }
 
         // Instance 3: records event 11, then verifies all 11 events
-        using (var inst3 = new SqliteGovernanceRepository(_epochService, opts))
+        using (var inst3 = GovernanceStoreFactory.CreateSqlite(_epochService, opts))
         {
             await inst3.RecordAuditEventAsync(new AuditLogEntry
             {
@@ -195,7 +195,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
         });
 
         Guid middleEventId = Guid.Empty;
-        using (var repo = new SqliteGovernanceRepository(_epochService, opts))
+        using (var repo = GovernanceStoreFactory.CreateSqlite(_epochService, opts))
         {
             // Seed 5 events
             for (int i = 1; i <= 5; i++)
@@ -244,7 +244,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
         });
 
         Guid middleEventId = Guid.Empty;
-        using (var repo = new SqliteGovernanceRepository(_epochService, opts))
+        using (var repo = GovernanceStoreFactory.CreateSqlite(_epochService, opts))
         {
             for (int i = 1; i <= 5; i++)
             {

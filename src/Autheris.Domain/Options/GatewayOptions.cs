@@ -647,6 +647,32 @@ public sealed class GovernanceDbOptions
     /// shared memory (-shm) is broken, configure DELETE or TRUNCATE to avoid database disk image corruption.
     /// </summary>
     public string JournalMode { get; init; } = "WAL";
+
+    /// <summary>WP-ARC-B-12: versioned governance schema migrations (<c>GovernanceDb:Migrations</c>).</summary>
+    public GovernanceMigrationOptions Migrations { get; init; } = new();
+}
+
+/// <summary>How the governance schema migrations are handled at startup.</summary>
+public enum GovernanceMigrationMode
+{
+    /// <summary>Apply pending migrations under the schema lock (default). Startup fails when a migration fails.</summary>
+    Apply = 0,
+
+    /// <summary>Do not change the schema; startup fails when migrations are pending (a separate pipeline migrates).</summary>
+    Verify = 1,
+
+    /// <summary>Do not inspect or change the schema. Rejected outside Development/Test.</summary>
+    Skip = 2
+}
+
+public sealed class GovernanceMigrationOptions
+{
+    public GovernanceMigrationMode Mode { get; init; } = GovernanceMigrationMode.Apply;
+
+    /// <summary>
+    /// When false (default) startup fails if the database contains migrations newer than this binary (database newer than code).
+    /// </summary>
+    public bool AllowNewerSchema { get; init; }
 }
 
 public sealed class CachingOptions

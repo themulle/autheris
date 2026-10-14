@@ -30,7 +30,7 @@ public sealed class SqliteGovernanceRepositoryPocTests : IDisposable
             }
         });
 
-        _repository = new SqliteGovernanceRepository(
+        _repository = GovernanceStoreFactory.CreateSqlite(
             Substitute.For<IEpochValidationService>(),
             options,
             logger: NullLogger<SqliteGovernanceRepository>.Instance);

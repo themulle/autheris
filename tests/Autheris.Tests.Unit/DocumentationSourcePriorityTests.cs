@@ -34,7 +34,7 @@ public sealed class DocumentationSourcePriorityTests
             }
         });
 
-        return new SqliteGovernanceRepository(epochService, options);
+        return GovernanceStoreFactory.CreateSqlite(epochService, options);
     }
 
     [Fact]

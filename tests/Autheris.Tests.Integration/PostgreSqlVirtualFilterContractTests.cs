@@ -52,7 +52,7 @@ public sealed class PostgreSqlVirtualFilterContractTests : IAsyncLifetime
     {
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
-        return new PostgreSqlGovernanceRepository(Substitute.For<IEpochValidationService>(), Options.Create(new GatewayOptions
+        return GovernanceStoreFactory.CreatePostgreSql(Substitute.For<IEpochValidationService>(), Options.Create(new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions
             {

@@ -513,7 +513,7 @@ public sealed class AccessProfileTests
         });
 
         var epochService = Substitute.For<IEpochValidationService>();
-        using var sqliteRepo = new SqliteGovernanceRepository(
+        using var sqliteRepo = GovernanceStoreFactory.CreateSqlite(
             epochService,
             options,
             logger: NullLogger<SqliteGovernanceRepository>.Instance);

@@ -470,7 +470,7 @@ public class SecurityFindingsRemediationTests
         // Finding B1 Verification:
         // Consents in tenant-alpha MUST NOT be visible when querying tenant-beta or vice-versa.
         var epochService = Substitute.For<IEpochValidationService>();
-        using var repo = new SqliteGovernanceRepository(epochService);
+        using var repo = GovernanceStoreFactory.CreateSqlite(epochService);
 
         var tableId = new TableIdentifier("sales", "dbo", "orders");
         var metadata = new TableMetadata
@@ -873,7 +873,7 @@ public class SecurityFindingsRemediationTests
 
             // No secret provider and non-dev environment -> must throw InvalidOperationException
             var ex = Should.Throw<InvalidOperationException>(() =>
-                new SqliteGovernanceRepository(epochMock, options, env, secretProvider: null));
+                GovernanceStoreFactory.CreateSqlite(epochMock, options, env, secretProvider: null));
             ex.Message.ShouldContain("Audit HMAC secret is missing");
         }
         finally
