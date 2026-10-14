@@ -398,7 +398,7 @@ The `sql-compiler-gate` job in `.github/workflows/ci.yml` runs on every pull req
 | G4 | Differential corpus: the live AST outcome of every corpus statement, executed on SQLite, PostgreSQL, SQL Server and Oracle, against the frozen legacy results; `looser` outcomes fail unless approved in `tests/Autheris.Tests.SqlCompilerGate/Corpus/accepted-differences.json` |
 | G5 | Property and fuzz tests (fail-closed typing, partition oracles) |
 | G6 | Real execution (Testcontainers PostgreSQL, SQL Server, Oracle; in-process SQLite and DuckDB; Spark/Delta as Databricks proxy) |
-| G7 | Security regression suites (`Category=Security`); gate tests run in Debug with the security mutant hooks and in Release to prove the hooks are absent |
+| G7 | Security regression suites (`Category=Security`); gate tests run in Debug and Release with the security mutant hooks (`ICompilerHooks`, implemented in the test assembly only; production uses the no-op hooks and all controls are always enabled) |
 | G8 | Performance: allocation and Gen2 count compared with `benchmarks/baselines/sql-compiler-legacy.json` (`tools/SqlGate.BenchCheck`) |
 | G9 | Live Databricks SQL warehouse (nightly, secret-gated, skipped without secrets) |
 | G10 | Consumer parity of the IR renderers |

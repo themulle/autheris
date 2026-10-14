@@ -1,4 +1,3 @@
-#if DEBUG
 using System.Text;
 using System.Text.RegularExpressions;
 using Xunit;
@@ -8,9 +7,9 @@ namespace TrinoSqlEngine.Tests.Security;
 
 /// <summary>
 /// WP-X0v, plan M-3 and SEC-ADG-13: the deterministic security mutant suite. It runs on every PR (it needs no container and no
-/// network) and is part of the <c>SqlGate</c> category. The seam it uses is compiled out of Release builds, so this suite runs in
-/// the Debug configuration (<c>dotnet test -c Debug --filter Category=SqlGate</c>); a Release build proves that the hooks are gone
-/// instead (<see cref="ReleaseHookAbsenceTests"/>).
+/// network) and is part of the <c>SqlGate</c> category. The hooks it uses are implemented in the test assembly only (<see cref="MutantHooks"/>), so the suite runs
+/// identically in Debug and Release (<c>dotnet test --filter Category=SqlGate</c>); <see cref="ReleaseHookAbsenceTests"/> proves that the
+/// shipped assembly contains no switch.
 /// <para>
 /// To see one mutant fail the gate tests: <c>SQLGATE_MUTANT=drop-cte-rls dotnet test --filter "FullyQualifiedName~Probe_Passes"</c>
 /// keeps that mutant active for every probe, so the probes that guard the control go red.
@@ -154,4 +153,3 @@ public class SecurityMutantGateTests(ITestOutputHelper output)
         return killers;
     }
 }
-#endif

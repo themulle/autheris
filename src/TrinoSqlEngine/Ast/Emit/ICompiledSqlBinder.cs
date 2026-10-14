@@ -119,24 +119,17 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
         BindCore(command, compiled, clientParameterValues);
     }
 
-#if DEBUG
-    /// <summary>Test seam only (<see cref="SecurityControl.BinderFactoryRefusal"/>): a binder that never refuses. Compiled out of Release.</summary>
-    internal bool NeverRefuses { get; init; }
-#endif
-
     private bool RefusesUncheckedBinding(CompiledSql compiled)
     {
-#if DEBUG
-        if (NeverRefuses || CompilerTestSeams.IsDisabled(SecurityControl.BinderRefusal))
+        if (CompilerHooks.IsDisabled(SecurityControl.BinderRefusal) || CompilerHooks.IsDisabled(SecurityControl.BinderFactoryRefusal))
         {
             return false;
         }
 
-        if (CompilerTestSeams.IsDisabled(SecurityControl.BinderAliasMarker))
+        if (CompilerHooks.IsDisabled(SecurityControl.BinderAliasMarker))
         {
             return compiled.RequiresRowCountCheck;
         }
-#endif
         return compiled.RequiresRowCountCheck || ContainsCheckAlias(compiled.Sql);
     }
 
@@ -410,12 +403,10 @@ public sealed class OracleCompiledSqlBinder : DbCommandCompiledSqlBinder
 
     protected override void PrepareCommand(DbCommand command)
     {
-#if DEBUG
-        if (CompilerTestSeams.IsDisabled(SecurityControl.OracleBindByName))
+        if (CompilerHooks.IsDisabled(SecurityControl.OracleBindByName))
         {
             return;
         }
-#endif
         var property = command.GetType().GetProperty("BindByName");
         if (property is null || property.PropertyType != typeof(bool) || !property.CanWrite || !property.CanRead)
         {

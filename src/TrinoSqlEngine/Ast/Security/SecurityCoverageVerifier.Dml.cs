@@ -467,12 +467,10 @@ public sealed partial class SecurityCoverageVerifier
                         break;
                     }
                     default:
-#if DEBUG
-                        if (CompilerTestSeams.IsDisabled(SecurityControl.MergeClauseClosedSet))
+                        if (CompilerHooks.IsDisabled(SecurityControl.MergeClauseClosedSet))
                         {
                             break;
                         }
-#endif
                         // The clause set is closed (SEC-ADG-08 a): an unknown clause such as BY SOURCE is never emitted.
                         throw new SecurityCoverageException($"MERGE clause '{clause.GetType().Name}' is not covered.");
                 }

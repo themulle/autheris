@@ -115,12 +115,10 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
                     _logger.LogWarning("Catalog metadata load failed for data source {DataSource}, table {Table} ({ExceptionType}); the table is denied.",
                         dataSourceName, table.ToQualifiedName(), ex.GetType().Name);
                     _cache.TryRemove(key, out _);
-#if DEBUG
-                    if (TrinoSqlEngine.CompilerTestSeams.IsDisabled(TrinoSqlEngine.SecurityControl.CatalogLoadFailureDenies))
+                    if (TrinoSqlEngine.CompilerHooks.IsDisabled(TrinoSqlEngine.SecurityControl.CatalogLoadFailureDenies))
                     {
                         entries.Add(new TableCatalogEntry(new TableIdentity(table.Schema, table.TableName), ImmutableArray<CatalogColumn>.Empty, null, 0));
                     }
-#endif
                 }
             }
         }

@@ -1,4 +1,3 @@
-#if DEBUG
 using System.Collections.Immutable;
 using System.Data;
 using System.Security;
@@ -398,4 +397,3 @@ internal static class SecurityProbes
         return (long)command.ExecuteScalar()!;
     }
 }
-#endif

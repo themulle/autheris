@@ -306,15 +306,13 @@ public class SecurityCoverageVerifierMutationTests
         Assert.Equal(4, ex.Requested);
     }
 
-#if DEBUG
     [Fact]
     public void StackExhaustion_IsReportedAsTheNestingDepthLimit()
     {
-        using var _ = CompilerTestSeams.Use(new CompilerTestSeams { ExhaustStackAtGuardCall = 1 });
+        using var _ = CompilerHooks.Use(new MutantHooks { ExhaustStackAtGuardCall = 1 });
 
         var ex = Assert.Throws<SqlLimitExceededException>(() => Verify(Root(Ok())));
 
         Assert.Equal(SqlLimitKind.NestingDepth, ex.Kind);
     }
-#endif
 }
