@@ -37,7 +37,13 @@ public sealed class SqlServerGovernanceMigrationRunner : GovernanceMigrationRunn
             3,
             "cdc_watermarks",
             MigrationStep.ComputeChecksum("sqlserver:0003:cdc_watermarks:v1"),
-            ctx => ExecuteAsync(ctx.Connection, ctx.Transaction, CdcWatermarksDdl, ctx.CancellationToken), Transactional: true)
+            ctx => ExecuteAsync(ctx.Connection, ctx.Transaction, CdcWatermarksDdl, ctx.CancellationToken), Transactional: true),
+        new MigrationStep(
+            4,
+            "cloudevent_subscriptions",
+            MigrationStep.ComputeChecksum("sqlserver:0004:cloudevent_subscriptions:v1"),
+            ctx => ExecuteAsync(ctx.Connection, ctx.Transaction, CloudEventSubscriptionsSchema.SqlServer, ctx.CancellationToken),
+            Transactional: true)
     ];
 
     private readonly SqlServerGovernanceRepository _repository;

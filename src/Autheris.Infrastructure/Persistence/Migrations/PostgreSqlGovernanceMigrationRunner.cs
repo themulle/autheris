@@ -37,7 +37,13 @@ public sealed class PostgreSqlGovernanceMigrationRunner : GovernanceMigrationRun
             3,
             "cdc_watermarks",
             MigrationStep.ComputeChecksum("postgresql:0003:cdc_watermarks:v1"),
-            ctx => ExecuteAsync(ctx.Connection, ctx.Transaction, CdcWatermarksDdl, ctx.CancellationToken), Transactional: true)
+            ctx => ExecuteAsync(ctx.Connection, ctx.Transaction, CdcWatermarksDdl, ctx.CancellationToken), Transactional: true),
+        new MigrationStep(
+            4,
+            "cloudevent_subscriptions",
+            MigrationStep.ComputeChecksum("postgresql:0004:cloudevent_subscriptions:v1"),
+            ctx => ExecuteAsync(ctx.Connection, ctx.Transaction, CloudEventSubscriptionsSchema.PostgreSql, ctx.CancellationToken),
+            Transactional: true)
     ];
 
     private readonly PostgreSqlGovernanceRepository _repository;

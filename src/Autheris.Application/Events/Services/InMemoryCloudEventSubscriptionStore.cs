@@ -18,9 +18,10 @@ public sealed class InMemoryCloudEventSubscriptionStore : ICloudEventSubscriptio
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, CloudEventWebhookSubscription>> _subscriptions =
         new(StringComparer.Ordinal);
 
-    private const int MaxSubscriptionsPerTenant = 100;
+    public ValueTask RegisterSubscriptionAsync(CloudEventWebhookSubscription subscription, CancellationToken ct = default) =>
+        RegisterSubscriptionAsync(subscription, ICloudEventSubscriptionStore.DefaultMaxSubscriptionsPerTenant, ct);
 
-    public ValueTask RegisterSubscriptionAsync(CloudEventWebhookSubscription subscription, CancellationToken ct = default)
+    public ValueTask RegisterSubscriptionAsync(CloudEventWebhookSubscription subscription, int maxSubscriptionsPerTenant, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(subscription);
         ArgumentException.ThrowIfNullOrWhiteSpace(subscription.TenantId);
@@ -31,9 +32,9 @@ public sealed class InMemoryCloudEventSubscriptionStore : ICloudEventSubscriptio
         lock (tenantStore)
         {
             // SEC M-5: Unbounded in-memory subscription store DoS defense
-            if (tenantStore.Count >= MaxSubscriptionsPerTenant && !tenantStore.ContainsKey(subscription.Id))
+            if (tenantStore.Count >= maxSubscriptionsPerTenant && !tenantStore.ContainsKey(subscription.Id))
             {
-                throw new InvalidOperationException($"Maximum webhook subscriptions ({MaxSubscriptionsPerTenant}) reached for tenant '{subscription.TenantId}'.");
+                throw new InvalidOperationException($"Maximum webhook subscriptions ({maxSubscriptionsPerTenant}) reached for tenant '{subscription.TenantId}'.");
             }
 
             tenantStore[subscription.Id] = subscription;
