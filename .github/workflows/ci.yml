@@ -23,7 +23,7 @@ jobs:
       - name: Setup .NET 10
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       - name: Restore with Locked Mode
         run: dotnet restore Autheris.sln --locked-mode
@@ -35,7 +35,7 @@ jobs:
             || { echo "::error::Vulnerable NuGet packages detected"; jq . vulnerable.json; exit 1; }
 
       - name: Test Autheris Solution
-        run: dotnet test Autheris.sln -c Release --no-restore --verbosity normal
+        run: dotnet test Autheris.sln -c Release --no-restore -p:AutherisIncludeTestAuth=true --verbosity normal
 
   # SQL compiler evidence gate (plan 9.5, 16.5). It must run on the merge result: a pull_request run checks out
   # refs/pull/N/merge by default, so no explicit `ref:` is set (a test in tests/Autheris.Tests.SqlCompilerGate asserts that).
@@ -61,7 +61,7 @@ jobs:
       - name: Setup .NET 10
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       - name: Restore with Locked Mode
         run: dotnet restore Autheris.sln --locked-mode
@@ -76,10 +76,10 @@ jobs:
 
       # G4 differential, G6 execution on PostgreSQL, SQL Server and Oracle (CI=true makes a missing database fail).
       - name: Differential and execution gate
-        run: dotnet test tests/Autheris.Tests.SqlCompilerGate -c Release --no-restore --verbosity normal
+        run: dotnet test tests/Autheris.Tests.SqlCompilerGate -c Release --no-restore -p:AutherisIncludeTestAuth=true --verbosity normal
 
       - name: Architecture tests
-        run: dotnet test tests/Autheris.Tests.Architecture -c Release --no-restore --verbosity normal
+        run: dotnet test tests/Autheris.Tests.Architecture -c Release --no-restore -p:AutherisIncludeTestAuth=true --verbosity normal
 
       # G8: the AST compiler is measured and compared with the frozen legacy baseline (benchmarks/baselines/sql-compiler-legacy.json) by bytes (allocation) and Gen2 count.
       - name: G8 performance benchmark

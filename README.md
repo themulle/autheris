@@ -405,8 +405,9 @@ dotnet build Autheris.sln -c Release
 ### 2. Run Tests
 
 ```bash
-dotnet test Autheris.sln -c Release
+dotnet test Autheris.sln -c Release -p:AutherisIncludeTestAuth=true
 ```
+*Note: `AutherisIncludeTestAuth` defaults to `false`; the test suites need the `TestAuthHandler` (compiled only with `AUTHERIS_TEST_AUTH`), so opt in explicitly as shown. Release/publish builds must never set it.*
 Currently passes **3,728 / 3,728 tests (100% green)** across all test suites:
 - **1,072 TrinoSqlEngine & WebSQL Parser / Dialect Tests** (ANTLR4 parsing, AST statement validation, multi-dialect code generators for PostgreSQL, MSSQL, SQLite, Oracle, DuckDB, Databricks, parameter extraction, RLS AST-injection, type inference)
 - **2,288 Unit Tests** (Authentication & ForwardAuth Security, Multi-Dialect RLS, Declarative SQL-to-API Execution, Contract-First Stored Procedures, Casbin ABAC Hot-Reload, Dual Authorization & Delegation Stress, Concurrency & Audit Replication, DataLoader Odd Batching, AST Filter Inference Defense, Zero-Allocation Column Masking, Downstream Lineage BFS, GDPR Art. 15 Disclosure, MCP Guardrails, Differential Privacy)
@@ -461,6 +462,8 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 ```bash
 dotnet run --project src/Autheris.Api/Autheris.Api.csproj
 ```
+
+To use the Development-only `TestAuthHandler` locally, opt in explicitly: `dotnet run --project src/Autheris.Api/Autheris.Api.csproj -p:AutherisIncludeTestAuth=true`.
 
 The service starts locally on `http://localhost:5000` (or `https://localhost:5001`). In `Development` mode, the Hot Chocolate Banana Cake Pop GraphQL IDE is accessible at:
 - `http://localhost:5000/graphql`

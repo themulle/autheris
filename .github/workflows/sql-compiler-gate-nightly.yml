@@ -37,7 +37,7 @@ jobs:
       - name: Setup .NET 10
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       - name: Restore with Locked Mode
         run: dotnet restore Autheris.sln --locked-mode
@@ -49,10 +49,10 @@ jobs:
         run: dotnet test tests/TrinoSqlEngine.Tests -c Release --no-restore --filter "Category=SqlGate" --verbosity normal
 
       - name: Differential and execution gate
-        run: dotnet test tests/Autheris.Tests.SqlCompilerGate -c Release --no-restore --verbosity normal
+        run: dotnet test tests/Autheris.Tests.SqlCompilerGate -c Release --no-restore -p:AutherisIncludeTestAuth=true --verbosity normal
 
       - name: Architecture tests
-        run: dotnet test tests/Autheris.Tests.Architecture -c Release --no-restore --verbosity normal
+        run: dotnet test tests/Autheris.Tests.Architecture -c Release --no-restore -p:AutherisIncludeTestAuth=true --verbosity normal
 
       - name: G8 performance benchmark
         run: dotnet run -c Release --no-restore --project benchmarks/Autheris.Benchmarks -- --filter "*SqlCompiler*" --job short --inProcess --exporters json --artifacts benchmarks/results
@@ -119,7 +119,7 @@ jobs:
         if: steps.gate.outputs.enabled == 'true'
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       - name: Restore with Locked Mode
         if: steps.gate.outputs.enabled == 'true'
@@ -131,7 +131,7 @@ jobs:
         if: steps.gate.outputs.enabled == 'true'
         run: |
           set -o pipefail
-          dotnet test tests/Autheris.Tests.SqlCompilerGate -c Release --no-restore --filter "Category=DatabricksLive" --verbosity normal | tee g9.log
+          dotnet test tests/Autheris.Tests.SqlCompilerGate -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "Category=DatabricksLive" --verbosity normal | tee g9.log
           if grep -q "No test matches" g9.log; then
             echo "::error::No Category=DatabricksLive test exists; G9 cannot be green."
             exit 1

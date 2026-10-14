@@ -37,7 +37,7 @@ jobs:
       - name: Setup .NET 10
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       - name: Restore with Locked Mode
         run: dotnet restore Autheris.sln --locked-mode
@@ -49,7 +49,7 @@ jobs:
             || { echo "::error::Vulnerable NuGet packages detected"; jq . vulnerable.json; exit 1; }
 
       - name: Run Test Suite
-        run: dotnet test Autheris.sln -c Release --no-restore --verbosity normal
+        run: dotnet test Autheris.sln -c Release --no-restore -p:AutherisIncludeTestAuth=true --verbosity normal
 
       - name: Publish Autheris
         run: |
