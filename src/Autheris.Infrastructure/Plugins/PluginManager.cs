@@ -302,6 +302,20 @@ public sealed class PluginManager : IPluginManager, IDisposable
         return loadedCount;
     }
 
+    private static readonly MethodInfo CreateInvokerMethod =
+        typeof(PluginManager).GetMethod(nameof(CreateInvoker), BindingFlags.NonPublic | BindingFlags.Static)!;
+
+    /// <summary>
+    /// Builds the typed dispatch delegate once per listener interface. The per-event call is a plain delegate invocation:
+    /// no <c>MethodInfo.Invoke</c>, no boxing of arguments and no <see cref="TargetInvocationException"/> wrapping.
+    /// </summary>
+    private static Func<IGatewayEvent, CancellationToken, Task> CreateInvoker<TEvent>(IPluginEventListener listener)
+        where TEvent : IGatewayEvent
+    {
+        var typed = (IPluginEventListener<TEvent>)listener;
+        return (e, ct) => typed.HandleEventAsync((TEvent)e, ct);
+    }
+
     private void BindListenerToEventBus(IPluginEventListener listener)
     {
         var eventBus = _serviceProvider?.GetService(typeof(IGatewayEventBus)) as IGatewayEventBus;
@@ -316,26 +330,25 @@ public sealed class PluginManager : IPluginManager, IDisposable
             if (iface.IsGenericType && iface.GetGenericTypeDefinition() == typeof(IPluginEventListener<>))
             {
                 var eventType = iface.GetGenericArguments()[0];
-                var handleMethod = iface.GetMethod(nameof(IPluginEventListener<IGatewayEvent>.HandleEventAsync));
-                if (handleMethod != null)
-                {
-                    var sub = eventBus.Subscribe(eventType, async (@event, ct) =>
-                    {
-                        try
-                        {
-                            var task = (Task)handleMethod.Invoke(listener, [@event, ct])!;
-                            await task.ConfigureAwait(false);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "Plugin listener '{ListenerType}' failed while handling event {EventType}", listenerType.FullName, @event.EventType);
-                        }
-                    });
+                var invoker = (Func<IGatewayEvent, CancellationToken, Task>)CreateInvokerMethod
+                    .MakeGenericMethod(eventType)
+                    .Invoke(null, [listener])!;
 
-                    lock (_lock)
+                var sub = eventBus.Subscribe(eventType, async (@event, ct) =>
+                {
+                    try
                     {
-                        _busSubscriptions.Add(sub);
+                        await invoker(@event, ct).ConfigureAwait(false);
                     }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Plugin listener '{ListenerType}' failed while handling event {EventType}", listenerType.FullName, @event.EventType);
+                    }
+                });
+
+                lock (_lock)
+                {
+                    _busSubscriptions.Add(sub);
                 }
             }
         }
