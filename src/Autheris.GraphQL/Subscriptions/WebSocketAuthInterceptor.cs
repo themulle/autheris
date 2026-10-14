@@ -44,6 +44,7 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
     private readonly ITokenRevocationService? _revocationService;
     private readonly TimeSpan _revalidationInterval;
     private readonly GatewayOptions? _gatewayOptions;
+    private readonly RevocationWatchPolicy _revocationWatchPolicy;
 
 
     public WebSocketAuthInterceptor(
@@ -52,7 +53,8 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
         TimeProvider? timeProvider = null,
         TimeSpan? maxSessionLifetime = null,
         ITokenRevocationService? revocationService = null,
-        IOptions<GatewayOptions>? options = null)
+        IOptions<GatewayOptions>? options = null,
+        IOptions<RevocationWatchOptions>? revocationWatchOptions = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _tokenValidator = tokenValidator;
@@ -60,6 +62,7 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
         _maxSessionLifetime = maxSessionLifetime is { } lifetime && lifetime > TimeSpan.Zero ? lifetime : DefaultMaxSessionLifetime;
         _revocationService = revocationService;
         _gatewayOptions = options?.Value;
+        _revocationWatchPolicy = RevocationWatchPolicy.From(revocationWatchOptions);
         var seconds = options?.Value?.GraphQL?.SubscriptionRevalidationSeconds ?? 0;
         _revalidationInterval = seconds > 0 ? TimeSpan.FromSeconds(seconds) : DefaultRevalidationInterval;
     }
@@ -385,7 +388,7 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
 
         // SEC M-14 (GAP-B): Periodic revocation check; on revocation the connection (incl. all subscriptions)
         // is aborted, like the expiry timer. The watch is disposed together with the request.
-        var watch = new RevocationWatch(httpContext, principal, revocationService, _logger);
+        var watch = new RevocationWatch(httpContext, principal, revocationService, _logger, _revocationWatchPolicy);
         httpContext.Items[RevocationWatchItemKey] = watch;
         httpContext.Response.RegisterForDispose(watch);
         watch.Start(_timeProvider, _revalidationInterval);
@@ -404,11 +407,18 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
         private readonly CancellationTokenSource _cts = new();
         private readonly CancellationToken _token;
         private ITimer? _timer;
+        private readonly RevocationFailureCounter _failures;
         private int _checking;
         private volatile bool _disposed;
 
-        public RevocationWatch(HttpContext httpContext, ClaimsPrincipal principal, ITokenRevocationService revocationService, ILogger logger)
+        public RevocationWatch(
+            HttpContext httpContext,
+            ClaimsPrincipal principal,
+            ITokenRevocationService revocationService,
+            ILogger logger,
+            RevocationWatchPolicy? policy = null)
         {
+            _failures = new RevocationFailureCounter(policy);
             _httpContext = httpContext;
             _principal = principal;
             _revocationService = revocationService;
@@ -442,6 +452,7 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
             try
             {
                 var revoked = await _revocationService.IsRevokedAsync(_principal, _token).ConfigureAwait(false);
+                _failures.RecordSuccess();
                 if (revoked && !_disposed)
                 {
                     _logger.LogWarning("WebSocket session closed: authentication token was revoked.");
@@ -453,19 +464,23 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
             {
                 // Connection closed while checking.
             }
-            catch (TokenRevocationUnavailableException ex)
+            catch (Exception ex)
             {
-                // SR-L-10 (minimal shim until SR-L-18): fail closed by closing the connection.
-                if (!_disposed)
+                // SR-L-18: a revocation status that cannot be verified must not keep the session alive indefinitely.
+                // Terminate after the configured number of consecutive failures (fail-closed).
+                if (!_disposed && _failures.RecordFailure())
                 {
-                    _logger.LogWarning(ex, "WebSocket session closed: token revocation status unavailable (fail-closed).");
+                    var correlationId = Guid.NewGuid().ToString("N");
+                    _logger.LogWarning(
+                        ex,
+                        "WebSocket session closed: token revocation status could not be verified ({Failures} consecutive failures, fail-closed). CorrelationId={CorrelationId}",
+                        _failures.ConsecutiveFailures,
+                        correlationId);
                     _httpContext.Abort();
                     return true;
                 }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "WebSocket token revocation check failed.");
+
+                _logger.LogWarning(ex, "WebSocket token revocation check failed ({Failures} consecutive).", _failures.ConsecutiveFailures);
             }
             finally
             {

@@ -51,9 +51,21 @@ Configuration section `Gateway:Governance:AccessPlanning`:
 | `MaxPendingPlansPerAdmin` | 20 | Maximum unexpired plans per administrator; further plans are rejected |
 | `PlanTtlMinutes` | 10 | Lifetime of a plan |
 | `ConfirmationTokenTtlMinutes` | 10 | Lifetime of a confirmation token |
-| `SweepIntervalSeconds` | 60 | Minimum interval between expired-state sweeps |
+| `SweepIntervalSeconds` | 60 | Minimum interval between expired-state sweeps (process-local store) |
+| `SigningKeyRef` | unset | Secret reference (resolved through `IKeyVaultSecretProvider`) from which the confirmation-token HMAC key is derived with HKDF-SHA256. Required when the cluster state is external (shared by all replicas); unset means a per-process random key (single node only) |
 
-Plan state is kept in process memory; plans and tokens do not survive a restart and are not shared across nodes.
+### Plan state storage
+
+Plans, confirmation-token hashes and consumed-token markers live behind the `IAccessPlanStore` port:
+
+- **External cluster state (multi-replica):** `ClusterAccessPlanStore` keeps plans under `accessplan:plan:{planId}` with a TTL equal to the plan lifetime. A plan can be created on one node, confirmed on a second and applied on a third. Confirmation tokens are single-use cluster-wide (atomic first-wins counter `accessplan:token:{sha256(token)}`). Only SHA-256 hashes of tokens are stored. The per-administrator cap is a shared counter (approximate window). If the shared store is unreachable, plan, confirm and apply fail (fail closed); the state is never treated as absent.
+- **In-memory or embedded state (single node):** `InMemoryAccessPlanStore` is bounded and evicts expired entries through `TimeProvider`. Plans do not survive a restart.
+
+Startup validation fails when the cluster state is external and `SigningKeyRef` is not configured.
+
+### Datasource secrets
+
+`admin_register_datasource` writes inline secrets to the configured `IKeyVaultSecretProvider` under `datasource:{domain}:{name}:auth_secret` and returns that reference. No plaintext copy is kept in process memory. If the provider is missing or read-only the request is rejected; supply `Auth.SecretRef` instead.
 
 ## 2. Implementation Details
 
