@@ -133,4 +133,19 @@ public sealed class DelegatedAuditRouteIntegrationTests : IClassFixture<WebAppli
                                    && e.DetailsJson.Contains("/api/v1/olap/query"));
         entries.ShouldNotContain(e => e.EventType == "OLAP_TABLE_STAGED");
     }
+
+    [Fact]
+    public async Task OpenApiIngestion_ByNonAdmin_Returns403_AndRecordsDenyAudit()
+    {
+        var client = CreateClient("S-1-5-21-PLAIN-USER", "StandardUser");
+        var content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
+
+        var response = await client.PostAsync("/api/governance/catalog/ingest-openapi", content);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        var entries = await ReadAuditAsync();
+        entries.ShouldContain(e => e.EventType == AuditEventTypes.AuthzEndpointDenied && e.Decision == "DENY"
+                                   && e.DetailsJson.Contains("/api/governance/catalog/ingest-openapi"));
+        entries.ShouldNotContain(e => e.EventType == "OPENAPI_CATALOG_INGESTED");
+    }
 }
