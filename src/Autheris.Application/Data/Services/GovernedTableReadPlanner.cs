@@ -25,6 +25,8 @@ public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
     /// <summary>Alias of the single column of <see cref="PlanCount"/>.</summary>
     public const string CountColumnAlias = "total_count";
 
+    public string BuildFullTableSelect(TableIdentifier table) => $"SELECT * FROM {table.ToQualifiedName()}";
+
     public PlannedTableRead Plan(TableReadIntent intent, TableMetadata metadata, TableAccessDecision decision)
     {
         ArgumentNullException.ThrowIfNull(intent);
