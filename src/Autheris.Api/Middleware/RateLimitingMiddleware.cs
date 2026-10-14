@@ -142,36 +142,9 @@ public sealed class PostAuthSidRateLimitingMiddleware
 
         if (context.User.Identity?.IsAuthenticated != true)
         {
-            if (context.Items.ContainsKey("Autheris_PreAuthExempted"))
-            {
-                // Request bypassed pre-auth rate limiting by supplying a Bearer token,
-                // but authentication failed or was anonymous. We must subject it to pre-auth IP rate limiting.
-                string clientIp = PreAuthIpRateLimitingMiddleware.ResolveClientIp(context, _gatewayOptions);
-                clientIp = Autheris.Infrastructure.RateLimiting.ClientIpRateLimitKey.Normalize(clientIp);
-                var preAuthOptions = _gatewayOptions.RateLimiting.PreAuthIpRateLimit;
-                var ipResult = await _rateLimiter.CheckPreAuthIpAsync(clientIp, preAuthOptions, context.RequestAborted);
-                if (!ipResult.Allowed)
-                {
-                    PreAuthIpRateLimitingMiddleware.RateLimitExceededCounter.WithLabels("pre_auth_ip").Inc();
-                    context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-                    context.Response.Headers.RetryAfter = ipResult.RetryAfterSeconds.ToString();
-                    context.Response.ContentType = "application/json";
-                    await context.Response.WriteAsync(JsonSerializer.Serialize(new
-                    {
-                        errors = new[]
-                        {
-                            new
-                            {
-                                message = "Pre-auth IP rate limit exceeded. Wait before retrying.",
-                                extensions = new { code = "RATE_LIMIT_EXCEEDED" }
-                            }
-                        }
-                    }));
-                    return;
-                }
-            }
-
-            // Anonymous requests proceed to endpoint for authorization / authentication challenge
+            // Anonymous requests proceed to endpoint for authorization / authentication challenge.
+            // Bearer-exempted requests that failed authentication were already IP-limited by
+            // UnauthenticatedBearerIpRateLimitingMiddleware (SR-M-02), which runs before authorization.
             await _next(context);
             return;
         }
@@ -209,6 +182,66 @@ public sealed class PostAuthSidRateLimitingMiddleware
                     new
                     {
                         message = "Per-user SID rate limit exceeded.",
+                        extensions = new { code = "RATE_LIMIT_EXCEEDED" }
+                    }
+                }
+            }));
+            return;
+        }
+
+        await _next(context);
+    }
+}
+
+/// <summary>
+/// SR-M-02: Requests that skipped the pre-auth IP limit because they carry a Bearer header (issue #44) but are NOT
+/// authenticated after <c>UseAuthentication</c> are charged against the pre-auth IP budget here. This middleware must be
+/// placed between authentication and authorization so that 401/403 short-circuits cannot be used for unlimited token guessing.
+/// </summary>
+public sealed class UnauthenticatedBearerIpRateLimitingMiddleware
+{
+    private readonly RequestDelegate _next;
+    private readonly GatewayOptions _gatewayOptions;
+    private readonly IRateLimiterService _rateLimiter;
+
+    public UnauthenticatedBearerIpRateLimitingMiddleware(
+        RequestDelegate next,
+        IOptions<GatewayOptions> options,
+        IRateLimiterService rateLimiter)
+    {
+        _next = next;
+        _gatewayOptions = options.Value;
+        _rateLimiter = rateLimiter;
+    }
+
+    public async Task InvokeAsync(HttpContext context)
+    {
+        if (_gatewayOptions.IsRateLimitingDisabled ||
+            context.Request.Path.StartsWithSegments("/health") ||
+            context.User.Identity?.IsAuthenticated == true ||
+            !context.Items.ContainsKey("Autheris_PreAuthExempted"))
+        {
+            await _next(context);
+            return;
+        }
+
+        string clientIp = PreAuthIpRateLimitingMiddleware.ResolveClientIp(context, _gatewayOptions);
+        clientIp = Autheris.Infrastructure.RateLimiting.ClientIpRateLimitKey.Normalize(clientIp);
+        var preAuthOptions = _gatewayOptions.RateLimiting.PreAuthIpRateLimit;
+        var ipResult = await _rateLimiter.CheckPreAuthIpAsync(clientIp, preAuthOptions, context.RequestAborted);
+        if (!ipResult.Allowed)
+        {
+            PreAuthIpRateLimitingMiddleware.RateLimitExceededCounter.WithLabels("pre_auth_ip").Inc();
+            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            context.Response.Headers.RetryAfter = ipResult.RetryAfterSeconds.ToString();
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(JsonSerializer.Serialize(new
+            {
+                errors = new[]
+                {
+                    new
+                    {
+                        message = "Pre-auth IP rate limit exceeded. Wait before retrying.",
                         extensions = new { code = "RATE_LIMIT_EXCEEDED" }
                     }
                 }

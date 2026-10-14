@@ -295,6 +295,8 @@ public static class GatewayApplicationBuilderExtensions
         app.UseMiddleware<AccessAuditMiddleware>();
         app.UseMiddleware<PreAuthIpRateLimitingMiddleware>();
         app.UseAuthentication();
+        // SR-M-02: IP-limit Bearer-exempted but unauthenticated requests before authorization can short-circuit with 401/403
+        app.UseMiddleware<UnauthenticatedBearerIpRateLimitingMiddleware>();
         app.UseMiddleware<TokenRevocationMiddleware>();
         // F-AUTH-DX: issue the session cookie after a Basic login (no-op unless BasicAuth.Session is allowed)
         app.UseMiddleware<BasicAuthSessionMiddleware>();
