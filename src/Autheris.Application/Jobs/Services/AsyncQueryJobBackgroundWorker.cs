@@ -28,6 +28,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
     private readonly IAuditLogRepository _auditLogRepository;
     private readonly ILogger<AsyncQueryJobBackgroundWorker> _logger;
     private readonly IOptions<GatewayOptions>? _options;
+    private readonly IOptions<AsyncJobOptions>? _jobOptions;
 
     public AsyncQueryJobBackgroundWorker(
         IAsyncQueryJobManager jobManager,
@@ -35,9 +36,11 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         IServiceScopeFactory scopeFactory,
         IAuditLogRepository auditLogRepository,
         ILogger<AsyncQueryJobBackgroundWorker>? logger = null,
-        IOptions<GatewayOptions>? options = null)
+        IOptions<GatewayOptions>? options = null,
+        IOptions<AsyncJobOptions>? jobOptions = null)
     {
         _options = options;
+        _jobOptions = jobOptions;
         ArgumentNullException.ThrowIfNull(jobManager);
         ArgumentNullException.ThrowIfNull(queue);
         ArgumentNullException.ThrowIfNull(scopeFactory);
@@ -57,10 +60,14 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
 
         try
         {
-            await foreach (var item in _queue.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
-            {
-                await ProcessJobItemAsync(item, stoppingToken).ConfigureAwait(false);
-            }
+            var jobs = JobOptions;
+            using var scheduler = new AsyncJobScheduler(
+                jobs.MaxConcurrentJobs,
+                jobs.MaxConcurrentJobsPerTenant,
+                ProcessJobItemAsync,
+                _logger,
+                DiscardQueuedAsync);
+            await scheduler.RunAsync(_queue.Reader, stoppingToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -74,10 +81,24 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         await purgeTask.ConfigureAwait(false);
     }
 
+    private AsyncJobOptions JobOptions => _jobOptions?.Value ?? _options?.Value?.AsyncJobs ?? new AsyncJobOptions();
+
+    /// <summary>A job still queued at shutdown is cancelled: the in-memory queue does not survive the process.</summary>
+    private async Task DiscardQueuedAsync(AsyncJobExecutionItem item)
+    {
+        var cancelled = item.Job with
+        {
+            State = AsyncJobState.Cancelled,
+            CompletedAt = DateTimeOffset.UtcNow,
+            ErrorMessage = "Job cancelled because the gateway is shutting down."
+        };
+        await _queue.TryTransitionAsync(cancelled, CancellationToken.None).ConfigureAwait(false);
+    }
+
     /// <summary>SR-M-21: periodically removes finished jobs and their result files after the retention period.</summary>
     private async Task RunPurgeLoopAsync(CancellationToken stoppingToken)
     {
-        var interval = TimeSpan.FromMinutes(Math.Max(1, (_options?.Value?.AsyncJobs ?? new AsyncJobOptions()).PurgeIntervalMinutes));
+        var interval = TimeSpan.FromMinutes(Math.Max(1, JobOptions.PurgeIntervalMinutes));
         try
         {
             using var timer = new PeriodicTimer(interval);
@@ -93,7 +114,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
 
     internal async Task PurgeOnceAsync(CancellationToken ct)
     {
-        var retention = TimeSpan.FromHours(Math.Max(0, (_options?.Value?.AsyncJobs ?? new AsyncJobOptions()).RetentionHours));
+        var retention = TimeSpan.FromHours(Math.Max(0, JobOptions.RetentionHours));
         try
         {
             await _jobManager.PurgeExpiredJobsAsync(retention, ct).ConfigureAwait(false);

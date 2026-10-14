@@ -29,15 +29,19 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
     private readonly ILogger<AsyncQueryJobManager> _logger;
     private readonly string _scratchDirectory;
     private readonly IOptions<GatewayOptions>? _options;
+    private readonly IOptions<AsyncJobOptions>? _jobOptions;
+    private readonly object _submitGate = new();
 
     public AsyncQueryJobManager(
         IAuditLogRepository auditLogRepository,
         ILogger<AsyncQueryJobManager>? logger = null,
         IHostEnvironment? environment = null,
-        IOptions<GatewayOptions>? options = null)
+        IOptions<GatewayOptions>? options = null,
+        IOptions<AsyncJobOptions>? jobOptions = null)
     {
         ArgumentNullException.ThrowIfNull(auditLogRepository);
         _options = options;
+        _jobOptions = jobOptions;
         _auditLogRepository = auditLogRepository;
         _logger = logger ?? NullLogger<AsyncQueryJobManager>.Instance;
 
@@ -136,7 +140,26 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
             State: AsyncJobState.Queued,
             CreatedAt: DateTimeOffset.UtcNow);
 
-        _jobs[jobId] = descriptor;
+        // Per-tenant backlog cap: counted and reserved under one gate so concurrent submits cannot overshoot it.
+        var maxQueued = (_jobOptions?.Value ?? _options?.Value?.AsyncJobs ?? new AsyncJobOptions()).MaxQueuedJobsPerTenant;
+        lock (_submitGate)
+        {
+            var active = 0;
+            foreach (var existing in _jobs.Values)
+            {
+                if (!IsTerminal(existing.State) && string.Equals(existing.TenantId, tenantId.Value, StringComparison.Ordinal))
+                {
+                    active++;
+                }
+            }
+
+            if (active >= maxQueued)
+            {
+                throw new AsyncJobQueueLimitExceededException(maxQueued);
+            }
+
+            _jobs[jobId] = descriptor;
+        }
 
         // SR-H-05: row count and timeout are server-bounded; the client values only narrow them.
         request = AsyncJobLimits.Normalize(request, _options?.Value);

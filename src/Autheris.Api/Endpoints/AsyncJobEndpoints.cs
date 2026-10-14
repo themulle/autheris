@@ -26,7 +26,20 @@ public static class AsyncJobEndpoints
             CancellationToken ct) =>
         {
             var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
-            var job = await jobManager.SubmitJobAsync(request, httpContext.User, tenantId, ct).ConfigureAwait(false);
+            AsyncJobDescriptor job;
+            try
+            {
+                job = await jobManager.SubmitJobAsync(request, httpContext.User, tenantId, ct).ConfigureAwait(false);
+            }
+            catch (AsyncJobQueueLimitExceededException)
+            {
+                httpContext.Response.Headers.RetryAfter = "30";
+                return Results.Problem(
+                    statusCode: StatusCodes.Status429TooManyRequests,
+                    title: "Too many queued async jobs.",
+                    detail: "The tenant has reached the maximum number of queued or running async jobs. Retry later.");
+            }
+
             MarkDomainAudited(httpContext);
 
             var response = new AsyncJobStatusResponse(

@@ -6,14 +6,18 @@ using System.IO;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Channels;
+using System.Linq;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Jobs.Interfaces;
+using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Application.Jobs.Services;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -147,5 +151,131 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
 
         (await manager.TryTransitionAsync(cancelled with { State = AsyncJobState.Completed }, CancellationToken.None)).ShouldBeFalse();
         (await manager.GetJobAsync("j", new TenantId("t"), "alice"))!.State.ShouldBe(AsyncJobState.Cancelled);
+    }
+
+    // ---- scheduler ----
+
+    private static AsyncJobExecutionItem Item(string tenant, string? id = null)
+    {
+        var job = new AsyncJobDescriptor(id ?? Guid.NewGuid().ToString("D"), tenant, "alice", "SELECT 1", "json", AsyncJobState.Queued, DateTimeOffset.UtcNow);
+        return new AsyncJobExecutionItem(job, new AsyncQueryJobRequest("SELECT 1"), User("alice", tenant), new CancellationTokenSource());
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition, int timeoutMs = 10_000)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (!condition())
+        {
+            if (sw.ElapsedMilliseconds > timeoutMs) throw new TimeoutException("Condition not reached.");
+            await Task.Delay(10);
+        }
+    }
+
+    [Fact]
+    public async Task MaxConcurrentJobs_IsHonoured()
+    {
+        var channel = Channel.CreateUnbounded<AsyncJobExecutionItem>();
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int running = 0, peak = 0, finished = 0;
+        using var scheduler = new AsyncJobScheduler(2, 2, async (_, _) =>
+        {
+            var now = Interlocked.Increment(ref running);
+            int seen;
+            while ((seen = Volatile.Read(ref peak)) < now && Interlocked.CompareExchange(ref peak, now, seen) != seen) { }
+            await gate.Task;
+            Interlocked.Decrement(ref running);
+            Interlocked.Increment(ref finished);
+        }, NullLogger.Instance);
+        using var cts = new CancellationTokenSource();
+        var loop = scheduler.RunAsync(channel.Reader, cts.Token);
+        for (var i = 0; i < 6; i++) channel.Writer.TryWrite(Item("t" + i));
+
+        await WaitUntilAsync(() => Volatile.Read(ref running) == 2);
+        await Task.Delay(200);
+        Volatile.Read(ref peak).ShouldBe(2);
+        gate.SetResult();
+        await WaitUntilAsync(() => Volatile.Read(ref finished) == 6);
+        Volatile.Read(ref peak).ShouldBe(2);
+        cts.Cancel();
+        await loop;
+    }
+
+    [Fact]
+    public async Task SlowJobOfTenantA_DoesNotBlockJobOfTenantB()
+    {
+        var channel = Channel.CreateUnbounded<AsyncJobExecutionItem>();
+        var slow = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var bDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var scheduler = new AsyncJobScheduler(4, 1, async (item, _) =>
+        {
+            if (item.Job.TenantId == "a") await slow.Task; else bDone.TrySetResult();
+        }, NullLogger.Instance);
+        using var cts = new CancellationTokenSource();
+        var loop = scheduler.RunAsync(channel.Reader, cts.Token);
+
+        channel.Writer.TryWrite(Item("a"));
+        channel.Writer.TryWrite(Item("a"));
+        channel.Writer.TryWrite(Item("b"));
+
+        await bDone.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        slow.SetResult();
+        cts.Cancel();
+        await loop;
+    }
+
+    [Fact]
+    public async Task TenantAtCap_DoesNotOccupyGlobalSlot()
+    {
+        var channel = Channel.CreateUnbounded<AsyncJobExecutionItem>();
+        var gateA = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        using var scheduler = new AsyncJobScheduler(2, 1, async (item, _) =>
+        {
+            started.Enqueue(item.Job.TenantId);
+            if (item.Job.TenantId == "a") await gateA.Task;
+        }, NullLogger.Instance);
+        using var cts = new CancellationTokenSource();
+        var loop = scheduler.RunAsync(channel.Reader, cts.Token);
+
+        // a1 runs, a2 and a3 are over the tenant cap and wait without holding a global slot: b and c still run.
+        foreach (var t in new[] { "a", "a", "a", "b", "c" }) channel.Writer.TryWrite(Item(t));
+
+        await WaitUntilAsync(() => started.Contains("b") && started.Contains("c"));
+        started.Count(t => t == "a").ShouldBe(1);
+
+        gateA.SetResult();
+        await WaitUntilAsync(() => started.Count(t => t == "a") == 3);
+        cts.Cancel();
+        await loop;
+    }
+
+    // ---- options and queue cap ----
+
+    [Fact]
+    public void AsyncJobOptionsValidator_RejectsPerTenantAboveGlobal()
+    {
+        var validator = new AsyncJobOptionsValidator();
+
+        validator.Validate(null, new AsyncJobOptions { MaxConcurrentJobs = 2, MaxConcurrentJobsPerTenant = 3 }).Failed.ShouldBeTrue();
+        validator.Validate(null, new AsyncJobOptions { MaxConcurrentJobs = 0 }).Failed.ShouldBeTrue();
+        validator.Validate(null, new AsyncJobOptions { MaxQueuedJobsPerTenant = 0 }).Failed.ShouldBeTrue();
+        validator.Validate(null, new AsyncJobOptions { DefaultTimeoutSeconds = 100, MaxTimeoutSeconds = 50 }).Failed.ShouldBeTrue();
+        validator.Validate(null, new AsyncJobOptions { ScratchDirectory = "relative/dir" }).Failed.ShouldBeTrue();
+        validator.Validate(null, new AsyncJobOptions()).Succeeded.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Submit_AboveQueuedPerTenantCap_IsRejected()
+    {
+        var jobOptions = Options.Create(new AsyncJobOptions { MaxQueuedJobsPerTenant = 2 });
+        var manager = new AsyncQueryJobManager(_audit, environment: _env, jobOptions: jobOptions);
+
+        await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), User(), new TenantId("t"));
+        await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), User(), new TenantId("t"));
+
+        await Should.ThrowAsync<AsyncJobQueueLimitExceededException>(
+            () => manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), User(), new TenantId("t")));
+        // Another tenant is unaffected.
+        await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), User("alice", "other"), new TenantId("other"));
     }
 }
