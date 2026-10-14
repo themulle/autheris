@@ -4,7 +4,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Consent;
+using Autheris.Application.ConsentRequests;
 using Autheris.Application.Interfaces;
 using Autheris.Application.OpenMetadata.Interfaces;
 using Autheris.Application.DataCatalog.Interfaces;

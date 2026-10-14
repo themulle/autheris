@@ -2,6 +2,7 @@ namespace Autheris.Application.Sql.Masking;
 
 using System;
 using System.Linq;
+using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Governance;
 
 /// <summary>

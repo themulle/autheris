@@ -70,8 +70,8 @@ public static class SubgraphSecurityValidator
         string? version = null,
         string? bodySha256 = null,
         bool allowLegacy = false,
-        CancellationToken ct = default,
-        IClusterStateTopology? topology = null)
+        IClusterStateTopology? topology = null,
+        CancellationToken ct = default)
     {
         var drift = maxDrift ?? TimeSpan.FromSeconds(60);
         if (!VerifyCore(tenant, userSid, timestampStr, nonce, signature, signingKey, drift, subgraph, roles, method, path, version, bodySha256, allowLegacy, out var now))

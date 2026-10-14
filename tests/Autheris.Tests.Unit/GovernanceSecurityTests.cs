@@ -1,5 +1,5 @@
 using System.Security.Claims;
-using Autheris.Application.Consent;
+using Autheris.Application.ConsentRequests;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;

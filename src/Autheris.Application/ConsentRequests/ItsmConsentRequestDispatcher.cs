@@ -1,4 +1,4 @@
-namespace Autheris.Application.Consent;
+namespace Autheris.Application.ConsentRequests;
 
 using System;
 using System.Threading;

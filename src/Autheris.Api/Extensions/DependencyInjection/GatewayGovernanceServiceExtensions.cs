@@ -162,8 +162,8 @@ public static class GatewayGovernanceServiceExtensions
 
         // ITSM orchestration (dispatcher, recertification, outbox workers)
         services.AddScoped<ItsmWorkflowDispatcher>();
-        services.AddScoped<Autheris.Application.Consent.IConsentRequestDispatcher, Autheris.Application.Consent.ItsmConsentRequestDispatcher>();
-        services.AddScoped<Autheris.Application.Consent.IConsentRequestService, Autheris.Application.Consent.ConsentRequestService>();
+        services.AddScoped<Autheris.Application.ConsentRequests.IConsentRequestDispatcher, Autheris.Application.ConsentRequests.ItsmConsentRequestDispatcher>();
+        services.AddScoped<Autheris.Application.ConsentRequests.IConsentRequestService, Autheris.Application.ConsentRequests.ConsentRequestService>();
         services.AddScoped<IConsentRecertificationService, ConsentRecertificationWorkflowService>();
         if (gatewayOptions.Itsm.Enabled)
         {

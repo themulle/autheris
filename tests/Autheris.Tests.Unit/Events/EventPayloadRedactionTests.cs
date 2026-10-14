@@ -9,6 +9,8 @@ using Xunit;
 [Trait("Category", "Security")]
 public sealed class EventPayloadRedactionTests
 {
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
+
     private static DocumentDepositedEvent Deposit() => new(
         EventId: "e1",
         AppId: "orders",
@@ -27,7 +29,7 @@ public sealed class EventPayloadRedactionTests
 #pragma warning disable CS0618 // deprecated alias must stay relative
         ev.SourceFilePath.ShouldBe(ev.RelativePath);
 #pragma warning restore CS0618
-        var json = JsonSerializer.Serialize(ev, ev.GetType(), new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var json = JsonSerializer.Serialize(ev, ev.GetType(), WebJson);
         json.ShouldNotContain("\"/");
         json.ShouldNotContain(":\\\\");
         json.ShouldContain("\"relativePath\":\"orders/architecture/overview\"");
@@ -46,7 +48,7 @@ public sealed class EventPayloadRedactionTests
 
         ev.Reason.ShouldBe("POLICY_DENIED");
         ev.ReasonCode.ShouldBe("POLICY_DENIED");
-        var json = JsonSerializer.Serialize(ev, ev.GetType(), new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var json = JsonSerializer.Serialize(ev, ev.GetType(), WebJson);
         json.ShouldContain("\"reasonCode\":\"POLICY_DENIED\"");
     }
 }

@@ -42,11 +42,17 @@ public static partial class EventRedaction
             case JsonObject obj:
                 foreach (var key in obj.Select(kv => kv.Key).ToList())
                 {
-                    if (obj[key] is { } child && IsRedactable(child))
+                    var child = obj[key];
+                    if (child is null)
+                    {
+                        continue;
+                    }
+
+                    if (IsRedactable(child))
                     {
                         obj[key] = JsonValue.Create(RedactedPath);
                     }
-                    else if (child is not null)
+                    else
                     {
                         Walk(child);
                     }
@@ -56,11 +62,17 @@ public static partial class EventRedaction
             case JsonArray arr:
                 for (var i = 0; i < arr.Count; i++)
                 {
-                    if (arr[i] is { } child && IsRedactable(child))
+                    var child = arr[i];
+                    if (child is null)
+                    {
+                        continue;
+                    }
+
+                    if (IsRedactable(child))
                     {
                         arr[i] = JsonValue.Create(RedactedPath);
                     }
-                    else if (child is not null)
+                    else
                     {
                         Walk(child);
                     }

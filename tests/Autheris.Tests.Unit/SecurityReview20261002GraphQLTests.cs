@@ -9,7 +9,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Caching.Services;
-using Autheris.Application.Consent;
+using Autheris.Application.ConsentRequests;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Domain.Common;

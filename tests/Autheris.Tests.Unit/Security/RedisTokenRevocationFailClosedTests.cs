@@ -1,3 +1,4 @@
+#pragma warning disable CS0618 // StackExchange.Redis exception constructors without CommandFlags are fine for test doubles
 namespace Autheris.Tests.Unit.Security;
 
 using System;

@@ -7,14 +7,7 @@ using System.Threading.Tasks;
 /// <summary>
 /// Result of a cluster state read that distinguishes "found", "absent" and "unavailable" without exceptions.
 /// </summary>
-public readonly record struct StateRead<T>(bool Found, T? Value, bool Unavailable)
-{
-    public static StateRead<T> FoundValue(T value) => new(true, value, false);
-
-    public static StateRead<T> Absent { get; } = new(false, default, false);
-
-    public static StateRead<T> StoreUnavailable { get; } = new(false, default, true);
-}
+public readonly record struct StateRead<T>(bool Found, T? Value, bool Unavailable);
 
 public static class DistributedClusterStateProviderExtensions
 {
@@ -31,11 +24,11 @@ public static class DistributedClusterStateProviderExtensions
         try
         {
             var value = await provider.GetAsync<T>(key, ct).ConfigureAwait(false);
-            return value is null ? StateRead<T>.Absent : StateRead<T>.FoundValue(value);
+            return value is null ? new StateRead<T>(false, default, false) : new StateRead<T>(true, value, false);
         }
         catch (ClusterStateUnavailableException)
         {
-            return StateRead<T>.StoreUnavailable;
+            return new StateRead<T>(false, default, true);
         }
     }
 }

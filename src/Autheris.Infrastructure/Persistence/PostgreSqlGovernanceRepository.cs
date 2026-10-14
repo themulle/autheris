@@ -258,7 +258,7 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, Mig
             }
 
             // AU-12: Background processor starts only after keys and stores are completely initialized
-            _auditProcessorTask = Task.Run(ProcessAuditChannelAsync);
+            _auditProcessorTask = Task.Run(ProcessAuditChannelAsync, CancellationToken.None);
         }
         catch
         {
