@@ -4,6 +4,7 @@ using System;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Extensions;
 using Autheris.Application.DataCatalog.Interfaces;
 using Autheris.Application.Interfaces;
@@ -51,107 +52,6 @@ public static class WebhookEndpoints
 
             return Results.Ok(new { status = "Processed" });
         }).AllowAnonymous().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
-
-        async Task<IResult> ProcessItsmWebhookAsync(
-            HttpContext context,
-            IItsmWebhookHandler webhookHandler,
-            IOptions<GatewayOptions> options,
-            string defaultSystemName)
-        {
-            // SEC M-07: Bounded read instead of a bypassable Content-Length check.
-            var (payload, tooLarge) = await EndpointSecurity.TryReadBodyAsync(
-                context.Request,
-                2 * 1024 * 1024,
-                "Payload size exceeds maximum allowed size (2 MB).",
-                context.RequestAborted);
-            if (payload == null)
-            {
-                return tooLarge!;
-            }
-
-            if (string.IsNullOrWhiteSpace(payload))
-            {
-                return Results.BadRequest(new { error = "Empty webhook payload." });
-            }
-
-            var opts = options.Value;
-            string? signature = context.Request.Headers["X-ITSM-Signature"].FirstOrDefault()
-                                ?? context.Request.Headers["X-ServiceNow-Signature"].FirstOrDefault()
-                                ?? context.Request.Headers["X-Hub-Signature-256"].FirstOrDefault()
-                                ?? context.Request.Headers["X-Hub-Signature"].FirstOrDefault();
-
-            if (string.IsNullOrWhiteSpace(signature))
-            {
-                if (!opts.IsWebhookSignatureBypassed)
-                {
-                    return Results.Unauthorized();
-                }
-                signature = "bypassed";
-            }
-
-            DateTimeOffset timestamp;
-            var tsHeader = context.Request.Headers["X-ITSM-Timestamp"].FirstOrDefault()
-                           ?? context.Request.Headers["X-Timestamp"].FirstOrDefault()
-                           ?? context.Request.Headers["Date"].FirstOrDefault();
-
-            if (string.IsNullOrWhiteSpace(tsHeader) || !EndpointSecurity.TryParseWebhookTimestamp(tsHeader, out timestamp))
-            {
-                if (!opts.IsWebhookTimestampToleranceIgnored)
-                {
-                    return Results.BadRequest(new { error = "Header X-ITSM-Timestamp is required and must be a valid ISO 8601 timestamp or Unix time in seconds." });
-                }
-                timestamp = DateTimeOffset.UtcNow;
-            }
-            else if (!opts.IsWebhookTimestampToleranceIgnored)
-            {
-                var diff = (DateTimeOffset.UtcNow - timestamp).Duration();
-                if (diff > TimeSpan.FromMinutes(5))
-                {
-                    return Results.Unauthorized();
-                }
-            }
-
-            try
-            {
-                using var jsonDoc = JsonDocument.Parse(payload);
-            }
-            catch (JsonException ex)
-            {
-                return Results.BadRequest(new { error = $"Malformed JSON payload: {ex.Message}" });
-            }
-
-            // SEC H-06: The instance header is unsigned. It is only passed on for a consistency check;
-            // the handler takes the instance exclusively from the signed payload.
-            string? instanceHeader = context.Request.Headers["X-Instance-ID"].FirstOrDefault()
-                                     ?? context.Request.Headers["X-ServiceNow-Instance"].FirstOrDefault()
-                                     ?? context.Request.Headers["X-Jira-Instance"].FirstOrDefault()
-                                     ?? context.Request.Query["instance"].FirstOrDefault();
-
-            bool success;
-            try
-            {
-                success = await webhookHandler.HandleStatusChangeAsync(payload, signature, timestamp, instanceHeader, tsHeader, context.RequestAborted);
-            }
-            catch (ArgumentException ex)
-            {
-                return Results.BadRequest(new { error = ex.Message });
-            }
-            catch (JsonException ex)
-            {
-                return Results.BadRequest(new { error = $"Malformed payload: {ex.Message}" });
-            }
-            catch (FormatException ex)
-            {
-                return Results.BadRequest(new { error = $"Invalid signature or data format: {ex.Message}" });
-            }
-
-            if (!success)
-            {
-                return Results.Unauthorized();
-            }
-
-            return Results.Ok(new { status = "Processed", system = defaultSystemName });
-        }
 
         // Canonical ITSM Webhook Endpoint
         app.MapPost("/api/webhooks/itsm/status-change", (
@@ -379,5 +279,110 @@ public static class WebhookEndpoints
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         return app;
+    }
+
+    internal static async Task<IResult> ProcessItsmWebhookAsync(
+        HttpContext context,
+        IItsmWebhookHandler webhookHandler,
+        IOptions<GatewayOptions> options,
+        string defaultSystemName)
+    {
+        // SEC M-07: Bounded read instead of a bypassable Content-Length check.
+        var (payload, tooLarge) = await EndpointSecurity.TryReadBodyAsync(
+            context.Request,
+            2 * 1024 * 1024,
+            "Payload size exceeds maximum allowed size (2 MB).",
+            context.RequestAborted);
+        if (payload == null)
+        {
+            return tooLarge!;
+        }
+
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return Results.BadRequest(new { error = "Empty webhook payload." });
+        }
+
+        var opts = options.Value;
+        string? signature = context.Request.Headers["X-ITSM-Signature"].FirstOrDefault()
+                            ?? context.Request.Headers["X-ServiceNow-Signature"].FirstOrDefault()
+                            ?? context.Request.Headers["X-Hub-Signature-256"].FirstOrDefault()
+                            ?? context.Request.Headers["X-Hub-Signature"].FirstOrDefault();
+
+        if (string.IsNullOrWhiteSpace(signature))
+        {
+            if (!opts.IsWebhookSignatureBypassed)
+            {
+                return Results.Unauthorized();
+            }
+            signature = "bypassed";
+        }
+
+        DateTimeOffset timestamp;
+        var tsHeader = context.Request.Headers["X-ITSM-Timestamp"].FirstOrDefault()
+                       ?? context.Request.Headers["X-Timestamp"].FirstOrDefault()
+                       ?? context.Request.Headers["Date"].FirstOrDefault();
+
+        if (string.IsNullOrWhiteSpace(tsHeader) || !EndpointSecurity.TryParseWebhookTimestamp(tsHeader, out timestamp))
+        {
+            if (!opts.IsWebhookTimestampToleranceIgnored)
+            {
+                return Results.BadRequest(new { error = "Header X-ITSM-Timestamp is required and must be a valid ISO 8601 timestamp or Unix time in seconds." });
+            }
+            timestamp = DateTimeOffset.UtcNow;
+        }
+        else if (!opts.IsWebhookTimestampToleranceIgnored)
+        {
+            var diff = (DateTimeOffset.UtcNow - timestamp).Duration();
+            if (diff > TimeSpan.FromMinutes(5))
+            {
+                return Results.Unauthorized();
+            }
+        }
+
+        try
+        {
+            using var jsonDoc = JsonDocument.Parse(payload);
+        }
+        catch (JsonException ex)
+        {
+            SafeErrorResults.LogFailure(context, ex, "WEBHOOK_PAYLOAD_INVALID");
+            return SafeErrorResults.BadRequest("WEBHOOK_PAYLOAD_INVALID", "The webhook payload is invalid.", context);
+        }
+
+        // SEC H-06: The instance header is unsigned. It is only passed on for a consistency check;
+        // the handler takes the instance exclusively from the signed payload.
+        string? instanceHeader = context.Request.Headers["X-Instance-ID"].FirstOrDefault()
+                                 ?? context.Request.Headers["X-ServiceNow-Instance"].FirstOrDefault()
+                                 ?? context.Request.Headers["X-Jira-Instance"].FirstOrDefault()
+                                 ?? context.Request.Query["instance"].FirstOrDefault();
+
+        bool success;
+        try
+        {
+            success = await webhookHandler.HandleStatusChangeAsync(payload, signature, timestamp, instanceHeader, tsHeader, context.RequestAborted);
+        }
+        catch (ArgumentException ex)
+        {
+            SafeErrorResults.LogFailure(context, ex, "WEBHOOK_SIGNATURE_OR_FORMAT_INVALID");
+            return SafeErrorResults.BadRequest("WEBHOOK_SIGNATURE_OR_FORMAT_INVALID", "The webhook signature or payload format is invalid.", context);
+        }
+        catch (JsonException ex)
+        {
+            SafeErrorResults.LogFailure(context, ex, "WEBHOOK_PAYLOAD_INVALID");
+            return SafeErrorResults.BadRequest("WEBHOOK_PAYLOAD_INVALID", "The webhook payload is invalid.", context);
+        }
+        catch (FormatException ex)
+        {
+            SafeErrorResults.LogFailure(context, ex, "WEBHOOK_SIGNATURE_OR_FORMAT_INVALID");
+            return SafeErrorResults.BadRequest("WEBHOOK_SIGNATURE_OR_FORMAT_INVALID", "The webhook signature or payload format is invalid.", context);
+        }
+
+        if (!success)
+        {
+            return Results.Unauthorized();
+        }
+
+        return Results.Ok(new { status = "Processed", system = defaultSystemName });
     }
 }
