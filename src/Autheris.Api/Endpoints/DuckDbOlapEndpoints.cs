@@ -191,6 +191,21 @@ public static class DuckDbOlapEndpoints
                     return;
                 }
 
+                // SR-H-06: tenant/global data-source allowlists apply before any access decision or read.
+                try
+                {
+                    Autheris.Application.Sql.Services.DataSourceAllowlistGuard.EnsureAllowed(
+                        gatewayOptions.Value.WebSql ?? new WebSqlOptions(), tenantId,
+                        meta.Identifier.Domain);
+                }
+                catch (Autheris.Application.Sql.WebSqlPolicyException)
+                {
+                    logger.LogWarning("OLAP request denied: data source of table {Table} is not allowed for the tenant.", meta.Identifier);
+                    httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    await httpContext.Response.WriteAsJsonAsync(new { error = $"Access denied to table '{rawTableName}'." }, ct);
+                    return;
+                }
+
                 var effectiveUser = user ?? new ClaimsPrincipal(new ClaimsIdentity());
 
                 // SEC-OLAP-05 / RR-L3-04 / Architecture 1: one access decision (ReBAC whenever enabled, consents, Casbin, RLS)
