@@ -27,7 +27,7 @@ public partial class SqliteGovernanceRepository
             {
                 result.Add(new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2)));
             }
-                }
+        }
 
         return result;
     }

@@ -44,7 +44,7 @@ public partial class SqliteGovernanceRepository : IItsmOutboxRepository
             cmd.Parameters.AddWithValue("@lastError", (object?)message.LastError ?? DBNull.Value);
 
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                }
+        }
     }
 
     public async Task<IReadOnlyList<ItsmOutboxMessage>> GetPendingMessagesAsync(int batchSize = 20, CancellationToken ct = default)
@@ -74,7 +74,7 @@ public partial class SqliteGovernanceRepository : IItsmOutboxRepository
                 list.Add(ReadOutboxMessage(reader));
             }
             return list;
-                }
+        }
     }
 
     public async Task MarkCompletedAsync(string id, string? ticketId = null, CancellationToken ct = default)
@@ -95,7 +95,7 @@ public partial class SqliteGovernanceRepository : IItsmOutboxRepository
             cmd.Parameters.AddWithValue("@id", id);
 
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                }
+        }
     }
 
     public async Task MarkFailedAsync(string id, string errorMessage, TimeSpan nextRetryDelay, bool deadLetter = false, CancellationToken ct = default)
@@ -122,7 +122,7 @@ public partial class SqliteGovernanceRepository : IItsmOutboxRepository
             cmd.Parameters.AddWithValue("@id", id);
 
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                }
+        }
     }
 
     public async Task<IReadOnlyList<ItsmOutboxMessage>> GetDeadLetterMessagesAsync(int limit = 50, CancellationToken ct = default)
@@ -149,7 +149,7 @@ public partial class SqliteGovernanceRepository : IItsmOutboxRepository
                 list.Add(ReadOutboxMessage(reader));
             }
             return list;
-                }
+        }
     }
 
     private static ItsmOutboxMessage ReadOutboxMessage(SqliteDataReader reader)
