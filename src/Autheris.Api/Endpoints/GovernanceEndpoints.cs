@@ -703,7 +703,7 @@ public static class GovernanceEndpoints
 
             try
             {
-                var parser = new FastSqlEngine();
+                var parser = FastSqlEngine.Default;
                 _ = parser.ParseExpression(trimmedFilter.AsMemory(), SqlTokenSecurityOptions.None, ct);
             }
             catch (Exception ex)

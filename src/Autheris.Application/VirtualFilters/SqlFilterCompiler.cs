@@ -80,7 +80,7 @@ public static partial class SqlFilterCompiler
         TrinoSqlEngine.Analysis.SqlQueryMetadata metadata;
         try
         {
-            metadata = new FastSqlEngine().Analyze(Statement(fragment).AsMemory());
+            metadata = FastSqlEngine.Default.Analyze(Statement(fragment).AsMemory());
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -180,7 +180,7 @@ public static partial class SqlFilterCompiler
             VirtualFilterNames.ValidateIdentifier(column, nameof(filter));
         }
 
-        var (tree, _) = new FastSqlEngine().Parse(Statement(fragment).AsMemory(), null, CancellationToken.None);
+        var (tree, _) = FastSqlEngine.Default.Parse(Statement(fragment).AsMemory(), null, CancellationToken.None);
         var astBuilder = new TrinoSqlEngine.Ast.Builder.SqlAstBuilder();
         var ast = astBuilder.BuildStatement(tree);
         if (ast is not SelectStatement select || select.Body is not QuerySpecification spec)
@@ -262,7 +262,7 @@ public static partial class SqlFilterCompiler
             return filter;
         }
 
-        var metadata = new FastSqlEngine().Analyze(Statement(fragment).AsMemory());
+        var metadata = FastSqlEngine.Default.Analyze(Statement(fragment).AsMemory());
         var tenanted = new List<(TableAccessTarget Table, string Column)>();
         foreach (var table in metadata.ReferencedTables)
         {
@@ -275,7 +275,7 @@ public static partial class SqlFilterCompiler
 
         if (tenanted.Count > 0)
         {
-            var (tree, _) = new FastSqlEngine().Parse(Statement(fragment).AsMemory(), null, CancellationToken.None);
+            var (tree, _) = FastSqlEngine.Default.Parse(Statement(fragment).AsMemory(), null, CancellationToken.None);
             var ast = new TrinoSqlEngine.Ast.Builder.SqlAstBuilder().BuildStatement(tree);
             if (ast is not SelectStatement { Body: QuerySpecification { Where: not null } spec })
             {
@@ -453,7 +453,7 @@ public static partial class SqlFilterCompiler
     {
         ArgumentNullException.ThrowIfNull(filter);
         var fragment = filter.Sql ?? throw new InvalidOperationException($"The virtual filter '{filter.Name}' has no sql definition.");
-        return new FastSqlEngine().Analyze(Statement(fragment).AsMemory()).ReferencedTables
+        return FastSqlEngine.Default.Analyze(Statement(fragment).AsMemory()).ReferencedTables
             .Select(t => new TableIdentifier(filter.Source, t.Schema ?? string.Empty, t.TableName))
             .ToList();
     }
@@ -562,7 +562,7 @@ public static partial class SqlFilterCompiler
     /// </summary>
     private static string GenerateInline(string statement, TargetSqlDialect target)
     {
-        var (tree, _) = new FastSqlEngine().Parse(statement.AsMemory(), SqlTokenSecurityOptions.ForDialect(target), CancellationToken.None);
+        var (tree, _) = FastSqlEngine.Default.Parse(statement.AsMemory(), SqlTokenSecurityOptions.ForDialect(target), CancellationToken.None);
         var ast = new SqlAstBuilder(BuilderOptions()).BuildStatement(tree);
         var simplified = (SqlStatement)new AstSimplificationVisitor().Visit(ast);
         new AstValidationVisitor().Validate(simplified);

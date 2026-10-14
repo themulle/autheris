@@ -16,7 +16,7 @@ using TrinoSqlEngine.Governance;
 /// </summary>
 public static class PolicyParserSetup
 {
-    public static IPolicyExpressionParser CreateParser() => new PolicyExpressionParser(new FastSqlEngine());
+    public static IPolicyExpressionParser CreateParser() => new PolicyExpressionParser(FastSqlEngine.Default);
 
     /// <summary>Catalog of every table, with column types, for correlated subqueries and column resolution.</summary>
     public static ITableCatalog CreateCatalog(IEnumerable<TableMetadata> tables, string defaultSchema = "main") =>
