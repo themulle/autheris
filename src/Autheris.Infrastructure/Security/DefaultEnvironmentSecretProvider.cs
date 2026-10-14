@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Security;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -36,6 +37,14 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(secretRef);
         ArgumentNullException.ThrowIfNull(secretBytes);
+
+        // SR-H-03: runtime-written secrets are confined to the datasource namespace so they can never shadow
+        // operator-configured secrets (forwardauth-secret, audit keys, ...), which are checked after this map on reads.
+        if (!DatasourceSecretRefPolicy.IsInDatasourceNamespace(secretRef))
+        {
+            throw new ArgumentException("Secrets can only be set inside the 'datasource:' namespace.", nameof(secretRef));
+        }
+
         _inMemorySecrets[secretRef] = secretBytes;
     }
 

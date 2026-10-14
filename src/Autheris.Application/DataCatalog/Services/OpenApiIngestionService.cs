@@ -193,6 +193,9 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
 
         if (auth != null)
         {
+            // SR-H-03: a client-supplied SecretRef must lie inside the domain's datasource namespace.
+            DatasourceSecretRefPolicy.ValidateClientRef(auth.SecretRef, DatasourceSecretRefPolicy.DomainPrefix(domain));
+
             if (string.Equals(auth.Type, "apiKey", StringComparison.OrdinalIgnoreCase))
             {
                 effectiveAuthMode = HttpAuthMode.StaticApiKey;

@@ -276,7 +276,7 @@ public sealed class DeclarativeHttpDataSourceExecutorTests
             PathTemplate = "/v1/customers",
             AuthMode = HttpAuthMode.StaticApiKey,
             ApiKeyHeaderName = "X-Api-Key",
-            ApiKeySecretName = "secret-key-999"
+            ApiKeySecretName = "datasource:payments:secret-key-999"
         };
         var metadata = CreateTestMetadata(descriptor);
 
@@ -286,7 +286,7 @@ public sealed class DeclarativeHttpDataSourceExecutorTests
 
         requests.Count.ShouldBe(1);
         requests[0].Headers.Contains("X-Api-Key").ShouldBeTrue();
-        requests[0].Headers.GetValues("X-Api-Key").First().ShouldBe("secret-key-999");
+        requests[0].Headers.GetValues("X-Api-Key").First().ShouldBe("datasource:payments:secret-key-999");
     }
 
     [Fact]
