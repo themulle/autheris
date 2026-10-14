@@ -72,6 +72,10 @@ public sealed class AccessProfileDistributedStateTests
     {
         var consentRepo = Substitute.For<IConsentRepository>();
         var resolutionService = Substitute.For<IConsentResolutionService>();
+        // SR-M-07: an access profile never creates an allow; the underlying consent decision allows the table here.
+        resolutionService.ResolveAccess(default!, default!, default!, default, default!, default, default, default)
+            .ReturnsForAnyArgs(ci => TableAccessDecision.Allowed(
+                ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
         var cacheService = Substitute.For<IConsentCacheService>();
         var policyEnforcementService = Substitute.For<IPolicyEnforcementService>();
         var rebacEvaluator = Substitute.For<IRebacEvaluator>();
