@@ -30,7 +30,7 @@ public sealed class SqlRewritePipelineTests
         stages[3].ShouldBe(SqlRewriteStageOrder.RewriteOptions);
         stages[4].ShouldBe(SqlRewriteStageOrder.SecureRewrite);
 
-        var service = new GovernedSqlExecutionService(options, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+        var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(options, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
         service.StageOrder.ShouldBe(stages);
     }
 

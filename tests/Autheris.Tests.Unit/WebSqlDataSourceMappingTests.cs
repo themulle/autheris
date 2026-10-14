@@ -113,7 +113,7 @@ public sealed class WebSqlDataSourceMappingTests
 
         var sessionInit = Substitute.For<IDbSessionContextInitializer>();
 
-        var service = new GovernedSqlExecutionService(
+        var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             consentResolution: resolution,
@@ -148,7 +148,7 @@ public sealed class WebSqlDataSourceMappingTests
             }
         };
 
-        var service = new GovernedSqlExecutionService(
+        var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
             logger: NullLogger<GovernedSqlExecutionService>.Instance, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 

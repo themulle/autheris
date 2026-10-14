@@ -36,6 +36,31 @@ public class AuditUsageRulesTests
         offenders.ShouldBeEmpty("Use IAuditWriter (RecordRequiredAsync / RecordBestEffortAsync) instead of GetService<IAuditLogRepository>() or null-guarded audit repositories.");
     }
 
+    private static readonly Regex DirectRepositoryAuditWrite = new(@"\.RecordAuditEventAsync\(", RegexOptions.Compiled);
+
+    /// <summary>R-2: the audit failure policy lives in <c>IAuditWriter</c>; Api code never calls the repository write directly.</summary>
+    [Fact]
+    public void Api_DoesNotCallRecordAuditEventAsyncDirectly()
+    {
+        var apiDir = Path.Combine(FindRepositoryRoot(), "src", "Autheris.Api");
+        var offenders = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(apiDir, "*.cs", SearchOption.AllDirectories))
+        {
+            if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
+                file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (DirectRepositoryAuditWrite.IsMatch(File.ReadAllText(file)))
+            {
+                offenders.Add(Path.GetRelativePath(apiDir, file));
+            }
+        }
+
+        offenders.ShouldBeEmpty("Use IAuditWriter.RecordAsync / RecordRequiredAsync / RecordBestEffortAsync instead of IAuditLogRepository.RecordAuditEventAsync.");
+    }
+
     private static string FindRepositoryRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

@@ -36,7 +36,7 @@ public sealed class GovernedSqlRejectionAuditTests
         new(new ClaimsIdentity(
             [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-L4"), new Claim("tenant_id", Tenant), new Claim(ClaimTypes.Role, "Writer")], "Test"));
 
-    private static (GovernedSqlExecutionService Service, List<AuditLogEntry> Audit) CreateService()
+    private static (GovernedSqlExecutionService Service, List<AuditLogEntry> Audit) CreateService(global::Autheris.Application.Audit.IAuditWriter? writer = null)
     {
         var table = new TableMetadata
         {
@@ -65,7 +65,7 @@ public sealed class GovernedSqlRejectionAuditTests
         var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
 
-        var service = new GovernedSqlExecutionService(
+        var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(new GatewayOptions
             {
                 WebSql = new WebSqlOptions { Enabled = true, AllowDml = true, DmlWriterRoles = ["Writer"], DefaultDataSourceName = DataSource, DefaultMaxRows = 100, MaxAllowedRows = 500 }
@@ -75,7 +75,8 @@ public sealed class GovernedSqlRejectionAuditTests
             auditLogRepository: auditRepo,
             environment: env,
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
-            consentRepository: consents, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            consentRepository: consents, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
+            auditWriter: writer);
         return (service, audit);
     }
 
@@ -119,6 +120,31 @@ public sealed class GovernedSqlRejectionAuditTests
         rejected.EventType.ShouldBe(AuditEventTypes.WebSqlDmlRejected);
         rejected.Decision.ShouldBe("DENY");
         Details(rejected).GetProperty("reason").GetString().ShouldBe(code);
+    }
+
+    [Fact]
+    public async Task GovernedSqlExecutor_DeniedQuery_WritesDenyThroughWriter()
+    {
+        var writer = Substitute.For<global::Autheris.Application.Audit.IAuditWriter>();
+        var (service, audit) = CreateService(writer);
+
+        using var cts = new CancellationTokenSource();
+        var ex = await Should.ThrowAsync<Exception>(() => service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest("SELEC id FROM orders"), Writer(), new TenantId(Tenant), cts.Token));
+
+        ex.ShouldNotBeOfType<OperationCanceledException>();
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out _).ShouldBeTrue("the engine syntax error itself, not a wrapped or audit error");
+        audit.ShouldBeEmpty("the repository is only reachable through the writer");
+        // A DENY record never depends on the request token.
+        await writer.Received(1).RecordAsync(
+            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.WebSqlQueryDenied && e.Decision == "DENY"), Arg.Is<CancellationToken>(t => !t.CanBeCanceled));
+    }
+
+    [Fact]
+    public async Task GovernedSqlExecutor_DmlFailedEvent_HasExplicitPolicy()
+    {
+        AuditEventTypes.WebSqlDmlFailed.ShouldBe("WEBSQL_DML_FAILED");
+        Autheris.Application.Audit.AuditPolicyTable.All.ShouldContainKey(AuditEventTypes.WebSqlDmlFailed);
+        await Task.CompletedTask;
     }
 
     [Fact]

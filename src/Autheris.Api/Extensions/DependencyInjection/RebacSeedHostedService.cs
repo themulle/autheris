@@ -4,8 +4,9 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Audit;
 using Autheris.Application.Security.Rebac.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -22,20 +23,20 @@ public sealed class RebacSeedHostedService : IHostedService
     private readonly IRebacStore _store;
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<RebacSeedHostedService> _logger;
-    private readonly IAuditLogRepository _auditLog;
+    private readonly IAuditWriter _auditWriter;
     private readonly IHostEnvironment? _environment;
 
     public RebacSeedHostedService(
         IRebacStore store,
         IOptions<GatewayOptions> options,
         ILogger<RebacSeedHostedService> logger,
-        IAuditLogRepository auditLog,
+        IAuditWriter auditWriter,
         IHostEnvironment? environment = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _auditLog = auditLog ?? throw new ArgumentNullException(nameof(auditLog));
+        _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
         _environment = environment;
     }
 
@@ -60,10 +61,10 @@ public sealed class RebacSeedHostedService : IHostedService
             try
             {
                 await _store.AddTuplesAsync(tuplesToSeed, cancellationToken).ConfigureAwait(false);
-                await _auditLog.RecordAuditEventAsync(new AuditLogEntry
+                await _auditWriter.RecordBestEffortAsync(new AuditLogEntry
                 {
                     TenantId = TenantId.LegacySingleTenant,
-                    EventType = "REBAC_TUPLE_SEED",
+                    EventType = AuditEventTypes.RebacTupleSeed,
                     ActorSid = new Sid("System:HostedService:RebacSeedHostedService"),
                     TargetTable = "RebacTuples",
                     Decision = "ALLOW",

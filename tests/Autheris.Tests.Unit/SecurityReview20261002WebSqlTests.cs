@@ -216,7 +216,7 @@ public sealed class SecurityReview20261002WebSqlTests
     {
         var repo = repository ?? CreateRepository(CreateEmployeesMetadata(), CreateOrdersMetadata());
         var gatewayOptions = Options.Create(options ?? CreateOptions());
-        return new GovernedSqlExecutionService(
+        return global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             gatewayOptions, executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: casbin ?? global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             consentResolution: withConsentServices ? (consentResolution ?? CreateConsentResolution(t => UnconstrainedAllow(t))) : null,
@@ -799,7 +799,7 @@ public sealed class SecurityReview20261002WebSqlTests
         tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => ci.Arg<TableIdentifier>().TableName == "employees" ? Task.FromResult<TableMetadata?>(employeesMeta) : Task.FromResult<TableMetadata?>(null));
 
-        var service = new GovernedSqlExecutionService(
+        var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: CreateCasbin(),
             consentResolution: CreateConsentResolution(t => UnconstrainedAllow(t)),
@@ -867,7 +867,7 @@ public sealed class SecurityReview20261002WebSqlTests
         tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => ci.Arg<TableIdentifier>().TableName == "employees" ? Task.FromResult<TableMetadata?>(employeesMeta) : Task.FromResult<TableMetadata?>(null));
 
-        var service = new GovernedSqlExecutionService(
+        var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: CreateCasbin(),
             consentResolution: CreateConsentResolution(t => UnconstrainedAllow(t)),

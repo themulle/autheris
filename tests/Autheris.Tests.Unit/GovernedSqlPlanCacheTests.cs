@@ -96,7 +96,7 @@ public sealed class GovernedSqlPlanCacheTests
             WebSql = new WebSqlOptions { Enabled = true, AllowDml = false }
         });
 
-        return new GovernedSqlExecutionService(
+        return global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             options: options, executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             consentResolution: consentResolution,
