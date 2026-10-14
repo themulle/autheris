@@ -58,3 +58,19 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Container image reference. Renders repo@digest when image.digest is set (immutable),
+otherwise repo:tag where tag defaults to the chart appVersion (never a floating "latest").
+Fails when image.requireDigest is true and no digest is configured.
+*/}}
+{{- define "autheris.image" -}}
+{{- if .Values.image.digest -}}
+{{- printf "%s@%s" .Values.image.repository .Values.image.digest -}}
+{{- else -}}
+{{- if .Values.image.requireDigest -}}
+{{- fail "image.digest is required (image.requireDigest=true): set --set image.digest=sha256:<digest> to pin the image immutably" -}}
+{{- end -}}
+{{- printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) -}}
+{{- end -}}
+{{- end }}
