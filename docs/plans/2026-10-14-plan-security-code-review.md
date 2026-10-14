@@ -190,14 +190,10 @@ All fixes follow the 6-phase lifecycle (strict TDD: a failing regression test pe
 
 ### Wave A — P0 (High and incomplete fixes on authentication/authorization)
 
+The High findings SR-H-01 … SR-H-06 are fixed (see §8). Remaining Wave A items:
+
 | Finding | Remediation |
 | :--- | :--- |
-| SR-H-01 | Resolve MCP target tables from the SQL AST (`ISqlQueryAnalyzer`, all referenced tables) and from the `invoke_api` path/statement; evaluate Four-Eyes for **every** table; fail closed when no table can be resolved. Better: move Four-Eyes enforcement into the governed execution pipeline so it applies regardless of channel. |
-| SR-H-02 | Restrict `McpAdminTools` to canonical `ClusterAdmin`, or thread the caller's `TenantId` through `AccessPlanningService` and reject cross-tenant datasets. Audit under the real tenant. |
-| SR-H-03 | Reject client-supplied `SecretRef` (always server-generate `datasource:{tenant}:{domain}:{name}:secret`), or enforce a `datasource:` namespace prefix on both read and write; never let `SetSecret` override configured keys. |
-| SR-H-04 | Load the proposal and reviewer server-side by ID; enforce `Status` preconditions per transition; persist approver SIDs per stage and require distinct approvers; require a non-empty `DataOwnerSid` match; verify step-up via `VerifyAndConsumeTotpAsync`. |
-| SR-H-05 | Clamp `MaxRows` to `SqlRowLimit.For(webSql, AsyncJob channel)` and `Timeout` to a configured maximum; stream results to disk instead of buffering. |
-| SR-H-06 | Call `ISqlDataSourceResolver.ResolveAllowedDataSource(catalog, tenant)` for every catalog on cross-source, HTTP-declarative and OLAP staging paths. |
 | SR-M-01, SR-M-04..06, SR-L-05 | Server-side pending enrollment seed only; atomic `SET NX` consumption per `(user, step)`; attempt counter with lockout; cache invalidation on revoke; encrypt seeds via Data Protection. |
 | SR-M-02 | Move the unauthenticated-IP check before `UseAuthorization`, or drop the Bearer exemption and apply a higher pre-auth budget instead. |
 | SR-M-03 | Derive the HitL key from the resolved secret bytes (`IKeyVaultSecretProvider`), fail closed if unresolved. |
@@ -209,6 +205,46 @@ SR-M-07 … SR-M-15, SR-M-17 … SR-M-26 per the remediation guidance in the det
 
 ### Wave C — P2 (Low / defence in depth)
 
-SR-L-01 … SR-L-24 and SR-D-02 … SR-D-09. SR-D-01 is resolved by merging `4ca84c5a` into `main`.
+SR-L-01 … SR-L-24 and SR-D-02 … SR-D-09.
 
 Cross-cutting: add a regression test per `SEC-*` ID fixed in `6ad16519` so that reverts are caught.
+
+---
+
+## 8. Remediation Status — Wave A High Findings (2026-10-14)
+
+All High findings (`SR-H-01` … `SR-H-06`, `SR-D-01`) are fixed on branch **`fix/security-review-2026-10-14-high-b`** (base `main` `88f7df1c`). PR to `main` pending.
+
+> [!WARNING]
+> A second, independently developed fix set for the same findings exists on `fix/security-review-2026-10-14-high` (head `3ef3c473`, includes `SR-M-21` job purge). Only one of the two branches should be merged; the other must be closed.
+
+| Finding | Status | Commit(s) | Remediation as implemented |
+| :--- | :--- | :--- | :--- |
+| SR-H-01 | Fixed | `42e15c40`, `c89f6967` | `query_sql` / `invoke_api` targets resolved from the SQL AST (`ISqlEngine.Analyze`) and from `/api/v1/data/...` / `/api/v1/statement`; Four-Eyes and ABAC pre-check run per referenced table; fail closed on missing engine, parse error (`ParseCanceledException`), or unresolvable target. Regex `FROM` helper removed. |
+| SR-H-02 | Fixed | `42e15c40`, `99369340` | MCP admin tools (execution gate and `tools/list` in `McpProtocolHandler` / `GatewayMcpServer`) admit only `ClusterAdmin` / `GovernanceAdmin`; `TenantAdmin` and bare `Admin` rejected. `AccessPlanningService` receives the caller tenant from MCP **and** REST (`SetDatasetState`, `ApplyAccess`) for audit and ReBAC instead of `LegacySingleTenant` / dataset domain. |
+| SR-H-03 | Fixed | `57e8969d` | Datasource secrets live only in the server-generated `datasource:{tenant}:{domain}:{name}:secret` namespace; a client `SecretRef` with a raw secret is ignored, without one it must be namespaced. `DefaultEnvironmentSecretProvider.SetSecret` rejects keys outside the namespace; the datasource test never resolves non-namespaced refs. |
+| SR-H-04 | Fixed | `57e8969d`, `c89f6967` | `/transition`, `/approve`, `/reject` load the proposal from the store and take the reviewer from the authenticated principal; per-action status preconditions; `Stage1ApproverSid` persisted and distinct stage-2 approver required; empty or mismatched `DataOwnerSid` denies; step-up via `VerifyAndConsumeTotpAsync` (fail closed without TOTP services); column overrides cannot lower the rank. |
+| SR-H-05 | Fixed (partial scope) | `1abf41bd` | Async job `MaxRows` = min(request, WebSQL / `RowLimits.AsyncJob` limit, `AsyncJobs.MaxRowsHardCap` = 100000); timeout always armed, capped at `AsyncJobs.MaxTimeoutSeconds` = 600. **Not done:** streaming results to disk, per-user job quota. |
+| SR-H-06 | Fixed | `1abf41bd`, `c89f6967` | Shared `SqlDataSourceResolver.ResolveAllowedDataSource` applied to every catalog in `CrossSourceQueryRouter` (cross-source and HTTP-declarative) and in the DuckDB OLAP endpoint before any metadata or upstream access. |
+| SR-D-01 | Fixed | `59ccfdc0` | `System.Security.Cryptography.Pkcs` pinned to 10.0.13 (cherry-pick of `4ca84c5a`). |
+
+### 8.1 Behaviour changes
+
+- HTTP-declarative catalogs must be listed in `WebSql.AllowedDataSources` (or `DataSourceMappings`), like SQL catalogs, to be readable via WebSQL cross-source and the REST dataset channel.
+- OLAP applies the tenant allowlist always and the global allowlist only when `AllowedDataSources` or `DataSourceMappings` is configured.
+- `GovernanceAdmin` can no longer act as `DATA_OWNER` on a classification unless assigned as owner (`assign-owner`).
+- New options: `Gateway:AsyncJobs:MaxRowsHardCap`, `Gateway:AsyncJobs:MaxTimeoutSeconds`, `Gateway:RowLimits:AsyncJob`.
+
+### 8.2 Verification (branch `fix/security-review-2026-10-14-high-b`)
+
+- `dotnet build Autheris.slnx -c Release`: 0 errors, 0 warnings.
+- Unit 5369/5369, Architecture 43/43, Extensions 241/241, TrinoSqlEngine 6976/6977 (one DuckDB timing test, green in isolation, code untouched).
+- Integration: REST dataset suite green. Remaining failures are pre-existing on the base `59ccfdc0` (5 `ODataIntegrationTests`, 1 `EndToEndSqliteTests` OData test, 3 `DataClassificationWorkflowIntegrationTests`) or require Docker (PostgreSQL, Oracle, SQL Server, Databricks containers) and were not executed locally.
+- Regression tests named `SR_H_0x_*` exist for every finding. The failing-before-fix step was demonstrated only for the first `SR-H-03` and `SR-H-05`/`SR-H-06` tests.
+
+### 8.3 Residual risks and follow-ups
+
+- Datasource rows persisted before `57e8969d` may still carry arbitrary `ApiKeySecretName` values; `DeclarativeHttpDataSourceExecutor` does not enforce the namespace at query time. Add a migration or execution-time check.
+- `GovernanceAdmin` (global role) can reference any `datasource:` secret of any tenant when registering a datasource.
+- SR-H-05 streaming to disk and per-user job quota remain open (Wave B candidate).
+- Pre-existing failing OData and classification integration tests need triage (possibly related to the `4da8e788` regression in §1).
