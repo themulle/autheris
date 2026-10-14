@@ -41,6 +41,13 @@ jobs:
       - name: Test Autheris Solution
         run: dotnet test Autheris.sln -c Release --no-restore -p:AutherisIncludeTestAuth=true --verbosity normal
 
+      # WP-ARC-B-12 (D7): the chart must lint and render with and without the optional governance migration job.
+      - name: Lint and render Helm chart
+        run: |
+          helm lint deploy/helm/autheris
+          helm template autheris deploy/helm/autheris > /dev/null
+          helm template autheris deploy/helm/autheris --set governanceMigrationJob.enabled=true > /dev/null
+
   # SQL compiler evidence gate (plan 9.5, 16.5). It must run on the merge result: a pull_request run checks out
   # refs/pull/N/merge by default, so no explicit `ref:` is set (a test in tests/Autheris.Tests.SqlCompilerGate asserts that).
   # There is deliberately no path filter (policy producers live outside src/TrinoSqlEngine) and no retry of any kind
