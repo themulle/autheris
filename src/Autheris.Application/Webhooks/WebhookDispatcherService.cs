@@ -3,7 +3,6 @@ namespace Autheris.Application.Webhooks;
 using System;
 using System.IO;
 using System.Net.Http;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -70,7 +69,7 @@ public sealed class WebhookDispatcherService : IWebhookDispatcherService
             Time: @event.Timestamp,
             Subject: @event.CorrelationId,
             DataContentType: "application/json",
-            Data: @event,
+            Data: EventRedaction.Sanitize(@event, JsonOptions), // SR-L-15 safety net
             TenantId: @event.TenantId,
             CorrelationId: @event.CorrelationId);
 
@@ -89,24 +88,36 @@ public sealed class WebhookDispatcherService : IWebhookDispatcherService
         int defaultTimeoutSeconds,
         CancellationToken ct)
     {
-        var timestamp = DateTimeOffset.UtcNow.ToString("O");
-        var signature = ComputeHmacSha256(subscription.Secret, $"{timestamp}.{jsonPayload}");
+        var timestamp = WebhookSignature.FormatTimestamp(DateTimeOffset.UtcNow);
         var maxRetries = subscription.EffectiveMaxRetries;
 
         if (!Uri.TryCreate(subscription.TargetUrl, UriKind.Absolute, out var targetUri))
         {
-            _logger.LogWarning("Webhook subscription target URL '{TargetUrl}' is malformed. Dropping dispatch.", subscription.TargetUrl);
+            _logger.LogWarning("Webhook subscription {SubscriptionId} target URL is malformed. Dropping dispatch.", subscription.Id);
             return;
         }
 
         var isDev = _environment?.IsDevelopment() ?? false;
+        var redactedUrl = UrlRedactor.Redact(targetUri);
+
+        // SR-L-13: fail closed, never deliver unsigned when a secret is required (default: outside Development).
+        var hasSecret = !string.IsNullOrEmpty(subscription.Secret);
+        if (!hasSecret && (_options.Value.Webhooks.RequireSecret ?? !isDev))
+        {
+            _logger.LogWarning(
+                "Webhook subscription {SubscriptionId} has no secret; delivery to {TargetUrl} dropped (Gateway:Webhooks:RequireSecret).",
+                subscription.Id, redactedUrl);
+            return;
+        }
+
+        var signature = hasSecret ? WebhookSignature.SignHeaderValue(subscription.Secret, timestamp, jsonPayload) : null;
         try
         {
             await EgressUrlPolicy.ValidateResolvedAsync(targetUri, isDev: isDev, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "SSRF violation: Webhook destination '{TargetUrl}' blocked by egress policy.", subscription.TargetUrl);
+            _logger.LogWarning("SSRF violation: Webhook destination {TargetUrl} blocked by egress policy ({ErrorType}).", redactedUrl, ex.GetType().Name);
             return;
         }
 
@@ -125,8 +136,12 @@ public sealed class WebhookDispatcherService : IWebhookDispatcherService
                 request.Headers.TryAddWithoutValidation("ce-time", @event.Timestamp.ToString("O"));
 
                 // Autheris HMAC signature & replay protection headers
-                request.Headers.TryAddWithoutValidation("X-Autheris-Signature-256", $"sha256={signature}");
-                request.Headers.TryAddWithoutValidation("X-Autheris-Timestamp", timestamp);
+                if (signature is not null)
+                {
+                    request.Headers.TryAddWithoutValidation(WebhookSignature.SignatureHeader, signature);
+                }
+
+                request.Headers.TryAddWithoutValidation(WebhookSignature.TimestampHeader, timestamp);
                 request.Headers.TryAddWithoutValidation("X-Autheris-Event-Type", @event.EventType);
                 request.Headers.TryAddWithoutValidation("X-Autheris-Event-Id", @event.EventId);
 
@@ -138,25 +153,24 @@ public sealed class WebhookDispatcherService : IWebhookDispatcherService
                 {
                     _logger.LogDebug(
                         "Successfully dispatched webhook for {EventType} ({EventId}) to {TargetUrl} [Attempt {Attempt}]",
-                        @event.EventType, @event.EventId, subscription.TargetUrl, attempt);
+                        @event.EventType, @event.EventId, redactedUrl, attempt);
                     return;
                 }
 
                 _logger.LogWarning(
                     "Webhook endpoint {TargetUrl} responded with HTTP {StatusCode} on attempt {Attempt}/{MaxRetries}",
-                    subscription.TargetUrl, (int)response.StatusCode, attempt, maxRetries);
+                    redactedUrl, (int)response.StatusCode, attempt, maxRetries);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                _logger.LogInformation("Webhook dispatch cancelled for {TargetUrl}", subscription.TargetUrl);
+                _logger.LogInformation("Webhook dispatch cancelled for {TargetUrl}", redactedUrl);
                 return;
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(
-                    ex,
-                    "Webhook delivery to {TargetUrl} failed on attempt {Attempt}/{MaxRetries}",
-                    subscription.TargetUrl, attempt, maxRetries);
+                    "Webhook delivery to {TargetUrl} failed on attempt {Attempt}/{MaxRetries} ({ErrorType})",
+                    redactedUrl, attempt, maxRetries, ex.GetType().Name);
             }
 
             if (attempt < maxRetries)
@@ -169,7 +183,7 @@ public sealed class WebhookDispatcherService : IWebhookDispatcherService
 
         _logger.LogError(
             "Exhausted {MaxRetries} attempts dispatching webhook for {EventType} ({EventId}) to {TargetUrl}",
-            maxRetries, @event.EventType, @event.EventId, subscription.TargetUrl);
+            maxRetries, @event.EventType, @event.EventId, redactedUrl);
     }
 
     public static string ComputeHmacSha256(string secret, string payload)
@@ -179,11 +193,6 @@ public sealed class WebhookDispatcherService : IWebhookDispatcherService
             return string.Empty;
         }
 
-        var keyBytes = Encoding.UTF8.GetBytes(secret);
-        var payloadBytes = Encoding.UTF8.GetBytes(payload);
-
-        using var hmac = new HMACSHA256(keyBytes);
-        var hash = hmac.ComputeHash(payloadBytes);
-        return Convert.ToHexString(hash).ToLowerInvariant();
+        return WebhookSignature.ComputeHex(secret, payload);
     }
 }

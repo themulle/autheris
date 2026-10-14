@@ -417,9 +417,10 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
                             SubjectSid: userSidStr,
                             Action: tool.Name,
                             Resource: effectiveTable.ToString(),
-                            Reason: string.Join("; ", policyDecision.DeniedReasons),
+                            Reason: PolicyDeniedEvent.DefaultReasonCode,
                             Timestamp: DateTimeOffset.UtcNow,
-                            TenantId: sessionContext.TenantId), cancellationToken).ConfigureAwait(false);
+                            TenantId: sessionContext.TenantId,
+                            ReasonCode: PolicyDeniedEvent.DefaultReasonCode), cancellationToken).ConfigureAwait(false);
                     }
 
                     return new McpToolCallResult(

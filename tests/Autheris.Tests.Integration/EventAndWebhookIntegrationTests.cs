@@ -69,6 +69,7 @@ public sealed class EventAndWebhookIntegrationTests : IClassFixture<WebApplicati
         receivedEvent.Category.ShouldBe("architecture");
         receivedEvent.DocId.ShouldBe("overview");
         receivedEvent.Title.ShouldBe("Orders Service Architecture");
+        receivedEvent.RelativePath.ShouldBe("orders-service/architecture/overview");
     }
 
     [Fact]

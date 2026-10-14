@@ -5,14 +5,17 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Events.Interfaces;
+using Autheris.Application.Security;
+using Autheris.Application.Webhooks;
+using Autheris.Domain.Options;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// F-EVT-01: Dispatches signed CloudEvents v1.0 payloads with SSRF defense and HMAC-SHA256 signatures.
@@ -21,6 +24,7 @@ public sealed class CloudEventWebhookDispatcher : ICloudEventWebhookDispatcher
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<CloudEventWebhookDispatcher> _logger;
+    private readonly IOptions<GatewayOptions>? _options;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -30,8 +34,10 @@ public sealed class CloudEventWebhookDispatcher : ICloudEventWebhookDispatcher
 
     public CloudEventWebhookDispatcher(
         HttpClient httpClient,
-        ILogger<CloudEventWebhookDispatcher> logger)
+        ILogger<CloudEventWebhookDispatcher> logger,
+        IOptions<GatewayOptions>? options = null)
     {
+        _options = options;
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -67,7 +73,8 @@ public sealed class CloudEventWebhookDispatcher : ICloudEventWebhookDispatcher
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("Webhook delivery {DeliveryId} aborted by EgressUrlPolicy: {Error}", deliveryId, ex.Message);
+            // SR-L-14: only the exception type and the redacted destination are logged (messages may carry resolved IPs).
+            _logger.LogWarning("Webhook delivery {DeliveryId} to {Url} aborted by EgressUrlPolicy ({ErrorType})", deliveryId, UrlRedactor.Redact(targetUri), ex.GetType().Name);
             return new CloudEventDeliveryResult(
                 deliveryId,
                 subscription.Id,
@@ -95,13 +102,24 @@ public sealed class CloudEventWebhookDispatcher : ICloudEventWebhookDispatcher
                 request.Headers.TryAddWithoutValidation("ce-tenantid", envelope.TenantId);
             }
 
-            // SEC-EVT-02: Cryptographic HMAC-SHA256 Signature
+            // SEC-EVT-02 / SR-L-13: HMAC-SHA256 over "{timestamp}.{body}" (D1) plus replay-protection headers.
             if (!string.IsNullOrWhiteSpace(subscription.HmacSecret))
             {
-                using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(subscription.HmacSecret));
-                var hashBytes = hmac.ComputeHash(Encoding.UTF8.GetBytes(payloadJson));
-                var signatureHex = Convert.ToHexStringLower(hashBytes);
-                request.Headers.TryAddWithoutValidation("X-Autheris-Signature", $"sha256={signatureHex}");
+                var timestamp = WebhookSignature.FormatTimestamp(DateTimeOffset.UtcNow);
+                request.Headers.TryAddWithoutValidation(WebhookSignature.TimestampHeader, timestamp);
+                request.Headers.TryAddWithoutValidation("X-Autheris-Event-Id", envelope.Id);
+                request.Headers.TryAddWithoutValidation("X-Autheris-Event-Type", envelope.Type);
+                request.Headers.TryAddWithoutValidation(
+                    WebhookSignature.SignatureHeader,
+                    WebhookSignature.SignHeaderValue(subscription.HmacSecret, timestamp, payloadJson));
+
+                // D7: deprecated body-only signature, kept for one release.
+                if (_options?.Value.Webhooks.EmitLegacySignature ?? true)
+                {
+                    request.Headers.TryAddWithoutValidation(
+                        WebhookSignature.LegacySignatureHeader,
+                        WebhookSignature.Prefix + WebhookSignature.ComputeHex(subscription.HmacSecret, payloadJson));
+                }
             }
 
             // Custom headers
@@ -129,7 +147,7 @@ public sealed class CloudEventWebhookDispatcher : ICloudEventWebhookDispatcher
             var success = response.IsSuccessStatusCode;
 
             _logger.LogInformation("Webhook delivery {DeliveryId} to {Url} finished with status {StatusCode} in {ElapsedMs}ms",
-                deliveryId, subscription.TargetUrl, statusCode, sw.ElapsedMilliseconds);
+                deliveryId, UrlRedactor.Redact(targetUri), statusCode, sw.ElapsedMilliseconds);
 
             return new CloudEventDeliveryResult(
                 deliveryId,
@@ -143,7 +161,7 @@ public sealed class CloudEventWebhookDispatcher : ICloudEventWebhookDispatcher
         catch (Exception ex)
         {
             sw.Stop();
-            _logger.LogError(ex, "Webhook delivery {DeliveryId} to {Url} failed with exception", deliveryId, subscription.TargetUrl);
+            _logger.LogError("Webhook delivery {DeliveryId} to {Url} failed with {ErrorType}", deliveryId, UrlRedactor.Redact(targetUri), ex.GetType().Name);
             return new CloudEventDeliveryResult(
                 deliveryId,
                 subscription.Id,
@@ -158,7 +176,8 @@ public sealed class CloudEventWebhookDispatcher : ICloudEventWebhookDispatcher
     private static readonly HashSet<string> ForbiddenCustomHeaders = new(StringComparer.OrdinalIgnoreCase)
     {
         "host", "forwarded", "via", "x-real-ip", "connection", "keep-alive", "te", "trailer", "transfer-encoding",
-        "upgrade", "expect", "content-length", "content-type", "content-encoding", "x-autheris-signature"
+        "upgrade", "expect", "content-length", "content-type", "content-encoding", "x-autheris-signature", "x-autheris-signature-256", "x-autheris-timestamp",
+        "x-autheris-event-id", "x-autheris-event-type"
     };
 
     /// <summary>

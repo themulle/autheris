@@ -120,9 +120,17 @@ public sealed record PolicyDeniedEvent(
     string Reason,
     DateTimeOffset Timestamp,
     string? TenantId = null,
-    string? CorrelationId = null
+    string? CorrelationId = null,
+    string ReasonCode = PolicyDeniedEvent.DefaultReasonCode,
+    string? PolicyId = null
 ) : IGatewayEvent
 {
+    /// <summary>
+    /// SR-L-15: stable machine-readable denial code. Events never carry verbatim ABAC denial text
+    /// (full reasons are written to the audit log only); <see cref="Reason"/> carries the same code.
+    /// </summary>
+    public const string DefaultReasonCode = "POLICY_DENIED";
+
     public string EventType => "security.policy.denied";
 }
 
@@ -151,13 +159,23 @@ public sealed record DocumentDepositedEvent(
     string Category,
     string DocId,
     string Title,
-    string SourceFilePath,
+    string RelativePath,
     DateTimeOffset Timestamp,
     string? TenantId = null,
     string? CorrelationId = null
 ) : IGatewayEvent
 {
     public string EventType => "docs.document.deposited";
+
+    /// <summary>
+    /// Deprecated (SR-L-15): always equals <see cref="RelativePath"/>, never an absolute filesystem path.
+    /// Kept for one release so existing plugin binaries and webhook consumers still bind; use <see cref="RelativePath"/>.
+    /// </summary>
+    [Obsolete("Use RelativePath. This property is populated with the redacted relative path and will be removed.")]
+    public string SourceFilePath => RelativePath;
+
+    /// <summary>Builds the doc-lake relative path <c>{appId}/{category}/{docId}</c> from request values.</summary>
+    public static string BuildRelativePath(string appId, string category, string docId) => $"{appId}/{category}/{docId}";
 }
 
 public sealed record QueryExecutedEvent(
