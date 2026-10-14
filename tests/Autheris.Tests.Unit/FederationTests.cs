@@ -134,14 +134,14 @@ public sealed class FederationTests
 
         var nested = masked["nested"] as IReadOnlyDictionary<string, object?>;
         nested.ShouldNotBeNull();
-        nested["contactEmail"]!.ToString().ShouldStartWith("b***@");
+        nested["contactEmail"]!.ToString().ShouldBe("***@***");
         nested["diagnosis"]!.ToString().ShouldBe("[REDACTED]");
 
         var items = masked["items"] as List<object?>;
         items.ShouldNotBeNull();
         var item0 = items[0] as IReadOnlyDictionary<string, object?>;
         item0.ShouldNotBeNull();
-        item0["accountEmail"]!.ToString().ShouldStartWith("c***@");
+        item0["accountEmail"]!.ToString().ShouldBe("***@***");
     }
 
     [Fact]
