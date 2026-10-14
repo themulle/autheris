@@ -26,6 +26,7 @@ public static class CdcSourceServiceCollectionExtensions
         services.TryAddSingleton<IMssqlChangeTrackingPoller, MssqlChangeTrackingPoller>();
         if (gatewayOptions.MssqlChangeTracking.Enabled)
         {
+            services.TryAddScoped<MssqlChangeTrackingPollJob>();
             services.AddHostedService<MssqlChangeTrackingHostedService>();
         }
 

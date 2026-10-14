@@ -4,10 +4,12 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Hosting;
+using Autheris.Application.State;
 using Autheris.Application.Streaming.Interfaces;
+using Microsoft.Extensions.DependencyInjection;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Autheris.Application.Interfaces;
@@ -16,110 +18,30 @@ using Autheris.Domain.Model;
 
 /// <summary>
 /// Background worker service polling MSSQL Change Tracking tables on a configurable interval.
-/// Zero-Kafka Realtime CDC Engine (F-CDC-02).
+/// Zero-Kafka Realtime CDC Engine (F-CDC-02). Runs on exactly one cluster replica at a time under a renewed,
+/// fenced lease (<see cref="ClusterScheduledService{TJob}"/>); the fencing token guards the watermark commits.
 /// </summary>
-public sealed class MssqlChangeTrackingHostedService : BackgroundService
+public sealed class MssqlChangeTrackingHostedService(
+    IServiceScopeFactory scopeFactory,
+    IOptionsMonitor<GatewayOptions> options,
+    IDistributedClusterStateProvider clusterState,
+    ILogger<MssqlChangeTrackingHostedService> logger,
+    TimeProvider? timeProvider = null)
+    : ClusterScheduledService<MssqlChangeTrackingPollJob>(scopeFactory, clusterState, logger, timeProvider)
 {
-    private readonly IMssqlChangeTrackingPoller _poller;
-    private readonly IOptions<GatewayOptions> _gatewayOptions;
-    private readonly ILogger<MssqlChangeTrackingHostedService> _logger;
-    private readonly Autheris.Application.State.IDistributedClusterStateProvider? _clusterState;
+    protected override string LeaseKey => "cdc:mssql:poll";
 
-    public MssqlChangeTrackingHostedService(
-        IMssqlChangeTrackingPoller poller,
-        IOptions<GatewayOptions> gatewayOptions,
-        ILogger<MssqlChangeTrackingHostedService> logger,
-        Autheris.Application.State.IDistributedClusterStateProvider? clusterState = null)
+    protected override ClusterSchedule GetSchedule()
     {
-        _poller = poller ?? throw new ArgumentNullException(nameof(poller));
-        _gatewayOptions = gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _clusterState = clusterState;
-    }
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        var options = _gatewayOptions.Value.MssqlChangeTracking;
-        if (!options.Enabled)
-        {
-            _logger.LogInformation("MSSQL Change Tracking ingestion is disabled.");
-            return;
-        }
-
-        var trackedTableIds = ParseTrackedTables(options.TrackedTables);
-        if (trackedTableIds.Count == 0)
-        {
-            _logger.LogWarning("MSSQL Change Tracking is enabled but no valid tables are configured in TrackedTables.");
-            return;
-        }
-
-        _logger.LogInformation(
-            "Starting MSSQL Change Tracking background poller for {Count} tables with interval {Interval}ms.",
-            trackedTableIds.Count, options.PollingIntervalMilliseconds);
-
-        var interval = Math.Max(250, options.PollingIntervalMilliseconds);
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                IAsyncDisposable? pollLock = null;
-                if (_clusterState != null)
-                {
-                    var leaseDuration = TimeSpan.FromMilliseconds(Math.Max(5000, interval * 3));
-                    pollLock = await _clusterState.TryAcquireLockAsync("cdc:mssql:poll", leaseDuration, stoppingToken).ConfigureAwait(false);
-                    if (pollLock == null)
-                    {
-                        _logger.LogDebug("MSSQL Change Tracking polling lock held by another cluster replica; skipping cycle.");
-                        try
-                        {
-                            await Task.Delay(interval, stoppingToken).ConfigureAwait(false);
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            break;
-                        }
-                        continue;
-                    }
-                }
-
-                await using (pollLock)
-                {
-                    foreach (var table in trackedTableIds)
-                    {
-                        if (stoppingToken.IsCancellationRequested) break;
-
-                        try
-                        {
-                            var processed = await _poller.PollTableChangesAsync(table, stoppingToken).ConfigureAwait(false);
-                            if (processed > 0)
-                            {
-                                _logger.LogDebug("Polled and dispatched {Count} CDC changes for table {Table}.", processed, table);
-                            }
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException)
-                        {
-                            _logger.LogError(ex, "Failed to poll change tracking for table {Table}.", table);
-                        }
-                    }
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogError(ex, "Unexpected error in MSSQL Change Tracking loop.");
-            }
-
-            try
-            {
-                await Task.Delay(interval, stoppingToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-        }
-
-        _logger.LogInformation("MSSQL Change Tracking background poller stopped.");
+        var cdc = options.CurrentValue.MssqlChangeTracking;
+        var interval = TimeSpan.FromMilliseconds(Math.Max(250, cdc.PollingIntervalMilliseconds));
+        var enabled = cdc.Enabled && ParseTrackedTables(cdc.TrackedTables).Count > 0;
+        return new ClusterSchedule(
+            enabled,
+            interval,
+            InitialDelay: TimeSpan.Zero,
+            LeaseTtl: TimeSpan.FromSeconds(Math.Max(15, 3 * interval.TotalSeconds)),
+            MaxJitter: TimeSpan.Zero);
     }
 
     public static List<TableIdentifier> ParseTrackedTables(IEnumerable<string>? tableStrings)
@@ -146,5 +68,42 @@ public sealed class MssqlChangeTrackingHostedService : BackgroundService
         }
 
         return list;
+    }
+}
+
+/// <summary>One polling pass over all tracked tables, executed under the cluster lease.</summary>
+public sealed class MssqlChangeTrackingPollJob(
+    IMssqlChangeTrackingPoller poller,
+    IOptionsMonitor<GatewayOptions> options,
+    ILogger<MssqlChangeTrackingPollJob> logger) : IClusterScheduledJob
+{
+    public async Task ExecuteAsync(ClusterJobContext context, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        var tables = MssqlChangeTrackingHostedService.ParseTrackedTables(options.CurrentValue.MssqlChangeTracking.TrackedTables);
+        if (tables.Count == 0)
+        {
+            logger.LogWarning("MSSQL Change Tracking is enabled but no valid tables are configured in TrackedTables.");
+            return;
+        }
+
+        foreach (var table in tables)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            try
+            {
+                var processed = await poller.PollTableChangesAsync(table, ct).ConfigureAwait(false);
+                if (processed > 0)
+                {
+                    logger.LogDebug("Polled and dispatched {Count} CDC changes for table {Table}.", processed, table);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException and not FencingTokenRejectedException)
+            {
+                logger.LogError(ex, "Failed to poll change tracking for table {Table}.", table);
+            }
+        }
     }
 }
