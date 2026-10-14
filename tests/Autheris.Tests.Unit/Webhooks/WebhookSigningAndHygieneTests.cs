@@ -104,14 +104,14 @@ public sealed class WebhookSigningAndHygieneTests
 
     [Fact]
     public void ForbiddenCustomHeaders_StillBlockLegacySignatureName() =>
-        CloudEventWebhookDispatcher.IsForbiddenCustomHeader("X-Autheris-Signature").ShouldBeTrue();
+        WebhookDeliveryClient.IsForbiddenCustomHeader("X-Autheris-Signature").ShouldBeTrue();
 
     [Theory]
     [InlineData("X-Autheris-Timestamp")]
     [InlineData("x-autheris-signature-256")]
     [InlineData("X-Autheris-Event-Id")]
     public void CustomHeaders_SigningHeaders_AreForbidden(string name) =>
-        CloudEventWebhookDispatcher.IsForbiddenCustomHeader(name).ShouldBeTrue();
+        WebhookDeliveryClient.IsForbiddenCustomHeader(name).ShouldBeTrue();
 
     [Fact]
     public async Task Dispatch_SsrfRejection_LogsRedactedUrlAndNoMessage()

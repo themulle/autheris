@@ -22,6 +22,7 @@ using Autheris.Application.Security;
 using Autheris.Application.State;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Application.Workflows;
+using Autheris.Application.Webhooks;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -259,13 +260,13 @@ public sealed class SecurityReviewG5Tests : IDisposable
     [InlineData("Connection")]
     [InlineData("ce-id")]
     [InlineData("X-Autheris-Signature")]
-    public void Webhook_ForbiddenCustomHeaders(string name) => CloudEventWebhookDispatcher.IsForbiddenCustomHeader(name).ShouldBeTrue();
+    public void Webhook_ForbiddenCustomHeaders(string name) => WebhookDeliveryClient.IsForbiddenCustomHeader(name).ShouldBeTrue();
 
     [Theory]
     [InlineData("X-Api-Key")]
     [InlineData("Authorization")]
     [InlineData("X-Custom-Tenant")]
-    public void Webhook_AllowedCustomHeaders(string name) => CloudEventWebhookDispatcher.IsForbiddenCustomHeader(name).ShouldBeFalse();
+    public void Webhook_AllowedCustomHeaders(string name) => WebhookDeliveryClient.IsForbiddenCustomHeader(name).ShouldBeFalse();
 
     // ---------------------------------------------------------------- Secrets
 
