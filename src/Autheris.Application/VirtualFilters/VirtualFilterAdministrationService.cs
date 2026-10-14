@@ -108,6 +108,7 @@ public sealed class VirtualFilterAdministrationService
     private readonly VirtualFilterFederationOptions _federation;
     private readonly IVirtualFilterSnapshotProvider? _snapshots;
     private readonly ITableMetadataRepository? _catalog;
+    private readonly SqlDataSourceOptions? _dataSources;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<TenantId, List<(DateTimeOffset Timestamp, int Count)>> _removalHistory = new();
 
     public VirtualFilterAdministrationService(
@@ -118,6 +119,7 @@ public sealed class VirtualFilterAdministrationService
         ITableMetadataRepository? catalog = null)
     {
         _catalog = catalog;
+        _dataSources = options?.Value?.DataSources;
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
         _options = options?.Value?.VirtualFilters ?? new VirtualFilterOptions();
@@ -183,7 +185,7 @@ public sealed class VirtualFilterAdministrationService
         {
             var catalog = _catalog ?? throw new ArgumentException("Virtual filters with a sql definition need the catalog to be validated.", nameof(filter));
             var tables = await catalog.GetAllTablesAsync(ct).ConfigureAwait(false);
-            return SqlFilterCompiler.Validate(filter, tables, _options.AllowedReferenceTables);
+            return SqlFilterCompiler.Validate(filter, tables, _options.AllowedReferenceTables, _dataSources?.RequireTenantColumn == true, _dataSources?.TenantColumnExemptTables);
         }
 
         if (filter.Structured != null && _catalog != null)

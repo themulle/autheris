@@ -39,7 +39,15 @@ public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicate
     [GeneratedRegex(@"^-?(0|[1-9]\d{0,17})(\.\d{1,18})?$", RegexOptions.CultureInvariant)]
     private static partial Regex NumericLiteral();
 
-    public string Build(VirtualFilter filter, FilterBinding binding, TableMetadata target, DatabaseDialect dialect)
+    public string Build(VirtualFilter filter, FilterBinding binding, TableMetadata target, DatabaseDialect dialect) =>
+        Build(filter, binding, target, dialect, tenant: null);
+
+    /// <summary>
+    /// SR-L-11: with a <paramref name="tenant"/> context every tenanted source table is restricted to the caller's tenant
+    /// (<c>alias.tenantcolumn = '&lt;tenant&gt;'</c>, escaped like every literal), and a sql definition must still compare its tenant
+    /// columns with the reserved tenant value. Without a context the legacy, unbound predicate is built.
+    /// </summary>
+    public string Build(VirtualFilter filter, FilterBinding binding, TableMetadata target, DatabaseDialect dialect, VirtualFilterTenantContext? tenant)
     {
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(binding);
@@ -51,7 +59,7 @@ public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicate
                 throw new NotSupportedException($"The virtual filter '{filter.Name}' is defined in sql; a column map or time column does not apply to it.");
             }
 
-            return SqlFilterCompiler.Compile(filter, dialect);
+            return SqlFilterCompiler.Compile(filter, dialect, tenant);
         }
 
         var definition = filter.Structured ?? throw new InvalidOperationException($"The virtual filter '{filter.Name}' has no definition.");
@@ -63,6 +71,14 @@ public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicate
         // FROM ... JOIN ... WHERE <conditions> (shared with the federation key query, F-GOV-14)
         var from = StructuredFilterSqlParts.From(definition, dialect);
         var conditions = definition.Where.Select(c => StructuredFilterSqlParts.Condition(c, dialect, v => Literal(v, dialect))).ToList();
+
+        if (tenant != null)
+        {
+            foreach (var (alias, column) in tenant.ColumnsByAlias(definition))
+            {
+                conditions.Add($"{dialect.QuoteIdentifier(alias)}.{dialect.QuoteIdentifier(column)} = '{dialect.EscapeSqlLiteral(tenant.Tenant)}'");
+            }
+        }
 
         // key correlations: filter key column (alias.column) = target column (renamed by the binding's map)
         var keys = filter.KeyColumns
@@ -113,7 +129,12 @@ public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicate
     /// identifiers are validated, and the SQL Server IN strategy is not used (a text-level optimisation, like WP-X0d). A filter
     /// defined in sql is compiled by <see cref="SqlFilterCompiler.CompileTyped"/> with the injected engine.
     /// </summary>
-    public PolicyPredicate? BuildTyped(VirtualFilter filter, FilterBinding binding, TableMetadata target, DatabaseDialect dialect, string parameterPrefix)
+    public PolicyPredicate? BuildTyped(VirtualFilter filter, FilterBinding binding, TableMetadata target, DatabaseDialect dialect, string parameterPrefix) =>
+        BuildTyped(filter, binding, target, dialect, parameterPrefix, tenant: null);
+
+    /// <summary>Typed variant of <see cref="Build(VirtualFilter, FilterBinding, TableMetadata, DatabaseDialect, VirtualFilterTenantContext?)"/>: the tenant is a bound policy parameter.</summary>
+    public PolicyPredicate? BuildTyped(
+        VirtualFilter filter, FilterBinding binding, TableMetadata target, DatabaseDialect dialect, string parameterPrefix, VirtualFilterTenantContext? tenant)
     {
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(binding);
@@ -125,7 +146,7 @@ public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicate
                 throw new NotSupportedException($"The virtual filter '{filter.Name}' is defined in sql; a column map or time column does not apply to it.");
             }
 
-            return SqlFilterCompiler.CompileTyped(filter, dialect, _engine, parameterPrefix);
+            return SqlFilterCompiler.CompileTyped(filter, dialect, _engine, parameterPrefix, tenant);
         }
 
         var definition = filter.Structured ?? throw new InvalidOperationException($"The virtual filter '{filter.Name}' has no definition.");
@@ -154,6 +175,15 @@ public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicate
                 FilterConditionOperator.NotEq => new BinaryExpression(column, BinaryOperator.NotEqual, Value(namer, condition)),
                 _ => throw new InvalidOperationException($"Unsupported condition operator {condition.Operator}.")
             });
+        }
+
+        if (tenant != null)
+        {
+            foreach (var (alias, column) in tenant.ColumnsByAlias(definition))
+            {
+                AdvancedRlsFilterGenerator.ValidateIdentifier(column, "TenantColumn");
+                conditions.Add(new BinaryExpression(Column($"{alias}.{column}"), BinaryOperator.Equal, namer.Add(new PolicyValue(tenant.Tenant, SqlParameterType.String))));
+            }
         }
 
         ColumnReference TargetColumn(string key)

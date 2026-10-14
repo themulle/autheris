@@ -634,12 +634,12 @@ public static class GatewayStartupValidator
     /// does not admit. A deny at scale is an outage, so the start lists all of them (a warning per table, ids and codes only). The same
     /// lint runs as the blocking pre-deploy step <c>tools/PolicyPredicateLint</c>.
     /// </summary>
-    public static IReadOnlyList<DeniedTable> ListDeniedTables(PolicyLintInput input, ILogger? logger = null)
+    public static IReadOnlyList<DeniedTable> ListDeniedTables(PolicyLintInput input, ILogger? logger = null, SqlDataSourceOptions? dataSources = null)
     {
         ArgumentNullException.ThrowIfNull(input);
         var denied = new List<DeniedTable>();
 
-        foreach (var finding in new PolicyPredicateLinter().Lint(input).Findings)
+        foreach (var finding in new PolicyPredicateLinter(dataSources: dataSources).Lint(input).Findings)
         {
             denied.Add(new DeniedTable(finding.Table, finding.PolicyId, finding.Code));
         }

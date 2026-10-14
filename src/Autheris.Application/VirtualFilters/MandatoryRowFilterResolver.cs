@@ -86,6 +86,18 @@ public interface IVirtualFilterPredicateBuilder
     /// </summary>
     TrinoSqlEngine.Governance.PolicyPredicate? BuildTyped(
         VirtualFilter filter, FilterBinding binding, TableMetadata target, DatabaseDialect dialect, string parameterPrefix) => null;
+
+    /// <summary>
+    /// SR-L-11: <see cref="Build(VirtualFilter, FilterBinding, TableMetadata, DatabaseDialect)"/> with the caller's tenant bound to every tenanted
+    /// source table. A builder that does not know tenants ignores it (the default).
+    /// </summary>
+    string Build(VirtualFilter filter, FilterBinding binding, TableMetadata target, DatabaseDialect dialect, VirtualFilterTenantContext? tenant) =>
+        Build(filter, binding, target, dialect);
+
+    /// <summary>SR-L-11: tenant-bound typed form; ignores the tenant by default.</summary>
+    TrinoSqlEngine.Governance.PolicyPredicate? BuildTyped(
+        VirtualFilter filter, FilterBinding binding, TableMetadata target, DatabaseDialect dialect, string parameterPrefix, VirtualFilterTenantContext? tenant) =>
+        BuildTyped(filter, binding, target, dialect, parameterPrefix);
 }
 
 /// <summary>Restrictive row predicates from virtual filters (design 3.3): never grants, only narrows.</summary>
@@ -166,12 +178,27 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
     private readonly IVirtualFilterPredicateBuilder _predicates;
     private readonly ConcurrentDictionary<VirtualFilterMemoKey, MandatoryFilterOutcome> _memo = new();
     private readonly ConcurrentDictionary<string, ObjectPattern> _patterns = new(StringComparer.Ordinal);
+    private readonly ITableMetadataRepository? _catalog;
+    private readonly SqlDataSourceOptions? _dataSources;
     private long _memoGeneration = -1;
 
-    public MandatoryRowFilterResolver(IVirtualFilterSnapshotProvider snapshots, IVirtualFilterPredicateBuilder predicates)
+    /// <param name="snapshots">Current filters and profiles.</param>
+    /// <param name="predicates">Builds the SQL of one applying filter.</param>
+    /// <param name="catalog">
+    /// SR-L-11: resolves the tenant column of the source tables of the filters. Production wiring always supplies it; without a
+    /// catalog (tests) the predicates are built without tenant binding.
+    /// </param>
+    /// <param name="options">Gateway options (<c>DataSources:RequireTenantColumn</c> and its exempt tables).</param>
+    public MandatoryRowFilterResolver(
+        IVirtualFilterSnapshotProvider snapshots,
+        IVirtualFilterPredicateBuilder predicates,
+        ITableMetadataRepository? catalog = null,
+        Microsoft.Extensions.Options.IOptions<GatewayOptions>? options = null)
     {
         _snapshots = snapshots ?? throw new ArgumentNullException(nameof(snapshots));
         _predicates = predicates ?? throw new ArgumentNullException(nameof(predicates));
+        _catalog = catalog;
+        _dataSources = options?.Value?.DataSources;
     }
 
     public async ValueTask<MandatoryFilterOutcome> ResolveAsync(MandatoryFilterQuery query, CancellationToken ct = default)
@@ -205,9 +232,93 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
             return cached;
         }
 
-        var outcome = Resolve(snapshot, query, trace: null);
+        VirtualFilterTenantContext? tenantContext;
+        try
+        {
+            tenantContext = await LoadTenantContextAsync(snapshot, query.Tenant, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Without the tenant columns of the source tables the tenant cannot be bound (fail closed, not memoized).
+            return MandatoryFilterOutcome.Deny($"{VirtualFilterErrorCodes.BindingMisconfigured}: the tenant columns of the virtual filter source tables could not be resolved ({ex.GetType().Name}).");
+        }
+
+        var outcome = Resolve(snapshot, query, trace: null, tenantContext);
         _memo[key] = outcome;
         return outcome;
+    }
+
+    /// <summary>
+    /// SR-L-11: the tenant column of every source table of the tenant's filters (structured FROM/JOIN tables and the tables of sql
+    /// definitions), looked up once per resolution. A table that is unknown or must be tenanted and is not fails only when a filter
+    /// that uses it is built (deny).
+    /// </summary>
+    private async ValueTask<VirtualFilterTenantContext?> LoadTenantContextAsync(VirtualFilterSnapshot snapshot, TenantId tenant, CancellationToken ct)
+    {
+        if (_catalog == null)
+        {
+            return null;
+        }
+
+        var tables = new Dictionary<string, TableIdentifier>(StringComparer.OrdinalIgnoreCase);
+        foreach (var filter in snapshot.Filters.Where(f => f.TenantId == tenant))
+        {
+            IEnumerable<TableIdentifier> sources;
+            if (filter.Structured != null)
+            {
+                sources = filter.Structured.Joins.Select(j => j.Table).Prepend(filter.Structured.From);
+            }
+            else if (filter.Sql != null)
+            {
+                try
+                {
+                    sources = SqlFilterCompiler.ReferencedTables(filter);
+                }
+                catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or NotSupportedException)
+                {
+                    continue;   // building this filter fails closed on its own
+                }
+            }
+            else
+            {
+                continue;
+            }
+
+            foreach (var source in sources)
+            {
+                tables[source.ToString()] = source;
+            }
+        }
+
+        var columns = new Dictionary<string, (string? Column, string? Error)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, identifier) in tables)
+        {
+            var metadata = await _catalog.GetTableMetadataAsync(identifier, ct).ConfigureAwait(false);
+            if (metadata == null)
+            {
+                columns[name] = (null, $"the source table '{name}' is unknown in the catalog");
+                continue;
+            }
+
+            try
+            {
+                columns[name] = (VirtualFilterTenantColumns.Resolve(metadata, _dataSources?.RequireTenantColumn == true, _dataSources?.TenantColumnExemptTables), null);
+            }
+            catch (InvalidOperationException ex)
+            {
+                columns[name] = (null, ex.Message);
+            }
+        }
+
+        return new VirtualFilterTenantContext(tenant.Value, identifier =>
+        {
+            if (!columns.TryGetValue(identifier.ToString(), out var entry))
+            {
+                throw new InvalidOperationException($"The source table '{identifier}' is unknown in the catalog.");
+            }
+
+            return entry.Error != null ? throw new InvalidOperationException(entry.Error) : entry.Column;
+        });
     }
 
     public async ValueTask<bool> HasActiveProfilesAsync(TenantId tenant, CancellationToken ct = default)
@@ -229,11 +340,12 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
         ArgumentNullException.ThrowIfNull(query);
         var snapshot = await _snapshots.GetAsync(ct).ConfigureAwait(false);
         var trace = new List<ProfileExplanation>();
-        var outcome = Resolve(snapshot, query, trace);
+        var tenantContext = await LoadTenantContextAsync(snapshot, query.Tenant, ct).ConfigureAwait(false);
+        var outcome = Resolve(snapshot, query, trace, tenantContext);
         return new MandatoryFilterExplanation(snapshot.Generation, outcome, trace);
     }
 
-    private MandatoryFilterOutcome Resolve(VirtualFilterSnapshot snapshot, MandatoryFilterQuery query, List<ProfileExplanation>? trace)
+    private MandatoryFilterOutcome Resolve(VirtualFilterSnapshot snapshot, MandatoryFilterQuery query, List<ProfileExplanation>? trace, VirtualFilterTenantContext? tenantContext)
     {
         var table = query.Metadata.Identifier;
         var profiles = snapshot.Profiles
@@ -374,11 +486,16 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
             {
                 var (filter, binding, _) = effective[i];
                 currentFilter = filter.Name;
-                var pred = _predicates.Build(filter, binding, query.Metadata, query.Metadata.Dialect);
+                var pred = tenantContext == null
+                    ? _predicates.Build(filter, binding, query.Metadata, query.Metadata.Dialect)
+                    : _predicates.Build(filter, binding, query.Metadata, query.Metadata.Dialect, tenantContext);
 
                 // The prefix carries the position in the effective order, so parameter names of different filters never collide;
                 // an exception here denies (fail closed), it never falls back to the text.
-                var typed = _predicates.BuildTyped(filter, binding, query.Metadata, query.Metadata.Dialect, $"{SqlFilterCompiler.DefaultTypedParameterPrefix}{i}_");
+                var typedPrefix = $"{SqlFilterCompiler.DefaultTypedParameterPrefix}{i}_";
+                var typed = tenantContext == null
+                    ? _predicates.BuildTyped(filter, binding, query.Metadata, query.Metadata.Dialect, typedPrefix)
+                    : _predicates.BuildTyped(filter, binding, query.Metadata, query.Metadata.Dialect, typedPrefix, tenantContext);
                 if (distinctPredicates.Add(pred))
                 {
                     parts.Add(pred);

@@ -28,9 +28,11 @@ public sealed partial class PolicyPredicateLinter
 
     private readonly IPolicyExpressionParser _parser;
     private readonly IRlsFilterGenerator _rlsFilterGenerator;
+    private readonly SqlDataSourceOptions? _dataSources;
 
-    public PolicyPredicateLinter(IPolicyExpressionParser? parser = null, IRlsFilterGenerator? rlsFilterGenerator = null)
+    public PolicyPredicateLinter(IPolicyExpressionParser? parser = null, IRlsFilterGenerator? rlsFilterGenerator = null, SqlDataSourceOptions? dataSources = null)
     {
+        _dataSources = dataSources;
         _parser = parser ?? PolicyParserSetup.CreateParser();
         _rlsFilterGenerator = rlsFilterGenerator ?? RlsFilterGenerator.Instance;
     }
@@ -64,7 +66,7 @@ public sealed partial class PolicyPredicateLinter
             checkedCount++;
             try
             {
-                SqlFilterCompiler.Validate(filter, input.Catalog);
+                SqlFilterCompiler.Validate(filter, input.Catalog, null, _dataSources?.RequireTenantColumn == true, _dataSources?.TenantColumnExemptTables);
             }
             catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or NotSupportedException or System.Security.SecurityException)
             {
