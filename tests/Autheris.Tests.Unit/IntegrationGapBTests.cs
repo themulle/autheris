@@ -341,7 +341,9 @@ public sealed class IntegrationGapBTests
     {
         var multiplexer = Substitute.For<IConnectionMultiplexer>();
         multiplexer.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(_ => throw new InvalidOperationException("redis down"));
-        var store = new RedisTokenRevocationService(multiplexer, Options.Create(new GatewayOptions()), NullLogger<RedisTokenRevocationService>.Instance);
+        // SR-L-10: this test covers the legacy fail-open behaviour; fail-closed is covered by RedisTokenRevocationFailClosedTests.
+        var failOpen = new GatewayOptions { Caching = new CachingOptions { Redis = new RedisOptions { FailClosedOnRevocationLookupError = false } } };
+        var store = new RedisTokenRevocationService(multiplexer, Options.Create(failOpen), NullLogger<RedisTokenRevocationService>.Instance);
 
         await Should.ThrowAsync<InvalidOperationException>(() => store.RevokeAsync("S-1-5-21-WS-LOCAL", DateTimeOffset.UtcNow.AddHours(1)));
 

@@ -78,7 +78,25 @@ public sealed class Subscription
         }
 
         var revocation = services.GetService<ITokenRevocationService>();
-        if (revocation != null && await revocation.IsRevokedAsync(principal, ct).ConfigureAwait(false))
+        var revokedAtStart = false;
+        if (revocation != null)
+        {
+            try
+            {
+                revokedAtStart = await revocation.IsRevokedAsync(principal, ct).ConfigureAwait(false);
+            }
+            catch (TokenRevocationUnavailableException)
+            {
+                // SR-L-10: fail closed when the revocation status cannot be determined.
+                throw new GraphQLException(
+                    ErrorBuilder.New()
+                        .SetMessage("Service unavailable: token revocation status could not be determined.")
+                        .SetCode("TOKEN_REVOCATION_UNAVAILABLE")
+                        .Build());
+            }
+        }
+
+        if (revokedAtStart)
         {
             throw new GraphQLException(
                 ErrorBuilder.New()
@@ -162,6 +180,18 @@ public sealed class Subscription
         catch (ObjectDisposedException)
         {
             // Stream already ended.
+        }
+        catch (TokenRevocationUnavailableException)
+        {
+            // SR-L-10: fail closed; end the stream when the revocation status cannot be determined.
+            try
+            {
+                cts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Stream already ended.
+            }
         }
         catch (Exception)
         {

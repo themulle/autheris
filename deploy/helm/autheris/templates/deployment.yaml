@@ -88,6 +88,12 @@ spec:
                   key: {{ .Values.gateway.redis.configurationSecretKey }}
             - name: Gateway__Caching__Redis__InstanceName
               value: {{ .Values.gateway.redis.instanceName | quote }}
+            {{- if hasKey .Values.gateway.redis "failClosedOnRevocationLookupError" }}
+            - name: Gateway__Caching__Redis__FailClosedOnRevocationLookupError
+              value: {{ .Values.gateway.redis.failClosedOnRevocationLookupError | quote }}
+            {{- end }}
+            - name: Gateway__Caching__Redis__RevocationLookupGraceSeconds
+              value: {{ .Values.gateway.redis.revocationLookupGraceSeconds | default 60 | quote }}
             {{- end }}
           envFrom:
             - configMapRef:
