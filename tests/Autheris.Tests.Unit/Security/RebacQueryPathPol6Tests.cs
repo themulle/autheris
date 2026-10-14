@@ -102,7 +102,7 @@ public sealed class RebacQueryPathPol6Tests
         env.EnvironmentName.Returns("Development");
 
         var repo = CreateRepository();
-        return new GovernedSqlExecutionService(
+        return global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), executionGuard: GovernedTestSupport.Guard,
             auditLogRepository: Substitute.For<IAuditLogRepository>(),
             consentResolution: resolution,

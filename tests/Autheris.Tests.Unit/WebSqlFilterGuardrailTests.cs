@@ -92,7 +92,7 @@ public sealed class WebSqlFilterGuardrailTests
             .Returns(System.Text.Encoding.UTF8.GetBytes("super-secret-key-32-chars-long!"));
 
         var gatewayOptions = Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500 } });
-        return new GovernedSqlExecutionService(
+        return global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             gatewayOptions, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             consentResolution: resolution,

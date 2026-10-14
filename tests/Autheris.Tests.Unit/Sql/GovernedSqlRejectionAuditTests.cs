@@ -65,7 +65,7 @@ public sealed class GovernedSqlRejectionAuditTests
         var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
 
-        var service = new GovernedSqlExecutionService(
+        var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(new GatewayOptions
             {
                 WebSql = new WebSqlOptions { Enabled = true, AllowDml = true, DmlWriterRoles = ["Writer"], DefaultDataSourceName = DataSource, DefaultMaxRows = 100, MaxAllowedRows = 500 }

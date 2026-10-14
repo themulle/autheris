@@ -86,7 +86,7 @@ public sealed class GovernedPipelineCachePoisoningTests
             resolution = new ConsentResolutionService();
         }
 
-        return new GovernedSqlExecutionService(
+        return global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, AllowDml = allowDml, DmlWriterRoles = ["Writer"], DefaultMaxRows = 100, MaxAllowedRows = 500 } }), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies(),

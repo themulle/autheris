@@ -40,8 +40,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
 
     private readonly GovernedSqlRewriter _rewriter;
     private readonly GovernedSqlExecutor _executor;
-    private readonly IServiceProvider? _serviceProvider;
-    private readonly IFederatedQueryExecutionService? _federatedExecutionService;
+    private readonly Lazy<IFederatedQueryExecutionService>? _federatedExecution;
 
     public IReadOnlyList<SqlRewriteStageOrder> StageOrder => _rewriter.StageOrder;
 
@@ -49,86 +48,53 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         IOptions<GatewayOptions> options,
         IAuditLogRepository auditLogRepository,
         IProviderExecutionGuard executionGuard,
-        IPolicyEnforcementService? policyEnforcement = null,
-        IConsentResolutionService? consentResolution = null,
-        ITableMetadataRepository? tableRepository = null,
-        ISqlConnectionFactory? connectionFactory = null,
-        IClientIpResolver? clientIpResolver = null,
-        IHostEnvironment? environment = null,
-        ILogger<GovernedSqlExecutionService>? logger = null,
-        IConsentRepository? consentRepository = null,
-        IKeyVaultSecretProvider? secretProvider = null,
-        ISqlEngine? sqlEngine = null,
-        ISqlSecurityValidator? sqlSecurityValidator = null,
-        ITableReadConcurrencyGate? concurrencyGate = null,
-        IDbSessionContextInitializer? sessionInitializer = null,
-        IRebacEvaluator? rebacEvaluator = null,
-        IConsentCacheService? consentCache = null,
-        IMandatoryRowFilterResolver? mandatoryFilters = null,
-        ISchemaContractManager? contractManager = null,
-        IAccessProfileRepository? accessProfileRepository = null,
-        IMemoryCache? memoryCache = null,
-        IServiceProvider? serviceProvider = null,
-        IFederatedQueryExecutionService? federatedExecutionService = null,
-        TypedPolicySources? typedPolicies = null,
-        GovernancePolicyFactory? policyFactory = null,
-        CompiledSqlAuditDigester? auditDigester = null)
+        GovernedSqlRewriteDependencies rewrite,
+        GovernedSqlExecutionDependencies execution,
+        Lazy<IFederatedQueryExecutionService>? federatedExecution = null,
+        ILogger<GovernedSqlExecutionService>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(executionGuard);
-        _serviceProvider = serviceProvider;
-        _federatedExecutionService = federatedExecutionService;
+        ArgumentNullException.ThrowIfNull(rewrite);
+        ArgumentNullException.ThrowIfNull(execution);
+        _federatedExecution = federatedExecution;
 
         _rewriter = new GovernedSqlRewriter(
             options,
-            policyEnforcement,
-            consentResolution,
-            tableRepository,
-            clientIpResolver,
+            rewrite.PolicyEnforcement,
+            rewrite.ConsentResolution,
+            rewrite.TableRepository,
+            rewrite.ClientIpResolver,
             logger,
-            consentRepository,
-            sqlEngine,
-            policyFactory,
-            sqlSecurityValidator,
-            rebacEvaluator,
-            consentCache,
-            mandatoryFilters,
-            contractManager,
-            accessProfileRepository,
-            memoryCache,
-            typedPolicies: typedPolicies);
+            rewrite.ConsentRepository,
+            rewrite.SqlEngine,
+            rewrite.PolicyFactory,
+            rewrite.SqlSecurityValidator,
+            rewrite.RebacEvaluator,
+            rewrite.ConsentCache,
+            rewrite.MandatoryFilters,
+            rewrite.ContractManager,
+            rewrite.AccessProfileRepository,
+            rewrite.MemoryCache,
+            typedPolicies: rewrite.TypedPolicies);
 
         _executor = new GovernedSqlExecutor(
             _rewriter,
             options,
             auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository)),
             executionGuard,
-            connectionFactory,
-            environment,
+            execution.ConnectionFactory,
+            execution.Environment,
             logger,
-            concurrencyGate,
-            sessionInitializer,
-            secretProvider,
-            auditDigester);
+            execution.ConcurrencyGate,
+            execution.SessionInitializer,
+            execution.SecretProvider,
+            execution.AuditDigester);
     }
 
-    private IFederatedQueryExecutionService ResolveFederatedService()
-    {
-        if (_federatedExecutionService != null)
-        {
-            return _federatedExecutionService;
-        }
-
-        if (_serviceProvider != null)
-        {
-            var service = (IFederatedQueryExecutionService?)_serviceProvider.GetService(typeof(IFederatedQueryExecutionService));
-            if (service != null)
-            {
-                return service;
-            }
-        }
-
-        throw new WebSqlPolicyException("Cross-source query execution service is not configured.");
-    }
+    /// <summary>Fail-closed: a cross-source query without a federated executor is rejected, never executed locally.</summary>
+    private IFederatedQueryExecutionService ResolveFederatedService() =>
+        _federatedExecution?.Value
+        ?? throw new WebSqlPolicyException("Cross-source query execution service is not configured.");
 
     public async Task ValidateAsync(
         string rawSql,
