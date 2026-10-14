@@ -90,31 +90,18 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             throw new UnauthorizedAccessException($"Table '{request.Table.ToQualifiedName()}' is not active.");
         }
 
-        // 2. Evaluate unified PDP (ReBAC, ABAC, Consent, Virtual Filters)
-        var clientIp = !string.IsNullOrWhiteSpace(context.ClientIp) && IPAddress.TryParse(context.ClientIp, out var ip) ? ip : null;
-        var secContext = SecurityPrincipalContext.FromPrincipal(context.User, context.TenantId, clientIp: clientIp);
-
-        var decision = await _pdp.EvaluateAccessAsync(
+        // 2. Authorization stage (WP-ARC-B-03): unified PDP (ReBAC, ABAC, Consent, Virtual Filters) plus the non-canonical
+        // ClusterAdmin fail-closed check. The row policy is not spliced from this decision (WP-X0n / SEC-X1-17): the rewriter's own
+        // decision is the only one that restricts rows, so both must be computed from the same inputs.
+        var decision = await GovernedQueryStages.AuthorizeTableAsync(
+            _pdp,
             request.Table,
             metadata,
-            secContext,
+            context.User,
+            context.TenantId,
+            context.ClientIp,
             request.SelectColumns,
             ct).ConfigureAwait(false);
-
-        if (!decision.IsAllowed)
-        {
-            var reasons = decision.DeniedReasons.Count > 0 ? string.Join("; ", decision.DeniedReasons) : "Access denied by governance policy.";
-            throw new UnauthorizedAccessException($"Access to table '{request.Table.ToQualifiedName()}' is forbidden: {reasons}");
-        }
-
-        // WP-X0n / SEC-X1-17: the row policy is no longer spliced from this decision, so the rewriter's own decision is the only
-        // one that restricts rows. It must be computed from the same inputs. The unified PDP drops a ClusterAdmin role claim of a
-        // non-canonical principal while the rewriter keeps every role claim; that one input difference fails closed here.
-        if (context.User.GetUserRoles().Any(ClusterAdminPolicy.IsClusterAdminRole) && !ClusterAdminPolicy.IsCanonicalClusterAdmin(context.User))
-        {
-            throw new UnauthorizedAccessException(
-                $"Access to table '{request.Table.ToQualifiedName()}' is forbidden: the cluster administrator role claim is not canonical.");
-        }
 
         // 5. AST & SQL Formulation
         var limit = request.Limit > 0 ? Math.Min(request.Limit, MaxLimit) : DefaultLimit;
