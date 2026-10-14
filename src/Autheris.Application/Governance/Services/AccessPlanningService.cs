@@ -14,6 +14,7 @@ using Autheris.Application.Audit;
 using Autheris.Application.Events;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Security;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Domain.Common;
@@ -328,6 +329,10 @@ public class AccessPlanningService : IAccessPlanningService
 
         var datasourceId = $"{request.Domain.ToLowerInvariant()}.{request.Name.ToLowerInvariant()}";
         string? secretRef = null;
+        var vaultPrefix = $"vault://datasources/{request.Domain.ToLowerInvariant()}/";
+
+        // SR-H-03: a client-supplied SecretRef must lie inside this domain's datasource namespace.
+        DatasourceSecretRefPolicy.ValidateClientRef(request.Auth?.SecretRef, vaultPrefix);
 
         if (!string.IsNullOrWhiteSpace(request.Auth?.Secret))
         {

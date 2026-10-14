@@ -177,8 +177,15 @@ public static class CatalogApiEndpoints
         }
 
         var context = CreateRequestContext(httpContext);
-        var result = await discoveryService.RegisterDatasourceAsync(request, context, ct);
-        return Results.Ok(result);
+        try
+        {
+            var result = await discoveryService.RegisterDatasourceAsync(request, context, ct);
+            return Results.Ok(result);
+        }
+        catch (ArgumentException ex) when (ex.ParamName == "secretRef")
+        {
+            return Results.BadRequest(new { error = ex.Message });
+        }
     }
 
     private static RequestContext CreateRequestContext(HttpContext httpContext)
