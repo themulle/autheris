@@ -375,8 +375,8 @@ public sealed class Wave2GovernanceTests
         var options = new GatewayOptions();
 
         // Assert
-        options.Authentication.EntraId.ReadOnlyScopes.ShouldContain("Agent.Read");
-        options.Authentication.EntraId.ReadOnlyScopes.ShouldContain("App.Read");
+        options.Authentication.EntraId.GetEffectiveReadOnlyScopes().ShouldContain("Agent.Read");
+        options.Authentication.EntraId.GetEffectiveReadOnlyScopes().ShouldContain("App.Read");
 
         options.FinOps.ScopeMonthlyBudgets.ShouldNotBeNull();
         options.FinOps.ScopeMonthlyBudgets["Agent.Read"] = 250.0m;

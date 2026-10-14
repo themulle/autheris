@@ -6,6 +6,7 @@ using System.Threading;
 using Autheris.Api.Extensions;
 using Autheris.Application.Jobs.Interfaces;
 using Autheris.Domain.Audit;
+using Autheris.Application.Jobs.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Builder;
@@ -26,6 +27,7 @@ public static class AsyncJobEndpoints
         {
             var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
             var job = await jobManager.SubmitJobAsync(request, httpContext.User, tenantId, ct).ConfigureAwait(false);
+            MarkDomainAudited(httpContext);
 
             var response = new AsyncJobStatusResponse(
                 JobId: job.JobId,
@@ -48,9 +50,7 @@ public static class AsyncJobEndpoints
             CancellationToken ct) =>
         {
             var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
-            var userSid = httpContext.User.GetUserSid()?.Value
-                          ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                          ?? string.Empty;
+            var userSid = AsyncJobOwner.Resolve(httpContext.User) ?? string.Empty;
 
             var job = await jobManager.GetJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
             if (job == null)
@@ -83,15 +83,15 @@ public static class AsyncJobEndpoints
             CancellationToken ct) =>
         {
             var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
-            var userSid = httpContext.User.GetUserSid()?.Value
-                          ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                          ?? string.Empty;
+            var userSid = AsyncJobOwner.Resolve(httpContext.User) ?? string.Empty;
 
             var stream = await jobManager.GetJobResultStreamAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
             if (stream == null)
             {
                 return Results.NotFound();
             }
+
+            MarkDomainAudited(httpContext);
 
             var job = await jobManager.GetJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
             var format = job?.Format ?? "json";
@@ -108,14 +108,24 @@ public static class AsyncJobEndpoints
             CancellationToken ct) =>
         {
             var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
-            var userSid = httpContext.User.GetUserSid()?.Value
-                          ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                          ?? string.Empty;
+            var userSid = AsyncJobOwner.Resolve(httpContext.User) ?? string.Empty;
 
             var cancelled = await jobManager.CancelJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
+            if (cancelled)
+            {
+                MarkDomainAudited(httpContext);
+            }
+
             return cancelled ? Results.NoContent() : Results.NotFound();
         }).RequireAuthorization().WithAudit(AuditLevel.Delegated, AuditEventTypes.AsyncJobCancelled);
 
         return app;
     }
+
+    /// <summary>
+    /// Delegated audit routes: the job manager has written the ALLOW audit record (fail-closed), so the central
+    /// middleware must not write a second one. Denials and failures are NOT marked and stay with the middleware.
+    /// </summary>
+    private static void MarkDomainAudited(HttpContext httpContext) =>
+        httpContext.Features.Get<AuditContext>()?.MarkHandled();
 }

@@ -377,7 +377,7 @@ public sealed class McpDatasetToolWiringTests
         var json = await Executor(catalog).ExecuteOperationAsync(Tool("sample_rows"), """{"dataset":"orders"}""", Session());
 
         json.ShouldContain("INVALID_PARAMS");
-        json.ShouldContain("domain.schema.table");
+        json.ShouldNotContain("domain.schema.table"); // SEC-X1-01: the exception message is not echoed
     }
 
     [Fact]

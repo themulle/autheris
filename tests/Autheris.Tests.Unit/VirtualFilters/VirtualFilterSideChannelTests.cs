@@ -34,6 +34,8 @@ public sealed class VirtualFilterSideChannelTests
     private sealed class FixedOutcome(MandatoryFilterOutcome outcome) : IMandatoryRowFilterResolver
     {
         public ValueTask<MandatoryFilterOutcome> ResolveAsync(MandatoryFilterQuery query, CancellationToken ct = default) => ValueTask.FromResult(outcome);
+
+        public ValueTask<bool> HasActiveProfilesAsync(Autheris.Domain.Common.TenantId tenant, CancellationToken ct = default) => ValueTask.FromResult(false);
     }
 
     public static TheoryData<string, bool> Outcomes() => new()

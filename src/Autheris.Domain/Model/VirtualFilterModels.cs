@@ -299,38 +299,40 @@ public sealed record FilterBinding
     /// <summary>Execution strategy for federated/web-api virtual filters.</summary>
     public VirtualFilterExecutionStrategy Strategy { get; init; } = VirtualFilterExecutionStrategy.Adaptive;
 
-    /// <summary>Parameter format when pushing down allowed keys to external web-apis.</summary>
-    public PushdownParameterFormat PushdownFormat { get; init; } = PushdownParameterFormat.CommaSeparated;
+    /// <summary>
+    /// Parameter format the binding asserts for pushing keys to a web-api; null uses the capability the endpoint
+    /// declares. A format the endpoint cannot satisfy is never silently replaced (Tier 3, or denial for PushdownOnly).
+    /// </summary>
+    public PushdownParameterFormat? PushdownFormat { get; init; }
 
-    /// <summary>Maximum number of keys pushed down in URL parameters before switching to DuckDB join.</summary>
-    public int MaxPushdownKeys { get; init; } = 100;
+    /// <summary>Upper bound of <see cref="MaxPushdownKeys"/>; the gateway-wide limit applies on top.</summary>
+    public const int HardMaxPushdownKeys = 1_000;
 
-    /// <summary>Composite key column names for multi-column joins.</summary>
-    public IReadOnlyList<string> CompositeKeys { get; init; } = [];
+    /// <summary>Maximum number of keys pushed down to the upstream; more is read completely or denied (1..<see cref="HardMaxPushdownKeys"/>).</summary>
+    public int MaxPushdownKeys { get; init; } = DefaultMaxPushdownKeys;
+
+    /// <summary>Value of <see cref="MaxPushdownKeys"/> when a binding does not set it.</summary>
+    public const int DefaultMaxPushdownKeys = 100;
 
     public void Validate()
     {
         VirtualFilterNames.ValidateFilterName(FilterName, nameof(FilterName));
         if (TargetPattern != null)
         {
-            if (!ObjectPattern.TryParse(TargetPattern, out _, out var patternError))
+            if (TargetPatternMatcher.IsRegex(TargetPattern))
             {
-                if (TargetPattern.StartsWith('^') || TargetPattern.StartsWith("regex:", StringComparison.OrdinalIgnoreCase))
+                try
                 {
-                    var regexStr = TargetPattern.StartsWith("regex:", StringComparison.OrdinalIgnoreCase) ? TargetPattern[6..] : TargetPattern;
-                    try
-                    {
-                        _ = new Regex(regexStr, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(50));
-                    }
-                    catch (Exception ex)
-                    {
-                        throw new ArgumentException($"Invalid target regex pattern of '{FilterName}': {ex.Message}", nameof(TargetPattern));
-                    }
+                    TargetPatternMatcher.Validate(TargetPattern);
                 }
-                else
+                catch (ArgumentException ex)
                 {
-                    throw new ArgumentException($"Invalid target pattern of '{FilterName}': {patternError}", nameof(TargetPattern));
+                    throw new ArgumentException($"Invalid target regex pattern of '{FilterName}': {ex.Message}", nameof(TargetPattern), ex);
                 }
+            }
+            else if (!ObjectPattern.TryParse(TargetPattern, out _, out var patternError))
+            {
+                throw new ArgumentException($"Invalid target pattern of '{FilterName}': {patternError}", nameof(TargetPattern));
             }
         }
 
@@ -339,9 +341,9 @@ public sealed record FilterBinding
             throw new ArgumentException($"The binding of '{FilterName}' needs at least one object kind.", nameof(ObjectKinds));
         }
 
-        if (MaxPushdownKeys <= 0)
+        if (MaxPushdownKeys is < 1 or > HardMaxPushdownKeys)
         {
-            throw new ArgumentException($"MaxPushdownKeys must be greater than zero for '{FilterName}'.", nameof(MaxPushdownKeys));
+            throw new ArgumentException($"MaxPushdownKeys must be between 1 and {HardMaxPushdownKeys} for '{FilterName}'.", nameof(MaxPushdownKeys));
         }
 
         if (TimeColumn != null) VirtualFilterNames.ValidateIdentifier(TimeColumn, nameof(TimeColumn));
@@ -350,13 +352,13 @@ public sealed record FilterBinding
             VirtualFilterNames.ValidateIdentifier(key, nameof(ColumnMap));
             VirtualFilterNames.ValidateIdentifier(target, nameof(ColumnMap));
         }
-
-        foreach (var compositeKey in CompositeKeys)
-        {
-            VirtualFilterNames.ValidateIdentifier(compositeKey, nameof(CompositeKeys));
-        }
     }
 
+    /// <summary>
+    /// Whether the binding's target pattern matches <paramref name="table"/>: a glob <see cref="ObjectPattern"/>, or a
+    /// regex (<see cref="TargetPatternMatcher"/>, full match on <c>domain.schema.table</c>). No error is swallowed: an
+    /// invalid stored pattern or a regex timeout propagates so the caller denies (F-GOV-14 SEC-7/SEC-8).
+    /// </summary>
     public bool MatchesTarget(TableIdentifier table)
     {
         if (string.IsNullOrWhiteSpace(TargetPattern))
@@ -364,27 +366,17 @@ public sealed record FilterBinding
             return false;
         }
 
-        if (!TargetPattern.StartsWith('^') &&
-            !TargetPattern.StartsWith("regex:", StringComparison.OrdinalIgnoreCase) &&
-            ObjectPattern.TryParse(TargetPattern, out var pattern, out _))
-        {
-            return pattern!.MatchesObject(table);
-        }
+        return TargetPatternMatcher.IsRegex(TargetPattern)
+            ? TargetPatternMatcher.IsMatch(TargetPattern, table)
+            : ObjectPattern.Parse(TargetPattern).MatchesObject(table);
+    }
 
-        var regexStr = TargetPattern.StartsWith("regex:", StringComparison.OrdinalIgnoreCase) ? TargetPattern[6..] : TargetPattern;
-        try
-        {
-            return Regex.IsMatch(table.ToQualifiedName(), regexStr, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(50))
-                || Regex.IsMatch(table.ToString(), regexStr, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(50));
-        }
-        catch (RegexMatchTimeoutException)
-        {
-            return false;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
+    /// <summary>SHA-256 over the canonical binding (value identity, independent of the profile it belongs to).</summary>
+    public string ComputeHash()
+    {
+        var sb = new StringBuilder();
+        AppendCanonical(sb);
+        return VirtualFilterNames.Sha256(sb.ToString());
     }
 
     internal void AppendCanonical(StringBuilder sb) =>
@@ -393,9 +385,8 @@ public sealed record FilterBinding
           .Append(" kinds=").Append((int)ObjectKinds)
           .Append(" time=").Append(TimeColumn)
           .Append(" strat=").Append((int)Strategy)
-          .Append(" push=").Append((int)PushdownFormat)
+          .Append(" push=").Append(PushdownFormat is { } format ? ((int)format).ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty)
           .Append(" maxk=").Append(MaxPushdownKeys)
-          .Append(" comp=").AppendJoin(',', CompositeKeys.OrderBy(c => c, StringComparer.Ordinal))
           .Append(" map=").AppendJoin(',', (ColumnMap ?? new Dictionary<string, string>())
               .OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => p.Key + "=" + p.Value))
           .Append('\n');

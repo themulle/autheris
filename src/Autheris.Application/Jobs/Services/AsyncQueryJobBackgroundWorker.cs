@@ -8,7 +8,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Jobs.Interfaces;
-using Autheris.Application.Security;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Audit;
@@ -91,7 +90,8 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
             var maxRows = Math.Max(1, item.Request.MaxRows);
             var queryRequest = new GovernedSqlQueryRequest(
                 Sql: item.Request.Query,
-                RowLimit: new SqlRowLimit(maxRows, maxRows));
+                RowLimit: new SqlRowLimit(maxRows, maxRows),
+                Transport: SqlTransports.AsyncJob);
 
             var tenantId = new TenantId(item.Job.TenantId);
             var result = await sqlExec.ExecuteQueryBufferedAsync(
@@ -129,7 +129,8 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
 
             await RecordAuditAsync(completed, item.User, AuditEventTypes.AsyncJobCompleted, "ALLOW", "Job completed successfully.", stoppingToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        // ParseCanceledException derives from OperationCanceledException: a governed SQL error (syntax, parser timeout) is a failed job.
+        catch (OperationCanceledException ex) when (!Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out _))
         {
             var cancelled = runningJob with
             {
@@ -141,7 +142,8 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         }
         catch (Exception ex)
         {
-            var sanitized = SecretScrubber.Scrub(ex.Message);
+            // WP-X0a (SEC-X1-01): the persisted message is the fixed message of the stable code, never Exception.Message (driver text, values).
+            var sanitized = Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.FixedMessageOrDefault(ex, "The job could not be executed. Contact support with the trace id.");
             var failed = runningJob with
             {
                 State = AsyncJobState.Failed,
@@ -220,9 +222,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
     {
         try
         {
-            var sidStr = user.FindFirst("sub")?.Value
-                         ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                         ?? job.SubmittedByUserId;
+            var sidStr = AsyncJobOwner.Resolve(user) ?? job.SubmittedByUserId;
 
             var entry = new AuditLogEntry
             {

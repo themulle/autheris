@@ -3,6 +3,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
+using TrinoSqlEngine.Governance;
 
 namespace Autheris.Application.Services;
 
@@ -30,5 +31,14 @@ public sealed class RlsFilterGenerator : IRlsFilterGenerator
     {
         return AdvancedRlsFilterGenerator.BuildCrossSourceSetFilter(filter, maxBatchSize, dialect);
     }
-}
 
+    public PolicyPredicate BuildCorrelatedPredicate(ConsentRowFilter filter, string parameterPrefix = "__gql_rls_")
+    {
+        return AdvancedRlsFilterGenerator.BuildCorrelatedPredicate(filter, parameterPrefix);
+    }
+
+    public PolicyPredicate BuildCrossSourceSetPredicate(ConsentRowFilter filter, DatabaseDialect dialect, string parameterPrefix = "__gql_rls_")
+    {
+        return AdvancedRlsFilterGenerator.BuildCrossSourceSetPredicate(filter, dialect, parameterPrefix);
+    }
+}

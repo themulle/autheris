@@ -79,8 +79,9 @@ public static class EntraTokenPolicy
             return null;
         }
 
-        if (scopes.Count > 0 && options.ReadOnlyScopes.Count > 0 &&
-            scopes.All(s => options.ReadOnlyScopes.Any(r => IsSameScope(r, s))))
+        var readOnlyScopes = options.GetEffectiveReadOnlyScopes();
+        if (scopes.Count > 0 && readOnlyScopes.Count > 0 &&
+            scopes.All(s => readOnlyScopes.Any(r => IsSameScope(r, s))))
         {
             TokenAccessScope.MarkReadOnly(identity);
         }

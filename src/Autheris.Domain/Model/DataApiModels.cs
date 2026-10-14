@@ -11,7 +11,8 @@ public sealed record DatasetQueryRequest(
     string? FilterExpression = null,
     string? OrderBy = null,
     int Limit = 50,
-    int Offset = 0);
+    int Offset = 0,
+    string? Transport = null);
 
 public sealed record DatasetColumnInfo(
     string Name,

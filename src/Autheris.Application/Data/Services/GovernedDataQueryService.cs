@@ -16,6 +16,8 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using Microsoft.Extensions.Options;
 using Autheris.Domain.Security;
 
 /// <summary>
@@ -28,19 +30,31 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
     private const int DefaultLimit = 50;
     private const int MaxLimit = 1000;
 
+    /// <summary>
+    /// Absolute upper bound of the pagination window (offset + limit + 1) a single request may span. The effective cap is
+    /// lowered further by WebSql.MaxAllowedRows and, on the cross-source path, DuckDbOlap.MaxResultRows
+    /// (see <see cref="ResolvePaginationWindowCap"/>).
+    /// </summary>
+    private const int MaxPaginationWindow = 10_000;
+
+    private const int DefaultDuckDbMaxResultRows = 50_000;
+
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly IUnifiedPolicyDecisionPoint _pdp;
     private readonly IGovernedSqlExecutionService _sqlExecutionService;
     private readonly IFederatedQueryExecutionService _federatedExecutionService;
     private readonly IColumnMaskingProvider _maskingProvider;
+    private readonly GatewayOptions _options;
 
     public GovernedDataQueryService(
         ITableMetadataRepository metadataRepository,
         IUnifiedPolicyDecisionPoint pdp,
         IGovernedSqlExecutionService sqlExecutionService,
         IFederatedQueryExecutionService federatedExecutionService,
-        IColumnMaskingProvider maskingProvider)
+        IColumnMaskingProvider maskingProvider,
+        IOptions<GatewayOptions>? options = null)
     {
+        _options = options?.Value ?? new GatewayOptions();
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _pdp = pdp ?? throw new ArgumentNullException(nameof(pdp));
         _sqlExecutionService = sqlExecutionService ?? throw new ArgumentNullException(nameof(sqlExecutionService));
@@ -85,6 +99,15 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
         {
             var reasons = decision.DeniedReasons.Count > 0 ? string.Join("; ", decision.DeniedReasons) : "Access denied by governance policy.";
             throw new UnauthorizedAccessException($"Access to table '{request.Table.ToQualifiedName()}' is forbidden: {reasons}");
+        }
+
+        // WP-X0n / SEC-X1-17: the row policy is no longer spliced from this decision, so the rewriter's own decision is the only
+        // one that restricts rows. It must be computed from the same inputs. The unified PDP drops a ClusterAdmin role claim of a
+        // non-canonical principal while the rewriter keeps every role claim; that one input difference fails closed here.
+        if (context.User.GetUserRoles().Any(ClusterAdminPolicy.IsClusterAdminRole) && !ClusterAdminPolicy.IsCanonicalClusterAdmin(context.User))
+        {
+            throw new UnauthorizedAccessException(
+                $"Access to table '{request.Table.ToQualifiedName()}' is forbidden: the cluster administrator role claim is not canonical.");
         }
 
         // 3. Resolve columns to select and enforce column permissions
@@ -167,49 +190,55 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
         var limit = request.Limit > 0 ? Math.Min(request.Limit, MaxLimit) : DefaultLimit;
         var offset = request.Offset >= 0 ? request.Offset : 0;
 
-        var sb = new StringBuilder();
-        sb.Append("SELECT ").Append(string.Join(", ", columnsToSelect)).Append(" FROM ").Append(request.Table.ToQualifiedName());
-
-        var predicates = new List<string>();
-        if (!string.IsNullOrWhiteSpace(request.FilterExpression))
-        {
-            var translated = DataApiFilterTranslator.TranslateFilterToSql(request.FilterExpression);
-            if (!string.IsNullOrWhiteSpace(translated))
-            {
-                predicates.Add($"({translated})");
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
-        {
-            predicates.Add($"({decision.CombinedRowFilterSql})");
-        }
-
-        if (predicates.Count > 0)
-        {
-            sb.Append(" WHERE ").Append(string.Join(" AND ", predicates));
-        }
-
-        if (!string.IsNullOrWhiteSpace(request.OrderBy))
-        {
-            sb.Append(" ORDER BY ").Append(request.OrderBy);
-        }
-        else if (metadata.PrimaryKeyColumns.Count > 0)
-        {
-            sb.Append(" ORDER BY ").Append(string.Join(", ", metadata.PrimaryKeyColumns));
-        }
-
-        // Fetch Limit + 1 to accurately populate HasMore
-        sb.Append(" LIMIT ").Append(limit + 1).Append(" OFFSET ").Append(offset);
-        var sql = sb.ToString();
-
-        // 6. Execution & Routing
-        var queryRequest = new GovernedSqlQueryRequest(sql);
-        GovernedSqlResult sqlResult;
+        // Pagination is applied here, not as OFFSET text in the generated SQL: the SQL engine's grammar only accepts the
+        // Trino form (OFFSET n LIMIT m) while the legacy token-stream rewriter hands the text unchanged to SQLite,
+        // SQL Server, PostgreSQL and the cross-source planner, none of which share that form. A plain LIMIT is
+        // understood and translated per target by every path, so the query reads offset + limit + 1 rows and the
+        // first <offset> rows are skipped below (the extra row populates HasMore).
         bool isCrossSource = metadata.DataSourceType is DataSourceType.LakehouseIceberg
             or DataSourceType.LakehouseDelta
             or DataSourceType.HttpDeclarative
             or DataSourceType.HttpPlugin;
+
+        var windowCap = ResolvePaginationWindowCap(isCrossSource);
+        var window = (long)offset + limit + 1;
+        if (window > windowCap)
+        {
+            throw new ArgumentException(
+                $"Pagination window too large: offset + limit must not exceed {windowCap - 1}.", nameof(request));
+        }
+
+        var sb = new StringBuilder();
+        sb.Append("SELECT ").Append(string.Join(", ", columnsToSelect.Select(DataApiFilterTranslator.QuoteIdentifier))).Append(" FROM ").Append(request.Table.ToString());
+
+        // WP-X0n (G-5): no policy text is spliced here. The decision above authorizes the request and drives column access;
+        // the row policy is applied exactly once, by the rewriter on the single-source branch and by the staging service
+        // from its own decision on the cross-source branch. Identifiers are emitted as quoted catalog spellings.
+        if (!string.IsNullOrWhiteSpace(request.FilterExpression))
+        {
+            var translated = DataApiFilterTranslator.TranslateFilterToTrino(request.FilterExpression, metadata);
+            if (!string.IsNullOrWhiteSpace(translated))
+            {
+                sb.Append(" WHERE ").Append(translated);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.OrderBy))
+        {
+            sb.Append(" ORDER BY ").Append(DataApiFilterTranslator.BuildOrderByClause(request.OrderBy, metadata));
+        }
+        else if (metadata.PrimaryKeyColumns.Count > 0)
+        {
+            sb.Append(" ORDER BY ").Append(string.Join(", ", metadata.PrimaryKeyColumns.Select(DataApiFilterTranslator.QuoteIdentifier)));
+        }
+
+        // Fetch offset + limit + 1 rows: the skipped window plus one row to accurately populate HasMore
+        sb.Append(" LIMIT ").Append(offset + limit + 1);
+        var sql = sb.ToString();
+
+        // 6. Execution & Routing
+        var queryRequest = new GovernedSqlQueryRequest(sql, Transport: request.Transport);
+        GovernedSqlResult sqlResult;
 
         if (isCrossSource)
         {
@@ -240,9 +269,23 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
         }
 
         // 7. Paging Envelope & Masking Enforcement
-        var rawRows = sqlResult.Rows;
-        bool hasMore = rawRows.Count > limit;
-        var pagedRows = rawRows.Take(limit).ToList();
+        // Fail closed: a row cap below the requested window (e.g. a lower effective MaxAllowedRows on a path the
+        // pre-check could not predict) must never surface as a short page that claims hasMore=false.
+        var sourceRows = sqlResult.Rows;
+        if (sqlResult.Truncated && sourceRows.Count < window)
+        {
+            throw new ArgumentException(
+                "Pagination window exceeds the row limit of this data source; reduce offset or limit.", nameof(request));
+        }
+
+        int available = Math.Max(0, sourceRows.Count - offset);
+        bool hasMore = available > limit;
+        int pageCount = Math.Min(limit, available);
+        var pagedRows = new List<IReadOnlyDictionary<string, object?>>(pageCount);
+        for (int i = 0; i < pageCount; i++)
+        {
+            pagedRows.Add(sourceRows[offset + i]);
+        }
 
         var columnInfos = new List<DatasetColumnInfo>(columnsToSelect.Count);
         foreach (var col in columnsToSelect)
@@ -286,5 +329,29 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             HasMore: hasMore,
             Columns: columnInfos,
             Data: processedRows);
+    }
+
+    /// <summary>
+    /// Largest pagination window the request may span: min(10 000, effective WebSql.MaxAllowedRows when &gt; 0,
+    /// DuckDbOlap.MaxResultRows on the cross-source path). The SQL layer enforces the same row caps, so a larger
+    /// window could never be served completely.
+    /// </summary>
+    private long ResolvePaginationWindowCap(bool isCrossSource)
+    {
+        long cap = MaxPaginationWindow;
+
+        var maxAllowed = _options.WebSql?.MaxAllowedRows ?? 0;
+        if (maxAllowed > 0)
+        {
+            cap = Math.Min(cap, maxAllowed);
+        }
+
+        if (isCrossSource)
+        {
+            var duckRows = _options.DuckDbOlap?.MaxResultRows > 0 ? _options.DuckDbOlap.MaxResultRows : DefaultDuckDbMaxResultRows;
+            cap = Math.Min(cap, duckRows);
+        }
+
+        return cap;
     }
 }

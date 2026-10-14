@@ -60,8 +60,10 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
         Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null,
         IAccessProfileRepository? accessProfileRepository = null,
-        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null)
+        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
+        TypedPolicySources? typedPolicies = null)
     {
+        _typedPolicies = typedPolicies;
         _accessProfileRepository = accessProfileRepository;
         _memoryCache = memoryCache;
         _contractManager = contractManager;
@@ -342,6 +344,14 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 Items: pageItems
             );
 
+            // CR-10 (D-12): a declarative HTTP table cannot evaluate the row filter nor attest a pushdown. When the filter carries
+            // a Virtual Filter predicate this channel (OData, REST, GraphQL) does not federate, so it is denied here, before
+            // the upstream is called, not after unauthorized rows were fetched into gateway memory.
+            if (metadata.DataSourceType == DataSourceType.HttpDeclarative && !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
+            {
+                EnsureInMemoryFilterIsEnforceable(decision);
+            }
+
             rawRows = await executor.ExecuteAsync(execContext, ct);
 
             rlsPushdownAlreadyOccurred = execContext.Items.TryGetValue("RlsPushdownExecuted", out var p2) && p2 is true;
@@ -561,8 +571,9 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     private readonly Autheris.Application.Governance.Contracts.ISchemaContractManager? _contractManager;
     private readonly IAccessProfileRepository? _accessProfileRepository;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
+    private readonly TypedPolicySources? _typedPolicies;
 
-    private TableAccessPolicy AccessPolicy() =>
+    internal TableAccessPolicy AccessPolicy() =>
         new(_consentRepository, _resolutionService,
             _cacheService,
             _policyEnforcementService ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
@@ -572,7 +583,9 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
             _contractManager,
             _accessProfileRepository,
-            _memoryCache);
+            _memoryCache,
+            rowPolicyFactory: _typedPolicies?.RowPolicies,
+            maskPolicyFactory: _typedPolicies?.MaskPolicies);
 
     /// <summary>
     /// Virtual filters: an in-memory row filter cannot evaluate their subqueries (it would return nothing and look like
@@ -588,8 +601,9 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     public static List<IReadOnlyDictionary<string, object?>> FilterRows(
         List<IReadOnlyDictionary<string, object?>> rows,
         string rowFilterSql,
-        TableMetadata metadata) =>
-        InMemoryRowFilterEvaluator.FilterRows(rows, rowFilterSql, metadata);
+        TableMetadata metadata,
+        IReadOnlyDictionary<string, object?>? parameters = null) =>
+        InMemoryRowFilterEvaluator.FilterRows(rows, rowFilterSql, metadata, parameters);
 
     internal static bool IsTypeStrictRowFilter(string normalizedSql, System.Data.DataTable table) =>
         InMemoryRowFilterEvaluator.IsTypeStrictRowFilter(normalizedSql, table);

@@ -14,6 +14,7 @@ public static class AuditEventTypes
     public const string RateLimitExceeded = "RATE_LIMIT_EXCEEDED";
     public const string TokenRevoked = "TOKEN_REVOKED";
     public const string TokenRevokedHit = "TOKEN_REVOKED_HIT";
+    public const string TenantCollisionDenied = "TENANT_COLLISION_DENIED";
 
     // Catalog & Metadata Reads (Tier B)
     public const string CatalogRead = "CATALOG_READ";
@@ -57,6 +58,7 @@ public static class AuditEventTypes
     public const string AsyncJobDownloaded = "ASYNC_JOB_DOWNLOADED";
     public const string AsyncJobCancelled = "ASYNC_JOB_CANCELLED";
     public const string AsyncJobStatusRead = "ASYNC_JOB_STATUS_READ";
+    public const string AsyncJobAccessDenied = "ASYNC_JOB_ACCESS_DENIED";
 
     // Governance classification, access plans and DevPortal step-up consoles
     public const string ClassificationProposed = "CLASSIFICATION_PROPOSED";

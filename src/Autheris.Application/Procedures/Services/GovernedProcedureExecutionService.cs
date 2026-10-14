@@ -47,6 +47,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     private readonly ILogger<GovernedProcedureExecutionService>? _logger;
 
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? _mandatoryFilters;
+    private readonly Autheris.Application.Policy.TypedPolicySources? _typedPolicies;
     private readonly IAccessProfileRepository? _accessProfileRepository;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
     private readonly Autheris.Application.Policy.Interfaces.IAccessProfileCache? _accessProfileCache;
@@ -68,8 +69,9 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
         IAccessProfileRepository? accessProfileRepository = null,
         Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
-        Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null)
-        : this(registry, invoker, options, Autheris.Application.Audit.NullAuditLogRepository.Instance, tableRepository, consentRepository, consentResolution, masking, policyEnforcement, clientIpResolver, logger, rowScope, rebacEvaluator, consentCache, mandatoryFilters, accessProfileRepository, memoryCache, accessProfileCache)
+        Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null,
+        Autheris.Application.Policy.TypedPolicySources? typedPolicies = null)
+        : this(registry, invoker, options, Autheris.Application.Audit.NullAuditLogRepository.Instance, tableRepository, consentRepository, consentResolution, masking, policyEnforcement, clientIpResolver, logger, rowScope, rebacEvaluator, consentCache, mandatoryFilters, accessProfileRepository, memoryCache, accessProfileCache, typedPolicies)
     {
     }
 
@@ -91,8 +93,10 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
         IAccessProfileRepository? accessProfileRepository = null,
         Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
-        Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null)
+        Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null,
+        Autheris.Application.Policy.TypedPolicySources? typedPolicies = null)
     {
+        _typedPolicies = typedPolicies;
         _mandatoryFilters = mandatoryFilters;
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _invoker = invoker ?? throw new ArgumentNullException(nameof(invoker));
@@ -394,7 +398,9 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 contractManager: null,
                 accessProfileRepository: _accessProfileRepository,
                 memoryCache: _memoryCache,
-                accessProfileCache: _accessProfileCache)
+                accessProfileCache: _accessProfileCache,
+                rowPolicyFactory: _typedPolicies?.RowPolicies,
+                maskPolicyFactory: _typedPolicies?.MaskPolicies)
                 .DecideAsync(
                     new Autheris.Application.Policy.TableAccessQuery(
                         userSid,
@@ -729,7 +735,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             return TableAccessDecision.Denied(decision.Table, mandatory.DenyReason ?? "Denied by virtual filters.");
         }
 
-        return mandatory.PredicateSql != null ? decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters) : decision;
+        return mandatory.PredicateSql != null ? decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters, mandatory.AppliedBindings) : decision;
     }
 
     private System.Net.IPAddress ResolveClientIp(ClaimsPrincipal user)

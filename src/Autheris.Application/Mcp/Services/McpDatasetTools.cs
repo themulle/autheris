@@ -219,7 +219,7 @@ public static class McpDatasetTools
             TargetGraphQLOperation: SampleRows);
 
         yield return new McpToolDefinition(
-Name: DescribeMyAccess,
+            Name: DescribeMyAccess,
             Description: "Explains effective permissions, active row filters, and column masks for the caller on a specific dataset without data leakage.",
             InputJsonSchema: """
             {

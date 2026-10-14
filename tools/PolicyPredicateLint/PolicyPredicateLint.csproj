@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>policy-predicate-lint</AssemblyName>
+    <RootNamespace>Autheris.Tools.PolicyPredicateLint</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Autheris.Application\Autheris.Application.csproj" />
+    <ProjectReference Include="..\..\src\Autheris.Infrastructure\Autheris.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

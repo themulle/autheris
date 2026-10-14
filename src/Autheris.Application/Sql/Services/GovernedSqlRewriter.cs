@@ -65,6 +65,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
     private readonly IMemoryCache? _memoryCache;
     private readonly SqlDataMaskingProvider _maskingProvider;
     private readonly SqlDataSourceResolver _dataSourceResolver;
+    private readonly TypedPolicySources? _typedPolicies;
 
     public IReadOnlyList<SqlRewriteStageOrder> StageOrder =>
     [
@@ -94,8 +95,10 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         IAccessProfileRepository? accessProfileRepository = null,
         IMemoryCache? memoryCache = null,
         SqlDataMaskingProvider? maskingProvider = null,
-        SqlDataSourceResolver? dataSourceResolver = null)
+        SqlDataSourceResolver? dataSourceResolver = null,
+        TypedPolicySources? typedPolicies = null)
     {
+        _typedPolicies = typedPolicies;
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _policyEnforcement = policyEnforcement; _consentResolution = consentResolution;
         _tableRepository = tableRepository; _clientIpResolver = clientIpResolver;
@@ -779,7 +782,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         return new GovernedRewrite(securedSql, internalParameters, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters);
     }
 
-    private TableAccessPolicy AccessPolicy() =>
+    internal TableAccessPolicy AccessPolicy() =>
         new(_consentRepository!, _consentResolution!,
             _consentCache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             _policyEnforcement ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
@@ -789,7 +792,9 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             _mandatoryFilters ?? NullMandatoryRowFilterResolver.Instance,
             _contractManager,
             _accessProfileRepository,
-            _memoryCache);
+            _memoryCache,
+            rowPolicyFactory: _typedPolicies?.RowPolicies,
+            maskPolicyFactory: _typedPolicies?.MaskPolicies);
 
     private System.Net.IPAddress ResolveClientIp()
     {

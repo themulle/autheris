@@ -65,9 +65,10 @@ public sealed class PostgreSqlWebSqlTransactionTests : IAsyncLifetime
 
             _available = true;
         }
-        catch
+        catch (Exception ex)
         {
             _available = false;
+            ContainerStartup.FailIfRequired(ex, "The PostgreSQL test container");
         }
     }
 

@@ -14,9 +14,28 @@ public static class BenchmarkRunnerApp
         Console.WriteLine("================================================================================");
         Console.WriteLine();
 
+        // BenchmarkDotNet switches (for example the G8 gate: --filter "*SqlCompiler*" --job short --exporters json).
+        if (args.Length > 0 && args[0].StartsWith("--", StringComparison.Ordinal))
+        {
+            BenchmarkDotNet.Running.BenchmarkSwitcher.FromAssembly(typeof(BenchmarkRunnerApp).Assembly).Run(args);
+            return;
+        }
+
         if (args.Length > 0 && args[0].Equals("vf", StringComparison.OrdinalIgnoreCase))
         {
             await VirtualFilterResolverBenchmark.RunAsync();
+            return;
+        }
+
+        if (args.Length > 0 && args[0].Equals("compile", StringComparison.OrdinalIgnoreCase))
+        {
+            CompilePathBenchmark.Run();
+            return;
+        }
+
+        if (args.Length > 0 && args[0].Equals("vfenf", StringComparison.OrdinalIgnoreCase))
+        {
+            VirtualFilterEnforcementBenchmark.Run();
             return;
         }
 
@@ -41,6 +60,9 @@ public static class BenchmarkRunnerApp
 
         // 4. End-to-End Concurrent WebHost Load & Latency Benchmark
         await RunGatewayLoadBenchmarkAsync();
+
+        // 4b. Governed AST compile path (cache hit and miss)
+        CompilePathBenchmark.Run();
 
         // 5. Explicit SLA Checks (Casbin, Lineage, Complexity)
         await SlaValidationBenchmark.RunAllSlaChecksAsync();

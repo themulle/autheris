@@ -97,7 +97,7 @@ public sealed partial class JustificationAndBreakGlassInterceptor : IIngressInte
 
                 var user = context.User;
                 bool isAuthorized = false;
-                foreach (var role in extOptions.BreakGlassAllowedRoles)
+                foreach (var role in extOptions.GetEffectiveBreakGlassAllowedRoles())
                 {
                     if (user.IsInRole(role) || user.HasClaim(c => c.Type == System.Security.Claims.ClaimTypes.Role && string.Equals(c.Value, role, StringComparison.OrdinalIgnoreCase)))
                     {
@@ -111,7 +111,7 @@ public sealed partial class JustificationAndBreakGlassInterceptor : IIngressInte
                     _logger.LogWarning(
                         "Break-glass access denied: User '{User}' does not possess any authorized break-glass role ({Roles}).",
                         user.Identity?.Name ?? "Anonymous",
-                        string.Join(", ", extOptions.BreakGlassAllowedRoles));
+                        string.Join(", ", extOptions.GetEffectiveBreakGlassAllowedRoles()));
                     return IngressResult.Deny("User is not authorized to invoke emergency break-glass bypass.", 403);
                 }
             }

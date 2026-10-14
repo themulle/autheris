@@ -231,10 +231,10 @@ public sealed class WebSqlHeterogeneousJoinTests
 
         // 2. Source read audits (WEBSQL_CROSS_SOURCE_SOURCE_READ) for both tables
         await auditRepo.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead && e.TargetTable == ordersMeta.Identifier.ToQualifiedName()),
+            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead && e.TargetTable == ordersMeta.Identifier.ToString()),
             Arg.Any<CancellationToken>());
         await auditRepo.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead && e.TargetTable == shipmentsMeta.Identifier.ToQualifiedName()),
+            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead && e.TargetTable == shipmentsMeta.Identifier.ToString()),
             Arg.Any<CancellationToken>());
     }
 
@@ -325,6 +325,86 @@ public sealed class WebSqlHeterogeneousJoinTests
             Substitute.For<IDuckDbOlapEngine>());
 
         var request = new GovernedSqlQueryRequest("SELECT 1", Transport: "ArrowExport");
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(async () =>
+            await federatedService.ExecuteQueryBufferedAsync(request, CreateUser(), new TenantId(Tenant)));
+
+        ex.Message.ShouldContain("Cross-catalog");
+    }
+
+    [Fact]
+    public async Task Join_TransportGate_MissingTransport_IsRejected()
+    {
+        var ordersMeta = CreateOrdersTable();
+        var tableRepo = Substitute.For<ITableMetadataRepository>();
+        tableRepo.GetTableMetadataAsync(ordersMeta.Identifier, Arg.Any<CancellationToken>())
+            .Returns(ordersMeta);
+
+        var options = new GatewayOptions
+        {
+            Insecure = new InsecureGettingStartedOptions { danger_bypass_consent_checks = true },
+            WebSql = new WebSqlOptions
+            {
+                Enabled = true,
+                AllowedDataSources = ["crm"],
+                CrossSource = new CrossSourceOptions
+                {
+                    Enabled = true,
+                    AllowedTransports = ["WebSql", "Trino"] // MissingTransport NOT in list
+                }
+            }
+        };
+
+        var auditRepo = Substitute.For<IAuditLogRepository>();
+        var federatedService = new FederatedDuckDbExecutionService(
+            Options.Create(options),
+            auditRepo,
+            Substitute.For<ICrossSourceQueryRouter>(),
+            Substitute.For<ICrossSourcePlanner>(),
+            Substitute.For<IFederatedStagingService>(),
+            Substitute.For<IDuckDbOlapEngine>());
+
+        var request = new GovernedSqlQueryRequest("SELECT 1", Transport: null);
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(async () =>
+            await federatedService.ExecuteQueryBufferedAsync(request, CreateUser(), new TenantId(Tenant)));
+
+        ex.Message.ShouldContain("Cross-catalog");
+    }
+
+    [Fact]
+    public async Task Join_TransportGate_Rest_NotOptedIn_IsRejected()
+    {
+        var ordersMeta = CreateOrdersTable();
+        var tableRepo = Substitute.For<ITableMetadataRepository>();
+        tableRepo.GetTableMetadataAsync(ordersMeta.Identifier, Arg.Any<CancellationToken>())
+            .Returns(ordersMeta);
+
+        var options = new GatewayOptions
+        {
+            Insecure = new InsecureGettingStartedOptions { danger_bypass_consent_checks = true },
+            WebSql = new WebSqlOptions
+            {
+                Enabled = true,
+                AllowedDataSources = ["crm"],
+                CrossSource = new CrossSourceOptions
+                {
+                    Enabled = true,
+                    AllowedTransports = ["WebSql", "Trino"] // Rest_NotOptedIn NOT in list
+                }
+            }
+        };
+
+        var auditRepo = Substitute.For<IAuditLogRepository>();
+        var federatedService = new FederatedDuckDbExecutionService(
+            Options.Create(options),
+            auditRepo,
+            Substitute.For<ICrossSourceQueryRouter>(),
+            Substitute.For<ICrossSourcePlanner>(),
+            Substitute.For<IFederatedStagingService>(),
+            Substitute.For<IDuckDbOlapEngine>());
+
+        var request = new GovernedSqlQueryRequest("SELECT 1", Transport: "Rest");
 
         var ex = await Should.ThrowAsync<WebSqlPolicyException>(async () =>
             await federatedService.ExecuteQueryBufferedAsync(request, CreateUser(), new TenantId(Tenant)));

@@ -210,8 +210,9 @@ Autheris encompasses **57+ production-ready enterprise features**, documented in
 
 ---
 
-### Pillar 4: AST Target Dialect Compiler Pipeline ([`F-DIALECT-01`](docs/features/f-dialect-01-ast-target-dialect-pushdown.md), `ADR-017` / `TrinoSqlEngine`)
+### Pillar 4: AST Target Dialect Compiler Pipeline ([`F-DIALECT-02`](docs/features/f-dialect-02-ast-sql-compiler.md), `ADR-017` / `TrinoSqlEngine`)
 
+- **Engine selection**: the legacy token-stream rewriter is the default engine; the typed AST compiler (`ISqlEngine.Compile`, DQL and DML on SQL Server, PostgreSQL, DuckDB and Oracle; Databricks experimental) is opt-in. See [`F-DIALECT-02`](docs/features/f-dialect-02-ast-sql-compiler.md) for tiers, limits and configuration.
 - **High-Performance Multi-Pass Compiler Architecture**:
   - Replaced brittle regex/token rewriting with a multi-stage ANTLR4-based AST compiler pipeline:
     1. ParseTree -> Strongly typed, dialect-neutral AST via `SqlAstBuilder`.

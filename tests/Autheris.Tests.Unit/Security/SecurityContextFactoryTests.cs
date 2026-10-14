@@ -10,6 +10,8 @@ using Autheris.Api.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -128,6 +130,11 @@ public sealed class SecurityContextFactoryTests
     public async Task SecurityContextResolutionMiddleware_SetsBothContextItemKeys()
     {
         var httpContext = new DefaultHttpContext();
+        var services = new ServiceCollection();
+        var monitor = NSubstitute.Substitute.For<Microsoft.Extensions.Options.IOptionsMonitor<Autheris.Domain.Options.GatewayOptions>>();
+        monitor.CurrentValue.Returns(new Autheris.Domain.Options.GatewayOptions());
+        services.AddSingleton(monitor);
+        httpContext.RequestServices = services.BuildServiceProvider();
         var identity = new ClaimsIdentity(new[]
         {
             new Claim("sub", "S-1-5-21-USER2"),

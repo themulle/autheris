@@ -51,7 +51,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(query);
-        return ExecuteOlapQueryAsync(new OlapQueryRequest(query.Sql, sources, limit), ct);
+        return ExecuteOlapQueryAsync(new OlapQueryRequest(query.Sql, sources, limit, query.Parameters), ct);
     }
 
     public async Task<OlapQueryResult> ExecuteOlapQueryAsync(
@@ -64,7 +64,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         var sw = Stopwatch.StartNew();
 
         // 1. Early validation of SQL before any staging or connection allocation
-        ValidateUserSql(request.Sql, request.Sources);
+        ValidateUserSql(request.Sql, request.Sources, request.Parameters?.Count);
 
         // SEC-OLAP-02: Enforce MaxStagedRowsPerTable limits before opening DuckDB
         if (request.Sources != null)
@@ -129,6 +129,13 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
             using (var queryCmd = connection.CreateCommand())
             {
                 queryCmd.CommandText = request.Sql;
+                if (request.Parameters is { Count: > 0 } bound)
+                {
+                    foreach (var parameter in bound)
+                    {
+                        queryCmd.Parameters.Add(new DuckDBParameter(parameter.Name, parameter.Value ?? DBNull.Value));
+                    }
+                }
 
                 // SQL2-9: DuckDB.NET checks the token only before it starts; Cancel() calls duckdb_interrupt and stops a
                 // running query when the timeout fires or the caller aborts.
@@ -344,7 +351,58 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         return "VARCHAR";
     }
 
-    private static void ValidateUserSql(string sql, IReadOnlyList<OlapTableSource>? sources)
+    /// <summary>
+    /// WP-X3: the only <c>$</c> allowed is a <c>$n</c> marker outside quotes whose ordinal has a bound parameter. A <c>$</c> inside a
+    /// quoted literal or identifier, <c>$$</c>, <c>$name</c> and a marker without a parameter are rejected (SG-24).
+    /// </summary>
+    private static void ValidateDollarMarkers(string sql, int parameterCount)
+    {
+        const string message = "Dollar-quoted strings and parameters are prohibited in OLAP queries.";
+        char quote = '\0';
+        for (int i = 0; i < sql.Length; i++)
+        {
+            char c = sql[i];
+            if (quote != '\0')
+            {
+                if (c == '$')
+                {
+                    throw new System.Security.SecurityException(message);
+                }
+
+                if (c == quote)
+                {
+                    quote = '\0';
+                }
+
+                continue;
+            }
+
+            if (c == '\'' || c == '"')
+            {
+                quote = c;
+            }
+            else if (c == '$')
+            {
+                int start = i + 1;
+                int end = start;
+                while (end < sql.Length && char.IsAsciiDigit(sql[end]))
+                {
+                    end++;
+                }
+
+                if (end == start || end - start > 5 || sql[start] == '0' ||
+                    int.Parse(sql.AsSpan(start, end - start), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture) > parameterCount ||
+                    (end < sql.Length && (char.IsLetter(sql[end]) || sql[end] == '_' || sql[end] == '$')))
+                {
+                    throw new System.Security.SecurityException(message);
+                }
+
+                i = end - 1;
+            }
+        }
+    }
+
+    private static void ValidateUserSql(string sql, IReadOnlyList<OlapTableSource>? sources, int? boundParameterCount = null)
     {
         if (string.IsNullOrWhiteSpace(sql))
         {
@@ -352,7 +410,11 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         }
 
         // SG-24: Prohibit dollar quoting ($$...$$) and dollar variables to eliminate lexer and quote bypasses
-        if (sql.Contains('$'))
+        if (boundParameterCount is > 0)
+        {
+            ValidateDollarMarkers(sql, boundParameterCount.Value);
+        }
+        else if (sql.Contains('$'))
         {
             throw new System.Security.SecurityException("Dollar-quoted strings and parameters are prohibited in OLAP queries.");
         }

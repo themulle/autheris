@@ -52,3 +52,5 @@ worktrees/
 dist/
 libpod/
 .claude/
+benchmarks/results/
+StrykerOutput/

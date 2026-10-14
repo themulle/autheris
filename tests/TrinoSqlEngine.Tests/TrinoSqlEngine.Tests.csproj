@@ -9,7 +9,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="FsCheck.Xunit" Version="3.4.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <PackageReference Include="NSubstitute" Version="6.2.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" />
@@ -17,10 +19,16 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\TrinoSqlEngine\TrinoSqlEngine.csproj" />
+    <!-- The mutant probes of the controls that live outside the engine (WP-X0v activation: X0a, X0b, X0c, X0p). -->
+    <ProjectReference Include="..\..\src\Autheris.Application\Autheris.Application.csproj" />
+    <ProjectReference Include="..\..\src\Autheris.Infrastructure\Autheris.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <None Update="Fixtures\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Conformance\Fixtures\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Update="Fixtures\RawJava\*">

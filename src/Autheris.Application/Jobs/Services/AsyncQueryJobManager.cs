@@ -77,9 +77,10 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
             throw new ArgumentException("TenantId is required.", nameof(tenantId));
         }
 
-        var userSid = user.FindFirst("sub")?.Value
-                      ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                      ?? "anonymous";
+        // Canonical owner (same resolution as the status/result/cancel endpoints). Fail-closed: a principal without a
+        // resolvable identity must not become a shared "anonymous" owner.
+        var userSid = AsyncJobOwner.Resolve(user)
+                      ?? throw new Autheris.Domain.Exceptions.GatewaySecurityException("Async jobs require an authenticated principal with a resolvable user identity.", "ASYNC_JOB_OWNER_UNRESOLVABLE");
 
         var jobId = Guid.NewGuid().ToString("D");
         var format = string.IsNullOrWhiteSpace(request.Format) ? "json" : request.Format.Trim().ToLowerInvariant();
@@ -102,20 +103,33 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
         }
         _activeCts[jobId] = cts;
 
-        await RecordAuditAsync(
-            descriptor,
-            user,
-            AuditEventTypes.AsyncJobSubmitted,
-            "ALLOW",
-            "Job enqueued for background execution.",
-            ct).ConfigureAwait(false);
+        try
+        {
+            await RecordAuditAsync(
+                descriptor,
+                user,
+                AuditEventTypes.AsyncJobSubmitted,
+                "ALLOW",
+                "Job enqueued for background execution.",
+                ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Fail-closed: no audit record, no job.
+            _jobs.TryRemove(jobId, out _);
+            if (_activeCts.TryRemove(jobId, out var failedCts))
+            {
+                failedCts.Dispose();
+            }
+            throw;
+        }
 
         await _channel.Writer.WriteAsync(new AsyncJobExecutionItem(descriptor, request, user, cts), ct).ConfigureAwait(false);
 
         return descriptor;
     }
 
-    public Task<AsyncJobDescriptor?> GetJobAsync(
+    public async Task<AsyncJobDescriptor?> GetJobAsync(
         string jobId,
         TenantId tenantId,
         string userSid,
@@ -125,7 +139,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
 
         if (!_jobs.TryGetValue(jobId, out var job))
         {
-            return Task.FromResult<AsyncJobDescriptor?>(null);
+            return null;
         }
 
         // Zero-IDOR isolation: return 404 (null) if tenant or user do not match
@@ -133,10 +147,11 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
             !string.Equals(job.SubmittedByUserId, userSid, StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning("Zero-IDOR access violation blocked for job {JobId}. Tenant mismatch or user mismatch.", jobId);
-            return Task.FromResult<AsyncJobDescriptor?>(null);
+            await RecordAccessDeniedAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
+            return null;
         }
 
-        return Task.FromResult<AsyncJobDescriptor?>(job);
+        return job;
     }
 
     public async Task<Stream?> GetJobResultStreamAsync(
@@ -153,9 +168,19 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
 
         var fullResultPath = Path.GetFullPath(job.ResultFilePath);
         var fullScratchPath = Path.GetFullPath(_scratchDirectory);
-        if (!fullResultPath.StartsWith(fullScratchPath, StringComparison.OrdinalIgnoreCase))
+        // Containment needs a trailing separator: ".../jobs-evil/x" must not match the ".../jobs" prefix.
+        var scratchPrefix = Path.TrimEndingDirectorySeparator(fullScratchPath) + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!fullResultPath.StartsWith(scratchPrefix, comparison))
         {
-            throw new SecurityException("Unauthorized path traversal detected in job result retrieval.");
+            await RecordAuditAsync(
+                job,
+                new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, userSid), new Claim("tenant_id", tenantId.Value)], "JobAuth")),
+                AuditEventTypes.AsyncJobDownloaded,
+                "DENY",
+                "Job result path is outside the scratch directory.",
+                ct).ConfigureAwait(false);
+            throw new Autheris.Domain.Exceptions.GatewaySecurityException("Unauthorized path traversal detected in job result retrieval.", "JOB_RESULT_PATH_FORBIDDEN");
         }
 
         if (!File.Exists(fullResultPath))
@@ -268,9 +293,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
     {
         try
         {
-            var sidStr = user.FindFirst("sub")?.Value
-                         ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                         ?? job.SubmittedByUserId;
+            var sidStr = AsyncJobOwner.Resolve(user) ?? job.SubmittedByUserId;
 
             var entry = new AuditLogEntry
             {
@@ -294,6 +317,39 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to record audit event for job {JobId}", job.JobId);
+            if (string.Equals(decision, "ALLOW", StringComparison.Ordinal))
+            {
+                // Fail-closed: an ALLOW outcome (e.g. a result download) must never happen without its audit record.
+                throw;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Records a DENY event for a Zero-IDOR mismatch. Attributed to the requesting tenant/actor only;
+    /// the foreign owner and tenant of the job are never written. Best effort: the denial itself is already enforced.
+    /// </summary>
+    private async Task RecordAccessDeniedAsync(string jobId, TenantId requesterTenant, string requesterSid, CancellationToken ct)
+    {
+        try
+        {
+            var entry = new AuditLogEntry
+            {
+                Id = Guid.NewGuid(),
+                TenantId = requesterTenant,
+                OccurredAt = DateTimeOffset.UtcNow,
+                EventType = AuditEventTypes.AsyncJobAccessDenied,
+                ActorSid = new Sid(string.IsNullOrWhiteSpace(requesterSid) ? "anonymous" : requesterSid),
+                TargetTable = $"job:{jobId}",
+                Decision = "DENY",
+                DetailsJson = JsonSerializer.Serialize(new { JobId = jobId, Message = "Job not accessible for the requesting principal." })
+            };
+
+            await _auditLogRepository.RecordAuditEventAsync(entry, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Failed to record access-denied audit event for job {JobId}", jobId);
         }
     }
 }

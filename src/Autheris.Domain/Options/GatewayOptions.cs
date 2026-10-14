@@ -53,6 +53,7 @@ public sealed class GatewayOptions
     [Required] public VirtualFilterOptions VirtualFilters { get; init; } = new();
     [Required] public LoggingOptions Logging { get; init; } = new();
     [Required] public ClassificationOptions Classification { get; init; } = new();
+    [Required] public TenantIsolationOptions TenantIsolation { get; init; } = new();
     [Required] public ODataOptions OData { get; init; } = new();
     [Required] public WebhooksOptions Webhooks { get; init; } = new();
 
@@ -389,7 +390,21 @@ public sealed class PluginsOptions
 public sealed class ReverseProxyOptions
 {
     public bool Enabled { get; init; } = true;
-    public List<string> KnownNetworks { get; init; } = ["127.0.0.1/32", "::1/128"];
+
+    /// <summary>
+    /// Networks whose X-Forwarded-* headers are trusted. When not configured, only loopback (127.0.0.1/32, ::1/128) is
+    /// trusted. A configured list replaces the default entirely. Nullable on purpose: the configuration binder appends
+    /// to pre-filled lists, so a non-empty default could not be narrowed. An empty JSON array is logged
+    /// as a startup warning and treated as not configured (loopback is always trusted); to trust no forwarded headers
+    /// at all, set <see cref="Enabled"/> to false.
+    /// </summary>
+    public List<string>? KnownNetworks { get; init; }
+
+    private static readonly string[] DefaultKnownNetworks = ["127.0.0.1/32", "::1/128"];
+
+    /// <summary>Configured <see cref="KnownNetworks"/> or the loopback default.</summary>
+    public IReadOnlyList<string> GetEffectiveKnownNetworks() => KnownNetworks ?? (IReadOnlyList<string>)DefaultKnownNetworks;
+
     public List<string> KnownProxies { get; init; } = [];
 }
 
@@ -439,8 +454,17 @@ public sealed class ForwardAuthOptions
     /// RR-L2-02: Allowlist of roles accepted from the (proxy-asserted) roles header. Matching uses the role name
     /// after an optional "tenant:" prefix. Administrative roles (ClusterAdmin, PlatformAdmin, GatewayAdmin,
     /// GovernanceAdmin, SecurityAdmin, PrivacyAdmin, BreakGlassOperator) are never accepted from headers.
+    /// When not configured, GatewayUser, Consumer, Analyst and Developer are accepted; a configured list replaces that
+    /// default entirely. Nullable on purpose: the configuration binder appends to pre-filled lists, so a non-empty
+    /// default could not be narrowed. An empty JSON array aborts the start (it would silently apply the default); a list containing only a
+    /// role name that no proxy asserts accepts no header role.
     /// </summary>
-    public List<string> AllowedRoles { get; init; } = ["GatewayUser", "Consumer", "Analyst", "Developer"];
+    public List<string>? AllowedRoles { get; init; }
+
+    private static readonly string[] DefaultAllowedRoles = ["GatewayUser", "Consumer", "Analyst", "Developer"];
+
+    /// <summary>Configured <see cref="AllowedRoles"/> or the default list.</summary>
+    public IReadOnlyList<string> GetEffectiveAllowedRoles() => AllowedRoles ?? (IReadOnlyList<string>)DefaultAllowedRoles;
 
     /// <summary>
     /// RR-L2-02: When false (default), every group from the groups header is namespaced as
@@ -503,8 +527,19 @@ public sealed class BasicAuthSessionOptions
 
     public bool Enabled { get; init; } = false;
 
-    /// <summary>Environments in which the session cookie may be enabled. "Production" is never accepted.</summary>
-    public List<string> AllowedEnvironments { get; init; } = ["Development"];
+    /// <summary>
+    /// Environments in which the session cookie may be enabled. "Production" is never accepted. When not configured,
+    /// only Development is allowed; a configured list replaces that default entirely. Nullable on purpose: the
+    /// configuration binder appends to pre-filled lists, so a non-empty default could not be narrowed. An empty JSON
+    /// array aborts the start (it would silently apply the default); to disable the session everywhere, set
+    /// <see cref="Enabled"/> to false.
+    /// </summary>
+    public List<string>? AllowedEnvironments { get; init; }
+
+    private static readonly string[] DefaultAllowedEnvironments = ["Development"];
+
+    /// <summary>Configured <see cref="AllowedEnvironments"/> or the default list (Development).</summary>
+    public IReadOnlyList<string> GetEffectiveAllowedEnvironments() => AllowedEnvironments ?? (IReadOnlyList<string>)DefaultAllowedEnvironments;
 
     /// <summary>Cookie name; must use the <c>__Host-</c> prefix (Secure, Path=/, no Domain).</summary>
     public string CookieName { get; init; } = "__Host-Autheris.Session";
@@ -554,8 +589,17 @@ public sealed class EntraIdAuthOptions
     /// <summary>
     /// Delegated scopes (<c>scp</c>) that only permit reading, e.g. an agent scope. A user token whose scopes all appear
     /// here is read-only: writes over HTTP, GraphQL mutations and WebSQL DML are rejected.
+    /// When not configured, "Agent.Read" is the read-only scope; a configured list replaces that default entirely.
+    /// Nullable on purpose: the configuration binder appends to pre-filled lists, so a non-empty default could not be
+    /// replaced. An empty JSON array is logged as a startup warning and treated as not configured: the default
+    /// (Agent.Read) is more restrictive than no read-only scope, so the start is not aborted.
     /// </summary>
-    public List<string> ReadOnlyScopes { get; init; } = ["Agent.Read", "App.Read"];
+    public List<string>? ReadOnlyScopes { get; init; }
+
+    private static readonly string[] DefaultReadOnlyScopes = ["Agent.Read", "App.Read"];
+
+    /// <summary>Configured <see cref="ReadOnlyScopes"/> or the default list (Agent.Read, App.Read).</summary>
+    public IReadOnlyList<string> GetEffectiveReadOnlyScopes() => ReadOnlyScopes ?? (IReadOnlyList<string>)DefaultReadOnlyScopes;
 
     /// <summary>How app-only tokens (client credentials, no signed-in person) are treated. Defaults to ReadOnly.</summary>
     public AppOnlyTokenAccess AppOnlyTokens { get; init; } = AppOnlyTokenAccess.ReadOnly;
@@ -999,6 +1043,15 @@ public sealed class SqlDataSourceOptions
     [Range(0, 1000)] public int MaxConcurrentReadsPerUserAndTable { get; init; } = 4;
 
     public Dictionary<string, DataSourceConnectionOptions> Connections { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// WP-X0c (SEC-X1-09): how long the column types and collations read from the database metadata are cached, in seconds.
+    /// The hard maximum is 300; configuration can only lower it. A larger value fails the startup.
+    /// </summary>
+    [Range(1, 300)] public int CatalogCacheTtlSeconds { get; init; } = 300;
+
+    /// <summary>Global settings of the declarative HTTP data sources (web-api tables).</summary>
+    public HttpDataSourceOptions Http { get; init; } = new();
 }
 
 public sealed class DataSourceConnectionOptions
@@ -1014,6 +1067,88 @@ public sealed class DataSourceConnectionOptions
     /// on busy operational databases; default false. Ignored by other providers (PostgreSQL has no dirty reads).
     /// </summary>
     public bool ReadUncommitted { get; init; }
+
+    /// <summary>
+    /// Oracle only (WP-F1, CR-ADG-08): Key Vault reference of the database password. Outside Development the connection string
+    /// must not contain a plaintext <c>Password</c>; the factory injects the resolved secret when it opens the connection.
+    /// </summary>
+    public string? PasswordKeyVaultRef { get; init; }
+
+    /// <summary>
+    /// WP-X0b: default schema pinned on every connection rental. PostgreSQL: <c>search_path = pg_catalog, &lt;schema&gt;, pg_temp</c>;
+    /// Oracle: <c>CURRENT_SCHEMA</c>. SQL Server and SQLite ignore it. Validated against <see cref="DefaultSchemaPolicy"/>; the
+    /// value is only ever passed as a bound parameter and quoted by the database (<c>format('%I')</c>,
+    /// <c>DBMS_ASSERT.ENQUOTE_NAME</c>), never concatenated on the client.
+    /// </summary>
+    public string? DefaultSchema { get; init; }
+
+    /// <summary>
+    /// WP-X0b: when true the connection factory refuses to hand out a PostgreSQL or Oracle connection of this data source unless
+    /// <see cref="DefaultSchema"/> is set and valid (SQL_SOURCE_UNAVAILABLE, fail closed). Startup validation sets the same
+    /// requirement for every WebSQL-reachable PostgreSQL/Oracle source; this flag extends it to request time (options reload).
+    /// </summary>
+    public bool RequireDefaultSchema { get; init; }
+
+    /// <summary>Databricks only (WP-X0i, SEC-ADG-09): Statement Execution API settings. Required when <c>Provider</c> is databricks.</summary>
+    public DatabricksDataSourceOptions? Databricks { get; init; }
+}
+
+/// <summary>Authentication modes of the Databricks Statement Execution client.</summary>
+public enum DatabricksAuthMode
+{
+    /// <summary>OAuth machine-to-machine (service principal client credentials). Default and the only mode outside Development.</summary>
+    OAuthM2M = 0,
+
+    /// <summary>Personal access token. Development only (SEC-ADG-09 item 4).</summary>
+    Pat = 1
+}
+
+public sealed class DatabricksAuthOptions
+{
+    public DatabricksAuthMode Mode { get; init; } = DatabricksAuthMode.OAuthM2M;
+
+    /// <summary>OAuth M2M: service principal application id.</summary>
+    public string? ClientId { get; init; }
+
+    /// <summary>OAuth M2M: Key Vault reference of the service principal secret (plaintext only in Development).</summary>
+    public string? ClientSecretRef { get; init; }
+
+    /// <summary>PAT mode (Development only): Key Vault reference or plaintext token.</summary>
+    public string? PatRef { get; init; }
+}
+
+/// <summary>
+/// Settings of one Databricks SQL warehouse data source (design §6.3). The OAuth token endpoint is NOT configurable: it is
+/// always <c>https://{Host}/oidc/v1/token</c> (SEC-ADG-09 item 3).
+/// </summary>
+public sealed class DatabricksDataSourceOptions
+{
+    /// <summary>Exact workspace host name (no scheme, port, path or wildcard), for example <c>adb-123.azuredatabricks.net</c>.</summary>
+    public string Host { get; init; } = string.Empty;
+
+    public string WarehouseId { get; init; } = string.Empty;
+    public string Catalog { get; init; } = "main";
+    public string Schema { get; init; } = "default";
+    public DatabricksAuthOptions Auth { get; init; } = new();
+
+    /// <summary>Server-side wait per call; clamped to 5-50 seconds (SEC-ADG-09 item 6).</summary>
+    public int WaitTimeoutSeconds { get; init; } = 30;
+
+    /// <summary>Maximum inline result size in bytes (also bounds the response buffer).</summary>
+    [Range(1024, 104857600)] public long ByteLimit { get; init; } = 26214400;
+
+    /// <summary>Delay between status polls in milliseconds.</summary>
+    [Range(10, 10000)] public int PollIntervalMilliseconds { get; init; } = 500;
+}
+
+/// <summary>WP-X0b, SEC-X1-08: strict identifier rule for <see cref="DataSourceConnectionOptions.DefaultSchema"/>.</summary>
+public static partial class DefaultSchemaPolicy
+{
+    // \z instead of $: in .NET "$" also matches before a trailing line feed.
+    [System.Text.RegularExpressions.GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_$#]{0,127}\z", System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    private static partial System.Text.RegularExpressions.Regex Pattern();
+
+    public static bool IsValid(string? schema) => schema is not null && Pattern().IsMatch(schema);
 }
 
 public sealed class ItsmOptions
@@ -1240,7 +1375,22 @@ public sealed class ExtensibilityOptions
     public bool RequireJustificationForBreakGlass { get; init; } = true;
     // SEC M-06: Break-glass requires an authorized role by default.
     public bool RequireRoleForBreakGlass { get; init; } = true;
-    public List<string> BreakGlassAllowedRoles { get; init; } = ["BreakGlassOperator", "ClusterAdmin", "GovernanceAdmin", "SecurityAdmin"];
+
+    /// <summary>
+    /// Roles that may invoke break-glass when <see cref="RequireRoleForBreakGlass"/> is true. When not configured:
+    /// BreakGlassOperator, ClusterAdmin, GovernanceAdmin and SecurityAdmin. A configured list replaces that default
+    /// entirely, so an operator who restricts the list gets exactly what was configured. Nullable on purpose: the
+    /// configuration binder appends to pre-filled lists, so a non-empty default could not be narrowed. An empty JSON
+    /// array aborts the start (it would silently apply the default); to permit break-glass for nobody, set
+    /// <see cref="EnableBreakGlass"/> to false.
+    /// </summary>
+    public List<string>? BreakGlassAllowedRoles { get; init; }
+
+    private static readonly string[] DefaultBreakGlassAllowedRoles = ["BreakGlassOperator", "ClusterAdmin", "GovernanceAdmin", "SecurityAdmin"];
+
+    /// <summary>Configured <see cref="BreakGlassAllowedRoles"/> or the default list.</summary>
+    public IReadOnlyList<string> GetEffectiveBreakGlassAllowedRoles() => BreakGlassAllowedRoles ?? (IReadOnlyList<string>)DefaultBreakGlassAllowedRoles;
+
     public string JustificationHeaderName { get; init; } = "X-Access-Justification";
     public string BreakGlassHeaderName { get; init; } = "X-Break-Glass";
     public string PluginDirectory { get; init; } = "plugins";
@@ -1315,7 +1465,21 @@ public sealed class SystemMetricsOptions
 {
     public bool Enabled { get; init; } = true;
     public bool ExposeRestEndpoints { get; init; } = true;
-    public List<string> AllowedRoles { get; init; } = ["GovernanceAdmin", "ClusterAdmin", "SecurityAdmin"];
+
+    /// <summary>
+    /// Roles that may read the system metrics endpoints. When not configured: GovernanceAdmin, ClusterAdmin and
+    /// SecurityAdmin. A configured list replaces that default entirely. Nullable on purpose: the configuration binder
+    /// appends to pre-filled lists, so a non-empty default could not be narrowed. A configured empty JSON array
+    /// aborts the start (it would silently apply the default); to switch the endpoints off set <see cref="Enabled"/>
+    /// (or <see cref="ExposeRestEndpoints"/>) to false. A list that is empty only when built in code (not through
+    /// configuration) makes the endpoints require GovernanceAdmin.
+    /// </summary>
+    public List<string>? AllowedRoles { get; init; }
+
+    private static readonly string[] DefaultAllowedRoles = ["GovernanceAdmin", "ClusterAdmin", "SecurityAdmin"];
+
+    /// <summary>Configured <see cref="AllowedRoles"/> or the default list.</summary>
+    public IReadOnlyList<string> GetEffectiveAllowedRoles() => AllowedRoles ?? (IReadOnlyList<string>)DefaultAllowedRoles;
 }
 
 public sealed class GoldenQueryOptions
@@ -1464,7 +1628,19 @@ public sealed class WebSqlOptions
 public sealed class CrossSourceOptions
 {
     public bool Enabled { get; init; } = false;
-    public List<string> AllowedTransports { get; init; } = ["WebSql", "Trino"];
+    /// <summary>
+    /// Transport opt-in for federated (cross-source) queries. Valid names are the constants of <c>SqlTransports</c>:
+    /// WebSql, Trino, Rest, Mcp, ArrowExport, FlightSql, SqlEndpoints and AsyncJob. When not configured, only WebSql and
+    /// Trino are allowed; every other channel (including AsyncJob) is rejected on federated queries unless listed here.
+    /// An explicitly empty list allows no transport (fail-closed).
+    /// Nullable on purpose: the configuration binder appends to pre-filled lists, so a non-empty default could not be narrowed.
+    /// </summary>
+    public List<string>? AllowedTransports { get; init; }
+
+    private static readonly string[] DefaultAllowedTransports = ["WebSql", "Trino"];
+
+    /// <summary>Configured <see cref="AllowedTransports"/> or the default list (WebSql, Trino).</summary>
+    public IReadOnlyList<string> GetEffectiveAllowedTransports() => AllowedTransports ?? (IReadOnlyList<string>)DefaultAllowedTransports;
     public int MaxTableCount { get; init; } = 5;
     public int MaxStagedRowsPerTable { get; init; } = 50000;
     public int MaxTotalStagedRows { get; init; } = 200000;
@@ -1475,7 +1651,22 @@ public sealed class CrossSourceOptions
     public int TimeoutSeconds { get; init; } = 30;
     public int MaxParallelSourceReads { get; init; } = 4;
     public bool AllowNonEquiJoins { get; init; } = false;
-    public List<string> AllowedHttpAuthModes { get; init; } = ["None", "StaticApiKey", "ClientCredentials"];
+
+    /// <summary>
+    /// HTTP data source authentication modes allowed in federated queries. When not configured: None, StaticApiKey and
+    /// ClientCredentials. A configured list replaces that default entirely. Nullable on purpose: the configuration
+    /// binder appends to pre-filled lists, so a non-empty default could not be narrowed. Enforced fail-closed by the
+    /// federated staging step before any source is read: an HTTP source whose auth mode is not listed is denied with
+    /// error code HTTP_AUTH_MODE_DENIED (HTTP 403). ForwardBearerToken is never permitted, even if listed. An empty JSON
+    /// array aborts the start (it would silently apply the default); to permit no federated HTTP source, set
+    /// <see cref="Enabled"/> to false.
+    /// </summary>
+    public List<string>? AllowedHttpAuthModes { get; init; }
+
+    private static readonly string[] DefaultAllowedHttpAuthModes = ["None", "StaticApiKey", "ClientCredentials"];
+
+    /// <summary>Configured <see cref="AllowedHttpAuthModes"/> or the default list.</summary>
+    public IReadOnlyList<string> GetEffectiveAllowedHttpAuthModes() => AllowedHttpAuthModes ?? (IReadOnlyList<string>)DefaultAllowedHttpAuthModes;
 }
 
 public sealed class WebSqlPlanCacheOptions
@@ -1764,6 +1955,9 @@ public sealed class VirtualFilterOptions
     /// </summary>
     public bool RequireApproval { get; init; } = false;
 
+    /// <summary>F-GOV-14: Virtual Filters on Web-API tables in WebSQL cross-source queries.</summary>
+    public VirtualFilterFederationOptions Federation { get; init; } = new();
+
     /// <summary>
     /// SR15-11: Optional allowlist of table names or qualified identifiers allowed in virtual filter subqueries.
     /// When non-empty, any table referenced in a virtual filter subquery must be present in this list.
@@ -1805,3 +1999,36 @@ public sealed class LoggingOptions
 }
 
 
+
+/// <summary>Decision B-1: handling of tenant ids that differ only in case.</summary>
+public sealed class TenantIsolationOptions
+{
+    /// <summary>
+    /// Default <c>false</c>: colliding tenants are denied per request (403 <c>TENANT_ID_COLLISION</c> plus an audit entry) and the
+    /// start only logs a critical warning, so one bad tenant id does not take down the others. <c>true</c> refuses the start
+    /// outside Development (strict mode).
+    /// </summary>
+    public bool StrictCollisionStartup { get; init; }
+
+    /// <summary>CR-ADG-31 / WP-X0p: the tenant registry that detects collisions between tenants known only to the identity provider.</summary>
+    public TenantRegistryOptions Registry { get; init; } = new();
+}
+
+/// <summary>Tenant registry settings (<c>Gateway:TenantIsolation:Registry</c>). Off by default; the legacy configured-tenant guard stays active either way.</summary>
+public sealed class TenantRegistryOptions
+{
+    /// <summary>When <c>true</c> every authenticated request registers its tenant id; the registry being unavailable then denies the request (503).</summary>
+    public bool Enabled { get; init; }
+
+    /// <summary>Budget of new tenant registrations per identity provider issuer and window (SEC-X1-13).</summary>
+    [Range(1, 100_000)] public int MaxNewTenantsPerIssuerPerWindow { get; init; } = 20;
+
+    [Range(1, 86_400)] public int WindowSeconds { get; init; } = 60;
+
+    /// <summary>TTL of the in-memory positive cache; a collision recorded by another replica takes effect within this time.</summary>
+    [Range(1, 3_600)] public int CacheTtlSeconds { get; init; } = 60;
+
+    [Range(1, 1_000_000)] public int MaxCacheEntries { get; init; } = 10_000;
+
+    [Range(1, 100_000)] public int MaxTrackedIssuers { get; init; } = 1_024;
+}

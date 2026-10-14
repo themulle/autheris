@@ -7,7 +7,11 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using TrinoSqlEngine;
+using TrinoSqlEngine.Ast.Builder;
+using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
+using TrinoSqlEngine.Ast.Visitors;
+using TrinoSqlEngine.Governance;
 
 /// <summary>
 /// Virtual filters, phase 7: stage 2 definitions, a correlated predicate in Trino syntax
@@ -371,6 +375,88 @@ public static partial class SqlFilterCompiler
         var quotedTarget = dialect.QuoteIdentifier(TargetAlias) + ".";
         var correlated = generated.Replace(quotedTarget, dialect.QuoteIdentifier(RowFilterAliases.Target) + ".", StringComparison.Ordinal);
         return $"EXISTS ({correlated})";
+    }
+
+    /// <summary>Default prefix of the policy parameters of a typed virtual filter predicate.</summary>
+    public const string DefaultTypedParameterPrefix = "__gql_vf_";
+
+    /// <summary>
+    /// Typed variant of <see cref="Compile"/> (WP-X0g): the same <c>EXISTS (SELECT 1 FROM ... WHERE ...)</c> as AST, correlated with
+    /// <c>autheris_target</c>. The reserved <c>target</c> qualifier is rebased on the tree (no text edit), time functions stay AST
+    /// nodes, and every literal that is a direct operand of a comparison, IN list, BETWEEN or LIKE becomes a bound policy parameter
+    /// named <paramref name="parameterPrefix"/> plus a counter. <paramref name="engine"/> only parses (it is injected, never created here).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The definition has no sql, or does not compile to a correlated subquery.</exception>
+    public static PolicyPredicate CompileTyped(
+        VirtualFilter filter, DatabaseDialect dialect, ISqlEngine engine, string parameterPrefix = DefaultTypedParameterPrefix)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        ArgumentNullException.ThrowIfNull(engine);
+        var fragment = filter.Sql ?? throw new InvalidOperationException($"The virtual filter '{filter.Name}' has no sql definition.");
+        var options = new RlsOptions
+        {
+            TargetDialect = Sql.SqlDialectMapper.ToTargetDialect(dialect),
+            RewriterEngine = "AstCompiler",
+            TranslateTrinoDateFunctions = true,
+            PolicyProvider = new DefaultRlsPolicyProvider(predicate: _ => false),
+            EnforceReadOnlyQueries = true,
+            EnforceFunctionPolicy = true,
+            AllowedFunctions = AllowedFunctions,
+            EnforcedMaxRows = 0
+        };
+
+        var (tree, _) = engine.Parse(Statement(fragment).AsMemory(), SqlTokenSecurityOptions.FromRlsOptions(options), CancellationToken.None);
+        var ast = new SqlAstBuilder(AstBuilderOptions.FromRlsOptions(options)).BuildStatement(tree);
+        var secured = (SqlStatement)new AstSecurityVisitor(options, engine).Visit(ast);
+        var simplified = (SqlStatement)new AstSimplificationVisitor().Visit(secured);
+        new AstValidationVisitor().Validate(simplified);
+
+        if (simplified is not SelectStatement { Body: QuerySpecification { Where: not null } } select)
+        {
+            throw new InvalidOperationException($"The virtual filter '{filter.Name}' did not compile to a correlated subquery.");
+        }
+
+        var shaper = new TypedShaper(new Sql.Policy.PolicyParameterNamer(parameterPrefix));
+        var shaped = (SelectStatement)shaper.Visit(select);
+        return PolicyPredicate.Create(new ExistsExpression(shaped), shaper.Namer.Values);
+    }
+
+    /// <summary>Rebases <c>target</c> onto the reserved alias and turns comparison operands into policy parameters.</summary>
+    private sealed class TypedShaper(Sql.Policy.PolicyParameterNamer namer) : SqlAstRewriter
+    {
+        public Sql.Policy.PolicyParameterNamer Namer { get; } = namer;
+
+        public override SqlNode Visit(SqlNode node)
+        {
+            var visited = base.Visit(node);
+            switch (visited)
+            {
+                case ColumnReference { Name.Parts.Count: > 1 } column
+                    when string.Equals(column.Name.Parts[0].Value, TargetAlias, StringComparison.OrdinalIgnoreCase):
+                    var parts = new List<SqlIdentifier>(column.Name.Parts) { [0] = column.Name.Parts[0] with { Value = RowFilterAliases.Target } };
+                    return column with { Name = new SqlQualifiedName(parts) };
+                case BinaryExpression bin when bin.Operator is BinaryOperator.Equal or BinaryOperator.NotEqual or BinaryOperator.LessThan
+                    or BinaryOperator.LessThanOrEqual or BinaryOperator.GreaterThan or BinaryOperator.GreaterThanOrEqual:
+                    return bin with { Left = Bind(bin.Left), Right = Bind(bin.Right) };
+                case InListExpression inList:
+                    return inList with { Items = inList.Items.Select(i => Bind(i)).ToList() };
+                case BetweenExpression between:
+                    return between with { Lower = Bind(between.Lower), Upper = Bind(between.Upper) };
+                case LikeExpression like:
+                    return like with { Pattern = Bind(like.Pattern, isLikePattern: true) };
+                default:
+                    return visited;
+            }
+        }
+
+        private Expression Bind(Expression expression, bool isLikePattern = false) => expression switch
+        {
+            LiteralExpression { Type: LiteralType.String, Value: string text } => Namer.Add(new PolicyValue(text, SqlParameterType.String), isLikePattern),
+            LiteralExpression { Type: LiteralType.Integer, Value: long number } => Namer.Add(new PolicyValue(number, SqlParameterType.Int64)),
+            LiteralExpression { Type: LiteralType.Decimal, Value: decimal number } => Namer.Add(new PolicyValue(number, SqlParameterType.Decimal)),
+            LiteralExpression { Type: LiteralType.Boolean, Value: bool flag } => Namer.Add(new PolicyValue(flag, SqlParameterType.Boolean)),
+            _ => expression
+        };
     }
 
     private static string Statement(string fragment) => "SELECT 1 " + fragment.Trim();

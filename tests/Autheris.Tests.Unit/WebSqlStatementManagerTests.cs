@@ -175,6 +175,45 @@ public sealed class WebSqlStatementManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task SubmitOrWaitAsync_WhenStatementDoesNotParse_IsFailedWithTheSyntaxMessage_NotCanceled()
+    {
+        var request = new GovernedSqlQueryRequest("SELEC 1");
+        _sqlExecutionService.ExecuteQueryBufferedAsync(request, TestUser, TestTenant, Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<GovernedSqlResult>(new Antlr4.Runtime.Misc.ParseCanceledException("line 1:0: mismatched input 'SELEC'")));
+
+        var status = await _manager.SubmitOrWaitAsync(request, TestUser, TestTenant, TimeSpan.FromSeconds(2));
+
+        status.State.ShouldBe("FAILED");
+        status.ErrorMessage.ShouldBe(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.SyntaxError));
+    }
+
+    [Fact]
+    public async Task SubmitOrWaitAsync_WhenParserTimesOut_IsFailedWithTheLimitMessage_NotCanceled()
+    {
+        var request = new GovernedSqlQueryRequest("SELECT 1");
+        _sqlExecutionService.ExecuteQueryBufferedAsync(request, TestUser, TestTenant, Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<GovernedSqlResult>(
+                new Antlr4.Runtime.Misc.ParseCanceledException("SQL parsing exceeded the time budget.", new TimeoutException("budget"))));
+
+        var status = await _manager.SubmitOrWaitAsync(request, TestUser, TestTenant, TimeSpan.FromSeconds(2));
+
+        status.State.ShouldBe("FAILED");
+        status.ErrorMessage.ShouldBe(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.LimitExceeded));
+    }
+
+    [Fact]
+    public async Task SubmitOrWaitAsync_WhenExecutionIsCanceledWithoutAGovernedError_StaysCanceled()
+    {
+        var request = new GovernedSqlQueryRequest("SELECT 1");
+        _sqlExecutionService.ExecuteQueryBufferedAsync(request, TestUser, TestTenant, Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<GovernedSqlResult>(new OperationCanceledException()));
+
+        var status = await _manager.SubmitOrWaitAsync(request, TestUser, TestTenant, TimeSpan.FromSeconds(2));
+
+        status.State.ShouldBe("CANCELED");
+    }
+
+    [Fact]
     public async Task SubmitOrWaitAsync_WhenExecutionFaultsWithDatabaseError_SanitizesErrorMessage()
     {
         // Arrange

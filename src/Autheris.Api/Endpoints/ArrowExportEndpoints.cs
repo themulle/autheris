@@ -180,7 +180,8 @@ public static class ArrowExportEndpoints
             var gatewayOptions = httpContext.RequestServices?.GetService<IOptions<GatewayOptions>>()?.Value;
             var queryRequest = new GovernedSqlQueryRequest(
                 effectiveSql,
-                RowLimit: ArrowExportRowLimit(gatewayOptions));
+                RowLimit: ArrowExportRowLimit(gatewayOptions),
+                Transport: SqlTransports.ArrowExport);
             var queryResult = await sqlExecutionService.ExecuteQueryBufferedAsync(queryRequest, httpContext.User, tenant, ct).ConfigureAwait(false);
             rows = queryResult.Rows;
         }

@@ -95,7 +95,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
             var limit = ExtractInt(paramDict, "limit") ?? 50;
             var offset = ExtractInt(paramDict, "offset") ?? 0;
 
-            var request = new DatasetQueryRequest(table.Value, select, filter, orderBy, limit, offset);
+            var request = new DatasetQueryRequest(table.Value, select, filter, orderBy, limit, offset, SqlTransports.Mcp);
             var envelope = await _dataQueryService.ExecuteQueryAsync(request, effectiveContext, ct).ConfigureAwait(false);
             return JsonSerializer.Serialize(envelope, JsonOpts);
         }
@@ -205,7 +205,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
             }
 
             var sqlResult = await _sqlExecutionService.ExecuteQueryBufferedAsync(
-                new GovernedSqlQueryRequest(sql),
+                new GovernedSqlQueryRequest(sql, Transport: SqlTransports.Mcp),
                 effectiveContext.User,
                 effectiveContext.TenantId,
                 ct).ConfigureAwait(false);

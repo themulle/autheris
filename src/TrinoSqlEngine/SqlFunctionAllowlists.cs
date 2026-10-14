@@ -53,10 +53,11 @@ public static class SqlFunctionAllowlists
         "square", "pi", "degrees", "radians", "count_big", "stdev", "stdevp", "var", "varp", "translate",
     ];
 
+    // SEC-X1-10: closed list. printf/format (unbounded padding width) are excluded, like every name of SqlFunctionPolicy.DefaultDeniedFunctions.
     private static readonly string[] SqliteFunctions =
     [
-        "date", "time", "datetime", "julianday", "strftime", "unixepoch", "ifnull", "iif", "instr", "printf",
-        "format", "group_concat", "total", "unicode", "char", "trunc", "pi",
+        "date", "time", "datetime", "julianday", "strftime", "unixepoch", "ifnull", "iif", "instr",
+        "group_concat", "total", "unicode", "char", "trunc", "pi",
     ];
 
     private static readonly string[] OracleFunctions =
@@ -65,6 +66,106 @@ public static class SqlFunctionAllowlists
         "to_number", "add_months", "months_between", "last_day", "next_day", "initcap", "instr",
         "listagg", "median", "translate", "dump", "vsize", "nanvl",
     ];
+
+    private static readonly string[] DatabricksFunctions =
+    [
+        "now", "date_trunc", "date_add", "date_sub", "datediff", "dateadd", "date_format", "to_date", "to_timestamp", "trunc",
+        "year", "month", "day", "dayofmonth", "dayofweek", "dayofyear", "hour", "minute", "second", "quarter", "weekofyear",
+        "last_day", "add_months", "months_between", "make_date", "ifnull", "nvl", "nvl2", "instr", "locate", "concat_ws",
+        "initcap", "translate", "regexp_replace", "startswith", "endswith", "contains", "approx_count_distinct", "any_value",
+        "bool_and", "bool_or", "every", "string_agg", "percentile_cont", "percentile_disc", "median", "try_cast", "pi",
+        "localtimestamp", "current_timestamp", "current_date",
+    ];
+
+    // SQL special forms and ANSI niladic functions that the builder checks under their function name; every dialect has a rule.
+    private static readonly string[] TrinoSpecialForms =
+    [
+        "substring", "trim", "position", "extract", "cast", "current_date", "current_timestamp", "current_time", "localtime",
+        "localtimestamp",
+    ];
+
+    // Trino functions that only exist with TranslateTrinoDateFunctions (the builder turns them into date nodes); without the
+    // option they are only listed where the dialect has the native function of the same name (its default allowlist).
+    private static readonly string[] TrinoDateFunctions = ["date_add", "date_trunc", "now"];
+
+    /// <summary>
+    /// Trino function names that a dialect generator rewrites to a native form (CR-ADG-02: a name is listed only where the dialect
+    /// has a rule, otherwise the call would reach the database unchanged and fail at execution).
+    /// </summary>
+    private static IEnumerable<string> RewrittenFunctions(TargetSqlDialect dialect)
+    {
+        if (dialect is TargetSqlDialect.PostgreSql or TargetSqlDialect.DuckDb or TargetSqlDialect.SqlServer or TargetSqlDialect.Oracle
+            or TargetSqlDialect.Databricks)
+        {
+            yield return "strpos";
+        }
+
+        if (dialect is TargetSqlDialect.Databricks)
+        {
+            yield return "approx_distinct";
+        }
+
+        if (dialect is TargetSqlDialect.Databricks or TargetSqlDialect.DuckDb)
+        {
+            yield return "arbitrary";
+        }
+    }
+
+    /// <summary>
+    /// Names that have a rule in the per-dialect function map of the governed compiler (CR-ADG-02): the legacy allowlist of the
+    /// dialect plus the Trino functions that the compiler rewrites for that dialect. Anything else is rejected (INV-1, plan 3.6).
+    /// The date functions are included for <c>TranslateTrinoDateFunctions</c>; <see cref="WithoutDateTranslation"/> removes them again.
+    /// </summary>
+    internal static IReadOnlySet<string> CompilerNames(TargetSqlDialect dialect)
+    {
+        var names = new HashSet<string>(GetDefault(dialect), StringComparer.OrdinalIgnoreCase);
+        foreach (var name in TrinoSpecialForms.Concat(TrinoDateFunctions).Concat(RewrittenFunctions(dialect)))
+        {
+            if (!SqlFunctionPolicy.IsDeniedByDefault(name)) names.Add(name);
+        }
+
+        return names.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The function map of a request without <c>TranslateTrinoDateFunctions</c>: <c>date_add</c>, <c>date_trunc</c> and <c>now</c>
+    /// stay only where the dialect has the native function of that name, otherwise the call would reach the database unchanged.
+    /// </summary>
+    internal static IReadOnlySet<string> WithoutDateTranslation(TargetSqlDialect dialect, IReadOnlySet<string> names)
+    {
+        // G8: the result is a pure function of the (immutable) name set and the dialect, so it is computed once per name set
+        // instead of building a new frozen set on every compile. It contains no request value (SEC-ADG-01).
+        var entry = WithoutDateCache.GetValue(names, static _ => new WithoutDateEntry());
+        var cached = entry.Value;
+        if (cached is not null && cached.Dialect == dialect)
+        {
+            return cached.Names;
+        }
+
+        var native = GetDefault(dialect);
+        var result = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
+        foreach (var name in TrinoDateFunctions)
+        {
+            if (!native.Contains(name)) result.Remove(name);
+        }
+
+        var frozen = result.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+        entry.Value = new WithoutDateResult(dialect, frozen);
+        return frozen;
+    }
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<IReadOnlySet<string>, WithoutDateEntry> WithoutDateCache = new();
+
+    private sealed record WithoutDateResult(TargetSqlDialect Dialect, IReadOnlySet<string> Names);
+
+    private sealed class WithoutDateEntry
+    {
+        // A reference write is atomic; a lost race only recomputes the same value.
+        public volatile WithoutDateResult? Value;
+    }
+
+    /// <summary>Databricks allowlist (ANSI + the reviewed safe Spark SQL functions; no reflection, secrets or UDF calls).</summary>
+    public static IReadOnlySet<string> Databricks { get; } = Create(CommonFunctions, DatabricksFunctions);
 
     /// <summary>Dialect-neutral (ANSI) allowlist.</summary>
     public static IReadOnlySet<string> Ansi { get; } = Create(CommonFunctions);
@@ -92,6 +193,7 @@ public static class SqlFunctionAllowlists
         TargetSqlDialect.Sqlite => Sqlite,
         TargetSqlDialect.Oracle => Oracle,
         TargetSqlDialect.DuckDb => DuckDb,
+        TargetSqlDialect.Databricks => Databricks,
         _ => Ansi
     };
 

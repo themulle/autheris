@@ -144,7 +144,7 @@ public sealed class SqlDataSourceResolver
                string.Equals(tableOrAlias, target.FullName, StringComparison.OrdinalIgnoreCase);
     }
 
-    public static WebSqlPolicyException TableDenied(TableAccessTarget target) =>
+    public static WebSqlTableDeniedException TableDenied(TableAccessTarget target) =>
         new($"Access to table '{target.FullName}' is denied or the table is not registered in the governance catalog.");
 
     public static void AddInternalRowFilterParameters(IReadOnlyDictionary<string, object?>? source, Dictionary<string, object?> target)
@@ -153,6 +153,9 @@ public sealed class SqlDataSourceResolver
         {
             return;
         }
+
+        // SEC-ADG-02: two keys of one decision that name the same parameter (marker prefix or case) fail closed.
+        _ = Autheris.Application.Sql.Policy.RowFilterParameterNames.Checked(source);
 
         foreach (var (name, value) in source)
         {

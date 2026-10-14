@@ -195,7 +195,7 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
         using (var scope = _scopeFactory.CreateScope())
         {
             var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
-            var request = new GovernedSqlQueryRequest(ticket.Query, RowLimit: FlightSqlRowLimit());
+            var request = new GovernedSqlQueryRequest(ticket.Query, RowLimit: FlightSqlRowLimit(), Transport: SqlTransports.FlightSql);
             result = await sqlService.ExecuteQueryBufferedAsync(request, principal, new TenantId(ticket.TenantId), ct).ConfigureAwait(false);
         }
 

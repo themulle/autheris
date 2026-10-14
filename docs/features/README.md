@@ -52,7 +52,8 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-DBT-4** | Zero-Touch dbt Cloud & Orchestrator Webhook Integration | [f-dbt-04-orchestrator-webhooks.md](f-dbt-04-orchestrator-webhooks.md) |
 | **F-DBT-05** | Streaming dbt Metadata Ingestion & Automated Model Sync | [f-dbt-05-streaming-metadata-ingestion.md](f-dbt-05-streaming-metadata-ingestion.md) |
 | **F-DBT-6** | Policy & RLS Auto-Sync from dbt Metadata | [f-dbt-06-policy-rls-sync.md](f-dbt-06-policy-rls-sync.md) |
-| **F-DIALECT-01** | Multi-Target SQL AST Compiler & Native Dialect Pushdown | [f-dialect-01-ast-target-dialect-pushdown.md](f-dialect-01-ast-target-dialect-pushdown.md) |
+| **F-DIALECT-01** | Multi-Target SQL AST Compiler & Native Dialect Pushdown (superseded by F-DIALECT-02) | [f-dialect-01-ast-target-dialect-pushdown.md](f-dialect-01-ast-target-dialect-pushdown.md) |
+| **F-DIALECT-02** | Governed AST SQL Compiler (DQL and DML: SQL Server, PostgreSQL, DuckDB, Oracle; Databricks experimental) | [f-dialect-02-ast-sql-compiler.md](f-dialect-02-ast-sql-compiler.md) |
 | **F-DOC-01** | Omnichannel Semantic Documentation Passthrough | [f-doc-01-omnichannel-documentation.md](f-doc-01-omnichannel-documentation.md) |
 | **F-DX-01** | Zero-Config Developer Quickstart & Dev Portal Hub | [f-dx-01-developer-quickstart.md](f-dx-01-developer-quickstart.md) |
 | **F-EXT-01** | Generic C# DLL Plugin & Event/Webhook Subsystem | [f-ext-01-generic-plugin-events-and-webhooks.md](f-ext-01-generic-plugin-events-and-webhooks.md) |
@@ -62,7 +63,7 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-GOV-11** | Declarative Access Profiles & Person-Based Plaintext Exceptions (R-52) | [f-gov-11-declarative-access-profiles.md](f-gov-11-declarative-access-profiles.md) |
 | **F-GOV-12** | Multi-Engine Governance Database Storage (MSSQL, PostgreSQL, SQLite) | [f-gov-12-multi-engine-governance-storage.md](f-gov-12-multi-engine-governance-storage.md) |
 | **F-GOV-13** | Enterprise Data Classification, PII Tagging & Sensitivity Governance Engine | [f-gov-13-data-classification-and-pii-governance.md](f-gov-13-data-classification-and-pii-governance.md) |
-| **F-GOV-14** | Federated Virtual Filters on Web-APIs via DuckDB & Adaptive Pushdown | [f-gov-14-federated-virtual-filters.md](f-gov-14-federated-virtual-filters.md) |
+| **F-GOV-14** | Federated Virtual Filters on Web-APIs (gateway semi-join, point-lookup short-circuit, key pushdown; fail-closed) | [f-gov-14-federated-virtual-filters.md](f-gov-14-federated-virtual-filters.md) |
 | **F-GOV-15** | Declarative Consent GitOps, Effective Access Introspection & Scope Governance | [f-gov-15-declarative-consents-scopes.md](f-gov-15-declarative-consents-scopes.md) |
 | **F-GOV-16** | Catalog Discovery Transparency, Data Ownership & Response Masking Metadata | [f-gov-16-catalog-ownership-transparency.md](f-gov-16-catalog-ownership-transparency.md) |
 | **F-GOV-17** | GraphQL Cursor Pagination, Temporal Types & dbt Column Semantics | [f-gov-17-graphql-temporal-dbt-semantics.md](f-gov-17-graphql-temporal-dbt-semantics.md) |

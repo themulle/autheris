@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using TrinoSqlEngine.Ast.Emit;
 
 namespace Autheris.Application.Olap;
 
@@ -17,7 +18,8 @@ public sealed record OlapTableSource(
 public sealed record OlapQueryRequest(
     string Sql,
     IReadOnlyList<OlapTableSource> Sources,
-    int? Limit = null);
+    int? Limit = null,
+    IReadOnlyList<BoundParameter>? Parameters = null);
 
 public sealed record OlapQueryResult(
     IReadOnlyList<string> Columns,
@@ -25,7 +27,7 @@ public sealed record OlapQueryResult(
     int TotalRowCount,
     TimeSpan ExecutionDuration);
 
-public sealed record GeneratedOlapQuery(string Sql);
+public sealed record GeneratedOlapQuery(string Sql, IReadOnlyList<BoundParameter>? Parameters = null);
 
 public interface IDuckDbOlapEngine : IDisposable
 {

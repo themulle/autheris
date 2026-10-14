@@ -10,6 +10,7 @@ using Autheris.Application.Olap;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -53,10 +54,10 @@ public sealed class CrossSourcePlannerTests
         var tOrders = new ResolvedSourceTable(metadata.ReferencedTables[0], orderMeta.Identifier, orderMeta, "crm");
         var tShipments = new ResolvedSourceTable(metadata.ReferencedTables[1], shipMeta.Identifier, shipMeta, "logistics");
 
-        var decisions = new Dictionary<string, TableAccessDecision>
+        var decisions = new Dictionary<TableIdentifier, TableAccessDecision>
         {
-            [orderMeta.Identifier.ToQualifiedName()] = TableAccessDecision.Allowed(orderMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
-            [shipMeta.Identifier.ToQualifiedName()] = TableAccessDecision.Allowed(shipMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
+            [orderMeta.Identifier] = TableAccessDecision.Allowed(orderMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
+            [shipMeta.Identifier] = TableAccessDecision.Allowed(shipMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
         };
 
         var planner = new CrossSourcePlanner(Engine);
@@ -80,6 +81,33 @@ public sealed class CrossSourcePlannerTests
     }
 
     [Fact]
+    public void FederatedPlan_BindsParameters()
+    {
+        var sql = "SELECT o.id, s.tracking FROM crm.public.orders o JOIN logistics.v1.shipments s ON o.shipment_id = s.id WHERE o.id = 42 AND s.tracking = 'abc'' OR 1=1 --'";
+        var metadata = Engine.Analyze(sql.AsMemory());
+
+        var orderMeta = CreateTable("crm", "orders", DataSourceType.Sql, ["id", "shipment_id"]);
+        var shipMeta = CreateTable("logistics", "shipments", DataSourceType.HttpDeclarative, ["id", "tracking"]);
+        var tOrders = new ResolvedSourceTable(metadata.ReferencedTables[0], orderMeta.Identifier, orderMeta, "crm");
+        var tShipments = new ResolvedSourceTable(metadata.ReferencedTables[1], shipMeta.Identifier, shipMeta, "logistics");
+        var decisions = new Dictionary<TableIdentifier, TableAccessDecision>
+        {
+            [orderMeta.Identifier] = TableAccessDecision.Allowed(orderMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
+            [shipMeta.Identifier] = TableAccessDecision.Allowed(shipMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
+        };
+
+        var plan = new CrossSourcePlanner(Engine).Plan(sql, metadata, [tOrders, tShipments], decisions, new CrossSourceOptions { Enabled = true });
+
+        plan.Compiled.Dialect.ShouldBe(TrinoSqlEngine.TargetSqlDialect.DuckDb);
+        plan.Compiled.Parameters.Length.ShouldBe(2);
+        plan.Compiled.Parameters.Select(p => p.Value).ShouldContain("abc' OR 1=1 --");
+        plan.Compiled.Parameters.ShouldAllBe(p => p.Marker.StartsWith('$'));
+        plan.GeneratedDuckDbSql.ShouldContain("$1");
+        plan.GeneratedDuckDbSql.ShouldNotContain("abc");
+        plan.GeneratedDuckDbSql.ShouldNotContain("42");
+    }
+
+    [Fact]
     public void Plan_SEC_FILTER_01_Violation_ThrowsWebSqlPolicyException()
     {
         var sql = "SELECT o.id, s.tracking FROM crm.public.orders o JOIN logistics.v1.shipments s ON o.shipment_id = s.id WHERE o.secret_note = 'classified'";
@@ -99,10 +127,10 @@ public sealed class CrossSourcePlannerTests
             ["secret_note"] = ColumnAccessLevel.Mask
         };
 
-        var decisions = new Dictionary<string, TableAccessDecision>
+        var decisions = new Dictionary<TableIdentifier, TableAccessDecision>
         {
-            [orderMeta.Identifier.ToQualifiedName()] = TableAccessDecision.Allowed(orderMeta.Identifier, colAccess, hasUnconstrainedColumnAllow: false),
-            [shipMeta.Identifier.ToQualifiedName()] = TableAccessDecision.Allowed(shipMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
+            [orderMeta.Identifier] = TableAccessDecision.Allowed(orderMeta.Identifier, colAccess, hasUnconstrainedColumnAllow: false),
+            [shipMeta.Identifier] = TableAccessDecision.Allowed(shipMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
         };
 
         var planner = new CrossSourcePlanner(Engine);
@@ -132,10 +160,10 @@ public sealed class CrossSourcePlannerTests
             ["secret_note"] = ColumnAccessLevel.Mask
         };
 
-        var decisions = new Dictionary<string, TableAccessDecision>
+        var decisions = new Dictionary<TableIdentifier, TableAccessDecision>
         {
-            [orderMeta.Identifier.ToQualifiedName()] = TableAccessDecision.Allowed(orderMeta.Identifier, colAccess, hasUnconstrainedColumnAllow: false),
-            [shipMeta.Identifier.ToQualifiedName()] = TableAccessDecision.Allowed(shipMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
+            [orderMeta.Identifier] = TableAccessDecision.Allowed(orderMeta.Identifier, colAccess, hasUnconstrainedColumnAllow: false),
+            [shipMeta.Identifier] = TableAccessDecision.Allowed(shipMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
         };
 
         var planner = new CrossSourcePlanner(Engine);
@@ -158,10 +186,10 @@ public sealed class CrossSourcePlannerTests
         var tOrders = new ResolvedSourceTable(metadata.ReferencedTables[0], orderMeta.Identifier, orderMeta, "crm");
         var tShipments = new ResolvedSourceTable(metadata.ReferencedTables[1], shipMeta.Identifier, shipMeta, "logistics");
 
-        var decisions = new Dictionary<string, TableAccessDecision>
+        var decisions = new Dictionary<TableIdentifier, TableAccessDecision>
         {
-            [orderMeta.Identifier.ToQualifiedName()] = TableAccessDecision.Allowed(orderMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
-            [shipMeta.Identifier.ToQualifiedName()] = TableAccessDecision.Allowed(shipMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
+            [orderMeta.Identifier] = TableAccessDecision.Allowed(orderMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
+            [shipMeta.Identifier] = TableAccessDecision.Allowed(shipMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
         };
 
         var planner = new CrossSourcePlanner(Engine);
@@ -184,10 +212,10 @@ public sealed class CrossSourcePlannerTests
         var tOrders = new ResolvedSourceTable(metadata.ReferencedTables[0], orderMeta.Identifier, orderMeta, "crm");
         var tShipments = new ResolvedSourceTable(metadata.ReferencedTables[1], shipMeta.Identifier, shipMeta, "logistics");
 
-        var decisions = new Dictionary<string, TableAccessDecision>
+        var decisions = new Dictionary<TableIdentifier, TableAccessDecision>
         {
-            [orderMeta.Identifier.ToQualifiedName()] = TableAccessDecision.Allowed(orderMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
-            [shipMeta.Identifier.ToQualifiedName()] = TableAccessDecision.Allowed(shipMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
+            [orderMeta.Identifier] = TableAccessDecision.Allowed(orderMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
+            [shipMeta.Identifier] = TableAccessDecision.Allowed(shipMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
         };
 
         var planner = new CrossSourcePlanner(Engine);
@@ -196,5 +224,72 @@ public sealed class CrossSourcePlannerTests
             planner.Plan(sql, metadata, [tOrders, tShipments], decisions, new CrossSourceOptions { Enabled = true }));
 
         ex.Message.ShouldContain("read_csv");
+    }
+    [Fact]
+    public void Plan_DecisionMissingForOneTable_ThrowsEnforcementIncomplete_AndProducesNoStagingRequest()
+    {
+        // ST-3 (SEC-1): a table without its own decision is denied, never read with a default "allowed" decision.
+        var sql = "SELECT o.id, s.tracking FROM crm.public.orders o JOIN logistics.v1.shipments s ON o.id = s.id";
+        var metadata = Engine.Analyze(sql.AsMemory());
+
+        var orderMeta = CreateTable("crm", "orders", DataSourceType.Sql, ["id"]);
+        var shipMeta = CreateTable("logistics", "shipments", DataSourceType.HttpDeclarative, ["id", "tracking"]);
+
+        var tOrders = new ResolvedSourceTable(metadata.ReferencedTables[0], orderMeta.Identifier, orderMeta, "crm");
+        var tShipments = new ResolvedSourceTable(metadata.ReferencedTables[1], shipMeta.Identifier, shipMeta, "logistics");
+
+        var decisions = new Dictionary<TableIdentifier, TableAccessDecision>
+        {
+            [orderMeta.Identifier] = TableAccessDecision.Allowed(orderMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
+        };
+
+        var planner = new CrossSourcePlanner(Engine);
+        CrossSourcePlan? plan = null;
+
+        var ex = Should.Throw<GatewaySecurityException>(() =>
+            plan = planner.Plan(sql, metadata, [tOrders, tShipments], decisions, new CrossSourceOptions { Enabled = true }));
+
+        ex.ErrorCode.ShouldBe("VF_ENFORCEMENT_INCOMPLETE");
+        plan.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Plan_SameSchemaAndTableInTwoSources_EachStagingRequestCarriesItsOwnDecision()
+    {
+        // ST-1 (SEC-1): decisions are keyed by the source-qualified name; erp.public.customers must not replace the
+        // decision (and its Virtual Filter) of crm_api.public.customers.
+        var sql = "SELECT c.id, e.credit FROM crm_api.public.customers c JOIN erp.public.customers e ON c.id = e.id";
+        var metadata = Engine.Analyze(sql.AsMemory());
+
+        var crmMeta = CreateTable("crm_api", "customers", DataSourceType.HttpDeclarative, ["id", "status"]);
+        var erpMeta = CreateTable("erp", "customers", DataSourceType.Sql, ["id", "credit"]);
+
+        var crmDecision = TableAccessDecision.Allowed(crmMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
+            .WithMandatoryPredicate("P_vf_customers(id)", ["vf_customers"]);
+        var erpDecision = TableAccessDecision.Allowed(erpMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
+
+        foreach (var ordered in new[] { (crmMeta, erpMeta), (erpMeta, crmMeta) })
+        {
+            var decisions = new Dictionary<TableIdentifier, TableAccessDecision>
+            {
+                [ordered.Item1.Identifier] = ordered.Item1 == crmMeta ? crmDecision : erpDecision,
+                [ordered.Item2.Identifier] = ordered.Item2 == crmMeta ? crmDecision : erpDecision
+            };
+
+            var plan = new CrossSourcePlanner(Engine).Plan(
+                sql,
+                metadata,
+                [
+                    new ResolvedSourceTable(metadata.ReferencedTables[0], crmMeta.Identifier, crmMeta, "crm_api"),
+                    new ResolvedSourceTable(metadata.ReferencedTables[1], erpMeta.Identifier, erpMeta, "erp")
+                ],
+                decisions,
+                new CrossSourceOptions { Enabled = true });
+
+            var crmRequest = plan.StagingRequests.Single(r => r.Metadata.Identifier == crmMeta.Identifier);
+            crmRequest.Decision.ShouldBeSameAs(crmDecision);
+            crmRequest.Decision.AppliedVirtualFilters.ShouldNotBeNull().Count.ShouldBeGreaterThan(0);
+            plan.StagingRequests.Single(r => r.Metadata.Identifier == erpMeta.Identifier).Decision.ShouldBeSameAs(erpDecision);
+        }
     }
 }

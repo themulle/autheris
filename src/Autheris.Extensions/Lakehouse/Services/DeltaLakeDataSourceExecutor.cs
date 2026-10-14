@@ -196,7 +196,8 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
             candidateRows = Autheris.Application.Services.GatewayExecutionService.FilterRows(
                 candidateRows,
                 context.AccessDecision.CombinedRowFilterSql,
-                context.Metadata);
+                context.Metadata,
+                context.AccessDecision.RowFilterParameters);
             context.Items["RlsPushdownExecuted"] = true;
         }
 

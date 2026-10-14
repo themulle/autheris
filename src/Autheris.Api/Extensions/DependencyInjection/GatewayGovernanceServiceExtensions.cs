@@ -9,6 +9,7 @@ using Autheris.Application.Governance;
 using Autheris.Application.Governance.Contracts;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Services;
+using Autheris.Api.Security;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Application.Policy.Interfaces;
@@ -82,6 +83,21 @@ public static class GatewayGovernanceServiceExtensions
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
         }
 
+        if (gatewayOptions.TenantIsolation.Registry.Enabled)
+        {
+            // CR-ADG-31: the governance repository is the persistent registry; the gate adds the positive cache and the per-issuer budget.
+            var registry = gatewayOptions.TenantIsolation.Registry;
+            services.AddSingleton<ITenantRegistry>(sp => new TenantRegistryGate(
+                (ITenantRegistry)sp.GetRequiredService<IGovernanceRepository>(),
+                new TenantRegistryGateOptions(
+                    registry.MaxNewTenantsPerIssuerPerWindow,
+                    TimeSpan.FromSeconds(registry.WindowSeconds),
+                    TimeSpan.FromSeconds(registry.CacheTtlSeconds),
+                    registry.MaxCacheEntries,
+                    registry.MaxTrackedIssuers)));
+            services.AddHostedService<TenantRegistryPreseedService>();
+        }
+
         services.AddSingleton<IAccessProfileCache, AccessProfileCache>();
         services.AddSingleton<IDbtProposalRepository, InMemoryDbtProposalRepository>();
         services.AddSingleton<IDbtHealthCircuitBreaker, DbtHealthCircuitBreaker>();
@@ -91,10 +107,22 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IVirtualFilterPredicateBuilder, StructuredFilterSqlBuilder>();
         services.AddSingleton<MandatoryRowFilterResolver>();
         services.AddSingleton<IMandatoryRowFilterResolver>(sp => sp.GetRequiredService<MandatoryRowFilterResolver>());
-        services.AddSingleton<Autheris.Application.VirtualFilters.Services.IVirtualFilterKeyProvider, Autheris.Application.VirtualFilters.Services.DefaultVirtualFilterKeyProvider>();
-        services.AddSingleton<Autheris.Application.VirtualFilters.Services.IVirtualFilterShortCircuitEvaluator, Autheris.Application.VirtualFilters.Services.VirtualFilterShortCircuitEvaluator>();
+        // F-GOV-14 (M4, SEC-10): authorized key sets from the SQL key source, in a dedicated size-limited cache.
+        services.AddSingleton<Autheris.Application.VirtualFilters.Federation.VirtualFilterKeySetCache>();
+        services.AddSingleton<Autheris.Application.VirtualFilters.Federation.IVirtualFilterKeySetProvider, Autheris.Application.VirtualFilters.Federation.SqlVirtualFilterKeySetProvider>();
+        // F-GOV-14 (WI-6): without this registration a WebSQL cross-source query over a protected HTTP table is denied.
+        services.AddSingleton<Autheris.Application.VirtualFilters.Federation.IVirtualFilterFederationPlanner, Autheris.Application.VirtualFilters.Federation.VirtualFilterFederationPlanner>();
         services.AddSingleton<IConsentCacheService, ConsentCacheService>();
 
+        // WP-X0e: typed row policy. The renderer and the parser are stateless (the parser caches shapes), so one instance serves all.
+        services.AddSingleton<Autheris.Application.Sql.Policy.IPolicyPredicateRenderer, Autheris.Application.Sql.Policy.PolicyPredicateRenderer>();
+        services.AddSingleton<TrinoSqlEngine.Governance.IPolicyExpressionParser, TrinoSqlEngine.Governance.PolicyExpressionParser>();
+        services.AddSingleton<Autheris.Application.Policy.RowPolicyFactory>();
+        services.AddSingleton<Autheris.Application.Sql.Masking.SqlDataMaskingProvider>();
+        services.AddSingleton<Autheris.Application.Policy.ColumnMaskPolicyFactory>();
+        services.AddSingleton<Autheris.Application.Policy.TypedPolicySources>();
+        // WP-X0l: assembles the typed GovernancePolicy of a statement (no caller until X1). The catalog provider is registered with the storage.
+        services.AddSingleton<Autheris.Application.Sql.Policy.GovernancePolicyFactory>();
         services.AddSingleton<IRlsFilterGenerator, RlsFilterGenerator>();
         services.AddSingleton<IRowFilterSqlBuilder, RowFilterSqlBuilder>();
         services.AddSingleton<IConsentResolutionService, ConsentResolutionService>();

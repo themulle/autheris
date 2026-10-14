@@ -82,7 +82,8 @@ public sealed class SqlEndpointExecutionService : ISqlEndpointExecutionService
             Sql: SqlParameterExtractor.StripComments(endpoint.RawSql).Trim().TrimEnd(';').Trim(),
             Parameters: validatedParams,
             DataSourceName: endpoint.DataSource,
-            RowLimit: SqlRowLimit.For(_options.Value.WebSql ?? new WebSqlOptions(), _options.Value.RowLimits?.SqlEndpoints));
+            RowLimit: SqlRowLimit.For(_options.Value.WebSql ?? new WebSqlOptions(), _options.Value.RowLimits?.SqlEndpoints),
+            Transport: SqlTransports.SqlEndpoints);
 
         _logger?.LogDebug("Executing declarative SQL endpoint '{EndpointName}' with {ParamCount} parameters.", endpointName, endpoint.Parameters.Count);
 

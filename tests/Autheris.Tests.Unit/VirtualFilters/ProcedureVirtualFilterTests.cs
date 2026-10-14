@@ -46,6 +46,8 @@ public sealed class ProcedureVirtualFilterTests
             Queries.Add(query);
             return ValueTask.FromResult(outcome);
         }
+
+        public ValueTask<bool> HasActiveProfilesAsync(Autheris.Domain.Common.TenantId tenant, CancellationToken ct = default) => ValueTask.FromResult(false);
     }
 
     private static readonly MandatoryFilterOutcome Applied =
