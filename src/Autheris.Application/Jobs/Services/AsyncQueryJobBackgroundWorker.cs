@@ -114,9 +114,14 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
             State = AsyncJobState.Running,
             StartedAt = startedAt
         };
-        await _queue.TryTransitionAsync(runningJob, stoppingToken).ConfigureAwait(false);
+        if (!await _queue.TryTransitionAsync(runningJob, stoppingToken).ConfigureAwait(false))
+        {
+            // Cancelled (or otherwise finished) while still queued: nothing to execute.
+            return;
+        }
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, item.Cts.Token);
+        string? writtenPath = null;
 
         try
         {
@@ -144,6 +149,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
 
             var ext = item.Job.Format.Equals("csv", StringComparison.OrdinalIgnoreCase) ? "csv" : "json";
             var filePath = Path.Combine(tenantDir, $"{item.Job.JobId}.{ext}");
+            writtenPath = filePath;
 
             if (ext == "csv")
             {
@@ -163,13 +169,19 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
                 RowsProduced = result.RowCount,
                 BytesProduced = fileInfo.Length
             };
-            await _queue.TryTransitionAsync(completed, stoppingToken).ConfigureAwait(false);
+            if (!await _queue.TryTransitionAsync(completed, stoppingToken).ConfigureAwait(false))
+            {
+                // Lost the race against a cancel: the job stays terminal and its result must not outlive it.
+                try { File.Delete(filePath); } catch (Exception ex) { _logger.LogWarning(ex, "Could not delete result of cancelled job {JobId}", item.Job.JobId); }
+                return;
+            }
 
             await RecordAuditAsync(completed, item.User, AuditEventTypes.AsyncJobCompleted, "ALLOW", "Job completed successfully.", stoppingToken).ConfigureAwait(false);
         }
         // ParseCanceledException derives from OperationCanceledException: a governed SQL error (syntax, parser timeout) is a failed job.
         catch (OperationCanceledException ex) when (!Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out _))
         {
+            DeletePartialResult(writtenPath);
             var cancelled = runningJob with
             {
                 State = AsyncJobState.Cancelled,
@@ -180,6 +192,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         }
         catch (Exception ex)
         {
+            DeletePartialResult(writtenPath);
             // WP-X0a (SEC-X1-01): the persisted message is the fixed message of the stable code, never Exception.Message (driver text, values).
             var sanitized = Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.FixedMessageOrDefault(ex, "The job could not be executed. Contact support with the trace id.");
             var failed = runningJob with
@@ -191,6 +204,17 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
             await _queue.TryTransitionAsync(failed, stoppingToken).ConfigureAwait(false);
             _logger.LogError(ex, "Failed to execute async query job {JobId}", item.Job.JobId);
         }
+    }
+
+    private void DeletePartialResult(string? path)
+    {
+        if (path is null)
+        {
+            return;
+        }
+
+        try { File.Delete(path); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Could not delete partial job result."); }
     }
 
     private static async Task WriteJsonResultAsync(

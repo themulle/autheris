@@ -107,4 +107,45 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
         Should.Throw<ArgumentNullException>(() => new AsyncQueryJobBackgroundWorker(
             manager, null!, Scopes(Substitute.For<IGovernedSqlExecutionService>()), _audit));
     }
+
+    [Fact]
+    public async Task CancelledJob_IsNotOverwrittenByLateCompletion()
+    {
+        var manager = new AsyncQueryJobManager(_audit, environment: _env);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sql = Substitute.For<IGovernedSqlExecutionService>();
+        sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(async _ =>
+            {
+                started.TrySetResult();
+                await release.Task; // ignores the token: models a driver that finishes after the cancel
+                return EmptyResult();
+            });
+        var worker = new AsyncQueryJobBackgroundWorker(manager, manager, Scopes(sql), _audit, NullLogger<AsyncQueryJobBackgroundWorker>.Instance);
+        var job = await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), User(), new TenantId("t"));
+        await worker.StartAsync(CancellationToken.None);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        (await manager.CancelJobAsync(job.JobId, new TenantId("t"), "alice")).ShouldBeTrue();
+        release.SetResult();
+        await Task.Delay(500);
+        await worker.StopAsync(CancellationToken.None);
+
+        var final = await manager.GetJobAsync(job.JobId, new TenantId("t"), "alice");
+        final!.State.ShouldBe(AsyncJobState.Cancelled);
+        final.ResultFilePath.ShouldBeNull();
+        Directory.GetFiles(manager.ScratchDirectory, "*", SearchOption.AllDirectories).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task TryTransition_FromTerminalState_IsRefused()
+    {
+        var manager = new AsyncQueryJobManager(_audit, environment: _env);
+        var cancelled = new AsyncJobDescriptor("j", "t", "alice", "q", "json", AsyncJobState.Cancelled, DateTimeOffset.UtcNow);
+        manager.UpdateJob(cancelled);
+
+        (await manager.TryTransitionAsync(cancelled with { State = AsyncJobState.Completed }, CancellationToken.None)).ShouldBeFalse();
+        (await manager.GetJobAsync("j", new TenantId("t"), "alice"))!.State.ShouldBe(AsyncJobState.Cancelled);
+    }
 }

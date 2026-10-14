@@ -67,8 +67,37 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
     public ValueTask<bool> TryTransitionAsync(AsyncJobDescriptor next, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(next);
-        _jobs[next.JobId] = next;
-        return ValueTask.FromResult(true);
+        return ValueTask.FromResult(TryTransitionLocal(next));
+    }
+
+    private static bool IsTerminal(AsyncJobState state) =>
+        state is AsyncJobState.Completed or AsyncJobState.Failed or AsyncJobState.Cancelled;
+
+    /// <summary>Compare-and-swap that never leaves a terminal state (Completed, Failed, Cancelled stay terminal).</summary>
+    private bool TryTransitionLocal(AsyncJobDescriptor next)
+    {
+        while (true)
+        {
+            if (!_jobs.TryGetValue(next.JobId, out var current))
+            {
+                if (_jobs.TryAdd(next.JobId, next))
+                {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (IsTerminal(current.State))
+            {
+                return false;
+            }
+
+            if (_jobs.TryUpdate(next.JobId, next, current))
+            {
+                return true;
+            }
+        }
     }
 
     public async Task<AsyncJobDescriptor> SubmitJobAsync(
@@ -228,6 +257,19 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
             return false;
         }
 
+        var updated = job with
+        {
+            State = AsyncJobState.Cancelled,
+            CompletedAt = DateTimeOffset.UtcNow,
+            ErrorMessage = "Job cancelled by user request."
+        };
+
+        // Terminal states stay terminal: when the worker finished first, the cancel is a no-op.
+        if (!TryTransitionLocal(updated))
+        {
+            return false;
+        }
+
         if (_activeCts.TryRemove(jobId, out var cts))
         {
             try
@@ -237,14 +279,6 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
             catch (ObjectDisposedException) { }
             cts.Dispose();
         }
-
-        var updated = job with
-        {
-            State = AsyncJobState.Cancelled,
-            CompletedAt = DateTimeOffset.UtcNow,
-            ErrorMessage = "Job cancelled by user request."
-        };
-        _jobs[jobId] = updated;
 
         if (!string.IsNullOrWhiteSpace(job.ResultFilePath) && File.Exists(job.ResultFilePath))
         {
