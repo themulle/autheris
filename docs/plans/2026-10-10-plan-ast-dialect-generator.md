@@ -4319,3 +4319,48 @@ Branch `feat/ast-x1-smallfix` (from `83fb8ce`), one commit per item, strict Red-
 3. **`WebSql:PlanCache`.** `GatewayStartupValidator.ValidateRemovedWebSqlSettings` fails the start when the section exists (any environment, value never echoed); called from `AddGatewayOptions` next to the `SqlRewriterEngine` check. Red: three registration tests failed.
 4. **Architecture allowlist.** The reason of `SqlProcedureRowScopeResolver` now names the policy row-filter splice (section 7.3 consumer). Test-only text change.
 5. **Docs.** The `[` claims, the squash draft breaking-change list (`PlanCache`, dollar quoting) and `f-dialect-02` (token guards, Oracle arrays, removed settings) corrected.
+
+### Stryker coverage implementation log (M-12, cutover head)
+
+Mutation testing of the G7 scope (`stryker-config.json`: `Ast/Visitors/AstSecurityVisitor*.cs`, `AstSimplificationVisitor.cs`, `Ast/Security/*.cs`, `Ast/Emit/*.cs`; tests filtered by `Category=SqlGate`, break threshold 85%) on the cutover head (`a924f2b`, plus `d13ac28` for the Emit and Visitor groups). Stryker.NET 4.16.0, `--concurrency 4` to 6. The TrinoSqlEngine.Tests project starts no containers, so the SqlGate filter needs no container exclusion. Run time per group: Security 1161 mutants in 3 h 40 min (concurrency 4, shared machine), Emit 804 mutants in about 65 min, Visitors 629 mutants in about 60 min, the three re-measured visitor files 295 to 349 mutants in 8 to 20 min. About 1.2 s per mutant on an idle machine, 5 to 10 s when other builds run.
+
+| File | Before (pre-cutover, tests of the earlier Stryker branch) | After (cutover head) |
+|---|---|---|
+| Security group (13 files) | 84.23% as a group, TenantPredicateFactory 65.7% | all files at or above 90%: AstReflection 90.6, CatalogTypeMap 95.2, DmlMaskedReadGuard 90.0, InsertCheckOption 100, InsertCheckPolicy 98.4, LiteralColumnTypeAnnotator 96.7, MergeAliasGuard 100, PolicyColumnTypeAnnotator 100, PolicySubqueryTenantRewriter 94.7, SecurityCoverageVerifier 97.7, SecurityCoverageVerifier.Dml 99.1, SqliteTypeAffinity 100, TenantPredicateFactory 100 |
+| ICompiledSqlBinder.cs | 51.0 | 92.8 |
+| CompiledSqlBinders.cs | 7.1 | 100 |
+| ColumnBindAdapter.cs | 93.1 | 99.0 |
+| CheckedDmlExecutor.cs | 49.5 | 92.8 |
+| GovernedSqlException.cs | 23.8 | 95.5 (the reserved-identifier message was added to the code table test afterwards) |
+| EmittedSqlInvariantChecker.cs | 86.6 | 99.6 |
+| CompiledSqlTemplate.cs | 85.7 | 92.9 |
+| DmlConstraintViolationException.cs | 94.3 | 94.3 |
+| CompiledSql.cs | 33.3 | 100 |
+| AstSecurityVisitor.cs | 93.8 | 96.4 |
+| AstSecurityVisitor.Dml.cs | 47.4 | 99.2 |
+| AstSecurityVisitor.MaskGuards.cs | 14.2 | 92.5 |
+| AstSecurityVisitor.Support.cs | 51.4 | 97.2 |
+| AstSecurityVisitor.Tables.cs | 74.7 | 97.4 |
+| AstSecurityVisitor.TypedDml.cs | 78.7 | 92.9 |
+| AstSecurityVisitorOptions.cs | n/a | 100 |
+| AstSimplificationVisitor.cs | 91.3 | 92.3 |
+
+**What was done on the cutover head.** The first visitor measurement left `.Dml` at 48.4%, `.MaskGuards` at 47.5% and `.Support` at 42.4%: no SqlGate test reached the tautology detection (the simplifier folds most constant predicates before the visitor sees them), the masked-column predicate traversal or `RedactSqlLiterals`. The cutover deleted the options-path tests that covered them, so they were ported: `TypedGuardMutationTests` drives the unfiltered-DML truth tables, the masked column positions of a SELECT predicate, the join and HAVING/ORDER BY clauses, whole-row references, CTE scope rules and the TABLE body through the typed compiler; `AstSecurityVisitorGuardUnitTests` calls the private guards directly on hand-built trees (every comparison operator of `IsTriviallyTrue`/`IsTriviallyFalse`, every expression kind of `ContainsColumnReference` and of the masked-column traversal, `CollectTableSources`, join conditions, the DML and predicate entry points, `RedactSqlLiterals`, `TruncateForAudit`). `RedactSqlLiteralsTests` was tagged `SqlGate`.
+
+**Equivalent or unreachable survivors (one line each).**
+- `CheckedDmlExecutor` lines 82, 83, 134, 161, 166, 175: `ConfigureAwait(false)` to `true`. A context-counting test kills the flips at the first await of a chain; later awaits run without a captured context, so the flip changes nothing observable.
+- `CheckedDmlExecutor` line 194: block removal of a catch block that holds only a comment.
+- `ICompiledSqlBinder` lines 104 and 286: `?? string.Empty` on `Convert.ToString` of a non-null value; line 313: `>>` to `>>>` under a `& 0xFF` mask.
+- `ColumnBindAdapter` line 52: `||` to `&&` between conditions that all lead to an unchanged bind for an unknown column type.
+- `CompiledSqlTemplate` lines 291, 308, 309, 278, 303: unused `skipValue` argument, property ordering of types with one property, unreachable serializer branch for a non-`TrinoSqlEngine` type.
+- `MaskGuards` lines 68 and 100: `break` removed from a loop that sets a flag already set (no effect on the result); lines 93, 119, 139, 157: guards whose alternative branch yields the same outcome for every tree the compiler builds.
+- `Support` lines 254 and 256: lexer error listener wiring (the unrecognized-token check catches the same inputs); line 264 `Count < 0` and line 272 `i <= Count`: the loop body stops at the EOF token.
+- `AstSecurityVisitor.cs` lines 115, 182, 222: a flag set that only matters for the second root read, and a clamp that returns an equal literal.
+- `AstSimplificationVisitor` lines 82, 334, 350, 376: structural-equality helpers whose alternative returns an equal node.
+- `TypedDml` lines 369, 370, 387, 420: the tenant-column-appended path is reachable only with `RequireTenantColumnInInsert = false`, which the governed compiler rejects as a configuration error (CR-ADG-38).
+
+**Below 85%:** none.
+
+**Findings.**
+1. `DELETE ... WHERE id = 5 OR 1 = 1.0` is accepted on the typed path. The simplifier folds `1 = 1.0` to false (an integer literal against a decimal literal), so the OR branch is dropped and the statement is more restrictive than written. This is the safe direction here, but the fold is wrong (`1 = 1.0` is true) and would widen a statement such as `NOT (1 = 1.0)`. `AstSimplificationVisitor`, literal comparison of mixed numeric kinds; not fixed in this log.
+2. SQL Server `MapToDialectTypeName`-style type mapping of `double precision` was in the removed options-path code; no action.
