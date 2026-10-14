@@ -18,7 +18,7 @@ public sealed class WormConfigurationStartupAuditorTests
     public async Task StartAsync_MintsEpochOneChainedToGenesis_AndInitializesCurrentConfigHash()
     {
         var monitor = new TestOptionsMonitor<GatewayOptions>(new GatewayOptions { Classification = new ClassificationOptions() });
-        var audit = new WormConfigurationAuditService(monitor, NullLogger<WormConfigurationAuditService>.Instance);
+        var audit = new WormConfigurationAuditService(monitor, NullLogger<WormConfigurationAuditService>.Instance, environment: WormTestEnvironment.Development);
         audit.CurrentConfigHash.ShouldBeNull();
 
         var sut = new WormConfigurationStartupAuditor(audit, NullLogger<WormConfigurationStartupAuditor>.Instance);

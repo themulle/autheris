@@ -8,8 +8,11 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Interfaces;
+using Autheris.Application.Interfaces;
+using Autheris.Application.Security;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -27,19 +30,73 @@ public sealed class WormConfigurationAuditService : IWormConfigurationAuditServi
 
     private readonly IOptionsMonitor<GatewayOptions> _gatewayOptions;
     private readonly ILogger<WormConfigurationAuditService> _logger;
-    private readonly byte[] _hmacSecretKey = Encoding.UTF8.GetBytes("Autheris_Worm_Config_Sealing_Key_2026_Strict");
+    private readonly byte[] _hmacSecretKey;
+
+    // SR-D-02: development-only sealing key; any other environment must derive the key from the audit key vault secret.
+    private static readonly byte[] DevelopmentSealingKey = Encoding.UTF8.GetBytes("Autheris_Worm_Config_Sealing_Key_Development_Only");
+    private static readonly byte[] SealingKeyInfo = Encoding.UTF8.GetBytes("Autheris:WormConfigSeal:v1");
 
     private string? _currentConfigHash;
     private long _currentPolicyEpoch;
 
     public WormConfigurationAuditService(
         IOptionsMonitor<GatewayOptions> gatewayOptions,
-        ILogger<WormConfigurationAuditService> logger)
+        ILogger<WormConfigurationAuditService> logger,
+        IKeyVaultSecretProvider? secretProvider = null,
+        IHostEnvironment? environment = null)
     {
         _gatewayOptions = gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _hmacSecretKey = ResolveSealingKey(_gatewayOptions.CurrentValue, secretProvider, environment);
         // The baseline hash is intentionally NOT seeded here: the first audit snapshot (startup bootstrap)
         // must mint epoch 1 chained to the all-zero genesis hash. Seeding would suppress that WORM record.
+    }
+
+    /// <summary>
+    /// SR-D-02: HKDF(audit key, info "Autheris:WormConfigSeal:v1"). The audit key is AuditHmacKeyVaultRef, falling back to
+    /// DataMasking.HmacSecretKeyVaultRef like the audit chain. Fails closed outside Development/Test. Seals minted with
+    /// the former hard-coded key do not verify against the derived key.
+    /// </summary>
+    private static byte[] ResolveSealingKey(GatewayOptions options, IKeyVaultSecretProvider? secretProvider, IHostEnvironment? environment)
+    {
+        var envName = environment?.EnvironmentName ??
+                      Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
+                      Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        var isDevOrTest = string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(envName, "Test", StringComparison.OrdinalIgnoreCase);
+
+        byte[]? master = null;
+        if (secretProvider != null)
+        {
+            var ref1 = options.GovernanceDb?.AuditHmacKeyVaultRef;
+            var ref2 = options.DataMasking?.HmacSecretKeyVaultRef;
+            var secretRef = !string.IsNullOrWhiteSpace(ref1) ? ref1 : ref2;
+            if (!string.IsNullOrWhiteSpace(secretRef))
+            {
+                try
+                {
+                    master = secretProvider.GetSecretBytes(secretRef);
+                }
+                catch (Exception) when (isDevOrTest)
+                {
+                    // Development/Test: fall back to the development key below.
+                }
+            }
+        }
+
+        if (master != null && master.Length > 0)
+        {
+            SecretKeyRequirements.EnsureMinimumLength(master, "The WORM configuration sealing master key (AuditHmacKeyVaultRef)", isDevOrTest);
+            return HKDF.DeriveKey(HashAlgorithmName.SHA256, master, 32, info: SealingKeyInfo);
+        }
+
+        if (!isDevOrTest)
+        {
+            throw new InvalidOperationException(
+                "Security critical: No AuditHmacKeyVaultRef or HmacSecretKeyVaultRef secret available in a non-development environment. Cannot seal WORM configuration records.");
+        }
+
+        return DevelopmentSealingKey;
     }
 
     public string? CurrentConfigHash => _currentConfigHash;
