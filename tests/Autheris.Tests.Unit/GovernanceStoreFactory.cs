@@ -10,7 +10,7 @@ namespace Autheris.Tests.Unit;
 
 /// <summary>
 /// Creates governance repositories whose schema is migrated and initialized, the way the startup hosted service does it
-/// (WP-ARC-B-12: repository constructors no longer run DDL). Use instead of <c>GovernanceStoreFactory.CreateSqlite(...)</c>.
+/// (WP-ARC-B-12: repository constructors no longer run DDL). Use instead of <c>new SqliteGovernanceRepository(...)</c>.
 /// </summary>
 public static class GovernanceStoreFactory
 {
@@ -24,7 +24,7 @@ public static class GovernanceStoreFactory
         IAuditAnchorSigner? auditAnchorSigner = null,
         ICallerContextProvider? callerContextProvider = null)
     {
-        var repository = GovernanceStoreFactory.CreateSqlite(
+        var repository = new SqliteGovernanceRepository(
             epochValidationService,
             options,
             environment,

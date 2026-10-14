@@ -330,7 +330,9 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran',100),(2,'LTM-1230','Mobi
     public async Task RoleProtectedEndpoints_RejectPlainReader_AcceptAdmin(string method, string path)
     {
         var plain = await Client(roles: "Reader").SendAsync(new HttpRequestMessage(new HttpMethod(method), path));
-        ((int)plain.StatusCode).ShouldBeOneOf(401, 403);
+        // WP-ARC-A-01: the CDC webhook endpoints answer 501 for every caller while Gateway:CdcWebhooks:Enabled is off.
+        int[] rejected = path.StartsWith("/api/v1/cdc/", StringComparison.Ordinal) ? [401, 403, 501] : [401, 403];
+        ((int)plain.StatusCode).ShouldBeOneOf(rejected);
 
         var admin = await Client(roles: "GovernanceAdmin,ClusterAdmin,SchemaAdmin,StreamingAdmin,DbtAdmin")
             .SendAsync(new HttpRequestMessage(new HttpMethod(method), path));

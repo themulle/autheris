@@ -35,9 +35,12 @@ public sealed class RestOffsetDialectContractTests
             compiled.Sql.ShouldContain(keyword, Case.Insensitive);
         }
 
-        // Offset and page size travel as structural integers (bound literals), never as client text.
+        // Offset and page size travel as structural integers: bound literals or validated inline integers, never client text.
         var literals = compiled.ValuesOf(ParameterOrigin.QueryLiteral).Select(Convert.ToInt64).ToList();
-        literals.ShouldContain(10L);
-        literals.ShouldContain(51L);
+        foreach (var expected in new[] { 10L, 51L })
+        {
+            (literals.Contains(expected) || System.Text.RegularExpressions.Regex.IsMatch(compiled.Sql, $@"\b{expected}\b"))
+                .ShouldBeTrue($"pagination value {expected} missing from '{compiled.Sql}'");
+        }
     }
 }

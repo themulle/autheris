@@ -89,7 +89,8 @@ public sealed class MutationTenantRGql9Tests
         var other = await new Mutation().RequestTableAccessAsync("hr", "dbo", "bonuses", "Quarterly audit", 7, "key-1", new ConsentRequestService(metadata, approvals, store), context);
 
         created.Count.ShouldBe(2);
-        replay.ShouldBe(first);
-        other.ShouldNotBe(first);
+        replay.RequestId.ShouldBe(first.RequestId);
+        replay.Status.ShouldBe(first.Status);
+        other.RequestId.ShouldNotBe(first.RequestId);
     }
 }

@@ -248,7 +248,7 @@ public class LakehouseIntegrationTests : IClassFixture<WebApplicationFactory<Pro
             // Column masking applied
             row["customerEmail"]?.ToString().ShouldNotBeNull().ShouldContain("***");
             row["iban"]?.ToString().ShouldNotBeNull().ShouldContain("****");
-            row["healthData"]?.ToString().ShouldNotBeNull().ShouldContain("REDACTED");
+            row["healthData"]?.ToString().ShouldNotBeNull().ShouldBe("***"); // in-memory masks match the SQL masks (WP-ARC-B-04)
         }
     }
 }

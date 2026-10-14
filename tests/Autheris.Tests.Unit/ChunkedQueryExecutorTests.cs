@@ -210,7 +210,8 @@ public class ChunkedQueryExecutorTests
             maskingProvider,
             executor,
             options,
-            dataSourceExecutors: new[] { sqlExecutor });
+            dataSourceExecutors: new[] { sqlExecutor },
+            policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         // Grant consent for finance_items
         var childTableId = new Autheris.Domain.Common.TableIdentifier("finance", "dbo", "finance_items");

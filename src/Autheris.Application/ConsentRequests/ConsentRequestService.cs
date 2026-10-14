@@ -49,7 +49,7 @@ public sealed class ConsentRequestService : IConsentRequestService
         _gatewayOptions = gatewayOptions;
     }
 
-    public async Task<SubmitConsentRequestResult> SubmitAsync(SubmitConsentRequestCommand command, CancellationToken ct = default)
+    public async Task<SubmitConsentRequestResult> SubmitAsync(ConsentRequestSubmission command, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(command);
 

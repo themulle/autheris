@@ -169,7 +169,7 @@ public sealed class Mutation
         try
         {
             var result = await consentRequestService.SubmitAsync(
-                new SubmitConsentRequestCommand(
+                new ConsentRequestSubmission(
                     domain, schema, tableName, justification, durationDays, idempotencyKey,
                     userSid, principal, GetContextTenantId(httpContextAccessor)),
                 ct);

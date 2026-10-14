@@ -282,6 +282,7 @@ public sealed class DatasetDataEndpointsTests
         services.AddSingleton(Substitute.For<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>());
         services.AddSingleton(Substitute.For<Autheris.Application.Sql.Interfaces.IFederatedQueryExecutionService>());
         services.AddSingleton(Substitute.For<IColumnMaskingProvider>());
+        services.AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
 
         services.AddAutherisDataApi();
 

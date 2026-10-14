@@ -218,7 +218,7 @@ public sealed class SecurityReview20261002WebSqlTests
         var gatewayOptions = Options.Create(options ?? CreateOptions());
         return new GovernedSqlExecutionService(
             gatewayOptions, executionGuard: GovernedTestSupport.Guard,
-            policyEnforcement: casbin,
+            policyEnforcement: casbin ?? global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             consentResolution: withConsentServices ? (consentResolution ?? CreateConsentResolution(t => UnconstrainedAllow(t))) : null,
             tableRepository: repo,
             policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(gatewayOptions, secretProvider),

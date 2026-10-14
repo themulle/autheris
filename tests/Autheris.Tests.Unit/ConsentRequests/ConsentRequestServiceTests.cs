@@ -34,7 +34,7 @@ public sealed class ConsentRequestServiceTests
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer"));
     }
 
-    private static SubmitConsentRequestCommand Command(
+    private static ConsentRequestSubmission Command(
         ClaimsPrincipal principal, string contextTenant, string table = "salaries", string justification = "Quarterly audit", int days = 7, string? key = null)
         => new("hr", "dbo", table, justification, days, key, User, principal, new TenantId(contextTenant));
 
@@ -104,7 +104,7 @@ public sealed class ConsentRequestServiceTests
         var service = new ConsentRequestService(metadata, approvals);
 
         var ex = await Should.ThrowAsync<ConsentRequestException>(() =>
-            service.SubmitAsync(new SubmitConsentRequestCommand(domain, schema, table, justification, days, null, User, Principal("t"), TenantId.LegacySingleTenant)));
+            service.SubmitAsync(new ConsentRequestSubmission(domain, schema, table, justification, days, null, User, Principal("t"), TenantId.LegacySingleTenant)));
 
         ex.Code.ShouldBe("INVALID_ARGUMENT");
     }

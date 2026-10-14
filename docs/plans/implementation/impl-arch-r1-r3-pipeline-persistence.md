@@ -126,7 +126,7 @@ Conventions: tests live in `tests/Autheris.Tests.Unit` unless noted; `tests/Auth
 #### WP-ARC-B-05 - Consent-request use case out of GraphQL (ARC-G-01)
 
 - **Covers:** ARC-G-01.
-- **Goal:** `IConsentRequestService.SubmitAsync(SubmitConsentRequestCommand) -> SubmitConsentRequestResult` in Application; the GraphQL mutation only maps arguments and `GraphQLException`.
+- **Goal:** `IConsentRequestService.SubmitAsync(ConsentRequestSubmission) -> SubmitConsentRequestResult` in Application; the GraphQL mutation only maps arguments and `GraphQLException`.
 - **Design:** move validation (constants 5/2000/365 become `ConsentRequestOptions`-style values, but the options class is introduced inside the R4 options split; until then keep as private constants in the service), idempotency, tenant resolution, cross-tenant admin check, auto-approve and ITSM dispatch from `GraphQL/Types/MutationTypes.cs:158-330`. Remove the 6-parameter forwarding overload. Compensation by `DeleteConsentRequestAsync` stays for now; the transactional outbox replacement belongs to R2 (T6 outbox, ARC-F-*): leave a single `IConsentRequestDispatcher` seam so R2 swaps the implementation.
 - **Affected files:** `GraphQL/Types/MutationTypes.cs`, new `Application/Services` or feature folder `Application/Consent/ConsentRequestService.cs`, DI registration.
 - **Compatibility:** GraphQL schema unchanged (same arguments/payload); error codes unchanged. REST/MCP can now reuse the service (no new endpoints in this WP).

@@ -18,7 +18,7 @@ using Autheris.Domain.Model;
 /// <param name="UserSid">Authenticated requester.</param>
 /// <param name="Principal">Authenticated principal (claims used for tenant and identity resolution).</param>
 /// <param name="ContextTenant">Tenant resolved for the current request/connection context, or the legacy single tenant.</param>
-public sealed record SubmitConsentRequestCommand(
+public sealed record ConsentRequestSubmission(
     string Domain,
     string Schema,
     string TableName,
@@ -53,7 +53,7 @@ public sealed class ConsentRequestException : Exception
 /// <summary>Use case: a user requests access to a table.</summary>
 public interface IConsentRequestService
 {
-    Task<SubmitConsentRequestResult> SubmitAsync(SubmitConsentRequestCommand command, CancellationToken ct = default);
+    Task<SubmitConsentRequestResult> SubmitAsync(ConsentRequestSubmission command, CancellationToken ct = default);
 }
 
 /// <summary>

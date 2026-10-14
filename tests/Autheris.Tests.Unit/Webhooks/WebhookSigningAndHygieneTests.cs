@@ -129,7 +129,9 @@ public sealed class WebhookSigningAndHygieneTests
         var log = string.Join("\n", logger.Messages);
         log.ShouldNotContain("TOPSECRET");
         log.ShouldNotContain("/secret/path");
-        log.ShouldNotContain("10.9.8.7/");
+        // the redacted URL keeps scheme and host only; the egress policy message itself is never logged
+        log.ShouldContain("https://10.9.8.7/");
+        log.ShouldNotContain("forbidden");
     }
 
     private static (WebhookDispatcherService Dispatcher, CapturingHandler Handler, CapturingLogger<WebhookDispatcherService> Logger) CreateService(

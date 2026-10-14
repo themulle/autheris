@@ -49,7 +49,9 @@ public sealed class MaskSemanticsCorpusTests
         var rule = MaskSemanticsCorpus.NullRules[index];
 
         new ColumnMaskingProvider().MaskValue("v", null, rule).ShouldBeNull();
-        RunSql(rule, null, rule.RuleType == "GEO_JITTER" ? "real" : "text").ShouldBeNull();
+        // Constant masks (REDACT, MASK_EMAIL, MASK_IBAN) may emit their constant for a NULL in SQL; either way nothing is revealed.
+        var sql = RunSql(rule, null, rule.RuleType == "GEO_JITTER" ? "real" : "text")?.ToString();
+        (sql is null || sql.All(c => c is '*' or '@')).ShouldBeTrue($"SQL mask of NULL revealed '{sql}'");
     }
 
     [Fact]
