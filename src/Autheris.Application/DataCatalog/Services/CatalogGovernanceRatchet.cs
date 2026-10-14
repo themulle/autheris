@@ -108,7 +108,7 @@ public static class CatalogGovernanceRatchet
     }
 
     /// <summary>
-    /// EXT-2: SourceName selects the database connection (SqlDataSourceExecutor, procedures, plugins). A sync never
+    /// EXT-2: SourceName selects the database connection (SqlTableReadExecutor, procedures, plugins). A sync never
     /// moves a table to another connection: a persisted SourceName is kept, and an unbound table (which runs on the
     /// connection of its domain) may only be bound to exactly that domain.
     /// </summary>

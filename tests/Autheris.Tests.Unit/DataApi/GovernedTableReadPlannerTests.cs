@@ -225,4 +225,38 @@ public sealed class GovernedTableReadPlannerTests
         replaced.Count.ShouldBe(planned.Parameters.Count);
         Should.NotThrow(() => new FastSqlEngine().Parse(normalized.AsMemory()));
     }
+
+    [Fact]
+    public void Plan_PagedReadWithoutPrimaryKey_OrdersByTheFirstClearColumn()
+    {
+        var planned = _planner.Plan(Intent(offset: 20), Metadata(primaryKey: Array.Empty<string>()), Decision());
+
+        planned.Sql.ShouldContain("ORDER BY \"id\"");
+        planned.Sql.ShouldContain("OFFSET 20 ROWS");
+    }
+
+    [Fact]
+    public void Plan_UnpagedReadWithoutPrimaryKey_AddsNoOrderBy()
+    {
+        var planned = _planner.Plan(Intent(), Metadata(primaryKey: Array.Empty<string>()), Decision());
+
+        planned.Sql.ShouldNotContain("ORDER BY");
+    }
+
+    [Fact]
+    public void Plan_PagedReadWithoutPrimaryKeyAndWithoutClearColumn_Throws()
+    {
+        var decision = TableAccessDecision.Allowed(
+            Customers,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["id"] = ColumnAccessLevel.Mask,
+                ["email"] = ColumnAccessLevel.Mask,
+                ["name"] = ColumnAccessLevel.Mask,
+                ["secret"] = ColumnAccessLevel.Deny
+            },
+            hasUnconstrainedColumnAllow: true);
+
+        Should.Throw<ArgumentException>(() => _planner.Plan(Intent(offset: 5), Metadata(primaryKey: Array.Empty<string>()), decision));
+    }
 }

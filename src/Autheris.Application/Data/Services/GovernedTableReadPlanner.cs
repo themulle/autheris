@@ -158,7 +158,7 @@ public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
         return string.IsNullOrWhiteSpace(predicate) ? null : predicate;
     }
 
-    /// <summary>ORDER BY items (quoted catalog spellings); the primary key when the request names no ordering.</summary>
+    /// <summary>ORDER BY items (quoted catalog spellings); the primary key when the request names no ordering (first clear column for a paged read of a table without one).</summary>
     private static List<string> ResolveOrderBy(TableReadIntent intent, TableMetadata metadata, TableAccessDecision decision)
     {
         var items = new List<string>();
@@ -186,6 +186,20 @@ public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
         else if (metadata.PrimaryKeyColumns.Count > 0)
         {
             items.AddRange(metadata.PrimaryKeyColumns.Select(DataApiFilterTranslator.QuoteIdentifier));
+        }
+        else if (intent.Offset > 0)
+        {
+            // OFFSET paging needs a deterministic ORDER BY (SQL Server and Oracle require one). A table without a primary key
+            // falls back to its first column that is readable in clear text (ordering on a masked column would leak its order).
+            var fallback = metadata.Columns.FirstOrDefault(c => decision.GetEffectiveColumnAccess(c.ColumnName, metadata) == ColumnAccessLevel.Clear);
+            if (fallback == null)
+            {
+                throw new ArgumentException(
+                    $"Offset paging on table '{intent.Table.ToQualifiedName()}' needs a primary key or a column readable in clear text to order by.",
+                    nameof(intent));
+            }
+
+            items.Add(DataApiFilterTranslator.QuoteIdentifier(fallback.ColumnName));
         }
 
         return items;

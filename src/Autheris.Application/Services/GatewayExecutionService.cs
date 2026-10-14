@@ -76,7 +76,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         _chunkedQueryExecutor = chunkedQueryExecutor ?? new ChunkedQueryExecutor(500);
         _options = options?.Value;
         _drainController = drainController;
-        _dataSourceExecutors = dataSourceExecutors ?? new IDataSourceExecutor[] { new SqlDataSourceExecutor(options: options, maskingProvider: maskingProvider) };
+        _dataSourceExecutors = dataSourceExecutors ?? Array.Empty<IDataSourceExecutor>();
         _policyEnforcementService = policyEnforcementService;
         _clientIpResolver = clientIpResolver;
         _connectorRegistry = connectorRegistry;
