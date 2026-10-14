@@ -107,7 +107,7 @@ public static class DuckDbOlapEndpoints
         }
 
         // SEC D-4: every staged table and every query is audited BEFORE data is returned; an audit failure fails the request closed.
-        var auditWriter = httpContext.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
+        var auditWriter = httpContext.RequestServices!.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
         var actorSid = secContext.UserSid;
         var stagedCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var sqlHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(dto.Sql)));

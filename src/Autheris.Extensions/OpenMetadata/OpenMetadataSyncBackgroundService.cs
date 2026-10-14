@@ -79,7 +79,7 @@ public sealed class OpenMetadataSyncBackgroundService : BackgroundService
             {
                 await using var scope = _scopeFactory.CreateAsyncScope();
                 var syncService = scope.ServiceProvider.GetRequiredService<IOpenMetadataSyncService>();
-                await syncService.SyncPermissionsAsync(dryRun: false, stoppingToken).ConfigureAwait(false);
+                await syncService.SyncPermissionsAsync(dryRun: false, ct: stoppingToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

@@ -9,6 +9,6 @@ public interface IOpenMetadataSyncService
     /// SR-L-23: when set, only tables mapped to this tenant are synchronised and only this tenant's sync consents are
     /// reconciled (tenant-scoped administrators). <c>null</c> synchronises every tenant (cluster administrators, background sync).
     /// </param>
-    Task<OpenMetadataSyncResult> SyncPermissionsAsync(bool dryRun = false, CancellationToken ct = default, TenantId? restrictToTenant = null);
+    Task<OpenMetadataSyncResult> SyncPermissionsAsync(bool dryRun = false, TenantId? restrictToTenant = null, CancellationToken ct = default);
     Task<bool> HandleWebhookEventAsync(string eventPayload, string? signatureHeader = null, CancellationToken ct = default);
 }

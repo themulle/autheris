@@ -535,6 +535,57 @@ public sealed class Mutation
                 .Build());
         }
 
+        var roles = principal.FindAll(ClaimTypes.Role).Select(r => r.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!roles.Contains("GovernanceAdmin") && !roles.Contains("ClusterAdmin"))
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("FORBIDDEN")
+                .SetMessage("Only governance or cluster administrators may reload the schema.")
+                .Build());
+        }
+
+        await eventBus.PublishAsync("schema:reload", DateTimeOffset.UtcNow.ToString("O"), ct);
+
+        // Review E-10: schema reloads change what the gateway exposes and belong in the audit chain.
+        TenantId reloadTenant;
+        try
+        {
+            reloadTenant = principal.GetTenantId();
+        }
+        catch (System.Security.SecurityException)
+        {
+            reloadTenant = TenantId.LegacySingleTenant; // cluster admins may have no tenant claim
+        }
+
+        await auditLog.RecordAuditEventAsync(new AuditLogEntry
+        {
+            TenantId = reloadTenant,
+            EventType = "SCHEMA_RELOAD",
+            ActorSid = principal.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+            TargetTable = string.Empty,
+            Decision = "ALLOW",
+            TraceId = Guid.NewGuid().ToString("N"),
+            DetailsJson = "{}"
+        }, ct);
+
+        return true;
+    }
+
+    public async Task<OpenMetadataSyncPayload> SyncOpenMetadataAsync(
+        bool dryRun = false,
+        [Service] IOpenMetadataSyncService syncService = default!,
+        [Service] IHttpContextAccessor httpContextAccessor = default!,
+        CancellationToken ct = default)
+    {
+        var principal = httpContextAccessor?.HttpContext?.User;
+        if (principal?.Identity?.IsAuthenticated != true)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("UNAUTHORIZED")
+                .SetMessage("Authentication is required.")
+                .Build());
+        }
+
         // SR-L-23: only the canonical ClusterAdmin (claims-based, never ForwardAuth) or a GovernanceAdmin may synchronise.
         var roles = principal.FindAll(ClaimTypes.Role).Select(r => r.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var isClusterAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
@@ -566,7 +617,7 @@ public sealed class Mutation
         OpenMetadataSyncResult result;
         try
         {
-            result = await syncService.SyncPermissionsAsync(dryRun, ct, restrictToTenant);
+            result = await syncService.SyncPermissionsAsync(dryRun, restrictToTenant, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not GraphQLException)
         {

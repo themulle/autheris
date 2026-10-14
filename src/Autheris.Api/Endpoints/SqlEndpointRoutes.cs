@@ -135,7 +135,7 @@ public static class SqlEndpointRoutes
 
         registry.Register(definition);
 
-        var auditRepo = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
+        var auditRepo = context.RequestServices!.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
         await auditRepo.RecordRequiredAsync(new Autheris.Domain.Model.AuditLogEntry
         {
             TenantId = EndpointSecurity.GetRequestTenant(context),

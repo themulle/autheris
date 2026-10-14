@@ -37,7 +37,7 @@ public sealed class SyncOpenMetadataSanitisationTests
     public async Task SyncFailure_ReturnsNoExceptionText()
     {
         var sync = Substitute.For<IOpenMetadataSyncService>();
-        sync.SyncPermissionsAsync(Arg.Any<bool>(), Arg.Any<CancellationToken>(), Arg.Any<TenantId?>())
+        sync.SyncPermissionsAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns<Task<OpenMetadataSyncResult>>(_ => throw new InvalidOperationException("Server=db.internal;Password=hunter2 table other_tenant.secret"));
 
         var ex = await Should.ThrowAsync<GraphQLException>(
@@ -52,7 +52,7 @@ public sealed class SyncOpenMetadataSanitisationTests
     public async Task Warnings_AreReturnedAsCodesWithCounts()
     {
         var sync = Substitute.For<IOpenMetadataSyncService>();
-        sync.SyncPermissionsAsync(Arg.Any<bool>(), Arg.Any<CancellationToken>(), Arg.Any<TenantId?>())
+        sync.SyncPermissionsAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(new OpenMetadataSyncResult(1, 0, 0, [], [
                 "Failed to map or upsert table tenant_b.db.dbo.secret: boom",
                 "Failed to map or upsert table tenant_b.db.dbo.other: boom"
@@ -67,24 +67,24 @@ public sealed class SyncOpenMetadataSanitisationTests
     public async Task NonClusterAdmin_OtherTenantTable_NotSynced()
     {
         var sync = Substitute.For<IOpenMetadataSyncService>();
-        sync.SyncPermissionsAsync(Arg.Any<bool>(), Arg.Any<CancellationToken>(), Arg.Any<TenantId?>())
+        sync.SyncPermissionsAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(new OpenMetadataSyncResult(0, 0, 0, [], [], true)));
 
         await new Mutation().SyncOpenMetadataAsync(false, sync, Accessor("Bearer", "tenant-a", "GovernanceAdmin"));
 
-        await sync.Received(1).SyncPermissionsAsync(false, Arg.Any<CancellationToken>(), new TenantId("tenant-a"));
+        await sync.Received(1).SyncPermissionsAsync(false, new TenantId("tenant-a"), Arg.Any<CancellationToken>());
     }
 
     [Fact]
     public async Task ClusterAdmin_SyncsWithoutTenantRestriction()
     {
         var sync = Substitute.For<IOpenMetadataSyncService>();
-        sync.SyncPermissionsAsync(Arg.Any<bool>(), Arg.Any<CancellationToken>(), Arg.Any<TenantId?>())
+        sync.SyncPermissionsAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(new OpenMetadataSyncResult(0, 0, 0, [], [], true)));
 
         await new Mutation().SyncOpenMetadataAsync(false, sync, Accessor("Bearer", "tenant-a", "ClusterAdmin"));
 
-        await sync.Received(1).SyncPermissionsAsync(false, Arg.Any<CancellationToken>(), (TenantId?)null);
+        await sync.Received(1).SyncPermissionsAsync(false, (TenantId?)null, Arg.Any<CancellationToken>());
     }
 
     [Fact]

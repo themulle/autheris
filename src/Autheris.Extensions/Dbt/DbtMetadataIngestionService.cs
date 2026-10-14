@@ -133,7 +133,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task<DbtSyncResult> IngestManifestFileAsync(string filePath, bool dryRun = false, CancellationToken ct = default, TenantId? tenant = null)
+    public async Task<DbtSyncResult> IngestManifestFileAsync(string filePath, bool dryRun = false, TenantId? tenant = null, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
         ValidateSafeFilePath(filePath);
@@ -146,7 +146,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         }
 
         await using var stream = File.OpenRead(fullPath);
-        return await IngestManifestStreamAsync(stream, dryRun, ct, tenant).ConfigureAwait(false);
+        return await IngestManifestStreamAsync(stream, dryRun, tenant, ct).ConfigureAwait(false);
     }
 
     private static void ValidateSafeFilePath(string fullPath)
@@ -181,7 +181,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         }
     }
 
-    public async Task<DbtSyncResult> IngestManifestStreamAsync(Stream manifestStream, bool dryRun = false, CancellationToken ct = default, TenantId? tenant = null)
+    public async Task<DbtSyncResult> IngestManifestStreamAsync(Stream manifestStream, bool dryRun = false, TenantId? tenant = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(manifestStream);
 

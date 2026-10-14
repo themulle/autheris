@@ -130,7 +130,7 @@ public sealed class BackgroundServiceLockTests
     {
         // Arrange
         var syncService = Substitute.For<IOpenMetadataSyncService>();
-        syncService.SyncPermissionsAsync(Arg.Any<bool>(), Arg.Any<CancellationToken>())
+        syncService.SyncPermissionsAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(new OpenMetadataSyncResult(0, 0, 0, Array.Empty<TableIdentifier>(), Array.Empty<string>(), true)));
 
         var services = new ServiceCollection();
@@ -172,7 +172,7 @@ public sealed class BackgroundServiceLockTests
         }
 
         // Assert
-        await syncService.Received().SyncPermissionsAsync(Arg.Any<bool>(), Arg.Any<CancellationToken>());
+        await syncService.Received().SyncPermissionsAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -220,7 +220,7 @@ public sealed class BackgroundServiceLockTests
         }
 
         // Assert
-        await syncService.DidNotReceive().SyncPermissionsAsync(Arg.Any<bool>(), Arg.Any<CancellationToken>());
+        await syncService.DidNotReceive().SyncPermissionsAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

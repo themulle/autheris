@@ -58,7 +58,7 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
         _clusterState = clusterState;
     }
 
-    public async Task<OpenMetadataSyncResult> SyncPermissionsAsync(bool dryRun = false, CancellationToken ct = default, TenantId? restrictToTenant = null)
+    public async Task<OpenMetadataSyncResult> SyncPermissionsAsync(bool dryRun = false, TenantId? restrictToTenant = null, CancellationToken ct = default)
     {
         if (!await SyncLock.WaitAsync(TimeSpan.FromSeconds(5), ct))
         {
@@ -677,7 +677,7 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
                  string.Equals(webhookEvent.EntityType, "team", StringComparison.OrdinalIgnoreCase) ||
                  string.Equals(webhookEvent.EntityType, "user", StringComparison.OrdinalIgnoreCase))
         {
-            var result = await SyncPermissionsAsync(dryRun: false, ct);
+            var result = await SyncPermissionsAsync(dryRun: false, ct: ct);
             return result.Success;
         }
 

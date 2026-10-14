@@ -3,6 +3,7 @@ namespace Autheris.Tests.Unit.Cdc;
 using System;
 using System.Collections.Generic;
 using Autheris.Api.Endpoints;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Extensions.Cdc;
 using Microsoft.AspNetCore.Http;
