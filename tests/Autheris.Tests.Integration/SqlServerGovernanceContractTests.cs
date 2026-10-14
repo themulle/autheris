@@ -56,7 +56,7 @@ public sealed class SqlServerGovernanceContractTests : IAsyncLifetime
                 SeedDemoData = seed
             }
         });
-        return new SqlServerGovernanceRepository(epoch, options, env);
+        return GovernanceStoreFactory.CreateSqlServer(epoch, options, env);
     }
 
     private static AuditLogEntry Entry(string type, string actor) => new()

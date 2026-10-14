@@ -22,7 +22,7 @@ public class GovernanceSecurityTests : IDisposable
     public GovernanceSecurityTests()
     {
         var epochService = new EpochValidationService();
-        _repository = new SqliteGovernanceRepository(epochService);
+        _repository = GovernanceStoreFactory.CreateSqlite(epochService);
         _mutation = new Mutation();
     }
 
@@ -603,7 +603,7 @@ public class GovernanceSecurityTests : IDisposable
 
         Should.Throw<InvalidOperationException>(() =>
         {
-            using var repo = new SqliteGovernanceRepository(epochService, opts, prodEnv, secretProvider: null);
+            using var repo = GovernanceStoreFactory.CreateSqlite(epochService, opts, prodEnv, secretProvider: null);
         });
     }
 

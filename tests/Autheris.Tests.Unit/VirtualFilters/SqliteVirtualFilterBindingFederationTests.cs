@@ -21,7 +21,7 @@ public sealed class SqliteVirtualFilterBindingFederationTests : IDisposable
 
     public SqliteVirtualFilterBindingFederationTests()
     {
-        _repository = new(
+        _repository = GovernanceStoreFactory.CreateSqlite(
             Substitute.For<IEpochValidationService>(),
             Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = _connectionString } }));
     }

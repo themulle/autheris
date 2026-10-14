@@ -11,7 +11,7 @@ using Xunit;
 /// <summary>CR-ADG-31 / WP-X0p: the persistent registry on SQLite (the same portable store backs PostgreSQL and SQL Server).</summary>
 public sealed class TenantRegistryStoreTests : IDisposable
 {
-    private readonly SqliteGovernanceRepository _repo = new(Substitute.For<IEpochValidationService>());
+    private readonly SqliteGovernanceRepository _repo = GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>());
     private ITenantRegistry Registry => _repo;
 
     public void Dispose() => _repo.Dispose();

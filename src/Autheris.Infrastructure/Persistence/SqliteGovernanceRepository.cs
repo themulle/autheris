@@ -15,7 +15,7 @@ using Microsoft.Extensions.Options;
 
 namespace Autheris.Infrastructure.Persistence;
 
-public partial class SqliteGovernanceRepository : IGovernanceRepository, IDisposable
+public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrations.IGovernanceStoreInitializer, IDisposable
 {
     private readonly SqliteConnection _connection;
     internal SqliteConnection Connection => _connection;
@@ -46,7 +46,10 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
 
     private readonly Channel<AuditLogEntry> _auditChannel;
     private readonly CancellationTokenSource _auditCts = new();
-    private readonly Task _auditProcessorTask;
+    private Task? _auditProcessorTask;
+    private int _initialized;
+    private bool _isDevOrTest;
+    private bool _shouldSeed;
     private static readonly byte[] ProcessEphemeralAuditHmacKey = RandomNumberGenerator.GetBytes(32);
     private string _lastAuditHash = "GENESIS_0000000000000000000000000000000000000000000000000000000000000000";
     private long _lastAuditSeq;
@@ -77,7 +80,8 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
         _connection = new SqliteConnection(connStr);
         _connection.Open();
 
-        InitializeDatabase();
+        // No DDL here: the schema is created and evolved by the governance migration runner (WP-ARC-B-12).
+        ConfigureConnection();
 
         // SEC R2-3: Bounded channel with backpressure to limit in-flight audit entries
         var channelOptions = new BoundedChannelOptions(Math.Max(1, options?.Value?.Audit?.QueryAuditChannelCapacity ?? 5_000))
@@ -208,16 +212,50 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
             secretProvider,
             auditAnchorSigner,
             _logger);
-        InitializeAuditChainAnchor(isDevOrTest);
+        _isDevOrTest = isDevOrTest;
+        _shouldSeed = options?.Value?.GovernanceDb?.SeedDemoData ?? (isMemory && isDevOrTest);
+    }
 
-        bool shouldSeed = options?.Value?.GovernanceDb?.SeedDemoData ?? (isMemory && isDevOrTest);
-        if (shouldSeed)
+    /// <summary>
+    /// Post-migration initialization: reads the audit chain tail, verifies the external chain anchor, seeds demo data (when
+    /// configured) and starts the audit processor. Requires the schema to be migrated first; fails closed otherwise.
+    /// </summary>
+    public Task InitializeAsync(CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (Interlocked.Exchange(ref _initialized, 1) == 1)
         {
-            SeedInitialCatalog();
+            return Task.CompletedTask;
         }
 
-        // AU-12: Background processor starts only after keys and stores are completely initialized
-        _auditProcessorTask = Task.Run(ProcessAuditChannelAsync);
+        try
+        {
+            // Startup reference only; it is cross-checked against the external signed anchor (SEC H-17)
+            // in InitializeAuditChainAnchor and never silently re-synchronised from the DB afterwards.
+            var (tailHash, tailSeq) = ReadAuditTail(null);
+            if (tailHash != null)
+            {
+                _lastAuditHash = tailHash;
+                _lastAuditSeq = tailSeq;
+            }
+
+            InitializeAuditChainAnchor(_isDevOrTest);
+
+            if (_shouldSeed)
+            {
+                SeedInitialCatalog();
+            }
+
+            // AU-12: Background processor starts only after keys and stores are completely initialized
+            _auditProcessorTask = Task.Run(ProcessAuditChannelAsync);
+        }
+        catch
+        {
+            Volatile.Write(ref _initialized, 0);
+            throw;
+        }
+
+        return Task.CompletedTask;
     }
 
 
@@ -239,7 +277,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
 
         try
         {
-            _auditProcessorTask.GetAwaiter().GetResult();
+            _auditProcessorTask?.GetAwaiter().GetResult();
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)

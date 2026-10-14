@@ -56,7 +56,7 @@ public sealed class ItsmOutboxTests
     public async Task OutboxRepository_ShouldEnqueueAndRetrievePendingMessages()
     {
         // Arrange
-        using var repo = new SqliteGovernanceRepository(new StubEpochValidationService());
+        using var repo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
         var msg = new ItsmOutboxMessage(
             Guid.NewGuid().ToString(),
             Guid.NewGuid().ToString(),
@@ -90,7 +90,7 @@ public sealed class ItsmOutboxTests
     public async Task OutboxRepository_MarkFailed_ShouldBackoffAndDeadLetterWhenMaxRetriesExceeded()
     {
         // Arrange
-        using var repo = new SqliteGovernanceRepository(new StubEpochValidationService());
+        using var repo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
         var msg = new ItsmOutboxMessage(
             Guid.NewGuid().ToString(),
             Guid.NewGuid().ToString(),
@@ -127,7 +127,7 @@ public sealed class ItsmOutboxTests
         var services = new ServiceCollection();
         var clientStub = new StubItsmWorkflowClient();
 
-        using var repo = new SqliteGovernanceRepository(new StubEpochValidationService());
+        using var repo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
         services.AddSingleton<IItsmOutboxRepository>(repo);
         services.AddSingleton<IConsentApprovalRepository>(repo);
         services.AddSingleton<IItsmWorkflowClient>(clientStub);

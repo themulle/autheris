@@ -21,7 +21,7 @@ using Xunit;
 public sealed class VirtualFilterWebhookTriggerTests : IDisposable
 {
     private const string WebhookSecret = "test-gitops-webhook-secret-2026";
-    private readonly SqliteGovernanceRepository _repository = new(
+    private readonly SqliteGovernanceRepository _repository = GovernanceStoreFactory.CreateSqlite(
         Substitute.For<IEpochValidationService>(),
         Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=vf_wh_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" } }));
 

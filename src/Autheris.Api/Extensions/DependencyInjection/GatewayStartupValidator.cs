@@ -342,6 +342,12 @@ public static class GatewayStartupValidator
                 throw new ValidationException("Sicherheitsverletzung: GovernanceDb.SeedDemoData darf AUSSCHLIESSLICH in der Development-Umgebung true sein!");
             }
 
+            // WP-ARC-B-12 (fail closed): the schema must never be started unchecked outside Development.
+            if (options.GovernanceDb.Migrations.Mode == GovernanceMigrationMode.Skip)
+            {
+                throw new ValidationException("Security violation: GovernanceDb:Migrations:Mode = Skip is only allowed in the Development environment. Use Apply or Verify.");
+            }
+
             if (options.Authentication.EnableTestAuthHandler)
             {
                 throw new ValidationException("Security violation: EnableTestAuthHandler may be true ONLY in the Development environment.");

@@ -21,7 +21,7 @@ public sealed class Round4OpenMetadataCoreTests : IDisposable
     private static readonly Guid SyncMarker = new("0e3d5c1a-7b2f-4c8e-9a61-5f0d2b7c4e19");
     private static readonly TableIdentifier SeededTable = new("finance", "dbo", "finance_table_1");
 
-    private readonly SqliteGovernanceRepository _repository = new(new EpochValidationService());
+    private readonly SqliteGovernanceRepository _repository = GovernanceStoreFactory.CreateSqlite(new EpochValidationService());
 
     public void Dispose() => _repository.Dispose();
 

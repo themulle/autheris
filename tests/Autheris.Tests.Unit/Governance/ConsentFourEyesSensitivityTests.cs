@@ -31,7 +31,7 @@ public sealed class ConsentFourEyesSensitivityTests
         string sensitivity,
         bool requiresFourEyes = false)
     {
-        var repo = new SqliteGovernanceRepository(new StubEpochValidationService());
+        var repo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
         var tableId = new TableIdentifier("sales", "crm", "cust_" + Guid.NewGuid().ToString("N")[..8]);
         var table = new Table
         {

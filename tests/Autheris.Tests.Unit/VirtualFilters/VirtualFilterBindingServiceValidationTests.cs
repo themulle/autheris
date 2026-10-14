@@ -29,7 +29,7 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
 {
     private static readonly VirtualFilterActor DbtActor = new(new Sid("S-1-5-21-DBT-SYNC"), IsSync: true);
 
-    private readonly SqliteGovernanceRepository _repository = new(
+    private readonly SqliteGovernanceRepository _repository = GovernanceStoreFactory.CreateSqlite(
         Substitute.For<IEpochValidationService>(),
         Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=vfb_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" } }));
 

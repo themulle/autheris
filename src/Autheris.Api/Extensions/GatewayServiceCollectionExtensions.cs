@@ -241,6 +241,8 @@ public static class GatewayServiceCollectionExtensions
     {
         var hostEnv = environment ?? (services.FirstOrDefault(d => d.ServiceType == typeof(IHostEnvironment))?.ImplementationInstance as IHostEnvironment);
 
+        // WP-ARC-B-12: must stay the first hosted service so the governance schema is migrated before anything else starts.
+        services.AddAutherisGovernanceMigrations();
         services.AddAutherisEvents(gatewayOptions);
         services.AddAutherisStorage(gatewayOptions, hostEnv);
         services.AddAutherisGovernance(gatewayOptions);

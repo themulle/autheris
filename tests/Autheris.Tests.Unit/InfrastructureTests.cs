@@ -25,7 +25,7 @@ public class InfrastructureTests : IDisposable
         _epochService = new EpochValidationService(eventBus: _eventBus);
         _memoryCache = new MemoryCache(new MemoryCacheOptions());
         _cacheService = new ConsentCacheService(_memoryCache, _epochService, _eventBus);
-        _repository = new SqliteGovernanceRepository(_epochService);
+        _repository = GovernanceStoreFactory.CreateSqlite(_epochService);
     }
 
     [Fact]
@@ -136,7 +136,7 @@ public class InfrastructureTests : IDisposable
         try
         {
             // 1. Initial Repository Instance
-            using (var repo1 = new SqliteGovernanceRepository(_epochService, options))
+            using (var repo1 = GovernanceStoreFactory.CreateSqlite(_epochService, options))
             {
                 await repo1.RecordAuditEventAsync(new AuditLogEntry
                 {
@@ -157,7 +157,7 @@ public class InfrastructureTests : IDisposable
             }
 
             // 2. Second Repository Instance (simulates process restart pointing to existing DB)
-            using (var repo2 = new SqliteGovernanceRepository(_epochService, options))
+            using (var repo2 = GovernanceStoreFactory.CreateSqlite(_epochService, options))
             {
                 await repo2.RecordAuditEventAsync(new AuditLogEntry
                 {
@@ -293,7 +293,7 @@ public class InfrastructureTests : IDisposable
         });
 
         // Simulate reboot: new repository instance on same database
-        using var newRepo = new SqliteGovernanceRepository(_epochService);
+        using var newRepo = GovernanceStoreFactory.CreateSqlite(_epochService);
 
         // Record subsequent event
         await newRepo.RecordAuditEventAsync(new AuditLogEntry

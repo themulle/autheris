@@ -59,7 +59,7 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
                 SeedDemoData = false
             }
         });
-        return new PostgreSqlGovernanceRepository(Substitute.For<IEpochValidationService>(), options, env);
+        return GovernanceStoreFactory.CreatePostgreSql(Substitute.For<IEpochValidationService>(), options, env);
     }
 
     [Fact]

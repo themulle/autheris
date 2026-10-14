@@ -184,6 +184,17 @@ Speicherort für Metadaten, Freigaben, Delegationen, Vier-Augen-Genehmigungen un
 | `CommandTimeoutSeconds` | `int` | `1 .. 60` | `15` | Timeout für Governance-SQL-Statements. |
 | `EnableOutboxProcessor` | `bool` | `true \| false` | `true` | Startet den asynchronen Outbox-Worker für Invalidation-Events. |
 | `SeedDemoData` | `bool` | `true \| false` | `true` | Initialisiert Demo-Tabellen und Standard-Governance-Regeln bei leerer DB. |
+| `MigrationConnectionString` | `string` | ADO.NET ConnStr | unset | PostgreSQL / SQL Server only: separate role that runs the schema migrations (DDL). The runtime role then needs no DDL rights. |
+| `Migrations:Mode` | `string` | `Apply`, `Verify`, `Skip` | `Apply` | How the versioned schema migrations are handled at startup (see below). `Skip` is rejected outside Development. |
+| `Migrations:AllowNewerSchema` | `bool` | `true \| false` | `false` | When `false`, startup fails if the database holds migrations newer than the running build. |
+
+**Schema migrations.** The governance schema is created and evolved by ordered migrations recorded in the table `autheris_schema_migrations` (`version`, `name`, `checksum`, `applied_at`, `applied_by`). Repository constructors run no DDL. A hosted service that is registered before every other hosted service runs the migrations once at startup, holding the existing cross-replica lock (PostgreSQL `pg_advisory_lock`, SQL Server `sp_getapplock`, SQLite `BEGIN IMMEDIATE`), and then initializes the store (audit chain tail and anchor verification, optional demo seed, audit processor start). Startup fails when a migration cannot be applied, when a stored checksum differs from the build (schema drift), when the database is newer than the build (unless `AllowNewerSchema`), or when the append-only audit trigger is missing after the run (PostgreSQL, SQL Server). Migration `0001` is the idempotent baseline of the complete schema, so existing databases upgrade in place without a manual step.
+
+- `Apply` (default): applies pending migrations.
+- `Verify`: changes nothing and fails startup while migrations are pending. Use it for replicas whose schema is migrated by a separate pipeline or init job.
+- `Skip`: neither inspects nor changes the schema (Development only).
+
+Run the migrations as a one-off job with `Autheris.Api --migrate-governance`: it applies (or verifies, per `Migrations:Mode`) the migrations and exits with code `0` on success and `1` on failure, without serving requests.
 
 ```json
 "GovernanceDb": {

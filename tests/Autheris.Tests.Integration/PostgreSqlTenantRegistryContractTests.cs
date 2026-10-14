@@ -48,7 +48,7 @@ public sealed class PostgreSqlTenantRegistryContractTests : IAsyncLifetime
     {
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
-        return new PostgreSqlGovernanceRepository(Substitute.For<IEpochValidationService>(), Options.Create(new GatewayOptions
+        return GovernanceStoreFactory.CreatePostgreSql(Substitute.For<IEpochValidationService>(), Options.Create(new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = _container!.GetConnectionString(), EnableOutboxProcessor = false, SeedDemoData = false }
         }), env);

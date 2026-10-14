@@ -186,7 +186,7 @@ public class ChunkedQueryExecutorTests
                 ConnectionString = $"Data Source=chunked_test_{Guid.NewGuid():N};Mode=Memory;Cache=Shared"
             }
         });
-        using var repository = new Autheris.Infrastructure.Persistence.SqliteGovernanceRepository(epochService, repoOptions);
+        using var repository = GovernanceStoreFactory.CreateSqlite(epochService, repoOptions);
         var resolutionService = new ConsentResolutionService();
         var maskingProvider = new ColumnMaskingProvider();
 

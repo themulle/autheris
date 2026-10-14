@@ -124,7 +124,7 @@ public sealed class AuditAnchorHardeningTests : IDisposable
         var worm = Path.Combine(_dir, "worm");
         var anchor = Path.Combine(_dir, "local", "anchor.json");
         var options = RepoOptions(worm, anchor);
-        using (var repo = new SqliteGovernanceRepository(new EpochValidationService(), options))
+        using (var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options))
         {
             for (var i = 1; i <= 4; i++)
             {
@@ -138,7 +138,7 @@ public sealed class AuditAnchorHardeningTests : IDisposable
         Directory.GetFiles(worm).Length.ShouldBeGreaterThanOrEqualTo(4);
         File.Delete(anchor);
 
-        using var restarted = new SqliteGovernanceRepository(new EpochValidationService(), options);
+        using var restarted = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options);
         (await restarted.VerifyAuditHashChainAsync()).ShouldBeFalse();
     }
 
@@ -146,7 +146,7 @@ public sealed class AuditAnchorHardeningTests : IDisposable
     public async Task SynchronousQueryAudit_CommitsBeforeReturning()
     {
         var options = RepoOptions(Path.Combine(_dir, "w2"), Path.Combine(_dir, "l2", "a.json"), syncQuery: true);
-        using var repo = new SqliteGovernanceRepository(new EpochValidationService(), options);
+        using var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options);
         await repo.RecordAuditEventAsync(NewEntry(1, "TABLE_QUERY"));
 
         using var cmd = repo.Connection.CreateCommand();
@@ -160,7 +160,7 @@ public sealed class AuditAnchorHardeningTests : IDisposable
         var worm = Path.Combine(_dir, "worm-rb");
         var anchor = Path.Combine(_dir, "local-rb", "anchor.json");
         var options = RepoOptions(worm, anchor, syncQuery: true);
-        using var repo = new SqliteGovernanceRepository(new EpochValidationService(), options);
+        using var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options);
 
         // 1. Initial valid audit entry
         await repo.RecordAuditEventAsync(NewEntry(1));

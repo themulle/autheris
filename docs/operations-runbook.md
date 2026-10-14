@@ -235,6 +235,13 @@ The monthly FinOps budget is enforced against a cluster-wide counter in the shar
 - Anchors are advanced only after the audit transaction commits, so an append-only anchor can never be ahead of the database.
 - `Audit:SynchronousQueryAudit=true` commits query audit events before the request is answered (no loss window on a crash, lower throughput). Otherwise they travel through an in-memory channel of `Audit:QueryAuditChannelCapacity` entries (default 5000), the maximum a hard crash can lose; a graceful shutdown drains it.
 
+### 4.ac Governance schema migrations (WP-ARC-B-12)
+
+- The governance schema is versioned in `autheris_schema_migrations`. The first start of a new build applies pending migrations under the cross-replica schema lock; later replicas find nothing to do. Existing databases upgrade in place.
+- Startup fails closed (the host does not serve) when a migration fails, when a stored checksum differs from the build (`GovernanceSchemaDriftException`), when the database is newer than the build, or, in `Verify` mode, while migrations are pending. Read the critical log entry `Governance database migration or initialization failed` and the inner exception.
+- Separate pipelines: set `GovernanceDb:Migrations:Mode=Verify` on the application and run `Autheris.Api --migrate-governance` as a pre-deployment job (with `GovernanceDb:MigrationConnectionString` for a DDL-capable role). The command exits `0` on success and `1` on failure.
+- Migrations are forward-only. Rolling back to an older build means restoring a database backup taken before the upgrade; an older build refuses to start against a newer schema unless `GovernanceDb:Migrations:AllowNewerSchema=true`.
+
 ---
 
 ## 5. Data Catalog Synchronization Operations

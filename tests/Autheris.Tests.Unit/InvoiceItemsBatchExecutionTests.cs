@@ -31,7 +31,7 @@ public class InvoiceItemsBatchExecutionTests : IDisposable
     public InvoiceItemsBatchExecutionTests()
     {
         var epochService = new EpochValidationService();
-        _repository = new SqliteGovernanceRepository(epochService);
+        _repository = GovernanceStoreFactory.CreateSqlite(epochService);
         _resolutionService = new ConsentResolutionService();
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
         var eventBus = new Autheris.Infrastructure.Messaging.InProcessChannelEventBus();
