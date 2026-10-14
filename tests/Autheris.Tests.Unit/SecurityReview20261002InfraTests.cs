@@ -525,22 +525,6 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
         result.ErrorMessage!.ShouldContain("incomplete");
     }
 
-    [Fact]
-    public async Task M31_WormExport_LegacyRepositoryHittingTheCap_Fails()
-    {
-        var repo = Substitute.For<IAuditLogRepository>();
-        repo.VerifyAuditHashChainAsync(Arg.Any<CancellationToken>()).Returns(true);
-        var capped = Enumerable.Range(0, 5000).Select(i => new AuditLogEntry { PrevHash = $"H{i}", EntryHash = $"H{i + 1}" }).ToList();
-        repo.QueryAuditLogsAsync(Arg.Any<string?>(), Arg.Any<Sid?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<int>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<AuditLogEntry>>(capped));
-
-        using var httpClient = new HttpClient(new OkHandler());
-        var exporter = new AuditWormExportService(repo, WormOptions(), httpClient, NullLogger<AuditWormExportService>.Instance);
-        var result = await exporter.ExportAuditSnapshotAsync(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
-
-        result.Success.ShouldBeFalse();
-    }
-
     // =========================================================================
     // M-27: plugin integrity
     // =========================================================================

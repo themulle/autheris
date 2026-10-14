@@ -15,14 +15,14 @@ using Xunit;
 
 namespace Autheris.Tests.Unit.Audit;
 
-/// <summary>SR-L-09: the public legacy HMAC key is gone; unsequenced SQLite rows need the explicit one-time migration.</summary>
+/// <summary>SEC H-17: the public legacy HMAC key is gone; unsequenced SQLite audit rows never verify.</summary>
 [Trait("Category", "Security")]
-public sealed class SqliteLegacyAuditMigrationTests : IDisposable
+public sealed class SqliteUnsequencedAuditRowTests : IDisposable
 {
     private const string Genesis = "GENESIS_0000000000000000000000000000000000000000000000000000000000000000";
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "autheris-legacy-audit-" + Guid.NewGuid().ToString("N"));
 
-    public SqliteLegacyAuditMigrationTests() => Directory.CreateDirectory(_dir);
+    public SqliteUnsequencedAuditRowTests() => Directory.CreateDirectory(_dir);
 
     public void Dispose()
     {
@@ -108,14 +108,14 @@ public sealed class SqliteLegacyAuditMigrationTests : IDisposable
     }
 
     [Fact]
-    public async Task Sqlite_LegacyRows_WithoutFlag_LatchViolation_AndDenyDataAccessRejectsQueries()
+    public async Task Sqlite_UnsequencedRows_LatchViolation_AndDenyDataAccessRejectsQueries()
     {
         var (options, dbFile, anchorFile) = FileOptions(AuditChainViolationPolicy.DenyDataAccess);
         CreateSchemaThenInsertLegacyRow(options, dbFile, anchorFile);
 
         using var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options, TestEnvironment());
 
-        repo.IsAuditPipelineFaulted.ShouldBeTrue("Startup must latch a violation for unsequenced rows when the flag is off.");
+        repo.IsAuditPipelineFaulted.ShouldBeTrue("Startup must latch a violation for unsequenced rows.");
         await Should.ThrowAsync<AuditUnavailableException>(() => repo.RecordAuditEventAsync(new AuditLogEntry
         {
             EventType = "TABLE_QUERY",
@@ -124,39 +124,6 @@ public sealed class SqliteLegacyAuditMigrationTests : IDisposable
             Decision = "ALLOW",
             TraceId = "trace-q"
         }));
-    }
-
-    [Fact]
-    public async Task Sqlite_LegacyMigration_ResealsAndRecordsBoundary()
-    {
-        var (options, dbFile, anchorFile) = FileOptions();
-        CreateSchemaThenInsertLegacyRow(options, dbFile, anchorFile);
-        var migration = Options.Create(new AuditLegacyMigrationOptions { AllowLegacyUnsequencedRows = true });
-
-        using var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options, TestEnvironment(), legacyMigrationOptions: migration);
-
-        repo.IsAuditPipelineFaulted.ShouldBeFalse();
-        (await repo.VerifyAuditHashChainAsync()).ShouldBeTrue("Re-sealed rows must verify under the real audit key.");
-
-        using (var cmd = repo.Connection.CreateCommand())
-        {
-            cmd.CommandText = "SELECT seq FROM AUDIT_LOG_ENTRIES";
-            Convert.ToInt64(await cmd.ExecuteScalarAsync()).ShouldBe(1);
-        }
-
-        using (var cmd = repo.Connection.CreateCommand())
-        {
-            cmd.CommandText = "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES_legacy_backup WHERE seq IS NULL";
-            Convert.ToInt64(await cmd.ExecuteScalarAsync()).ShouldBe(1);
-        }
-
-        repo.GetVerifiedChainAnchor()!.Sequence.ShouldBe(1);
-
-        await repo.RecordAuditEventAsync(NewEntry(2));
-        (await repo.VerifyAuditHashChainAsync()).ShouldBeTrue();
-        using var seqCmd = repo.Connection.CreateCommand();
-        seqCmd.CommandText = "SELECT seq FROM AUDIT_LOG_ENTRIES ORDER BY rowid DESC LIMIT 1";
-        Convert.ToInt64(await seqCmd.ExecuteScalarAsync()).ShouldBe(2);
     }
 
     [Fact]

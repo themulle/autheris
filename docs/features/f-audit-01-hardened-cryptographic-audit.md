@@ -42,9 +42,9 @@ The audit subsystem decouples in-memory high-throughput hash chaining from asymm
 ### 7. Anchor Monotonicity (SR-L-07)
 - Anchor stores never move backwards: the file store (read-compare-write under an in-process lock and an exclusive sibling `<anchor>.lock` file for replicas sharing a path), the in-memory store and all three repositories ignore an anchor with a lower sequence than the stored one. The WORM directory store is append-only and always loads the highest sequence.
 
-### 8. Legacy Unsequenced Rows (SR-L-09)
-- The compile-time legacy HMAC key no longer exists. SQLite audit rows without a sequence number are no longer verifiable.
-- On startup, such rows latch a chain violation unless `Gateway:Audit:AllowLegacyUnsequencedRows` is `true` (default `false`). With the flag set for one start, all rows from the first unsequenced one onward are re-sealed under the real audit key in a single transaction (sequence numbers in rowid order), the original table is copied to `AUDIT_LOG_ENTRIES_legacy_backup`, and the re-sealed tail is recorded in the external signed anchor. Set the flag back to `false` afterwards.
+### 8. Unsequenced Rows
+- Every audit row is written with a sequence number; there is no legacy HMAC key and no migration path for rows without one.
+- On startup, SQLite audit rows without a sequence number latch a chain violation, and chain verification rejects them.
 
 ### 9. Unified Audit Contract (`IAuditWriter`)
 - Endpoints and services write audit records through `Autheris.Application.Audit.IAuditWriter` instead of resolving `IAuditLogRepository` ad hoc.
@@ -69,8 +69,7 @@ The audit subsystem decouples in-memory high-throughput hash chaining from asymm
       "FlushIntervalSeconds": 10,
       "MaxBatchSize": 500,
       "SanitizeLiterals": true,
-      "OnChainViolation": "DenyDataAccess",
-      "AllowLegacyUnsequencedRows": false
+      "OnChainViolation": "DenyDataAccess"
     },
     "GovernanceDb": {
       "Provider": "sqlserver",

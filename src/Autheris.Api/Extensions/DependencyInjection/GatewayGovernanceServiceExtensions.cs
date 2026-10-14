@@ -45,10 +45,6 @@ public static class GatewayGovernanceServiceExtensions
         this IServiceCollection services,
         GatewayOptions gatewayOptions)
     {
-        // SR-L-09: standalone one-time migration switch for legacy unsequenced SQLite audit rows (Audit:AllowLegacyUnsequencedRows).
-        services.AddOptions<AuditLegacyMigrationOptions>()
-            .BindConfiguration(AuditLegacyMigrationOptions.SectionName);
-
         services.AddSingleton<Autheris.Application.Audit.IAuditWriter, Autheris.Application.Audit.AuditWriter>();
 
         if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.PostgreSql))

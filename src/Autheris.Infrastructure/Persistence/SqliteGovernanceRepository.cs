@@ -58,7 +58,6 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
     private readonly IAuditChainAnchorStore _auditAnchorStore;
     private readonly ILogger<SqliteGovernanceRepository>? _logger;
     private string? _auditChainViolation;
-    private readonly bool _allowLegacyUnsequencedRows;
     private readonly GatewayOptions? _options;
     private readonly ICallerContextProvider? _callerContextProvider;
 
@@ -70,11 +69,9 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
         IAuditChainAnchorStore? auditAnchorStore = null,
         ILogger<SqliteGovernanceRepository>? logger = null,
         IAuditAnchorSigner? auditAnchorSigner = null,
-        ICallerContextProvider? callerContextProvider = null,
-        IOptions<AuditLegacyMigrationOptions>? legacyMigrationOptions = null)
+        ICallerContextProvider? callerContextProvider = null)
     {
         _epochValidationService = epochValidationService;
-        _allowLegacyUnsequencedRows = legacyMigrationOptions?.Value?.AllowLegacyUnsequencedRows ?? false;
         _logger = logger;
         _options = options?.Value;
         _callerContextProvider = callerContextProvider;
@@ -233,8 +230,8 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
 
         try
         {
-            // SR-L-09: legacy unsequenced rows are migrated (explicit flag) or latched as a violation before the tail is read.
-            HandleLegacyUnsequencedRows();
+            // SEC H-17: unsequenced rows are latched as a violation before the tail is read.
+            LatchUnsequencedAuditRows();
 
             // Startup reference only; it is cross-checked against the external signed anchor (SEC H-17)
             // in InitializeAuditChainAnchor and never silently re-synchronised from the DB afterwards.

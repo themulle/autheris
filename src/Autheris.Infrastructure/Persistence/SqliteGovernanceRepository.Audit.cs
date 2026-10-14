@@ -730,12 +730,10 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
                     return false; // Broken chain!
                 }
 
-                // SEC H-17 / SR-L-09: every row carries a gap-free sequence number equal to its ordinal position. Legacy rows
-                // without a sequence are only accepted after the explicit one-time migration (Audit:AllowLegacyUnsequencedRows).
+                // SEC H-17: every row carries a gap-free sequence number equal to its ordinal position.
                 if (!seq.HasValue)
                 {
-                    FlagAuditChainViolation(
-                        $"Unsequenced legacy audit row at position {position} (id {id}). Re-seal it with the one-time migration (Audit:AllowLegacyUnsequencedRows=true) or investigate tampering.");
+                    FlagAuditChainViolation($"Unsequenced audit row at position {position} (id {id}). Investigate tampering.");
                     return false;
                 }
 
@@ -958,159 +956,18 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             tenantId);
     }
 
-    private const string LegacyBackupTableName = "AUDIT_LOG_ENTRIES_legacy_backup";
-
     /// <summary>
-    /// SR-L-09: legacy audit rows without a sequence number were sealed under a compile-time constant key that is no longer
-    /// accepted. Without <c>Audit:AllowLegacyUnsequencedRows=true</c> they latch a chain violation; with it they are re-sealed
-    /// once under the real audit key (see <see cref="MigrateLegacyUnsequencedRows"/>).
+    /// SEC H-17: every audit row is written with a sequence number. Rows without one were not written by the gateway, so they
+    /// latch a chain violation at startup.
     /// </summary>
-    private void HandleLegacyUnsequencedRows()
+    private void LatchUnsequencedAuditRows()
     {
-        long unsequenced;
-        using (var countCmd = _connection.CreateCommand())
+        using var countCmd = _connection.CreateCommand();
+        countCmd.CommandText = "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES WHERE seq IS NULL";
+        var unsequenced = Convert.ToInt64(countCmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+        if (unsequenced > 0)
         {
-            countCmd.CommandText = "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES WHERE seq IS NULL";
-            unsequenced = Convert.ToInt64(countCmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
-        }
-
-        if (unsequenced == 0)
-        {
-            return;
-        }
-
-        if (!_allowLegacyUnsequencedRows)
-        {
-            FlagAuditChainViolation(
-                $"{unsequenced} legacy audit row(s) without a sequence number found. Back up the database, then set Audit:AllowLegacyUnsequencedRows=true for ONE start to re-seal them under the audit key, and set it back to false afterwards.");
-            return;
-        }
-
-        MigrateLegacyUnsequencedRows();
-    }
-
-    private void MigrateLegacyUnsequencedRows()
-    {
-        _lock.Wait();
-        try
-        {
-            using var tx = _connection.BeginTransaction();
-
-            using (var existsCmd = _connection.CreateCommand())
-            {
-                existsCmd.Transaction = tx;
-                existsCmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = @name";
-                existsCmd.Parameters.AddWithValue("@name", LegacyBackupTableName);
-                if (Convert.ToInt64(existsCmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) > 0)
-                {
-                    // A finished migration leaves no unsequenced rows behind; new ones next to an existing backup are injected rows.
-                    FlagAuditChainViolation(
-                        $"Unsequenced audit rows found although the legacy migration backup table {LegacyBackupTableName} already exists. Investigate possible tampering; do not re-run the migration.");
-                    return;
-                }
-            }
-
-            using (var backupCmd = _connection.CreateCommand())
-            {
-                backupCmd.Transaction = tx;
-                backupCmd.CommandText = $"CREATE TABLE {LegacyBackupTableName} AS SELECT * FROM AUDIT_LOG_ENTRIES";
-                backupCmd.ExecuteNonQuery();
-            }
-
-            var rows = new List<(long RowId, string Id, string OccurredAt, string EventType, string ActorSid, string TargetTable, string TargetColumn, string Decision, string TraceId, string DetailsJson, string TenantId, string EntryHash, bool HasSeq)>();
-            using (var readCmd = _connection.CreateCommand())
-            {
-                readCmd.Transaction = tx;
-                readCmd.CommandText = @"SELECT rowid, id, occurred_at, event_type, actor_sid, target_table, target_column,
-                                               decision, trace_id, details_json, tenant_id, entry_hash, seq
-                                        FROM AUDIT_LOG_ENTRIES
-                                        ORDER BY rowid ASC";
-                using var reader = readCmd.ExecuteReader();
-                while (reader.Read())
-                {
-                    rows.Add((
-                        reader.GetInt64(0),
-                        reader.GetString(1),
-                        reader.GetString(2),
-                        reader.GetString(3),
-                        reader.GetString(4),
-                        reader.GetString(5),
-                        reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
-                        reader.GetString(7),
-                        reader.GetString(8),
-                        reader.GetString(9),
-                        reader.IsDBNull(10) ? TenantId.LegacySingleTenant.Value : reader.GetString(10),
-                        reader.GetString(11),
-                        !reader.IsDBNull(12)));
-                }
-            }
-
-            using var updateCmd = _connection.CreateCommand();
-            updateCmd.Transaction = tx;
-            updateCmd.CommandText = "UPDATE AUDIT_LOG_ENTRIES SET prev_hash = @prev, entry_hash = @hash, seq = @seq WHERE rowid = @rowid";
-            var pPrev = updateCmd.Parameters.Add("@prev", SqliteType.Text);
-            var pHash = updateCmd.Parameters.Add("@hash", SqliteType.Text);
-            var pSeq = updateCmd.Parameters.Add("@seq", SqliteType.Integer);
-            var pRowId = updateCmd.Parameters.Add("@rowid", SqliteType.Integer);
-
-            // Rows before the first unsequenced one are an untouched prefix; from there on every row is re-sealed in rowid order
-            // because each hash covers its predecessor.
-            var previousHash = AuditGenesisHash;
-            long position = 0;
-            var resealing = false;
-            foreach (var row in rows)
-            {
-                position++;
-                resealing |= !row.HasSeq;
-                if (!resealing)
-                {
-                    previousHash = row.EntryHash;
-                    continue;
-                }
-
-                var hash = ComputeAuditEntryHash(
-                    position,
-                    row.Id,
-                    previousHash,
-                    DateTimeOffset.Parse(row.OccurredAt, System.Globalization.CultureInfo.InvariantCulture),
-                    row.EventType,
-                    row.ActorSid,
-                    row.TargetTable,
-                    row.TargetColumn,
-                    row.Decision,
-                    row.TraceId,
-                    row.DetailsJson,
-                    row.TenantId);
-                pPrev.Value = previousHash;
-                pHash.Value = hash;
-                pSeq.Value = position;
-                pRowId.Value = row.RowId;
-                updateCmd.ExecuteNonQuery();
-                previousHash = hash;
-            }
-
-            tx.Commit();
-
-            _lastAuditSeq = position;
-            _lastAuditHash = previousHash;
-            _logger?.LogWarning(
-                "SR-L-09: re-sealed legacy audit rows under the audit key (chain now ends at seq {Sequence}); original rows are kept in {Backup}. Set Audit:AllowLegacyUnsequencedRows back to false.",
-                position,
-                LegacyBackupTableName);
-
-            try
-            {
-                // The legacy anchor (if any) covers the old hashes; the boundary is recorded by anchoring the re-sealed tail.
-                _auditAnchorStore.Save(CreateSignedAnchor(position, previousHash));
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex, "Failed to record the legacy migration boundary in the external audit chain anchor (seq {Sequence}).", position);
-            }
-        }
-        finally
-        {
-            _lock.Release();
+            FlagAuditChainViolation($"{unsequenced} audit row(s) without a sequence number found. Investigate tampering.");
         }
     }
 
