@@ -703,6 +703,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
                 {
                     if (!seq.HasValue)
                     {
+                        // Backward-compatibility: legacy v1 rows created before additive sequence migration were sealed under the v1 default key
                         var legacyComputed = AuditCanonicalizer.ComputeEntryHash("AutherisAuditLogHmacTamperEvidenceSecret2026!"u8.ToArray(), null, id, prevHash, parsedOccurredAt, eventType, actorSid, targetTable, targetColumn, decision, traceId, detailsJson, tenantId);
                         if (!FixedTimeEqualsString(entryHash, legacyComputed))
                         {

@@ -196,6 +196,43 @@ public sealed class DatasourceTestingServiceTests
         result.Type.ShouldBe(DataSourceType.Sql);
     }
 
+    [Fact]
+    public async Task TestDatasource_IgnoresForbiddenHeadersAndCrlfInjection()
+    {
+        var httpTable = CreateHttpTable("crm", "customers", "https://api.crm-sample.com");
+        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([httpTable]);
+
+        HttpRequestMessage? captured = null;
+        var fakeHandler = new FakeHttpMessageHandler(req =>
+        {
+            captured = req;
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        _httpClientFactory.CreateClient("DeclarativeHttp").Returns(new HttpClient(fakeHandler));
+
+        var service = new DatasourceTestingService(
+            _metadataRepo, _httpClientFactory, _auditRepo, _secretProvider, _environment, NullLogger<DatasourceTestingService>.Instance);
+
+        var request = new DatasourceTestRequest(
+            AdditionalHeaders: new Dictionary<string, string>
+            {
+                ["Host"] = "attacker.internal",
+                ["Authorization"] = "Bearer stolen",
+                ["X-Injected\r\nInjected"] = "malicious",
+                ["X-Custom-Safe"] = "safe-val"
+            });
+
+        var result = await service.TestDatasourceAsync("crm.dbo.customers", request, CreateAdminUser());
+
+        result.IsSuccess.ShouldBeTrue();
+        captured.ShouldNotBeNull();
+        captured.Headers.Contains("Host").ShouldBeFalse();
+        captured.Headers.Contains("Authorization").ShouldBeFalse();
+        captured.Headers.Any(h => h.Key.Contains("Injected")).ShouldBeFalse();
+        captured.Headers.Contains("X-Custom-Safe").ShouldBeTrue();
+    }
+
     private sealed class FakeHttpMessageHandler : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, HttpResponseMessage> _handler;

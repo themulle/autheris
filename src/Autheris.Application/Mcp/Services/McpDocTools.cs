@@ -35,6 +35,7 @@ public static class McpDocTools
         string argumentsJson,
         IDocSearchService? searchService,
         IUniversalDocStore? docStore,
+        McpSessionContext? sessionContext = null,
         CancellationToken ct = default)
     {
         if (string.Equals(toolName, SearchDocs, StringComparison.OrdinalIgnoreCase))
@@ -88,7 +89,7 @@ public static class McpDocTools
             {
                 return JsonSerializer.Serialize(new { error = "Universal doc store is not configured." });
             }
-            return await ExecuteDepositDocumentationAsync(docStore, argumentsJson, ct).ConfigureAwait(false);
+            return await ExecuteDepositDocumentationAsync(docStore, argumentsJson, sessionContext, ct).ConfigureAwait(false);
         }
 
         return JsonSerializer.Serialize(new { error = $"Unknown doc tool '{toolName}'." });
@@ -383,9 +384,26 @@ public static class McpDocTools
     public static async Task<string> ExecuteDepositDocumentationAsync(
         IUniversalDocStore docStore,
         string? argumentsJson,
+        McpSessionContext? sessionContext = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(docStore);
+
+        if (sessionContext != null)
+        {
+            if (sessionContext.IsReadOnly)
+            {
+                return JsonSerializer.Serialize(new { error = "ReadOnlySession", message = "Cannot deposit documentation in a read-only MCP session." });
+            }
+
+            var roles = sessionContext.Roles ?? [];
+            bool isAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) ||
+                           roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
+            if (!isAdmin)
+            {
+                return JsonSerializer.Serialize(new { error = "Forbidden", message = "Depositing documentation requires ClusterAdmin or GovernanceAdmin role." });
+            }
+        }
 
         if (string.IsNullOrWhiteSpace(argumentsJson))
         {

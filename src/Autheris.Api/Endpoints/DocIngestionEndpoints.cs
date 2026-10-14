@@ -40,11 +40,19 @@ public static class DocIngestionEndpoints
                 }
 
                 using var ms = new MemoryStream();
-                await request.Body.CopyToAsync(ms, ct).ConfigureAwait(false);
-                if (ms.Length > maxRawSize)
+                var buffer = new byte[81920];
+                int bytesRead;
+                long totalBytes = 0;
+                while ((bytesRead = await request.Body.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false)) > 0)
                 {
-                    return Results.BadRequest(new { error = "Bundle archive exceeds maximum permitted size of 50 MB." });
+                    totalBytes += bytesRead;
+                    if (totalBytes > maxRawSize)
+                    {
+                        return Results.BadRequest(new { error = "Bundle archive exceeds maximum permitted size of 50 MB." });
+                    }
+                    await ms.WriteAsync(buffer.AsMemory(0, bytesRead), ct).ConfigureAwait(false);
                 }
+
                 if (ms.Length == 0)
                 {
                     return Results.BadRequest(new { error = "No documentation bundle file found in the request." });
@@ -71,7 +79,7 @@ public static class DocIngestionEndpoints
             await using var stream = file.OpenReadStream();
             var extractResult = await docStore.ExtractBundleAsync(appId, stream, ct).ConfigureAwait(false);
             return extractResult.Success ? Results.Ok(extractResult) : Results.BadRequest(extractResult);
-        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.DocIngestionBundleApplied);
+        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.DocIngestionBundleApplied);
 
         // 2. Deposit or update individual document
         app.MapPut("/api/v1/docs/apps/{appId}/documents/{category}/{docId}", async (
@@ -118,7 +126,7 @@ public static class DocIngestionEndpoints
             }
 
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);
-        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.DocIngestionDocumentApplied);
+        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.DocIngestionDocumentApplied);
 
         // 3. List all registered applications in the doc lake
         app.MapGet("/api/v1/docs/apps", async (

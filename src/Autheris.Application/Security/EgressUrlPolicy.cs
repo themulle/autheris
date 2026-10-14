@@ -17,7 +17,7 @@ public static class EgressUrlPolicy
     {
         ArgumentNullException.ThrowIfNull(uri);
 
-        var host = uri.Host.TrimEnd('.').ToLowerInvariant();
+        var host = uri.IdnHost.TrimEnd('.').ToLowerInvariant();
 
         if (EgressAddressRules.IsForbiddenHost(host))
         {
@@ -55,7 +55,7 @@ public static class EgressUrlPolicy
             return;
         }
 
-        var host = uri.Host.TrimEnd('.').ToLowerInvariant();
+        var host = uri.IdnHost.TrimEnd('.').ToLowerInvariant();
         IPAddress[] addresses;
         if (IPAddress.TryParse(host, out var directIp))
         {

@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Middleware;
+using Autheris.Api.Security;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -63,7 +64,7 @@ public static class DataContractEndpoints
             {
                 return Results.BadRequest(new { error = ex.Message });
             }
-        }).RequireAuthorization()
+        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin)
           .WithRequestBodyLimit(10 * 1024 * 1024)
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
@@ -74,7 +75,7 @@ public static class DataContractEndpoints
         {
             var contracts = await contractEngine.ListContractsAsync(context.RequestAborted);
             return Results.Ok(contracts);
-        }).RequireAuthorization()
+        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin)
           .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // 3. DataHub Inbound Webhook / Events Emitter
@@ -94,7 +95,7 @@ public static class DataContractEndpoints
 
             var success = await dataHubClient.IngestMetadataChangeEventAsync(payload, context.RequestAborted);
             return success ? Results.Ok(new { received = true }) : Results.BadRequest(new { error = "Invalid event payload." });
-        }).RequireAuthorization()
+        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin)
           .WithRequestBodyLimit(10 * 1024 * 1024)
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 

@@ -393,4 +393,17 @@ public sealed class AsyncQueryJobManagerTests : IDisposable
             manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), anonymous, new TenantId("tenant-a")));
         ex.ErrorCode.ShouldBe("ASYNC_JOB_OWNER_UNRESOLVABLE");
     }
+
+    [Theory]
+    [InlineData("=cmd|'/C calc'!A0", "'=cmd|'/C calc'!A0")]
+    [InlineData("+1+2", "'+1+2")]
+    [InlineData("-1+2", "'-1+2")]
+    [InlineData("@SUM(A1:A10)", "'@SUM(A1:A10)")]
+    [InlineData("\tmalicious", "'\tmalicious")]
+    [InlineData("normal text", "normal text")]
+    public void EscapeCsv_NeutralizesFormulaInjection(string input, string expected)
+    {
+        var result = AsyncQueryJobBackgroundWorker.EscapeCsv(input);
+        result.ShouldBe(expected);
+    }
 }

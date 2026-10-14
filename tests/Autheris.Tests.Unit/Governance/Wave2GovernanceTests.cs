@@ -70,7 +70,7 @@ public sealed class Wave2GovernanceTests
             ]);
 
         var user = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Name, "AdminUser")],
+            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Name, "AdminUser"), new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN")],
             "test"));
 
         // Act
@@ -121,7 +121,7 @@ public sealed class Wave2GovernanceTests
             ]);
 
         var user = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Name, "AdminUser")],
+            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Name, "AdminUser"), new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN")],
             "test"));
 
         // Act

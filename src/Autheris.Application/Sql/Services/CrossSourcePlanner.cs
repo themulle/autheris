@@ -231,7 +231,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
 
             foreach (var col in t.Metadata.Columns)
             {
-                if (dec.GetColumnAccess(col.ColumnName) == ColumnAccessLevel.Deny)
+                if (dec.GetEffectiveColumnAccess(col.ColumnName, t.Metadata) == ColumnAccessLevel.Deny)
                     continue;
 
                 bool referenced = selectAll ||
@@ -249,7 +249,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             {
                 foreach (var col in t.Metadata.Columns)
                 {
-                    if (dec.GetColumnAccess(col.ColumnName) != ColumnAccessLevel.Deny)
+                    if (dec.GetEffectiveColumnAccess(col.ColumnName, t.Metadata) != ColumnAccessLevel.Deny)
                         projected.Add(col.ColumnName);
                 }
             }
