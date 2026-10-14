@@ -118,6 +118,9 @@ if [[ ! -f .env ]]; then
     log_warn_env() { echo -e "\033[1;33m[GqlGateway Bench]\033[0m $1"; }
     log_warn_env "No .env found - generating random benchmark secrets via scripts/generate-env.sh"
     ./scripts/generate-env.sh
+elif [[ ! -f certs/sqlserver.crt ]]; then
+    # SR-D-08: existing .env but no SQL Server TLS certificate yet; the script keeps the .env untouched.
+    ./scripts/generate-env.sh
 fi
 set -a
 # shellcheck disable=SC1091

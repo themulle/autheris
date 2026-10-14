@@ -136,6 +136,17 @@ else
     echo "--> helm not installed; skipping Helm render checks (CI job helm-render runs them)."
 fi
 
+# 7b. No benchmark connection string may trust the SQL Server certificate blindly (SR-D-08)
+echo "--> Checking TrustServerCertificate..."
+if grep -rniE "TrustServerCertificate=True" "${REPO_ROOT}/deploy" --exclude="verify-hardening.sh" --exclude-dir=certs >/dev/null; then
+    echo "ERROR: deploy/ contains TrustServerCertificate=True" >&2
+    FAILURES=$((FAILURES + 1))
+fi
+if ! sed -n '/^  reverse-proxy:/,/^  load-generator:/p' "${REPO_ROOT}/deploy/podman-compose.yaml" | grep -q "read_only: true"; then
+    echo "ERROR: podman-compose.yaml reverse-proxy does not use a read-only root filesystem" >&2
+    FAILURES=$((FAILURES + 1))
+fi
+
 # 8. Every container base image is pinned to a full patch tag plus digest (SEC2-08)
 echo "--> Checking base image pins..."
 while IFS= read -r line; do
