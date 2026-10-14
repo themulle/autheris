@@ -436,4 +436,36 @@ public sealed class WebhookDeliveryClientTests
         result.Decision.Outcome.ShouldBe(WebhookRetryOutcome.Retry);
         result.Decision.ErrorCode.ShouldBeNull();
     }
+
+    [Fact]
+    public async Task Delivery_EgressValidationHang_IsBoundedByTheDeliveryTimeout()
+    {
+        var f = new Fixture(timeoutSeconds: 1, validator: async (_, _, ct) => await Task.Delay(Timeout.Infinite, ct));
+
+        var result = await f.Client.DeliverAsync(Message(), Target(), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+
+        result.Decision.Outcome.ShouldBe(WebhookRetryOutcome.Retry);
+        result.Decision.ErrorCode.ShouldBe(WebhookDeliveryErrorCodes.Timeout);
+        f.Handler.Calls.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("v1\r\nX-Injected: 1")]
+    [InlineData("v1\nx")]
+    [InlineData("a\rb")]
+    public async Task Delivery_CustomHeaderValueWithLineBreak_IsSkipped_AndOthersAreSent(string badValue)
+    {
+        var f = new Fixture();
+        var headers = new Dictionary<string, string> { ["X-Bad"] = badValue, ["X-Good"] = "ok" };
+
+        var result = await f.Client.DeliverAsync(Message(), Target(headers: headers), CancellationToken.None);
+
+        result.Decision.Outcome.ShouldBe(WebhookRetryOutcome.Success);
+        var req = f.Handler.Calls.Single().Request;
+        req.Headers.Contains("X-Bad").ShouldBeFalse();
+        req.Headers.Contains("X-Injected").ShouldBeFalse();
+        req.Headers.GetValues("X-Good").Single().ShouldBe("ok");
+        f.Logger.All.ShouldContain("X-Bad");
+        f.Logger.All.ShouldNotContain("X-Injected");
+    }
 }

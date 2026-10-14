@@ -87,6 +87,12 @@ public sealed class WebhookDispatcherService : IWebhookDispatcherService
         var now = _timeProvider.GetUtcNow();
         foreach (var subscription in matching)
         {
+            if (string.IsNullOrWhiteSpace(subscription.Id))
+            {
+                _logger.LogError("A configured webhook subscription has no Id; delivery skipped (validated at startup).");
+                continue;
+            }
+
             // SR-L-13: fail closed, never queue a delivery that could only go out unsigned.
             if (requireSecret && string.IsNullOrEmpty(subscription.Secret))
             {

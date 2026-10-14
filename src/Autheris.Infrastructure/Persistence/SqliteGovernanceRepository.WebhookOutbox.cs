@@ -89,22 +89,22 @@ public partial class SqliteGovernanceRepository : IWebhookOutbox
         }, ct);
     }
 
-    public Task<bool> CompleteAsync(string id, string leaseOwner, int statusCode, CancellationToken ct = default) =>
+    public Task<bool> CompleteAsync(string id, string leaseOwner, int statusCode, DateTimeOffset now, CancellationToken ct = default) =>
         FencedUpdateAsync(
-            "state = 2, lease_until_ms = NULL, last_status_code = @status, last_error_code = NULL",
-            id, leaseOwner, statusCode, null, null, ct);
+            "state = 2, lease_until_ms = NULL, last_status_code = @status, last_error_code = NULL, updated_ms = @now",
+            id, leaseOwner, statusCode, null, null, now, ct);
 
-    public Task<bool> RescheduleAsync(string id, string leaseOwner, DateTimeOffset nextAttemptAt, int? statusCode, string errorCode, CancellationToken ct = default) =>
+    public Task<bool> RescheduleAsync(string id, string leaseOwner, DateTimeOffset nextAttemptAt, int? statusCode, string errorCode, DateTimeOffset now, CancellationToken ct = default) =>
         FencedUpdateAsync(
-            "state = 0, lease_until_ms = NULL, lease_owner = NULL, next_attempt_ms = @next, last_status_code = @status, last_error_code = @error",
-            id, leaseOwner, statusCode, errorCode, WebhookOutboxMapping.Ms(nextAttemptAt), ct);
+            "state = 0, lease_until_ms = NULL, lease_owner = NULL, next_attempt_ms = @next, last_status_code = @status, last_error_code = @error, updated_ms = @now",
+            id, leaseOwner, statusCode, errorCode, WebhookOutboxMapping.Ms(nextAttemptAt), now, ct);
 
-    public Task<bool> DeadLetterAsync(string id, string leaseOwner, int? statusCode, string errorCode, CancellationToken ct = default) =>
+    public Task<bool> DeadLetterAsync(string id, string leaseOwner, int? statusCode, string errorCode, DateTimeOffset now, CancellationToken ct = default) =>
         FencedUpdateAsync(
-            "state = 3, lease_until_ms = NULL, last_status_code = @status, last_error_code = @error",
-            id, leaseOwner, statusCode, errorCode, null, ct);
+            "state = 3, lease_until_ms = NULL, last_status_code = @status, last_error_code = @error, updated_ms = @now",
+            id, leaseOwner, statusCode, errorCode, null, now, ct);
 
-    private Task<bool> FencedUpdateAsync(string setClause, string id, string leaseOwner, int? statusCode, string? errorCode, long? next, CancellationToken ct)
+    private Task<bool> FencedUpdateAsync(string setClause, string id, string leaseOwner, int? statusCode, string? errorCode, long? next, DateTimeOffset now, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentException.ThrowIfNullOrWhiteSpace(leaseOwner);
@@ -117,6 +117,7 @@ public partial class SqliteGovernanceRepository : IWebhookOutbox
             cmd.Parameters.AddWithValue("@status", (object?)statusCode ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@error", (object?)errorCode ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@next", (object?)next ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@now", WebhookOutboxMapping.Ms(now));
             return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) == 1;
         }, ct);
     }

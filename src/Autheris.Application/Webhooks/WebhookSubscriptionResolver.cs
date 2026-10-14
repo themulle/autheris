@@ -26,9 +26,23 @@ public sealed class WebhookSubscriptionResolver(IOptions<GatewayOptions> options
             case WebhookSubscriptionSource.Configured:
                 var configured = options.Value.Webhooks.Subscriptions
                     .FirstOrDefault(s => string.Equals(s.Id, message.SubscriptionId, StringComparison.Ordinal));
-                return configured is null
-                    ? null
-                    : new ResolvedWebhookTarget(configured.TargetUrl, configured.Secret, null, configured.IsActive);
+                if (configured is null)
+                {
+                    return null;
+                }
+
+                if (!configured.IsActive)
+                {
+                    return new ResolvedWebhookTarget(configured.TargetUrl, configured.Secret, null, false);
+                }
+
+                // The subscription may have been re-bound since the row was queued: retries must never leave the tenant or filter
+                // the row was matched under (fail closed, same as a missing subscription).
+                var owner = string.IsNullOrWhiteSpace(configured.TenantId) ? null : configured.TenantId;
+                return string.Equals(owner, message.OwnerTenantId, StringComparison.OrdinalIgnoreCase)
+                       && configured.MatchesEvent(message.EventType, message.EventTenantId)
+                    ? new ResolvedWebhookTarget(configured.TargetUrl, configured.Secret, null, true)
+                    : null;
 
             case WebhookSubscriptionSource.CloudEvent:
                 var store = services.GetService<ICloudEventSubscriptionStore>();

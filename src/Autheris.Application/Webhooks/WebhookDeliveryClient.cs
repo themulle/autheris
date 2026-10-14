@@ -102,12 +102,14 @@ public sealed class WebhookDeliveryClient
 
         try
         {
-            // Re-validated on every attempt: DNS may have changed since the previous one (the connect callback pins the IP as well).
-            await _egressValidator(uri, isDev, ct).ConfigureAwait(false);
-
-            using var request = BuildRequest(message, target, uri, hasSecret);
+            // The timeout covers the egress check (a slow DNS lookup) as well as the send.
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, webhooks.DefaultTimeoutSeconds)));
+
+            // Re-validated on every attempt: DNS may have changed since the previous one (the connect callback pins the IP as well).
+            await _egressValidator(uri, isDev, timeoutCts.Token).ConfigureAwait(false);
+
+            using var request = BuildRequest(message, target, uri, hasSecret);
 
             using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token).ConfigureAwait(false);
             var status = (int)response.StatusCode;
@@ -175,6 +177,18 @@ public sealed class WebhookDeliveryClient
                 if (IsForbiddenCustomHeader(name))
                 {
                     _logger.LogWarning("Webhook subscription {SubscriptionId}: custom header '{Header}' is not permitted and was dropped.", message.SubscriptionId, name);
+                    continue;
+                }
+
+                // A value with CR/LF can never be sent (header injection); skip it instead of failing every retry. Name only is logged.
+                if (value.AsSpan().IndexOfAny('\r', '\n') >= 0 || name.AsSpan().IndexOfAny('\r', '\n') >= 0)
+                {
+                    _logger.LogWarning("Webhook subscription {SubscriptionId}: a custom header was skipped because it contains a line break.", message.SubscriptionId);
+                    if (name.AsSpan().IndexOfAny('\r', '\n') < 0)
+                    {
+                        _logger.LogWarning("Skipped custom header name: {Header}", name);
+                    }
+
                     continue;
                 }
 

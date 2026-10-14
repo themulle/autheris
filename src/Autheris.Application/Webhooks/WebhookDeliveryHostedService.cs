@@ -42,6 +42,7 @@ public sealed class WebhookDeliveryHostedService : BackgroundService
     private readonly TimeProvider _timeProvider;
     private readonly ConcurrentDictionary<(WebhookSubscriptionSource Source, string SubscriptionId), int> _consecutiveFailures = new();
     private long _lastPurgeTicks;
+    private long _lastCountTicks;
 
     public WebhookDeliveryHostedService(
         IWebhookOutbox outbox,
@@ -60,6 +61,7 @@ public sealed class WebhookDeliveryHostedService : BackgroundService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _lastPurgeTicks = _timeProvider.GetUtcNow().UtcTicks;
+        _lastCountTicks = long.MinValue;
         _ = PendingGauge; // touch the static gauge so it is registered once the service exists
     }
 
@@ -131,7 +133,21 @@ public sealed class WebhookDeliveryHostedService : BackgroundService
                 break; // the remaining leased rows are reclaimed after the lease expires
             }
 
-            await ProcessAsync(message, leaseOwner, ct).ConfigureAwait(false);
+            try
+            {
+                await ProcessAsync(message, leaseOwner, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // One bad row must not abort the rest of the batch; its lease expires and it is retried. Type only: messages may carry secrets.
+                _logger.LogError(
+                    "Webhook {EventId} for subscription {SubscriptionId} could not be processed ({ErrorType}).",
+                    message.EventId, message.SubscriptionId, ex.GetType().Name);
+            }
         }
 
         return batch.Count;
@@ -139,6 +155,13 @@ public sealed class WebhookDeliveryHostedService : BackgroundService
 
     private async Task ProcessAsync(WebhookOutboxMessage message, string leaseOwner, CancellationToken ct)
     {
+        // Poison protection: every claim counts as an attempt, so a row whose lease keeps expiring runs out of budget.
+        if (message.Attempt > message.MaxAttempts)
+        {
+            await DeadAsync(message, leaseOwner, message.LastStatusCode, WebhookDeliveryErrorCodes.MaxAttemptsExceeded, ct).ConfigureAwait(false);
+            return;
+        }
+
         var target = await _resolver.ResolveAsync(message, ct).ConfigureAwait(false);
         if (target is null)
         {
@@ -160,12 +183,12 @@ public sealed class WebhookDeliveryHostedService : BackgroundService
         {
             case WebhookRetryOutcome.Success:
                 _consecutiveFailures.TryRemove(key, out _);
-                await _outbox.CompleteAsync(message.Id, leaseOwner, result.StatusCode ?? 200, ct).ConfigureAwait(false);
+                await _outbox.CompleteAsync(message.Id, leaseOwner, result.StatusCode ?? 200, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
                 DeliveriesCounter.Add(1, new KeyValuePair<string, object?>("outcome", "success"));
                 return;
 
             case WebhookRetryOutcome.Permanent:
-                await DeadAsync(message, leaseOwner, result.StatusCode, decision.ErrorCode ?? WebhookDeliveryErrorCodes.Network, ct).ConfigureAwait(false);
+                await DeadAsync(message, leaseOwner, result.StatusCode, decision.ErrorCode ?? WebhookDeliveryErrorCodes.Unknown, ct).ConfigureAwait(false);
                 if (decision.ErrorCode != WebhookDeliveryErrorCodes.SecretMissing)
                 {
                     await RecordFailureAsync(message, ct).ConfigureAwait(false);
@@ -186,7 +209,7 @@ public sealed class WebhookDeliveryHostedService : BackgroundService
                 else
                 {
                     var next = _timeProvider.GetUtcNow() + _retryPolicy.ComputeDelay(message.Attempt, decision.RetryAfter);
-                    await _outbox.RescheduleAsync(message.Id, leaseOwner, next, result.StatusCode, decision.ErrorCode, ct).ConfigureAwait(false);
+                    await _outbox.RescheduleAsync(message.Id, leaseOwner, next, result.StatusCode, decision.ErrorCode, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
                     DeliveriesCounter.Add(1, new KeyValuePair<string, object?>("outcome", "retry"));
                 }
 
@@ -197,7 +220,7 @@ public sealed class WebhookDeliveryHostedService : BackgroundService
 
     private async Task DeadAsync(WebhookOutboxMessage message, string leaseOwner, int? statusCode, string errorCode, CancellationToken ct)
     {
-        await _outbox.DeadLetterAsync(message.Id, leaseOwner, statusCode, errorCode, ct).ConfigureAwait(false);
+        await _outbox.DeadLetterAsync(message.Id, leaseOwner, statusCode, errorCode, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
         DeliveriesCounter.Add(1, new KeyValuePair<string, object?>("outcome", "dead"));
         DeadLettersCounter.Add(1, new KeyValuePair<string, object?>("code", errorCode));
         _logger.LogWarning(
@@ -223,7 +246,7 @@ public sealed class WebhookDeliveryHostedService : BackgroundService
             message.SubscriptionId, failures, deferred, Webhooks.EffectiveCircuitCooldownSeconds);
     }
 
-    private async Task HousekeepingAsync(CancellationToken ct)
+    internal async Task HousekeepingAsync(CancellationToken ct)
     {
         var now = _timeProvider.GetUtcNow();
         var last = new DateTimeOffset(Interlocked.Read(ref _lastPurgeTicks), TimeSpan.Zero);
@@ -232,7 +255,13 @@ public sealed class WebhookDeliveryHostedService : BackgroundService
             await PurgeAsync(ct).ConfigureAwait(false);
         }
 
-        Interlocked.Exchange(ref s_pending, await _outbox.CountPendingAsync(ct).ConfigureAwait(false));
+        // The gauge value is a count query: refresh it at most every 30 s per node.
+        var lastCount = Interlocked.Read(ref _lastCountTicks);
+        if (lastCount == long.MinValue || now - new DateTimeOffset(lastCount, TimeSpan.Zero) >= TimeSpan.FromSeconds(30))
+        {
+            Interlocked.Exchange(ref _lastCountTicks, now.UtcTicks);
+            Interlocked.Exchange(ref s_pending, await _outbox.CountPendingAsync(ct).ConfigureAwait(false));
+        }
     }
 
     /// <summary>Removes expired delivered and dead rows (retention from <see cref="WebhooksOptions"/>).</summary>

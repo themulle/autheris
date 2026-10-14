@@ -4,6 +4,7 @@ using Autheris.Application.Events;
 using Autheris.Application.Security;
 using Autheris.Application.Webhooks;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -25,18 +26,27 @@ public static class GatewayEventServiceExtensions
         services.AddSingleton<IGatewayEventBus>(sp => sp.GetRequiredService<InMemoryGatewayEventBus>());
         services.AddSingleton<IGatewayEventBusDrain>(sp => sp.GetRequiredService<InMemoryGatewayEventBus>());
 
-        if (gatewayOptions.Webhooks.Enabled)
+        // WP-ARC-A-02: durable webhook outbox. The bridge enqueues configured-webhook rows; the delivery service (any node) drains
+        // with leases. CloudEvent (CDC) rows must be delivered even when the configured webhooks are disabled.
+        var configuration = services.FirstOrDefault(d => d.ServiceType == typeof(Microsoft.Extensions.Configuration.IConfiguration))
+            ?.ImplementationInstance as Microsoft.Extensions.Configuration.IConfiguration;
+        var cdcWebhooksEnabled = configuration?.GetSection(CdcWebhooksOptions.SectionName)
+            .GetValue<bool>(nameof(CdcWebhooksOptions.Enabled)) == true;
+        if (gatewayOptions.Webhooks.Enabled || cdcWebhooksEnabled)
         {
-            // WP-ARC-A-02: durable webhook outbox. The bridge enqueues; the delivery service (any node) drains with leases.
-            services.AddSingleton<IWebhookDispatcherService, WebhookDispatcherService>();
             services.AddSingleton(sp => new WebhookRetryPolicy(
                 sp.GetRequiredService<IOptions<GatewayOptions>>().Value.Webhooks,
                 sp.GetService<TimeProvider>() ?? TimeProvider.System));
             services.AddHttpClient<WebhookDeliveryClient>()
                 .AddSecureOutboundHandlers(EgressIntegrations.Webhooks);
             services.AddSingleton<WebhookSubscriptionResolver>();
-            services.AddHostedService<WebhookEventBridgeHostedService>();
             services.AddHostedService<WebhookDeliveryHostedService>();
+        }
+
+        if (gatewayOptions.Webhooks.Enabled)
+        {
+            services.AddSingleton<IWebhookDispatcherService, WebhookDispatcherService>();
+            services.AddHostedService<WebhookEventBridgeHostedService>();
         }
 
         return services;

@@ -22,14 +22,14 @@ public interface IWebhookOutbox
     /// </summary>
     Task<IReadOnlyList<WebhookOutboxMessage>> ClaimBatchAsync(int limit, DateTimeOffset now, TimeSpan lease, string leaseOwner, CancellationToken ct = default);
 
-    /// <summary>Marks the row delivered. <c>false</c> when the caller no longer holds the lease.</summary>
-    Task<bool> CompleteAsync(string id, string leaseOwner, int statusCode, CancellationToken ct = default);
+    /// <summary>Marks the row delivered. <paramref name="now"/> becomes the row's last-touched time, from which purge retention is measured. <c>false</c> when the caller no longer holds the lease.</summary>
+    Task<bool> CompleteAsync(string id, string leaseOwner, int statusCode, DateTimeOffset now, CancellationToken ct = default);
 
     /// <summary>Returns the row to Pending at <paramref name="nextAttemptAt"/>. <c>false</c> when the caller no longer holds the lease.</summary>
-    Task<bool> RescheduleAsync(string id, string leaseOwner, DateTimeOffset nextAttemptAt, int? statusCode, string errorCode, CancellationToken ct = default);
+    Task<bool> RescheduleAsync(string id, string leaseOwner, DateTimeOffset nextAttemptAt, int? statusCode, string errorCode, DateTimeOffset now, CancellationToken ct = default);
 
     /// <summary>Marks the row dead. <c>false</c> when the caller no longer holds the lease.</summary>
-    Task<bool> DeadLetterAsync(string id, string leaseOwner, int? statusCode, string errorCode, CancellationToken ct = default);
+    Task<bool> DeadLetterAsync(string id, string leaseOwner, int? statusCode, string errorCode, DateTimeOffset now, CancellationToken ct = default);
 
     /// <summary>Circuit breaker: pushes the next attempt of all Pending rows of a subscription to <paramref name="until"/> (cluster-wide, no attempt is consumed).</summary>
     Task<int> DeferSubscriptionAsync(WebhookSubscriptionSource source, string subscriptionId, DateTimeOffset until, CancellationToken ct = default);

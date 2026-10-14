@@ -55,7 +55,7 @@ public sealed class WebhooksOptions
 
     public int EffectiveBatchSize => Math.Clamp(DeliveryBatchSize, 1, 100);
 
-    public int EffectivePollIntervalSeconds => Math.Max(1, PollIntervalSeconds);
+    public int EffectivePollIntervalSeconds => Math.Clamp(PollIntervalSeconds, 1, 300);
 
     public int EffectiveRetryBaseSeconds => Math.Max(1, RetryBaseSeconds);
 
@@ -76,7 +76,11 @@ public sealed class WebhooksOptions
 
 public sealed class WebhookSubscription
 {
-    public string Id { get; init; } = Guid.NewGuid().ToString("N");
+    /// <summary>
+    /// Stable subscription id (required, unique, at most 128 chars; validated at startup). Queued deliveries reference it, so it must
+    /// survive restarts and be identical on every node: there is deliberately no generated default.
+    /// </summary>
+    public string Id { get; init; } = string.Empty;
     public string TargetUrl { get; init; } = string.Empty;
     public List<string> EventFilters { get; init; } = [];
     public string Secret { get; init; } = string.Empty;

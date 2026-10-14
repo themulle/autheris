@@ -14,7 +14,13 @@ internal static class WebhookOutboxMapping
     public const string Columns =
         "id, source, subscription_id, owner_tenant_id, event_tenant_id, event_id, event_type, event_source, event_time_ms, payload_json, attempt, max_attempts, state, next_attempt_ms, lease_until_ms, lease_owner, last_status_code, last_error_code, created_ms";
 
-    public static string Prefixed(string prefix) =>
+    /// <summary>PostgreSQL <c>RETURNING</c> list (alias <c>o</c>).</summary>
+    public static readonly string ReturningAliasO = Prefixed("o.");
+
+    /// <summary>SQL Server <c>OUTPUT</c> list.</summary>
+    public static readonly string OutputInserted = Prefixed("inserted.");
+
+    private static string Prefixed(string prefix) =>
         string.Join(", ", Columns.Split(", ", StringSplitOptions.None).Select(c => prefix + c));
 
     public static long Ms(DateTimeOffset value) => value.ToUnixTimeMilliseconds();

@@ -30,6 +30,7 @@ public sealed class WebhookDeliveryHostedServiceTests : IDisposable
     private readonly WebhookManualTime _clock = new(Start);
     private readonly WebhookCapturingLogger<WebhookDeliveryHostedService> _logger = new();
     private readonly InMemoryCloudEventSubscriptionStore _ceStore = new();
+    private readonly WebhookCapturingLogger<WebhookDeliveryClient> _clientLogger = new();
     private WebhookDeliveryHostedService _service = null!;
     private IWebhookOutbox Outbox => _repo;
 
@@ -46,14 +47,14 @@ public sealed class WebhookDeliveryHostedServiceTests : IDisposable
 
     public void Dispose() => _repo.Dispose();
 
-    private void Build(WebhooksOptions webhooks, string environment = "Development")
+    private void Build(WebhooksOptions webhooks, string environment = "Development", Func<Uri, bool, CancellationToken, Task>? validator = null)
     {
         var options = Options.Create(new GatewayOptions { Webhooks = webhooks });
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns(environment);
         var policy = new WebhookRetryPolicy(webhooks, _clock, () => 1.0);
         var client = new WebhookDeliveryClient(
-            new HttpClient(_handler), options, policy, new WebhookCapturingLogger<WebhookDeliveryClient>(), env, _clock, (_, _, _) => Task.CompletedTask);
+            new HttpClient(_handler), options, policy, _clientLogger, env, _clock, validator ?? ((_, _, _) => Task.CompletedTask));
         var services = new ServiceCollection().AddSingleton<Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore>(_ceStore).BuildServiceProvider();
         _service = new WebhookDeliveryHostedService(
             Outbox, client, new WebhookSubscriptionResolver(options, services), policy, options, _logger, _clock);
@@ -61,7 +62,7 @@ public sealed class WebhookDeliveryHostedServiceTests : IDisposable
 
     private static WebhooksOptions Config(
         string? secret = "s3cret", int maxAttempts = 5, string subId = "sub-1", bool active = true,
-        int batch = 8, int threshold = 20, int cooldown = 300) =>
+        int batch = 8, int threshold = 20, int cooldown = 300, string? tenant = null) =>
         new()
         {
             DeliveryBatchSize = batch,
@@ -69,7 +70,7 @@ public sealed class WebhookDeliveryHostedServiceTests : IDisposable
             CircuitCooldownSeconds = cooldown,
             Subscriptions =
             [
-                new WebhookSubscription { Id = subId, TargetUrl = "https://hooks.example.com/in", Secret = secret ?? string.Empty, IsClusterWide = true, MaxAttempts = maxAttempts, IsActive = active }
+                new WebhookSubscription { Id = subId, TargetUrl = "https://hooks.example.com/in", Secret = secret ?? string.Empty, IsClusterWide = tenant is null, TenantId = tenant, MaxAttempts = maxAttempts, IsActive = active }
             ]
         };
 
@@ -276,9 +277,169 @@ public sealed class WebhookDeliveryHostedServiceTests : IDisposable
         Build(new WebhooksOptions { DeliveredRetentionHours = 24, DeadLetterRetentionDays = 14 });
         await Outbox.EnqueueAsync(Msg("old"));
         var claimed = await Outbox.ClaimBatchAsync(5, _clock.GetUtcNow(), TimeSpan.FromMinutes(1), "w1");
-        await Outbox.CompleteAsync(claimed.Single().Id, "w1", 200);
+        await Outbox.CompleteAsync(claimed.Single().Id, "w1", 200, _clock.GetUtcNow());
 
         _clock.Advance(TimeSpan.FromHours(25));
         (await _service.PurgeAsync(CancellationToken.None)).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Resolver_SubscriptionRebound_ToAnotherTenant_DeadLettersWithoutSending()
+    {
+        Build(Config(tenant: "tenant-A"));
+        await Outbox.EnqueueAsync(Msg("e1", owner: "tenant-A"));
+
+        Build(Config(tenant: "tenant-B")); // admin re-binds the subscription before the retry
+        await _service.RunOnceAsync("w1", CancellationToken.None);
+
+        _handler.Calls.ShouldBeEmpty();
+        (await DeadLettersAsync("tenant-A")).ShouldHaveSingleItem().LastErrorCode.ShouldBe(WebhookDeliveryErrorCodes.SubscriptionNotFound);
+    }
+
+    [Fact]
+    public async Task Resolver_SubscriptionNoLongerClusterWide_DeadLettersWithoutSending()
+    {
+        Build(Config());
+        await Outbox.EnqueueAsync(Msg("e1", owner: null));
+
+        Build(new WebhooksOptions
+        {
+            Subscriptions = [new WebhookSubscription { Id = "sub-1", TargetUrl = "https://hooks.example.com/in", Secret = "s", IsClusterWide = false }]
+        });
+        await _service.RunOnceAsync("w1", CancellationToken.None);
+
+        _handler.Calls.ShouldBeEmpty();
+        (await DeadLettersAsync()).ShouldHaveSingleItem().LastErrorCode.ShouldBe(WebhookDeliveryErrorCodes.SubscriptionNotFound);
+    }
+
+    [Fact]
+    public async Task Resolver_EventFilterNoLongerMatches_DeadLettersWithoutSending()
+    {
+        Build(Config());
+        await Outbox.EnqueueAsync(Msg("e1"));
+
+        Build(new WebhooksOptions
+        {
+            Subscriptions = [new WebhookSubscription { Id = "sub-1", TargetUrl = "https://hooks.example.com/in", Secret = "s", IsClusterWide = true, EventFilters = ["other.*"] }]
+        });
+        await _service.RunOnceAsync("w1", CancellationToken.None);
+
+        _handler.Calls.ShouldBeEmpty();
+        (await DeadLettersAsync()).ShouldHaveSingleItem().LastErrorCode.ShouldBe(WebhookDeliveryErrorCodes.SubscriptionNotFound);
+    }
+
+    [Fact]
+    public async Task ExhaustedAttemptBudget_AfterRepeatedLeaseExpiry_DeadLettersWithoutSending()
+    {
+        Build(Config(maxAttempts: 1));
+        await Outbox.EnqueueAsync(Msg("e1", maxAttempts: 1));
+        // Poison row: a crashed worker claimed it (attempt 1) and never finished.
+        await Outbox.ClaimBatchAsync(5, _clock.GetUtcNow(), TimeSpan.FromMinutes(1), "crashed");
+        _clock.Advance(TimeSpan.FromMinutes(5));
+
+        await _service.RunOnceAsync("w1", CancellationToken.None); // attempt 2 > MaxAttempts 1
+
+        _handler.Calls.ShouldBeEmpty();
+        (await DeadLettersAsync()).ShouldHaveSingleItem().LastErrorCode.ShouldBe(WebhookDeliveryErrorCodes.MaxAttemptsExceeded);
+    }
+
+    [Fact]
+    public async Task FailingRow_DoesNotAbortTheRestOfTheBatch()
+    {
+        // A CloudEvent row whose store throws, followed by a healthy configured row in the same batch.
+        var throwing = Substitute.For<Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore>();
+        throwing.GetSubscriptionAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns<ValueTask<CloudEventWebhookSubscription?>>(_ => throw new InvalidOperationException("Password=hunter2"));
+        var options = Options.Create(new GatewayOptions { Webhooks = Config() });
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Development");
+        var policy = new WebhookRetryPolicy(options.Value.Webhooks, _clock, () => 1.0);
+        var client = new WebhookDeliveryClient(new HttpClient(_handler), options, policy, new WebhookCapturingLogger<WebhookDeliveryClient>(), env, _clock, (_, _, _) => Task.CompletedTask);
+        var services = new ServiceCollection().AddSingleton(throwing).BuildServiceProvider();
+        var service = new WebhookDeliveryHostedService(Outbox, client, new WebhookSubscriptionResolver(options, services), policy, options, _logger, _clock);
+        await Outbox.EnqueueAsync(Msg("bad", "ce-1", source: WebhookSubscriptionSource.CloudEvent, owner: "tenant-A"));
+        await Outbox.EnqueueAsync(Msg("good"));
+
+        (await service.RunOnceAsync("w1", CancellationToken.None)).ShouldBe(2);
+
+        _handler.Calls.Count.ShouldBe(1);
+        _logger.All.ShouldNotContain("hunter2");
+        _logger.All.ShouldContain(nameof(InvalidOperationException));
+    }
+
+    [Fact]
+    public async Task Delivery_ErrorMessage_ContainsNoResolvedIp()
+    {
+        Build(Config(), validator: (_, _, _) =>
+        {
+            var ex = new System.Security.SecurityException("blocked 10.20.30.40 internal detail");
+            ex.Data["ResolvedIp"] = "10.20.30.40";
+            throw ex;
+        });
+        await Outbox.EnqueueAsync(Msg("e1"));
+
+        await _service.RunOnceAsync("w1", CancellationToken.None);
+
+        var dead = (await DeadLettersAsync()).ShouldHaveSingleItem();
+        dead.LastErrorCode.ShouldBe(WebhookDeliveryErrorCodes.EgressDenied);
+        var raw = string.Join("|", dead.LastErrorCode, dead.LastStatusCode, dead.EventId, dead.SubscriptionId);
+        raw.ShouldNotContain("10.20.30.40");
+        foreach (var log in new[] { _logger.All, _clientLogger.All })
+        {
+            log.ShouldNotContain("10.20.30.40");
+            log.ShouldNotContain("internal detail");
+        }
+    }
+
+    [Fact]
+    public async Task Housekeeping_CountsPendingAtMostEvery30Seconds()
+    {
+        var outbox = Substitute.For<IWebhookOutbox>();
+        outbox.CountPendingAsync(Arg.Any<CancellationToken>()).Returns(0L);
+        var options = Options.Create(new GatewayOptions { Webhooks = new WebhooksOptions() });
+        var policy = new WebhookRetryPolicy(options.Value.Webhooks, _clock);
+        var client = new WebhookDeliveryClient(new HttpClient(_handler), options, policy, _clientLogger, null, _clock);
+        var service = new WebhookDeliveryHostedService(outbox, client, new WebhookSubscriptionResolver(options, new ServiceCollection().BuildServiceProvider()), policy, options, _logger, _clock);
+
+        await service.HousekeepingAsync(CancellationToken.None);
+        _clock.Advance(TimeSpan.FromSeconds(10));
+        await service.HousekeepingAsync(CancellationToken.None);
+        await outbox.Received(1).CountPendingAsync(Arg.Any<CancellationToken>());
+
+        _clock.Advance(TimeSpan.FromSeconds(25));
+        await service.HousekeepingAsync(CancellationToken.None);
+        await outbox.Received(2).CountPendingAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_StartsWorkers_DeliversOnTimerTicks_AndStopsCleanly()
+    {
+        Build(Config());
+        await Outbox.EnqueueAsync(Msg("e1"));
+
+        await _service.StartAsync(CancellationToken.None);
+        await WaitUntilAsync(() => _clock.TimerCount == new WebhooksOptions().EffectiveDeliveryWorkers);
+        _handler.Calls.ShouldBeEmpty(); // nothing happens before the first tick
+
+        _clock.Advance(TimeSpan.FromSeconds(2));
+        await WaitUntilAsync(() => _handler.Calls.Count == 1);
+
+        await _service.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+        _clock.TimerCount.ShouldBe(0);
+        (await Outbox.CountPendingAsync()).ShouldBe(0);
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException("Condition not reached.");
+            }
+
+            await Task.Delay(10);
+        }
     }
 }

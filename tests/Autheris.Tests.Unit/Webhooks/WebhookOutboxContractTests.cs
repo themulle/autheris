@@ -148,23 +148,51 @@ public abstract class WebhookOutboxContractTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task TwoWorkers_ClaimDisjointBatches()
+    public async Task ParallelWorkers_ClaimDisjointBatches()
     {
         if (await OpenAsync() is not { } outbox) return;
-        for (var i = 0; i < 24; i++)
+        for (var i = 0; i < 40; i++)
         {
             await outbox.EnqueueAsync(Msg(eventId: $"e{i}"));
         }
 
-        var a = outbox.ClaimBatchAsync(12, Now, Lease, "w1");
-        var b = outbox.ClaimBatchAsync(12, Now, Lease, "w2");
-        var results = await Task.WhenAll(a, b);
+        var claims = Enumerable.Range(0, 8).Select(i => Task.Run(() => outbox.ClaimBatchAsync(4, Now, Lease, $"w{i}"))).ToArray();
+        var results = await Task.WhenAll(claims);
 
+        // Claims are disjoint and respect the limit. A dialect using READPAST may hand a contended worker fewer rows than its
+        // limit, so only an upper bound is asserted per round; draining afterwards proves no row was lost or duplicated.
         var ids = results.SelectMany(r => r.Select(m => m.Id)).ToList();
         ids.Count.ShouldBe(ids.Distinct().Count());
-        ids.Count.ShouldBe(24);
-        results[0].ShouldAllBe(m => m.LeaseOwner == "w1");
-        results[1].ShouldAllBe(m => m.LeaseOwner == "w2");
+        ids.Count.ShouldBeInRange(4, 32);
+        for (var i = 0; i < results.Length; i++)
+        {
+            results[i].Count.ShouldBeLessThanOrEqualTo(4);
+            results[i].ShouldAllBe(m => m.LeaseOwner == $"w{i}");
+        }
+
+        var all = new HashSet<string>(ids);
+        for (var round = 0; round < 20 && all.Count < 40; round++)
+        {
+            foreach (var m in await outbox.ClaimBatchAsync(40, Now, Lease, "drain"))
+            {
+                all.Add(m.Id).ShouldBeTrue();
+            }
+        }
+
+        all.Count.ShouldBe(40);
+    }
+
+    [Fact]
+    public async Task Purge_MeasuresRetentionFromCompletion_NotFromClaim()
+    {
+        if (await OpenAsync() is not { } outbox) return;
+        var old = Now.AddDays(-30);
+        await outbox.EnqueueAsync(Msg("s", "slow", nextAttempt: old));
+        var row = (await outbox.ClaimBatchAsync(1, old, Lease, "w1")).Single();
+        await outbox.CompleteAsync(row.Id, "w1", 200, Now); // completed recently although claimed long ago
+
+        (await outbox.PurgeAsync(Now.AddHours(-24), Now.AddDays(-14))).ShouldBe(0);
+        (await outbox.PurgeAsync(Now.AddMinutes(1), Now.AddDays(-14))).ShouldBe(1);
     }
 
     [Fact]
@@ -189,11 +217,11 @@ public abstract class WebhookOutboxContractTests : IAsyncLifetime
         var later = Now + Lease + TimeSpan.FromSeconds(1);
         await outbox.ClaimBatchAsync(1, later, Lease, "w2");
 
-        (await outbox.CompleteAsync(first.Id, "w1", 200)).ShouldBeFalse();
-        (await outbox.RescheduleAsync(first.Id, "w1", later, 500, "http_status")).ShouldBeFalse();
-        (await outbox.DeadLetterAsync(first.Id, "w1", 500, "http_status")).ShouldBeFalse();
-        (await outbox.CompleteAsync(first.Id, "w2", 200)).ShouldBeTrue();
-        (await outbox.CompleteAsync(first.Id, "w2", 200)).ShouldBeFalse();
+        (await outbox.CompleteAsync(first.Id, "w1", 200, Now)).ShouldBeFalse();
+        (await outbox.RescheduleAsync(first.Id, "w1", later, 500, "http_status", Now)).ShouldBeFalse();
+        (await outbox.DeadLetterAsync(first.Id, "w1", 500, "http_status", Now)).ShouldBeFalse();
+        (await outbox.CompleteAsync(first.Id, "w2", 200, Now)).ShouldBeTrue();
+        (await outbox.CompleteAsync(first.Id, "w2", 200, Now)).ShouldBeFalse();
     }
 
     [Fact]
@@ -203,7 +231,7 @@ public abstract class WebhookOutboxContractTests : IAsyncLifetime
         await outbox.EnqueueAsync(Msg(eventId: "e"));
         var row = (await outbox.ClaimBatchAsync(1, Now, Lease, "w1")).Single();
 
-        (await outbox.CompleteAsync(row.Id, "w1", 204)).ShouldBeTrue();
+        (await outbox.CompleteAsync(row.Id, "w1", 204, Now)).ShouldBeTrue();
 
         (await outbox.CountPendingAsync()).ShouldBe(0);
         (await outbox.ClaimBatchAsync(1, Now + TimeSpan.FromDays(1), Lease, "w1")).ShouldBeEmpty();
@@ -218,7 +246,7 @@ public abstract class WebhookOutboxContractTests : IAsyncLifetime
         var row = (await outbox.ClaimBatchAsync(1, Now, Lease, "w1")).Single();
         var next = Now.AddMinutes(5);
 
-        (await outbox.RescheduleAsync(row.Id, "w1", next, 503, "http_status")).ShouldBeTrue();
+        (await outbox.RescheduleAsync(row.Id, "w1", next, 503, "http_status", Now)).ShouldBeTrue();
 
         (await outbox.ClaimBatchAsync(1, next.AddSeconds(-1), Lease, "w2")).ShouldBeEmpty();
         var again = (await outbox.ClaimBatchAsync(1, next, Lease, "w2")).Single();
@@ -255,12 +283,12 @@ public abstract class WebhookOutboxContractTests : IAsyncLifetime
         await outbox.EnqueueAsync(Msg("s", "delivered-old", nextAttempt: old));
         await outbox.EnqueueAsync(Msg("s", "dead-old", nextAttempt: old));
         var claimed = await outbox.ClaimBatchAsync(10, old, Lease, "w1");
-        await outbox.CompleteAsync(claimed.Single(m => m.EventId == "delivered-old").Id, "w1", 200);
-        await outbox.DeadLetterAsync(claimed.Single(m => m.EventId == "dead-old").Id, "w1", 500, "max_attempts_exceeded");
+        await outbox.CompleteAsync(claimed.Single(m => m.EventId == "delivered-old").Id, "w1", 200, old);
+        await outbox.DeadLetterAsync(claimed.Single(m => m.EventId == "dead-old").Id, "w1", 500, "max_attempts_exceeded", old);
         await outbox.EnqueueAsync(Msg("s", "delivered-new", nextAttempt: Now));
         await outbox.EnqueueAsync(Msg("s", "pending", nextAttempt: Now.AddHours(1)));
         var recent = (await outbox.ClaimBatchAsync(10, Now, Lease, "w1")).Single();
-        await outbox.CompleteAsync(recent.Id, "w1", 200);
+        await outbox.CompleteAsync(recent.Id, "w1", 200, Now);
 
         var purged = await outbox.PurgeAsync(Now.AddHours(-24), Now.AddDays(-14));
 
@@ -280,7 +308,7 @@ public abstract class WebhookOutboxContractTests : IAsyncLifetime
         await outbox.EnqueueAsync(Msg("sc", "ec", ownerTenant: null));
         foreach (var m in await outbox.ClaimBatchAsync(10, Now, Lease, "w1"))
         {
-            await outbox.DeadLetterAsync(m.Id, "w1", 404, "http_status");
+            await outbox.DeadLetterAsync(m.Id, "w1", 404, "http_status", Now);
         }
 
         var a = await outbox.ListDeadLettersAsync(new WebhookOwnerScope("tenant-A", false), 10);

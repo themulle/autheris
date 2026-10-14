@@ -65,6 +65,7 @@ public static class WebhookDeliveryErrorCodes
     public const string SubscriptionInactive = "subscription_inactive";
     public const string PayloadTooLarge = "payload_too_large";
     public const string MaxAttemptsExceeded = "max_attempts_exceeded";
+    public const string Unknown = "unknown";
 }
 
 /// <summary>Owner scope for dead-letter listings. There is intentionally no "all tenants" scope.</summary>

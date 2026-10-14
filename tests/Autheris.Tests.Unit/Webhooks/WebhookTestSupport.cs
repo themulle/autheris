@@ -11,11 +11,89 @@ using Microsoft.Extensions.Logging;
 /// <summary>Settable clock (a local test double; avoids an extra package).</summary>
 internal sealed class WebhookManualTime(DateTimeOffset start) : TimeProvider
 {
+    private readonly List<ManualTimer> _timers = [];
+    private readonly object _gate = new();
     private DateTimeOffset _now = start;
 
     public override DateTimeOffset GetUtcNow() => _now;
 
-    public void Advance(TimeSpan by) => _now += by;
+    /// <summary>Number of live timers (e.g. one per worker poll loop).</summary>
+    public int TimerCount
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _timers.Count;
+            }
+        }
+    }
+
+    public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+    {
+        var timer = new ManualTimer(this, callback, state);
+        timer.Change(dueTime, period);
+        lock (_gate)
+        {
+            _timers.Add(timer);
+        }
+
+        return timer;
+    }
+
+    /// <summary>Moves the clock and fires every timer that became due (periodic timers may fire repeatedly).</summary>
+    public void Advance(TimeSpan by)
+    {
+        List<ManualTimer> snapshot;
+        lock (_gate)
+        {
+            _now += by;
+            snapshot = [.. _timers];
+        }
+
+        foreach (var timer in snapshot)
+        {
+            timer.FireDue(_now);
+        }
+    }
+
+    private void Remove(ManualTimer timer)
+    {
+        lock (_gate)
+        {
+            _timers.Remove(timer);
+        }
+    }
+
+    private sealed class ManualTimer(WebhookManualTime owner, TimerCallback callback, object? state) : ITimer
+    {
+        private DateTimeOffset? _next;
+        private TimeSpan _period;
+
+        public bool Change(TimeSpan dueTime, TimeSpan period)
+        {
+            _period = period;
+            _next = dueTime == Timeout.InfiniteTimeSpan ? null : owner._now + dueTime;
+            return true;
+        }
+
+        public void FireDue(DateTimeOffset now)
+        {
+            while (_next is { } next && next <= now)
+            {
+                _next = _period > TimeSpan.Zero ? next + _period : null;
+                callback(state);
+            }
+        }
+
+        public void Dispose() => owner.Remove(this);
+
+        public ValueTask DisposeAsync()
+        {
+            Dispose();
+            return ValueTask.CompletedTask;
+        }
+    }
 }
 
 /// <summary>Handler that records requests (with bodies) and answers with a configurable response.</summary>
