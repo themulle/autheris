@@ -45,6 +45,10 @@ public sealed class ExtensionsSecurityAuditRemediationTests
             ]));
 
         var execMock = Substitute.For<IGatewayExecutionService>();
+        // SR-M-16: a missing decision is a deny, so the access check must answer explicitly.
+        execMock.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), false, Arg.Any<CancellationToken>())
+            .Returns(ci => Task.FromResult(TableAccessDecision.Allowed(
+                ci.Arg<TableMetadata>().Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
         var handler = new ODataHandler(metaMock, execMock, NullLogger<ODataHandler>.Instance);
 
         // 1. Unauthenticated principal

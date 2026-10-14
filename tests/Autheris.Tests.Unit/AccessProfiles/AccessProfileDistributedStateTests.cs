@@ -320,7 +320,7 @@ public sealed class AccessProfileDistributedStateTests
         var request = new BulkConsentRequest
         {
             Subject = "david",
-            MaskingMode = "Unmasked",
+            MaskingMode = "Strict", // SR-M-10: Unmasked is rejected in bulk before invalidation runs
             Tables = ["tem.*"],
             RowFilter = "1=1",
             Justification = "Maintenance exception approved by governance",

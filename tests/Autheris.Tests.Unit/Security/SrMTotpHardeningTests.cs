@@ -155,8 +155,9 @@ public class SrMTotpHardeningTests
     {
         var cluster = new InMemoryClusterStateProvider();
         var protector = Substitute.For<ITotpSecretProtector>();
-        protector.Protect(Arg.Any<string>()).Returns(ci => "enc(" + ci.Arg<string>() + ")");
-        protector.Unprotect(Arg.Any<string>()).Returns(ci => ci.Arg<string>()["enc(".Length..^1]);
+        // The fake reverses the payload so the stored value never contains the plaintext seed.
+        protector.Protect(Arg.Any<string>()).Returns(ci => "enc(" + new string(ci.Arg<string>().Reverse().ToArray()) + ")");
+        protector.Unprotect(Arg.Any<string>()).Returns(ci => new string(ci.Arg<string>()["enc(".Length..^1].Reverse().ToArray()));
         var store = new ClusterTotpSecretStore(cluster, protector);
 
         await store.SetSecretAsync(Sid, "JBSWY3DPEHPK3PXP");

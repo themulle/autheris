@@ -1,4 +1,5 @@
 using Autheris.Application.Interfaces;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Infrastructure.Persistence;
 using Shouldly;
@@ -26,13 +27,13 @@ public sealed class SrM24TenantScopedTicketLookupTests
     [Fact]
     public void SR_M_24_Interface_Default_Is_Not_Silently_Unscoped()
     {
-        var method = typeof(IGovernanceRepository).GetMethod(nameof(IGovernanceRepository.GetConsentRequestByTicketIdAsync), ScopedSignature);
+        var method = typeof(IConsentApprovalRepository).GetMethod(nameof(IGovernanceRepository.GetConsentRequestByTicketIdAsync), ScopedSignature);
 
         method.ShouldNotBeNull();
         // Default interface method (has a body) that fails closed: its body must not call the unscoped overload.
         method.IsAbstract.ShouldBeFalse();
         var il = method.GetMethodBody()!.GetILAsByteArray()!;
-        var unscoped = typeof(IGovernanceRepository).GetMethod(nameof(IGovernanceRepository.GetConsentRequestByTicketIdAsync), [typeof(string), typeof(CancellationToken)])!;
+        var unscoped = typeof(IConsentApprovalRepository).GetMethod(nameof(IGovernanceRepository.GetConsentRequestByTicketIdAsync), [typeof(string), typeof(CancellationToken)])!;
         var token = BitConverter.GetBytes(unscoped.MetadataToken);
         il.AsSpan().IndexOf(token).ShouldBe(-1);
     }

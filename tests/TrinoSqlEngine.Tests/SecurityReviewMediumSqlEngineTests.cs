@@ -15,7 +15,7 @@ public class SecurityReviewMediumSqlEngineTests
         PolicyFiltersAreTargetDialectSql = true,
         PolicyProvider = new DefaultRlsPolicyProvider(
             predicate: t => t.Equals("secret", StringComparison.OrdinalIgnoreCase),
-            filterFunc: _ => string.Format(System.Globalization.CultureInfo.InvariantCulture, ConsentFilter, consentTableRef))
+            filterFunc: _ => ConsentFilter.Replace("{0}", consentTableRef, StringComparison.Ordinal))
     };
 
     private static string Rewrite(string engineName, string sql, RlsOptions options)
@@ -36,7 +36,8 @@ public class SecurityReviewMediumSqlEngineTests
     [InlineData("AstCompiler", "consents", "WITH a AS (SELECT * FROM secret), consents AS (SELECT 1 AS subject, 1 AS row_id) SELECT * FROM a")]
     public void SR_M_25_UserCteShadowingPolicyPredicateTable_IsRejected(string engine, string consentRef, string sql)
     {
-        Assert.ThrowsAny<Exception>(() => Rewrite(engine, sql, ConsentOptions(consentRef)));
+        var ex = Assert.ThrowsAny<Exception>(() => Rewrite(engine, sql, ConsentOptions(consentRef)));
+        Assert.Contains("would shadow a table referenced by a row-level security predicate", ex.ToString(), StringComparison.Ordinal);
     }
 
     [Theory]
@@ -63,6 +64,7 @@ public class SecurityReviewMediumSqlEngineTests
     private static RlsOptions InsertOptions() => new()
     {
         TargetDialect = TargetSqlDialect.Sqlite,
+        EnforceReadOnlyQueries = false,
         EnforceWithCheckOption = true,
         ExpectedTenantValue = "'T1'",
         RequireTenantColumnInInsert = true,
@@ -78,7 +80,9 @@ public class SecurityReviewMediumSqlEngineTests
     [InlineData("AstCompiler", "INSERT INTO orders (id, tenant_id, id) VALUES (1, 'T1', 2)")]
     public void SR_M_26_DuplicateInsertColumn_IsRejected(string engine, string sql)
     {
-        Assert.ThrowsAny<Exception>(() => Rewrite(engine, sql, InsertOptions()));
+        var ex = Assert.ThrowsAny<Exception>(() => Rewrite(engine, sql, InsertOptions()));
+        // Must be rejected by the duplicate-column guard, not by an unrelated read-only gate.
+        Assert.DoesNotContain("read-only", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]

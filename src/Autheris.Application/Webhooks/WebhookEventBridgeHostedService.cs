@@ -14,7 +14,7 @@ using Microsoft.Extensions.Logging;
 /// Events are queued in a bounded channel and delivered by background workers so that publishing
 /// never waits for outbound HTTP calls or retries (SR-M-13). When the queue is full the event is dropped and logged.
 /// </summary>
-public sealed class WebhookEventBridgeHostedService : IHostedService
+public sealed class WebhookEventBridgeHostedService : IHostedService, IDisposable
 {
     /// <summary>Default capacity of the delivery queue.</summary>
     public const int DefaultQueueCapacity = 1024;
@@ -125,5 +125,12 @@ public sealed class WebhookEventBridgeHostedService : IHostedService
         {
             // Shutdown.
         }
+    }
+
+    public void Dispose()
+    {
+        _subscription?.Dispose();
+        _workersCts?.Dispose();
+        _workersCts = null;
     }
 }
