@@ -153,7 +153,7 @@ public sealed class TableAccessPolicyArch1Tests
         engine.ExecuteOlapQueryAsync(Arg.Any<OlapQueryRequest>(), Arg.Any<CancellationToken>())
             .Returns(new OlapQueryResult([], [], 0, TimeSpan.Zero));
 
-        await DuckDbOlapEndpoints.HandleOlapQueryAsync(
+        await Autheris.Tests.Unit.TestDoubles.OlapEndpointTestHost.HandleAsync(
             httpContext, engine, metadataRepo, registry, resolver, Substitute.For<IColumnMaskingProvider>(), Options.Create(new GatewayOptions { DuckDbOlap = new DuckDbOlapOptions { Enabled = true, MaxStagedRowsPerTable = 100 } }),
             NullLoggerFactory.Instance);
 

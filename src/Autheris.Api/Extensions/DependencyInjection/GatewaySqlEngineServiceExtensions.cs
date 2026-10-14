@@ -88,6 +88,7 @@ public static class GatewaySqlEngineServiceExtensions
         services.AddSingleton<CrossSourcePlanner>();
         services.AddSingleton<ICrossSourcePlanner>(sp => sp.GetRequiredService<CrossSourcePlanner>());
         services.AddScoped<Autheris.Application.Olap.IFederatedStagingService, Autheris.Application.Olap.FederatedStagingService>();
+        services.AddScoped<Autheris.Application.Olap.IOlapStagingService, Autheris.Application.Olap.OlapStagingService>();
         services.AddScoped<IFederatedQueryExecutionService, FederatedDuckDbExecutionService>();
 
         // F-SQL-02: governed stored procedure endpoints (SQL Server, read-only in phase 1)

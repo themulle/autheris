@@ -186,7 +186,7 @@ public sealed class WebSqlCrossSourceGuardTests
         var engine = Substitute.For<IDuckDbOlapEngine>();
 
         // Act
-        await DuckDbOlapEndpoints.HandleOlapQueryAsync(
+        await Autheris.Tests.Unit.TestDoubles.OlapEndpointTestHost.HandleAsync(
             httpContext,
             engine,
             metadataRepo,
