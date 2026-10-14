@@ -53,7 +53,7 @@ GovernedSqlExecutor
 
 **Governed entry points.** WebSQL (JSON, NDJSON, Parquet), WebSQL async statements (`/v1/statement`), SQL endpoints, async query jobs, Arrow export, Arrow Flight SQL, the MCP SQL tool, the MCP dataset tools and REST datasets. The architecture test `GovernedEntryPoints_ReachCompileAndBinder` proves that each reaches `Compile` and the binder.
 
-**Outside `Compile`.** The GraphQL tree compiler (`TreeSqlCompiler`) and the text consumers (federated staging reads through `SqlDataSourceExecutor`, OLAP table reads) render their predicates from the same typed policy model through `PolicyPredicateRenderer` and use no legacy API. They are the listed exceptions of the architecture test and must not reach the binder. Federated (cross-source) plans run on DuckDB with bound parameters (`CrossSourcePlanner` produces a `CompiledSql`).
+**Outside `Compile`.** The GraphQL tree compiler (`TreeSqlCompiler`) is the single documented exception to `ISqlEngine.Compile` for governed SQL reads: it builds one JSON-aggregating statement per selection tree (SQL Server `FOR JSON PATH`, PostgreSQL `jsonb_agg`, SQLite `json_group_array`), a shape the AST compiler does not produce. It renders its predicates and masks from the same typed policy model through `PolicyPredicateRenderer`, uses no legacy API and must not reach the binder. `TreeSqlCompiler.SupportsTreeCompile(dialect)` names the dialects it supports (SQL Server, PostgreSQL, SQLite); tables of other dialects are read as flat tables through `Compile` and offer no nested relation fields. The test `TreeVsCompilePolicyParityTests` guards the exception: for the same tenant, row filter and mask, the tree compiler and `Compile` expose the same rows and the same masked values. The other listed exceptions are the OLAP table reads and the federated staging reads. Federated (cross-source) plans run on DuckDB with bound parameters (`CrossSourcePlanner` produces a `CompiledSql`).
 
 ### 2.2 Compiler passes
 
@@ -426,7 +426,7 @@ The `sql-compiler-gate` job in `.github/workflows/ci.yml` runs on every pull req
 - The catalog `DataType` and `Collation` come from database metadata; the INSERT check option, the bind types and the Databricks collation shortcut trust them.
 - Not usable on the governed path: recursive CTEs, table functions, qualified function names, and on SQL Server and SQLite any `[` token (bracket lexer differential guard).
 - Client-named parameters are not supported in federated (cross-source) queries; such a statement fails closed.
-- The GraphQL tree compiler and the text consumers (section 2.1) do not run through `Compile`; they render the typed policy model.
+- The GraphQL tree compiler and the OLAP/staging reads (section 2.1) do not run through `Compile`; they render the typed policy model.
 - Oracle uses `Oracle.ManagedDataAccess.Core` under the Oracle Free Use Terms and Conditions; the license review is a release gate for announcing Oracle as supported.
 - Databricks is Experimental and not admitted to WebSQL: the bind budget of 1,000 is provisional, Delta has no INSERT check option and no subqueries in `UPDATE`/`DELETE` conditions, and Databricks DML is refused while `MaxAffectedRows > 0`.
 - Snowflake and ANSI have no capability entry.

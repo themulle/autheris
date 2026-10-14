@@ -721,6 +721,38 @@ public sealed class CutoverArchitectureTests
     }
 
     // ---------------------------------------------------------------------------------------------------------------------
+    // AllExecutorsUseGovernedQueryStages (WP-ARC-B-03)
+    // ---------------------------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The governed read executors. Each takes its authorization and its audit entry from <c>GovernedQueryStages</c>, so that one
+    /// place owns the PDP call, the non-canonical ClusterAdmin fail-closed check and the audit entry shape.
+    /// </summary>
+    private static readonly string[] GovernedReadExecutors =
+    [
+        "Autheris.Application.Services.GatewayExecutionService",
+        "Autheris.Application.Sql.Tree.GovernedTreeQueryService",
+        "Autheris.Application.Procedures.Services.GovernedProcedureExecutionService",
+        "Autheris.Application.Data.Services.GovernedDataQueryService"
+    ];
+
+    private const string StagesPrefix = "Autheris.Application.Policy.GovernedQueryStages::";
+    private const string AuditWriteTarget = "Autheris.Application.Interfaces.IAuditLogRepository::RecordAuditEventAsync";
+
+    [Fact]
+    public void AllExecutorsUseGovernedQueryStages()
+    {
+        var graph = BuildCallGraph(ProductionAssemblies);
+        foreach (string executor in GovernedReadExecutors)
+        {
+            var targets = graph.Targets.Where(kv => kv.Key.Type == executor).SelectMany(kv => kv.Value).ToList();
+            graph.Edges.Keys.ShouldContain(n => n.Type == executor, $"{executor} exists in a production assembly");
+            targets.ShouldContain(t => t.StartsWith(StagesPrefix, StringComparison.Ordinal), $"{executor} uses GovernedQueryStages");
+            targets.ShouldNotContain(AuditWriteTarget, $"{executor} writes its audit entry through GovernedQueryStages, not directly");
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------------
     // DeletedPathsNotReintroduced (revert safety, plan 12.2)
     // ---------------------------------------------------------------------------------------------------------------------
 
