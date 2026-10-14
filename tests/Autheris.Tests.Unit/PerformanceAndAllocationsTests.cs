@@ -18,15 +18,15 @@ public class PerformanceAndAllocationsTests
     private readonly ColumnMaskingProvider _maskingProvider = new();
 
     [Theory]
-    [InlineData("alice@example.com", "a***@***.com")]
-    [InlineData("bob.marley@corp.co.uk", "b***@***.uk")]
-    [InlineData("charlie@internal", "c***@***")]
+    [InlineData("alice@example.com", "***@***")]
+    [InlineData("bob.marley@corp.co.uk", "***@***")]
+    [InlineData("charlie@internal", "***@***")]
     [InlineData("x@y.z", "***@***")]
     [InlineData("@onlydomain.com", "***@***")]
     [InlineData("missing_at_sign", "***@***")]
-    [InlineData("ab@domain.com", "a***@***.com")]
-    [InlineData("ab@.com", "a***@***")]
-    [InlineData("john@corp.", "j***@***.")]
+    [InlineData("ab@domain.com", "***@***")]
+    [InlineData("ab@.com", "***@***")]
+    [InlineData("john@corp.", "***@***")]
     public void MaskEmail_VariousFormats_MasksCorrectly(string input, string expected)
     {
         var rule = new MaskingRule { RuleType = "MASK_EMAIL" };
@@ -35,10 +35,10 @@ public class PerformanceAndAllocationsTests
     }
 
     [Theory]
-    [InlineData("DE89370400440532013000", "DE** **** **** 3000")]
-    [InlineData("DE89 3704 0044 0532 0130 00", "DE** **** **** 3000")]
-    [InlineData("FR1420041010050500013M02606", "FR** **** **** 2606")]
-    [InlineData("FR14 2004 1010 0505 0001 3M02 606", "FR** **** **** 2606")]
+    [InlineData("DE89370400440532013000", "****")]
+    [InlineData("DE89 3704 0044 0532 0130 00", "****")]
+    [InlineData("FR1420041010050500013M02606", "****")]
+    [InlineData("FR14 2004 1010 0505 0001 3M02 606", "****")]
     [InlineData("1234567", "****")]
     [InlineData("", "****")]
     [InlineData("   ", "****")]

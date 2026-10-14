@@ -79,9 +79,8 @@ public sealed class LakehouseDataSourceExecutor : ILakehouseDataSourceExecutor, 
             Autheris.Application.Services.GatewayExecutionService.EnsureInMemoryFilterIsEnforceable(context.AccessDecision);
             rawRows = Autheris.Application.Services.GatewayExecutionService.FilterRows(
                 rawRows,
-                context.AccessDecision.CombinedRowFilterSql,
-                context.Metadata,
-                context.AccessDecision.RowFilterParameters);
+                context.AccessDecision,
+                context.Metadata);
             context.Items["RlsPushdownExecuted"] = true;
         }
 

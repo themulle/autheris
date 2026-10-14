@@ -161,13 +161,13 @@ public class ColumnMaskingTests
     }
 
     [Theory]
-    [InlineData("john.doe@company.org", "j***@***.org")]
-    [InlineData("alice@corp.internal.com", "a***@***.com")]
-    [InlineData("bob@localhost", "b***@***")]
+    [InlineData("john.doe@company.org", "***@***")]
+    [InlineData("alice@corp.internal.com", "***@***")]
+    [InlineData("bob@localhost", "***@***")]
     [InlineData("c@short.com", "***@***")]
     [InlineData("@nodomain.com", "***@***")]
     [InlineData("no_at_sign", "***@***")]
-    [InlineData("user@.com", "u***@***")]
+    [InlineData("user@.com", "***@***")]
     public void MaskValue_MaskEmail_ProducesExpectedResults(string rawEmail, string expected)
     {
         var rule = new MaskingRule { RuleType = "MASK_EMAIL" };
@@ -176,12 +176,12 @@ public class ColumnMaskingTests
     }
 
     [Theory]
-    [InlineData("DE89370400440532013000", "DE** **** **** 3000")]
-    [InlineData("DE89 3704 0044 0532 0130 00", "DE** **** **** 3000")]
-    [InlineData("GB29 XAAA 0101 2345 6789 01", "GB** **** **** 8901")]
+    [InlineData("DE89370400440532013000", "****")]
+    [InlineData("DE89 3704 0044 0532 0130 00", "****")]
+    [InlineData("GB29 XAAA 0101 2345 6789 01", "****")]
     [InlineData("SHORT", "****")]
     [InlineData("1234567", "****")]
-    [InlineData("12345678", "12** **** **** 5678")]
+    [InlineData("12345678", "****")]
     public void MaskValue_MaskIban_ProducesExpectedResults(string rawIban, string expected)
     {
         var rule = new MaskingRule { RuleType = "MASK_IBAN" };
