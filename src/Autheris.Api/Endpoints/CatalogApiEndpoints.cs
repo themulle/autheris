@@ -156,7 +156,7 @@ public static class CatalogApiEndpoints
 
         var adminSid = httpContext.User.GetUserSid()?.Value ?? httpContext.User.Identity?.Name ?? "system-admin";
         var planningRequest = new AdminSetDatasetStateRequest(id, request.State, request.Reason);
-        var result = await accessPlanningService.SetDatasetStateAsync(planningRequest, adminSid, ct: ct);
+        var result = await accessPlanningService.SetDatasetStateAsync(planningRequest, adminSid, EndpointSecurity.GetRequestTenant(httpContext), ct);
         if (!result.Success)
         {
             return Results.NotFound(new { error = result.Message });

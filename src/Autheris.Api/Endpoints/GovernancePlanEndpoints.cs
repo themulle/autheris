@@ -110,7 +110,7 @@ public static class GovernancePlanEndpoints
                     ? request
                     : request with { PlanId = planId };
 
-                var result = await planningService.ApplyAccessAsync(effectiveRequest, adminSid, ct: ct).ConfigureAwait(false);
+                var result = await planningService.ApplyAccessAsync(effectiveRequest, adminSid, EndpointSecurity.GetRequestTenant(context), ct).ConfigureAwait(false);
                 return Results.Ok(result);
             }
             catch (SecurityException sex)
