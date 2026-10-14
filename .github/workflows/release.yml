@@ -70,14 +70,16 @@ jobs:
               -r "$RID" \
               --self-contained true \
               -p:PublishSingleFile=true \
+              -p:AutherisIncludeTestAuth=false \
               -o "$OUT_DIR"
 
             # Single-file bundles embed the assembly, so scan the per-RID compiled assembly (SC-04).
-            API_DLL="$(find src/Autheris.Api/obj/Release -path "*/${RID}/Autheris.Api.dll" -not -path "*/ref*" | head -n 1)"
-            if [ -z "$API_DLL" ]; then
-              echo "::error::Compiled Autheris.Api.dll for $RID not found"
+            mapfile -t API_DLLS < <(find src/Autheris.Api/obj/Release -type f -path "*/${RID}/Autheris.Api.dll" -not -path "*/ref/*" -not -path "*/refint/*")
+            if [ "${#API_DLLS[@]}" -ne 1 ]; then
+              echo "::error::Expected exactly one compiled Autheris.Api.dll for $RID, found ${#API_DLLS[@]}"
               exit 1
             fi
+            API_DLL="${API_DLLS[0]}"
             AUTHERIS_RELEASE_API_ASSEMBLY="$PWD/$API_DLL" dotnet test tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj \
               -c Release --no-build \
               --filter "FullyQualifiedName~ReleaseBuildExcludesTestAuthTests"

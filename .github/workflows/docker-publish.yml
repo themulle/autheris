@@ -60,6 +60,7 @@ jobs:
           dotnet publish src/Autheris.Api/Autheris.Api.csproj \
             -c Release \
             --no-restore \
+            -p:AutherisIncludeTestAuth=false \
             -o ./dist/publish
 
       - name: Verify TestAuthHandler is Excluded from Publish Output (SC-04)

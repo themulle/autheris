@@ -102,6 +102,7 @@ if (-not $composeCmd) {
 Write-Success "Using compose orchestrator: $composeCmd"
 
 # Ensure compose discovers podman-compose.yaml
+# SR-D-08: run ./scripts/generate-env.sh once (bash/openssl, e.g. WSL) to create deploy/.env and deploy/certs/ before the first run.
 $env:COMPOSE_FILE = "podman-compose.yaml"
 
 # 2. Stage Source Code if needed

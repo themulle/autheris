@@ -86,13 +86,30 @@ if command -v helm >/dev/null 2>&1; then
            --set gateway.authentication.entraId.audience=api://autheris)
 
     render() { helm template t "${CHART}" "$@" 2>&1; }
+    # A negative render must fail for the expected reason (error message pattern), not for an unrelated template error.
     expect_failure() {
-        local label="$1"; shift
-        if helm template t "${CHART}" "$@" >/dev/null 2>&1; then
+        local label="$1" pattern="$2"; shift 2
+        local out
+        if out="$(helm template t "${CHART}" "$@" 2>&1)"; then
             echo "ERROR: production Helm render must fail: ${label}" >&2
+            FAILURES=$((FAILURES + 1))
+        elif ! grep -qE "${pattern}" <<<"${out}"; then
+            echo "ERROR: production Helm render failed for the wrong reason (${label}): ${out}" >&2
             FAILURES=$((FAILURES + 1))
         fi
     }
+    expect_success() {
+        local label="$1"; shift
+        local out
+        if ! out="$(helm template t "${CHART}" "$@" 2>&1)"; then
+            echo "ERROR: production Helm render must succeed (${label}): ${out}" >&2
+            FAILURES=$((FAILURES + 1))
+        fi
+    }
+    FWD=(--set gateway.authentication.forwardAuth.enabled=true
+         --set 'gateway.authentication.forwardAuth.trustedProxies={10.1.2.3}'
+         --set 'gateway.authentication.forwardAuth.trustedNetworks={10.1.2.0/24}'
+         --set gateway.authentication.forwardAuth.sharedSecret.existingSecret=fwd-secret)
 
     # Positive render: a fully configured production release renders and carries the authenticated ServiceMonitor.
     if ! POSITIVE="$(render "${BASE[@]}" "${ENTRA[@]}")"; then
@@ -104,32 +121,38 @@ if command -v helm >/dev/null 2>&1; then
         grep -q 'Gateway__Authentication__EntraId__Audience: "api://autheris"' <<<"${POSITIVE}" || { echo "ERROR: production Helm render does not carry the EntraId audience" >&2; FAILURES=$((FAILURES + 1)); }
     fi
 
-    expect_failure "unauthenticated ServiceMonitor" "${BASE[@]}" "${ENTRA[@]}" --set monitoring.serviceMonitor.auth.type=none
-    expect_failure "no authentication provider" "${BASE[@]}"
-    expect_failure "two authentication providers" "${BASE[@]}" "${ENTRA[@]}" \
+    expect_failure "unauthenticated ServiceMonitor" "must be bearer or mtls" "${BASE[@]}" "${ENTRA[@]}" --set monitoring.serviceMonitor.auth.type=none
+    expect_failure "no authentication provider" "exactly one of" "${BASE[@]}"
+    expect_failure "two authentication providers" "exactly one of" "${BASE[@]}" "${ENTRA[@]}" \
         --set gateway.authentication.adfs.enabled=true --set gateway.authentication.adfs.authority=https://adfs.example/adfs \
         --set gateway.authentication.adfs.audience=api://autheris
     for field in tenantId clientId audience; do
-        expect_failure "EntraId ${field} missing" "${BASE[@]}" "${ENTRA[@]}" --set "gateway.authentication.entraId.${field}="
+        expect_failure "EntraId ${field} missing" "entraId.${field} is required" "${BASE[@]}" "${ENTRA[@]}" --set "gateway.authentication.entraId.${field}="
     done
-    expect_failure "ADFS authority missing" "${BASE[@]}" --set gateway.authentication.adfs.enabled=true \
+    expect_failure "ADFS authority missing" "adfs.authority is required" "${BASE[@]}" --set gateway.authentication.adfs.enabled=true \
         --set gateway.authentication.adfs.audience=api://autheris
-    expect_failure "ADFS audience missing" "${BASE[@]}" --set gateway.authentication.adfs.enabled=true \
+    expect_failure "ADFS audience missing" "adfs.audience is required" "${BASE[@]}" --set gateway.authentication.adfs.enabled=true \
         --set gateway.authentication.adfs.authority=https://adfs.example/adfs
-    expect_failure "forwardAuth without trustedProxies" "${BASE[@]}" --set gateway.authentication.forwardAuth.enabled=true
-    expect_failure "RequireTenantColumn disabled without exemption" "${BASE[@]}" "${ENTRA[@]}" --set gateway.dataSources.requireTenantColumn=false
+    expect_failure "forwardAuth without trustedProxies" "trustedProxies must list" "${BASE[@]}" --set gateway.authentication.forwardAuth.enabled=true
+    expect_failure "forwardAuth with empty trustedNetworks" "trustedNetworks must be set explicitly" "${BASE[@]}" "${FWD[@]}" \
+        --set 'gateway.authentication.forwardAuth.trustedNetworks=null'
+    expect_failure "forwardAuth without shared secret" "sharedSecret.existingSecret" "${BASE[@]}" "${FWD[@]}" \
+        --set gateway.authentication.forwardAuth.sharedSecret.existingSecret=
+    expect_failure "RequireTenantColumn disabled without exemption" "requireTenantColumn must be true" "${BASE[@]}" "${ENTRA[@]}" \
+        --set gateway.dataSources.requireTenantColumn=false
 
-    if ! render "${BASE[@]}" "${ENTRA[@]}" --set gateway.dataSources.requireTenantColumn=false \
-        --set gateway.dataSources.requireTenantColumnExemption=true >/dev/null; then
-        echo "ERROR: explicit RequireTenantColumn exemption must render" >&2
+    expect_success "explicit RequireTenantColumn exemption" "${BASE[@]}" "${ENTRA[@]}" --set gateway.dataSources.requireTenantColumn=false \
+        --set gateway.dataSources.requireTenantColumnExemption=true
+    expect_success "kerberos only" "${BASE[@]}" --set gateway.authentication.kerberos.enabled=true
+    expect_success "adfs only" "${BASE[@]}" --set gateway.authentication.adfs.enabled=true \
+        --set gateway.authentication.adfs.authority=https://adfs.example/adfs --set gateway.authentication.adfs.audience=api://autheris
+    if ! FWDOUT="$(render "${BASE[@]}" "${FWD[@]}")"; then
+        echo "ERROR: forwardAuth with trusted proxies, networks and shared secret must render: ${FWDOUT}" >&2
         FAILURES=$((FAILURES + 1))
-    fi
-    if ! FWD="$(render "${BASE[@]}" --set gateway.authentication.forwardAuth.enabled=true \
-        --set 'gateway.authentication.forwardAuth.trustedProxies={10.1.2.3}')"; then
-        echo "ERROR: forwardAuth with trustedProxies must render: ${FWD}" >&2
-        FAILURES=$((FAILURES + 1))
-    elif ! grep -q 'ForwardAuth__TrustedProxies__0: "10.1.2.3"' <<<"${FWD}" || ! grep -q 'ForwardAuth__TrustedNetworks__0:' <<<"${FWD}"; then
-        echo "ERROR: forwardAuth render does not carry trusted proxies and networks" >&2
+    elif ! grep -q 'ForwardAuth__TrustedProxies__0: "10.1.2.3"' <<<"${FWDOUT}" \
+        || ! grep -q 'ForwardAuth__TrustedNetworks__0: "10.1.2.0/24"' <<<"${FWDOUT}" \
+        || ! grep -q 'Gateway__Authentication__ForwardAuth__SharedSecret' <<<"${FWDOUT}"; then
+        echo "ERROR: forwardAuth render does not carry trusted proxies, networks and the shared secret reference" >&2
         FAILURES=$((FAILURES + 1))
     fi
 else

@@ -113,6 +113,14 @@ gateway:
       enabled: false
       # Gateway:Authentication:ForwardAuth:TrustedProxies (IP addresses of the authenticating reverse proxy).
       trustedProxies: []
+      # Gateway:Authentication:ForwardAuth:TrustedNetworks. Must be set explicitly in production; when empty (non-production
+      # only) gateway.security.trustedNetworks is used.
+      trustedNetworks: []
+      # Shared secret between proxy and gateway (>= 32 bytes). Reference an existing Secret, or a Key Vault reference.
+      sharedSecret:
+        existingSecret: ""
+        key: "sharedSecret"
+        keyVaultRef: ""
     kerberos:
       enabled: false
 
@@ -149,7 +157,7 @@ gateway:
   security:
     hmacSecretExistingSecret: "autheris-security-secrets"
     hmacSecretKey: "hmacKey"
-    # Rendered as Gateway:Authentication:ForwardAuth:TrustedNetworks when forwardAuth is enabled.
+    # Non-production fallback for Gateway:Authentication:ForwardAuth:TrustedNetworks when forwardAuth.trustedNetworks is empty.
     trustedNetworks:
       - "10.0.0.0/8"
       - "172.16.0.0/12"

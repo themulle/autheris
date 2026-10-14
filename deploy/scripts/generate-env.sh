@@ -9,7 +9,7 @@ command -v openssl >/dev/null 2>&1 || { echo "ERROR: openssl is required" >&2; e
 if [ ! -f certs/sqlserver.crt ] || [ ! -f certs/sqlserver.key ]; then
     mkdir -p certs
     (
-        umask 022
+        umask 077
         openssl req -x509 -newkey rsa:4096 -sha256 -nodes -days 365 -subj "/CN=Autheris Benchmark CA" \
             -keyout certs/ca.key -out certs/ca.crt >/dev/null 2>&1
         openssl req -newkey rsa:3072 -sha256 -nodes -subj "/CN=sqlserver" \
@@ -20,8 +20,9 @@ if [ ! -f certs/sqlserver.crt ] || [ ! -f certs/sqlserver.key ]; then
         rm -f certs/sqlserver.csr certs/sqlserver.ext
         # The SQL Server process runs as a different uid inside the container, so the key must be world-readable on disk.
         # This is benchmark-only material in a gitignored directory; never reuse it outside the benchmark stack.
-        chmod 644 certs/sqlserver.key
-        chmod 600 certs/ca.key
+        chmod 644 certs/sqlserver.key certs/sqlserver.crt certs/ca.crt
+        # The gateway pins sqlserver.crt, so the CA is not needed afterwards: drop its private key.
+        rm -f certs/ca.key certs/ca.srl
     )
     echo "Created deploy/certs/ with a benchmark CA and SQL Server certificate (SAN DNS:sqlserver)."
 fi

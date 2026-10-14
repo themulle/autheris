@@ -16,6 +16,7 @@ public sealed partial class BenchmarkStackHardeningTests
         string deploy = Path.Combine(FindRepoRoot(), "deploy");
         var offenders = Directory.EnumerateFiles(deploy, "*", SearchOption.AllDirectories)
             .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}certs{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}results{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
             .Where(f => !f.EndsWith("verify-hardening.sh", StringComparison.Ordinal))
             .Where(f => File.ReadAllText(f).Contains("TrustServerCertificate=True", StringComparison.OrdinalIgnoreCase))
             .Select(f => Path.GetRelativePath(deploy, f))
@@ -48,9 +49,7 @@ public sealed partial class BenchmarkStackHardeningTests
     public void ReverseProxy_RunsReadOnlyWithTmpfsWritablePaths()
     {
         string compose = File.ReadAllText(Path.Combine(FindRepoRoot(), "deploy", "podman-compose.yaml"));
-        int start = compose.IndexOf("\n  reverse-proxy:", StringComparison.Ordinal);
-        int end = compose.IndexOf("\n  load-generator:", StringComparison.Ordinal);
-        string service = compose[start..end];
+        string service = ServiceBlock(compose, "reverse-proxy");
 
         service.ShouldContain("read_only: true");
         service.ShouldContain("tmpfs:");
@@ -69,9 +68,25 @@ public sealed partial class BenchmarkStackHardeningTests
         conf.ShouldContain("tlskey = /certs/sqlserver.key");
         conf.ShouldContain("forceencryption = 1");
 
+        File.ReadAllText(Path.Combine(root, "deploy", "containers", "sqlserver", "Containerfile"))
+            .ShouldContain("containers/sqlserver/mssql.conf");
+        string composeText = File.ReadAllText(Path.Combine(root, "deploy", "podman-compose.yaml"));
+        string sqlService = ServiceBlock(composeText, "sqlserver");
+        sqlService.ShouldContain("./certs/sqlserver.crt:/certs/sqlserver.crt");
+        sqlService.ShouldContain("./certs/sqlserver.key:/certs/sqlserver.key");
+        ServiceBlock(composeText, "gqlgateway-api").ShouldContain("./certs/sqlserver.crt:/certs/sqlserver.crt");
+
         string gen = File.ReadAllText(Path.Combine(root, "deploy", "scripts", "generate-env.sh"));
         gen.ShouldContain("DNS:sqlserver");
         File.ReadAllText(Path.Combine(root, ".gitignore")).ShouldContain("deploy/certs/");
+    }
+
+    /// <summary>Text of one top-level compose service: from its key to the next two-space-indented key (order independent).</summary>
+    private static string ServiceBlock(string compose, string service)
+    {
+        var match = Regex.Match(compose, $@"^  {Regex.Escape(service)}:\s*$(.*?)(?=^  [A-Za-z0-9_-]+:\s*$|\z)", RegexOptions.Multiline | RegexOptions.Singleline);
+        match.Success.ShouldBeTrue($"compose service '{service}' not found");
+        return match.Groups[1].Value;
     }
 
     [GeneratedRegex("Gateway__DataSources__Connections__crm__ConnectionString: \"([^\"]+)\"")]

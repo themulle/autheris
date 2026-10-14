@@ -28,6 +28,7 @@ COPY src/ src/
 # Publish in Release mode with Server GC, PGO and ready-to-run optimizations
 RUN dotnet publish src/Autheris.Api/Autheris.Api.csproj -c Release -o /app/publish \
     --no-restore \
+    -p:AutherisIncludeTestAuth=false \
     -p:ServerGarbageCollection=true \
     -p:TieredCompilation=true \
     -p:TieredPGO=true

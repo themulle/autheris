@@ -56,8 +56,22 @@ data:
   {{- range $i, $p := $auth.forwardAuth.trustedProxies }}
   Gateway__Authentication__ForwardAuth__TrustedProxies__{{ $i }}: {{ $p | quote }}
   {{- end }}
-  {{- range $i, $n := .Values.gateway.security.trustedNetworks }}
+  {{- $fa := $auth.forwardAuth }}
+  {{- $networks := $fa.trustedNetworks }}
+  {{- if not $networks }}
+  {{- if $enforce }}
+  {{- fail "gateway.authentication.forwardAuth.trustedNetworks must be set explicitly when forwardAuth is enabled and gateway.production.enforceRequiredSettings is true (the defaults in gateway.security.trustedNetworks are not accepted)" }}
+  {{- end }}
+  {{- $networks = .Values.gateway.security.trustedNetworks }}
+  {{- end }}
+  {{- range $i, $n := $networks }}
   Gateway__Authentication__ForwardAuth__TrustedNetworks__{{ $i }}: {{ $n | quote }}
+  {{- end }}
+  {{- if and $enforce (not $fa.sharedSecret.existingSecret) (not $fa.sharedSecret.keyVaultRef) }}
+  {{- fail "gateway.authentication.forwardAuth.sharedSecret.existingSecret (or sharedSecret.keyVaultRef) is required when forwardAuth is enabled and gateway.production.enforceRequiredSettings is true" }}
+  {{- end }}
+  {{- with $fa.sharedSecret.keyVaultRef }}
+  Gateway__Authentication__ForwardAuth__SharedSecretKeyVaultRef: {{ . | quote }}
   {{- end }}
   {{- end }}
   {{- $ds := .Values.gateway.dataSources }}

@@ -37,3 +37,4 @@ docs
 tools
 deploy
 **/*.md
+**/certs/
