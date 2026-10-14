@@ -59,7 +59,7 @@ public sealed class DeniedTablesStartupReporter(
                 ? []
                 : (await virtualFilters.LoadSnapshotAsync(stoppingToken).ConfigureAwait(false)).Filters.ToList();
 
-            GatewayStartupValidator.ListDeniedTables(new PolicyLintInput(catalog, accessProfiles, filters, []), logger);
+            GatewayStartupValidator.ListDeniedTables(new PolicyLintInput(catalog, accessProfiles, filters, []), logger, options.Value.DataSources);
         }
         catch (OperationCanceledException)
         {

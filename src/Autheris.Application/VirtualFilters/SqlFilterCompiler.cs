@@ -26,6 +26,13 @@ public static partial class SqlFilterCompiler
 {
     private const string TargetAlias = "target";
 
+    /// <summary>
+    /// SR-L-11: the reserved value a sql definition compares the tenant column of every tenanted source table with:
+    /// <c>alias.tenant_id = '{{tenant}}'</c> in a conjunctive position. The gateway replaces it with the caller's tenant (a bound
+    /// parameter in the typed form); the tenant never comes from the filter text.
+    /// </summary>
+    public const string TenantPlaceholder = "{{tenant}}";
+
     /// <summary>Functions a filter may call (Trino names); everything else is rejected before translation.</summary>
     public static readonly FrozenSet<string> AllowedFunctions = new[]
     {
@@ -44,7 +51,9 @@ public static partial class SqlFilterCompiler
     public static VirtualFilter Validate(
         VirtualFilter filter,
         IReadOnlyList<TableMetadata> catalog,
-        IReadOnlyList<string>? allowedReferenceTables = null)
+        IReadOnlyList<string>? allowedReferenceTables = null,
+        bool requireTenantColumn = false,
+        IEnumerable<string>? tenantColumnExemptTables = null)
     {
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(catalog);
@@ -83,6 +92,7 @@ public static partial class SqlFilterCompiler
         }
 
         var sourceTables = new List<TableMetadata>();
+        var tenanted = new List<(TableAccessTarget Table, string Column)>();
         foreach (var table in metadata.ReferencedTables)
         {
             if (string.Equals(table.Alias, TargetAlias, StringComparison.OrdinalIgnoreCase) ||
@@ -121,20 +131,20 @@ public static partial class SqlFilterCompiler
                 string.Equals(t.Identifier.TableName, table.TableName, StringComparison.OrdinalIgnoreCase));
             sourceTables.Add(catalogued ?? throw Reject(filter, $"the table '{table.FullName}' is unknown in the catalog of '{filter.Source}'."));
 
-            // SR15-11: If reference table has a tenant isolation column, verify the filter constrains it
-            var tenantCol = catalogued.Columns.FirstOrDefault(c =>
-                string.Equals(c.ColumnName, "tenant_id", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(c.ColumnName, "tenantid", StringComparison.OrdinalIgnoreCase))?.ColumnName;
+            // SR-L-11: a tenanted source table must be compared with the reserved tenant value (checked on the AST below).
+            string? tenantCol;
+            try
+            {
+                tenantCol = VirtualFilterTenantColumns.Resolve(catalogued, requireTenantColumn, tenantColumnExemptTables);
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw Reject(filter, ex.Message);
+            }
+
             if (tenantCol != null)
             {
-                bool hasTenantFilter = (metadata.FilterColumnReferences ?? []).Any(r =>
-                    (string.Equals(r.TableOrAlias, table.Alias ?? table.TableName, StringComparison.OrdinalIgnoreCase) ||
-                     string.Equals(r.TableOrAlias, table.TableName, StringComparison.OrdinalIgnoreCase)) &&
-                    string.Equals(r.ColumnName, tenantCol, StringComparison.OrdinalIgnoreCase));
-                if (!hasTenantFilter)
-                {
-                    throw Reject(filter, $"the subquery table '{table.FullName}' has tenant column '{tenantCol}' which must be constrained in the WHERE clause.");
-                }
+                tenanted.Add((table, tenantCol));
             }
         }
 
@@ -181,12 +191,13 @@ public static partial class SqlFilterCompiler
             throw Reject(filter, "virtual filter definition must contain a WHERE predicate.");
         }
         ValidateAstPredicates(spec.Where, filter);
+        RequireTenantBinding(filter, tenanted, spec.Where);
 
         var validated = filter with { SqlTargetColumns = targetColumns };
         var dialect = sourceTables.Count > 0 ? sourceTables[0].Dialect : DatabaseDialect.SqlServer;
         try
         {
-            Compile(validated, dialect);
+            Compile(validated with { Sql = Substitute(fragment, "validation") }, dialect);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not ArgumentException)
         {
@@ -194,6 +205,93 @@ public static partial class SqlFilterCompiler
         }
 
         return validated;
+    }
+
+    /// <summary>
+    /// SR-L-11: every tenanted source table needs a conjunct <c>alias.&lt;tenantcolumn&gt; = '{{tenant}}'</c> in the WHERE clause; a
+    /// mere reference, a literal or another column does not bind the tenant.
+    /// </summary>
+    private static void RequireTenantBinding(VirtualFilter filter, IReadOnlyList<(TableAccessTarget Table, string Column)> tenanted, Expression where)
+    {
+        foreach (var (table, column) in tenanted)
+        {
+            if (!IsTenantBound(where, table.Alias ?? table.TableName, column))
+            {
+                throw Reject(filter, $"the source table '{table.FullName}' has the tenant column '{column}', which must be compared with the reserved tenant value as a WHERE conjunct: {table.Alias ?? table.TableName}.{column} = '{TenantPlaceholder}'.");
+            }
+        }
+    }
+
+    private static bool IsTenantBound(Expression expression, string qualifier, string column) => expression switch
+    {
+        ParenthesizedExpression p => IsTenantBound(p.Expression, qualifier, column),
+        BinaryExpression { Operator: BinaryOperator.And } conjunction =>
+            IsTenantBound(conjunction.Left, qualifier, column) || IsTenantBound(conjunction.Right, qualifier, column),
+        BinaryExpression { Operator: BinaryOperator.Equal } eq =>
+            IsTenantComparison(eq.Left, eq.Right, qualifier, column) || IsTenantComparison(eq.Right, eq.Left, qualifier, column),
+        _ => false
+    };
+
+    private static bool IsTenantComparison(Expression columnSide, Expression valueSide, string qualifier, string column) =>
+        columnSide is ColumnReference { Name.Parts.Count: >= 2 } reference &&
+        string.Equals(reference.Name.Parts[^1].Value, column, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(reference.Name.Parts[^2].Value, qualifier, StringComparison.OrdinalIgnoreCase) &&
+        valueSide is LiteralExpression { Type: LiteralType.String, Value: string text } &&
+        string.Equals(text, TenantPlaceholder, StringComparison.Ordinal);
+
+    /// <summary>The definition with the reserved tenant value replaced by the quoted <paramref name="tenant"/> (escaped; the typed form binds it).</summary>
+    private static string Substitute(string fragment, string tenant) =>
+        fragment.Replace($"'{TenantPlaceholder}'", "'" + tenant.Replace("'", "''", StringComparison.Ordinal) + "'", StringComparison.Ordinal);
+
+    /// <summary>
+    /// The definition ready to compile: with a <paramref name="tenant"/> context every tenanted source table must still compare its
+    /// tenant column with the reserved value (a stored definition that does not is denied, never skipped), and the value becomes the
+    /// caller's tenant. Without a context a definition that uses the reserved value is refused (fail closed).
+    /// </summary>
+    private static VirtualFilter BindTenant(VirtualFilter filter, VirtualFilterTenantContext? tenant)
+    {
+        var fragment = filter.Sql ?? throw new InvalidOperationException($"The virtual filter '{filter.Name}' has no sql definition.");
+        if (tenant == null)
+        {
+            if (fragment.Contains(TenantPlaceholder, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"The virtual filter '{filter.Name}' uses the reserved tenant value but no tenant is bound.");
+            }
+
+            return filter;
+        }
+
+        var metadata = new FastSqlEngine().Analyze(Statement(fragment).AsMemory());
+        var tenanted = new List<(TableAccessTarget Table, string Column)>();
+        foreach (var table in metadata.ReferencedTables)
+        {
+            var column = tenant.TenantColumnOf(new TableIdentifier(filter.Source, table.Schema ?? string.Empty, table.TableName));
+            if (column != null)
+            {
+                tenanted.Add((table, column));
+            }
+        }
+
+        if (tenanted.Count > 0)
+        {
+            var (tree, _) = new FastSqlEngine().Parse(Statement(fragment).AsMemory(), null, CancellationToken.None);
+            var ast = new TrinoSqlEngine.Ast.Builder.SqlAstBuilder().BuildStatement(tree);
+            if (ast is not SelectStatement { Body: QuerySpecification { Where: not null } spec })
+            {
+                throw new InvalidOperationException($"The virtual filter '{filter.Name}' did not compile to a correlated subquery.");
+            }
+
+            try
+            {
+                RequireTenantBinding(filter, tenanted, spec.Where);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new InvalidOperationException(ex.Message, ex);
+            }
+        }
+
+        return filter with { Sql = Substitute(fragment, tenant.Tenant) };
     }
 
     private static void ValidateAstPredicates(Expression expr, VirtualFilter filter)
@@ -349,10 +447,21 @@ public static partial class SqlFilterCompiler
         return false;
     }
 
-    /// <summary>EXISTS predicate of the SQL definition in <paramref name="dialect"/>, correlated with <c>autheris_target</c>.</summary>
-    public static string Compile(VirtualFilter filter, DatabaseDialect dialect)
+    /// <summary>The catalog identifiers of the tables a sql definition reads (data source of the filter, schema, table).</summary>
+    public static IReadOnlyList<TableIdentifier> ReferencedTables(VirtualFilter filter)
     {
         ArgumentNullException.ThrowIfNull(filter);
+        var fragment = filter.Sql ?? throw new InvalidOperationException($"The virtual filter '{filter.Name}' has no sql definition.");
+        return new FastSqlEngine().Analyze(Statement(fragment).AsMemory()).ReferencedTables
+            .Select(t => new TableIdentifier(filter.Source, t.Schema ?? string.Empty, t.TableName))
+            .ToList();
+    }
+
+    /// <summary>EXISTS predicate of the SQL definition in <paramref name="dialect"/>, correlated with <c>autheris_target</c>.</summary>
+    public static string Compile(VirtualFilter filter, DatabaseDialect dialect, VirtualFilterTenantContext? tenant = null)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        filter = BindTenant(filter, tenant);
         var fragment = filter.Sql ?? throw new InvalidOperationException($"The virtual filter '{filter.Name}' has no sql definition.");
         var target = Sql.SqlDialectMapper.ToTargetDialect(dialect);
         var generated = GenerateInline(Statement(fragment), target);
@@ -377,10 +486,12 @@ public static partial class SqlFilterCompiler
     /// </summary>
     /// <exception cref="InvalidOperationException">The definition has no sql, or does not compile to a correlated subquery.</exception>
     public static PolicyPredicate CompileTyped(
-        VirtualFilter filter, DatabaseDialect dialect, ISqlEngine engine, string parameterPrefix = DefaultTypedParameterPrefix)
+        VirtualFilter filter, DatabaseDialect dialect, ISqlEngine engine, string parameterPrefix = DefaultTypedParameterPrefix,
+        VirtualFilterTenantContext? tenant = null)
     {
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(engine);
+        filter = BindTenant(filter, tenant);
         var fragment = filter.Sql ?? throw new InvalidOperationException($"The virtual filter '{filter.Name}' has no sql definition.");
         var target = Sql.SqlDialectMapper.ToTargetDialect(dialect);
         var (tree, _) = engine.Parse(Statement(fragment).AsMemory(), SqlTokenSecurityOptions.ForDialect(target), CancellationToken.None);

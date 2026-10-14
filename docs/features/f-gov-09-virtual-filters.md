@@ -227,3 +227,12 @@ The Virtual Filter subsystem is validated by comprehensive unit, integration, an
 - `VirtualFilterAdministrationTests.cs`: Validates CRUD, GitOps atomic sync, `MaxRemovals` safeguards, and input validation.
 - `VirtualFilterResolutionPerformanceTests.cs`: Benchmarks resolution overhead, ensuring p99 latency remains under 0.05 ms.
 - `VirtualFilterProcedureParityTests.cs`: Verifies row-scope and virtual filter enforcement on stored procedure outputs.
+
+## Tenant binding of source tables
+
+The predicate that a virtual filter injects into WebSQL, REST and OData restricts every tenanted source table to the caller's tenant, like the federation key query.
+
+- **Structured filters** need no change: for every FROM/JOIN table with a tenant column (resolved through `TableMetadata.RequireTenantColumnOrThrow`, honouring `DataSources:RequireTenantColumn` and `DataSources:TenantColumnExemptTables`), the gateway adds `alias.<tenant column> = <caller tenant>` (a bound parameter in the typed form, an escaped literal in the text form). The tenant comes from the resolved principal, never from filter text.
+- **SQL-defined filters** must compare the tenant column of every tenanted source table with the reserved value `'{{tenant}}'` in a conjunctive WHERE position, for example `client.tenant_id = '{{tenant}}'`. The gateway replaces the reserved value with the caller's tenant. A mere reference to the column, a literal, another column or a disjunction does not satisfy the rule and is rejected at validation. The tenant column is resolved from the catalog (not only a column literally named `tenant_id`).
+- **Existing stored SQL-defined filters** that do not meet the rule are reported by the policy predicate lint (`VIRTUAL_FILTER_REJECTED`) and are denied at compile time (fail closed, never skipped). Rewrite them to use the reserved value before rollout.
+- A tenanted table that cannot be resolved in the catalog, or a table without a tenant column while `RequireTenantColumn` is on and the table is not exempt, denies the request.
