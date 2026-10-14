@@ -98,42 +98,6 @@ public sealed class SyntheticDataAndExceptionHandlingTests
     }
 
     [Fact]
-    public async Task SqlDataSourceExecutor_WithNullEnvironment_TreatsAsProductionAndThrowsGatewayNotImplementedException()
-    {
-        // S-1: When environment is null, fail-closed production must be assumed.
-        // Without active connection or AreExternalSystemsMockedIfUnreachable, it must throw GatewayNotImplementedException.
-        var executor = new SqlDataSourceExecutor(
-            connectionFactory: null,
-            options: Options.Create(new GatewayOptions()),
-            logger: NullLogger<SqlDataSourceExecutor>.Instance,
-            environment: null); // null environment
-
-        var meta = new TableMetadata
-        {
-            Identifier = _testTableId,
-            Table = new Table { IsActive = true, DataSourceType = DataSourceType.Sql, SourceType = "SqlServer", SourceName = "crm_db" }
-        };
-
-        var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-123")], "Test"));
-        var decision = TableAccessDecision.Allowed(_testTableId, new Dictionary<string, ColumnAccessLevel>
-        {
-            ["id"] = ColumnAccessLevel.Clear
-        }, null, hasUnconstrainedColumnAllow: true);
-
-        var context = new DataSourceExecutionContext(
-            SourceName: "crm_db",
-            Metadata: meta,
-            Principal: principal,
-            AccessDecision: decision,
-            Arguments: new Dictionary<string, object?>(),
-            RequestedFields: ["id"]
-        );
-
-        await Assert.ThrowsAsync<GatewayNotImplementedException>(() =>
-            executor.ExecuteAsync(context));
-    }
-
-    [Fact]
     public async Task GovernedSqlExecutionService_WithNullEnvironment_TreatsAsProductionAndThrowsGatewayNotImplementedException()
     {
         // S-1: When environment is null, fail-closed production must be assumed.

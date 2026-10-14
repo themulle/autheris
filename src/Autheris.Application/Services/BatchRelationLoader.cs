@@ -114,7 +114,9 @@ public sealed class BatchRelationLoader
                     Parameters: filterParams,
                     ReferencedColumns: new[] { joinColumn })
                 {
-                    DialectSqlFactory = d => $"{d.QuoteIdentifier(joinColumn)} IN ({string.Join(", ", paramNames)})"
+                    DialectSqlFactory = d => $"{d.QuoteIdentifier(joinColumn)} IN ({string.Join(", ", paramNames)})",
+                    // WP-ARC-B-02: the governed table-read planner renders the Trino form; the values stay client parameters.
+                    TrinoSqlFactory = resolve => $"{Autheris.Application.Data.Services.DataApiFilterTranslator.QuoteIdentifier(resolve(joinColumn))} IN ({string.Join(", ", paramNames)})"
                 };
 
                 var pageItems = new Dictionary<string, object?>(StringComparer.Ordinal)

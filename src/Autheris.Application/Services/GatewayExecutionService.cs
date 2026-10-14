@@ -1,5 +1,4 @@
 using System.Security.Claims;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
@@ -79,7 +78,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         _chunkedQueryExecutor = chunkedQueryExecutor ?? new ChunkedQueryExecutor(500);
         _options = options?.Value;
         _drainController = drainController;
-        _dataSourceExecutors = dataSourceExecutors ?? new IDataSourceExecutor[] { new SqlDataSourceExecutor(options: options, maskingProvider: maskingProvider) };
+        _dataSourceExecutors = dataSourceExecutors ?? Array.Empty<IDataSourceExecutor>();
         _policyEnforcementService = policyEnforcementService;
         _clientIpResolver = clientIpResolver;
         _connectorRegistry = connectorRegistry;
@@ -174,16 +173,9 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         // Enforce Access
         if (!decision.IsAllowed)
         {
-            await _auditWriter.RecordRequiredAsync(new AuditLogEntry
-            {
-                TenantId = tenantId,
-                EventType = "TABLE_QUERY",
-                ActorSid = userSid,
-                TargetTable = table.ToString(),
-                Decision = "DENY",
-                TraceId = traceId,
-                DetailsJson = JsonSerializer.Serialize(new { is_allowed = false, reasons = decision.DeniedReasons, virtual_filters = decision.AppliedVirtualFilters })
-            }, ct).ConfigureAwait(false);
+            await GovernedQueryStages.RecordTableReadAsync(
+                _auditWriter, tenantId, userSid, table, allowed: false,
+                GovernedQueryStages.DecisionDetails(decision), ct).ConfigureAwait(false);
 
             throw new GatewayForbiddenException($"Access to table '{table}' denied: {string.Join("; ", decision.DeniedReasons)}");
         }
@@ -256,44 +248,18 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         catch (Exception ex)
         {
             // SR15-32: Validation/preparation failures are audited as DENY with predicate details
-            await _auditWriter.RecordRequiredAsync(new AuditLogEntry
-            {
-                TenantId = tenantId,
-                EventType = "TABLE_QUERY",
-                ActorSid = userSid,
-                TargetTable = table.ToString(),
-                Decision = "DENY",
-                TraceId = traceId,
-                DetailsJson = JsonSerializer.Serialize(new
-                {
-                    is_allowed = false,
-                    reasons = new[] { ex.Message },
-                    virtual_filters = decision.AppliedVirtualFilters,
-                    filter = filter?.SqlPredicate,
-                    order_by = orderBy?.Select(o => $"{o.Column} {(o.Descending ? "DESC" : "ASC")}").ToArray()
-                })
-            }, ct).ConfigureAwait(false);
+            var failureDetails = GovernedQueryStages.WithQueryShape(GovernedQueryStages.DecisionDetails(decision), filter, orderBy);
+            failureDetails["is_allowed"] = false;
+            failureDetails["reasons"] = new[] { ex.Message };
+            await GovernedQueryStages.RecordTableReadAsync(
+                _auditWriter, tenantId, userSid, table, allowed: false, failureDetails, ct).ConfigureAwait(false);
             throw;
         }
 
         // SR15-32: ALLOW audit is recorded only after successful validation of all query parameters
-        await _auditWriter.RecordRequiredAsync(new AuditLogEntry
-        {
-            TenantId = tenantId,
-            EventType = "TABLE_QUERY",
-            ActorSid = userSid,
-            TargetTable = table.ToString(),
-            Decision = "ALLOW",
-            TraceId = traceId,
-            DetailsJson = JsonSerializer.Serialize(new
-            {
-                is_allowed = true,
-                reasons = decision.DeniedReasons,
-                virtual_filters = decision.AppliedVirtualFilters,
-                filter = filter?.SqlPredicate,
-                order_by = orderBy?.Select(o => $"{o.Column} {(o.Descending ? "DESC" : "ASC")}").ToArray()
-            })
-        }, ct).ConfigureAwait(false);
+        await GovernedQueryStages.RecordTableReadAsync(
+            _auditWriter, tenantId, userSid, table, allowed: true,
+            GovernedQueryStages.WithQueryShape(GovernedQueryStages.DecisionDetails(decision), filter, orderBy), ct).ConfigureAwait(false);
 
         // O10: bound concurrent reads of the same table by the same user (each slow read holds a database worker).
         var maxConcurrentReads = _options?.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
@@ -524,20 +490,16 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             if (catalogCol != null && decision.GetColumnAccess(catalogCol.ColumnName) == ColumnAccessLevel.Deny)
             {
                 // O1: Gesperrte (Deny) Spalte: dieselbe Antwort wie unbekannt (kein Existenz-Orakel), Audit-Eintrag mit dem echten Grund.
-                await _auditWriter.RecordRequiredAsync(new AuditLogEntry
-                {
-                    TenantId = tenantId,
-                    EventType = "COLUMN_ACCESS_DENIED",
-                    ActorSid = userSid,
-                    TargetTable = table.ToString(),
-                    Decision = "DENY",
-                    TraceId = traceId ?? string.Empty,
-                    DetailsJson = JsonSerializer.Serialize(new
+                await GovernedQueryStages.RecordTableReadAsync(
+                    _auditWriter, tenantId, userSid, table, allowed: false,
+                    new Dictionary<string, object?>(StringComparer.Ordinal)
                     {
-                        column = catalogCol.ColumnName,
-                        reason = $"Column '{catalogCol.ColumnName}' access is denied by governance policy."
-                    })
-                }, ct).ConfigureAwait(false);
+                        ["column"] = catalogCol.ColumnName,
+                        ["reason"] = $"Column '{catalogCol.ColumnName}' access is denied by governance policy."
+                    },
+                    ct,
+                    eventType: "COLUMN_ACCESS_DENIED",
+                    traceId: traceId ?? string.Empty).ConfigureAwait(false);
 
                 var echo = trimmed != null && EchoableColumnNameRegex().IsMatch(trimmed) ? trimmed : "(invalid name)";
                 throw new GatewayInvalidQueryException($"The property '{echo}' does not exist or is not accessible.");
@@ -665,18 +627,11 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
         if (recordAudit)
         {
-            // F-OPS-02: W3C Trace Correlation
-            var traceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId();
-            await _auditWriter.RecordRequiredAsync(new AuditLogEntry
-            {
-                TenantId = tenantId,
-                EventType = "CHILD_RELATION_CHECK",
-                ActorSid = userSid,
-                TargetTable = table.ToString(),
-                Decision = decision.IsAllowed ? "ALLOW" : "DENY",
-                TraceId = traceId,
-                DetailsJson = JsonSerializer.Serialize(new { is_allowed = decision.IsAllowed, reasons = decision.DeniedReasons })
-            }, ct);
+            // F-OPS-02: W3C Trace Correlation (the stage defaults the trace id to the current trace)
+            await GovernedQueryStages.RecordTableReadAsync(
+                _auditWriter, tenantId, userSid, table, decision.IsAllowed,
+                GovernedQueryStages.DecisionDetails(decision, includeVirtualFilters: false), ct,
+                eventType: "CHILD_RELATION_CHECK").ConfigureAwait(false);
         }
 
         return decision;

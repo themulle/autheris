@@ -46,7 +46,7 @@ public class DataPathSecurityTests : IDisposable
         _maskingProvider = new ColumnMaskingProvider(gatewayOptions);
         var devEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         devEnv.EnvironmentName.Returns("Development");
-        var sqlExecutor = new SqlDataSourceExecutor(options: gatewayOptions, environment: devEnv);
+        var sqlExecutor = new Autheris.Tests.Unit.TestDoubles.SyntheticSqlDataSourceExecutor();
         _executionService = new GatewayExecutionService(
             _repository,
             _resolutionService,

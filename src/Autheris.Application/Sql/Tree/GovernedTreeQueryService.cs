@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Policy;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -353,16 +354,9 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             return;
         }
 
-        await _auditLog.RecordAuditEventAsync(new AuditLogEntry
-        {
-            TenantId = access.Tenant,
-            EventType = "TABLE_QUERY",
-            ActorSid = access.UserSid,
-            TargetTable = table.ToString(),
-            Decision = access.Decision.IsAllowed ? "ALLOW" : "DENY",
-            TraceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId(),
-            DetailsJson = JsonSerializer.Serialize(new { is_allowed = access.Decision.IsAllowed, reasons = access.Decision.DeniedReasons, path = "graphql_tree", virtual_filters = access.Decision.AppliedVirtualFilters })
-        }, ct).ConfigureAwait(false);
+        await GovernedQueryStages.RecordTableReadAsync(
+            _auditLog, access.Tenant, access.UserSid, table, access.Decision.IsAllowed,
+            GovernedQueryStages.DecisionDetails(access.Decision, path: "graphql_tree"), ct).ConfigureAwait(false);
     }
 
     private IDisposable? AcquireLease(ResolvedTableAccess rootAccess)

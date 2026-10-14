@@ -56,25 +56,6 @@ public sealed class FailClosedDialectDefaultsTests
         await sut.InitializeSessionAsync(connection, null, dialect, Tenant);
     }
 
-    [Theory]
-    [InlineData(DatabaseDialect.PostgreSql)]
-    [InlineData(DatabaseDialect.SqlServer)]
-    [InlineData(DatabaseDialect.Sqlite)]
-    [InlineData(DatabaseDialect.Oracle)]
-    public void MaskDialectMapping_MappedDialects_DoNotThrow(DatabaseDialect dialect)
-    {
-        Should.NotThrow(() => SqlDataSourceExecutor.ToMaskTargetDialect(dialect));
-    }
-
-    [Theory]
-    [InlineData(DatabaseDialect.Databricks)]
-    [InlineData((DatabaseDialect)0)]
-    [InlineData((DatabaseDialect)99)]
-    public void MaskDialectMapping_UnmappedDialect_Throws(DatabaseDialect dialect)
-    {
-        Should.Throw<NotSupportedException>(() => SqlDataSourceExecutor.ToMaskTargetDialect(dialect));
-    }
-
     [Fact]
     public void NoDialectDefaultFallback_InSrc()
     {

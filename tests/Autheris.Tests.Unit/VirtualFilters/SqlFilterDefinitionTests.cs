@@ -178,21 +178,21 @@ public sealed class SqlFilterDefinitionTests : IDisposable
             Columns = [new TableColumn { ColumnName = "id" }, new TableColumn { ColumnName = "client_id" }, new TableColumn { ColumnName = "ts" }]
         };
         var predicate = new StructuredFilterSqlBuilder().Build(filter, new FilterBinding { FilterName = filter.Name }, air1, DatabaseDialect.Sqlite);
-        var decision = TableAccessDecision.Allowed(air1.Identifier, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear })
-            .WithMandatoryPredicate(predicate, [filter.Name]);
-        var executor = new SqlDataSourceExecutor(new SqlConnectionFactory(), Options.Create(new GatewayOptions
+        // The generated predicate text is executed as a text consumer splices it (reserved alias on the filtered table).
+        await using var readConn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath}");
+        await readConn.OpenAsync();
+        await using var readCmd = readConn.CreateCommand();
+        readCmd.CommandText = $"SELECT id FROM air1 AS autheris_target WHERE ({predicate})";
+        var rows = new List<long>();
+        await using (var reader = await readCmd.ExecuteReaderAsync())
         {
-            DataSources = new SqlDataSourceOptions
+            while (await reader.ReadAsync())
             {
-                Connections = new Dictionary<string, DataSourceConnectionOptions> { ["erp"] = new() { Provider = "Sqlite", ConnectionString = $"Data Source={_dbPath}" } }
+                rows.Add(reader.GetInt64(0));
             }
-        }), NullLogger<SqlDataSourceExecutor>.Instance);
+        }
 
-        var rows = await executor.ExecuteAsync(new DataSourceExecutionContext(
-            "erp", air1, new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-LWE-DAVID")], "Test")),
-            decision, new Dictionary<string, object?>(), ["id"], Limit: 100));
-
-        rows.Select(r => Convert.ToInt64(r["id"])).ShouldBe([11L]);   // undelivered crane, within the last day
+        rows.ShouldBe([11L]);   // undelivered crane, within the last day
     }
 
     [Fact]

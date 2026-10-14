@@ -4,7 +4,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Data.Interfaces;
@@ -47,6 +46,7 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
     private readonly IColumnMaskingProvider _maskingProvider;
     private readonly GatewayOptions _options;
     private readonly int _maxOffset;
+    private readonly IGovernedTableReadPlanner _planner;
 
     public GovernedDataQueryService(
         ITableMetadataRepository metadataRepository,
@@ -55,8 +55,10 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
         IFederatedQueryExecutionService federatedExecutionService,
         IColumnMaskingProvider maskingProvider,
         IOptions<GatewayOptions>? options = null,
-        IOptions<AnalyticsOptions>? analyticsOptions = null)
+        IOptions<AnalyticsOptions>? analyticsOptions = null,
+        IGovernedTableReadPlanner? planner = null)
     {
+        _planner = planner ?? new GovernedTableReadPlanner();
         _options = options?.Value ?? new GatewayOptions();
         _maxOffset = analyticsOptions?.Value?.DatasetApi?.MaxOffset ?? DatasetApiOptions.DefaultMaxOffset;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
@@ -88,107 +90,18 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             throw new UnauthorizedAccessException($"Table '{request.Table.ToQualifiedName()}' is not active.");
         }
 
-        // 2. Evaluate unified PDP (ReBAC, ABAC, Consent, Virtual Filters)
-        var clientIp = !string.IsNullOrWhiteSpace(context.ClientIp) && IPAddress.TryParse(context.ClientIp, out var ip) ? ip : null;
-        var secContext = SecurityPrincipalContext.FromPrincipal(context.User, context.TenantId, clientIp: clientIp);
-
-        var decision = await _pdp.EvaluateAccessAsync(
+        // 2. Authorization stage (WP-ARC-B-03): unified PDP (ReBAC, ABAC, Consent, Virtual Filters) plus the non-canonical
+        // ClusterAdmin fail-closed check. The row policy is not spliced from this decision (WP-X0n / SEC-X1-17): the rewriter's own
+        // decision is the only one that restricts rows, so both must be computed from the same inputs.
+        var decision = await GovernedQueryStages.AuthorizeTableAsync(
+            _pdp,
             request.Table,
             metadata,
-            secContext,
+            context.User,
+            context.TenantId,
+            context.ClientIp,
             request.SelectColumns,
             ct).ConfigureAwait(false);
-
-        if (!decision.IsAllowed)
-        {
-            var reasons = decision.DeniedReasons.Count > 0 ? string.Join("; ", decision.DeniedReasons) : "Access denied by governance policy.";
-            throw new UnauthorizedAccessException($"Access to table '{request.Table.ToQualifiedName()}' is forbidden: {reasons}");
-        }
-
-        // WP-X0n / SEC-X1-17: the row policy is no longer spliced from this decision, so the rewriter's own decision is the only
-        // one that restricts rows. It must be computed from the same inputs. The unified PDP drops a ClusterAdmin role claim of a
-        // non-canonical principal while the rewriter keeps every role claim; that one input difference fails closed here.
-        if (context.User.GetUserRoles().Any(ClusterAdminPolicy.IsClusterAdminRole) && !ClusterAdminPolicy.IsCanonicalClusterAdmin(context.User))
-        {
-            throw new UnauthorizedAccessException(
-                $"Access to table '{request.Table.ToQualifiedName()}' is forbidden: the cluster administrator role claim is not canonical.");
-        }
-
-        // 3. Resolve columns to select and enforce column permissions
-        IReadOnlyList<string> columnsToSelect;
-        if (request.SelectColumns != null && request.SelectColumns.Count > 0)
-        {
-            foreach (var col in request.SelectColumns)
-            {
-                var colMeta = metadata.GetColumn(col);
-                if (colMeta == null)
-                {
-                    throw new ArgumentException($"Column '{col}' does not exist on table '{request.Table.ToQualifiedName()}'.", nameof(request));
-                }
-
-                var access = decision.GetEffectiveColumnAccess(col, metadata);
-                if (access == ColumnAccessLevel.Deny)
-                {
-                    throw new ArgumentException($"Access to column '{col}' is denied on table '{request.Table.ToQualifiedName()}'.", nameof(request));
-                }
-            }
-            columnsToSelect = request.SelectColumns;
-        }
-        else
-        {
-            columnsToSelect = metadata.Columns
-                .Where(c => decision.GetEffectiveColumnAccess(c.ColumnName, metadata) != ColumnAccessLevel.Deny)
-                .Select(c => c.ColumnName)
-                .ToList();
-
-            if (columnsToSelect.Count == 0)
-            {
-                throw new UnauthorizedAccessException($"No accessible columns available on table '{request.Table.ToQualifiedName()}'.");
-            }
-        }
-
-        // 4. Guard against Oracle Inference Attacks on Filter and OrderBy
-        if (!string.IsNullOrWhiteSpace(request.FilterExpression))
-        {
-            var filterCols = DataApiFilterTranslator.ExtractReferencedColumns(request.FilterExpression, metadata);
-            foreach (var col in filterCols)
-            {
-                var colMeta = metadata.GetColumn(col);
-                if (colMeta == null)
-                {
-                    throw new ArgumentException($"Column '{col}' does not exist on table '{request.Table}'.", nameof(request));
-                }
-
-                var access = decision.GetEffectiveColumnAccess(col, metadata);
-                if (access != ColumnAccessLevel.Clear)
-                {
-                    throw new ArgumentException(
-                        $"Filtering on masked or denied column '{col}' is rejected to prevent oracle inference attacks.",
-                        nameof(request));
-                }
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(request.OrderBy))
-        {
-            var orderCols = DataApiFilterTranslator.ExtractOrderByColumns(request.OrderBy, metadata);
-            foreach (var col in orderCols)
-            {
-                var colMeta = metadata.GetColumn(col);
-                if (colMeta == null)
-                {
-                    throw new ArgumentException($"Column '{col}' does not exist on table '{request.Table}'.", nameof(request));
-                }
-
-                var access = decision.GetEffectiveColumnAccess(col, metadata);
-                if (access != ColumnAccessLevel.Clear)
-                {
-                    throw new ArgumentException(
-                        $"Ordering on masked or denied column '{col}' is rejected to prevent oracle inference attacks.",
-                        nameof(request));
-                }
-            }
-        }
 
         // 5. AST & SQL Formulation
         var limit = request.Limit > 0 ? Math.Min(request.Limit, MaxLimit) : DefaultLimit;
@@ -233,48 +146,40 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             }
         }
 
-        var sb = new StringBuilder();
-        sb.Append("SELECT ").Append(string.Join(", ", columnsToSelect.Select(DataApiFilterTranslator.QuoteIdentifier))).Append(" FROM ").Append(request.Table.ToString());
-
-        // WP-X0n (G-5): no policy text is spliced here. The decision above authorizes the request and drives column access;
-        // the row policy is applied exactly once, by the rewriter on the single-source branch and by the staging service
-        // from its own decision on the cross-source branch. Identifiers are emitted as quoted catalog spellings.
+        // WP-ARC-B-01: column authorization, the oracle-inference guard and the SQL formulation are the shared planner's job.
+        // No policy text is spliced: the decision above authorizes the request; the row policy is applied exactly once, by the
+        // rewriter on the single-source branch and by the staging service from its own decision on the cross-source branch.
+        TableFilterClause? filter = null;
         if (!string.IsNullOrWhiteSpace(request.FilterExpression))
         {
             var translated = DataApiFilterTranslator.TranslateFilterToTrino(request.FilterExpression, metadata);
             if (!string.IsNullOrWhiteSpace(translated))
             {
-                sb.Append(" WHERE ").Append(translated);
+                filter = TableFilterClause.FromTrinoText(
+                    translated,
+                    DataApiFilterTranslator.ExtractReferencedColumns(request.FilterExpression, metadata));
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(request.OrderBy))
-        {
-            sb.Append(" ORDER BY ").Append(DataApiFilterTranslator.BuildOrderByClause(request.OrderBy, metadata));
-        }
-        else if (metadata.PrimaryKeyColumns.Count > 0)
-        {
-            sb.Append(" ORDER BY ").Append(string.Join(", ", metadata.PrimaryKeyColumns.Select(DataApiFilterTranslator.QuoteIdentifier)));
-        }
+        var orderBy = string.IsNullOrWhiteSpace(request.OrderBy) ? null : DataApiFilterTranslator.ParseOrderBy(request.OrderBy);
 
-        if (isCrossSource)
-        {
-            // Fetch offset + limit + 1 rows: the skipped window plus one row to accurately populate HasMore
-            sb.Append(" LIMIT ").Append(offset + limit + 1);
-        }
-        else
-        {
-            if (offset > 0)
-            {
-                sb.Append(" OFFSET ").Append(offset).Append(" ROWS");
-            }
-
-            sb.Append(" LIMIT ").Append(limit + 1);
-        }
-        var sql = sb.ToString();
+        // Cross-source: LIMIT offset + limit + 1 (the skipped window plus one row to populate HasMore); single-source: the page is
+        // pushed down as OFFSET n ROWS LIMIT limit + 1.
+        var planned = _planner.Plan(
+            new TableReadIntent(
+                request.Table,
+                request.SelectColumns,
+                filter,
+                orderBy,
+                Limit: checked((int)window),
+                Offset: isCrossSource ? 0 : offset,
+                Transport: request.Transport),
+            metadata,
+            decision);
+        var columnsToSelect = planned.ColumnsToSelect;
 
         // 6. Execution & Routing
-        var queryRequest = new GovernedSqlQueryRequest(sql, Transport: request.Transport);
+        var queryRequest = new GovernedSqlQueryRequest(planned.Sql, planned.Parameters.Count > 0 ? planned.Parameters : null, Transport: request.Transport);
         GovernedSqlResult sqlResult;
 
         if (isCrossSource)

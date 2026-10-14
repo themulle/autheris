@@ -73,6 +73,38 @@ public sealed record TableFilterClause(
 
     public string GetSqlPredicate(DatabaseDialect dialect) =>
         DialectSqlFactory?.Invoke(dialect) ?? SqlPredicate;
+
+    /// <summary>
+    /// WP-ARC-B-01: dialect-neutral predicate builder. The argument maps a column name as written in the request to the
+    /// catalog spelling; the factory returns Trino syntax (delimited identifiers, named client parameters <c>@name</c>
+    /// whose values are in <see cref="Parameters"/>). The governed compile path translates that text per dialect.
+    /// </summary>
+    public Func<Func<string, string>, string>? TrinoSqlFactory { get; init; }
+
+    /// <summary>
+    /// The predicate in Trino syntax. Values never enter the text; they travel as <see cref="Parameters"/>.
+    /// Fail-closed: a clause without a Trino builder cannot be planned (no best-effort text).
+    /// </summary>
+    public string GetTrinoPredicate(Func<string, string>? columnResolver = null)
+    {
+        if (TrinoSqlFactory is not { } factory)
+        {
+            throw new NotSupportedException("This filter clause has no Trino predicate builder and cannot be pushed down through the governed pipeline.");
+        }
+
+        return factory(columnResolver ?? (static column => column));
+    }
+
+    /// <summary>A clause whose predicate is already Trino text (identifiers quoted by the caller, literals inlined by a safe translator).</summary>
+    public static TableFilterClause FromTrinoText(string trinoPredicate, IReadOnlyList<string> referencedColumns)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(trinoPredicate);
+        ArgumentNullException.ThrowIfNull(referencedColumns);
+        return new TableFilterClause(trinoPredicate, new Dictionary<string, object?>(), referencedColumns)
+        {
+            TrinoSqlFactory = _ => trinoPredicate
+        };
+    }
 }
 
 /// <summary>Page request of <see cref="IGatewayExecutionService.ExecuteTablePageAsync"/>.</summary>

@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
+using Autheris.Application.Interfaces;
 using Autheris.Domain.Model;
 
 /// <summary>
@@ -168,6 +169,31 @@ public static partial class DataApiFilterTranslator
         }
 
         return string.Join(", ", items);
+    }
+
+    /// <summary>
+    /// Parses the request text <c>column [ASC|DESC][, ...]</c> into neutral order items for the table-read planner. The column
+    /// is kept as written (the planner resolves and authorizes it against the catalog); a malformed item is rejected.
+    /// </summary>
+    public static IReadOnlyList<TableOrderBy> ParseOrderBy(string orderBy)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(orderBy);
+        var items = new List<TableOrderBy>();
+        foreach (var part in orderBy.Split(',', StringSplitOptions.TrimEntries))
+        {
+            var tokens = part.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            string? direction = null;
+            var valid = tokens.Length is 1 or 2
+                && (tokens.Length != 2 || (direction = tokens[1].ToUpperInvariant()) is "ASC" or "DESC");
+            if (!valid)
+            {
+                throw new ArgumentException($"Invalid orderBy item '{part}'. Use '<column> [asc|desc]' over the columns of the dataset.", nameof(orderBy));
+            }
+
+            items.Add(new TableOrderBy(tokens[0], direction == "DESC"));
+        }
+
+        return items;
     }
 
     private static string QuoteColumnWords(string text, TableMetadata metadata) =>

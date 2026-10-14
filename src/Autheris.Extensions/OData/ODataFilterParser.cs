@@ -51,12 +51,21 @@ public static class ODataFilterParser
         var paramCtx = new SqlGenerationContext(defaultDialect, paramPrefix);
         var defaultPredicate = ast.ToSql(paramCtx);
 
+        // WP-ARC-B-01: the same AST rendered in Trino syntax for the governed compile path. Parameters are numbered in
+        // render order, so the names (and values) equal those of the dialect rendering above.
+        string TrinoBuilder(Func<string, string> columnResolver)
+        {
+            var ctx = new SqlGenerationContext(defaultDialect, paramPrefix, trino: true, columnResolver);
+            return ast.ToSql(ctx);
+        }
+
         return new TableFilterClause(
             SqlPredicate: defaultPredicate,
             Parameters: paramCtx.Parameters,
             ReferencedColumns: distinctCols)
         {
-            DialectSqlFactory = SqlBuilder
+            DialectSqlFactory = SqlBuilder,
+            TrinoSqlFactory = TrinoBuilder
         };
     }
 
@@ -564,9 +573,16 @@ public static class ODataFilterParser
         private int _counter;
         public int Depth { get; set; }
 
-        public SqlGenerationContext(DatabaseDialect dialect, string paramPrefix)
+        /// <summary>True when identifiers are rendered as Trino delimited identifiers of the catalog spelling.</summary>
+        public bool Trino { get; }
+
+        private readonly Func<string, string>? _columnResolver;
+
+        public SqlGenerationContext(DatabaseDialect dialect, string paramPrefix, bool trino = false, Func<string, string>? columnResolver = null)
         {
             Dialect = dialect;
+            Trino = trino;
+            _columnResolver = columnResolver;
             ParamPrefix = paramPrefix;
             _counter = 0;
             Depth = 0;
@@ -583,6 +599,11 @@ public static class ODataFilterParser
         }
 
         public void ExitDepth() => Depth--;
+
+        public string QuoteColumn(string name) =>
+            Trino
+                ? Autheris.Application.Data.Services.DataApiFilterTranslator.QuoteIdentifier(_columnResolver?.Invoke(name) ?? name)
+                : Dialect.QuoteIdentifier(name);
 
         public string AddParameter(object? value)
         {
@@ -630,7 +651,7 @@ public static class ODataFilterParser
     {
         public string Name { get; } = name.Contains('/') ? name.Split('/')[^1] : name;
 
-        public override string ToSql(SqlGenerationContext ctx) => ctx.Dialect.QuoteIdentifier(Name);
+        public override string ToSql(SqlGenerationContext ctx) => ctx.QuoteColumn(Name);
 
         public override void CollectReferencedColumns(List<string> columns, int depth = 0) => columns.Add(Name);
     }

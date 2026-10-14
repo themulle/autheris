@@ -18,7 +18,6 @@ public sealed class DuplicateParameterTests(ParityFixture<SqliteGateDatabase> fi
 
     public static IEnumerable<object[]> Consumers() =>
     [
-        [new SqlDataSourceExecutorConsumer()],
         [new TreeSqlCompilerConsumer()],
         [new ProcedureRowScopeConsumer()],
         [new InMemoryFilterRowsConsumer()],

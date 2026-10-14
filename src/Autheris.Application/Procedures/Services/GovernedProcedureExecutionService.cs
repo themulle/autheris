@@ -682,17 +682,17 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         object details,
         CancellationToken ct)
     {
-        await _audit.RecordAuditEventAsync(
-            new AuditLogEntry
-            {
-                TenantId = tenantId,
-                EventType = eventType,
-                ActorSid = actor,
-                TargetTable = definition.ProcedureName,
-                Decision = decision,
-                TraceId = Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N"),
-                DetailsJson = JsonSerializer.Serialize(details)
-            },
+        await Autheris.Application.Policy.GovernedQueryStages.WriteAsync(
+            _audit,
+            Autheris.Application.Policy.GovernedQueryStages.BuildEntry(
+                eventType,
+                tenantId,
+                actor,
+                definition.ProcedureName,
+                allowed: string.Equals(decision, "ALLOW", StringComparison.Ordinal),
+                details,
+                traceId: Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N")),
+            Autheris.Application.Policy.AuditTier.Required,
             ct).ConfigureAwait(false);
     }
 

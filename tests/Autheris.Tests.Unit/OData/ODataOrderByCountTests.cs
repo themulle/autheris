@@ -35,6 +35,7 @@ public sealed class ODataOrderByCountTests : IDisposable
 
     public void Dispose()
     {
+        _connection?.Dispose();
         SqliteConnection.ClearAllPools();
         try { File.Delete(_dbPath); } catch { /* best effort */ }
     }
@@ -71,19 +72,18 @@ INSERT INTO invoices VALUES (1, 'CH', 300, 'CH01'), (2, 'DE', 100, 'DE02'), (3, 
         cmd.ExecuteNonQuery();
     }
 
-    private SqlDataSourceExecutor CreateSqliteExecutor() => new(
-        new SqlConnectionFactory(),
-        Options.Create(new GatewayOptions
-        {
-            DataSources = new SqlDataSourceOptions
-            {
-                Connections = new Dictionary<string, DataSourceConnectionOptions>
-                {
-                    ["erp"] = new() { Provider = "Sqlite", ConnectionString = $"Data Source={_dbPath}" }
-                }
-            }
-        }),
-        NullLogger<SqlDataSourceExecutor>.Instance);
+    private SqliteConnection? _connection;
+
+    private SqlTableReadExecutor CreateSqliteExecutor()
+    {
+        _connection = new SqliteConnection($"Data Source={_dbPath}");
+        _connection.Open();
+        // The row policy of the decision: only the CH rows are visible.
+        var env = new Autheris.Tests.Unit.Sql.TestCompileEnv(TrinoSqlEngine.TargetSqlDialect.Sqlite)
+            .Table("invoices", null, "id:INTEGER", "region", "amount:INTEGER", "iban")
+            .Policy("invoices", Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService.RowPolicy("region", "CH"));
+        return new Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService(_connection, env).Executor();
+    }
 
     private static DataSourceExecutionContext Context(int limit, int offset, IReadOnlyList<TableOrderBy>? orderBy, bool count)
     {
@@ -127,7 +127,7 @@ INSERT INTO invoices VALUES (1, 'CH', 300, 'CH01'), (2, 'DE', 100, 'DE02'), (3, 
     public async Task SqlExecutor_OrderingByMaskedColumn_IsRejected()
     {
         CreateDatabase();
-        await Should.ThrowAsync<System.Security.SecurityException>(() =>
+        await Should.ThrowAsync<ArgumentException>(() =>
             CreateSqliteExecutor().ExecuteAsync(Context(limit: 2, offset: 0, [new TableOrderBy("iban")], count: false)));
     }
 

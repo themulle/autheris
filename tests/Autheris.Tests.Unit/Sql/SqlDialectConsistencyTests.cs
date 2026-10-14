@@ -49,18 +49,6 @@ public sealed class SqlDialectConsistencyTests
         }
     }
 
-    [Fact]
-    public void SqlDataSourceExecutor_HasZeroDatabricksReferences()
-    {
-        // AR-13: Dead Databricks branches in SqlDataSourceExecutor.cs removed
-        var repoRoot = FindRepoRoot();
-        var filePath = Path.Combine(repoRoot, "src", "Autheris.Application", "Services", "SqlDataSourceExecutor.cs");
-        var content = File.ReadAllText(filePath);
-
-        var matches = Regex.Matches(content, @"\bDatabricks\b");
-        matches.Count.ShouldBe(0, $"Found {matches.Count} Databricks references in SqlDataSourceExecutor.cs");
-    }
-
     [Theory]
     [InlineData(DatabaseDialect.SqlServer, "a]b")]
     [InlineData(DatabaseDialect.SqlServer, "a;--")]
@@ -73,19 +61,5 @@ public sealed class SqlDialectConsistencyTests
         // Security Invariant 3: strict identifier quoting parity & validation
         dialect.ShouldBeOneOf(DatabaseDialect.SqlServer, DatabaseDialect.PostgreSql, DatabaseDialect.Sqlite);
         Should.Throw<ArgumentException>(() => DatabaseDialectExtensions.ValidateIdentifier(maliciousId));
-    }
-
-    private static string FindRepoRoot()
-    {
-        var dir = AppContext.BaseDirectory;
-        while (!string.IsNullOrEmpty(dir))
-        {
-            if (File.Exists(Path.Combine(dir, "Autheris.sln")))
-            {
-                return dir;
-            }
-            dir = Path.GetDirectoryName(dir);
-        }
-        return Directory.GetCurrentDirectory();
     }
 }

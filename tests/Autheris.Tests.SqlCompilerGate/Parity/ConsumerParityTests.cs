@@ -164,7 +164,7 @@ public abstract class ConsumerParityBase<TDatabase>(ParityFixture<TDatabase> fix
         if (results is null) return;
 
         // The database-backed consumers evaluate every construct: both producers must admit exactly the reference rows (no row more, none less).
-        var sql = new[] { "SqlDataSourceExecutor", "TreeSqlCompiler", "SqlProcedureRowScopeResolver", "GovernedDataQueryService (dataset splice)" };
+        var sql = new[] { "TreeSqlCompiler", "SqlProcedureRowScopeResolver", "GovernedDataQueryService (dataset splice)" };
         var mismatched = results.Where(r => sql.Contains(r.Consumer) && r.Produced is not null && (r.IrMissesReference || r.IrExceedsReference || r.LegacyDeviatesFromReference))
             .ToList();
         mismatched.ShouldBeEmpty($"{mismatched.Count} cases where a producer does not admit exactly the reference rows on {Fixture.Database.Dialect}:\n{Describe(mismatched)}");

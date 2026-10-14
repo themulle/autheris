@@ -200,7 +200,7 @@ public class ChunkedQueryExecutorTests
 
         var devEnv = NSubstitute.Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         devEnv.EnvironmentName.Returns("Development");
-        var sqlExecutor = new SqlDataSourceExecutor(options: options, environment: devEnv);
+        var sqlExecutor = new Autheris.Tests.Unit.TestDoubles.SyntheticSqlDataSourceExecutor();
 
         var executor = new ChunkedQueryExecutor(defaultChunkSize: 100);
         var executionService = new Autheris.Application.Services.GatewayExecutionService(

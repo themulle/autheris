@@ -20,7 +20,7 @@ public sealed record MaskParityCase(string Id, string RuleType, Func<DatabaseDia
 public sealed record MaskOutcome(string? Value, bool Refused);
 
 /// <summary>
-/// G10 for the masks (§7.3: <c>SqlDataSourceExecutor</c> projection, <c>TreeSqlCompiler</c>, <c>SqlDataMaskingProvider</c>). The legacy string builders that
+/// G10 for the masks (§7.3: <c>TreeSqlCompiler</c>, <c>SqlDataMaskingProvider</c>). The legacy string builders that
 /// still exist (<c>BuildEmailMaskExpression</c>, <c>BuildIbanMaskExpression</c>) and the typed mask spec rendered through the dialect generator are
 /// evaluated on the same clear values. A mask is looser when it reveals more characters, or a clear value, than the legacy one.
 /// </summary>

@@ -19,6 +19,7 @@ using Autheris.Domain.Options;
 using Autheris.Infrastructure.Plugins;
 using Autheris.Infrastructure.Security;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using TrinoSqlEngine;
 
 public static class GatewaySqlEngineServiceExtensions
@@ -53,7 +54,15 @@ public static class GatewaySqlEngineServiceExtensions
 #pragma warning restore CA5359
 
         services.AddSingleton<IPluginManager, PluginManager>();
-        services.AddSingleton<IDataSourceExecutor, SqlDataSourceExecutor>();
+        // WP-ARC-B-02: SQL table reads run through the governed pipeline (planner + IGovernedSqlExecutionService). Scoped, because the
+        // execution service is; it is resolved lazily to keep the FederatedStagingService -> IEnumerable<IDataSourceExecutor> ->
+        // IGovernedSqlExecutionService -> IFederatedQueryExecutionService cycle out of the constructor graph.
+        services.TryAddSingleton<Autheris.Application.Data.Interfaces.IGovernedTableReadPlanner, Autheris.Application.Data.Services.GovernedTableReadPlanner>();
+        services.AddScoped<SqlTableReadExecutor>(sp => new SqlTableReadExecutor(
+            sp.GetRequiredService<Autheris.Application.Data.Interfaces.IGovernedTableReadPlanner>(),
+            () => sp.GetRequiredService<IGovernedSqlExecutionService>(),
+            sp.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()));
+        services.AddScoped<IDataSourceExecutor>(sp => sp.GetRequiredService<SqlTableReadExecutor>());
         services.AddSingleton<IDataSourceExecutor, DeclarativeHttpDataSourceExecutor>();
         services.AddSingleton<IDataSourceExecutor, PluginHttpDataSourceExecutor>();
         services.AddSingleton<ISqlEngine, FastSqlEngine>();

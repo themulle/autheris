@@ -37,6 +37,7 @@ public sealed class ODataFilterPushdownTests : IDisposable
 
     public void Dispose()
     {
+        _connection?.Dispose();
         SqliteConnection.ClearAllPools();
         try { File.Delete(_dbPath); } catch { /* best effort */ }
     }
@@ -73,19 +74,16 @@ INSERT INTO orders VALUES (1, 'pending', 100, '4111-1111'), (2, 'completed', 250
         cmd.ExecuteNonQuery();
     }
 
-    private SqlDataSourceExecutor CreateSqliteExecutor() => new(
-        new SqlConnectionFactory(),
-        Options.Create(new GatewayOptions
-        {
-            DataSources = new SqlDataSourceOptions
-            {
-                Connections = new Dictionary<string, DataSourceConnectionOptions>
-                {
-                    ["sales"] = new() { Provider = "Sqlite", ConnectionString = $"Data Source={_dbPath}" }
-                }
-            }
-        }),
-        NullLogger<SqlDataSourceExecutor>.Instance);
+    private SqliteConnection? _connection;
+
+    private SqlTableReadExecutor CreateSqliteExecutor()
+    {
+        _connection = new SqliteConnection($"Data Source={_dbPath}");
+        _connection.Open();
+        var env = new Autheris.Tests.Unit.Sql.TestCompileEnv(TrinoSqlEngine.TargetSqlDialect.Sqlite)
+            .Table("orders", null, "id:INTEGER", "status", "amount:INTEGER", "card_number");
+        return new Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService(_connection, env).Executor();
+    }
 
     private static DataSourceExecutionContext Context(TableFilterClause? filter, bool count = false)
     {
@@ -141,8 +139,8 @@ INSERT INTO orders VALUES (1, 'pending', 100, '4111-1111'), (2, 'completed', 250
         var filter = ODataFilterParser.Parse("card_number eq '4111-1111'", DatabaseDialect.Sqlite);
         var context = Context(filter);
 
-        var ex = await Should.ThrowAsync<SecurityException>(() => CreateSqliteExecutor().ExecuteAsync(context));
-        ex.Message.ShouldContain("Zero-Trust violation: Filtering on column 'card_number'");
+        var ex = await Should.ThrowAsync<ArgumentException>(() => CreateSqliteExecutor().ExecuteAsync(context));
+        ex.Message.ShouldContain("Filtering on masked or denied column 'card_number'");
     }
 
     // ------------------------------------------------------------------ Gateway

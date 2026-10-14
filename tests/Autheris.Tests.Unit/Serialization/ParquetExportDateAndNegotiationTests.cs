@@ -86,7 +86,7 @@ public class ParquetExportDateAndNegotiationTests
     {
         var service = CreateService();
 
-        // Simulated rows as emitted by SqlDataSourceExecutor.NormalizeReadValue (ISO-8601 strings)
+        // Simulated rows as emitted by SqlTableReadExecutor.NormalizeReadValue (ISO-8601 strings)
         var rows = new List<IReadOnlyDictionary<string, object?>>
         {
             new Dictionary<string, object?>
