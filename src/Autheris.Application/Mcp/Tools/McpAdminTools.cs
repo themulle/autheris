@@ -182,7 +182,7 @@ public static class McpAdminTools
             {
                 var req = JsonSerializer.Deserialize<AdminApplyAccessRequest>(argumentsJson, JsonOptions)
                     ?? throw new ArgumentException("Invalid arguments for admin_apply_access.");
-                var result = await planningService.ApplyAccessAsync(req, adminSid, ct, sessionContext.TenantId).ConfigureAwait(false);
+                var result = await planningService.ApplyAccessAsync(req, adminSid, sessionContext.TenantId, ct).ConfigureAwait(false);
                 return new McpToolCallResult(true, JsonSerializer.Serialize(result, JsonOptions));
             }
 
@@ -190,7 +190,7 @@ public static class McpAdminTools
             {
                 var req = JsonSerializer.Deserialize<AdminRegisterDatasourceRequest>(argumentsJson, JsonOptions)
                     ?? throw new ArgumentException("Invalid arguments for admin_register_datasource.");
-                var result = await planningService.RegisterDatasourceAsync(req, adminSid, ct, sessionContext.TenantId).ConfigureAwait(false);
+                var result = await planningService.RegisterDatasourceAsync(req, adminSid, sessionContext.TenantId, ct).ConfigureAwait(false);
                 return new McpToolCallResult(true, JsonSerializer.Serialize(result, JsonOptions));
             }
 
@@ -198,7 +198,7 @@ public static class McpAdminTools
             {
                 var req = JsonSerializer.Deserialize<AdminSetDatasetStateRequest>(argumentsJson, JsonOptions)
                     ?? throw new ArgumentException("Invalid arguments for admin_set_dataset_state.");
-                var result = await planningService.SetDatasetStateAsync(req, adminSid, ct, sessionContext.TenantId).ConfigureAwait(false);
+                var result = await planningService.SetDatasetStateAsync(req, adminSid, sessionContext.TenantId, ct).ConfigureAwait(false);
                 return new McpToolCallResult(true, JsonSerializer.Serialize(result, JsonOptions));
             }
 

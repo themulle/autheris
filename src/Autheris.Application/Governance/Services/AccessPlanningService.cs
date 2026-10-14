@@ -210,8 +210,8 @@ public class AccessPlanningService : IAccessPlanningService
     public async Task<AdminApplyAccessResult> ApplyAccessAsync(
         AdminApplyAccessRequest request,
         string adminSid,
-        CancellationToken ct = default,
-        string? tenantId = null)
+        string? tenantId = null,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(adminSid);
@@ -321,8 +321,8 @@ public class AccessPlanningService : IAccessPlanningService
     public async Task<AdminRegisterDatasourceResult> RegisterDatasourceAsync(
         AdminRegisterDatasourceRequest request,
         string adminSid,
-        CancellationToken ct = default,
-        string? tenantId = null)
+        string? tenantId = null,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(adminSid);
@@ -382,8 +382,8 @@ public class AccessPlanningService : IAccessPlanningService
     public async Task<AdminSetDatasetStateResult> SetDatasetStateAsync(
         AdminSetDatasetStateRequest request,
         string adminSid,
-        CancellationToken ct = default,
-        string? tenantId = null)
+        string? tenantId = null,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(adminSid);

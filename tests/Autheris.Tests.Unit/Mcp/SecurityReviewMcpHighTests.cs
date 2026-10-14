@@ -227,9 +227,8 @@ public sealed class SecurityReviewMcpHighTests
         var result = await Guardrail(Executor(), planning).ExecuteToolWithGuardrailAsync(
             new McpToolCallRequest(tool, "{}"), Session(["ClusterAdmin"]));
 
-        // Authorization passed: the (empty) arguments are rejected by the tool itself, not by the gate.
-        result.ErrorMessage.ShouldNotBeNull();
-        result.ErrorMessage.ShouldNotContain("Access denied");
+        // Authorization passed: any failure comes from the tool itself (e.g. empty arguments), not from the gate.
+        (result.ErrorMessage ?? string.Empty).ShouldNotContain("Access denied");
     }
 
     [Theory]

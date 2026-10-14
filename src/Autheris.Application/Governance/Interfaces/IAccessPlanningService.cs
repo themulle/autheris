@@ -33,8 +33,8 @@ public interface IAccessPlanningService
     Task<AdminApplyAccessResult> ApplyAccessAsync(
         AdminApplyAccessRequest request,
         string adminSid,
-        CancellationToken ct = default,
-        string? tenantId = null);
+        string? tenantId = null,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Registers a new datasource in inactive status (SEC M-30) and isolates credentials in vault.
@@ -42,8 +42,8 @@ public interface IAccessPlanningService
     Task<AdminRegisterDatasourceResult> RegisterDatasourceAsync(
         AdminRegisterDatasourceRequest request,
         string adminSid,
-        CancellationToken ct = default,
-        string? tenantId = null);
+        string? tenantId = null,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Updates dataset lifecycle status (active, quarantined, deprecated, inactive) and records WORM audit.
@@ -51,8 +51,8 @@ public interface IAccessPlanningService
     Task<AdminSetDatasetStateResult> SetDatasetStateAsync(
         AdminSetDatasetStateRequest request,
         string adminSid,
-        CancellationToken ct = default,
-        string? tenantId = null);
+        string? tenantId = null,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Performs fuzzy/prefix resolution of principals by display name, account, or SID.

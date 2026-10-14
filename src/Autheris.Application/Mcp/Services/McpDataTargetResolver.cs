@@ -53,9 +53,10 @@ internal static class McpDataTargetResolver
 
             return tables;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception)
         {
-            // Parse errors, security exceptions of the token guards, depth limits: nothing can be proven, so deny.
+            // Parse errors (ParseCanceledException derives from OperationCanceledException), security exceptions of
+            // the token guards, depth limits: nothing can be proven, so deny. Analysis is synchronous and not cancellable.
             return null;
         }
     }
