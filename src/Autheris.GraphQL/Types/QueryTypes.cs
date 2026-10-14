@@ -353,7 +353,7 @@ public sealed class Query
                 Description = t.Table.Description,
                 Columns = t.Columns.Select(c => c.ColumnName).ToList(),
                 Tags = t.Table.Tags ?? Array.Empty<string>(),
-                AccessStatus = "GRANTED"
+                AccessStatus = Autheris.Application.Services.CatalogVisibility.ComputeAccessStatus(t.Identifier, Array.Empty<Consent>(), null, isAdmin: true)
             });
             return FilterAndPaginateCatalog(dtos, domain, search, tag, first, after);
         }
@@ -379,8 +379,24 @@ public sealed class Query
         var groupSids = principal.GetGroupSids();
         var roles = principal.GetUserRoles();
 
-        var isGlobalAdmin = roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase) ||
-                            Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        // SR-L-21: fail-closed on an invalid tenant claim (never echoes the claim value).
+        TenantId tenantId;
+        try
+        {
+            tenantId = principal.GetTenantId();
+        }
+        catch (System.Security.SecurityException)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("UNAUTHORIZED")
+                .SetMessage("No valid tenant in the authentication token.")
+                .Build());
+        }
+
+        // Only the canonical ClusterAdmin keeps the global view; GovernanceAdmin is tenant-scoped.
+        var isClusterAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        var isGovernanceAdmin = roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
+        var isAdmin = isClusterAdmin || isGovernanceAdmin;
         var allowDiscovery = options?.Value?.Catalog?.AllowAuthenticatedCatalogDiscovery == true;
 
         var allTables = await metadataRepository.GetAllTablesAsync(ct);
@@ -388,30 +404,15 @@ public sealed class Query
         {
             allTables = Autheris.Application.Services.CatalogVisibility.FilterByContract(allTables, contractDef);
         }
-        if (isGlobalAdmin || allowDiscovery)
-        {
-            var dtos = allTables.Select(t => new TableMetadataDto
-            {
-                Domain = t.Identifier.Domain,
-                Schema = t.Table.SchemaName,
-                TableName = t.Table.TableName,
-                DisplayName = t.Table.DisplayName,
-                Sensitivity = t.Table.Sensitivity,
-                Description = t.Table.Description,
-                Columns = t.Columns.Select(c => c.ColumnName).ToList(),
-                Tags = t.Table.Tags ?? Array.Empty<string>(),
-                AccessStatus = "GRANTED"
-            });
-            return FilterAndPaginateCatalog(dtos, domain, search, tag, first, after);
-        }
 
         // F-CONS-04: Non-admins only see tables for which they have at least one active ALLOW consent (or visibility SUMMARY/FULL)
-        var tenantId = principal.GetTenantId();
         var allSubjects = groupSids.Append(userSid).ToList();
-        var activeConsents = await consentRepository.GetAllActiveConsentsForSubjectsAsync(allSubjects, roles, DateTimeOffset.UtcNow, tenantId, ct);
+        IReadOnlyList<Consent> activeConsents = isAdmin
+            ? Array.Empty<Consent>()
+            : await consentRepository.GetAllActiveConsentsForSubjectsAsync(allSubjects, roles, DateTimeOffset.UtcNow, tenantId, ct);
 
         IReadOnlyList<ConsentRequest> pendingRequests = Array.Empty<ConsentRequest>();
-        if (approvalRepository != null)
+        if (!isAdmin && approvalRepository != null)
         {
             try
             {
@@ -423,12 +424,27 @@ public sealed class Query
             }
         }
 
-        var visibleTables = Autheris.Application.Services.CatalogVisibility.FilterForSubject(allTables, activeConsents, tenantId);
-        var catalogList = new List<TableMetadataDto>();
+        IReadOnlyList<TableMetadata> visibleTables;
+        if (isClusterAdmin)
+        {
+            visibleTables = allTables;
+        }
+        else if (isGovernanceAdmin || allowDiscovery)
+        {
+            // SR-L-21: admin/discovery views are confined to the caller's tenant (consent-derived ownership + shared tables).
+            var tenantConsentTables = await consentRepository.GetTablesWithConsentsForTenantAsync(tenantId, ct);
+            visibleTables = Autheris.Application.Services.CatalogVisibility.FilterToTenant(
+                allTables, tenantId, tenantConsentTables, options?.Value?.Catalog?.SharedTables);
+        }
+        else
+        {
+            visibleTables = Autheris.Application.Services.CatalogVisibility.FilterForSubject(allTables, activeConsents, tenantId);
+        }
 
+        var catalogList = new List<TableMetadataDto>();
         foreach (var t in visibleTables)
         {
-            var status = Autheris.Application.Services.CatalogVisibility.ComputeAccessStatus(t.Identifier, activeConsents, pendingRequests, isAdmin: false);
+            var status = Autheris.Application.Services.CatalogVisibility.ComputeAccessStatus(t.Identifier, activeConsents, pendingRequests, isAdmin);
             catalogList.Add(new TableMetadataDto
             {
                 Domain = t.Identifier.Domain,

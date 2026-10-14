@@ -1311,6 +1311,13 @@ public sealed class DataCatalogOptions
     public bool AllowAuthenticatedCatalogDiscovery { get; init; } = false;
 
     /// <summary>
+    /// SR-L-21: Tables (<c>domain.schema.table</c>) visible in the GraphQL catalog to every tenant's administrators and in
+    /// discovery mode, in addition to the tables on which the tenant holds a consent. Only relevant in multi-tenant deployments.
+    /// Standard: empty (a tenant sees only tables it has a consent record on).
+    /// </summary>
+    public IReadOnlyList<string> SharedTables { get; init; } = [];
+
+    /// <summary>
     /// SEC M-34: Erlaubt (abwärtskompatibel) Katalog-Webhook-Signaturen nur über den Payload statt über
     /// "{unixTimestamp}.{payload}". Standard: false.
     /// </summary>
