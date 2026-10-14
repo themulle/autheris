@@ -373,39 +373,45 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             // SEC H-17: the DB tail is compared with the in-memory reference instead of being adopted blindly.
             var (dbTailHash, dbTailSeq) = ReadAuditTail(tx);
             var effectiveDbHash = dbTailHash ?? AuditGenesisHash;
-            if (!FixedTimeEqualsString(effectiveDbHash, _lastAuditHash) || dbTailSeq != _lastAuditSeq)
+            long preTxSeq;
+            string preTxHash;
+            long lastSequence;
+            string lastEntryHash;
+            lock (_pendingAuditTxStates)
             {
-                // SEC-CRYPTO-01 / SR15-24: If an uncommitted transaction was rolled back without calling OnTransactionRolledBack,
-                // clean up pending states and revert in-memory pointers to the committed DB tail.
-                if (!_pendingAuditTxStates.IsEmpty && dbTailSeq < _lastAuditSeq)
-                {
-                    RollbackPendingAuditTransactions();
-                }
-
                 if (!FixedTimeEqualsString(effectiveDbHash, _lastAuditHash) || dbTailSeq != _lastAuditSeq)
                 {
-                    var anchor = TryLoadVerifiedAnchor(out _);
-                    var explainedByAnchor = anchor != null
-                                            && dbTailSeq > _lastAuditSeq
-                                            && anchor.Sequence == dbTailSeq
-                                            && FixedTimeEqualsString(anchor.EntryHash, effectiveDbHash);
-                    if (!explainedByAnchor)
+                    // SEC-CRYPTO-01 / SR15-24: If an uncommitted transaction was rolled back without calling OnTransactionRolledBack,
+                    // clean up pending states and revert in-memory pointers to the committed DB tail.
+                    if (!_pendingAuditTxStates.IsEmpty && dbTailSeq < _lastAuditSeq)
                     {
-                        FlagAuditChainViolation(
-                            $"Audit chain tail in DB (seq {dbTailSeq}) diverges from the in-memory reference (seq {_lastAuditSeq}) without a matching signed anchor - possible truncation or rewrite.");
+                        RollbackPendingAuditTransactions();
                     }
 
-                    // Keep the chain linear; verification stays failed while a violation is flagged.
-                    _lastAuditHash = effectiveDbHash;
-                    _lastAuditSeq = dbTailSeq;
+                    if (!FixedTimeEqualsString(effectiveDbHash, _lastAuditHash) || dbTailSeq != _lastAuditSeq)
+                    {
+                        var anchor = TryLoadVerifiedAnchor(out _);
+                        var explainedByAnchor = anchor != null
+                                                && dbTailSeq > _lastAuditSeq
+                                                && anchor.Sequence == dbTailSeq
+                                                && FixedTimeEqualsString(anchor.EntryHash, effectiveDbHash);
+                        if (!explainedByAnchor)
+                        {
+                            FlagAuditChainViolation(
+                                $"Audit chain tail in DB (seq {dbTailSeq}) diverges from the in-memory reference (seq {_lastAuditSeq}) without a matching signed anchor - possible truncation or rewrite.");
+                        }
+
+                        // Keep the chain linear; verification stays failed while a violation is flagged.
+                        _lastAuditHash = effectiveDbHash;
+                        _lastAuditSeq = dbTailSeq;
+                    }
                 }
+
+                preTxSeq = _lastAuditSeq;
+                preTxHash = _lastAuditHash;
+                lastSequence = _lastAuditSeq;
+                lastEntryHash = _lastAuditHash;
             }
-
-            long preTxSeq = _lastAuditSeq;
-            string preTxHash = _lastAuditHash;
-
-            long lastSequence = _lastAuditSeq;
-            string lastEntryHash = _lastAuditHash;
 
             using var cmd = _connection.CreateCommand();
             cmd.Transaction = tx;
@@ -467,8 +473,11 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             {
                 await ownedTx.CommitAsync(ct).ConfigureAwait(false);
 
-                _lastAuditHash = lastEntryHash;
-                _lastAuditSeq = lastSequence;
+                lock (_pendingAuditTxStates)
+                {
+                    _lastAuditHash = lastEntryHash;
+                    _lastAuditSeq = lastSequence;
+                }
 
                 // SEC H-17 / E-11: advance the external signed anchor only AFTER the commit while the write lock is still
                 // held. Append-only (WORM) anchor stores cannot take an anchor back, so an anchor that is ahead of the
@@ -493,25 +502,28 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
                 // Do NOT advance the external signed anchor until the caller explicitly commits the transaction!
                 // Append-only (WORM) anchor stores cannot take an anchor back, so writing the anchor before commit
                 // causes permanent chain violation if the transaction rolls back.
-                if (!_pendingAuditTxStates.TryGetValue(existingTx!, out var pendingState))
+                lock (_pendingAuditTxStates)
                 {
-                    _pendingAuditTxStates[existingTx!] = new AuditTxPendingState
+                    if (!_pendingAuditTxStates.TryGetValue(existingTx!, out var pendingState))
                     {
-                        PreTxSeq = preTxSeq,
-                        PreTxHash = preTxHash,
-                        LastSeq = lastSequence,
-                        LastHash = lastEntryHash
-                    };
-                }
-                else
-                {
-                    pendingState.LastSeq = lastSequence;
-                    pendingState.LastHash = lastEntryHash;
-                }
+                        _pendingAuditTxStates[existingTx!] = new AuditTxPendingState
+                        {
+                            PreTxSeq = preTxSeq,
+                            PreTxHash = preTxHash,
+                            LastSeq = lastSequence,
+                            LastHash = lastEntryHash
+                        };
+                    }
+                    else
+                    {
+                        pendingState.LastSeq = lastSequence;
+                        pendingState.LastHash = lastEntryHash;
+                    }
 
-                // Tentatively advance in-memory pointers so consecutive writes within this transaction chain correctly
-                _lastAuditHash = lastEntryHash;
-                _lastAuditSeq = lastSequence;
+                    // Tentatively advance in-memory pointers so consecutive writes within this transaction chain correctly
+                    _lastAuditHash = lastEntryHash;
+                    _lastAuditSeq = lastSequence;
+                }
             }
         }
         catch (Exception ex)
@@ -768,16 +780,23 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             }
 
             // Tail truncation detection against the in-memory reference of this process.
-            if (_lastAuditHash != AuditGenesisHash &&
-                (!FixedTimeEqualsString(expectedPrevHash, _lastAuditHash) || position != _lastAuditSeq))
+            long knownSeq;
+            string knownHash;
+            lock (_pendingAuditTxStates)
+            {
+                knownSeq = _lastAuditSeq;
+                knownHash = _lastAuditHash;
+            }
+            if (knownHash != AuditGenesisHash &&
+                (!FixedTimeEqualsString(expectedPrevHash, knownHash) || position != knownSeq))
             {
                 var explainedByAnchor = anchor != null
-                                        && position > _lastAuditSeq
+                                        && position > knownSeq
                                         && anchor.Sequence == position
                                         && FixedTimeEqualsString(anchor.EntryHash, expectedPrevHash);
                 if (!explainedByAnchor)
                 {
-                    FlagAuditChainViolation($"Audit chain tail (seq {position}) does not match the in-memory reference (seq {_lastAuditSeq}).");
+                    FlagAuditChainViolation($"Audit chain tail (seq {position}) does not match the in-memory reference (seq {knownSeq}).");
                     return false; // Tail truncation detected!
                 }
             }

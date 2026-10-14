@@ -474,8 +474,13 @@ public partial class PostgreSqlGovernanceRepository
         // rewriting, unless a signed anchor explains it.
         var (dbTailHash, dbTailSeq) = ReadAuditTail(tx);
         var effectiveDbHash = dbTailHash ?? AuditGenesisHash;
-        var knownSeq = Interlocked.Read(ref _lastAuditSeq);
-        var knownHash = _lastAuditHash;
+        long knownSeq;
+        string knownHash;
+        lock (_pendingAuditTxStates)
+        {
+            knownSeq = _lastAuditSeq;
+            knownHash = _lastAuditHash;
+        }
         if (dbTailSeq < knownSeq || (dbTailSeq == knownSeq && !FixedTimeEqualsString(effectiveDbHash, knownHash)))
         {
             FlagAuditChainViolation(
@@ -549,8 +554,14 @@ public partial class PostgreSqlGovernanceRepository
 
         await tx.CommitAsync(ct).ConfigureAwait(false);
 
-        _lastAuditHash = lastEntryHash;
-        Interlocked.Exchange(ref _lastAuditSeq, lastSequence);
+        lock (_pendingAuditTxStates)
+        {
+            if (lastSequence >= _lastAuditSeq)
+            {
+                _lastAuditSeq = lastSequence;
+                _lastAuditHash = lastEntryHash;
+            }
+        }
 
         if (Volatile.Read(ref _auditChainViolation) == null && _auditAnchorStore != null)
         {
@@ -692,8 +703,11 @@ public partial class PostgreSqlGovernanceRepository
         await _auditLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            knownSeq = Interlocked.Read(ref _lastAuditSeq);
-            knownHash = _lastAuditHash;
+            lock (_pendingAuditTxStates)
+            {
+                knownSeq = _lastAuditSeq;
+                knownHash = _lastAuditHash;
+            }
         }
         finally
         {
@@ -799,10 +813,13 @@ public partial class PostgreSqlGovernanceRepository
             await _auditLock.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                if (position > Interlocked.Read(ref _lastAuditSeq))
+                lock (_pendingAuditTxStates)
                 {
-                    _lastAuditHash = expectedPrevHash;
-                    Interlocked.Exchange(ref _lastAuditSeq, position);
+                    if (position > _lastAuditSeq)
+                    {
+                        _lastAuditSeq = position;
+                        _lastAuditHash = expectedPrevHash;
+                    }
                 }
             }
             finally

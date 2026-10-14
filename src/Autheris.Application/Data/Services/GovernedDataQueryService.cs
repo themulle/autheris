@@ -247,10 +247,14 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             {
                 if (row.TryGetValue(colInfo.Name, out var val))
                 {
-                    if (colInfo.Masked)
+                    if (colInfo.Masked && !sqlResult.InDbColumnMaskingExecuted && !_options.IsColumnMaskingDisabled)
                     {
                         var rule = metadata.ColumnMaskingRules.TryGetValue(colInfo.Name, out var r) ? r : new MaskingRule { RuleType = "REDACT" };
-                        rowDict[colInfo.Name] = _maskingProvider.MaskValue(colInfo.Name, val, rule);
+                        var scopedRule = Autheris.Application.Services.GatewayExecutionService.ScopeRuleForTenant(
+                            rule,
+                            context.TenantId.Value,
+                            _options.DataMasking?.HmacKeyId);
+                        rowDict[colInfo.Name] = _maskingProvider.MaskValue(colInfo.Name, val, scopedRule);
                     }
                     else
                     {

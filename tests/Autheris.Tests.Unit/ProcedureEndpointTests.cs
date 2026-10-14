@@ -440,8 +440,9 @@ public class ProcedureEndpointTests
         var svc = new GovernedProcedureExecutionService(
             f.Registry, f.Invoker, Options.Create(new GatewayOptions()), f.Audit, f.Tables, f.Consents, f.Resolution, f.Masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
-        await Should.ThrowAsync<IOException>(() =>
+        var ex = await Should.ThrowAsync<Autheris.Application.Audit.AuditUnavailableException>(() =>
             svc.ExecuteAsync("get_orders", new Dictionary<string, object?> { ["customer_id"] = 7 }, User(), Tenant));
+        ex.InnerException.ShouldBeOfType<IOException>();
     }
 
     [Fact]

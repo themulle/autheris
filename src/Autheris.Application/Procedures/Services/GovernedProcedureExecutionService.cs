@@ -42,6 +42,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     private readonly IPolicyEnforcementService? _policyEnforcement;
     private readonly Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? _rebacEvaluator;
     private readonly IAuditLogRepository _audit;
+    private readonly Autheris.Application.Audit.IAuditWriter _auditWriter;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly IProcedureRowScopeResolver? _rowScope;
     private readonly ILogger<GovernedProcedureExecutionService>? _logger;
@@ -71,7 +72,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         IAccessProfileRepository? accessProfileRepository = null,
         Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
         Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null,
-        Autheris.Application.Policy.TypedPolicySources? typedPolicies = null)
+        Autheris.Application.Policy.TypedPolicySources? typedPolicies = null,
+        Autheris.Application.Audit.IAuditWriter? auditWriter = null)
     {
         _typedPolicies = typedPolicies;
         _mandatoryFilters = mandatoryFilters;
@@ -79,6 +81,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         _invoker = invoker ?? throw new ArgumentNullException(nameof(invoker));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
+        _auditWriter = auditWriter ?? new Autheris.Application.Audit.AuditWriter(_audit, Microsoft.Extensions.Logging.Abstractions.NullLogger<Autheris.Application.Audit.AuditWriter>.Instance);
         _tableRepository = tableRepository;
         _consentRepository = consentRepository;
         _consentResolution = consentResolution;
@@ -683,7 +686,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         CancellationToken ct)
     {
         await Autheris.Application.Policy.GovernedQueryStages.WriteAsync(
-            _audit,
+            _auditWriter,
             Autheris.Application.Policy.GovernedQueryStages.BuildEntry(
                 eventType,
                 tenantId,

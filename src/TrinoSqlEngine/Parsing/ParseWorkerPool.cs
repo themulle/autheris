@@ -16,19 +16,26 @@ internal sealed class ParseWork
     private const int Abandoned = 3;
 
     private readonly Action _execute;
+    private readonly Action? _onCanceledWhileQueued;
     private readonly ExecutionContext? _context;
     private int _state;
 
-    public ParseWork(Action execute)
+    public ParseWork(Action execute, Action? onCanceledWhileQueued = null)
     {
         _execute = execute ?? throw new ArgumentNullException(nameof(execute));
+        _onCanceledWhileQueued = onCanceledWhileQueued;
         _context = ExecutionContext.Capture();
     }
 
     /// <summary>Runs the work on the calling worker thread. Returns false when the caller abandoned the work while it ran.</summary>
     internal bool Run()
     {
-        Volatile.Write(ref _state, Running);
+        if (Interlocked.CompareExchange(ref _state, Running, Queued) != Queued)
+        {
+            // Abandoned while still queued: skip execution and keep this worker thread alive.
+            return true;
+        }
+
         if (_context is null)
         {
             _execute();
@@ -42,7 +49,16 @@ internal sealed class ParseWork
     }
 
     /// <summary>Marks running work as abandoned (the caller timed out). Returns true when the work was running.</summary>
-    internal bool TryAbandon() => Interlocked.CompareExchange(ref _state, Abandoned, Running) == Running;
+    internal bool TryAbandon()
+    {
+        if (Interlocked.CompareExchange(ref _state, Abandoned, Queued) == Queued)
+        {
+            _onCanceledWhileQueued?.Invoke();
+            return false;
+        }
+
+        return Interlocked.CompareExchange(ref _state, Abandoned, Running) == Running;
+    }
 }
 
 /// <summary>
@@ -129,6 +145,7 @@ internal sealed class ParseWorkerPool : IDisposable
 
             _live++;
             _created++;
+            Interlocked.Increment(ref _idle);
             try
             {
                 using (ExecutionContext.SuppressFlow())
@@ -139,6 +156,7 @@ internal sealed class ParseWorkerPool : IDisposable
             catch (Exception ex) when (ex is OutOfMemoryException or ThreadStartException)
             {
                 // No thread could be started: the queued work is rejected by its caller when the time budget runs out (fail closed).
+                Interlocked.Decrement(ref _idle);
                 _live--;
                 _created--;
             }
@@ -147,9 +165,15 @@ internal sealed class ParseWorkerPool : IDisposable
 
     private void WorkerLoop()
     {
+        bool idleCounted = true;
         while (true)
         {
-            Interlocked.Increment(ref _idle);
+            if (!idleCounted)
+            {
+                Interlocked.Increment(ref _idle);
+            }
+
+            idleCounted = false;
             ParseWork work;
             try
             {
@@ -162,6 +186,11 @@ internal sealed class ParseWorkerPool : IDisposable
             finally
             {
                 Interlocked.Decrement(ref _idle);
+            }
+
+            if (_queue.Count > Volatile.Read(ref _idle))
+            {
+                EnsureWorker();
             }
 
             if (!work.Run())

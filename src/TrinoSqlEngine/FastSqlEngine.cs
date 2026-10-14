@@ -295,6 +295,11 @@ public sealed partial class FastSqlEngine : ISqlEngine
                     limiter.Release();
                     completed.Set();
                 }
+            },
+            onCanceledWhileQueued: () =>
+            {
+                limiter.Release();
+                completed.Dispose();
             });
 
         var pool = ParseWorkerPool.ForStackSize(_parseThreadStackSize);

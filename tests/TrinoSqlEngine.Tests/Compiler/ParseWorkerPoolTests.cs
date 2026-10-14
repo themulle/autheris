@@ -127,4 +127,33 @@ public class ParseWorkerPoolTests
 
         Assert.Equal(1, limiter.CurrentCount);
     }
+
+    [Fact]
+    public void AbandonedWhileStillQueued_SkipsWork_AndDoesNotRetireTheWorker()
+    {
+        using var pool = new ParseWorkerPool(1, FastSqlEngine.MinParseThreadStackSize);
+        using var firstStarted = new ManualResetEventSlim(false);
+        using var releaseFirst = new ManualResetEventSlim(false);
+
+        Assert.True(pool.TrySubmit(new ParseWork(() => { firstStarted.Set(); releaseFirst.Wait(); }), 1000, CancellationToken.None));
+        Assert.True(firstStarted.Wait(TimeSpan.FromSeconds(10)));
+
+        bool queuedRan = false;
+        bool canceledCallbackInvoked = false;
+        var queued = new ParseWork(() => queuedRan = true, onCanceledWhileQueued: () => canceledCallbackInvoked = true);
+        Assert.True(pool.TrySubmit(queued, 1000, CancellationToken.None));
+
+        // Abandon while still in the queue (worker is still blocked on the first item).
+        pool.Abandon(queued);
+        Assert.True(canceledCallbackInvoked);
+
+        releaseFirst.Set();
+
+        using var after = new ManualResetEventSlim(false);
+        Assert.True(pool.TrySubmit(new ParseWork(() => after.Set()), 1000, CancellationToken.None));
+        Assert.True(after.Wait(TimeSpan.FromSeconds(10)));
+
+        Assert.False(queuedRan);
+        Assert.Equal(1, pool.ThreadsCreated);
+    }
 }

@@ -238,7 +238,7 @@ public static class CatalogVisibility
         ArgumentNullException.ThrowIfNull(principal);
 
         var roles = principal.GetUserRoles();
-        if (roles.Contains("GovernanceAdmin") || roles.Contains("ClusterAdmin"))
+        if (roles.Contains("GovernanceAdmin") || Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal))
         {
             return FilterByContract(allTables, contract);
         }

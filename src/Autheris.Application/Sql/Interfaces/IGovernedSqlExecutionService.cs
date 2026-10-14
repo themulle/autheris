@@ -39,7 +39,8 @@ public sealed record GovernedSqlResult(
     int RowCount,
     long ElapsedMilliseconds,
     bool Truncated = false,
-    [property: System.Text.Json.Serialization.JsonIgnore] IReadOnlyList<SqlResultColumn>? ColumnDescriptions = null);
+    [property: System.Text.Json.Serialization.JsonIgnore] IReadOnlyList<SqlResultColumn>? ColumnDescriptions = null,
+    [property: System.Text.Json.Serialization.JsonIgnore] bool InDbColumnMaskingExecuted = false);
 
 public interface IGovernedSqlExecutionService
 {

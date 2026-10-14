@@ -524,6 +524,7 @@ public sealed class Mutation
         [Service] IEventBus eventBus = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] Autheris.Application.Interfaces.IAuditLogRepository auditLog = default!,
+        [Service] Autheris.Application.Audit.IAuditWriter? auditWriter = null,
         CancellationToken ct = default)
     {
         var principal = httpContextAccessor?.HttpContext?.User;
@@ -535,8 +536,8 @@ public sealed class Mutation
                 .Build());
         }
 
-        var roles = principal.FindAll(ClaimTypes.Role).Select(r => r.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (!roles.Contains("GovernanceAdmin") && !roles.Contains("ClusterAdmin"))
+        var roles = principal.GetUserRoles();
+        if (!roles.Contains("GovernanceAdmin") && !Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal))
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
@@ -557,16 +558,25 @@ public sealed class Mutation
             reloadTenant = TenantId.LegacySingleTenant; // cluster admins may have no tenant claim
         }
 
-        await auditLog.RecordAuditEventAsync(new AuditLogEntry
+        var entry = new AuditLogEntry
         {
             TenantId = reloadTenant,
             EventType = "SCHEMA_RELOAD",
             ActorSid = principal.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
             TargetTable = string.Empty,
             Decision = "ALLOW",
-            TraceId = Guid.NewGuid().ToString("N"),
+            TraceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId(),
             DetailsJson = "{}"
-        }, ct);
+        };
+
+        if (auditWriter != null)
+        {
+            await auditWriter.RecordRequiredAsync(entry, ct);
+        }
+        else
+        {
+            await auditLog.RecordAuditEventAsync(entry, ct);
+        }
 
         return true;
     }

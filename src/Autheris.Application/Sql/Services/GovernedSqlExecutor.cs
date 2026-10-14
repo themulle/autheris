@@ -145,7 +145,8 @@ public sealed class GovernedSqlExecutor
             RowCount: rows.Count,
             ElapsedMilliseconds: sw.ElapsedMilliseconds,
             Truncated: isTruncated,
-            ColumnDescriptions: columnDescriptions);
+            ColumnDescriptions: columnDescriptions,
+            InDbColumnMaskingExecuted: !_options.Value.IsColumnMaskingDisabled);
     }
 
     private async Task<string> ExecuteCoreAsync(

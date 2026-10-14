@@ -844,6 +844,8 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
             }
         }));
         var consents = Substitute.For<IConsentRepository>();
+        consents.GetTablesWithConsentsForTenantAsync(new TenantId("tenant-a"), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<TableIdentifier>>([table]));
         return (new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance, null, consents), consents, table);
     }
 

@@ -73,6 +73,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
     private readonly ITableAccessResolver _accessResolver;
     private readonly ISqlConnectionFactory _connectionFactory;
     private readonly IAuditLogRepository _auditLog;
+    private readonly Autheris.Application.Audit.IAuditWriter _auditWriter;
     private readonly IColumnMaskingProvider _maskingProvider;
     private readonly GatewayOptions _options;
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
@@ -92,11 +93,13 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         IOptions<GatewayOptions> options,
         ITableReadConcurrencyGate? concurrencyGate = null,
         ILogger<GovernedTreeQueryService>? logger = null,
-        IDbSessionContextInitializer? sessionInitializer = null)
+        IDbSessionContextInitializer? sessionInitializer = null,
+        Autheris.Application.Audit.IAuditWriter? auditWriter = null)
     {
         _accessResolver = accessResolver ?? throw new ArgumentNullException(nameof(accessResolver));
         _connectionFactory = connectionFactory ?? throw new ArgumentNullException(nameof(connectionFactory));
         _auditLog = auditLog ?? throw new ArgumentNullException(nameof(auditLog));
+        _auditWriter = auditWriter ?? new Autheris.Application.Audit.AuditWriter(_auditLog, Microsoft.Extensions.Logging.Abstractions.NullLogger<Autheris.Application.Audit.AuditWriter>.Instance);
         _maskingProvider = maskingProvider ?? throw new ArgumentNullException(nameof(maskingProvider));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _concurrencyGate = concurrencyGate;
@@ -355,7 +358,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         }
 
         await GovernedQueryStages.RecordTableReadAsync(
-            _auditLog, access.Tenant, access.UserSid, table, access.Decision.IsAllowed,
+            _auditWriter, access.Tenant, access.UserSid, table, access.Decision.IsAllowed,
             GovernedQueryStages.DecisionDetails(access.Decision, path: "graphql_tree"), ct).ConfigureAwait(false);
     }
 
