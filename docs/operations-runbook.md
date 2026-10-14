@@ -373,10 +373,12 @@ For high-throughput environments, configure ASP.NET Core Kestrel limits in `apps
   "Hosting": {
     "MaxRequestBodySizeBytes": 2097152,
     "MaxConcurrentConnections": 10000,
-    "MaxConcurrentUpgradedConnections": 2000
+    "MaxConcurrentUpgradedConnections": 2000,
+    "AllowedHosts": [ "gateway.corp.example" ]
   }
 }
 ```
+* **Host allow-list (`Gateway:Hosting:AllowedHosts`):** Required outside Development; the gateway refuses to start when the list is empty or contains the bare wildcard `*`. Entries are an exact host (`gateway.corp.example`), `host:port` (that port only) or `*.suffix` (sub-domains only). The `Host` header (the forwarded host when `Gateway:ReverseProxy:Enabled` is true) must match an entry, otherwise the request is answered with `400`. `/health*` is exempt so probes that send the pod IP as `Host` keep working. The CSRF `Origin`/`Referer` check uses the same list (in addition to `Gateway:GraphQL:TrustedOrigins`); `Origin == Host` alone is not trusted. In Development an empty list accepts loopback names only (`localhost`, `127.0.0.1`, `[::1]`, `*.localhost`); other host names such as a compose service name must be listed. Helm: `gateway.allowedHosts` (defaults to the ingress hosts); environment variable form: `Gateway__Hosting__AllowedHosts__0`.
 * **Garbage Collection:** Ensure Server GC is enabled in container runtime (`DOTNET_gcServer=1`).
 * **Connection Pooling:** Set upstream database `MaxPoolSize` according to pod replica count to avoid exhausting database connection pools (`MaxPoolSize=100` per pod on typical setups).
 * **Redis Sizing:** Maintain an active connection pool with `abortConnect=false` and keep-alive pings enabled; L2 policy cache size rarely exceeds 200 MB even with 50,000 active consents.

@@ -9,3 +9,16 @@ data:
   Gateway__DrainDelaySeconds: {{ .Values.gateway.drainDelaySeconds | quote }}
   Gateway__ShutdownTimeoutSeconds: {{ .Values.gateway.shutdownTimeoutSeconds | quote }}
   Gateway__Authentication__ForwardAuth__RequireTrustedProxy: "true"
+  {{- $allowedHosts := .Values.gateway.allowedHosts }}
+  {{- if not $allowedHosts }}
+  {{- $allowedHosts = list }}
+  {{- range .Values.ingress.hosts }}
+  {{- $allowedHosts = append $allowedHosts .host }}
+  {{- end }}
+  {{- end }}
+  {{- if not $allowedHosts }}
+  {{- fail "gateway.allowedHosts (or ingress.hosts) must list the host names clients use; the gateway refuses to start without Gateway:Hosting:AllowedHosts." }}
+  {{- end }}
+  {{- range $i, $h := $allowedHosts }}
+  Gateway__Hosting__AllowedHosts__{{ $i }}: {{ $h | quote }}
+  {{- end }}

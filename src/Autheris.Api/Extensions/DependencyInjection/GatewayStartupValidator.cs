@@ -599,6 +599,34 @@ public static class GatewayStartupValidator
     /// one path now and no runtime switch (rollback is a revert), so a configured value fails the start in every environment:
     /// warn-and-ignore would let an operator believe in a kill switch that does not exist. The configured value is never echoed.
     /// </summary>
+    /// <summary>
+    /// SR-L-02 / G-4: outside Development <c>Gateway:Hosting:AllowedHosts</c> must be set and must not be the bare wildcard.
+    /// </summary>
+    public static void ValidateAllowedHosts(GatewayOptions options, IHostEnvironment environment)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(environment);
+
+        if (environment.IsDevelopment())
+        {
+            return;
+        }
+
+        var hosts = options.Hosting.AllowedHosts.Where(h => !string.IsNullOrWhiteSpace(h)).Select(h => h.Trim()).ToList();
+        if (hosts.Count == 0)
+        {
+            throw new ValidationException(
+                "Gateway:Hosting:AllowedHosts is required outside Development. List the host names clients use to reach the gateway " +
+                "(for example [\"gateway.corp.example\"], \"host:port\" or \"*.corp.example\"), or set Gateway__Hosting__AllowedHosts__0 in the environment.");
+        }
+
+        if (hosts.Contains("*"))
+        {
+            throw new ValidationException(
+                "Gateway:Hosting:AllowedHosts must not contain the bare wildcard '*' outside Development; list the concrete host names.");
+        }
+    }
+
     public static void ValidateSqlRewriterEngine(Microsoft.Extensions.Configuration.IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);

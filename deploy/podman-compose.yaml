@@ -227,6 +227,10 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:5050
+      # SR-L-02: required outside Development; the benchmark clients reach the gateway by service name or loopback.
+      Gateway__Hosting__AllowedHosts__0: gqlgateway-api
+      Gateway__Hosting__AllowedHosts__1: localhost
+      Gateway__Hosting__AllowedHosts__2: 127.0.0.1
       HMAC_SECRET_KEY: "${GATEWAY_HMAC_SECRET:?set GATEWAY_HMAC_SECRET in .env}"
       GQL_PROD_BENCHMARK_SECRET_KEY: "${BENCHMARK_SECRET_KEY:?set BENCHMARK_SECRET_KEY in .env (see .env.example)}"
       Gateway__Authentication__ForwardAuth__SharedSecret: "${FORWARD_AUTH_SHARED_SECRET:?set FORWARD_AUTH_SHARED_SECRET in .env (see .env.example)}"
