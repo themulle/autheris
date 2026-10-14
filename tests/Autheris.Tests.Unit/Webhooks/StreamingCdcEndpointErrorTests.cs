@@ -7,10 +7,12 @@ using Autheris.Api.Endpoints;
 using Autheris.Application.Events.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
@@ -20,10 +22,12 @@ namespace Autheris.Tests.Unit.Webhooks;
 [Trait("Category", "Security")]
 public sealed class StreamingCdcEndpointErrorTests
 {
-    private static DefaultHttpContext CreateAdminContext()
+    private static DefaultHttpContext CreateAdminContext(ICloudEventSubscriptionStore store)
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton<IOptions<CdcWebhooksOptions>>(Options.Create(new CdcWebhooksOptions { Enabled = true }));
+        services.AddSingleton(store);
         var context = new DefaultHttpContext { RequestServices = services.BuildServiceProvider() };
         context.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
         {
@@ -53,9 +57,9 @@ public sealed class StreamingCdcEndpointErrorTests
         var store = Substitute.For<ICloudEventSubscriptionStore>();
 
         var privateResult = await StreamingCdcEndpoints.CreateSubscriptionAsync(
-            CreateAdminContext(), Subscription("http://127.0.0.1/hook"), store);
+            CreateAdminContext(store), Subscription("http://127.0.0.1/hook"));
         var unresolvableResult = await StreamingCdcEndpoints.CreateSubscriptionAsync(
-            CreateAdminContext(), Subscription("http://does-not-resolve.invalid/hook"), store);
+            CreateAdminContext(store), Subscription("http://does-not-resolve.invalid/hook"));
 
         var privateProblem = privateResult.ShouldBeOfType<ProblemHttpResult>();
         var unresolvableProblem = unresolvableResult.ShouldBeOfType<ProblemHttpResult>();
@@ -79,7 +83,7 @@ public sealed class StreamingCdcEndpointErrorTests
 
         // A public literal address passes the egress policy without DNS resolution.
         var result = await StreamingCdcEndpoints.CreateSubscriptionAsync(
-            CreateAdminContext(), Subscription("https://93.184.216.34/hook"), store);
+            CreateAdminContext(store), Subscription("https://93.184.216.34/hook"));
 
         var problem = result.ShouldBeOfType<ProblemHttpResult>();
         problem.StatusCode.ShouldBe(StatusCodes.Status429TooManyRequests);

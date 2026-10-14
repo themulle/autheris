@@ -59,6 +59,8 @@ flowchart TD
 - **`IGatewayEventBus` (`Autheris.Application.Events`):**
   - Thread-safe pub/sub dispatching events asynchronously to typed subscribers and general listeners.
   - Fault-isolated execution: Subscriber exceptions are caught and logged, preventing any failing plugin from affecting core operations or aborting other subscribers.
+  - Bounded asynchronous delivery (default `Queued` mode): every subscription owns a bounded queue and a single reader task, so `PublishAsync` only enqueues and returns immediately. A slow or hung handler is cut off after the per-handler timeout (10 s) and never delays the publisher or other subscribers. Semantics: in-process, at-most-once, ordered per subscriber, lossy under overload (the oldest queued event is dropped when a queue is full). Security decisions and audit records must never depend on the bus; events are notifications only.
+  - Metrics: `autheris_event_bus_dropped_total{event_type}` and `autheris_event_bus_handler_timeout_total{event_type}`.
 - **Plugin Contracts (`Autheris.Application.Plugins`):**
   - `IPluginEventListener<TEvent>`: Strongly typed event listener implemented in plugin DLLs.
   - `IPluginActionHandler`: Custom action handler callable by name via `IPluginManager.ExecuteActionAsync(...)`.
@@ -111,6 +113,27 @@ Webhook endpoints and filtering rules are configured under `Gateway:Webhooks`:
   }
 }
 ```
+
+### 3.1.1 Event Bus Options (`Gateway:Events`)
+
+```json
+{
+  "Gateway": {
+    "Events": {
+      "SubscriberQueueCapacity": 1024,
+      "DeliveryMode": "Queued"
+    }
+  }
+}
+```
+
+- `SubscriberQueueCapacity` (default `1024`, minimum `1`): capacity of each subscriber queue; overflow drops the oldest event.
+- `DeliveryMode` (`Queued` default, or `Inline`): `Inline` awaits all handlers inside `PublishAsync` and exists for tests only; it is rejected at startup outside Development.
+- Tests that assert handler side effects after `PublishAsync` resolve `IGatewayEventBusDrain` and `await DrainAsync()`.
+
+### 3.1.2 CDC Webhook Subscription Endpoints (`Gateway:CdcWebhooks`)
+
+The endpoints `GET/POST /api/v1/cdc/subscriptions` and `DELETE /api/v1/cdc/subscriptions/{id}` are disabled by default and answer `501 Not Implemented` (problem details). While disabled, no subscription store and no CloudEvents dispatcher HTTP client are registered. Setting `Gateway:CdcWebhooks:Enabled` to `true` activates them; callers still need the `GovernanceAdmin` or `TenantAdmin` role.
 
 ### 3.2 Authoring a C# DLL Plugin Event Listener
 
