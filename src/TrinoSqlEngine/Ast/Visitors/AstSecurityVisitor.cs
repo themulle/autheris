@@ -31,6 +31,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     private readonly RlsOptions _options;
     private readonly ISqlEngine _engine;
     private readonly Stack<HashSet<string>> _cteScopeStack = new();
+    private readonly PolicyFilterCteGuard _cteFilterGuard = new();
 
     /// <summary>CTE names are compared by ordinal bytes: a delimited physical name that differs in case is not the CTE (INV-11).</summary>
     private static StringComparer CteScopeComparer =>
@@ -131,6 +132,8 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             {
                 string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(cte.Name);
                 EnsureCteNameIsUnambiguous(cteKey);
+                // SR-M-25: a user CTE must not share its name with a table referenced by an injected policy predicate.
+                _cteFilterGuard.RegisterCte(cte.Name.Value);
                 if (node.With.IsRecursive)
                 {
                     // CR-ADG-29: a recursive CTE sees its own name in its body (self-reference); the base tables of the anchor

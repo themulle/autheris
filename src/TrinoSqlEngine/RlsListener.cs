@@ -14,6 +14,7 @@ public sealed class RlsListener : SqlBaseBaseListener
     private readonly TokenStreamRewriter _rewriter;
     private readonly RlsOptions _options;
     private readonly Stack<HashSet<string>> _cteScopeStack = new();
+    private readonly PolicyFilterCteGuard _cteFilterGuard = new();
     private bool _rootLimitHandled = false;
 
     public RlsListener(ITokenStream tokens, RlsOptions? options = null)
@@ -134,6 +135,8 @@ public sealed class RlsListener : SqlBaseBaseListener
     {
         string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(context.name.GetText());
         _cteScopeStack.Peek().Add(cteKey);
+        // SR-M-25: a user CTE must not share its name with a table referenced by an injected policy predicate.
+        _cteFilterGuard.RegisterCte(context.name.GetText());
     }
 
     /// <summary>
@@ -290,6 +293,7 @@ public sealed class RlsListener : SqlBaseBaseListener
             return;
 
         string policyFilter = _options.PolicyProvider.GetPolicyFilter(normalizedName);
+        _cteFilterGuard.RegisterFilter(policyFilter);
         if (RowFilterAliases.ReferencesTarget(policyFilter))
         {
             // UPDATE/DELETE target aliases differ per dialect; a correlated row filter cannot be bound here (fail closed).
@@ -359,6 +363,7 @@ public sealed class RlsListener : SqlBaseBaseListener
             return;
 
         string policyFilter = _options.PolicyProvider.GetPolicyFilter(normalizedName);
+        _cteFilterGuard.RegisterFilter(policyFilter);
         if (RowFilterAliases.ReferencesTarget(policyFilter))
         {
             // UPDATE/DELETE target aliases differ per dialect; a correlated row filter cannot be bound here (fail closed).
@@ -405,10 +410,18 @@ public sealed class RlsListener : SqlBaseBaseListener
             for (int i = 0; i < idList.Length; i++)
             {
                 string col = SqlIdentifierHelper.NormalizeIdentifier(idList[i].GetText());
-                if (col.Equals(tenantColumn, StringComparison.OrdinalIgnoreCase))
+                // SR-M-26: a repeated column would let a later value bypass the check of the first one (last value wins on some backends).
+                for (int j = 0; j < i; j++)
+                {
+                    if (col.Equals(SqlIdentifierHelper.NormalizeIdentifier(idList[j].GetText()), StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new SecurityException($"Column '{col}' is listed more than once in the INSERT column list.");
+                    }
+                }
+
+                if (tenantIndex == -1 && col.Equals(tenantColumn, StringComparison.OrdinalIgnoreCase))
                 {
                     tenantIndex = i;
-                    break;
                 }
             }
         }
@@ -907,6 +920,7 @@ public sealed class RlsListener : SqlBaseBaseListener
     private string BuildReplacement(ParserRuleContext context, string rawTableName, string normalizedTableName, bool shouldApplyRls)
     {
         string policyFilter = shouldApplyRls ? _options.PolicyProvider.GetPolicyFilter(normalizedTableName) : string.Empty;
+        _cteFilterGuard.RegisterFilter(policyFilter);
 
         string selectColumns = "*";
         if (_options.TableColumnsProvider != null)
