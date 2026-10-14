@@ -6,6 +6,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
+using Autheris.Api.Security;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -64,7 +65,7 @@ public static class GovernanceClassificationEndpoints
             }
 
             return Results.Ok(proposal);
-        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ClassificationProposed);
+        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ClassificationProposed);
 
         // 2. Submit Approval / Review Transition (1-Stage or 2-Stage SoD)
         app.MapPost("/api/governance/classification/transition", async (
@@ -74,7 +75,7 @@ public static class GovernanceClassificationEndpoints
         {
             var result = await stateMachine.TransitionAsync(payload.Proposal, payload.Request, ct).ConfigureAwait(false);
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);
-        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ClassificationTransitioned);
+        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ClassificationTransitioned);
 
         // 3. List Pending Proposals for Review Inbox (Filtered by role or owner)
         app.MapGet("/api/governance/classification/proposals/pending", async (
@@ -86,7 +87,7 @@ public static class GovernanceClassificationEndpoints
             Sid? ownerSid = !string.IsNullOrWhiteSpace(owner) ? (Sid?)new Sid(owner) : null;
             var proposals = await store.GetPendingProposalsAsync(role, ownerSid, ct).ConfigureAwait(false);
             return Results.Ok(proposals);
-        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.ClassificationProposed);
+        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Summarized, AuditEventTypes.ClassificationProposed);
 
         // 4. Get Proposal Details by Proposal ID
         app.MapGet("/api/governance/classification/proposals/{proposalId:guid}", async (
@@ -113,8 +114,38 @@ public static class GovernanceClassificationEndpoints
                 return Results.NotFound(new { error = $"Proposal with ID '{proposalId}' was not found." });
             }
 
-            var reviewerSid = httpContext.User.GetUserSid() ?? (!string.IsNullOrWhiteSpace(payload.ReviewerSid) ? new Sid(payload.ReviewerSid) : new Sid("ANONYMOUS_REVIEWER"));
-            var reviewerRole = !string.IsNullOrWhiteSpace(payload.ReviewerRole) ? payload.ReviewerRole : "DATA_OWNER";
+            var callerSid = httpContext.User.GetUserSid();
+            if (callerSid == null || string.IsNullOrWhiteSpace(callerSid.Value.Value))
+            {
+                return Results.Unauthorized();
+            }
+
+            string? resolvedRole = null;
+            if (httpContext.User.IsInRole("ComplianceReviewer") || httpContext.User.IsInRole("ComplianceOfficer"))
+            {
+                resolvedRole = "DATA_GOVERNANCE_REVIEWER";
+            }
+            else if (httpContext.User.IsInRole("DataOwner") || EndpointSecurity.IsGlobalGovernanceAdmin(httpContext.User))
+            {
+                resolvedRole = "DATA_OWNER";
+            }
+
+            if (resolvedRole == null)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            if (resolvedRole == "DATA_OWNER" && !EndpointSecurity.IsGlobalGovernanceAdmin(httpContext.User))
+            {
+                if (!string.IsNullOrWhiteSpace(proposal.DataOwnerSid) &&
+                    !string.Equals(proposal.DataOwnerSid, callerSid.Value.Value, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+            }
+
+            var reviewerSid = callerSid.Value;
+            var reviewerRole = resolvedRole;
 
             var request = new TableClassificationApprovalRequest(
                 proposal.ProposalId,
@@ -146,8 +177,38 @@ public static class GovernanceClassificationEndpoints
                 return Results.NotFound(new { error = $"Proposal with ID '{proposalId}' was not found." });
             }
 
-            var reviewerSid = httpContext.User.GetUserSid() ?? (!string.IsNullOrWhiteSpace(payload.ReviewerSid) ? new Sid(payload.ReviewerSid) : new Sid("ANONYMOUS_REVIEWER"));
-            var reviewerRole = !string.IsNullOrWhiteSpace(payload.ReviewerRole) ? payload.ReviewerRole : "DATA_OWNER";
+            var callerSid = httpContext.User.GetUserSid();
+            if (callerSid == null || string.IsNullOrWhiteSpace(callerSid.Value.Value))
+            {
+                return Results.Unauthorized();
+            }
+
+            string? resolvedRole = null;
+            if (httpContext.User.IsInRole("ComplianceReviewer") || httpContext.User.IsInRole("ComplianceOfficer"))
+            {
+                resolvedRole = "DATA_GOVERNANCE_REVIEWER";
+            }
+            else if (httpContext.User.IsInRole("DataOwner") || EndpointSecurity.IsGlobalGovernanceAdmin(httpContext.User))
+            {
+                resolvedRole = "DATA_OWNER";
+            }
+
+            if (resolvedRole == null)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            if (resolvedRole == "DATA_OWNER" && !EndpointSecurity.IsGlobalGovernanceAdmin(httpContext.User))
+            {
+                if (!string.IsNullOrWhiteSpace(proposal.DataOwnerSid) &&
+                    !string.Equals(proposal.DataOwnerSid, callerSid.Value.Value, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+            }
+
+            var reviewerSid = callerSid.Value;
+            var reviewerRole = resolvedRole;
 
             var request = new TableClassificationApprovalRequest(
                 proposal.ProposalId,
@@ -176,7 +237,7 @@ public static class GovernanceClassificationEndpoints
                 AssignedOwnerSid = payload.DataOwnerSid,
                 ProposalUpdated = updated
             });
-        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ClassificationTransitioned);
+        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ClassificationTransitioned);
 
         // 8. Inspect Current Active Governance WORM Configuration Hash
         app.MapGet("/api/governance/classification/config-hash", (

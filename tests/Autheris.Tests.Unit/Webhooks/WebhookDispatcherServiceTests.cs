@@ -12,8 +12,10 @@ using System.Threading.Tasks;
 using Autheris.Application.Webhooks;
 using Autheris.Domain.Events;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -120,7 +122,9 @@ public sealed class WebhookDispatcherServiceTests
             }
         });
 
-        var dispatcher = new WebhookDispatcherService(httpClient, options, NullLogger<WebhookDispatcherService>.Instance);
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Development");
+        var dispatcher = new WebhookDispatcherService(httpClient, options, NullLogger<WebhookDispatcherService>.Instance, env);
 
         var @event = new AccessPlanCreatedEvent(
             EventId: "ev-test-100",

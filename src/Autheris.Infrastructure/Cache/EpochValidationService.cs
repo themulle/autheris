@@ -7,13 +7,14 @@ using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 
 namespace Autheris.Infrastructure.Cache;
 
-public sealed class EpochValidationService : IEpochValidationService
+public sealed class EpochValidationService : IEpochValidationService, IHostedService, IDisposable
 {
     private sealed record LocalEpochEntry(long Epoch, DateTimeOffset CachedAt);
 
@@ -28,6 +29,8 @@ public sealed class EpochValidationService : IEpochValidationService
     private readonly ConcurrentDictionary<string, long> _highestSeenRedisEpoch = new(StringComparer.OrdinalIgnoreCase);
     private readonly ILogger<EpochValidationService>? _logger;
     private readonly ITableSensitivityLookup _sensitivityLookup;
+    private readonly object _subscriptionLock = new();
+    private IDisposable? _invalidationSubscription;
 
     private const string RollbackLuaScript = @"
 local current = redis.call('GET', KEYS[1])
@@ -74,23 +77,64 @@ end";
                 _epochs.Clear();
                 _lastEpochRefresh.Clear();
                 _microCache.Clear();
+                EnsureSubscribed();
             };
         }
 
         var prefix = options?.Value?.Caching?.Redis?.InstanceName ?? "autheris:";
         _redisPrefix = prefix.EndsWith(':') ? prefix : prefix + ":";
+    }
 
-        _eventBus.Subscribe<string>(_invalidationChannel, message =>
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        EnsureSubscribed();
+        return Task.CompletedTask;
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken)
+    {
+        lock (_subscriptionLock)
         {
-            if (!string.IsNullOrWhiteSpace(message))
+            _invalidationSubscription?.Dispose();
+            _invalidationSubscription = null;
+        }
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        lock (_subscriptionLock)
+        {
+            _invalidationSubscription?.Dispose();
+            _invalidationSubscription = null;
+        }
+    }
+
+    private void EnsureSubscribed()
+    {
+        if (_invalidationSubscription != null) return;
+        lock (_subscriptionLock)
+        {
+            if (_invalidationSubscription != null) return;
+            try
             {
-                var key = message.ToLowerInvariant();
-                _epochs.AddOrUpdate(key, 2, (_, current) => current + 1);
-                _lastEpochRefresh[key] = DateTimeOffset.UtcNow;
-                _microCache.TryRemove(key, out _);
+                _invalidationSubscription = _eventBus.Subscribe<string>(_invalidationChannel, message =>
+                {
+                    if (!string.IsNullOrWhiteSpace(message))
+                    {
+                        var key = message.ToLowerInvariant();
+                        _epochs.AddOrUpdate(key, 2, (_, current) => current + 1);
+                        _lastEpochRefresh[key] = DateTimeOffset.UtcNow;
+                        _microCache.TryRemove(key, out _);
+                    }
+                    return Task.CompletedTask;
+                });
             }
-            return Task.CompletedTask;
-        });
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to subscribe to invalidation channel {Channel}; will retry on reconnection.", _invalidationChannel);
+            }
+        }
     }
 
     public async Task<long> GetCurrentEpochAsync(TableIdentifier table, CancellationToken ct = default)
@@ -102,6 +146,7 @@ end";
     /// </summary>
     private async Task<(long Epoch, bool Authoritative)> GetCurrentEpochCoreAsync(TableIdentifier table)
     {
+        EnsureSubscribed();
         var key = table.ToString().ToLowerInvariant();
 
         if (_multiplexer != null && _multiplexer.IsConnected)
@@ -433,6 +478,7 @@ end";
 
     public async Task InvalidateEpochAsync(TableIdentifier table, CancellationToken ct = default)
     {
+        EnsureSubscribed();
         var key = table.ToString().ToLowerInvariant();
         _microCache.TryRemove(key, out _);
         _epochs.AddOrUpdate(key, 2, (_, current) => current + 1);

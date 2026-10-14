@@ -219,10 +219,11 @@ public sealed partial class SemanticPromptGuardrail(ILogger<SemanticPromptGuardr
             {
                 if (Convert.TryFromBase64Chars(matchSpan, dest, out var bytesWritten) && bytesWritten >= 12)
                 {
-                    var decoded = Encoding.UTF8.GetString(dest[..bytesWritten]);
+                    var decoded = NormalizeForInspection(Encoding.UTF8.GetString(dest[..bytesWritten]));
                     if (DirectInstructionOverrideRegex().IsMatch(decoded) ||
                         JailbreakPersonaRegex().IsMatch(decoded) ||
-                        InstructionDelimiterRegex().IsMatch(decoded))
+                        InstructionDelimiterRegex().IsMatch(decoded) ||
+                        ExfiltrationCoercionRegex().IsMatch(decoded))
                     {
                         return PromptGuardrailEvaluation.Deny("Base64ObfuscatedInjection", $"Payload contains base64-obfuscated prompt injection directive: '{decoded[..Math.Min(40, decoded.Length)]}...'");
                     }

@@ -230,12 +230,19 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
             columns = [new TableColumn { ColumnName = "id", DataType = "int" }];
         }
 
-        var colDefs = columns.Select(c =>
+        var colDefs = new List<string>(columns.Count);
+        var seenCleanColNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in columns)
         {
+            var cleanColName = SanitizeIdentifier(c.ColumnName);
+            if (!seenCleanColNames.Add(cleanColName))
+            {
+                throw new InvalidOperationException($"Column identifier collision detected in table staging: sanitized name '{cleanColName}' appears multiple times.");
+            }
             bool isMasked = source.MaskedColumns != null && source.MaskedColumns.Contains(c.ColumnName);
             var duckType = isMasked ? "VARCHAR" : MapDuckDbType(c);
-            return $"\"{SanitizeIdentifier(c.ColumnName)}\" {duckType}";
-        });
+            colDefs.Add($"\"{cleanColName}\" {duckType}");
+        }
         var createTableSql = $"CREATE TABLE \"{cleanTableName}\" ({string.Join(", ", colDefs)});";
 
         using (var createCmd = connection.CreateCommand())
@@ -411,7 +418,15 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
                 token.StartsWith("read_", StringComparison.OrdinalIgnoreCase) ||
                 token.StartsWith("sniff_", StringComparison.OrdinalIgnoreCase) ||
                 token.StartsWith("parquet_", StringComparison.OrdinalIgnoreCase) ||
-                token.StartsWith("duckdb_", StringComparison.OrdinalIgnoreCase))
+                token.StartsWith("duckdb_", StringComparison.OrdinalIgnoreCase) ||
+                token.StartsWith("pragma_", StringComparison.OrdinalIgnoreCase) ||
+                token.Equals("iceberg_scan", StringComparison.OrdinalIgnoreCase) ||
+                token.Equals("delta_scan", StringComparison.OrdinalIgnoreCase) ||
+                token.Equals("sqlite_scan", StringComparison.OrdinalIgnoreCase) ||
+                token.Equals("postgres_scan", StringComparison.OrdinalIgnoreCase) ||
+                token.Equals("mysql_scan", StringComparison.OrdinalIgnoreCase) ||
+                token.Equals("current_setting", StringComparison.OrdinalIgnoreCase) ||
+                token.Equals("getenv", StringComparison.OrdinalIgnoreCase))
             {
                 throw new System.Security.SecurityException($"Function or table function '{token}' is prohibited in OLAP queries.");
             }
@@ -421,13 +436,13 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         var match = DisallowedTableFunctionsRegex.Match(trimmed);
         if (match.Success)
         {
-            throw new System.Security.SecurityException($"Table generator or file function '{match.Groups[1].Value}' is not permitted in OLAP queries.");
+            throw new System.Security.SecurityException($"Table generator or file function '{match.Groups[1].Value}' is prohibited in OLAP queries.");
         }
     }
 
     // Function name followed by optional whitespace and '(' (e.g. "range (1, 1000000000)").
     private static readonly System.Text.RegularExpressions.Regex DisallowedTableFunctionsRegex = new(
-        @"\b(range|generate_series|repeat|read_\w+|glob|sniff_\w+|parquet_\w+|duckdb_\w+)\s*\(",
+        @"\b(range|generate_series|repeat|read_\w+|glob|sniff_\w+|parquet_\w+|duckdb_\w+|iceberg_scan|delta_scan|sqlite_scan|postgres_scan|mysql_scan|pragma_\w+|current_setting|getenv)\s*\(",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant,
         TimeSpan.FromMilliseconds(250));
 

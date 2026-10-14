@@ -20,6 +20,12 @@ using Microsoft.Extensions.Logging;
 
 public sealed class DatasourceTestingService : IDatasourceTestingService
 {
+    private static readonly HashSet<string> ForbiddenProbeHeaders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Host", "Authorization", "Proxy-Authorization", "Cookie", "Set-Cookie",
+        "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Transfer-Encoding", "Connection"
+    };
+
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IAuditLogRepository _auditLogRepository;
@@ -269,6 +275,17 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
             {
                 foreach (var (k, v) in request.AdditionalHeaders)
                 {
+                    if (string.IsNullOrWhiteSpace(k) || ForbiddenProbeHeaders.Contains(k))
+                    {
+                        continue;
+                    }
+
+                    // CRLF injection prevention (SEC-MED-08)
+                    if (k.Contains('\r') || k.Contains('\n') || (v != null && (v.Contains('\r') || v.Contains('\n'))))
+                    {
+                        continue;
+                    }
+
                     reqMsg.Headers.TryAddWithoutValidation(k, v);
                 }
             }

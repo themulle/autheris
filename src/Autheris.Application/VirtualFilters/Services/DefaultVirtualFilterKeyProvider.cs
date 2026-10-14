@@ -29,18 +29,21 @@ public sealed class DefaultVirtualFilterKeyProvider : IVirtualFilterKeyProvider
     private readonly ITableMetadataRepository? _tableRepository;
     private readonly IMemoryCache? _cache;
     private readonly ILogger<DefaultVirtualFilterKeyProvider>? _logger;
+    private readonly IColumnMaskingProvider? _maskingProvider;
     private readonly ConcurrentDictionary<string, IReadOnlyList<IReadOnlyDictionary<string, object?>>> _inMemoryTuples = new(StringComparer.OrdinalIgnoreCase);
 
     public DefaultVirtualFilterKeyProvider(
         IAutherisConnectorRegistry? connectorRegistry = null,
         ITableMetadataRepository? tableRepository = null,
         IMemoryCache? cache = null,
-        ILogger<DefaultVirtualFilterKeyProvider>? logger = null)
+        ILogger<DefaultVirtualFilterKeyProvider>? logger = null,
+        IColumnMaskingProvider? maskingProvider = null)
     {
         _connectorRegistry = connectorRegistry;
         _tableRepository = tableRepository;
         _cache = cache;
         _logger = logger;
+        _maskingProvider = maskingProvider;
     }
 
     /// <summary>
@@ -175,7 +178,7 @@ public sealed class DefaultVirtualFilterKeyProvider : IVirtualFilterKeyProvider
             Offset: 0);
 
         var rowPolicy = new GovernedRowPolicy(
-            MaskingProvider: new ColumnMaskingProvider(),
+            MaskingProvider: _maskingProvider ?? new ColumnMaskingProvider(),
             HmacKeyId: null,
             MaskingDisabled: true,
             MaxRows: 50_000,

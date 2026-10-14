@@ -8,8 +8,10 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Security;
 using Autheris.Domain.Events;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -27,15 +29,18 @@ public sealed class WebhookDispatcherService : IWebhookDispatcherService
     private readonly HttpClient _httpClient;
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<WebhookDispatcherService> _logger;
+    private readonly IHostEnvironment? _environment;
 
     public WebhookDispatcherService(
         HttpClient httpClient,
         IOptions<GatewayOptions> options,
-        ILogger<WebhookDispatcherService> logger)
+        ILogger<WebhookDispatcherService> logger,
+        IHostEnvironment? environment = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _environment = environment;
     }
 
     public async Task DispatchEventAsync(IGatewayEvent @event, CancellationToken ct = default)
@@ -85,6 +90,23 @@ public sealed class WebhookDispatcherService : IWebhookDispatcherService
         var timestamp = DateTimeOffset.UtcNow.ToString("O");
         var signature = ComputeHmacSha256(subscription.Secret, $"{timestamp}.{jsonPayload}");
         var maxRetries = Math.Max(1, subscription.MaxRetries);
+
+        if (!Uri.TryCreate(subscription.TargetUrl, UriKind.Absolute, out var targetUri))
+        {
+            _logger.LogWarning("Webhook subscription target URL '{TargetUrl}' is malformed. Dropping dispatch.", subscription.TargetUrl);
+            return;
+        }
+
+        var isDev = _environment?.IsDevelopment() ?? false;
+        try
+        {
+            await EgressUrlPolicy.ValidateResolvedAsync(targetUri, isDev: isDev, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SSRF violation: Webhook destination '{TargetUrl}' blocked by egress policy.", subscription.TargetUrl);
+            return;
+        }
 
         for (int attempt = 1; attempt <= maxRetries; attempt++)
         {

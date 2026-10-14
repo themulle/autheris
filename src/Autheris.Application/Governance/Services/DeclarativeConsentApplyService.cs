@@ -27,6 +27,20 @@ public sealed class DeclarativeConsentApplyService(
         ArgumentNullException.ThrowIfNull(caller);
         ArgumentNullException.ThrowIfNull(manifest);
 
+        if (caller.Identity?.IsAuthenticated != true)
+        {
+            throw new System.Security.SecurityException("Caller must be authenticated to apply declarative consent manifests.");
+        }
+
+        var isPrivileged = caller.IsInRole("GOVERNANCE_ADMIN") ||
+                           caller.IsInRole("CLUSTER_ADMIN") ||
+                           caller.IsInRole("DATA_GOVERNANCE_REVIEWER") ||
+                           caller.HasClaim(c => c.Type == "scope" && c.Value.Contains("governance:admin"));
+        if (!isPrivileged)
+        {
+            throw new System.Security.SecurityException("Caller lacks required governance permissions to apply declarative consent manifests.");
+        }
+
         var actorSid = caller.GetUserSid() ?? new Sid("S-1-5-21-GITOPS-SYNC");
         var tenantId = caller.GetTenantId();
         var now = DateTimeOffset.UtcNow;
@@ -60,7 +74,7 @@ public sealed class DeclarativeConsentApplyService(
 
             if (!Enum.TryParse<ConsentEffect>(policy.Effect, ignoreCase: true, out var effect))
             {
-                effect = ConsentEffect.Allow;
+                throw new ArgumentException($"Invalid consent effect '{policy.Effect}' for table '{tableId}'. Effect must be explicitly specified (e.g. 'Allow' or 'Deny').", nameof(manifest));
             }
 
             Sid? granteeSid = null;
@@ -245,6 +259,8 @@ public sealed class DeclarativeConsentApplyService(
             if (match == null) return false;
             if (!string.Equals(match.Operator, desiredRf.Operator, StringComparison.OrdinalIgnoreCase)) return false;
             if (!string.Equals(match.ValueJson, desiredRf.ValueJson, StringComparison.Ordinal)) return false;
+            if (!string.Equals(match.UserAttribute, desiredRf.UserAttribute, StringComparison.OrdinalIgnoreCase)) return false;
+            if (!string.Equals(match.ValueSource ?? "LITERAL", desiredRf.ValueSource ?? "LITERAL", StringComparison.OrdinalIgnoreCase)) return false;
         }
 
         return true;
