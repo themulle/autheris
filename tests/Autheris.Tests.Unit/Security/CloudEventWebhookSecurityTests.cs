@@ -2,6 +2,7 @@ namespace Autheris.Tests.Unit.Security;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -11,6 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Events.Interfaces;
 using Autheris.Application.Events.Services;
+using Autheris.Application.Webhooks;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -181,12 +183,10 @@ public sealed class CloudEventWebhookSecurityTests
         capturedRequest.Headers.GetValues("ce-type").ShouldContain("autheris.cdc.update");
 
         // Verify HMAC-SHA256 signature
-        capturedRequest.Headers.Contains("X-Autheris-Signature").ShouldBeTrue();
-        var sentSignature = string.Join("", capturedRequest.Headers.GetValues("X-Autheris-Signature"));
-
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(hmacSecret));
-        var expectedHashHex = Convert.ToHexStringLower(hmac.ComputeHash(Encoding.UTF8.GetBytes(capturedBody!)));
-        sentSignature.ShouldBe($"sha256={expectedHashHex}");
+        capturedRequest.Headers.Contains("X-Autheris-Signature").ShouldBeFalse();
+        var sentSignature = capturedRequest.Headers.GetValues("X-Autheris-Signature-256").Single();
+        var timestamp = capturedRequest.Headers.GetValues("X-Autheris-Timestamp").Single();
+        sentSignature.ShouldBe(WebhookSignature.SignHeaderValue(hmacSecret, timestamp, capturedBody!));
     }
 
     private sealed class MockHttpMessageHandler : HttpMessageHandler

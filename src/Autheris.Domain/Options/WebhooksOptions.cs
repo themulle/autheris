@@ -14,12 +14,6 @@ public sealed class WebhooksOptions
     /// <c>null</c> (default) means required outside Development.
     /// </summary>
     public bool? RequireSecret { get; init; }
-
-    /// <summary>
-    /// SR-L-13 / D7: also emit the deprecated body-only <c>X-Autheris-Signature</c> header on CloudEvents deliveries.
-    /// Default <c>true</c> for one release; will be removed.
-    /// </summary>
-    public bool EmitLegacySignature { get; init; } = true;
 }
 
 public sealed class WebhookSubscription

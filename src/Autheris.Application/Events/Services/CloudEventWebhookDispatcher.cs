@@ -112,14 +112,6 @@ public sealed class CloudEventWebhookDispatcher : ICloudEventWebhookDispatcher
                 request.Headers.TryAddWithoutValidation(
                     WebhookSignature.SignatureHeader,
                     WebhookSignature.SignHeaderValue(subscription.HmacSecret, timestamp, payloadJson));
-
-                // D7: deprecated body-only signature, kept for one release.
-                if (_options?.Value.Webhooks.EmitLegacySignature ?? true)
-                {
-                    request.Headers.TryAddWithoutValidation(
-                        WebhookSignature.LegacySignatureHeader,
-                        WebhookSignature.Prefix + WebhookSignature.ComputeHex(subscription.HmacSecret, payloadJson));
-                }
             }
 
             // Custom headers

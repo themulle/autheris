@@ -92,21 +92,19 @@ public sealed class WebhookSigningAndHygieneTests
     }
 
     [Fact]
-    public async Task Dispatch_LegacySignature_EmittedByDefault_SuppressedWhenDisabled()
+    public async Task Delivery_NeverEmitsLegacySignatureHeader()
     {
-        var defaultHandler = new CapturingHandler();
-        await new CloudEventWebhookDispatcher(new HttpClient(defaultHandler), new CapturingLogger<CloudEventWebhookDispatcher>())
+        var handler = new CapturingHandler();
+        await new CloudEventWebhookDispatcher(new HttpClient(handler), new CapturingLogger<CloudEventWebhookDispatcher>())
             .DispatchAsync(Subscription(), Envelope());
-        defaultHandler.Calls.Single().Request.Headers.Contains("X-Autheris-Signature").ShouldBeTrue();
-
-        var offHandler = new CapturingHandler();
-        var options = Options.Create(new GatewayOptions { Webhooks = new WebhooksOptions { EmitLegacySignature = false } });
-        await new CloudEventWebhookDispatcher(new HttpClient(offHandler), new CapturingLogger<CloudEventWebhookDispatcher>(), options)
-            .DispatchAsync(Subscription(), Envelope());
-        var req = offHandler.Calls.Single().Request;
+        var req = handler.Calls.Single().Request;
         req.Headers.Contains("X-Autheris-Signature").ShouldBeFalse();
         req.Headers.Contains("X-Autheris-Signature-256").ShouldBeTrue();
     }
+
+    [Fact]
+    public void ForbiddenCustomHeaders_StillBlockLegacySignatureName() =>
+        CloudEventWebhookDispatcher.IsForbiddenCustomHeader("X-Autheris-Signature").ShouldBeTrue();
 
     [Theory]
     [InlineData("X-Autheris-Timestamp")]
