@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Webhooks;
 using Autheris.Domain.Events;
+using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -21,38 +22,16 @@ using Xunit;
 
 public sealed class WebhookDispatcherServiceTests
 {
-    private sealed class MockHttpMessageHandler : HttpMessageHandler
-    {
-        public List<HttpRequestMessage> Requests { get; } = [];
-        public HttpStatusCode StatusCodeToReturn { get; set; } = HttpStatusCode.OK;
-
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            if (request.Content != null)
-            {
-                await request.Content.ReadAsStringAsync(cancellationToken);
-            }
-
-            Requests.Add(request);
-            return new HttpResponseMessage(StatusCodeToReturn);
-        }
-    }
-
     [Fact]
-    public void ComputeHmacSha256_ProducesValidExpectedSignature()
+    public void WebhookSignature_ComputeHex_ProducesValidExpectedSignature()
     {
-        // Arrange
         const string secret = "super-secret-key-123";
         const string payload = "test-payload-content";
 
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
         var expectedHex = Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
 
-        // Act
-        var result = WebhookDispatcherService.ComputeHmacSha256(secret, payload);
-
-        // Assert
-        result.ShouldBe(expectedHex);
+        WebhookSignature.ComputeHex(secret, payload).ShouldBe(expectedHex);
     }
 
     [Theory]
@@ -136,56 +115,37 @@ public sealed class WebhookDispatcherServiceTests
     }
 
     [Fact]
-    public async Task DispatchEventAsync_DispatchesSignedCloudEventWithStandardHeaders()
+    public async Task DispatchEventAsync_EnqueuesCloudEventRow_ForMatchingSubscriptionsOnly()
     {
-        // Arrange
-        var handler = new MockHttpMessageHandler();
-        var httpClient = new HttpClient(handler);
-
+        var enqueued = new List<WebhookOutboxMessage>();
+        var outbox = Substitute.For<IWebhookOutbox>();
+        outbox.EnqueueAsync(Arg.Do<WebhookOutboxMessage>(enqueued.Add), Arg.Any<CancellationToken>()).Returns(true);
         var options = Options.Create(new GatewayOptions
         {
             Webhooks = new WebhooksOptions
             {
-                Enabled = true,
-                DefaultTimeoutSeconds = 5,
                 Subscriptions =
                 [
-                    new WebhookSubscription
-                    {
-                        Id = "sub-1",
-                        TargetUrl = "https://receiver.internal/webhook",
-                        EventFilters = ["governance.*"],
-                        Secret = "secret-key-456",
-                        IsClusterWide = true,
-                        MaxAttempts = 1
-                    }
+                    new WebhookSubscription { Id = "sub-1", TargetUrl = "https://receiver.internal/webhook", EventFilters = ["governance.*"], Secret = "secret-key-456", IsClusterWide = true, MaxAttempts = 4 },
+                    new WebhookSubscription { Id = "sub-2", TargetUrl = "https://other.internal/webhook", EventFilters = ["catalog.*"], Secret = "secret-key-789", IsClusterWide = true }
                 ]
             }
         });
-
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
-        var dispatcher = new WebhookDispatcherService(httpClient, options, NullLogger<WebhookDispatcherService>.Instance, env);
+        var dispatcher = new WebhookDispatcherService(outbox, options, NullLogger<WebhookDispatcherService>.Instance, env);
 
-        var @event = new AccessPlanCreatedEvent(
-            EventId: "ev-test-100",
-            PlanId: "plan-100",
-            DatasetId: "sales.orders",
-            RequesterSid: "admin-user",
-            GrantCount: 2,
-            Timestamp: DateTimeOffset.UtcNow);
+        await dispatcher.DispatchEventAsync(new AccessPlanCreatedEvent(
+            EventId: "ev-test-100", PlanId: "plan-100", DatasetId: "sales.orders", RequesterSid: "admin-user", GrantCount: 2, Timestamp: DateTimeOffset.UtcNow));
 
-        // Act
-        await dispatcher.DispatchEventAsync(@event);
-
-        // Assert
-        handler.Requests.Count.ShouldBe(1);
-        var req = handler.Requests[0];
-        req.RequestUri.ShouldBe(new Uri("https://receiver.internal/webhook"));
-        req.Headers.GetValues("ce-specversion").Single().ShouldBe("1.0");
-        req.Headers.GetValues("ce-id").Single().ShouldBe("ev-test-100");
-        req.Headers.GetValues("ce-type").Single().ShouldBe("governance.access_plan.created");
-        req.Headers.GetValues("X-Autheris-Signature-256").Single().ShouldStartWith("sha256=");
-        req.Headers.GetValues("X-Autheris-Timestamp").ShouldNotBeEmpty();
+        var row = enqueued.ShouldHaveSingleItem();
+        row.SubscriptionId.ShouldBe("sub-1");
+        row.EventId.ShouldBe("ev-test-100");
+        row.EventType.ShouldBe("governance.access_plan.created");
+        row.EventSource.ShouldBe("https://autheris.gateway/events");
+        row.MaxAttempts.ShouldBe(4);
+        row.State.ShouldBe(WebhookOutboxState.Pending);
+        row.OwnerTenantId.ShouldBeNull();
+        row.PayloadJson.ShouldContain("ev-test-100");
     }
 }

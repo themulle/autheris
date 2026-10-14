@@ -44,26 +44,37 @@ public sealed class WebhookEventBridgeHostedServiceTests
     }
 
     [Fact]
-    public async Task SR_M_13_Publish_WhenQueueFull_DropsInsteadOfBlocking()
+    public async Task Publish_DispatcherFailure_IsContainedAndLoggedWithoutMessage()
     {
         var bus = new InMemoryGatewayEventBus(NullLogger<InMemoryGatewayEventBus>.Instance);
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var dispatcher = Substitute.For<IWebhookDispatcherService>();
         dispatcher.DispatchEventAsync(Arg.Any<IGatewayEvent>(), Arg.Any<CancellationToken>())
-            .Returns(_ => release.Task);
-
-        var bridge = new WebhookEventBridgeHostedService(bus, dispatcher, NullLogger<WebhookEventBridgeHostedService>.Instance, queueCapacity: 1);
+            .Returns<Task>(_ => throw new InvalidOperationException("Password=hunter2"));
+        var logger = new WebhookCapturingLogger<WebhookEventBridgeHostedService>();
+        var bridge = new WebhookEventBridgeHostedService(bus, dispatcher, logger);
         await bridge.StartAsync(CancellationToken.None);
 
-        var sw = Stopwatch.StartNew();
-        for (var i = 0; i < 50; i++)
-        {
-            await bus.PublishAsync(NewEvent($"ev-{i}"));
-        }
+        await bus.PublishAsync(NewEvent("ev-fail"));
+        await bus.DrainAsync();
 
-        sw.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(2));
+        logger.All.ShouldContain("ev-fail");
+        logger.All.ShouldNotContain("hunter2");
+        await bridge.StopAsync(CancellationToken.None);
+    }
 
-        release.SetResult();
+    [Fact]
+    public async Task Publish_EnqueuesEachEventThroughTheDispatcher()
+    {
+        var bus = new InMemoryGatewayEventBus(NullLogger<InMemoryGatewayEventBus>.Instance);
+        var dispatcher = Substitute.For<IWebhookDispatcherService>();
+        var bridge = new WebhookEventBridgeHostedService(bus, dispatcher, NullLogger<WebhookEventBridgeHostedService>.Instance);
+        await bridge.StartAsync(CancellationToken.None);
+
+        await bus.PublishAsync(NewEvent("ev-1"));
+        await bus.PublishAsync(NewEvent("ev-2"));
+        await bus.DrainAsync();
+
+        await dispatcher.Received(2).DispatchEventAsync(Arg.Any<IGatewayEvent>(), Arg.Any<CancellationToken>());
         await bridge.StopAsync(CancellationToken.None);
     }
 

@@ -25,10 +25,19 @@ public static class GatewayEventServiceExtensions
         services.AddSingleton<IGatewayEventBus>(sp => sp.GetRequiredService<InMemoryGatewayEventBus>());
         services.AddSingleton<IGatewayEventBusDrain>(sp => sp.GetRequiredService<InMemoryGatewayEventBus>());
 
-        services.AddHttpClient<IWebhookDispatcherService, WebhookDispatcherService>()
-            .AddSecureOutboundHandlers(EgressIntegrations.Webhooks);
-
-        services.AddHostedService<WebhookEventBridgeHostedService>();
+        if (gatewayOptions.Webhooks.Enabled)
+        {
+            // WP-ARC-A-02: durable webhook outbox. The bridge enqueues; the delivery service (any node) drains with leases.
+            services.AddSingleton<IWebhookDispatcherService, WebhookDispatcherService>();
+            services.AddSingleton(sp => new WebhookRetryPolicy(
+                sp.GetRequiredService<IOptions<GatewayOptions>>().Value.Webhooks,
+                sp.GetService<TimeProvider>() ?? TimeProvider.System));
+            services.AddHttpClient<WebhookDeliveryClient>()
+                .AddSecureOutboundHandlers(EgressIntegrations.Webhooks);
+            services.AddSingleton<WebhookSubscriptionResolver>();
+            services.AddHostedService<WebhookEventBridgeHostedService>();
+            services.AddHostedService<WebhookDeliveryHostedService>();
+        }
 
         return services;
     }
