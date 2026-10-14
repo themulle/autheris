@@ -4362,5 +4362,4 @@ Mutation testing of the G7 scope (`stryker-config.json`: `Ast/Visitors/AstSecuri
 **Below 85%:** none.
 
 **Findings.**
-1. `DELETE ... WHERE id = 5 OR 1 = 1.0` is accepted on the typed path. The simplifier folds `1 = 1.0` to false (an integer literal against a decimal literal), so the OR branch is dropped and the statement is more restrictive than written. This is the safe direction here, but the fold is wrong (`1 = 1.0` is true) and would widen a statement such as `NOT (1 = 1.0)`. `AstSimplificationVisitor`, literal comparison of mixed numeric kinds; not fixed in this log.
-2. SQL Server `MapToDialectTypeName`-style type mapping of `double precision` was in the removed options-path code; no action.
+1. `DELETE ... WHERE id = 5 OR 1 = 1.0` is accepted on the typed path. The compiled SQL keeps only `[id] = @p0`, so the OR branch with `1 = 1.0` was dropped: it appears to be folded to false (an integer literal against a decimal literal; not traced to the exact fold). That is the safe direction here, but `1 = 1.0` is true and a wrong fold could widen a statement such as `NOT (1 = 1.0)`. `AstSimplificationVisitor`, literal comparison of mixed numeric kinds; not fixed in this log.
