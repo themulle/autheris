@@ -95,8 +95,8 @@ public sealed class WebSqlMaskingExpressionsTests
             .Returns(Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>()));
 
         return new GovernedSqlExecutionService(
-            Options.Create(options), executionGuard: GovernedTestSupport.Guard,
-            policyEnforcement: null,
+            Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
+            policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             consentResolution: resolution,
             tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null,

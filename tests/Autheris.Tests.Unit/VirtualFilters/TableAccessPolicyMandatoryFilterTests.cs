@@ -63,7 +63,7 @@ public sealed class TableAccessPolicyMandatoryFilterTests
         GatewayOptions? options = null) =>
         new(consents, new ConsentResolutionService(),
             cache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            casbin ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+            casbin ?? global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             options ?? new GatewayOptions(),

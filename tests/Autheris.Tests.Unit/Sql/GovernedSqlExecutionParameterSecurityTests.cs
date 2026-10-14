@@ -110,8 +110,8 @@ public sealed class GovernedSqlExecutionParameterSecurityTests
             .Returns(Task.FromResult(conn));
 
         return new GovernedSqlExecutionService(
-            Options.Create(options), executionGuard: GovernedTestSupport.Guard,
-            policyEnforcement: null,
+            Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
+            policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: factory,

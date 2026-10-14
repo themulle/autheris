@@ -61,7 +61,7 @@ public sealed class IcebergRestCatalogSecurityTests
         repo.GetActiveConsentsForSubjectsAsync(Arg.Any<IReadOnlyList<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>(consents));
         return new IcebergRestCatalogFederationService(_metadataReader, _metadataRepo, _options,
-            NullLogger<IcebergRestCatalogFederationService>.Instance, new ConsentResolutionService(), repo);
+            NullLogger<IcebergRestCatalogFederationService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, new ConsentResolutionService(), repo);
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public sealed class IcebergRestCatalogSecurityTests
         _metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(Orders("id")));
         var service = new IcebergRestCatalogFederationService(_metadataReader, _metadataRepo, _options,
-            NullLogger<IcebergRestCatalogFederationService>.Instance);
+            NullLogger<IcebergRestCatalogFederationService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
 
         await Should.ThrowAsync<SecurityException>(() => service.LoadTableAsync("tenant-1", "raw", "orders", Analyst()).AsTask());
     }
@@ -369,7 +369,7 @@ public sealed class IcebergRestCatalogSecurityTests
             _metadataRepo,
             optionsWithRebac,
             NullLogger<IcebergRestCatalogFederationService>.Instance,
-            new ConsentResolutionService(),
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, new ConsentResolutionService(),
             consentRepo,
             rebacEvaluator: rebac);
 

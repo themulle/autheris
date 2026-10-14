@@ -127,7 +127,7 @@ public sealed class RepeatedReviewRound3Tests
             auditLogRepository: Substitute.For<IAuditLogRepository>(),
             tableRepository: metaRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(metaRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(options, secretProvider),
             secretProvider: secretProvider,
-            logger: NullLogger<GovernedSqlExecutionService>.Instance);
+            logger: NullLogger<GovernedSqlExecutionService>.Instance, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
@@ -244,7 +244,7 @@ public sealed class RepeatedReviewRound3Tests
         // Architecture 1: the endpoint's single access decision (the real resolver) applies ReBAC on the fully qualified
         // object id (POL-11); the endpoint has no check of its own.
         var accessResolver = new DefaultCrossDomainAccessResolver(
-            Substitute.For<IConsentRepository>(), Substitute.For<IConsentResolutionService>(), options: options, rebacEvaluator: rebac);
+            Substitute.For<IConsentRepository>(), Substitute.For<IConsentResolutionService>(), global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, options: options, rebacEvaluator: rebac);
 
         await DuckDbOlapEndpoints.HandleOlapQueryAsync(
             context, engine, metadataRepo, connectorRegistry, accessResolver, masking, options, NullLoggerFactory.Instance);

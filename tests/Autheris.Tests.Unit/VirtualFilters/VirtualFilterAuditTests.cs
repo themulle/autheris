@@ -44,7 +44,7 @@ public sealed class VirtualFilterAuditTests
             .Returns(TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
         var audit = Substitute.For<IAuditLogRepository>();
         var service = new GatewayExecutionService(metadata, consents, audit, resolution, Substitute.For<IConsentCacheService>(), Substitute.For<IColumnMaskingProvider>(),
-            options: Options.Create(new GatewayOptions()), dataSourceExecutors: [], mandatoryFilters: new FixedOutcome(Applied));
+            options: Options.Create(new GatewayOptions()), dataSourceExecutors: [], mandatoryFilters: new FixedOutcome(Applied), policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
         var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-LWE-DAVID"), new Claim("tenant_id", "tenant_lwe")], "Test"));
 
         await Should.ThrowAsync<System.Exception>(() => service.ExecuteTableQueryAsync(user, table.Identifier, 10, 0));   // no executor registered

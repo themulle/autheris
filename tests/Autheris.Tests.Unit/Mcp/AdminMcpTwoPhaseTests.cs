@@ -358,7 +358,7 @@ public sealed class AdminMcpTwoPhaseTests
             registry,
             Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } }),
             NullLogger<AiDataGuardrailService>.Instance,
-            accessPlanningService: _service);
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, accessPlanningService: _service);
 
         var nonAdminSession = new McpSessionContext(
             SessionId: "sess-user-1",
@@ -398,7 +398,7 @@ public sealed class AdminMcpTwoPhaseTests
             registry,
             Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } }),
             NullLogger<AiDataGuardrailService>.Instance,
-            accessPlanningService: _service);
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, accessPlanningService: _service);
 
         var adminSession = new McpSessionContext(
             SessionId: "sess-admin-1",

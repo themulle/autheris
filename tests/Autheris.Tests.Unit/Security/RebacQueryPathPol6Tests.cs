@@ -85,7 +85,7 @@ public sealed class RebacQueryPathPol6Tests
             cache,
             Substitute.For<IColumnMaskingProvider>(),
             options: Options.Create(options),
-            rebacEvaluator: evaluator);
+            rebacEvaluator: evaluator, policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
     }
 
     private static GovernedSqlExecutionService CreateWebSqlService(GatewayOptions options, IRebacEvaluator? evaluator)
@@ -111,7 +111,7 @@ public sealed class RebacQueryPathPol6Tests
             environment: env,
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: consents,
-            rebacEvaluator: evaluator);
+            rebacEvaluator: evaluator, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
     }
 
     [Fact]

@@ -197,7 +197,7 @@ public class ProcedureEndpointTests
         {
             Audit.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(AuditEntries.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
             return new GovernedProcedureExecutionService(
-                Registry, Invoker, Options.Create(new GatewayOptions()), Audit, Tables, Consents, Resolution, Masking);
+                Registry, Invoker, Options.Create(new GatewayOptions()), Audit, Tables, Consents, Resolution, Masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
         }
     }
 
@@ -438,7 +438,7 @@ public class ProcedureEndpointTests
         var f = Active();
         f.Audit.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).Returns(Task.FromException(new IOException("audit down")));
         var svc = new GovernedProcedureExecutionService(
-            f.Registry, f.Invoker, Options.Create(new GatewayOptions()), f.Audit, f.Tables, f.Consents, f.Resolution, f.Masking);
+            f.Registry, f.Invoker, Options.Create(new GatewayOptions()), f.Audit, f.Tables, f.Consents, f.Resolution, f.Masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         await Should.ThrowAsync<IOException>(() =>
             svc.ExecuteAsync("get_orders", new Dictionary<string, object?> { ["customer_id"] = 7 }, User(), Tenant));
@@ -450,7 +450,7 @@ public class ProcedureEndpointTests
         var f = Active();
         Should.Throw<ArgumentNullException>(() =>
             new GovernedProcedureExecutionService(
-                f.Registry, f.Invoker, Options.Create(new GatewayOptions()), audit: null!, f.Tables, f.Consents, f.Resolution, f.Masking));
+                f.Registry, f.Invoker, Options.Create(new GatewayOptions()), audit: null!, f.Tables, f.Consents, f.Resolution, f.Masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance));
     }
 
     [Fact]

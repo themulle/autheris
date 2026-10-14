@@ -406,7 +406,7 @@ public sealed class SecurityReviewG5Tests : IDisposable
                 : TableAccessDecision.Denied(OrdersId, "abac")));
         var svc = new IcebergRestCatalogFederationService(
             Substitute.For<IIcebergMetadataReader>(), metaRepo, Options.Create(new GatewayOptions()),
-            NullLogger<IcebergRestCatalogFederationService>.Instance, new Autheris.Application.Services.ConsentResolutionService(), consentRepo, policy);
+            NullLogger<IcebergRestCatalogFederationService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, new Autheris.Application.Services.ConsentResolutionService(), consentRepo, policy);
         return (svc, policy);
     }
 

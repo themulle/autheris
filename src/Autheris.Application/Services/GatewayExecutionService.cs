@@ -576,7 +576,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     internal TableAccessPolicy AccessPolicy() =>
         new(_consentRepository, _resolutionService,
             _cacheService,
-            _policyEnforcementService ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+            _policyEnforcementService ?? throw new InvalidOperationException("IPolicyEnforcementService is not configured; refusing to evaluate table access without policy enforcement (fail-closed)."),
             _rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             _clientIpResolver,
             _options ?? new GatewayOptions(),

@@ -60,7 +60,7 @@ public sealed class SecurityReviewMcpHighTests
             new McpToolRegistry(Options.Create(new GatewayOptions()), new NoDemo()),
             Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } }),
             NullLogger<AiDataGuardrailService>.Instance,
-            queryExecutor: executor,
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, queryExecutor: executor,
             policyEnforcementService: policy,
             tableMetadataRepository: metadataRepo,
             accessPlanningService: planning);
@@ -131,7 +131,7 @@ public sealed class SecurityReviewMcpHighTests
         var options = Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = true }, Mcp = new McpOptions { Enabled = true } });
         var guardrail = new AiDataGuardrailService(
             new McpToolRegistry(Options.Create(new GatewayOptions()), new NoDemo()), options,
-            NullLogger<AiDataGuardrailService>.Instance, queryExecutor: Executor(), policyEnforcementService: policy);
+            NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, queryExecutor: Executor(), policyEnforcementService: policy);
 
         var result = await guardrail.ExecuteToolWithGuardrailAsync(
             new McpToolCallRequest("query_sql", SqlArgs("SELECT * FROM sales.public.pub p JOIN sales.public.secret s ON s.id = p.id")), Session());

@@ -31,13 +31,6 @@ public sealed class EuAiActAuditExporter : IEuAiActAuditExporter
 
     public EuAiActAuditExporter(
         IDifferentialPrivacyEngine dpEngine,
-        IAuditChainExportSource? auditSource = null)
-        : this(dpEngine, Autheris.Application.Audit.NullAuditLogRepository.Instance, auditSource)
-    {
-    }
-
-    public EuAiActAuditExporter(
-        IDifferentialPrivacyEngine dpEngine,
         IAuditLogRepository auditRepo,
         IAuditChainExportSource? auditSource = null)
     {

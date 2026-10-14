@@ -89,6 +89,7 @@ public sealed class CatalogListingVisibilityTests
         Tables(),
         Options.Create(new GatewayOptions()),
         NullLogger<IcebergRestCatalogFederationService>.Instance,
+        global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
         new ConsentResolutionService(),
         consents);
 

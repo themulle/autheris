@@ -70,7 +70,7 @@ public sealed class ProcedureVirtualFilterTests
             return new GovernedProcedureExecutionService(
                 Registry, Invoker, Options.Create(options ?? new GatewayOptions()), Audit, Tables,
                 withConsents ? Consents : null, withConsents ? Resolution : null, masking: null,
-                policyEnforcement: null, rowScope: RowScope, mandatoryFilters: resolver);
+                policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, rowScope: RowScope, mandatoryFilters: resolver);
         }
     }
 

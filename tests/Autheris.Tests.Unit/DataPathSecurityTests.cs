@@ -54,7 +54,7 @@ public class DataPathSecurityTests : IDisposable
             _maskingProvider,
             new ChunkedQueryExecutor(500),
             gatewayOptions,
-            dataSourceExecutors: [sqlExecutor]);
+            dataSourceExecutors: [sqlExecutor], policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
         _query = new Query();
     }
 

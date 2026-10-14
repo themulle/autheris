@@ -241,7 +241,7 @@ public sealed class RestDatasetPolicySpliceTests
         var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
         var service = new GovernedSqlExecutionService(
-            Options.Create(options), executionGuard: GovernedTestSupport.Guard, policyEnforcement: casbin, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
+            Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard, policyEnforcement: casbin, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null, clientIpResolver: null, environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: repo, secretProvider: null);
         await service.RewriteSqlAsync("SELECT \"id\", \"name\" FROM default.dbo.customers LIMIT 11", user, new TenantId(TenantValue));
@@ -288,7 +288,7 @@ public sealed class RestDatasetPolicySpliceTests
         var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
         var service = new GovernedSqlExecutionService(
-            Options.Create(Options_()), executionGuard: GovernedTestSupport.Guard, policyEnforcement: null, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
+            Options.Create(Options_()), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null, clientIpResolver: null, environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: repo, secretProvider: null);
 
@@ -447,7 +447,7 @@ public sealed class RestDatasetPolicySpliceTests
             DataSources = new SqlDataSourceOptions { RequireTenantColumn = true }
         };
         var service = new GovernedSqlExecutionService(
-            Options.Create(options), executionGuard: GovernedTestSupport.Guard, policyEnforcement: null, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
+            Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null, clientIpResolver: null, environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: repo, secretProvider: null);
         var rewritten = await service.CompileAsync(emitted, Alice(), new TenantId(TenantValue));

@@ -36,7 +36,7 @@ public sealed class EuAiActArticle10ComplianceSecurityTests
                 LastResetUtc: DateTimeOffset.UtcNow
             ));
 
-        var exporter = new EuAiActAuditExporter(_dpEngine, _auditSource);
+        var exporter = new EuAiActAuditExporter(_dpEngine, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, _auditSource);
 
         // Act
         var certificate = await exporter.GenerateCertificateAsync(tenantId);
@@ -71,7 +71,7 @@ public sealed class EuAiActArticle10ComplianceSecurityTests
         _dpEngine.GetBudgetAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(new PrivacyBudget(tenantId, 10.0, 0.0, DateTimeOffset.UtcNow));
 
-        var exporter = new EuAiActAuditExporter(_dpEngine, _auditSource);
+        var exporter = new EuAiActAuditExporter(_dpEngine, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, _auditSource);
 
         // Act
         var certificate = await exporter.GenerateCertificateAsync(tenantId);

@@ -30,14 +30,6 @@ public sealed class DifferentialPrivacyEngine : IDifferentialPrivacyEngine
     private readonly ILogger<DifferentialPrivacyEngine> _logger;
 
     public DifferentialPrivacyEngine(
-        IDistributedClusterStateProvider? clusterState = null,
-        TimeProvider? timeProvider = null,
-        ILogger<DifferentialPrivacyEngine>? logger = null)
-        : this(Autheris.Application.Audit.NullAuditLogRepository.Instance, clusterState, timeProvider, logger)
-    {
-    }
-
-    public DifferentialPrivacyEngine(
         IDistributedClusterStateProvider clusterState,
         IAuditLogRepository auditLog)
         : this(auditLog, clusterState)

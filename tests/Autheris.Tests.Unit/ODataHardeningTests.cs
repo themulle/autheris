@@ -94,7 +94,7 @@ public sealed class ODataHardeningTests
             cache,
             Substitute.For<IColumnMaskingProvider>(),
             options: Options.Create(new GatewayOptions()),
-            dataSourceExecutors: [executor]);
+            dataSourceExecutors: [executor], policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         return (service, auditLog, executor);
     }

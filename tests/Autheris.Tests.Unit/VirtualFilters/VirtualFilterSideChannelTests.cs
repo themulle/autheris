@@ -96,7 +96,7 @@ public sealed class VirtualFilterSideChannelTests
             .Returns(Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>()));
         var service = new IcebergRestCatalogFederationService(
             Substitute.For<IIcebergMetadataReader>(), metadata, Options.Create(new GatewayOptions()), NullLogger<IcebergRestCatalogFederationService>.Instance,
-            AllowAll(), consents, mandatoryFilters: new FixedOutcome(Outcome(outcome)));
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, AllowAll(), consents, mandatoryFilters: new FixedOutcome(Outcome(outcome)));
         var analyst = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "analyst"), new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ANALYST")], "Bearer"));
 
         if (delivered)
