@@ -110,6 +110,11 @@ gateway:
     instanceName: "Autheris:"
     existingSecret: "autheris-redis-secrets"
     configurationSecretKey: "configuration"
+    # SR-L-10: token revocation lookups fail closed (HTTP 503) when Redis is unreachable. This is the default outside
+    # Development; uncomment and set to false to prefer availability over security during Redis outages.
+    # failClosedOnRevocationLookupError: false
+    # Tokens issued less than this many seconds ago are still accepted while the lookup fails (0 disables the grace).
+    revocationLookupGraceSeconds: 60
   
   # Security & Masking
   security:

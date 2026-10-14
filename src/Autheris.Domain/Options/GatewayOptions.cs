@@ -745,6 +745,23 @@ public sealed class RedisOptions
     [Range(100, 10000)] public int SyncTimeoutMs { get; init; } = 1000;
 
     /// <summary>
+    /// SR-L-10: when the Redis revocation lookup fails (Redis unreachable or a lookup faults) and the token is not
+    /// revoked locally, deny the request (HTTP 503) instead of accepting it. <c>null</c> (default) resolves to
+    /// <c>true</c> outside Development and <c>false</c> in Development. Set <c>false</c> explicitly to prefer
+    /// availability over security during Redis outages.
+    /// </summary>
+    public bool? FailClosedOnRevocationLookupError { get; init; }
+
+    /// <summary>
+    /// SR-L-10: with the fail-closed policy active, a token issued less than this many seconds ago is still accepted
+    /// when the lookup fails (it cannot have been revoked on another node before the outage began). 0 disables the grace.
+    /// </summary>
+    [Range(0, 3600)] public int RevocationLookupGraceSeconds { get; init; } = 60;
+
+    /// <summary>Resolves <see cref="FailClosedOnRevocationLookupError"/> for the given environment.</summary>
+    public bool ResolveFailClosedOnRevocationLookupError(bool isDevelopment) => FailClosedOnRevocationLookupError ?? !isDevelopment;
+
+    /// <summary>
     /// SEC H-01: Secret-Referenz für das Redis-Passwort (außerhalb Development Pflicht, falls nicht im Verbindungsstring).
     /// </summary>
     public string? PasswordSecretRef { get; init; }

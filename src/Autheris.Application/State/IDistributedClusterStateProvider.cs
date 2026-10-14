@@ -15,6 +15,10 @@ public enum BudgetConsumeOutcome
 /// K-K14: Pluggable Distributed Cluster State Provider for Multi-Node Deployments.
 /// Provides distributed KV storage, pub/sub messaging for instant cache invalidation,
 /// and distributed resource locks for cluster-wide consistency.
+/// Contract: <see cref="GetAsync{T}"/> returns <c>default</c> only when the key is absent. Infrastructure failures of
+/// <c>GetAsync</c>, <c>SetAsync</c>, <c>RemoveAsync</c>, <c>PublishEventAsync</c> and <c>TryAcquireLockAsync</c> throw
+/// <see cref="ClusterStateUnavailableException"/>; a <c>null</c> lock lease means "busy" only. Counters and budgets keep
+/// their explicit unavailable signals (<c>null</c> / <see cref="BudgetConsumeOutcome.StoreUnavailable"/>).
 /// </summary>
 public interface IDistributedClusterStateProvider
 {
@@ -26,7 +30,7 @@ public interface IDistributedClusterStateProvider
 
     /// <summary>
     /// Atomically adds <paramref name="delta"/> to a cluster-wide counter and returns the new value, or null when the
-    /// shared store is unreachable (callers must then fall back to local accounting). The TTL is set when the counter is created.
+    /// shared store is unreachable (<c>null</c> means unavailable, never "zero"; callers must fall back to local accounting or fail closed). The TTL is set when the counter is created.
     /// </summary>
     ValueTask<long?> IncrementAsync(string key, long delta, TimeSpan ttl, CancellationToken ct = default);
 
@@ -49,7 +53,7 @@ public interface IDistributedClusterStateProvider
     IAsyncDisposable SubscribeAsync<T>(string channel, Func<T, ValueTask> handler, CancellationToken ct = default);
 
     /// <summary>
-    /// Tries to acquire a distributed lock for atomicity across nodes. Returns an IAsyncDisposable lease or null if busy.
+    /// Tries to acquire a distributed lock for atomicity across nodes. Returns an IAsyncDisposable lease, or null only if the lock is busy.
     /// </summary>
     ValueTask<IAsyncDisposable?> TryAcquireLockAsync(string resourceKey, TimeSpan expiry, CancellationToken ct = default);
 }

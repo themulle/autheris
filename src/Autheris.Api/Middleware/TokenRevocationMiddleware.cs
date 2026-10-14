@@ -23,7 +23,32 @@ public sealed class TokenRevocationMiddleware
     {
         if (context.User?.Identity?.IsAuthenticated == true && revocationService != null)
         {
-            if (await revocationService.IsRevokedAsync(context.User, context.RequestAborted).ConfigureAwait(false))
+            bool revoked;
+            try
+            {
+                revoked = await revocationService.IsRevokedAsync(context.User, context.RequestAborted).ConfigureAwait(false);
+            }
+            catch (TokenRevocationUnavailableException)
+            {
+                // SR-L-10: fail closed. The revocation status is unknown, so the pipeline must not run.
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                context.Response.Headers["Retry-After"] = "5";
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonSerializer.Serialize(new
+                {
+                    errors = new[]
+                    {
+                        new
+                        {
+                            message = "Token revocation status is temporarily unavailable.",
+                            extensions = new { code = "TOKEN_REVOCATION_UNAVAILABLE" }
+                        }
+                    }
+                }), context.RequestAborted).ConfigureAwait(false);
+                return;
+            }
+
+            if (revoked)
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 context.Response.ContentType = "application/json";

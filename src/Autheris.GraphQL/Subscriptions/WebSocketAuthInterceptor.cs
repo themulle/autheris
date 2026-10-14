@@ -103,11 +103,20 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
 
                 // SEC M-14 (GAP-B): Revoked tokens are rejected at connect time and re-checked periodically.
                 var revocationService = ResolveRevocationService(httpContext);
-                if (revocationService != null &&
-                    await revocationService.IsRevokedAsync(validatedPrincipal, cancellationToken).ConfigureAwait(false))
+                if (revocationService != null)
                 {
-                    _logger.LogWarning("WebSocket connection_init rejected: Token revoked.");
-                    return ConnectionStatus.Reject("Authentication token revoked");
+                    var revocationCheck = await CheckRevocationAtConnectAsync(revocationService, validatedPrincipal, cancellationToken).ConfigureAwait(false);
+                    if (revocationCheck == ConnectRevocationState.Unavailable)
+                    {
+                        _logger.LogWarning("WebSocket connection_init rejected: Token revocation status unavailable (fail-closed).");
+                        return ConnectionStatus.Reject("Authentication token revocation status unavailable");
+                    }
+
+                    if (revocationCheck == ConnectRevocationState.Revoked)
+                    {
+                        _logger.LogWarning("WebSocket connection_init rejected: Token revoked.");
+                        return ConnectionStatus.Reject("Authentication token revoked");
+                    }
                 }
 
                 var tokenTenant = validatedPrincipal.GetTenantId();
@@ -205,11 +214,20 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
                 }
 
                 var revocationService = ResolveRevocationService(httpContext);
-                if (revocationService != null &&
-                    await revocationService.IsRevokedAsync(httpUser, cancellationToken).ConfigureAwait(false))
+                if (revocationService != null)
                 {
-                    _logger.LogWarning("WebSocket connection_init rejected: HTTP authentication token revoked.");
-                    return ConnectionStatus.Reject("Authentication token revoked");
+                    var revocationCheck = await CheckRevocationAtConnectAsync(revocationService, httpUser, cancellationToken).ConfigureAwait(false);
+                    if (revocationCheck == ConnectRevocationState.Unavailable)
+                    {
+                        _logger.LogWarning("WebSocket connection_init rejected: HTTP authentication revocation status unavailable (fail-closed).");
+                        return ConnectionStatus.Reject("Authentication token revocation status unavailable");
+                    }
+
+                    if (revocationCheck == ConnectRevocationState.Revoked)
+                    {
+                        _logger.LogWarning("WebSocket connection_init rejected: HTTP authentication token revoked.");
+                        return ConnectionStatus.Reject("Authentication token revoked");
+                    }
                 }
 
                 ScheduleSessionExpiry(httpContext, expiry);
@@ -333,6 +351,28 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
         httpContext.Response.RegisterForDispose(expiryCts);
     }
 
+    private enum ConnectRevocationState
+    {
+        NotRevoked,
+        Revoked,
+        Unavailable
+    }
+
+    private static async Task<ConnectRevocationState> CheckRevocationAtConnectAsync(
+        ITokenRevocationService revocationService, ClaimsPrincipal principal, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await revocationService.IsRevokedAsync(principal, cancellationToken).ConfigureAwait(false)
+                ? ConnectRevocationState.Revoked
+                : ConnectRevocationState.NotRevoked;
+        }
+        catch (TokenRevocationUnavailableException)
+        {
+            return ConnectRevocationState.Unavailable;
+        }
+    }
+
     private ITokenRevocationService? ResolveRevocationService(HttpContext? httpContext)
         => _revocationService ?? httpContext?.RequestServices?.GetService<ITokenRevocationService>();
 
@@ -412,6 +452,16 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
             catch (OperationCanceledException) when (_token.IsCancellationRequested)
             {
                 // Connection closed while checking.
+            }
+            catch (TokenRevocationUnavailableException ex)
+            {
+                // SR-L-10 (minimal shim until SR-L-18): fail closed by closing the connection.
+                if (!_disposed)
+                {
+                    _logger.LogWarning(ex, "WebSocket session closed: token revocation status unavailable (fail-closed).");
+                    _httpContext.Abort();
+                    return true;
+                }
             }
             catch (Exception ex)
             {

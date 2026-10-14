@@ -51,7 +51,8 @@ public static class SubgraphSecurityValidator
 
     /// <summary>
     /// Same as <see cref="ValidateSignature"/> but records the nonce in the distributed cluster state provider (when given and
-    /// reachable) so replays are detected across nodes; falls back to the process-local cache otherwise.
+    /// reachable) so replays are detected across nodes; falls back to the process-local cache when the store is unavailable
+    /// unless <paramref name="topology"/> reports a cluster-wide state, in which case the request is rejected.
     /// </summary>
     public static async Task<bool> ValidateSignatureAsync(
         string? tenant,
@@ -69,7 +70,8 @@ public static class SubgraphSecurityValidator
         string? version = null,
         string? bodySha256 = null,
         bool allowLegacy = false,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        IClusterStateTopology? topology = null)
     {
         var drift = maxDrift ?? TimeSpan.FromSeconds(60);
         if (!VerifyCore(tenant, userSid, timestampStr, nonce, signature, signingKey, drift, subgraph, roles, method, path, version, bodySha256, allowLegacy, out var now))
@@ -84,6 +86,9 @@ public static class SubgraphSecurityValidator
 
         if (clusterState != null)
         {
+            // WP-ARC-A-09: with a cluster-wide topology the shared nonce registry is the replay defense, so an unavailable
+            // store rejects the request (fail closed). Without it the process-local cache above is all there is.
+            var failClosed = topology?.IsClusterWide == true;
             try
             {
                 var ttl = drift * 2 + TimeSpan.FromSeconds(5);
@@ -92,10 +97,20 @@ public static class SubgraphSecurityValidator
                 {
                     return false;
                 }
+
+                if (count is null && failClosed)
+                {
+                    return false;
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // Shared store unavailable: the local cache above remains the replay defense.
+                if (failClosed)
+                {
+                    return false;
+                }
+
+                // Shared store unavailable and not cluster-wide: the local cache above remains the replay defense.
             }
         }
 

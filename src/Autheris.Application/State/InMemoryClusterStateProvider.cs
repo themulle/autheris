@@ -17,6 +17,7 @@ public class InMemoryClusterStateProvider : IDistributedClusterStateProvider
     private readonly ConcurrentDictionary<string, Entry> _store = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, ConcurrentBag<Delegate>> _subscriptions = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new(StringComparer.Ordinal);
+    private readonly object _budgetLock = new();
 
     public ValueTask<T?> GetAsync<T>(string key, CancellationToken ct = default)
     {
@@ -58,29 +59,30 @@ public class InMemoryClusterStateProvider : IDistributedClusterStateProvider
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
 
-        long result = 0;
-        var expiresAt = (ttl <= TimeSpan.Zero || ttl == TimeSpan.MaxValue) ? DateTimeOffset.MaxValue : DateTimeOffset.UtcNow.Add(ttl);
-        _store.AddOrUpdate(
-            key,
-            _ =>
+        // All numeric operations share _budgetLock so a concurrent increment and budget consume cannot lose updates.
+        lock (_budgetLock)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var newExpiry = (ttl <= TimeSpan.Zero || ttl == TimeSpan.MaxValue) ? DateTimeOffset.MaxValue : now.Add(ttl);
+            long result;
+            DateTimeOffset expiresAt;
+            if (_store.TryGetValue(key, out var existing) &&
+                existing.ExpiresAt > now &&
+                long.TryParse(existing.Serialized, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var current))
+            {
+                result = current + delta;
+                expiresAt = existing.ExpiresAt;
+            }
+            else
             {
                 result = delta;
-                return new Entry(delta.ToString(System.Globalization.CultureInfo.InvariantCulture), expiresAt);
-            },
-            (_, existing) =>
-            {
-                var live = existing.ExpiresAt > DateTimeOffset.UtcNow;
-                var current = live ? long.Parse(existing.Serialized, System.Globalization.CultureInfo.InvariantCulture) : 0;
-                result = current + delta;
-                return new Entry(
-                    result.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    live ? existing.ExpiresAt : expiresAt);
-            });
+                expiresAt = newExpiry;
+            }
 
-        return ValueTask.FromResult<long?>(result);
+            _store[key] = new Entry(result.ToString(System.Globalization.CultureInfo.InvariantCulture), expiresAt);
+            return ValueTask.FromResult<long?>(result);
+        }
     }
-
-    private readonly object _budgetLock = new();
 
     public ValueTask<(BudgetConsumeOutcome Outcome, long ConsumedAfter)> TryConsumeBudgetAsync(
         string key, long cost, long limit, TimeSpan ttl, CancellationToken ct = default)
@@ -128,7 +130,14 @@ public class InMemoryClusterStateProvider : IDistributedClusterStateProvider
             {
                 if (del is Func<T, ValueTask> handler)
                 {
-                    await handler(payload).ConfigureAwait(false);
+                    try
+                    {
+                        await handler(payload).ConfigureAwait(false);
+                    }
+                    catch (Exception)
+                    {
+                        // A failing subscriber must not prevent delivery to the other subscribers or fail the publisher.
+                    }
                 }
             }
         }

@@ -16,6 +16,9 @@ public interface ITokenRevocationService
 {
     /// <summary>
     /// Returns true if the principal's token was revoked (by <c>jti</c> or by subject).
+    /// Implementations backed by a remote store may throw <see cref="TokenRevocationUnavailableException"/> when the
+    /// revocation status cannot be determined and the deployment chose to fail closed; callers must then deny the
+    /// request (HTTP 503) or terminate the session, never treat the token as valid.
     /// </summary>
     ValueTask<bool> IsRevokedAsync(ClaimsPrincipal principal, CancellationToken ct = default);
 
@@ -24,6 +27,28 @@ public interface ITokenRevocationService
     /// <paramref name="until"/>, which should be the (maximum) expiry of the affected tokens.
     /// </summary>
     Task RevokeAsync(string subjectOrJti, DateTimeOffset until, CancellationToken ct = default);
+}
+
+/// <summary>
+/// SR-L-10: the revocation status of a token could not be determined (for example Redis is unreachable) while the
+/// fail-closed policy (<c>Caching:Redis:FailClosedOnRevocationLookupError</c>) is active.
+/// </summary>
+public sealed class TokenRevocationUnavailableException : Exception
+{
+    public TokenRevocationUnavailableException()
+        : base("The token revocation status could not be determined.")
+    {
+    }
+
+    public TokenRevocationUnavailableException(string message)
+        : base(message)
+    {
+    }
+
+    public TokenRevocationUnavailableException(string message, Exception? innerException)
+        : base(message, innerException)
+    {
+    }
 }
 
 /// <summary>
