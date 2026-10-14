@@ -42,7 +42,28 @@ public sealed class RedisClusterStateProvider : IDistributedClusterStateProvider
         _prefix = instance + "state:";
     }
 
+    private static readonly Prometheus.Counter StateFailures = Prometheus.Metrics.CreateCounter(
+        "autheris_cluster_state_failure_total", "Number of infrastructure failures of the Redis cluster state store",
+        new Prometheus.CounterConfiguration { LabelNames = ["operation"] });
+
+    private static readonly Prometheus.Counter SubscriberHandlerFailures = Prometheus.Metrics.CreateCounter(
+        "autheris_cluster_state_handler_failure_total", "Number of failed cluster event handler invocations");
+
     private string BuildKey(string key) => _prefix + key;
+
+    /// <summary>
+    /// Infrastructure failures (connection, timeout, Redis server errors) are surfaced as
+    /// <see cref="ClusterStateUnavailableException"/>; anything else (programming errors, cancellation) is not masked.
+    /// </summary>
+    private static bool IsInfrastructureFailure(Exception ex) =>
+        ex is RedisException or TimeoutException or System.IO.IOException or System.Net.Sockets.SocketException or ObjectDisposedException;
+
+    private ClusterStateUnavailableException Unavailable(string operation, string key, Exception ex)
+    {
+        StateFailures.WithLabels(operation).Inc();
+        _logger.LogWarning(ex, "Redis cluster state operation {Operation} failed for key {Key}.", operation, key);
+        return new ClusterStateUnavailableException(operation, key, ex);
+    }
 
     public async ValueTask<T?> GetAsync<T>(string key, CancellationToken ct = default)
     {
@@ -58,10 +79,9 @@ public sealed class RedisClusterStateProvider : IDistributedClusterStateProvider
 
             return JsonSerializer.Deserialize<T>(val.ToString());
         }
-        catch (Exception ex)
+        catch (Exception ex) when (IsInfrastructureFailure(ex))
         {
-            _logger.LogWarning(ex, "Failed to read key {Key} from Redis state store.", key);
-            return default;
+            throw Unavailable("get", key, ex);
         }
     }
 
@@ -75,9 +95,9 @@ public sealed class RedisClusterStateProvider : IDistributedClusterStateProvider
             var serialized = JsonSerializer.Serialize(value);
             await db.StringSetAsync((RedisKey)BuildKey(key), (RedisValue)serialized, ttl).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (IsInfrastructureFailure(ex))
         {
-            _logger.LogWarning(ex, "Failed to set key {Key} in Redis state store.", key);
+            throw Unavailable("set", key, ex);
         }
     }
 
@@ -89,10 +109,9 @@ public sealed class RedisClusterStateProvider : IDistributedClusterStateProvider
             var db = _multiplexer.GetDatabase();
             return await db.KeyDeleteAsync((RedisKey)BuildKey(key)).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (IsInfrastructureFailure(ex))
         {
-            _logger.LogWarning(ex, "Failed to delete key {Key} from Redis state store.", key);
-            return false;
+            throw Unavailable("remove", key, ex);
         }
     }
 
@@ -112,8 +131,10 @@ public sealed class RedisClusterStateProvider : IDistributedClusterStateProvider
 
             return value;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (IsInfrastructureFailure(ex))
         {
+            // Documented contract: null means "store unavailable" for counters (never "zero").
+            StateFailures.WithLabels("increment").Inc();
             _logger.LogWarning(ex, "Failed to increment counter {Key} in Redis state store.", key);
             return null;
         }
@@ -166,8 +187,9 @@ end
 
             return (BudgetConsumeOutcome.StoreUnavailable, 0);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (IsInfrastructureFailure(ex))
         {
+            StateFailures.WithLabels("consume_budget").Inc();
             _logger.LogError(ex, "Failed to execute atomic budget consume script for key {Key} in Redis state store.", key);
             return (BudgetConsumeOutcome.StoreUnavailable, 0);
         }
@@ -182,9 +204,9 @@ end
             var serialized = JsonSerializer.Serialize(payload);
             await sub.PublishAsync(RedisChannel.Literal(BuildKey(channel)), (RedisValue)serialized).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (IsInfrastructureFailure(ex))
         {
-            _logger.LogWarning(ex, "Failed to publish cluster event to channel {Channel}.", channel);
+            throw Unavailable("publish", channel, ex);
         }
     }
 
@@ -204,7 +226,7 @@ end
                 var payload = JsonSerializer.Deserialize<T>(msg.ToString());
                 if (payload != null)
                 {
-                    _ = handler(payload).AsTask();
+                    _ = InvokeHandlerAsync(handler, payload, channel);
                 }
             }
             catch (Exception ex)
@@ -214,6 +236,19 @@ end
         });
 
         return new RedisSubscriptionLease(sub, redisChannel);
+    }
+
+    private async Task InvokeHandlerAsync<T>(Func<T, ValueTask> handler, T payload, string channel)
+    {
+        try
+        {
+            await handler(payload).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            SubscriberHandlerFailures.Inc();
+            _logger.LogError(ex, "Cluster event handler failed for channel {Channel}.", channel);
+        }
     }
 
     public async ValueTask<IAsyncDisposable?> TryAcquireLockAsync(string resourceKey, TimeSpan expiry, CancellationToken ct = default)
@@ -233,10 +268,10 @@ end
 
             return new RedisLockLease(db, lockKey, lockValue);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (IsInfrastructureFailure(ex))
         {
-            _logger.LogWarning(ex, "Failed to acquire distributed lock for resource {Resource}.", resourceKey);
-            return null;
+            // null is reserved for "lock busy"; an unreachable store must not look like a busy lock.
+            throw Unavailable("lock", resourceKey, ex);
         }
     }
 

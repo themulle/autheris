@@ -129,6 +129,13 @@ If the Redis cluster becomes unavailable:
 - Queries continue executing without dropping client requests or returning 500 errors.
 - **Token revocations are only enforced locally on the node that received them while Redis is down** (revocations issued on other nodes are not visible). Treat a Redis outage as degraded security for token revocation and restore Redis quickly; with PostgreSQL and several replicas Redis is required (startup check), so an outage affects all nodes the same way.
 
+### 3.1.1 Cluster State Contract (absent vs unavailable)
+The shared cluster state (`IDistributedClusterStateProvider`) distinguishes "key absent" from "store unavailable":
+- A read of a missing key returns no value. An infrastructure failure (connection loss, timeout, Redis error) throws `ClusterStateUnavailableException` for reads, writes, deletes, event publishing and lock acquisition. A `null` lock lease only ever means "lock busy". Counters return `null` and budgets return `StoreUnavailable` when the store cannot be reached.
+- Consumers decide explicitly: TOTP secret reads and TOTP replay consumption fail closed (a valid code is rejected while the store is down), MCP session reads and HitL ticket reads treat the remote entry as not found, HitL locks honour `HitLStepUp:FailClosedOnClusterPartition`, FinOps budget enforcement fails closed, federation nonce replay checks reject requests when the topology is cluster-wide. Background singletons (catalog sync, CDC, ITSM) skip the cycle.
+- Every store failure increments `autheris_cluster_state_failure_total{operation}`; failed event handlers increment `autheris_cluster_state_handler_failure_total`. Alert on a sustained rate of the first.
+- The embedded Garnet server is process-local. Startup fails when `HighAvailability:MultiNodeClusterMode` is set or `HighAvailability:Replicas` is greater than 1 while `Caching:Garnet:EnableEmbeddedServer` is true (also when `Caching:Redis:Enabled` is true as well, because the embedded server takes precedence). Use an external Redis/Garnet for multi-replica deployments.
+
 ### 3.2 Recovery
 Once Redis connectivity is restored:
 - L2 cache operations resume automatically.

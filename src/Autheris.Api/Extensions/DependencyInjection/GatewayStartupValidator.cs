@@ -592,6 +592,15 @@ public static class GatewayStartupValidator
         {
             throw new ValidationException("Security violation (E-2): Multi-node cluster mode and more than 1 replica are not allowed with SQLite, because SQLite uses local database files per instance. Configure GovernanceDb.Provider = 'PostgreSql' or 'SqlServer' for cluster operation.");
         }
+
+        // WP-ARC-A-09: an embedded Garnet server lives inside one process and is shared with no other replica, so it cannot
+        // provide cluster-wide state. This also catches EnableEmbeddedServer = true combined with Redis.Enabled = true,
+        // where the embedded server silently wins the registration.
+        if ((options.HighAvailability.MultiNodeClusterMode || options.HighAvailability.Replicas > 1) &&
+            options.Caching.Garnet.EnableEmbeddedServer)
+        {
+            throw new ValidationException("NF-HA-02 violation: Multi-node cluster mode or more than one replica requires an external Redis/Garnet. The embedded Garnet server (Caching.Garnet.EnableEmbeddedServer = true) is local to one process and cannot provide cluster-wide state; disable it and configure Caching.Redis.");
+        }
     }
 
     /// <summary>

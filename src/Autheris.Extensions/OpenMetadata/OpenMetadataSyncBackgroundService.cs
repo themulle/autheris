@@ -55,7 +55,17 @@ public sealed class OpenMetadataSyncBackgroundService : BackgroundService
         IAsyncDisposable? syncLock = null;
         if (_clusterState != null)
         {
-            syncLock = await _clusterState.TryAcquireLockAsync("catalog:openmetadata:sync", leaseDuration, stoppingToken).ConfigureAwait(false);
+            try
+            {
+                syncLock = await _clusterState.TryAcquireLockAsync("catalog:openmetadata:sync", leaseDuration, stoppingToken).ConfigureAwait(false);
+            }
+            catch (Autheris.Application.State.ClusterStateUnavailableException ex)
+            {
+                // The cluster state is unavailable: skip this cycle (never run unguarded, never crash the host).
+                _logger.LogWarning(ex, "OpenMetadata sync skipped: cluster state unavailable.");
+                return;
+            }
+
             if (syncLock == null)
             {
                 _logger.LogDebug("OpenMetadata sync lock held by another cluster replica; skipping sync cycle.");
