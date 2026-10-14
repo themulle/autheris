@@ -66,5 +66,5 @@ public interface IAccessPlanningService
     /// <summary>
     /// Retrieves a pending access plan by ID, or null if not found or expired.
     /// </summary>
-    AdminPlanAccessResult? GetPlan(string planId);
+    Task<AdminPlanAccessResult?> GetPlanAsync(string planId, CancellationToken ct = default);
 }
