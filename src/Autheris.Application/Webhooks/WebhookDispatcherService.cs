@@ -69,7 +69,7 @@ public sealed class WebhookDispatcherService : IWebhookDispatcherService
             Time: @event.Timestamp,
             Subject: @event.CorrelationId,
             DataContentType: "application/json",
-            Data: @event,
+            Data: EventRedaction.Sanitize(@event, JsonOptions), // SR-L-15 safety net
             TenantId: @event.TenantId,
             CorrelationId: @event.CorrelationId);
 

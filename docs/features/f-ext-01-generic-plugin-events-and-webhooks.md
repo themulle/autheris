@@ -53,9 +53,9 @@ flowchart TD
   - `AccessPlanCreatedEvent`: Emitted when an access plan is generated.
   - `AccessPlanAppliedEvent`: Emitted when an access plan is confirmed and applied to REBAC policies.
   - `DatasetStateChangedEvent`: Emitted when a dataset is activated, quarantined, or deprecated.
-  - `PolicyDeniedEvent`: Emitted when Casbin ABAC or REBAC rejects an access request.
+  - `PolicyDeniedEvent`: Emitted when Casbin ABAC or REBAC rejects an access request. Carries a stable `ReasonCode` (`POLICY_DENIED`) and never the verbatim denial text (`Reason` holds the same code); full reasons are only written to the audit log.
   - `SecurityAlertEvent`: Emitted when prompt injections, jailbreaks, or brute force attempts are intercepted.
-  - `DocumentDepositedEvent`: Emitted when a document is deposited into the Universal Doc Store.
+  - `DocumentDepositedEvent`: Emitted when a document is deposited into the Universal Doc Store. Carries `RelativePath` (`{appId}/{category}/{docId}`), never an absolute filesystem path. The deprecated `SourceFilePath` property is kept for one release and equals `RelativePath`.
 - **`IGatewayEventBus` (`Autheris.Application.Events`):**
   - Thread-safe pub/sub dispatching events asynchronously to typed subscribers and general listeners.
   - Fault-isolated execution: Subscriber exceptions are caught and logged, preventing any failing plugin from affecting core operations or aborting other subscribers.
@@ -191,6 +191,7 @@ public sealed class CustomSyncActionHandler : IPluginActionHandler
    - Outbound HTTP requests from `WebhookDispatcherService` run with `AddSecureOutboundHandlers(EgressIntegrations.Webhooks)`.
    - Loopback addresses, link-local IPs, cloud metadata endpoints (e.g. AWS IMDS `169.254.169.254`), and unauthorized internal networks are denied by default.
    - Logs and client-visible errors never contain URL userinfo, path, query or resolved IP addresses: destinations are logged as `scheme://host[:port]/` (`UrlRedactor`), and `EgressUrlPolicy` exceptions carry no IP in the message (the address is available in `Exception.Data["ResolvedIp"]` for operator logs).
+   - As defence in depth, `WebhookDispatcherService` passes every event through `EventRedaction.Sanitize`, which replaces any string value that looks like an absolute filesystem path (`/...`, `C:\...`, `\\host\...`) with `[redacted-path]` before it is serialised into the webhook payload.
 3. **Isolated Assembly Loading & Integrity Check:**
    - Plugin DLLs are loaded into isolated `PluginAssemblyLoadContext` instances.
    - In production environments, SHA-256 hash checks against `Gateway:Plugins:TrustedPluginHashes` prevent unauthorized code execution.
