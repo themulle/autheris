@@ -35,6 +35,8 @@ public sealed class MssqlChangeTrackingPollerTests
 
         public IReadOnlyList<string> PrimaryKey { get; set; } = ["Id"];
 
+        public bool PkQueryFails { get; set; }
+
         public long? MinValidVersion { get; set; } = 0;
 
         public long? CurrentVersion { get; set; } = 0;
@@ -43,6 +45,11 @@ public sealed class MssqlChangeTrackingPollerTests
         {
             if (sql.Contains("sys.indexes", StringComparison.Ordinal))
             {
+                if (PkQueryFails)
+                {
+                    throw new InvalidOperationException("transient pk query failure");
+                }
+
                 var pk = new DataTable();
                 pk.Columns.Add("name", typeof(string));
                 foreach (var column in PrimaryKey)
@@ -66,7 +73,11 @@ public sealed class MssqlChangeTrackingPollerTests
             var table = new DataTable();
             table.Columns.Add("SYS_CHANGE_VERSION", typeof(long));
             table.Columns.Add("SYS_CHANGE_OPERATION", typeof(string));
-            table.Columns.Add("PK_Id", typeof(int));
+            foreach (var column in PrimaryKey)
+            {
+                table.Columns.Add("PK_" + column, column == "Id" ? typeof(int) : typeof(string));
+            }
+
             table.Columns.Add("Id", typeof(int));
             table.Columns.Add("Name", typeof(string));
 
@@ -84,7 +95,11 @@ public sealed class MssqlChangeTrackingPollerTests
 
             foreach (var change in selected)
             {
-                table.Rows.Add(change.Version, change.Operation, change.Id, change.Id, "row" + change.Id);
+                var values = new List<object> { change.Version, change.Operation };
+                values.AddRange(PrimaryKey.Select(c => c == "Id" ? (object)change.Id : "k" + change.Id));
+                values.Add(change.Id);
+                values.Add("row" + change.Id);
+                table.Rows.Add(values.ToArray());
             }
 
             return table;
@@ -103,6 +118,18 @@ public sealed class MssqlChangeTrackingPollerTests
 
         public IAsyncEnumerable<CdcEvent> SubscribeAsync(string topic, CancellationToken ct = default) =>
             throw new NotSupportedException();
+    }
+
+    private static MssqlChangeTrackingPoller CreateWith(FakeChangeSource source, IMssqlWatermarkStore store)
+    {
+        var factory = Substitute.For<ISqlConnectionFactory>();
+        factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromResult<DbConnection>(new FakeConnection(source.Respond)));
+        var options = Options.Create(new GatewayOptions
+        {
+            MssqlChangeTracking = new MssqlChangeTrackingOptions { Enabled = true, ConnectionString = "Server=localhost;Database=Test;" }
+        });
+        return new MssqlChangeTrackingPoller(factory, store, new RecordingChannel(), options, NullLogger<MssqlChangeTrackingPoller>.Instance);
     }
 
     private static (MssqlChangeTrackingPoller Poller, InMemoryMssqlWatermarkStore Store, RecordingChannel Channel) Create(
@@ -175,10 +202,12 @@ public sealed class MssqlChangeTrackingPollerTests
     {
         var source = new FakeChangeSource();
         source.Changes.Add(new Change(12, "I", 1));
-        var (poller, store, _) = Create(source);
+        var (poller, store, channel) = Create(source);
         await store.TryAdvanceWatermarkAsync(Table, 5, 9); // a newer lease owner already wrote the watermark
 
         await Should.ThrowAsync<FencingTokenRejectedException>(() => poller.PollTableChangesAsync(Table, 4));
+
+        channel.Published.ShouldBeEmpty(); // a fenced poll publishes nothing
 
         (await store.GetWatermarkAsync(Table)).ShouldBe(5);
     }
@@ -207,6 +236,57 @@ public sealed class MssqlChangeTrackingPollerTests
         third.ShouldBe(0);
         channel.Published.Select(e => e.EventId).Distinct().Count().ShouldBe(6);
         (await store.GetWatermarkAsync(Table)).ShouldBe(11);
+    }
+
+    [Fact]
+    public async Task MinValidVersionNull_ThrowsConfigurationException()
+    {
+        var source = new FakeChangeSource { MinValidVersion = null };
+        var (poller, store, channel) = Create(source);
+        await store.TryAdvanceWatermarkAsync(Table, 5, 1);
+
+        await Should.ThrowAsync<CdcSourceConfigurationException>(() => poller.PollTableChangesAsync(Table, 1));
+
+        channel.Published.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task TransientPrimaryKeyQueryFailure_TakesNormalPath_NotConfigurationError()
+    {
+        var source = new FakeChangeSource { PkQueryFails = true };
+        var (poller, store, channel) = Create(source);
+        await store.TryAdvanceWatermarkAsync(Table, 5, 1);
+
+        var processed = await poller.PollTableChangesAsync(Table, 1);
+
+        processed.ShouldBe(0);
+        channel.Published.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task FirstRun_FencedCommit_ThrowsFencingTokenRejected()
+    {
+        var source = new FakeChangeSource { CurrentVersion = 100 };
+        var (poller, _, _) = Create(source);
+        var store = Substitute.For<IMssqlWatermarkStore>();
+        store.GetWatermarkAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<long?>((long?)null));
+        store.TryAdvanceWatermarkAsync(Arg.Any<TableIdentifier>(), Arg.Any<long>(), Arg.Any<long>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<bool>(false));
+        var fenced = CreateWith(source, store);
+
+        await Should.ThrowAsync<FencingTokenRejectedException>(() => fenced.PollTableChangesAsync(Table, 1));
+    }
+
+    [Fact]
+    public async Task CompositePrimaryKey_EventIdJoinsAllKeyValues()
+    {
+        var source = new FakeChangeSource { PrimaryKey = ["Id", "Region"] };
+        source.Changes.Add(new Change(10, "I", 7));
+        var (poller, store, channel) = Create(source);
+        await store.TryAdvanceWatermarkAsync(Table, 5, 1);
+
+        await poller.PollTableChangesAsync(Table, 1);
+
+        channel.Published.Single().EventId.ShouldEndWith("_10_7|k7");
     }
 
     [Fact]

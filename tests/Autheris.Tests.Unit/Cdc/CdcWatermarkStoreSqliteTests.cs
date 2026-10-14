@@ -94,4 +94,25 @@ public sealed class CdcWatermarkStoreSqliteTests : IDisposable
             (await store.GetWatermarkAsync(Table)).ShouldBe(10);
         }
     }
+
+    [Fact]
+    public async Task AfterClusterStateRestart_NewLeaseTokenCanStillCommit()
+    {
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+        var (repository, store) = NewStore();
+        using (repository)
+        {
+            var before = new Autheris.Application.State.InMemoryClusterStateProvider(time);
+            await using (var lease = await before.TryAcquireLeaseAsync("cdc:mssql:poll", TimeSpan.FromSeconds(30)))
+            {
+                (await store.TryAdvanceWatermarkAsync(Table, 10, lease!.Token)).ShouldBeTrue();
+            }
+
+            time.Advance(TimeSpan.FromSeconds(5));
+            var restarted = new Autheris.Application.State.InMemoryClusterStateProvider(time); // fence counters were lost
+            await using var after = await restarted.TryAcquireLeaseAsync("cdc:mssql:poll", TimeSpan.FromSeconds(30));
+
+            (await store.TryAdvanceWatermarkAsync(Table, 20, after!.Token)).ShouldBeTrue();
+        }
+    }
 }

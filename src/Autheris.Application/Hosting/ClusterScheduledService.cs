@@ -78,35 +78,63 @@ public abstract class ClusterScheduledService<TJob> : BackgroundService
     /// <summary>The current schedule, read from live options once per cycle.</summary>
     protected abstract ClusterSchedule GetSchedule();
 
+    private static readonly TimeSpan MinDisabledRecheck = TimeSpan.FromMinutes(1);
+    private static readonly ClusterSchedule FallbackSchedule =
+        new(false, MinDisabledRecheck, TimeSpan.Zero, MinDisabledRecheck, TimeSpan.Zero);
+
+    private ClusterSchedule _lastSchedule = FallbackSchedule;
+
+    /// <summary>Reads the schedule; a failing options read keeps the previous schedule and never kills the host.</summary>
+    private ClusterSchedule ReadSchedule()
+    {
+        try
+        {
+            _lastSchedule = GetSchedule();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Reading the schedule of scheduled job {Job} failed; the previous schedule stays in effect.", _jobName);
+        }
+
+        return _lastSchedule;
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try
         {
-            var schedule = GetSchedule();
-            if (!schedule.Enabled)
+            var schedule = ReadSchedule();
+            if (schedule.Enabled)
             {
-                _logger.LogInformation("Scheduled job {Job} is disabled; the worker will not run.", _jobName);
-                return;
+                var initial = schedule.InitialDelay + NextJitter(schedule.MaxJitter);
+                if (initial > TimeSpan.Zero)
+                {
+                    await Task.Delay(initial, _time, stoppingToken).ConfigureAwait(false);
+                }
             }
 
-            var initial = schedule.InitialDelay + NextJitter(schedule.MaxJitter);
-            if (initial > TimeSpan.Zero)
-            {
-                await Task.Delay(initial, _time, stoppingToken).ConfigureAwait(false);
-            }
-
+            var disabledLogged = false;
             while (!stoppingToken.IsCancellationRequested)
             {
+                schedule = ReadSchedule();
+                if (!schedule.Enabled)
+                {
+                    // Stay alive so that enabling the job through the options monitor takes effect without a restart.
+                    if (!disabledLogged)
+                    {
+                        _logger.LogInformation("Scheduled job {Job} is disabled; the worker idles and re-checks its schedule.", _jobName);
+                        disabledLogged = true;
+                    }
+
+                    await Task.Delay(schedule.Interval > MinDisabledRecheck ? schedule.Interval : MinDisabledRecheck, _time, stoppingToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                disabledLogged = false;
                 await RunCycleAsync(stoppingToken).ConfigureAwait(false);
 
                 // Re-read per cycle so interval changes apply without a restart.
-                schedule = GetSchedule();
-                if (!schedule.Enabled)
-                {
-                    _logger.LogInformation("Scheduled job {Job} was disabled; the worker stops.", _jobName);
-                    return;
-                }
-
+                schedule = ReadSchedule();
                 await Task.Delay(schedule.Interval + NextJitter(schedule.MaxJitter), _time, stoppingToken).ConfigureAwait(false);
             }
         }
@@ -121,7 +149,7 @@ public abstract class ClusterScheduledService<TJob> : BackgroundService
 
     private async Task RunCycleAsync(CancellationToken stoppingToken)
     {
-        var schedule = GetSchedule();
+        var schedule = ReadSchedule();
         IDistributedLease? lease;
         try
         {

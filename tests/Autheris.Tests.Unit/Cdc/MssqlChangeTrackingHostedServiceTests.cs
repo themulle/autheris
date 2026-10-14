@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.State;
 using Autheris.Application.Streaming.Interfaces;
+using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Autheris.Extensions.Cdc;
 using Microsoft.Extensions.DependencyInjection;
@@ -68,5 +69,35 @@ public sealed class MssqlChangeTrackingHostedServiceTests
 
         await service.StartAsync(CancellationToken.None);
         await service.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task PollJob_BacksOffPersistentlyFailingTable_AndLogsOnce()
+    {
+        var poller = Substitute.For<IMssqlChangeTrackingPoller>();
+        poller.PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns<Task<int>>(_ => throw new Autheris.Application.Streaming.CdcWatermarkExpiredException(new TableIdentifier("catalog", "schema", "orders"), 1, 5));
+        var options = new GatewayOptions
+        {
+            MssqlChangeTracking = new MssqlChangeTrackingOptions { Enabled = true, TrackedTables = new List<string> { "catalog.schema.orders" } }
+        };
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+        var job = new MssqlChangeTrackingPollJob(
+            poller,
+            new StaticOptionsMonitor<GatewayOptions>(options),
+            NullLogger<MssqlChangeTrackingPollJob>.Instance,
+            new CdcPollFailureTracker(time));
+        var context = new Autheris.Application.Hosting.ClusterJobContext(1, Substitute.For<IDistributedLease>());
+
+        await job.ExecuteAsync(context, CancellationToken.None);
+        await job.ExecuteAsync(context, CancellationToken.None);
+        await job.ExecuteAsync(context, CancellationToken.None);
+
+        await poller.Received(1).PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<long>(), Arg.Any<CancellationToken>());
+
+        time.Advance(TimeSpan.FromMinutes(6));
+        await job.ExecuteAsync(context, CancellationToken.None);
+
+        await poller.Received(2).PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<long>(), Arg.Any<CancellationToken>());
     }
 }

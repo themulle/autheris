@@ -40,7 +40,7 @@ public sealed class GovernanceDbMssqlWatermarkStore : IMssqlWatermarkStore
         if (!accepted)
         {
             FencedTotal.Inc();
-            _logger.LogError("CDC watermark write for {Table} was rejected: fencing token {Token} is stale.", table, fencingToken);
+            _logger.LogCritical("CDC watermark write for {Table} was rejected: fencing token {Token} is stale. Another replica owns the lease, or the fence counter was reset: check cluster-state persistence (AOF).", table, fencingToken);
         }
 
         return accepted;

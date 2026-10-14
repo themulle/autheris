@@ -51,6 +51,86 @@ public sealed class DistributedLeaseTests
         }
     }
 
+    private sealed class ScriptedExtendLease : DistributedLeaseBase
+    {
+        public ScriptedExtendLease(TimeProvider time, TimeSpan ttl)
+            : base(time, ttl, "scripted", 1, NullLogger.Instance) => StartHeartbeat();
+
+        public TaskCompletionSource<bool> Extend { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override ValueTask<bool> TryExtendAsync(CancellationToken ct) => new(Extend.Task);
+
+        protected override ValueTask ReleaseAsync() => ValueTask.CompletedTask;
+    }
+
+    [Fact]
+    public async Task HangingExtend_StillCancelsLeaseLost_AtTwoThirdsTtl()
+    {
+        var time = new FakeTimeProvider();
+        await using var lease = new ScriptedExtendLease(time, Ttl); // the extend never completes
+
+        time.Advance(TimeSpan.FromSeconds(10));
+        lease.LeaseLost.IsCancellationRequested.ShouldBeFalse();
+        time.Advance(TimeSpan.FromSeconds(10));
+
+        lease.LeaseLost.IsCancellationRequested.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task LastConfirmedAt_IsTheTimeTheExtendWasSent()
+    {
+        var time = new FakeTimeProvider();
+        var start = time.GetUtcNow();
+        await using var lease = new ScriptedExtendLease(time, Ttl);
+
+        time.Advance(TimeSpan.FromSeconds(10)); // the extend is sent now
+        time.Advance(TimeSpan.FromSeconds(5));
+        lease.Extend.SetResult(true);
+        await Task.Delay(50);
+
+        lease.LastConfirmedAt.ShouldBe(start + TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
+    public async Task NormalDispose_DoesNotEmitLeaseLostMetricsOrCancelBeforeDispose()
+    {
+        var time = new FakeTimeProvider();
+        var lease = new ScriptedExtendLease(time, Ttl);
+        time.Advance(TimeSpan.FromSeconds(10)); // extend in flight
+
+        await lease.DisposeAsync();
+        lease.Extend.SetResult(false); // the late answer must not signal a loss
+
+        await Task.Delay(50);
+        lease.LeaseLost.IsCancellationRequested.ShouldBeTrue(); // cancelled by dispose itself
+    }
+
+    [Fact]
+    public async Task LeaseLostCallbackThatThrows_DoesNotBreakDispose()
+    {
+        var time = new FakeTimeProvider();
+        var lease = new ScriptedExtendLease(time, Ttl);
+        lease.LeaseLost.Register(() => throw new InvalidOperationException("callback"));
+
+        await lease.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Token_AfterProviderRestart_IsAboveThePreviousGeneration()
+    {
+        var time = new FakeTimeProvider();
+        var first = new InMemoryClusterStateProvider(time);
+        var a = await first.TryAcquireLeaseAsync("job", Ttl);
+        var oldToken = a!.Token;
+        await a.DisposeAsync();
+
+        time.Advance(TimeSpan.FromSeconds(1));
+        var restarted = new InMemoryClusterStateProvider(time); // fence counters are lost
+        await using var b = await restarted.TryAcquireLeaseAsync("job", Ttl);
+
+        b!.Token.ShouldBeGreaterThan(oldToken);
+    }
+
     [Fact]
     public async Task Lease_IsRenewed_WhileJobRuns_LongerThanInitialTtl()
     {

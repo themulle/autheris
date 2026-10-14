@@ -59,10 +59,10 @@ public sealed class RedisLeaseTests : IAsyncLifetime, IDisposable
     [Fact]
     public async Task Lease_IsRenewed_WhileJobRuns_LongerThanInitialTtl()
     {
-        await using var lease = await _provider.TryAcquireLeaseAsync("job", TimeSpan.FromMilliseconds(900));
+        await using var lease = await _provider.TryAcquireLeaseAsync("job", TimeSpan.FromSeconds(3));
         lease.ShouldNotBeNull();
 
-        await Task.Delay(2500);
+        await Task.Delay(7000);
 
         lease.LeaseLost.IsCancellationRequested.ShouldBeFalse();
         (await _provider.TryAcquireLeaseAsync("job", Ttl)).ShouldBeNull();
@@ -109,6 +109,32 @@ public sealed class RedisLeaseTests : IAsyncLifetime, IDisposable
         await stale.DisposeAsync();
 
         (await _provider.TryAcquireLeaseAsync("job", Ttl)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Token_AfterFenceCounterLoss_IsStillAboveThePreviousToken()
+    {
+        var first = await _provider.TryAcquireLeaseAsync("job", Ttl);
+        var oldToken = first!.Token;
+        await first.DisposeAsync();
+        var db = _mux!.GetDatabase();
+        foreach (var key in _mux.GetServer(_mux.GetEndPoints()[0]).Keys(pattern: "*lease:{job}*"))
+        {
+            await db.KeyDeleteAsync(key); // the store restarted without persistence
+        }
+
+        await Task.Delay(20);
+        await using var second = await _provider.TryAcquireLeaseAsync("job", Ttl);
+
+        second!.Token.ShouldBeGreaterThan(oldToken);
+    }
+
+    [Theory]
+    [InlineData("a{b")]
+    [InlineData("a}b")]
+    public async Task Acquire_WithBracesInKey_IsRejected(string key)
+    {
+        await Should.ThrowAsync<ArgumentException>(async () => await _provider.TryAcquireLeaseAsync(key, Ttl));
     }
 
     [Fact]

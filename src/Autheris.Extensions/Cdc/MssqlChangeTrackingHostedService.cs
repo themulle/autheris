@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Hosting;
 using Autheris.Application.State;
+using Autheris.Application.Streaming;
 using Autheris.Application.Streaming.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -44,13 +45,22 @@ public sealed class MssqlChangeTrackingHostedService(
         return base.StartAsync(cancellationToken);
     }
 
+    private object? _parsedSource;
+    private int _parsedCount;
+
     protected override string LeaseKey => "cdc:mssql:poll";
 
     protected override ClusterSchedule GetSchedule()
     {
         var cdc = options.CurrentValue.MssqlChangeTracking;
         var interval = TimeSpan.FromMilliseconds(Math.Max(250, cdc.PollingIntervalMilliseconds));
-        var enabled = cdc.Enabled && ParseTrackedTables(cdc.TrackedTables).Count > 0;
+        if (!ReferenceEquals(cdc.TrackedTables, _parsedSource))
+        {
+            _parsedCount = ParseTrackedTables(cdc.TrackedTables).Count;
+            _parsedSource = cdc.TrackedTables;
+        }
+
+        var enabled = cdc.Enabled && _parsedCount > 0;
         return new ClusterSchedule(
             enabled,
             interval,
@@ -86,12 +96,51 @@ public sealed class MssqlChangeTrackingHostedService(
     }
 }
 
+/// <summary>
+/// Remembers tables whose polling failed with a persistent error (expired watermark, invalid configuration) so the job backs
+/// off exponentially and logs the failure once instead of every polling cycle.
+/// </summary>
+public sealed class CdcPollFailureTracker(TimeProvider? timeProvider = null)
+{
+    private static readonly TimeSpan MaxBackoff = TimeSpan.FromMinutes(5);
+    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<TableIdentifier, (int Failures, DateTimeOffset NextAttempt)> _state = new();
+
+    public bool ShouldSkip(TableIdentifier table) =>
+        _state.TryGetValue(table, out var entry) && _time.GetUtcNow() < entry.NextAttempt;
+
+    /// <summary>Records a persistent failure; returns true for the first failure of a streak (the one to log).</summary>
+    public bool RecordFailure(TableIdentifier table)
+    {
+        var first = false;
+        _state.AddOrUpdate(
+            table,
+            _ =>
+            {
+                first = true;
+                return (1, _time.GetUtcNow() + TimeSpan.FromSeconds(5));
+            },
+            (_, existing) =>
+            {
+                var failures = existing.Failures + 1;
+                var delay = TimeSpan.FromSeconds(Math.Min(MaxBackoff.TotalSeconds, 5 * Math.Pow(2, Math.Min(failures, 10))));
+                return (failures, _time.GetUtcNow() + delay);
+            });
+        return first;
+    }
+
+    public void RecordSuccess(TableIdentifier table) => _state.TryRemove(table, out _);
+}
+
 /// <summary>One polling pass over all tracked tables, executed under the cluster lease.</summary>
 public sealed class MssqlChangeTrackingPollJob(
     IMssqlChangeTrackingPoller poller,
     IOptionsMonitor<GatewayOptions> options,
-    ILogger<MssqlChangeTrackingPollJob> logger) : IClusterScheduledJob
+    ILogger<MssqlChangeTrackingPollJob> logger,
+    CdcPollFailureTracker? failureTracker = null) : IClusterScheduledJob
 {
+    private readonly CdcPollFailureTracker _tracker = failureTracker ?? new CdcPollFailureTracker();
+
     public async Task ExecuteAsync(ClusterJobContext context, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -106,13 +155,26 @@ public sealed class MssqlChangeTrackingPollJob(
         foreach (var table in tables)
         {
             ct.ThrowIfCancellationRequested();
+            if (_tracker.ShouldSkip(table))
+            {
+                continue;
+            }
 
             try
             {
                 var processed = await poller.PollTableChangesAsync(table, context.FencingToken, ct).ConfigureAwait(false);
+                _tracker.RecordSuccess(table);
                 if (processed > 0)
                 {
                     logger.LogDebug("Polled and dispatched {Count} CDC changes for table {Table}.", processed, table);
+                }
+            }
+            catch (Exception ex) when (ex is CdcWatermarkExpiredException or CdcSourceConfigurationException)
+            {
+                // Persistent: retrying every cycle cannot help. Log once per streak and back off.
+                if (_tracker.RecordFailure(table))
+                {
+                    logger.LogError(ex, "Change tracking of table {Table} is stopped until the cause is fixed; retrying with backoff.", table);
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException and not FencingTokenRejectedException)

@@ -180,6 +180,10 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
                 }
             }
 
+            // Probe the fence before publishing: a writer that lost its lease must not publish (and, retried every cycle,
+            // republish) a batch it can never commit.
+            await CommitAsync(table, lastVersion, fencingToken, ct).ConfigureAwait(false);
+
             foreach (var change in changes)
             {
                 await _eventChannel.PublishAsync(change.Event, ct).ConfigureAwait(false);
@@ -283,7 +287,7 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
 
             var rowData = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             string? tenantId = null;
-            var pkValueStr = string.Empty;
+            var pkValues = new List<string>();
 
             for (var i = 0; i < reader.FieldCount; i++)
             {
@@ -293,10 +297,7 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
                 if (colName.StartsWith("PK_", StringComparison.OrdinalIgnoreCase))
                 {
                     var purePk = colName[3..];
-                    if (string.IsNullOrEmpty(pkValueStr) && val != null)
-                    {
-                        pkValueStr = val.ToString() ?? "";
-                    }
+                    pkValues.Add(val?.ToString() ?? string.Empty);
 
                     if (operation == CdcOperation.Delete && !rowData.ContainsKey(purePk))
                     {
@@ -322,7 +323,7 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
             }
 
             // Deterministic id: a re-published batch after a crash carries the same ids, so consumers can deduplicate.
-            var eventId = $"{table.Domain}_{table.TableName}_{changeVersion}_{pkValueStr}";
+            var eventId = $"{table.Domain}_{table.TableName}_{changeVersion}_{string.Join('|', pkValues)}";
             changes.Add((changeVersion, new CdcEvent(
                 EventId: eventId,
                 Table: table,
@@ -358,7 +359,6 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
             """;
 
         List<string> list = [];
-        try
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = sql;
@@ -373,12 +373,8 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
                 list.Add(reader.GetString(0));
             }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            // No guessing: an unreadable primary key must not turn into a default column.
-            throw new CdcSourceConfigurationException($"The primary key of tracked table '{table}' could not be read.", ex);
-        }
 
+        // Transient query failures propagate and take the normal retry path; only a genuinely missing key is a configuration error.
         if (list.Count == 0)
         {
             throw new CdcSourceConfigurationException($"Tracked table '{table}' has no primary key; change tracking requires one.");

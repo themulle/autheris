@@ -43,6 +43,8 @@ public sealed class ClusterScheduledServiceTests
 
     private sealed class MutableSchedule
     {
+        public bool Throw { get; set; }
+
         public ClusterSchedule Value { get; set; } = new(true, TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(5), TimeSpan.FromMinutes(2), TimeSpan.Zero);
     }
 
@@ -55,7 +57,8 @@ public sealed class ClusterScheduledServiceTests
     {
         protected override string LeaseKey => "test:job";
 
-        protected override ClusterSchedule GetSchedule() => schedule.Value;
+        protected override ClusterSchedule GetSchedule() =>
+            schedule.Throw ? throw new InvalidOperationException("options broken") : schedule.Value;
     }
 
     private sealed class FakeLease(long token) : IDistributedLease
@@ -146,7 +149,7 @@ public sealed class ClusterScheduledServiceTests
         await h.StartAsync();
         await h.AdvanceAsync(TimeSpan.FromSeconds(6));
         (await Eventually.WaitAsync(() => Volatile.Read(ref attempts) >= 1, TimeSpan.FromSeconds(5))).ShouldBeTrue();
-        await h.AdvanceAsync(TimeSpan.FromMinutes(1));
+        await h.AdvanceAsync(TimeSpan.FromSeconds(90));
         (await Eventually.WaitAsync(() => Volatile.Read(ref attempts) >= 2, TimeSpan.FromSeconds(5))).ShouldBeTrue();
 
         h.Probe.Runs.ShouldBe(0);
@@ -221,7 +224,7 @@ public sealed class ClusterScheduledServiceTests
         await h.StartAsync();
         await h.AdvanceAsync(TimeSpan.FromSeconds(6));
         (await h.WaitForRunsAsync(1)).ShouldBeTrue();
-        await h.AdvanceAsync(TimeSpan.FromMinutes(1));
+        await h.AdvanceAsync(TimeSpan.FromSeconds(90));
 
         (await h.WaitForRunsAsync(2)).ShouldBeTrue();
         h.Service.ExecuteTask!.IsFaulted.ShouldBeFalse();
@@ -248,7 +251,7 @@ public sealed class ClusterScheduledServiceTests
         await h.AdvanceAsync(TimeSpan.FromMinutes(2));
         h.Probe.Runs.ShouldBe(1); // would be 2 with the old one-minute interval
 
-        await h.AdvanceAsync(TimeSpan.FromMinutes(9));
+        await h.AdvanceAsync(TimeSpan.FromMinutes(10));
         (await h.WaitForRunsAsync(2)).ShouldBeTrue();
     }
 
@@ -262,6 +265,78 @@ public sealed class ClusterScheduledServiceTests
         await h.AdvanceAsync(TimeSpan.FromMinutes(2));
 
         await h.State.DidNotReceive().TryAcquireLeaseAsync(Arg.Any<string>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DisabledSchedule_ReEnabledViaOptions_StartsRunning()
+    {
+        await using var h = new Harness();
+        h.State.TryAcquireLeaseAsync(Arg.Any<string>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(_ => new ValueTask<IDistributedLease?>(new FakeLease(1)));
+        h.Schedule.Value = h.Schedule.Value with { Enabled = false };
+
+        await h.StartAsync();
+        await h.AdvanceAsync(TimeSpan.FromSeconds(30));
+        h.Probe.Runs.ShouldBe(0);
+        h.Schedule.Value = h.Schedule.Value with { Enabled = true };
+        await h.AdvanceAsync(TimeSpan.FromMinutes(2));
+
+        (await h.WaitForRunsAsync(1)).ShouldBeTrue();
+        h.Service.ExecuteTask!.IsFaulted.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task GetScheduleThrows_KeepsPreviousSchedule_AndHostAlive()
+    {
+        await using var h = new Harness();
+        h.State.TryAcquireLeaseAsync(Arg.Any<string>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(_ => new ValueTask<IDistributedLease?>(new FakeLease(1)));
+        h.Probe.OnRun = () => h.Schedule.Throw = true;
+
+        await h.StartAsync();
+        await h.AdvanceAsync(TimeSpan.FromSeconds(6));
+        (await h.WaitForRunsAsync(1)).ShouldBeTrue();
+        await h.AdvanceAsync(TimeSpan.FromSeconds(90));
+
+        (await h.WaitForRunsAsync(2)).ShouldBeTrue(); // the previous one-minute schedule stayed in effect
+        h.Service.ExecuteTask!.IsFaulted.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task FencingTokenRejected_KeepsLoopRunning()
+    {
+        await using var h = new Harness();
+        h.State.TryAcquireLeaseAsync(Arg.Any<string>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(_ => new ValueTask<IDistributedLease?>(new FakeLease(1)));
+        h.Probe.Behaviour = _ => throw new FencingTokenRejectedException("res", 1);
+
+        await h.StartAsync();
+        await h.AdvanceAsync(TimeSpan.FromSeconds(6));
+        (await h.WaitForRunsAsync(1)).ShouldBeTrue();
+        await h.AdvanceAsync(TimeSpan.FromSeconds(90));
+
+        (await h.WaitForRunsAsync(2)).ShouldBeTrue();
+        h.Service.ExecuteTask!.IsFaulted.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Shutdown_WhileJobRuns_CancelsJob_AndCompletesCleanly()
+    {
+        await using var h = new Harness();
+        var lease = new FakeLease(1);
+        h.State.TryAcquireLeaseAsync(Arg.Any<string>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<IDistributedLease?>(lease));
+        h.Probe.Behaviour = ct => Task.Delay(Timeout.Infinite, ct);
+
+        await h.StartAsync();
+        await h.AdvanceAsync(TimeSpan.FromSeconds(6));
+        (await h.WaitForRunsAsync(1)).ShouldBeTrue();
+
+        await h.Service.StopAsync(CancellationToken.None);
+
+        h.Probe.LastCancellation.IsCancellationRequested.ShouldBeTrue();
+        h.Service.ExecuteTask!.IsCompletedSuccessfully.ShouldBeTrue();
+        lease.Disposed.ShouldBeTrue();
     }
 
     [Fact]

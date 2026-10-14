@@ -70,8 +70,21 @@ public abstract class DistributedLeaseBase : IDistributedLease
 
     private void OnTick()
     {
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            return;
+        }
+
+        // Fail closed even while an extend call hangs: the guard below would otherwise skip every tick.
+        var unconfirmedFor = _time.GetUtcNow() - LastConfirmedAt;
+        if (unconfirmedFor >= _ttl * 2 / 3)
+        {
+            _logger.LogError("Lease {Resource} (token {Token}) is treated as lost: unconfirmed for {Unconfirmed}, beyond two thirds of the ttl.", ResourceKey, Token, unconfirmedFor);
+            SignalLost("renew_unconfirmed");
+        }
+
         // Timer callbacks must never overlap; a slow extend simply skips the next tick.
-        if (Volatile.Read(ref _disposed) != 0 || Interlocked.Exchange(ref _ticking, 1) != 0)
+        if (Interlocked.Exchange(ref _ticking, 1) != 0)
         {
             return;
         }
@@ -88,12 +101,19 @@ public abstract class DistributedLeaseBase : IDistributedLease
                 return;
             }
 
+            // Ownership is confirmed as of the moment the extend was sent, not when the answer arrived.
+            var sentAtTicks = _time.GetUtcNow().UtcTicks;
             try
             {
-                var extended = await TryExtendAsync(CancellationToken.None).ConfigureAwait(false);
+                var extended = await TryExtendAsync(CancellationToken.None).AsTask().WaitAsync(_ttl / 3, _time).ConfigureAwait(false);
+                if (Volatile.Read(ref _disposed) != 0)
+                {
+                    return;
+                }
+
                 if (extended)
                 {
-                    Interlocked.Exchange(ref _lastConfirmedTicks, _time.GetUtcNow().UtcTicks);
+                    Interlocked.Exchange(ref _lastConfirmedTicks, sentAtTicks);
                     return;
                 }
 
@@ -102,6 +122,11 @@ public abstract class DistributedLeaseBase : IDistributedLease
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
+                if (Volatile.Read(ref _disposed) != 0)
+                {
+                    return;
+                }
+
                 OnRenewFailure();
                 var unconfirmedFor = _time.GetUtcNow() - LastConfirmedAt;
                 _logger.LogWarning(ex, "Lease {Resource} (token {Token}) renewal failed; unconfirmed for {Unconfirmed}.", ResourceKey, Token, unconfirmedFor);
@@ -120,7 +145,7 @@ public abstract class DistributedLeaseBase : IDistributedLease
 
     private void SignalLost(string reason)
     {
-        if (_lost.IsCancellationRequested)
+        if (_lost.IsCancellationRequested || Volatile.Read(ref _disposed) != 0)
         {
             return;
         }
@@ -130,9 +155,10 @@ public abstract class DistributedLeaseBase : IDistributedLease
         {
             _lost.Cancel();
         }
-        catch (ObjectDisposedException)
+        catch (Exception ex) when (ex is ObjectDisposedException or AggregateException)
         {
-            // Disposed concurrently: nothing left to signal.
+            // Disposed concurrently or a LeaseLost callback threw: the lease is lost either way.
+            _logger.LogDebug(ex, "Signalling the loss of lease {Resource} raised an exception.", ResourceKey);
         }
     }
 
@@ -162,9 +188,10 @@ public abstract class DistributedLeaseBase : IDistributedLease
             {
                 await _lost.CancelAsync().ConfigureAwait(false);
             }
-            catch (ObjectDisposedException)
+            catch (Exception ex) when (ex is ObjectDisposedException or AggregateException)
             {
-                // Already disposed.
+                // Already disposed or a LeaseLost callback threw: dispose must never throw.
+                _logger.LogDebug(ex, "Cancelling lease {Resource} on dispose raised an exception.", ResourceKey);
             }
 
             _lost.Dispose();

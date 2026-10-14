@@ -200,7 +200,8 @@ public class InMemoryClusterStateProvider : IDistributedClusterStateProvider
                 return ValueTask.FromResult<IDistributedLease?>(null);
             }
 
-            token = _fences.TryGetValue(resourceKey, out var last) ? last + 1 : 1;
+            // Seeded from the wall clock so tokens stay above those of a previous process generation (durable stores remember them).
+            token = _fences.TryGetValue(resourceKey, out var last) ? last + 1 : _time.GetUtcNow().ToUnixTimeMilliseconds() * 1000;
             _fences[resourceKey] = token;
             _leases[resourceKey] = new LeaseEntry(owner, token, now.Add(ttl));
         }

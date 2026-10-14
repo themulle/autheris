@@ -59,9 +59,11 @@ public sealed class RedisClusterStateProvider : IDistributedClusterStateProvider
     private static readonly Prometheus.Counter LeaseRenewFailureTotal = Prometheus.Metrics.CreateCounter(
         "autheris_cluster_lease_renew_failure_total", "Number of failed distributed lease renewal attempts");
 
-    // Acquire: KEYS[1]=lease key, KEYS[2]=fence counter (no TTL, so tokens stay strictly increasing), ARGV[1]=owner, ARGV[2]=ttl ms.
+    // Acquire: KEYS[1]=lease key, KEYS[2]=fence counter (no TTL, so tokens stay strictly increasing), ARGV[1]=owner, ARGV[2]=ttl ms, ARGV[3]=fence seed (unix ms * 1000).
+    // The seed keeps tokens above those of a previous generation when the counter was lost (restart without persistence).
     private const string AcquireLeaseScript = @"
 if redis.call('EXISTS', KEYS[1]) == 1 then return -1 end
+if redis.call('EXISTS', KEYS[2]) == 0 then redis.call('SET', KEYS[2], ARGV[3]) end
 local f = redis.call('INCR', KEYS[2])
 redis.call('SET', KEYS[1], ARGV[1] .. ':' .. f, 'PX', ARGV[2])
 return f
@@ -307,6 +309,12 @@ end
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(resourceKey);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(ttl, TimeSpan.Zero);
+        if (resourceKey.AsSpan().IndexOfAny('{', '}') >= 0)
+        {
+            // Braces delimit the hash tag; a key containing them could collide with another resource's tag.
+            throw new ArgumentException("Lease resource keys must not contain '{' or '}'.", nameof(resourceKey));
+        }
+
         try
         {
             var db = _multiplexer.GetDatabase();
@@ -316,7 +324,7 @@ end
             var owner = Guid.NewGuid().ToString("N");
             var ttlMs = (long)ttl.TotalMilliseconds;
 
-            var result = await db.ScriptEvaluateAsync(AcquireLeaseScript, [leaseKey, fenceKey], [owner, ttlMs]).ConfigureAwait(false);
+            var result = await db.ScriptEvaluateAsync(AcquireLeaseScript, [leaseKey, fenceKey], [owner, ttlMs, _time.GetUtcNow().ToUnixTimeMilliseconds() * 1000]).ConfigureAwait(false);
             var fence = (long)result;
             if (fence < 0)
             {
