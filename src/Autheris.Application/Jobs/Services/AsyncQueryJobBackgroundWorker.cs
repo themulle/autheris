@@ -13,10 +13,12 @@ using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
 {
@@ -24,13 +26,16 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IAuditLogRepository _auditLogRepository;
     private readonly ILogger<AsyncQueryJobBackgroundWorker> _logger;
+    private readonly IOptions<GatewayOptions>? _options;
 
     public AsyncQueryJobBackgroundWorker(
         IAsyncQueryJobManager jobManager,
         IServiceScopeFactory scopeFactory,
         IAuditLogRepository auditLogRepository,
-        ILogger<AsyncQueryJobBackgroundWorker>? logger = null)
+        ILogger<AsyncQueryJobBackgroundWorker>? logger = null,
+        IOptions<GatewayOptions>? options = null)
     {
+        _options = options;
         ArgumentNullException.ThrowIfNull(jobManager);
         ArgumentNullException.ThrowIfNull(scopeFactory);
         ArgumentNullException.ThrowIfNull(auditLogRepository);
@@ -50,6 +55,8 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
 
         _logger.LogInformation("AsyncQueryJobBackgroundWorker started.");
 
+        var purgeTask = RunPurgeLoopAsync(concreteManager, stoppingToken);
+
         try
         {
             await foreach (var item in concreteManager.ChannelReader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
@@ -64,6 +71,38 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unexpected error in AsyncQueryJobBackgroundWorker loop.");
+        }
+
+        await purgeTask.ConfigureAwait(false);
+    }
+
+    /// <summary>SR-M-21: periodically removes finished jobs and their result files after the retention period.</summary>
+    private async Task RunPurgeLoopAsync(AsyncQueryJobManager manager, CancellationToken stoppingToken)
+    {
+        var interval = TimeSpan.FromMinutes(Math.Max(1, (_options?.Value?.AsyncJobs ?? new AsyncJobOptions()).PurgeIntervalMinutes));
+        try
+        {
+            using var timer = new PeriodicTimer(interval);
+            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+            {
+                await PurgeOnceAsync(manager, stoppingToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    internal async Task PurgeOnceAsync(AsyncQueryJobManager manager, CancellationToken ct)
+    {
+        var retention = TimeSpan.FromHours(Math.Max(0, (_options?.Value?.AsyncJobs ?? new AsyncJobOptions()).RetentionHours));
+        try
+        {
+            await manager.PurgeExpiredJobsAsync(retention, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Purging expired async jobs failed.");
         }
     }
 
@@ -87,10 +126,12 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
             using var scope = _scopeFactory.CreateScope();
             var sqlExec = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
 
-            var maxRows = Math.Max(1, item.Request.MaxRows);
+            // SR-H-05 defence in depth: re-derive the bounds server-side; the queued request is never trusted.
+            var options = _options?.Value;
+            linkedCts.CancelAfter(AsyncJobLimits.ResolveTimeout(item.Request, options));
             var queryRequest = new GovernedSqlQueryRequest(
                 Sql: item.Request.Query,
-                RowLimit: new SqlRowLimit(maxRows, maxRows),
+                RowLimit: AsyncJobLimits.ResolveRowLimit(item.Request, options),
                 Transport: SqlTransports.AsyncJob);
 
             var tenantId = new TenantId(item.Job.TenantId);
