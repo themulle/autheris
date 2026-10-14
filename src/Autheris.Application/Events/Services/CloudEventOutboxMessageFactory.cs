@@ -1,6 +1,7 @@
 namespace Autheris.Application.Events.Services;
 
 using System;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Autheris.Domain.Model;
@@ -18,14 +19,41 @@ public static class CloudEventOutboxMessageFactory
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
+    public const int DefaultMaxPayloadBytes = 262144;
+    public const int MaxSubscriptionIdLength = 128;
+    public const int MaxEventIdLength = 128;
+    public const int MaxEventTypeLength = 256;
+    public const int MaxEventSourceLength = 512;
+
+    private static void Bound(string? value, int max, string field)
+    {
+        if (value is { } v && v.Length > max)
+        {
+            throw new WebhookOutboxBoundsException(field);
+        }
+    }
+
     public static WebhookOutboxMessage Create(
         CloudEventWebhookSubscription subscription,
         CloudEventEnvelope envelope,
         DateTimeOffset now,
-        int maxAttempts)
+        int maxAttempts,
+        int maxPayloadBytes = DefaultMaxPayloadBytes)
     {
         ArgumentNullException.ThrowIfNull(subscription);
         ArgumentNullException.ThrowIfNull(envelope);
+
+        // Column bounds of the outbox table; a violation drops the event instead of truncating or failing the insert.
+        Bound(subscription.Id, MaxSubscriptionIdLength, "subscription_id");
+        Bound(envelope.Id, MaxEventIdLength, "event_id");
+        Bound(envelope.Type, MaxEventTypeLength, "event_type");
+        Bound(envelope.Source, MaxEventSourceLength, "event_source");
+
+        var payload = JsonSerializer.Serialize(envelope, JsonOptions);
+        if (Encoding.UTF8.GetByteCount(payload) > maxPayloadBytes)
+        {
+            throw new WebhookOutboxBoundsException("payload");
+        }
 
         return new WebhookOutboxMessage(
             Id: Guid.CreateVersion7().ToString("N"),
@@ -37,7 +65,7 @@ public static class CloudEventOutboxMessageFactory
             EventType: envelope.Type,
             EventSource: envelope.Source,
             EventTime: envelope.Time,
-            PayloadJson: JsonSerializer.Serialize(envelope, JsonOptions),
+            PayloadJson: payload,
             Attempt: 0,
             MaxAttempts: Math.Clamp(maxAttempts, 1, WebhookSubscription.MaxAllowedAttempts),
             State: WebhookOutboxState.Pending,
