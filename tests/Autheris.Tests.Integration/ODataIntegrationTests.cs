@@ -1,29 +1,82 @@
 namespace Autheris.Tests.Integration;
 
 using System;
+using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
 
-public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
+    /// <summary>A real SQLite table behind the default data source (entity sets read real rows; there is no synthetic data).</summary>
+    private static readonly TableIdentifier RowsTable = new("default", "main", "odata_rows");
+
     private readonly WebApplicationFactory<Program> _factory;
+    private readonly string _dataDbPath = Path.Combine(Path.GetTempPath(), $"odata-rows-{Guid.NewGuid():N}.db");
 
     public ODataIntegrationTests(WebApplicationFactory<Program> factory)
     {
+        SeedRowsDatabase(_dataDbPath);
+
+        // WebSql:Enabled stays off: it switches the client SQL endpoints, not the table reads OData plans itself.
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
+            builder.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dataDbPath}");
+        });
+    }
+
+    public void Dispose()
+    {
+        SqliteConnection.ClearAllPools();
+        try { File.Delete(_dataDbPath); } catch (IOException) { }
+    }
+
+    private static void SeedRowsDatabase(string path)
+    {
+        using var conn = new SqliteConnection($"Data Source={path}");
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "CREATE TABLE odata_rows (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO odata_rows VALUES (1, 'alpha'), (2, 'beta');";
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Registers <see cref="RowsTable"/> in the catalog and grants the user a clear consent on every column.</summary>
+    private async Task GrantRowsTableAsync(Sid userSid)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
+        await repo.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = RowsTable.TableName, TableName = RowsTable.TableName, SchemaName = RowsTable.Schema, SourceType = "Sqlite", SourceName = "default" },
+            Identifier = RowsTable,
+            Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }, new TableColumn { ColumnName = "name", DataType = "varchar" }]
+        });
+        var meta = (await repo.GetTableMetadataAsync(RowsTable))!;
+        await repo.CreateConsentAsync(new Consent
+        {
+            TableId = meta.Table.Id,
+            TableIdentifier = RowsTable,
+            Effect = ConsentEffect.Allow,
+            GranteeType = GranteeType.User,
+            GranteeSid = userSid,
+            ValidFrom = DateTimeOffset.UtcNow.AddHours(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddHours(24),
+            ColumnRules = meta.Columns.Select(c => new ConsentColumnRule { ColumnName = c.ColumnName, AccessLevel = ColumnAccessLevel.Clear }).ToList()
         });
     }
 
@@ -124,40 +177,19 @@ public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program
     public async Task ODataEntitySet_WithActiveConsent_Returns200AndRows()
     {
         var userSid = new Sid("S-1-5-21-ODATA-ANALYST");
-        var tableId = new TableIdentifier("finance", "dbo", "finance_table_1");
-
-        // Seed consent
-        using (var scope = _factory.Services.CreateScope())
-        {
-            var consentRepo = scope.ServiceProvider.GetRequiredService<IConsentRepository>();
-            var metaRepo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
-
-            var meta = await metaRepo.GetTableMetadataAsync(tableId);
-            if (meta != null)
-            {
-                await consentRepo.CreateConsentAsync(new Consent
-                {
-                    TableId = meta.Table.Id,
-                    TableIdentifier = tableId,
-                    Effect = ConsentEffect.Allow,
-                    GranteeType = GranteeType.User,
-                    GranteeSid = userSid,
-                    ValidFrom = DateTimeOffset.UtcNow.AddHours(-1),
-                    ValidTo = DateTimeOffset.UtcNow.AddHours(24)
-                });
-            }
-        }
+        await GrantRowsTableAsync(userSid);
 
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", userSid.Value);
 
-        var response = await client.GetAsync("/odata/v4/finance/dbo/finance_table_1?$top=5&$skip=0");
+        var response = await client.GetAsync("/odata/v4/default/main/odata_rows?$top=5&$skip=0");
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         response.Headers.GetValues("OData-Version").ShouldContain("4.0");
 
         var body = await response.Content.ReadAsStringAsync();
-        body.ShouldContain("$metadata#finance_dbo_finance_table_1");
-        body.ShouldContain("value");
+        body.ShouldContain("$metadata#default_main_odata_rows");
+        body.ShouldContain("alpha");
+        body.ShouldContain("beta");
     }
 
     [Theory]
@@ -234,38 +266,17 @@ public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program
     public async Task ExcelCompatibility_RootODataPath_EntitySet_Returns200AndRows()
     {
         var userSid = new Sid("S-1-5-21-EXCEL-ANALYST");
-        var tableId = new TableIdentifier("finance", "dbo", "finance_table_1");
-
-        using (var scope = _factory.Services.CreateScope())
-        {
-            var consentRepo = scope.ServiceProvider.GetRequiredService<IConsentRepository>();
-            var metaRepo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
-
-            var meta = await metaRepo.GetTableMetadataAsync(tableId);
-            if (meta != null)
-            {
-                await consentRepo.CreateConsentAsync(new Consent
-                {
-                    TableId = meta.Table.Id,
-                    TableIdentifier = tableId,
-                    Effect = ConsentEffect.Allow,
-                    GranteeType = GranteeType.User,
-                    GranteeSid = userSid,
-                    ValidFrom = DateTimeOffset.UtcNow.AddHours(-1),
-                    ValidTo = DateTimeOffset.UtcNow.AddHours(24)
-                });
-            }
-        }
+        await GrantRowsTableAsync(userSid);
 
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", userSid.Value);
 
-        var response = await client.GetAsync("/odata/finance/dbo/finance_table_1?$top=5");
+        var response = await client.GetAsync("/odata/default/main/odata_rows?$top=5");
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         response.Headers.GetValues("OData-Version").ShouldContain("4.0");
 
         var body = await response.Content.ReadAsStringAsync();
-        body.ShouldContain("/odata/$metadata#finance_dbo_finance_table_1");
-        body.ShouldContain("value");
+        body.ShouldContain("/odata/$metadata#default_main_odata_rows");
+        body.ShouldContain("alpha");
     }
 }

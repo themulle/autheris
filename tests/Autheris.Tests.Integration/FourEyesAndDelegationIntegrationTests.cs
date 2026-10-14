@@ -28,6 +28,7 @@ public class FourEyesAndDelegationIntegrationTests : IClassFixture<WebApplicatio
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
+            builder.UseSyntheticSqlData();
         });
     }
 

@@ -170,8 +170,9 @@ public sealed class McpSdkTransportTests : IClassFixture<WebApplicationFactory<P
     public async Task ProtectedResourceMetadata_AnonymousInProduction_NamesTheAuthorizationServer_AndOnlyAllowlistedFields()
     {
         var tempDb = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"gov-test-{Guid.NewGuid():N}.db");
+        // Production needs a persistent anchor path; the store creates and signs the anchor itself (a placeholder file would be
+        // an invalid anchor and latch an audit chain violation).
         var tempAnchor = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"anchor-{Guid.NewGuid():N}.txt");
-        await System.IO.File.WriteAllTextAsync(tempAnchor, "anchor-token");
         try
         {
             var prodFactory = _factory.WithWebHostBuilder(b =>

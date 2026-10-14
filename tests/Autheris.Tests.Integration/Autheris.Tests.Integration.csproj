@@ -36,6 +36,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Demo-catalog SQL tables have no database behind them; workflow tests read deterministic synthetic rows. -->
+    <Compile Include="..\Autheris.Tests.Unit\TestDoubles\SyntheticSqlDataSourceExecutor.cs" Link="TestDoubles\SyntheticSqlDataSourceExecutor.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="Spark\runner.py" CopyToOutputDirectory="PreserveNewest" LinkBase="Spark" />
     <None Include="Spark\Dockerfile" CopyToOutputDirectory="PreserveNewest" LinkBase="Spark" />
     <None Include="Spark\fetch-delta.py" CopyToOutputDirectory="PreserveNewest" LinkBase="Spark" />

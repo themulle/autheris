@@ -14,6 +14,7 @@ using Autheris.Application.Sql;
 using Autheris.Application.Sql.Internal;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -490,7 +491,13 @@ public sealed class GovernedSqlExecutorX1Tests
     // X1.2: synthetic fallback (G-11, SEC-X1-15)
     // -------------------------------------------------------------------------------------------------------------------
 
-    private static GovernedSqlExecutionService DevelopmentServiceWithoutDatabase(params string[] catalogued)
+    private static GovernedSqlExecutionService DevelopmentServiceWithoutDatabase(params string[] catalogued) =>
+        DevelopmentServiceWithoutDatabase(webSqlEnabled: true, catalogued);
+
+    private static GovernedSqlExecutionService DevelopmentServiceWithoutDatabase(bool webSqlEnabled, params string[] catalogued) =>
+        DevelopmentServiceWithoutDatabase(webSqlEnabled, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, catalogued);
+
+    private static GovernedSqlExecutionService DevelopmentServiceWithoutDatabase(bool webSqlEnabled, IAuditLogRepository auditLog, params string[] catalogued)
     {
         var tables = catalogued.Select(t => Orders("Sqlite") with { Identifier = new TableIdentifier("default", "public", t), Table = new Table { TableName = t, SchemaName = "public", SourceType = "Sqlite" } }).ToArray();
         var repo = Substitute.For<ITableMetadataRepository>();
@@ -505,7 +512,7 @@ public sealed class GovernedSqlExecutorX1Tests
         var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
         return new GovernedSqlExecutionService(
-            Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultDataSourceName = DataSource } }), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
+            Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = webSqlEnabled, DefaultDataSourceName = DataSource } }), auditLog, executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies(),
             environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance, consentRepository: consents, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
@@ -533,5 +540,55 @@ public sealed class GovernedSqlExecutorX1Tests
         await Should.ThrowAsync<SecurityException>(() => service.ExecuteGovernedQueryAsync(
             new GovernedSqlQueryRequest("SELECT load_extension('x') FROM orders"), user, new TenantId(Tenant), (_, _) => { written = true; return Task.CompletedTask; }));
         written.ShouldBeFalse();
+    }
+
+    // -------------------------------------------------------------------------------------------------------------------
+    // WebSql:Enabled gates the client SQL endpoints, not the table reads the gateway plans itself (OData, GraphQL, MCP)
+    // -------------------------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task WebSqlDisabled_ClientSql_IsRejected()
+    {
+        var service = DevelopmentServiceWithoutDatabase(webSqlEnabled: false, "orders");
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => service.ExecuteQueryBufferedAsync(
+            new GovernedSqlQueryRequest("SELECT id FROM orders", Transport: SqlTransports.WebSql), Writer(), new TenantId(Tenant)));
+        ex.Message.ShouldContain("disabled");
+    }
+
+    [Fact]
+    public async Task WebSqlDisabled_PlannedTableRead_RunsThroughTheGovernedPipeline()
+    {
+        var service = DevelopmentServiceWithoutDatabase(webSqlEnabled: false, "orders");
+
+        var result = await service.ExecuteQueryBufferedAsync(
+            new GovernedSqlQueryRequest("SELECT id FROM orders", PlannedTableRead: true), Writer(), new TenantId(Tenant));
+
+        result.Rows.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task WebSqlDisabled_PlannedTableRead_IsStillGoverned()
+    {
+        var service = DevelopmentServiceWithoutDatabase(webSqlEnabled: false, "orders");
+
+        // the switch exemption does not bypass the catalog: a table outside it is still denied
+        await Should.ThrowAsync<WebSqlPolicyException>(() => service.ExecuteQueryBufferedAsync(
+            new GovernedSqlQueryRequest("SELECT id FROM not_catalogued", PlannedTableRead: true), Writer(), new TenantId(Tenant)));
+    }
+
+    [Fact]
+    public async Task QueryAudit_CarriesTheTraceIdOfTheCurrentActivity()
+    {
+        // A planned table read runs inside the caller's request (e.g. a cross-source query): its audit must correlate by trace id.
+        var auditLog = Substitute.For<IAuditLogRepository>();
+        var service = DevelopmentServiceWithoutDatabase(webSqlEnabled: false, auditLog, "orders");
+        using var activity = new System.Diagnostics.Activity("request").SetIdFormat(System.Diagnostics.ActivityIdFormat.W3C).Start();
+
+        await service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest("SELECT id FROM orders", PlannedTableRead: true), Writer(), new TenantId(Tenant));
+
+        await auditLog.Received().RecordAuditEventAsync(
+            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.WebSqlQuery && e.TraceId == activity.TraceId.ToHexString()),
+            Arg.Any<CancellationToken>());
     }
 }

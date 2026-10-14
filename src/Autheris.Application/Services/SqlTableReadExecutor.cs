@@ -98,7 +98,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
         var service = _executionService();
 
         var result = await service.ExecuteQueryBufferedAsync(
-            new GovernedSqlQueryRequest(planned.Sql, planned.Parameters.Count > 0 ? planned.Parameters : null, Transport: intent.Transport),
+            new GovernedSqlQueryRequest(planned.Sql, planned.Parameters.Count > 0 ? planned.Parameters : null, Transport: intent.Transport, PlannedTableRead: true),
             context.Principal,
             tenant,
             ct).ConfigureAwait(false);
@@ -149,7 +149,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
     {
         var count = _planner.PlanCount(intent, metadata, decision);
         var result = await service.ExecuteQueryBufferedAsync(
-            new GovernedSqlQueryRequest(count.Sql, count.Parameters.Count > 0 ? count.Parameters : null, Transport: intent.Transport),
+            new GovernedSqlQueryRequest(count.Sql, count.Parameters.Count > 0 ? count.Parameters : null, Transport: intent.Transport, PlannedTableRead: true),
             context.Principal,
             tenant,
             ct).ConfigureAwait(false);
