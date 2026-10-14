@@ -81,6 +81,8 @@ public abstract class RestDatasetHttpTableTestBase : IClassFixture<WebApplicatio
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:Rebac:Enabled", "false");
             builder.UseSetting("Gateway:WebSql:CrossSource:Enabled", crossSourceEnabled ? "true" : "false");
+            // SR-H-06: HTTP-declarative catalogs pass the same data-source allowlist as SQL catalogs.
+            builder.UseSetting("Gateway:WebSql:AllowedDataSources:0", "crm");
             if (crossSourceEnabled && restTransportAllowed)
             {
                 // REST federation is an explicit opt-in: "Rest" is not part of the default AllowedTransports.

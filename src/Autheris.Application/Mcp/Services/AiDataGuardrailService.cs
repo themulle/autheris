@@ -907,7 +907,8 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
                 .Distinct()
                 .ToList();
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        // ParseCanceledException derives from OperationCanceledException: a syntax error or parser timeout is a deny, not a cancellation.
+        catch (Exception ex) when (ex is not OperationCanceledException || ex is Antlr4.Runtime.Misc.ParseCanceledException)
         {
             _logger.LogWarning(ex, "SQL analysis failed while resolving MCP target tables; denying (fail-closed).");
             return null;

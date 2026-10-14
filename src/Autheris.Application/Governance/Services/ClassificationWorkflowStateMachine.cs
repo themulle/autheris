@@ -16,7 +16,7 @@ using Autheris.Application.Security.Totp.Interfaces;
 /// Implements the classification workflow state machine with SoD enforcement, Step-Up MFA validation,
 /// conditional four-eyes rules, and zero-touch auto-approvals.
 /// </summary>
-public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflowStateMachine
+public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflowStateMachine, IDisposable
 {
     /// <summary>Reviewer identity used by the zero-touch auto-approval path (only honored for eligible low-risk proposals).</summary>
     public const string SystemAutoApproverSid = "SYSTEM_AUTO_APPROVER";
@@ -420,4 +420,7 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
         }
         return false;
     }
+
+    /// <inheritdoc />
+    public void Dispose() => _transitionLock.Dispose();
 }
