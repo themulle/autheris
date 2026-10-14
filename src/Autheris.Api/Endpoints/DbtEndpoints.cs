@@ -3,6 +3,7 @@ namespace Autheris.Api.Endpoints;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Extensions;
 using Autheris.Api.Middleware;
 using Autheris.Application.Dbt.Interfaces;
@@ -148,7 +149,8 @@ public static class DbtEndpoints
             catch (InvalidOperationException ex)
             {
                 // R-EXT-1: not pending, not applicable (RLS/Casbin) or blocked by the ratchet; the status is unchanged.
-                return Results.Conflict(new { error = ex.Message });
+                SafeErrorResults.LogFailure(context, ex, "DBT_PROPOSAL_CONFLICT");
+                return SafeErrorResults.Conflict("DBT_PROPOSAL_CONFLICT", "The proposal cannot be approved in its current state.", context);
             }
         }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
 
@@ -176,7 +178,8 @@ public static class DbtEndpoints
             }
             catch (InvalidOperationException ex)
             {
-                return Results.Conflict(new { error = ex.Message });
+                SafeErrorResults.LogFailure(context, ex, "DBT_PROPOSAL_CONFLICT");
+                return SafeErrorResults.Conflict("DBT_PROPOSAL_CONFLICT", "The proposal cannot be rejected in its current state.", context);
             }
         }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentDenied);
 
@@ -368,7 +371,8 @@ public static class DbtEndpoints
             }
             catch (Exception ex)
             {
-                return Results.BadRequest(new { success = false, error = ex.Message });
+                SafeErrorResults.LogFailure(context, ex, "DBT_MANIFEST_INVALID");
+                return SafeErrorResults.BadRequest("DBT_MANIFEST_INVALID", "The semantic manifest could not be processed.", context);
             }
         }).RequireAuthorization()
           .WithRequestBodyLimit(10 * 1024 * 1024)

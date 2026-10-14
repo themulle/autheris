@@ -3,6 +3,7 @@ namespace Autheris.Api.Endpoints;
 using System;
 using System.Security.Claims;
 using System.Threading.Tasks;
+using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Streaming.Interfaces;
@@ -115,51 +116,12 @@ public static class StreamingCdcEndpoints
             return Results.Ok(safeSubs);
         }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
-        app.MapPost("/api/v1/cdc/subscriptions", async (
+        app.MapPost("/api/v1/cdc/subscriptions", (
             HttpContext context,
             Autheris.Domain.Model.CloudEventWebhookSubscription subscription,
             [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore store) =>
-        {
-            if (!IsAuthorizedSubscriptionAdmin(context.User))
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            var tenantId = EndpointSecurity.GetRequestTenant(context).Value;
-            if (string.IsNullOrWhiteSpace(tenantId))
-            {
-                tenantId = "default";
-            }
-
-            if (!Uri.TryCreate(subscription.TargetUrl, UriKind.Absolute, out var targetUri))
-            {
-                return Results.BadRequest(new { error = "Invalid absolute target URL" });
-            }
-
-            try
-            {
-                await Autheris.Application.Security.EgressUrlPolicy.ValidateResolvedAsync(targetUri, isDev: false, ct: context.RequestAborted);
-            }
-            catch (Exception ex)
-            {
-                return Results.BadRequest(new { error = $"Target URL blocked by SSRF egress policy: {ex.Message}" });
-            }
-
-            // SEC M-5: Server-side ID generation; client-chosen ID is ignored to prevent overwrite attacks
-            var serverId = Guid.NewGuid().ToString("N");
-            var securedSub = subscription with { Id = serverId, TenantId = tenantId };
-            try
-            {
-                await store.RegisterSubscriptionAsync(securedSub, context.RequestAborted);
-            }
-            catch (InvalidOperationException ex)
-            {
-                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status429TooManyRequests);
-            }
-
-            var responseSub = securedSub with { HmacSecret = string.IsNullOrEmpty(securedSub.HmacSecret) ? string.Empty : "[REDACTED]" };
-            return Results.Created($"/api/v1/cdc/subscriptions/{securedSub.Id}", responseSub);
-        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+            CreateSubscriptionAsync(context, subscription, store))
+          .RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         app.MapDelete("/api/v1/cdc/subscriptions/{id}", async (
             string id,
@@ -181,6 +143,54 @@ public static class StreamingCdcEndpoints
         }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         return app;
+    }
+
+    internal static async Task<IResult> CreateSubscriptionAsync(
+        HttpContext context,
+        Autheris.Domain.Model.CloudEventWebhookSubscription subscription,
+        Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore store)
+    {
+        if (!IsAuthorizedSubscriptionAdmin(context.User))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var tenantId = EndpointSecurity.GetRequestTenant(context).Value;
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            tenantId = "default";
+        }
+
+        if (!Uri.TryCreate(subscription.TargetUrl, UriKind.Absolute, out var targetUri))
+        {
+            return Results.BadRequest(new { error = "Invalid absolute target URL" });
+        }
+
+        try
+        {
+            await Autheris.Application.Security.EgressUrlPolicy.ValidateResolvedAsync(targetUri, isDev: false, ct: context.RequestAborted);
+        }
+        catch (Exception ex)
+        {
+            SafeErrorResults.LogFailure(context, ex, "CDC_TARGET_URL_NOT_ALLOWED");
+            return SafeErrorResults.BadRequest("CDC_TARGET_URL_NOT_ALLOWED", "The target URL is not allowed.", context);
+        }
+
+        // SEC M-5: Server-side ID generation; client-chosen ID is ignored to prevent overwrite attacks
+        var serverId = Guid.NewGuid().ToString("N");
+        var securedSub = subscription with { Id = serverId, TenantId = tenantId };
+        try
+        {
+            await store.RegisterSubscriptionAsync(securedSub, context.RequestAborted);
+        }
+        catch (InvalidOperationException ex)
+        {
+            SafeErrorResults.LogFailure(context, ex, "CDC_SUBSCRIPTION_QUOTA_EXCEEDED");
+            return SafeErrorResults.TooManyRequests("CDC_SUBSCRIPTION_QUOTA_EXCEEDED", "The subscription limit has been reached.", context);
+        }
+
+        var responseSub = securedSub with { HmacSecret = string.IsNullOrEmpty(securedSub.HmacSecret) ? string.Empty : "[REDACTED]" };
+        return Results.Created($"/api/v1/cdc/subscriptions/{securedSub.Id}", responseSub);
     }
 
     private static bool IsAuthorizedSubscriptionAdmin(ClaimsPrincipal user)

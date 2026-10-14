@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Extensions;
 using Autheris.Api.Middleware;
 using Autheris.Api.Security;
@@ -707,7 +708,12 @@ public static class GovernanceEndpoints
             }
             catch (Exception ex)
             {
-                return Results.BadRequest(new { error = $"Invalid row filter syntax: {ex.Message}" });
+                SafeErrorResults.LogFailure(context, ex, "ROW_FILTER_SYNTAX_INVALID");
+                var isDevelopment = context.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsDevelopment() ?? false;
+                return SafeErrorResults.BadRequest(
+                    "ROW_FILTER_SYNTAX_INVALID",
+                    isDevelopment ? $"Invalid row filter syntax: {ex.Message}" : "The row filter predicate is not valid SQL.",
+                    context);
             }
         }
 

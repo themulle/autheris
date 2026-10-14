@@ -652,6 +652,29 @@ public sealed class AccessProfileTests
     }
 
     [Fact]
+    public async Task RowFilterSyntaxError_NonDevelopment_NoParserDetail()
+    {
+        var repo = new InMemoryAccessProfileRepository();
+        var context = CreateEndpointContext(callerSid: "admin", callerName: "admin");
+        var req = new BulkConsentRequest
+        {
+            Subject = "david",
+            MaskingMode = "Strict",
+            Tables = ["tem.*"],
+            RowFilter = "amount >> ((",
+            Justification = "Row filter with a deliberately broken predicate",
+            ValidDays = 30
+        };
+
+        var result = await GovernanceEndpoints.CreateBulkConsentAsync(req, context, repo, CancellationToken.None);
+        var (status, body) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        body.ShouldContain("ROW_FILTER_SYNTAX_INVALID");
+        body.ShouldNotContain("Invalid row filter syntax");
+    }
+
+    [Fact]
     public async Task BulkConsent_ShortJustification_FailsValidation()
     {
         var repo = new InMemoryAccessProfileRepository();
