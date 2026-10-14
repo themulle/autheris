@@ -167,7 +167,9 @@ Most of these WPs have no open decisions and low file overlap. They can start im
 
 Each scope plan lists its own decisions with recommendations. The decisions below cross scopes or block whole lanes, so resolve them first.
 
-| # | Decision | Blocks | Recommendation |
+**Decision record (2026-10-14):** the product owner adopted all recommendations G-1..G-14 as listed below. Scope-plan decisions not listed here follow the recommendation in the respective scope plan unless a WP review raises a conflict.
+
+| # | Decision | Blocks | Decided (recommendation adopted) |
 |---|---|---|---|
 | G-1 | Is multi-replica deployment a supported topology? | L5 (A-09..A-14), SEC1-05C, SEC1-06 | Yes. Classify all state as node-local, cluster-shared or durable. |
 | G-2 | CDC webhooks: wire them up or remove them? | A-01, A-03, A-13 | Wire them up. Keep them behind a default-off flag until A-03 lands. |
