@@ -2,11 +2,16 @@ namespace Autheris.Tests.Unit.Docs;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Application.Docs.Services;
+using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
@@ -88,5 +93,61 @@ public sealed class DocSearchAndMcpToolsTests
         var topicsJson = await McpDocTools.ExecuteListDocTopicsAsync(searchService, null);
         using var topDoc = JsonDocument.Parse(topicsJson);
         topDoc.RootElement.GetProperty("total").GetInt32().ShouldBe(1);
+    }
+
+    [Fact]
+    public void McpToolRegistry_RegistersAllDocTools()
+    {
+        var registry = new McpToolRegistry();
+        var tools = registry.GetAvailableTools().Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        tools.ShouldContain(McpDocTools.SearchDocs);
+        tools.ShouldContain(McpDocTools.LookupErrorCode);
+        tools.ShouldContain(McpDocTools.GetProcedure);
+        tools.ShouldContain(McpDocTools.ListDocTopics);
+        tools.ShouldContain(McpDocTools.ListApplications);
+        tools.ShouldContain(McpDocTools.DepositDocumentation);
+    }
+
+    [Fact]
+    public void McpDocTools_IsDocTool_IdentifiesAllDocTools()
+    {
+        McpDocTools.IsDocTool("search_docs").ShouldBeTrue();
+        McpDocTools.IsDocTool("lookup_error_code").ShouldBeTrue();
+        McpDocTools.IsDocTool("get_procedure").ShouldBeTrue();
+        McpDocTools.IsDocTool("list_doc_topics").ShouldBeTrue();
+        McpDocTools.IsDocTool("list_applications").ShouldBeTrue();
+        McpDocTools.IsDocTool("deposit_documentation").ShouldBeTrue();
+
+        McpDocTools.IsDocTool("query_sql").ShouldBeFalse();
+        McpDocTools.IsDocTool("admin_plan_access").ShouldBeFalse();
+        McpDocTools.IsDocTool(null).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task AiDataGuardrailService_ExecutesSearchDocs_Successfully()
+    {
+        var searchService = new InMemoryDocSearchService();
+        var chunk = CreateChunk("Kubernetes Deployment", "kubectl apply -f deployment.yaml", DocCategory.Guide);
+        await searchService.IndexChunkAsync(chunk);
+
+        var toolRegistry = new McpToolRegistry();
+        var options = Options.Create(new GatewayOptions());
+        var guardrail = new AiDataGuardrailService(
+            toolRegistry,
+            options,
+            NullLogger<AiDataGuardrailService>.Instance,
+            docSearchService: searchService);
+
+        var sessionContext = new McpSessionContext("session-1", "client-1", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "user-david", Roles: ["DataConsumer"]);
+        var request = new McpToolCallRequest("search_docs", """{"query": "kubernetes"}""", "session-1", "req-1");
+
+        var result = await guardrail.ExecuteToolWithGuardrailAsync(request, sessionContext);
+
+        result.IsSuccess.ShouldBeTrue();
+        result.ErrorMessage.ShouldBeNull();
+        using var doc = JsonDocument.Parse(result.ContentJson);
+        doc.RootElement.GetProperty("total").GetInt32().ShouldBe(1);
+        doc.RootElement.GetProperty("results")[0].GetProperty("title").GetString().ShouldBe("Kubernetes Deployment");
     }
 }

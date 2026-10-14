@@ -5,8 +5,11 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
+using Autheris.Api.Security;
 using Autheris.Application.Docs.Interfaces;
+using Autheris.Application.Events;
 using Autheris.Domain.Audit;
+using Autheris.Domain.Events;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -30,7 +33,25 @@ public static class DocIngestionEndpoints
             if (!request.HasFormContentType)
             {
                 // Raw stream upload
-                var result = await docStore.ExtractBundleAsync(appId, request.Body, ct).ConfigureAwait(false);
+                const long maxRawSize = 50 * 1024 * 1024;
+                if (request.ContentLength > maxRawSize)
+                {
+                    return Results.BadRequest(new { error = "Bundle archive exceeds maximum permitted size of 50 MB." });
+                }
+
+                using var ms = new MemoryStream();
+                await request.Body.CopyToAsync(ms, ct).ConfigureAwait(false);
+                if (ms.Length > maxRawSize)
+                {
+                    return Results.BadRequest(new { error = "Bundle archive exceeds maximum permitted size of 50 MB." });
+                }
+                if (ms.Length == 0)
+                {
+                    return Results.BadRequest(new { error = "No documentation bundle file found in the request." });
+                }
+
+                ms.Position = 0;
+                var result = await docStore.ExtractBundleAsync(appId, ms, ct).ConfigureAwait(false);
                 return result.Success ? Results.Ok(result) : Results.BadRequest(result);
             }
 
@@ -59,6 +80,7 @@ public static class DocIngestionEndpoints
             string docId,
             DepositDocumentBody body,
             IUniversalDocStore docStore,
+            IGatewayEventBus? eventBus,
             CancellationToken ct) =>
         {
             if (!Enum.TryParse<DocCategory>(category, true, out var parsedCategory))
@@ -82,6 +104,19 @@ public static class DocIngestionEndpoints
                 body.Tags);
 
             var result = await docStore.DepositDocumentAsync(depositRequest, ct).ConfigureAwait(false);
+
+            if (result.Success && eventBus != null)
+            {
+                await eventBus.PublishAsync(new DocumentDepositedEvent(
+                    EventId: Guid.NewGuid().ToString("N"),
+                    AppId: appId,
+                    Category: category,
+                    DocId: docId,
+                    Title: title,
+                    SourceFilePath: result.FilePath ?? string.Empty,
+                    Timestamp: DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+            }
+
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);
         }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.DocIngestionDocumentApplied);
 
@@ -107,6 +142,77 @@ public static class DocIngestionEndpoints
                 ? Results.Ok(manifest)
                 : Results.NotFound(new { error = $"Manifest for application '{appId}' was not found." });
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.DocDiscoveryRead);
+
+        // 5. Search documentation REST API
+        app.MapGet("/api/v1/docs/search", async (
+            string query,
+            string? category,
+            int? limit,
+            IDocSearchService searchService,
+            CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                return Results.BadRequest(new { error = "Query parameter 'query' is required." });
+            }
+
+            DocCategory? parsedCategory = null;
+            if (!string.IsNullOrWhiteSpace(category) && Enum.TryParse<DocCategory>(category, true, out var c))
+            {
+                parsedCategory = c;
+            }
+
+            var results = await searchService.SearchAsync(query, parsedCategory, limit ?? 10, ct).ConfigureAwait(false);
+            return Results.Ok(new { total = results.Count, results });
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.DocDiscoveryRead);
+
+        // 6. List documentation topics REST API
+        app.MapGet("/api/v1/docs/topics", async (
+            string? appId,
+            IDocSearchService searchService,
+            CancellationToken ct) =>
+        {
+            var topics = await searchService.ListTopicsAsync(appId, ct).ConfigureAwait(false);
+            return Results.Ok(new { total = topics.Count, topics });
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.DocDiscoveryRead);
+
+        // 7. Lookup error code REST API
+        app.MapGet("/api/v1/docs/errors/{errorCode}", async (
+            string errorCode,
+            IDocSearchService searchService,
+            CancellationToken ct) =>
+        {
+            var def = await searchService.LookupErrorCodeAsync(errorCode, ct).ConfigureAwait(false);
+            return def != null
+                ? Results.Ok(def)
+                : Results.NotFound(new { error = $"Error code '{errorCode}' was not found in documentation." });
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.DocDiscoveryRead);
+
+        // 8. Retrieve procedure instructions REST API
+        app.MapGet("/api/v1/docs/procedures/{*identifier}", async (
+            string identifier,
+            IDocSearchService searchService,
+            CancellationToken ct) =>
+        {
+            if (!DocChunkIdentifier.TryParse(identifier, out var id) || id == null)
+            {
+                return Results.BadRequest(new { error = $"Invalid document identifier format '{identifier}'." });
+            }
+
+            var chunk = await searchService.GetChunkAsync(id, ct).ConfigureAwait(false);
+            return chunk != null
+                ? Results.Ok(chunk)
+                : Results.NotFound(new { error = $"Document section '{identifier}' was not found." });
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.DocDiscoveryRead);
+
+        // 9. Sync existing documents from filesystem storage REST API
+        app.MapPost("/api/v1/docs/sync", async (
+            IUniversalDocStore docStore,
+            CancellationToken ct) =>
+        {
+            var count = await docStore.SyncExistingDocumentsAsync(ct).ConfigureAwait(false);
+            return Results.Ok(new { message = $"Synchronized {count} document sections into search index.", indexedSections = count });
+        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.DocIngestionBundleApplied);
 
         return app;
     }

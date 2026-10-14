@@ -188,16 +188,20 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
             var getOperation = new JsonObject
             {
                 ["summary"] = $"Query {domain}.{tableName}",
-                ["description"] = $"OData v4 entity set query endpoint for table '{domain}.{schema}.{tableName}'. Supports $select, $top, $skip. Other system query options are rejected (400/501), never ignored.",
+                ["description"] = $"OData v4 entity set query endpoint for table '{domain}.{schema}.{tableName}'. Supports $select, $top, $skip, $filter, $orderby, $count, $format. Other system query options are rejected (400/501), never ignored.",
                 ["tags"] = new JsonArray { domain }
             };
 
             var parameters = new JsonArray
             {
-                // O3: only implemented options are advertised; unknown properties in $select are rejected with 400.
-                CreateQueryParam("$select", "string", "Comma-separated list of properties of this entity set to select."),
-                CreateQueryParam("$top", "integer", "Maximum number of records to return (max 1000)."),
-                CreateQueryParam("$skip", "integer", "Number of records to skip for pagination (max 100000).")
+                // Advertised query options matching runtime enforcement in ODataEndpoints / ODataHandler
+                CreateQueryParam("$select", "string", "Comma-separated list of properties of this entity set to select. Unknown properties are rejected with 400."),
+                CreateQueryParam("$top", "integer", "Maximum number of records to return (max 1000, default 100)."),
+                CreateQueryParam("$skip", "integer", "Number of records to skip for pagination (max 100000)."),
+                CreateQueryParam("$filter", "string", "OData v4 filter expression to restrict results (max 4096 characters, max recursion depth 32). Supported operators: eq, ne, gt, ge, lt, le, and, or, not; functions: contains, startswith, endswith, tolower, toupper; literals: strings, numbers, booleans, null, datetimes, guids."),
+                CreateQueryParam("$orderby", "string", "Comma-separated list of property names with optional direction ('asc' or 'desc') to sort results (e.g. 'created_at desc, id asc')."),
+                CreateQueryParam("$count", "boolean", "Include total count of matching records before pagination ('true' or 'false')."),
+                CreateQueryParam("$format", "string", "Requested media type format ('json' or 'parquet').")
             };
             getOperation["parameters"] = parameters;
 

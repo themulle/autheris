@@ -1,7 +1,6 @@
 # F-API-03: Dual-Access Exposure (OData v4 & Dynamic OpenAPI 3.1)
 
-**Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`ODataEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/ODataEndpoints.cs), [`IODataHandler.cs`](file:///root/autheris/src/Autheris.Application/OData/IODataHandler.cs), [`ODataCsdlGenerator.cs`](file:///root/autheris/src/Autheris.Application/OData/ODataCsdlGenerator.cs)
+**Components:** [`ODataEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/ODataEndpoints.cs), [`IODataHandler.cs`](file:///root/autheris/src/Autheris.Application/OData/IODataHandler.cs), [`ODataCsdlGenerator.cs`](file:///root/autheris/src/Autheris.Extensions/OData/ODataCsdlGenerator.cs), [`DynamicOpenApiGenerator.cs`](file:///root/autheris/src/Autheris.Application/OData/Services/DynamicOpenApiGenerator.cs)
 
 ---
 
@@ -22,15 +21,17 @@ Modern frontend web applications demand GraphQL, whereas enterprise BI tools (su
 ## 3. Architecture & Capabilities
 
 - Dynamic generation of OData v4 CSDL XML metadata (`$metadata`) reflecting live governance schemas.
+  - Character entity escaping (`&#10;`, `&#13;`, `&#9;`) for multi-line and tabbed descriptions to guarantee compatibility with strict XML parsers such as Microsoft Excel's OData connector.
 - Full support for standard OData query options:
   - `$select`: Projects requested columns while strictly enforcing column masking rules.
-  - `$filter`: SQL-level pushdown supporting equality, inequality, logical conjunctions, and substring checks.
+  - `$filter`: SQL-level pushdown supporting equality, inequality, comparison, logical conjunctions, substring/string functions, and collection operators.
   - `$orderby`: Multi-column sorting (`?$orderby=orderDate desc, totalAmount asc`).
-  - `$top` and `$skip`: Server-side pagination bounded by `MaxPageSize`.
+  - `$top` and `$skip`: Server-side pagination bounded by `MaxPageSize` (default 1000) and `MaxSkip` (100,000).
   - `$count`: Total matching row count projection (`?$count=true` returning `@odata.count`, or `/table/$count` scalar endpoint).
+  - `$format`: Content negotiation supporting JSON and Apache Parquet.
 - Strict protocol compatibility: Emits mandatory `OData-Version: 4.0` response header ensuring out-of-the-box compatibility with Microsoft Excel, PowerQuery, and Power BI desktop.
 - Zero-Trust Governance: Inherits data-owner consent, Casbin ABAC, column-level masking (HMAC/redaction), and relation-scoped Virtual Filters ([`F-GOV-09`](f-gov-09-virtual-filters.md)).
-- OpenAPI 3.1 schema projection (`/odata/v4/$openapi`) with embedded documentation and data types.
+- Dynamic OpenAPI 3.1 specification projection (`/odata/v4/$openapi`) advertising all evaluated query options (`$select`, `$top`, `$skip`, `$filter`, `$orderby`, `$count`, `$format`) with detailed operator descriptions and parameter constraints.
 
 ---
 

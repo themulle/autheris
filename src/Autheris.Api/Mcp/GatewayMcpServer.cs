@@ -10,6 +10,7 @@ using Autheris.Api.Endpoints;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
+using Autheris.Application.Mcp.Tools;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -62,7 +63,23 @@ public static class GatewayMcpServer
     internal static ValueTask<ListToolsResult> ListToolsAsync(RequestContext<ListToolsRequestParams> context, CancellationToken ct)
     {
         var registry = context.Services!.GetRequiredService<IMcpToolRegistry>();
-        var tools = registry.GetAvailableTools()
+        var session = Caller(context.Services!);
+        var options = context.Services!.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value;
+
+        var roles = session.Roles ?? [];
+        bool isAdmin = options.IsMcpAuthBypassed ||
+                       roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) ||
+                       roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase) ||
+                       roles.Contains("TenantAdmin", StringComparer.OrdinalIgnoreCase) ||
+                       roles.Contains("Admin", StringComparer.OrdinalIgnoreCase);
+
+        var available = registry.GetAvailableTools();
+        if (!isAdmin)
+        {
+            available = available.Where(t => !McpAdminTools.IsAdminTool(t.Name)).ToList();
+        }
+
+        var tools = available
             .OrderBy(t => t.Name, StringComparer.Ordinal)
             .Select(t => new Tool { Name = t.Name, Description = t.Description, InputSchema = Schema(t.InputJsonSchema) })
             .ToList();

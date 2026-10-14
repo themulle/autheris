@@ -238,6 +238,7 @@ public static class GatewayServiceCollectionExtensions
     {
         var hostEnv = environment ?? (services.FirstOrDefault(d => d.ServiceType == typeof(IHostEnvironment))?.ImplementationInstance as IHostEnvironment);
 
+        services.AddAutherisEvents(gatewayOptions);
         services.AddAutherisStorage(gatewayOptions, hostEnv);
         services.AddAutherisGovernance(gatewayOptions);
         services.AddAutherisSecurity(gatewayOptions, hostEnv);

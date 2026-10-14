@@ -210,4 +210,37 @@ public sealed class UniversalDocStoreTests : IDisposable
         listJson.ShouldContain("\"total\": 1");
         listJson.ShouldContain("crm-system");
     }
+
+    [Fact]
+    public async Task SyncExistingDocumentsAsync_IndexesMarkdownFilesOnDisk()
+    {
+        // Arrange: manually create a file structure on disk (simulating mounted shared-docs volume)
+        var appDir = Path.Combine(_testRootDir, "inventory-service", "runbooks");
+        Directory.CreateDirectory(appDir);
+        var filePath = Path.Combine(appDir, "stock-alert.md");
+        await File.WriteAllTextAsync(filePath, """
+        # Stock Level Critical Alert
+
+        ## Symptom
+        Error code `ERR_STOCK_LOW` occurs when items reach threshold.
+        """);
+
+        // Act: Sync existing documents into fresh search service
+        var freshSearchService = new InMemoryDocSearchService();
+        var store = new FileSystemUniversalDocStore(
+            _testRootDir,
+            freshSearchService,
+            _ingestor,
+            NullLogger<FileSystemUniversalDocStore>.Instance);
+
+        var indexedCount = await store.SyncExistingDocumentsAsync();
+
+        // Assert
+        indexedCount.ShouldBeGreaterThan(0);
+        var searchHits = await freshSearchService.SearchAsync("ERR_STOCK_LOW");
+        searchHits.Count.ShouldBeGreaterThanOrEqualTo(1);
+        searchHits[0].AppId.ShouldBe("inventory-service");
+        searchHits[0].Id.DocId.ShouldBe("stock-alert");
+        searchHits[0].Summary.ShouldContain("ERR_STOCK_LOW");
+    }
 }
