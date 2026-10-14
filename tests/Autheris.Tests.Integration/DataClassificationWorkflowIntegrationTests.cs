@@ -51,7 +51,7 @@ public class DataClassificationWorkflowIntegrationTests : IClassFixture<WebAppli
     [Fact]
     public async Task ClassifyTable_WithPiiColumns_ReturnsDeterministicProposalAndValidWormHash()
     {
-        var client = CreateClient(new Sid("S-1-5-21-DATA-STEWARD-1"), ["DATA_STEWARD"]);
+        var client = CreateClient(new Sid("S-1-5-21-DATA-STEWARD-1"), ["GovernanceAdmin"]);
 
         var context = new TableClassificationContext(
             TableIdentifier: new TableIdentifier("sales", "crm", "customer_accounts"),
@@ -118,7 +118,7 @@ public class DataClassificationWorkflowIntegrationTests : IClassFixture<WebAppli
         var client = leanMeshFactory.CreateClient();
         client.DefaultRequestHeaders.Add("GraphQL-Preflight", "1");
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-DATA-STEWARD-2");
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "DATA_STEWARD");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
 
         var context = new TableClassificationContext(
             TableIdentifier: new TableIdentifier("reference", "geo", "country_codes"),
@@ -235,7 +235,7 @@ public class DataClassificationWorkflowIntegrationTests : IClassFixture<WebAppli
         var client = customFactory.CreateClient();
         client.DefaultRequestHeaders.Add("GraphQL-Preflight", "1");
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-TEST-HOOK-USER");
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "DATA_STEWARD");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
 
         var context = new TableClassificationContext(
             TableIdentifier: new TableIdentifier("sales", "orders", "invoices"),

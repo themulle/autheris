@@ -349,10 +349,69 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     {
         if (context.INTEGER_VALUE() != null)
         {
-            long val = long.Parse(context.INTEGER_VALUE().GetText(), CultureInfo.InvariantCulture);
-            return new LiteralExpression(val, LiteralType.Integer);
+            return new LiteralExpression(ParseIntegerLiteral(context.INTEGER_VALUE().GetText()), LiteralType.Integer);
         }
         return new ParameterReference("?");
+    }
+
+    /// <summary>
+    /// Parses a Trino INTEGER_VALUE token: decimal, 0x hexadecimal, 0o octal or 0b binary digits with optional '_' separators
+    /// and an optional leading minus. A malformed value or one outside the BIGINT range is a typed rejection, never a
+    /// FormatException or OverflowException.
+    /// </summary>
+    internal static long ParseIntegerLiteral(string text) =>
+        TryParseIntegerLiteral(text, out long value)
+            ? value
+            : throw new AstBuildException("Integer literal is malformed or outside the BIGINT range.");
+
+    private static bool TryParseIntegerLiteral(string text, out long value)
+    {
+        value = 0;
+        ReadOnlySpan<char> digits = text.AsSpan();
+        bool negative = digits.Length > 0 && digits[0] == '-';
+        if (negative)
+        {
+            digits = digits[1..];
+        }
+
+        int radix = 10;
+        if (digits.Length > 2 && digits[0] == '0')
+        {
+            radix = char.ToUpperInvariant(digits[1]) switch { 'X' => 16, 'O' => 8, 'B' => 2, _ => 10 };
+            if (radix != 10)
+            {
+                digits = digits[2..];
+            }
+        }
+
+        ulong limit = negative ? (ulong)long.MaxValue + 1 : long.MaxValue;
+        ulong magnitude = 0;
+        bool any = false;
+        foreach (char c in digits)
+        {
+            if (c == '_')
+            {
+                continue;
+            }
+
+            char u = char.ToUpperInvariant(c);
+            int digit = u is >= '0' and <= '9' ? u - '0' : u is >= 'A' and <= 'F' ? u - 'A' + 10 : radix;
+            if (digit >= radix || magnitude > (limit - (ulong)digit) / (ulong)radix)
+            {
+                return false;
+            }
+
+            magnitude = magnitude * (ulong)radix + (ulong)digit;
+            any = true;
+        }
+
+        if (!any)
+        {
+            return false;
+        }
+
+        value = negative ? (long)(0UL - magnitude) : (long)magnitude;
+        return true;
     }
 
     public override SqlNode VisitQueryTermDefault(SqlBaseParser.QueryTermDefaultContext context)
@@ -1049,10 +1108,21 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
             case SqlBaseParser.NumericLiteralContext num:
                 {
                     string text = SingleTokenText(num);
-                    if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out long intVal))
+                    if (num.number() is SqlBaseParser.IntegerLiteralContext)
                     {
-                        return new LiteralExpression(intVal, LiteralType.Integer);
+                        if (TryParseIntegerLiteral(text, out long intVal))
+                        {
+                            return new LiteralExpression(intVal, LiteralType.Integer);
+                        }
+
+                        // A decimal digit string beyond BIGINT stays a decimal literal; a radix-prefixed one has no decimal form.
+                        if (text.TrimStart('-').Length > 1 && char.IsAsciiLetter(text.TrimStart('-')[1]))
+                        {
+                            throw new AstBuildException("Integer literal is malformed or outside the BIGINT range.");
+                        }
                     }
+
+                    text = text.Replace("_", string.Empty, StringComparison.Ordinal);
                     if (decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out decimal decVal))
                     {
                         return new LiteralExpression(decVal, LiteralType.Decimal);

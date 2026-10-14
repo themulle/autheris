@@ -76,4 +76,55 @@ public sealed class AstBuilderFailLoudTests
     {
         Assert.IsType<SelectStatement>(Build(sql));
     }
+
+    [Theory]
+    [InlineData("31", 31L)]
+    [InlineData("0x1F", 31L)]
+    [InlineData("0X1f", 31L)]
+    [InlineData("0o17", 15L)]
+    [InlineData("0b1010", 10L)]
+    [InlineData("1_000", 1000L)]
+    [InlineData("-0x10", -16L)]
+    [InlineData("9223372036854775807", long.MaxValue)]
+    [InlineData("-9223372036854775808", long.MinValue)]
+    [InlineData("0x7FFF_FFFF_FFFF_FFFF", long.MaxValue)]
+    public void IntegerLiteral_AllTrinoRadixForms_Parse(string text, long expected)
+    {
+        Assert.Equal(expected, SqlAstBuilder.ParseIntegerLiteral(text));
+    }
+
+    [Theory]
+    [InlineData("0x8000000000000000")]
+    [InlineData("9223372036854775808")]
+    [InlineData("0b2")]
+    public void IntegerLiteral_OutOfRangeOrMalformed_IsATypedRejection(string text)
+    {
+        Assert.Throws<AstBuildException>(() => SqlAstBuilder.ParseIntegerLiteral(text));
+    }
+
+    [Theory]
+    // fuzz seed 3882987415638235573: a hex ordinal reached the SQL Server generator as an unparsed string (FormatException)
+    [InlineData("SELECT id FROM t ORDER BY 0x1F LIMIT 1", 31L)]
+    [InlineData("SELECT id FROM t LIMIT 0x10", 16L)]
+    public void HexIntegerLiteral_BuildsAsATypedInteger(string sql, long expected)
+    {
+        var statement = Assert.IsType<SelectStatement>(Build(sql));
+        Assert.Contains(expected, Integers(statement));
+    }
+
+    [Fact]
+    public void HexIntegerLiteral_BeyondBigint_IsATypedRejection()
+    {
+        Assert.Throws<AstBuildException>(() => Build("SELECT id FROM t WHERE id = 0xFFFFFFFFFFFFFFFFFF"));
+    }
+
+    private static System.Collections.Generic.IEnumerable<long> Integers(SelectStatement statement)
+    {
+        foreach (var element in statement.OrderBy?.Elements ?? [])
+        {
+            if (element.Expression is LiteralExpression { Type: LiteralType.Integer, Value: long ordinal }) yield return ordinal;
+        }
+
+        if (statement.Pagination?.Limit is LiteralExpression { Type: LiteralType.Integer, Value: long limit }) yield return limit;
+    }
 }
