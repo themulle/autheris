@@ -329,7 +329,7 @@ public class InfrastructureTests : IDisposable
         });
 
         // Tamper with the Entry Id directly in the database
-        using (var cmd = _repository.Connection.CreateCommand())
+        using (var cmd = _repository.RawConnection().CreateCommand())
         {
             cmd.CommandText = "UPDATE AUDIT_LOG_ENTRIES SET id = @tamperedId WHERE id = @originalId";
             cmd.Parameters.AddWithValue("@tamperedId", Guid.NewGuid().ToString());
@@ -500,7 +500,7 @@ public class InfrastructureTests : IDisposable
     public async Task GetAllTables_WhenPolicyEpochMissing_ReturnsCorrectDomainFromSourceName()
     {
         // Arrange: Delete policy epoch for finance_table_1
-        using (var cmd = _repository.Connection.CreateCommand())
+        using (var cmd = _repository.RawConnection().CreateCommand())
         {
             cmd.CommandText = "DELETE FROM POLICY_EPOCHS WHERE table_name = 'finance_table_1'";
             await cmd.ExecuteNonQueryAsync();
@@ -576,7 +576,7 @@ public class InfrastructureTests : IDisposable
         await Should.ThrowAsync<Exception>(() => _repository.CreateConsentAsync(consent));
 
         // Verify that CONSENTS record was rolled back atomically
-        using (var cmd = _repository.Connection.CreateCommand())
+        using (var cmd = _repository.RawConnection().CreateCommand())
         {
             cmd.CommandText = "SELECT COUNT(*) FROM CONSENTS WHERE id = @id";
             cmd.Parameters.AddWithValue("@id", consentId.ToString());

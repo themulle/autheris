@@ -18,7 +18,7 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(subject);
 
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
+        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             var now = DateTimeOffset.UtcNow;
@@ -73,13 +73,13 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task<IReadOnlyList<AccessProfile>> GetAllProfilesAsync(TenantId tenantId, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
+        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             var profiles = new List<AccessProfile>();
@@ -131,7 +131,7 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
@@ -139,7 +139,7 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(profileId);
 
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
+        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             AccessProfile? profile = null;
@@ -188,7 +188,7 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
@@ -198,7 +198,7 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(profile.ProfileId);
         ArgumentException.ThrowIfNullOrWhiteSpace(profile.Name);
 
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
+        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             using var tx = _connection.BeginTransaction();
@@ -284,7 +284,7 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
@@ -292,7 +292,7 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(profileId);
 
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
+        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             using var tx = _connection.BeginTransaction();
@@ -322,7 +322,7 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 

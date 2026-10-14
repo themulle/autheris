@@ -73,7 +73,7 @@ public partial class SqliteGovernanceRepository
             return entry.Metadata;
         }
 
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             nowTicks = DateTime.UtcNow.Ticks;
@@ -192,13 +192,13 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             var results = new List<TableMetadata>();
@@ -327,7 +327,7 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
@@ -345,7 +345,7 @@ public partial class SqliteGovernanceRepository
 
     public async Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             Guid tableId;
@@ -575,13 +575,13 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task<long> GetTableEpochAsync(TableIdentifier table, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             using var cmd = _connection.CreateCommand();
@@ -596,13 +596,13 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task<long> IncrementTableEpochAsync(TableIdentifier table, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             long newEpoch;
@@ -627,7 +627,7 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
@@ -679,7 +679,7 @@ public partial class SqliteGovernanceRepository
 
     public async Task DeletePolicyEpochForTableAsync(TableIdentifier table, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             using var cmd = _connection.CreateCommand();
@@ -692,13 +692,13 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             using var cmd = _connection.CreateCommand();
@@ -716,13 +716,13 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             var owners = new List<DataOwner>();
@@ -753,20 +753,20 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             return await IsAuthorizedApproverForTableInternalAsync(table, approverSid, ct);
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
@@ -840,7 +840,7 @@ public partial class SqliteGovernanceRepository
 
     public async Task<IReadOnlySet<string>> GetTransitiveRolesAsync(Sid subjectSid, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             var roles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -860,13 +860,13 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task<IReadOnlyList<TableRelation>> GetRelationsForTableAsync(TableIdentifier parentTable, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             var relations = new List<TableRelation>();
@@ -912,13 +912,13 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task CreateRelationAsync(TableRelation relation, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             using var cmd = _connection.CreateCommand();
@@ -936,7 +936,7 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 

@@ -43,14 +43,14 @@ public sealed class GovernanceSchemaMigrationTests
 
     private static long Scalar(SqliteGovernanceRepository repository, string sql)
     {
-        using var cmd = repository.Connection.CreateCommand();
+        using var cmd = repository.RawConnection().CreateCommand();
         cmd.CommandText = sql;
         return Convert.ToInt64(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
     private static void Exec(SqliteGovernanceRepository repository, string sql)
     {
-        using var cmd = repository.Connection.CreateCommand();
+        using var cmd = repository.RawConnection().CreateCommand();
         cmd.CommandText = sql;
         cmd.ExecuteNonQuery();
     }

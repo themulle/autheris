@@ -30,7 +30,7 @@ public partial class SqliteGovernanceRepository
         var subjectSet = subjects.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (subjectSet.Count == 0) return Array.Empty<Consent>();
 
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             var consents = new List<Consent>();
@@ -101,7 +101,7 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
@@ -125,7 +125,7 @@ public partial class SqliteGovernanceRepository
             ? new HashSet<string>(roles, StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             var consents = new List<Consent>();
@@ -199,7 +199,7 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
@@ -212,7 +212,7 @@ public partial class SqliteGovernanceRepository
         DateTimeOffset atTime,
         CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             var consents = new List<Consent>();
@@ -260,7 +260,7 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
@@ -270,7 +270,7 @@ public partial class SqliteGovernanceRepository
     /// </summary>
     public async Task<bool> RevokeSystemConsentAsync(Guid consentId, Guid consentRequestId, Sid revokedBySid, string reason, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             TableIdentifier? tableId = null;
@@ -314,7 +314,7 @@ public partial class SqliteGovernanceRepository
 
             await IncrementTableEpochInternalAsync(tableId.Value, ct);
 
-            await RecordAuditEventInternalAsync(new AuditLogEntry
+            await RecordAuditEventInternalAsync(_connection, new AuditLogEntry
             {
                 TenantId = tenantId,
                 EventType = "CONSENT_REVOKED",
@@ -334,7 +334,7 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
@@ -585,7 +585,7 @@ public partial class SqliteGovernanceRepository
 
     public async Task<ConsentRequest> CreateConsentRequestAsync(ConsentRequest request, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             using var cmd = _connection.CreateCommand();
@@ -612,13 +612,13 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task<ConsentRequest?> GetConsentRequestAsync(Guid requestId, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             using var cmd = _connection.CreateCommand();
@@ -661,7 +661,7 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
@@ -676,7 +676,7 @@ public partial class SqliteGovernanceRepository
 
     private async Task<ConsentRequest?> GetConsentRequestByTicketIdCoreAsync(string ticketId, TenantId? tenantId, CancellationToken ct)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             using var cmd = _connection.CreateCommand();
@@ -724,7 +724,7 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
@@ -740,7 +740,7 @@ public partial class SqliteGovernanceRepository
 
     private async Task ActivateConsentCoreAsync(Guid requestId, Sid? approvedBy, bool allowPendingAutoApprove, CancellationToken ct)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             ConsentRequest? req = null;
@@ -889,7 +889,7 @@ public partial class SqliteGovernanceRepository
                     ValidTo = req.RequestedValidTo
                 })
             };
-            await RecordAuditEventInternalAsync(auditEntry, ct, tx);
+            await RecordAuditEventInternalAsync(_connection, auditEntry, ct, tx);
 
             await IncrementTableEpochInternalAsync(req.TableIdentifier, tx, ct);
             await tx.CommitAsync(ct);
@@ -900,13 +900,13 @@ public partial class SqliteGovernanceRepository
         finally
         {
             RollbackPendingAuditTransactions();
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             using var cmd = _connection.CreateCommand();
@@ -916,13 +916,13 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task UpdateConsentRequestTicketIdAsync(Guid requestId, string ticketId, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             using var cmd = _connection.CreateCommand();
@@ -933,13 +933,13 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task<IReadOnlyList<ConsentRequest>> GetRequestsByRequesterSidAsync(Sid requesterSid, string? status = null, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             var list = new List<ConsentRequest>();
@@ -981,13 +981,13 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             var list = new List<ConsentRequest>();
@@ -1035,7 +1035,7 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
@@ -1064,7 +1064,7 @@ public partial class SqliteGovernanceRepository
             throw new InvalidOperationException("Separation of duties violated: The requester cannot approve their own request.");
         }
 
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             string currentStatus;
@@ -1204,7 +1204,7 @@ public partial class SqliteGovernanceRepository
             }
 
             req.Status = newStatus;
-            await RecordAuditEventInternalAsync(
+            await RecordAuditEventInternalAsync(_connection, 
                 ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_APPROVAL_STEP", "APPROVED", newStatus, itsmApproverAccount, null), ct, tx);
 
             tx.Commit();
@@ -1214,7 +1214,7 @@ public partial class SqliteGovernanceRepository
         finally
         {
             RollbackPendingAuditTransactions();
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
@@ -1233,7 +1233,7 @@ public partial class SqliteGovernanceRepository
             throw new InvalidOperationException($"Request {requestId} is in status '{req.Status}' and cannot be rejected.");
         }
 
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             string currentStatus;
@@ -1283,7 +1283,7 @@ public partial class SqliteGovernanceRepository
             }
 
             req.Status = "REJECTED";
-            await RecordAuditEventInternalAsync(
+            await RecordAuditEventInternalAsync(_connection, 
                 ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_REQUEST_REJECTED", "REJECTED", "REJECTED", null, reason), ct, tx);
 
             tx.Commit();
@@ -1293,14 +1293,14 @@ public partial class SqliteGovernanceRepository
         finally
         {
             RollbackPendingAuditTransactions();
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default)
     {
         consent.Validate();
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             using var tx = _connection.BeginTransaction();
@@ -1396,7 +1396,7 @@ public partial class SqliteGovernanceRepository
                     ValidTo = consent.ValidTo
                 })
             };
-            await RecordAuditEventInternalAsync(auditEntry, ct, tx);
+            await RecordAuditEventInternalAsync(_connection, auditEntry, ct, tx);
 
             await IncrementTableEpochInternalAsync(consent.TableIdentifier, tx, ct);
             await tx.CommitAsync(ct);
@@ -1410,13 +1410,13 @@ public partial class SqliteGovernanceRepository
         finally
         {
             RollbackPendingAuditTransactions();
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             Consent? consent = null;
@@ -1473,13 +1473,13 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             TableIdentifier? tableId = null;
@@ -1558,17 +1558,17 @@ public partial class SqliteGovernanceRepository
                     Reason = reason
                 })
             };
-            await RecordAuditEventInternalAsync(auditEntry, ct);
+            await RecordAuditEventInternalAsync(_connection, auditEntry, ct);
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             var consents = new List<Consent>();
@@ -1625,13 +1625,13 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task ExtendConsentExpiryAsync(Guid consentId, DateTimeOffset newValidTo, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             TableIdentifier? tableId = null;
@@ -1670,7 +1670,7 @@ public partial class SqliteGovernanceRepository
             }
 
             // Review E-10: a longer validity is a policy change and belongs in the hash chain.
-            await RecordAuditEventInternalAsync(new AuditLogEntry
+            await RecordAuditEventInternalAsync(_connection, new AuditLogEntry
             {
                 TenantId = extendTenant,
                 EventType = "CONSENT_EXPIRY_EXTENDED",
@@ -1683,7 +1683,7 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 

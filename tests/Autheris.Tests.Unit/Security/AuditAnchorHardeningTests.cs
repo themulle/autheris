@@ -130,7 +130,7 @@ public sealed class AuditAnchorHardeningTests : IDisposable
             {
                 await repo.RecordAuditEventAsync(NewEntry(i));
             }
-            using var cmd = repo.Connection.CreateCommand();
+            using var cmd = repo.RawConnection().CreateCommand();
             cmd.CommandText = "DELETE FROM AUDIT_LOG_ENTRIES WHERE rowid IN (SELECT rowid FROM AUDIT_LOG_ENTRIES ORDER BY rowid DESC LIMIT 2)";
             await cmd.ExecuteNonQueryAsync();
         }
@@ -149,7 +149,7 @@ public sealed class AuditAnchorHardeningTests : IDisposable
         using var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options);
         await repo.RecordAuditEventAsync(NewEntry(1, "TABLE_QUERY"));
 
-        using var cmd = repo.Connection.CreateCommand();
+        using var cmd = repo.RawConnection().CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES";
         Convert.ToInt32(await cmd.ExecuteScalarAsync()).ShouldBe(1); // no flush of the async channel needed
     }
@@ -168,11 +168,11 @@ public sealed class AuditAnchorHardeningTests : IDisposable
         var initialWormCount = Directory.Exists(worm) ? Directory.GetFiles(worm).Length : 0;
 
         // 2. Perform a transaction that rolls back after inserting an audit event
-        await repo.LockAsync();
+        await repo.LockUnguardedAsync();
         try
         {
-            using var tx = repo.Connection.BeginTransaction();
-            await repo.RecordAuditEventInternalAsync(NewEntry(2), CancellationToken.None, tx);
+            using var tx = repo.RawConnection().BeginTransaction();
+            await repo.RecordAuditEventInternalAsync(tx.Connection!, NewEntry(2), CancellationToken.None, tx);
             // Simulate rollback by exiting using block without commit
         }
         finally

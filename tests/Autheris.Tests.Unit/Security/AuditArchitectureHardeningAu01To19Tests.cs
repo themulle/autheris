@@ -344,10 +344,10 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
         using var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options);
 
         var entry1 = CreateAuditEntry(1, "CONSENT_CREATED");
-        await repo.LockAsync();
+        await repo.LockUnguardedAsync();
         try
         {
-            using var tx = repo.Connection.BeginTransaction();
+            using var tx = repo.RawConnection().BeginTransaction();
             await repo.RecordAuditEventAsync(entry1, tx);
             await tx.CommitAsync();
             repo.OnTransactionCommitted(tx);
@@ -360,7 +360,7 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
         var isValid = await repo.VerifyAuditHashChainAsync();
         isValid.ShouldBeTrue();
 
-        using var cmd = repo.Connection.CreateCommand();
+        using var cmd = repo.RawConnection().CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES WHERE EVENT_TYPE = 'CONSENT_CREATED'";
         var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
         count.ShouldBe(1);
@@ -393,10 +393,10 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
 
         // 2. Transaction that is rolled back
         var entry2 = CreateAuditEntry(2, "CONSENT_FAILED_ATTEMPT");
-        await repo.LockAsync();
+        await repo.LockUnguardedAsync();
         try
         {
-            using var tx = repo.Connection.BeginTransaction();
+            using var tx = repo.RawConnection().BeginTransaction();
             await repo.RecordAuditEventAsync(entry2, tx);
             await tx.RollbackAsync();
             repo.OnTransactionRolledBack(tx);
@@ -411,7 +411,7 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
         chainValidAfterRollback.ShouldBeTrue();
 
         // 4. Failed entry must not exist in table
-        using var cmd = repo.Connection.CreateCommand();
+        using var cmd = repo.RawConnection().CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES WHERE EVENT_TYPE = 'CONSENT_FAILED_ATTEMPT'";
         var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
         count.ShouldBe(0);

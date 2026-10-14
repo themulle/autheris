@@ -23,10 +23,7 @@ public sealed class GovernanceRepositoryConstructorArchitectureTests
     ];
 
     /// <summary>Types that still violate the rule. Each entry is removed together with its violation (see the allow-list test).</summary>
-    private static readonly string[] ConstructorIoAllowList =
-    [
-        "Autheris.Infrastructure.Persistence.SqliteGovernanceRepository"
-    ];
+    private static readonly string[] ConstructorIoAllowList = [];
 
     private static readonly (string Type, string MethodPrefix)[] ForbiddenCalls =
     [
@@ -44,12 +41,15 @@ public sealed class GovernanceRepositoryConstructorArchitectureTests
     private static ModuleDefinition InfrastructureModule() =>
         ModuleDefinition.ReadModule(typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly.Location);
 
+    private static ModuleDefinition TestModule() => ModuleDefinition.ReadModule(typeof(GovernanceRepositoryConstructorArchitectureTests).Assembly.Location);
+
     private static bool IsForbidden(MethodReference method) =>
         ForbiddenCalls.Any(f => method.DeclaringType.FullName == f.Type && method.Name.StartsWith(f.MethodPrefix, StringComparison.Ordinal));
 
-    private static List<string> Violations(string typeName)
+    private static List<string> Violations(string typeName) => Violations(InfrastructureModule(), typeName);
+
+    private static List<string> Violations(ModuleDefinition module, string typeName)
     {
-        var module = InfrastructureModule();
         var type = module.GetType(typeName) ?? throw new InvalidOperationException($"{typeName} not found");
         var violations = new List<string>();
         var visited = new HashSet<MethodDefinition>();
@@ -118,6 +118,58 @@ public sealed class GovernanceRepositoryConstructorArchitectureTests
         {
             Violations(typeName).ShouldNotBeEmpty($"{typeName} no longer violates the rule: remove it from the allow-list.");
         }
+    }
+
+    // Positive controls for the scanner itself: the allow-list is empty, so without them a broken scan would pass vacuously.
+    [Fact]
+    public void Scanner_DetectsAnOpenInTheConstructor()
+    {
+        var violations = Violations(TestModule(), typeof(DirectOpenFixture).FullName!.Replace('+', '/'));
+
+        // The C# compiler binds Open() to the DbConnection base declaration.
+        violations.ShouldContain(v => v.EndsWith("DbConnection::Open", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Scanner_DetectsFileSystemAndThreadPoolWorkThroughAPrivateCallee()
+    {
+        var violations = Violations(TestModule(), typeof(IndirectIoFixture).FullName!.Replace('+', '/'));
+
+        violations.ShouldContain(v => v.EndsWith("Directory::CreateDirectory", StringComparison.Ordinal));
+        violations.ShouldContain(v => v.EndsWith("Task::Run", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Scanner_AcceptsAConstructorWithoutIo()
+    {
+        Violations(TestModule(), typeof(CleanFixture).FullName!.Replace('+', '/')).ShouldBeEmpty();
+    }
+
+    internal sealed class DirectOpenFixture
+    {
+        public DirectOpenFixture()
+        {
+            using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+            connection.Open();
+        }
+    }
+
+    internal sealed class IndirectIoFixture
+    {
+        public IndirectIoFixture() => Prepare();
+
+        private void Prepare()
+        {
+            Directory.CreateDirectory(Path.GetTempPath());
+            _ = Task.Run(() => { });
+        }
+    }
+
+    internal sealed class CleanFixture
+    {
+        public CleanFixture() => Name = "clean";
+
+        public string Name { get; }
     }
 
     [Fact]

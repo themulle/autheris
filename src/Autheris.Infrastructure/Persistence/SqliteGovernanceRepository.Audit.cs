@@ -36,10 +36,10 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         // SEC R2-3: Audit:SynchronousQueryAudit commits query events before the request is answered (no crash window).
         if (isTierA || _options?.Audit?.SynchronousQueryAudit == true)
         {
-            await _lock.WaitAsync(ct).ConfigureAwait(false);
+            await _writeGate.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                await RecordAuditEventInternalAsync(admitted, ct).ConfigureAwait(false);
+                await RecordAuditEventInternalAsync(_connection, admitted, ct).ConfigureAwait(false);
                 if (!ReferenceEquals(admitted, entry))
                 {
                     entry.PrevHash = admitted.PrevHash;
@@ -53,7 +53,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             }
             finally
             {
-                _lock.Release();
+                _writeGate.Release();
             }
             return;
         }
@@ -92,7 +92,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
 
         try
         {
-            await RecordAuditEventInternalAsync(AuditChainViolationGate.CreateFaultEvent(trigger, violation, ViolationPolicy), ct).ConfigureAwait(false);
+            await RecordAuditEventInternalAsync(_connection, AuditChainViolationGate.CreateFaultEvent(trigger, violation, ViolationPolicy), ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -108,14 +108,14 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             batch.Add(entry);
             if (batch.Count >= 250)
             {
-                await _lock.WaitAsync(ct).ConfigureAwait(false);
+                await _writeGate.WaitAsync(ct).ConfigureAwait(false);
                 try
                 {
-                    await RecordAuditEventsBatchInternalAsync(batch, ct).ConfigureAwait(false);
+                    await RecordAuditEventsBatchInternalAsync(_connection, batch, ct).ConfigureAwait(false);
                 }
                 finally
                 {
-                    _lock.Release();
+                    _writeGate.Release();
                 }
                 batch.Clear();
             }
@@ -123,14 +123,14 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
 
         if (batch.Count > 0)
         {
-            await _lock.WaitAsync(ct).ConfigureAwait(false);
+            await _writeGate.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                await RecordAuditEventsBatchInternalAsync(batch, ct).ConfigureAwait(false);
+                await RecordAuditEventsBatchInternalAsync(_connection, batch, ct).ConfigureAwait(false);
             }
             finally
             {
-                _lock.Release();
+                _writeGate.Release();
             }
         }
     }
@@ -182,10 +182,10 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
                 {
                     for (int attempt = 1; attempt <= 3; attempt++)
                     {
-                        await _lock.WaitAsync(_auditCts.Token).ConfigureAwait(false);
+                        await _writeGate.WaitAsync(_auditCts.Token).ConfigureAwait(false);
                         try
                         {
-                            await RecordAuditEventsBatchInternalAsync(batch, _auditCts.Token).ConfigureAwait(false);
+                            await RecordAuditEventsBatchInternalAsync(_connection, batch, _auditCts.Token).ConfigureAwait(false);
                             if (_isAuditPipelineFaulted)
                             {
                                 _isAuditPipelineFaulted = false;
@@ -204,13 +204,13 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
                             {
                                 _isAuditPipelineFaulted = true;
                                 _logger?.LogCritical(ex, "FATAL: Audit batch of {Count} entries failed permanently after 3 attempts. Setting audit pipeline to faulted (fail-closed). Diverting to dead-letter queue.", batch.Count);
-                                await WriteToDeadLetterAsync(batch, ex.Message, _auditCts.Token).ConfigureAwait(false);
+                                await WriteToDeadLetterAsync(_connection, batch, ex.Message, _auditCts.Token).ConfigureAwait(false);
                                 Autheris.Domain.Diagnostics.GatewayDiagnostics.AuditDeadLetterCounter.Add(batch.Count);
                             }
                         }
                         finally
                         {
-                            _lock.Release();
+                            _writeGate.Release();
                         }
                     }
                 }
@@ -227,14 +227,14 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             batch.Add(entry);
             if (batch.Count >= 250)
             {
-                await _lock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+                await _writeGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
                 try
                 {
-                    await RecordAuditEventsBatchInternalAsync(batch, CancellationToken.None).ConfigureAwait(false);
+                    await RecordAuditEventsBatchInternalAsync(_connection, batch, CancellationToken.None).ConfigureAwait(false);
                 }
                 finally
                 {
-                    _lock.Release();
+                    _writeGate.Release();
                 }
                 batch.Clear();
             }
@@ -242,23 +242,23 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
 
         if (batch.Count > 0)
         {
-            await _lock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            await _writeGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
             try
             {
-                await RecordAuditEventsBatchInternalAsync(batch, CancellationToken.None).ConfigureAwait(false);
+                await RecordAuditEventsBatchInternalAsync(_connection, batch, CancellationToken.None).ConfigureAwait(false);
             }
             finally
             {
-                _lock.Release();
+                _writeGate.Release();
             }
         }
     }
 
-    private async Task WriteToDeadLetterAsync(IReadOnlyList<AuditLogEntry> batch, string errorMessage, CancellationToken ct)
+    private async Task WriteToDeadLetterAsync(SqliteConnection conn, IReadOnlyList<AuditLogEntry> batch, string errorMessage, CancellationToken ct)
     {
         try
         {
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = @"INSERT INTO AUDIT_DEAD_LETTER (id, batch_json, error_message, failed_at, tenant_id)
                                 VALUES (@id, @batch, @err, @failed, @tenant)";
             cmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString("N"));
@@ -282,11 +282,11 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         {
             return RecordAuditEventAsync(entry, ct);
         }
-        return RecordAuditEventInternalAsync(entry, ct, (SqliteTransaction)existingTx);
+        return RecordAuditEventInternalAsync(((SqliteTransaction)existingTx).Connection!, entry, ct, (SqliteTransaction)existingTx);
     }
 
-    internal Task RecordAuditEventInternalAsync(AuditLogEntry entry, CancellationToken ct, SqliteTransaction? existingTx = null) =>
-        RecordAuditEventsBatchInternalAsync([entry], ct, existingTx);
+    internal Task RecordAuditEventInternalAsync(SqliteConnection conn, AuditLogEntry entry, CancellationToken ct, SqliteTransaction? existingTx = null) =>
+        RecordAuditEventsBatchInternalAsync(conn, [entry], ct, existingTx);
 
     private sealed class AuditTxPendingState
     {
@@ -359,7 +359,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         }
     }
 
-    private async Task RecordAuditEventsBatchInternalAsync(IReadOnlyList<AuditLogEntry> batch, CancellationToken ct, SqliteTransaction? existingTx = null)
+    private async Task RecordAuditEventsBatchInternalAsync(SqliteConnection conn, IReadOnlyList<AuditLogEntry> batch, CancellationToken ct, SqliteTransaction? existingTx = null)
     {
         if (batch.Count == 0) return;
 
@@ -367,14 +367,14 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         var tx = existingTx;
         if (tx == null)
         {
-            ownedTx = _connection.BeginTransaction(System.Data.IsolationLevel.Serializable);
+            ownedTx = conn.BeginTransaction(System.Data.IsolationLevel.Serializable);
             tx = ownedTx;
         }
 
         try
         {
             // SEC H-17: the DB tail is compared with the in-memory reference instead of being adopted blindly.
-            var (dbTailHash, dbTailSeq) = ReadAuditTail(tx);
+            var (dbTailHash, dbTailSeq) = ReadAuditTail(conn, tx);
             var effectiveDbHash = dbTailHash ?? AuditGenesisHash;
             long preTxSeq;
             string preTxHash;
@@ -416,7 +416,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
                 lastEntryHash = _lastAuditHash;
             }
 
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText = @"INSERT INTO AUDIT_LOG_ENTRIES (id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq)
                                 VALUES (@id, @occ, @event, @actor, @target, @col, @dec, @trace, @det, @prev, @hash, @tenantId, @seq)";
@@ -555,7 +555,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
     public async Task<IReadOnlyList<AuditLogEntry>> GetAuditLogEntriesAsync(int limit = 100, TenantId? tenantId = null, CancellationToken ct = default)
     {
         await FlushAuditChannelAsync(ct).ConfigureAwait(false);
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             var list = new List<AuditLogEntry>();
@@ -595,7 +595,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
@@ -608,7 +608,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         CancellationToken ct = default)
     {
         await FlushAuditChannelAsync(ct).ConfigureAwait(false);
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             var list = new List<AuditLogEntry>();
@@ -666,19 +666,19 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task<bool> VerifyAuditHashChainAsync(CancellationToken ct = default)
     {
         await FlushAuditChannelAsync(ct).ConfigureAwait(false);
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             if (!_pendingAuditTxStates.IsEmpty)
             {
-                var (_, tailSeq) = ReadAuditTail(null);
+                var (_, tailSeq) = ReadAuditTail(_connection, null);
                 if (tailSeq < _lastAuditSeq)
                 {
                     RollbackPendingAuditTransactions();
@@ -806,14 +806,14 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task<AuditChainRange?> GetAuditChainRangeAsync(DateTimeOffset windowFrom, DateTimeOffset windowTo, CancellationToken ct = default)
     {
         await FlushAuditChannelAsync(ct).ConfigureAwait(false);
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             long firstRowId;
@@ -842,14 +842,14 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public async Task<IReadOnlyList<AuditChainRecord>> GetAuditChainPageAsync(long afterRowId, long lastRowIdInclusive, int pageSize, CancellationToken ct = default)
     {
         await FlushAuditChannelAsync(ct).ConfigureAwait(false);
-        await _lock.WaitAsync(ct);
+        await _writeGate.WaitAsync(ct);
         try
         {
             var list = new List<AuditChainRecord>();
@@ -889,18 +889,18 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         }
         finally
         {
-            _lock.Release();
+            _writeGate.Release();
         }
     }
 
     public AuditChainAnchor? GetVerifiedChainAnchor() => TryLoadVerifiedAnchor(out _);
 
     /// <summary>Last entry hash and its (explicit or ordinal) sequence number; hash is null for an empty log.</summary>
-    private (string? Hash, long Sequence) ReadAuditTail(SqliteTransaction? tx)
+    private (string? Hash, long Sequence) ReadAuditTail(SqliteConnection conn, SqliteTransaction? tx)
     {
         string? hash = null;
         long? seq = null;
-        using (var cmd = _connection.CreateCommand())
+        using (var cmd = conn.CreateCommand())
         {
             cmd.Transaction = tx;
             cmd.CommandText = "SELECT entry_hash, seq FROM AUDIT_LOG_ENTRIES ORDER BY rowid DESC LIMIT 1";
@@ -922,7 +922,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             return (hash, seq.Value);
         }
 
-        using var countCmd = _connection.CreateCommand();
+        using var countCmd = conn.CreateCommand();
         countCmd.Transaction = tx;
         countCmd.CommandText = "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES";
         var count = Convert.ToInt64(countCmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
@@ -963,9 +963,9 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
     /// SEC H-17: every audit row is written with a sequence number. Rows without one were not written by the gateway, so they
     /// latch a chain violation at startup.
     /// </summary>
-    private void LatchUnsequencedAuditRows()
+    private void LatchUnsequencedAuditRows(SqliteConnection conn)
     {
-        using var countCmd = _connection.CreateCommand();
+        using var countCmd = conn.CreateCommand();
         countCmd.CommandText = "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES WHERE seq IS NULL";
         var unsequenced = Convert.ToInt64(countCmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
         if (unsequenced > 0)

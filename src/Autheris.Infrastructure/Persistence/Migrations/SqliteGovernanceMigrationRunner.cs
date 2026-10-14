@@ -44,16 +44,17 @@ public sealed class SqliteGovernanceMigrationRunner : GovernanceMigrationRunnerB
     protected override string InsertVersionSql =>
         "INSERT INTO autheris_schema_migrations (version, name, checksum, applied_at, applied_by) VALUES (@version, @name, @checksum, @applied_at, @applied_by);";
 
-    // The governance connection is shared with the repository and must stay open.
-    protected override bool OwnsConnection => false;
+    // The run opens its own pooled connection (BEGIN IMMEDIATE) and in-process exclusion goes through the repository's write gate.
+    protected override bool OwnsConnection => true;
 
     protected override bool UseStepTransactions => false;
 
-    protected override Task<DbConnection> OpenConnectionAsync(CancellationToken ct) => Task.FromResult<DbConnection>(_repository.Connection);
+    protected override async Task<DbConnection> OpenConnectionAsync(CancellationToken ct) =>
+        await _repository.Connections.OpenAsync(ct).ConfigureAwait(false);
 
     protected override async Task AcquireLockAsync(DbConnection connection, CancellationToken ct)
     {
-        await _repository.LockAsync(ct).ConfigureAwait(false);
+        await _repository.LockUnguardedAsync(ct).ConfigureAwait(false);
         try
         {
             await ExecuteAsync(connection, null, "BEGIN IMMEDIATE;", ct).ConfigureAwait(false);

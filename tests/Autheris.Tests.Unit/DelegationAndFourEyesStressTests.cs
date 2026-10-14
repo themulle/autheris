@@ -88,7 +88,7 @@ public class DelegationAndFourEyesStressTests : IDisposable
 
         // Create an inactive Data Owner
         var inactiveOwnerId = Guid.NewGuid();
-        using (var cmd = _repository.Connection.CreateCommand())
+        using (var cmd = _repository.RawConnection().CreateCommand())
         {
             cmd.CommandText = @"INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
                                 VALUES (@id, 'S-1-5-21-INACTIVE-OWNER', 'CORP\\inactive', 'Inactive Owner', 'inactive@corp.local', 0);";
@@ -99,7 +99,7 @@ public class DelegationAndFourEyesStressTests : IDisposable
         // Assign to table
         var meta = await _repository.GetTableMetadataAsync(table);
         meta.ShouldNotBeNull();
-        using (var cmd = _repository.Connection.CreateCommand())
+        using (var cmd = _repository.RawConnection().CreateCommand())
         {
             cmd.CommandText = @"INSERT INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role)
                                 VALUES (@id, @tid, @oid, 'DELEGATE');";

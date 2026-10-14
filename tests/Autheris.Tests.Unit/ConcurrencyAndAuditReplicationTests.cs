@@ -219,7 +219,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
             initiallyValid.ShouldBeTrue();
 
             // 1. Tamper with DetailsJson of middle event
-            using (var cmd = repo.Connection.CreateCommand())
+            using (var cmd = repo.RawConnection().CreateCommand())
             {
                 cmd.CommandText = "UPDATE AUDIT_LOG_ENTRIES SET details_json = '{\"tampered\": true}' WHERE id = @id";
                 cmd.Parameters.AddWithValue("@id", middleEventId.ToString());
@@ -263,7 +263,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
             }
 
             // Delete the 3rd event directly
-            using (var cmd = repo.Connection.CreateCommand())
+            using (var cmd = repo.RawConnection().CreateCommand())
             {
                 cmd.CommandText = "DELETE FROM AUDIT_LOG_ENTRIES WHERE id = @id";
                 cmd.Parameters.AddWithValue("@id", middleEventId.ToString());
@@ -295,7 +295,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
         isValidBefore.ShouldBeTrue();
 
         // 2. Anonymize user in DataOwners or external directory
-        using (var cmd = _repository.Connection.CreateCommand())
+        using (var cmd = _repository.RawConnection().CreateCommand())
         {
             cmd.CommandText = @"UPDATE DATA_OWNERS
                                 SET display_name = 'Anonymized User', email = 'anonymized@corp.local'

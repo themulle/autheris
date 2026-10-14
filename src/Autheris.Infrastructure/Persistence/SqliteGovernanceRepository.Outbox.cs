@@ -15,10 +15,10 @@ public partial class SqliteGovernanceRepository : IItsmOutboxRepository
     {
         ArgumentNullException.ThrowIfNull(message);
 
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 INSERT INTO ITSM_OUTBOX (
                     id, request_id, tenant_id, event_type, payload_json, preferred_system,
@@ -44,19 +44,15 @@ public partial class SqliteGovernanceRepository : IItsmOutboxRepository
             cmd.Parameters.AddWithValue("@lastError", (object?)message.LastError ?? DBNull.Value);
 
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            _lock.Release();
-        }
+                }
     }
 
     public async Task<IReadOnlyList<ItsmOutboxMessage>> GetPendingMessagesAsync(int batchSize = 20, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             var nowStr = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
 
             cmd.CommandText = @"
@@ -78,21 +74,17 @@ public partial class SqliteGovernanceRepository : IItsmOutboxRepository
                 list.Add(ReadOutboxMessage(reader));
             }
             return list;
-        }
-        finally
-        {
-            _lock.Release();
-        }
+                }
     }
 
     public async Task MarkCompletedAsync(string id, string? ticketId = null, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
 
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 UPDATE ITSM_OUTBOX
                 SET status = @status,
@@ -103,21 +95,17 @@ public partial class SqliteGovernanceRepository : IItsmOutboxRepository
             cmd.Parameters.AddWithValue("@id", id);
 
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            _lock.Release();
-        }
+                }
     }
 
     public async Task MarkFailedAsync(string id, string errorMessage, TimeSpan nextRetryDelay, bool deadLetter = false, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
 
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             var nextRetry = DateTimeOffset.UtcNow.Add(nextRetryDelay).ToString("O", CultureInfo.InvariantCulture);
 
             cmd.CommandText = @"
@@ -134,19 +122,15 @@ public partial class SqliteGovernanceRepository : IItsmOutboxRepository
             cmd.Parameters.AddWithValue("@id", id);
 
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            _lock.Release();
-        }
+                }
     }
 
     public async Task<IReadOnlyList<ItsmOutboxMessage>> GetDeadLetterMessagesAsync(int limit = 50, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 SELECT id, request_id, tenant_id, event_type, payload_json, preferred_system,
                        status, retry_count, max_retries, created_at, next_retry_at, last_error
@@ -165,11 +149,7 @@ public partial class SqliteGovernanceRepository : IItsmOutboxRepository
                 list.Add(ReadOutboxMessage(reader));
             }
             return list;
-        }
-        finally
-        {
-            _lock.Release();
-        }
+                }
     }
 
     private static ItsmOutboxMessage ReadOutboxMessage(SqliteDataReader reader)
