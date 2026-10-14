@@ -385,7 +385,6 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.BindByNameOracleCommand", "DbCommand decorator: forwards the text the binder gave it to the Oracle command (BindByName)"),
         // -- the allowed exceptions of §28.9 (the text comes from the typed IR / the compiler, never from a client string) --
         ("Autheris.Application.Sql.Tree.GovernedTreeQueryService", "§28.9 OQ-GQL: executes compiled.Sql of the GraphQL tree compiler"),
-        ("Autheris.Application.Services.SqlDataSourceExecutor", "§28.9 OQ-4: REST/MCP dataset text consumer rendered through the policy and mask renderers"),
         ("Autheris.Application.Olap.DuckDbOlapEngine", "§28.9 DuckDB staging: runs on the in-process staged copy, after the governed fetch"),
         ("Autheris.Application.VirtualFilters.Federation.SqlVirtualFilterKeySetProvider", "virtual-filter key set: the query is rendered from the typed key-source definition"),
         // -- statements of the gateway itself (no client text) --
@@ -504,18 +503,24 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Application.Serialization.ArrowFlightSqlServer", "DoGetStreamAsync", true),
         ("Autheris.Application.Mcp.Services.McpToolExecutionHandler", "ExecuteToolAsync", true),
         ("Autheris.Application.Mcp.Services.ApiDispatcherService", "InvokeApiAsync", true),
-        ("Autheris.Application.Data.Services.GovernedDataQueryService", "ExecuteQueryAsync", true)
+        ("Autheris.Application.Data.Services.GovernedDataQueryService", "ExecuteQueryAsync", true),
+        // WP-ARC-B-02: the SQL table reads of GraphQL flat reads, OData, MCP, connectors and batch relations run through the planner and
+        // the governed execution service (Compile + binder); SqlDataSourceExecutor no longer exists.
+        ("Autheris.Application.Services.SqlTableReadExecutor", "ExecuteAsync", true),
+        ("Autheris.Application.Services.GatewayExecutionService", "ExecuteTablePageAsync", true),
+        ("Autheris.Application.Services.GatewayExecutionService", "ExecuteTableQueryAsync", true),
+        ("Autheris.Extensions.OData.ODataHandler", "ExecuteEntitySetQueryAsync", true),
+        ("Autheris.GraphQL.Mcp.GatewayMcpQueryExecutor", "ExecuteOperationAsync", true)
     ];
 
     /// <summary>
-    /// The explicit allowed exceptions of §28.9: governed SQL outside <c>Compile</c>. OQ-GQL is the GraphQL tree compiler; OQ-4 are
-    /// the §7.3 text consumers (they render from the typed IR through <c>IPolicyPredicateRenderer</c> and the mask renderer).
+    /// The explicit allowed exceptions of §28.9: governed SQL outside <c>Compile</c>. OQ-GQL is the GraphQL tree compiler (G-6: the single
+    /// documented exception, guarded by <c>TreeVsCompilePolicyParityTests</c>); OQ-4 are the §7.3 text consumers (they render from the
+    /// typed IR through <c>IPolicyPredicateRenderer</c> and the mask renderer).
     /// </summary>
     private static readonly string[] AllowedExceptionsOutsideCompile =
     [
         "Autheris.Application.Sql.Tree.GovernedTreeQueryService",
-        "Autheris.Application.Services.SqlDataSourceExecutor",
-        "Autheris.Infrastructure.Connectors.SqlConnector",
         "Autheris.Application.Olap.FederatedStagingService",
         "Autheris.Api.Endpoints.DuckDbOlapEndpoints"
     ];
@@ -733,7 +738,8 @@ public sealed class CutoverArchitectureTests
         "Autheris.Application.Services.GatewayExecutionService",
         "Autheris.Application.Sql.Tree.GovernedTreeQueryService",
         "Autheris.Application.Procedures.Services.GovernedProcedureExecutionService",
-        "Autheris.Application.Data.Services.GovernedDataQueryService"
+        "Autheris.Application.Data.Services.GovernedDataQueryService",
+        "Autheris.Application.Services.SqlTableReadExecutor"
     ];
 
     private const string StagesPrefix = "Autheris.Application.Policy.GovernedQueryStages::";
@@ -750,6 +756,35 @@ public sealed class CutoverArchitectureTests
             targets.ShouldContain(t => t.StartsWith(StagesPrefix, StringComparison.Ordinal), $"{executor} uses GovernedQueryStages");
             targets.ShouldNotContain(AuditWriteTarget, $"{executor} writes its audit entry through GovernedQueryStages, not directly");
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------------
+    // PlannerOutput_NeverReachesACommand (WP-ARC-B-02)
+    // ---------------------------------------------------------------------------------------------------------------------
+
+    private const string PlannerPrefix = "Autheris.Application.Data.Interfaces.IGovernedTableReadPlanner::";
+
+    /// <summary>
+    /// The text of <c>IGovernedTableReadPlanner</c> is Trino text for the governed compile path. A type that plans a read must hand the text
+    /// to <c>IGovernedSqlExecutionService</c> and never put it into a <c>DbCommand</c> (the provider would run unrewritten, unbound text).
+    /// </summary>
+    [Fact]
+    public void PlannerOutput_NeverReachesACommand()
+    {
+        var graph = BuildCallGraph(ProductionAssemblies);
+        var plannerUsers = graph.Targets
+            .Where(kv => kv.Value.Any(t => t.StartsWith(PlannerPrefix, StringComparison.Ordinal)))
+            .Select(kv => kv.Key.Type)
+            .Distinct()
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        plannerUsers.ShouldContain("Autheris.Application.Services.SqlTableReadExecutor", "positive control: the table-read executor plans reads");
+        plannerUsers.ShouldContain("Autheris.Application.Data.Services.GovernedDataQueryService", "positive control: the dataset service plans reads");
+
+        var commandTypes = CommandTextSetterSites(ProductionTypes()).Select(s => s.Top).ToHashSet(StringComparer.Ordinal);
+        var violations = plannerUsers.Append("Autheris.Application.Data.Services.GovernedTableReadPlanner").Where(commandTypes.Contains).ToList();
+        violations.ShouldBeEmpty("Types that plan a table read must not assign CommandText: " + string.Join(", ", violations));
     }
 
     // ---------------------------------------------------------------------------------------------------------------------

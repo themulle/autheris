@@ -227,7 +227,7 @@ Run the migrations as a one-off job with `Autheris.Api --migrate-governance`: it
 
 Konfiguriert echte relationale Datenbank-Backends für die abgefragten Fachdaten. Das Gateway unterstützt über `ISqlConnectionFactory` die Provider `"SqlServer"`, `"PostgreSql"` und `"Sqlite"`. 
 
-Im Gegensatz zu synthetischen Stubs führt der `SqlDataSourceExecutor` echte SQL-Queries aus und **pushed Row-Level Security (RLS) Filter direkt als WHERE-Klausel in die Datenbank**:
+SQL table reads (GraphQL, OData, MCP, connectors) run through the governed SQL pipeline (`SqlTableReadExecutor`, the AST compiler and the dialect binder): the compiler **applies the tenant filter, the row-level security policy and the column masks inside the statement sent to the database**. There is no synthetic-data fallback:
 
 | Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |

@@ -71,8 +71,8 @@ The Gateway mediates all queries to enterprise data stores. The caller's identit
    - `EnterpriseClaimsTransformation` maps heterogeneous token claims (Entra ID `oid`, AD FS `primarygroupsid`, etc.) into unified `Sid` value objects.
    - Dynamic Scheme Selector routes requests to ForwardAuth, Bearer, Basic, or Negotiate schemes.
 3. **Real SQL Execution & RLS Pushdown**:
-   - `SqlDataSourceExecutor` leverages `ISqlConnectionFactory` to execute real parameterized queries against backend databases.
-   - Row-level security rules are combined into SQL WHERE fragments (`CombinedRowFilterSql`) and pushed directly into the database engine.
+   - `SqlTableReadExecutor` plans each table read (`IGovernedTableReadPlanner`) and runs it through `IGovernedSqlExecutionService` (AST compiler, dialect binder, `ISqlConnectionFactory`).
+   - Tenant filter, row-level security policy and column masks are applied by the compiler inside the statement sent to the database.
 4. **Consent Resolution Engine (F-CONS-07 Truth Table)**:
    - Evaluates direct user consents and all transitive group memberships.
    - Enforces Hard DENY: Any explicit DENY immediately revokes access.
@@ -124,7 +124,7 @@ classDiagram
             <<interface>>
             +CreateConnection(sourceName) DbConnection
         }
-        class SqlDataSourceExecutor
+        class SqlTableReadExecutor
     }
 
     namespace Infrastructure {
