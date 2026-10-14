@@ -184,9 +184,13 @@ public sealed class CustomSyncActionHandler : IPluginActionHandler
      - `X-Autheris-Signature-256`: `sha256=${hexSignature}`
      - `X-Autheris-Timestamp`: ISO 8601 UTC timestamp
    - The signature is calculated across `${timestamp}.${jsonPayload}` to defend against tampering and replay attacks.
+   - Both dispatchers (`WebhookDispatcherService` and the CDC `CloudEventWebhookDispatcher`) use the shared `WebhookSignature` helper, so receivers use one verification recipe: parse `X-Autheris-Timestamp`, reject it if it differs from the receiver clock by more than 5 minutes, recompute HMAC-SHA256 over `timestamp + "." + rawBody` with the subscription secret, and compare in constant time (`WebhookSignature.TryVerify` is the reference implementation). The CloudEvents dispatcher additionally sends `X-Autheris-Event-Id` and `X-Autheris-Event-Type` (informational; id and type are part of the signed body).
+   - Deprecated: the CloudEvents dispatcher also emits `X-Autheris-Signature` (HMAC over the body only, no timestamp) while `Gateway:Webhooks:EmitLegacySignature` is `true` (default). It will be removed in the next release; set the option to `false` to stop sending it now.
+   - A subscription without a secret never produces a signature header. With `Gateway:Webhooks:RequireSecret` (default: `true` outside Development) such a delivery is dropped with a warning instead of being sent unsigned.
 2. **SSRF Defense:**
    - Outbound HTTP requests from `WebhookDispatcherService` run with `AddSecureOutboundHandlers(EgressIntegrations.Webhooks)`.
    - Loopback addresses, link-local IPs, cloud metadata endpoints (e.g. AWS IMDS `169.254.169.254`), and unauthorized internal networks are denied by default.
+   - Logs and client-visible errors never contain URL userinfo, path, query or resolved IP addresses: destinations are logged as `scheme://host[:port]/` (`UrlRedactor`), and `EgressUrlPolicy` exceptions carry no IP in the message (the address is available in `Exception.Data["ResolvedIp"]` for operator logs).
 3. **Isolated Assembly Loading & Integrity Check:**
    - Plugin DLLs are loaded into isolated `PluginAssemblyLoadContext` instances.
    - In production environments, SHA-256 hash checks against `Gateway:Plugins:TrustedPluginHashes` prevent unauthorized code execution.

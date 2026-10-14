@@ -34,7 +34,7 @@ public static class EgressUrlPolicy
             var normIp = EgressAddressRules.Normalize(directIp);
             if (EgressAddressRules.IsAlwaysForbidden(normIp) || (!isDev && EgressAddressRules.IsPrivate(normIp)))
             {
-                throw new SecurityException($"Outbound access to restricted IP address '{directIp}' is strictly forbidden.");
+                throw WithResolvedIp(new SecurityException("Outbound access to a restricted IP address is strictly forbidden."), directIp);
             }
         }
 
@@ -84,8 +84,15 @@ public static class EgressUrlPolicy
             var normIp = EgressAddressRules.Normalize(ip);
             if (EgressAddressRules.IsAlwaysForbidden(normIp) || EgressAddressRules.IsPrivate(normIp))
             {
-                throw new SecurityException($"Outbound access to private/loopback/restricted address '{ip}' is strictly forbidden.");
+                throw WithResolvedIp(new SecurityException($"Outbound access to a private/loopback/restricted address (host '{host}') is strictly forbidden."), ip);
             }
         }
+    }
+
+    /// <summary>SR-L-14: the address is kept out of the message (client-visible) and only attached for operator logs.</summary>
+    private static SecurityException WithResolvedIp(SecurityException ex, IPAddress ip)
+    {
+        ex.Data["ResolvedIp"] = ip.ToString();
+        return ex;
     }
 }
