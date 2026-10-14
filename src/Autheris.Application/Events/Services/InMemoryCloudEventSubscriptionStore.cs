@@ -114,6 +114,17 @@ public sealed class InMemoryCloudEventSubscriptionStore : ICloudEventSubscriptio
         return false;
     }
 
+    public ValueTask<CloudEventWebhookSubscription?> GetSubscriptionAsync(string tenantId, string subscriptionId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(subscriptionId);
+
+        // Tenant isolation: the lookup is always scoped to the owning tenant's dictionary.
+        return _subscriptions.TryGetValue(tenantId, out var tenantStore) && tenantStore.TryGetValue(subscriptionId, out var subscription)
+            ? ValueTask.FromResult<CloudEventWebhookSubscription?>(subscription)
+            : ValueTask.FromResult<CloudEventWebhookSubscription?>(null);
+    }
+
     public ValueTask<IReadOnlyList<CloudEventWebhookSubscription>> ListSubscriptionsAsync(string tenantId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
