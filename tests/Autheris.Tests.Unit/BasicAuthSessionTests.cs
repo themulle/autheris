@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text;
 using System.Text.Encodings.Web;
+using Autheris.Tests.Common;
 using Autheris.Api.Middleware;
 using Autheris.Api.Security;
 using Autheris.Domain.Options;
@@ -446,12 +447,5 @@ public sealed class BasicAuthSessionTests
         WebSocketAuthInterceptor.IsSessionCookieFromTrustedOrigin(context, basic, CreateOptions()).ShouldBeFalse();
         WebSocketAuthInterceptor.IsSessionCookieFromTrustedOrigin(context, session, null).ShouldBeFalse();
         BasicAuthSessionOptions.SchemeName.ShouldBe(BasicAuthSession.SchemeName);
-    }
-
-    private sealed class StaticOptionsMonitor<T>(T value) : IOptionsMonitor<T>
-    {
-        public T CurrentValue { get; } = value;
-        public T Get(string? name) => CurrentValue;
-        public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 }
