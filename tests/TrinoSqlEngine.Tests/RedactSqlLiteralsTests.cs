@@ -4,6 +4,7 @@ using Xunit;
 namespace TrinoSqlEngine.Tests;
 
 /// <summary>AU-06 / L-2: the audit redaction replaces literal tokens and keeps every other character of the statement (whitespace and comments included).</summary>
+[Trait("Category", "SqlGate")]
 public class RedactSqlLiteralsTests
 {
     [Theory]

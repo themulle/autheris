@@ -154,6 +154,7 @@ public class EmitMutationTests
     [InlineData(GovernedSqlErrorCodes.CompilerInvariant, "The statement could not be processed.")]
     [InlineData(GovernedSqlErrorCodes.Timeout, "The SQL statement exceeded the execution time limit. Narrow the query (filter, fewer columns, LIMIT) or contact support with the trace id.")]
     [InlineData(GovernedSqlErrorCodes.SourceUnavailable, "The data source is temporarily unavailable. Retry later.")]
+    [InlineData(GovernedSqlErrorCodes.ReservedIdentifier, "The statement uses an identifier that is reserved by the gateway.")]
     [InlineData("SOMETHING_UNKNOWN", "The statement could not be executed.")]
     public void FixedMessage_IsStablePerCode(string code, string message)
     {
