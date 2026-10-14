@@ -15,7 +15,7 @@ This document puts every open item from the category plans into one global order
 | [`impl-arch-r1-r3-pipeline-persistence.md`](impl-arch-r1-r3-pipeline-persistence.md) | `WP-ARC-B` | B-07, B-09, B-10, B-11, B-12 remainder, B-13, B-14 | R1 remainder, R3; themes T1, T3, T4 |
 | [`impl-arch-r4-r6-api-perf-hygiene.md`](impl-arch-r4-r6-api-perf-hygiene.md) | `WP-ARC-C` | C-01..C-10, C-12..C-16, C-17 remainder, C-18..C-22 | R4–R6; themes T7–T10 |
 | [`impl-features-analytics.md`](impl-features-analytics.md) | `WP-FEAT` | FEAT-03, 04, 05, 06a/b, 07a/b/c | #28, #37, #38 Stage 2/3 |
-| [`impl-test-suite-speedup.md`](impl-test-suite-speedup.md) | `WP-TS` | CI check of WP-TS-01, WP-TS-02..05 | CI test wall-clock time |
+| [`impl-test-suite-speedup.md`](impl-test-suite-speedup.md) | `WP-TS` | CI check of WP-TS-01, WP-TS-00, WP-TS-02..05 | CI test wall-clock time |
 
 Security Wave C (SR-L-01..24) is delivered; its first scope plan (`impl-security-wave-c-1.md`) was removed because no open work remained.
 

@@ -33,6 +33,13 @@ CI gain. Re-baseline the table above with the result.
 
 ## 2. Open Work Packages (ordered by impact)
 
+### WP-TS-00: Make CI test timings visible (prerequisite)
+
+- **Change:** `dotnet test --logger trx` for every test project in `ci.yml` and upload the TRX files as a workflow artifact
+  (`if: always()`). Job logs are not readable without repository access, so per-class durations are otherwise unknown on GitHub.
+- **Use:** resolves the open CI question in section 1 and sizes the WP-TS-02 shards on measured class durations.
+- **Acceptance:** each CI run publishes per-test durations for all test projects.
+
 ### WP-TS-02: Shard the integration tests across parallel CI jobs
 
 - **Change:** a job matrix with three shards selected by `--filter` on namespace or trait (database contract tests, web host tests,
@@ -73,6 +80,7 @@ CI gain. Re-baseline the table above with the result.
 | Work package | Status |
 |---|---|
 | CI check of WP-TS-01 | Open: GitHub `Build & Test` 23:14 (`f396e742`) vs 20:18 before; investigate (section 1). |
+| WP-TS-00 | Planned (next) |
 | WP-TS-02 | Planned |
 | WP-TS-03 | Planned |
 | WP-TS-04 | Re-measure first: an uncontended local run took 20 s (the 5:07 baseline ran next to other test projects). Drop if CI confirms. |
