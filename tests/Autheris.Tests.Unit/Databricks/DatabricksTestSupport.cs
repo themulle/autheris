@@ -34,12 +34,19 @@ internal sealed class CapturingLogger<T> : ILogger<T>
 {
     public List<string> Lines { get; } = [];
 
+    /// <summary>The same lines with their level (to assert that something was logged as Critical).</summary>
+    public List<(LogLevel Level, string Text)> Entries { get; } = [];
+
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
     public bool IsEnabled(LogLevel logLevel) => true;
 
-    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
-        Lines.Add(formatter(state, exception) + (exception is null ? string.Empty : exception.ToString()));
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+        var line = formatter(state, exception) + (exception is null ? string.Empty : exception.ToString());
+        Lines.Add(line);
+        Entries.Add((logLevel, line));
+    }
 }
 
 internal static class DatabricksTestSupport

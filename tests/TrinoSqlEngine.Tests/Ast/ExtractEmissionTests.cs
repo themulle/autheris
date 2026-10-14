@@ -9,16 +9,11 @@ using Xunit;
 /// Wunsch 4, Phase 6a: EXTRACT was always emitted in ANSI form. SQL Server and SQLite have no EXTRACT, and PostgreSQL's
 /// DOW counts 0 (Sunday) to 6 while Trino's DOW/DAY_OF_WEEK is ISO, 1 (Monday) to 7 (Sunday).
 /// </summary>
+[Trait("Category", "SqlGate")]
 public sealed class ExtractEmissionTests
 {
-    private readonly FastSqlEngine _engine = new();
-
     private string Generate(string sql, TargetSqlDialect dialect) =>
-        _engine.GenerateGovernedSql(sql, new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'"),
-            TargetDialect = dialect
-        });
+        AstEmit.Inline(sql, dialect);
 
     private string Extract(string field, TargetSqlDialect dialect) =>
         Generate($"SELECT EXTRACT({field} FROM created_at) AS v FROM orders", dialect);

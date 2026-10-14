@@ -14,6 +14,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// cache unverified output. The Debug-only seam injects a faulty injector or emitter; a mutant that skips either proof, or caches
 /// before verification, fails these tests. The same seam cancels from inside every pass.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public class PipelineSeamTests
 {
     private static readonly string[] Passes = { "parse", "build", "validate", "simplify", "inject", "verify", "capabilities", "emit" };

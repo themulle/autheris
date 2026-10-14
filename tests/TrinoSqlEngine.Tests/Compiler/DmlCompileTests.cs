@@ -15,6 +15,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// was rejected as "not yet supported") and drive the typed DML injection. They run on every dialect that lists DML in its
 /// capability entry.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public class DmlCompileTests
 {
     public static readonly TargetSqlDialect[] Dialects = { TargetSqlDialect.SqlServer, TargetSqlDialect.DuckDb, TargetSqlDialect.PostgreSql, TargetSqlDialect.Databricks, TargetSqlDialect.Oracle };
@@ -557,14 +558,21 @@ public class DmlCompileTests
     [MemberData(nameof(DialectData))]
     public void Insert_MultiRow_OverTheBindLimit_IsRejected_WithTheTypedError(TargetSqlDialect dialect)
     {
-        _engine.MaxQueryLength = 8_000_000;   // the text guard (64 K characters) would otherwise fire before the bind limit of the larger dialects
-        var max = DialectCapabilityTable.Default.Get(dialect).MaxBindParameters;
-        int rows = (max / 2) + 5;   // id + status per row; the tenant marker is shared
-        var sql = "INSERT INTO orders (id, tenantid, status) VALUES " +
-                  string.Join(", ", Enumerable.Range(1, rows).Select(i => $"({i}, 'acme', 's{i}')"));
-        var request = Request(dialect) with { CompileTimeout = TimeSpan.FromSeconds(25) };   // a huge statement must reach the bind limit, not the 2 s budget
-        var ex = Assert.Throws<SqlLimitExceededException>(() => _engine.Compile(sql.AsMemory(), request, CancellationToken.None));
+        // Deterministic: the capability table is lowered to 40 binds, so the boundary is reached with a few rows. The statement needs
+        // 2 binds per row (id + status; the tenant marker is shared) plus the shared ones, and the production limit is probed in
+        // BindLimitProductionProbeTests.
+        const int limit = 40;
+        var compiler = LimitProbeSupport.WithBindLimit(LimitProbeSupport.Engine(), limit);
+        string Sql(int rows) => "INSERT INTO orders (id, tenantid, status) VALUES " +
+                                string.Join(", ", Enumerable.Range(1, rows).Select(i => $"({i}, 'acme', 's{i}')"));
+        var request = Request(dialect) with { CompileTimeout = CompileLimits.MaxCompileTimeout };
+
+        var ok = compiler.Compile(Sql(5).AsMemory(), request, CancellationToken.None);
+        Assert.True(ok.Parameters.Length <= limit);
+
+        var ex = Assert.Throws<SqlLimitExceededException>(() => compiler.Compile(Sql(limit).AsMemory(), request, CancellationToken.None));
         Assert.Equal(SqlLimitKind.BindParameters, ex.Kind);
+        Assert.Equal(limit, ex.Maximum);
     }
 
     [Theory]

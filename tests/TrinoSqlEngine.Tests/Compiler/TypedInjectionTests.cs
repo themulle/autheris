@@ -12,6 +12,7 @@ using static TrinoSqlEngine.Tests.Compiler.PolicyFixtures;
 
 namespace TrinoSqlEngine.Tests.Compiler;
 
+[Trait("Category", "SqlGate")]
 public class TypedInjectionTests
 {
     private readonly DictPolicyProvider _rowFilters = new();
@@ -32,8 +33,7 @@ public class TypedInjectionTests
     private SqlStatement Secure(string sql, TypedPolicyContext typed)
     {
         var ast = CompilerTestHelpers.Build(sql);
-        var visitor = new AstSecurityVisitor(new RlsOptions { EnforceReadOnlyQueries = true }, new FastSqlEngine(), typed);
-        return (SqlStatement)visitor.Visit(ast);
+        return TypedVisitor.Secure(ast, typed);
     }
 
     private static IEnumerable<SecurityPredicateExpression> Predicates(object? node)
@@ -261,6 +261,7 @@ public class TypedInjectionTests
     }
 }
 
+[Trait("Category", "SqlGate")]
 internal static class FrozenTestExtensions
 {
     public static System.Collections.Frozen.FrozenDictionary<string, PolicyValue> ToFrozenDictionaryForTest(

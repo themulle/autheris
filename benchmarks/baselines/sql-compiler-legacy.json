@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "description": "G8 allocation baseline of the SQL compiler (plan 9.3). Time is never frozen: it is compared by ratio on the same runner.",
+  "description": "G8 allocation baseline of the SQL compiler (plan 9.3), frozen at the X1 cutover. The legacy numbers were measured on the pre-cutover head (c1a2af2); the legacy rewriter is deleted, so they can never be re-measured and this file is not regenerated on the legacy side. Time is never frozen: it is compared by ratio on the same runner.",
   "capturedOn": "2026-10-11",
   "machine": "AMD Ryzen 7 8840U, 16 logical cores, 7.5 GB RAM under load, Linux (WSL2), .NET 10.0.12, ShortRun in-process; allocation only; AST side re-frozen 2026-10-11 after the G8 performance work (legacy numbers unchanged)",
   "buckets": {

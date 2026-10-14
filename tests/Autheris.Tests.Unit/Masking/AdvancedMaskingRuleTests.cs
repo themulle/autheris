@@ -5,8 +5,10 @@ using Autheris.Application.Services;
 using Autheris.Domain.Model;
 using Shouldly;
 using TrinoSqlEngine;
-using TrinoSqlEngine.Ast.Builder;
-using TrinoSqlEngine.Ast.Visitors;
+using System.Collections.Frozen;
+using Autheris.Tests.Unit.Sql;
+using TrinoSqlEngine.Ast.Nodes;
+using TrinoSqlEngine.Governance;
 using Xunit;
 
 namespace Autheris.Tests.Unit.Masking;
@@ -279,114 +281,65 @@ public class AdvancedMaskingRuleTests
 
     #endregion
 
-    #region Fail-Closed Predicate Guard (AstSecurityVisitor)
+    #region Fail-Closed Predicate Guard (typed compiler)
 
-    private readonly FastSqlEngine _engine = new();
-
-    private void SecureAst(string sql, string maskedCol, TargetSqlDialect dialect = TargetSqlDialect.PostgreSql)
+    private static void Compile(string sql, string maskedCol, TargetSqlDialect dialect = TargetSqlDialect.PostgreSql)
     {
-        var options = new RlsOptions
+        string schema = dialect == TargetSqlDialect.SqlServer ? "dbo" : "public";
+        var env = new TestCompileEnv(dialect, schema)
+            .Table("employees", "tenant_id", "id:INTEGER", "name", "salary:INTEGER", "tenant_id")
+            .Table("users", "tenant_id", "id:INTEGER", "name", "ssn", "tenant_id")
+            .Table("sales", "tenant_id", "id:INTEGER", "department", "bonus:INTEGER", "tenant_id")
+            .Table("a", "tenant_id", "id:INTEGER", "ssn", "tenant_id")
+            .Table("b", "tenant_id", "info", "ssn", "tenant_id");
+        var nullify = new MaskSpec(MaskKind.Nullify, new MaskArguments(), FrozenDictionary<string, PolicyValue>.Empty);
+        foreach (var table in new[] { "employees", "users", "sales", "a", "b" })
         {
-            PolicyProvider = new DefaultRlsPolicyProvider("1=1"),
-            TargetDialect = dialect,
-            RejectMaskedColumnsInPredicates = true,
-            TableColumnsProvider = _ => new[] { "id", "name", "salary", "ssn", "bonus", "department", "info" },
-            ColumnMaskingProvider = new DefaultColumnMaskingPolicyProvider(
-                hasMaskPredicate: (_, c) => c.Equals(maskedCol, StringComparison.OrdinalIgnoreCase),
-                maskExpressionProvider: (_, _) => "'***'")
-        };
+            env.Mask(table, maskedCol, nullify);
+        }
 
-        var (tree, _) = _engine.Parse(sql.AsMemory(), SqlTokenSecurityOptions.None);
-        var builder = new SqlAstBuilder(AstBuilderOptions.FromRlsOptions(options));
-        var ast = builder.BuildStatement(tree);
-        var visitor = new AstSecurityVisitor(options, _engine);
-        visitor.Visit(ast);
+        env.Compile(sql);
     }
 
     [Fact]
     public void PredicateGuard_MaskedColumnInWhere_ThrowsSecurityException()
     {
         Should.Throw<SecurityException>(() =>
-            SecureAst("SELECT id, name FROM employees WHERE salary > 50000", "salary"));
+            Compile("SELECT id, name FROM employees WHERE salary > 50000", "salary"));
     }
 
     [Fact]
     public void PredicateGuard_MaskedColumnInOrderBy_ThrowsSecurityException()
     {
         Should.Throw<SecurityException>(() =>
-            SecureAst("SELECT id, name FROM users ORDER BY ssn", "ssn"));
+            Compile("SELECT id, name FROM users ORDER BY ssn", "ssn"));
     }
 
     [Fact]
     public void PredicateGuard_MaskedColumnInHaving_ThrowsSecurityException()
     {
         Should.Throw<SecurityException>(() =>
-            SecureAst("SELECT department, sum(bonus) FROM sales GROUP BY department HAVING bonus > 1000", "bonus", TargetSqlDialect.SqlServer));
+            Compile("SELECT department, sum(bonus) FROM sales GROUP BY department HAVING bonus > 1000", "bonus", TargetSqlDialect.SqlServer));
     }
 
     [Fact]
     public void PredicateGuard_MaskedColumnInJoinOn_ThrowsSecurityException()
     {
         Should.Throw<SecurityException>(() =>
-            SecureAst("SELECT a.id, b.info FROM a JOIN b ON a.ssn = b.ssn", "ssn"));
+            Compile("SELECT a.id, b.info FROM a JOIN b ON a.ssn = b.ssn", "ssn"));
     }
 
     [Fact]
     public void PredicateGuard_UnmaskedColumnsInPredicates_SucceedsNormally()
     {
         Should.NotThrow(() =>
-            SecureAst("SELECT id, name, salary FROM employees WHERE id = 123 ORDER BY name", "salary"));
+            Compile("SELECT id, name, salary FROM employees WHERE id = 123 ORDER BY name", "salary"));
     }
 
     #endregion
 
-    #region AstSecurityVisitor Dialect SQL Mask Generation
-
-    [Fact]
-    public void BuildDialectMaskExpression_GeoJitter_GeneratesCorrectDialectSql()
-    {
-        var pgSql = AstSecurityVisitor.BuildDialectMaskExpression(
-            "latitude", "GEO_JITTER", TargetSqlDialect.PostgreSql, decimals: 2);
-        pgSql.ShouldBe("CASE WHEN \"latitude\" IS NULL OR \"latitude\" = 0.0 THEN \"latitude\" ELSE ROUND(\"latitude\"::numeric, 2)::double precision END");
-
-        var msSql = AstSecurityVisitor.BuildDialectMaskExpression(
-            "latitude", "GEO_JITTER", TargetSqlDialect.SqlServer, decimals: 3);
-        msSql.ShouldBe("CASE WHEN [latitude] IS NULL OR [latitude] = 0.0 THEN [latitude] ELSE ROUND([latitude], 3) END");
-
-        var sqlite = AstSecurityVisitor.BuildDialectMaskExpression(
-            "lat", "GEO_JITTER", TargetSqlDialect.Sqlite, decimals: 1);
-        sqlite.ShouldBe("CASE WHEN \"lat\" IS NULL OR \"lat\" = 0.0 THEN \"lat\" ELSE ROUND(\"lat\", 1) END");
-    }
-
-    [Fact]
-    public void BuildDialectMaskExpression_PartialMask_GeneratesCorrectDialectSql()
-    {
-        var pgSql = AstSecurityVisitor.BuildDialectMaskExpression(
-            "card_number", "PARTIAL_MASK", TargetSqlDialect.PostgreSql, keepPrefix: 2, keepSuffix: 4, maskChar: 'X');
-        pgSql.ShouldContain("REPEAT('X'");
-        pgSql.ShouldContain("SUBSTRING(\"card_number\"");
-
-        var msSql = AstSecurityVisitor.BuildDialectMaskExpression(
-            "card_number", "PARTIAL_MASK", TargetSqlDialect.SqlServer, keepPrefix: 1, keepSuffix: 0, maskChar: '*');
-        msSql.ShouldContain("LEFT([card_number], 1)");
-        msSql.ShouldContain("REPLICATE('*'");
-    }
-
-    [Fact]
-    public void BuildDialectMaskExpression_Redact_GeneratesTypedNullCast()
-    {
-        var pgSql = AstSecurityVisitor.BuildDialectMaskExpression(
-            "balance", "REDACT", TargetSqlDialect.PostgreSql, dataType: "DECIMAL(18,2)");
-        pgSql.ShouldBe("CAST(NULL AS NUMERIC)");
-
-        var msSql = AstSecurityVisitor.BuildDialectMaskExpression(
-            "balance", "REDACT", TargetSqlDialect.SqlServer, dataType: "DECIMAL(18,2)");
-        msSql.ShouldBe("CAST(NULL AS DECIMAL(18,2))");
-
-        var defaultSql = AstSecurityVisitor.BuildDialectMaskExpression(
-            "notes", "REDACT", TargetSqlDialect.SqlServer, replacement: "[CUSTOM_REDACT]");
-        defaultSql.ShouldBe("N'[CUSTOM_REDACT]'");
-    }
-
-    #endregion
+    // The BuildDialectMaskExpression tests (GEO_JITTER, PARTIAL_MASK, REDACT per dialect, L-9) tested the removed string builder. The typed
+    // mask renderer is covered per dialect by TrinoSqlEngine.Tests/Compiler/MaskTests (Redact_NumericOrTemporal_IsTypedNull,
+    // PartialMask_AllArgumentsAreBound, GeoJitter_RoundsWithAStructuralScale_Clamped), SqliteMaskTests, and here by
+    // TypedMaskSpecTests.RenderedMask_* (executed on SQLite).
 }

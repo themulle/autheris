@@ -2,6 +2,7 @@ namespace Autheris.Api.Middleware;
 
 using System;
 using System.Security;
+using System.Security.Claims;
 using System.Threading.Tasks;
 using Autheris.Api.Security;
 using Autheris.Application.Interfaces;
@@ -23,6 +24,7 @@ using Microsoft.AspNetCore.Http;
 public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
 {
     public const string TenantCollisionCode = "TENANT_ID_COLLISION";
+    public const string TenantUnknownCode = "TENANT_UNKNOWN";
     public const string TenantRegistryUnavailableCode = "TENANT_REGISTRY_UNAVAILABLE";
     public const string TenantRegistrationRateLimitedCode = "TENANT_REGISTRATION_RATE_LIMITED";
 
@@ -93,10 +95,14 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
             return false;
         }
 
-        TenantRegistration result;
+        TenantRegistration? result;
         try
         {
-            result = await registry.RegisterOrGetAsync(securityContext.TenantId, context.User.FindFirst("iss")?.Value, context.RequestAborted).ConfigureAwait(false);
+            // M-A2: a tenant that a ClusterAdmin selected by header is looked up only. A header can never register a tenant or mark a
+            // collision (which would lock the tenant's whole spelling group); an unknown tenant is refused.
+            result = securityContext.TenantSelectedByHeader
+                ? await registry.TryGetAsync(securityContext.TenantId, context.RequestAborted).ConfigureAwait(false)
+                : await registry.RegisterOrGetAsync(securityContext.TenantId, BudgetKey(context.User), context.RequestAborted).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -111,6 +117,9 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
             case TenantRegistration.Registered:
             case TenantRegistration.Existing:
                 return false;
+            case null:
+                await WriteJsonAsync(context, StatusCodes.Status403Forbidden, "The selected tenant is not registered.", TenantUnknownCode).ConfigureAwait(false);
+                return true;
             case TenantRegistration.RateLimited:
                 await WriteJsonAsync(context, StatusCodes.Status429TooManyRequests, "Too many new tenants were registered for this identity provider issuer.", TenantRegistrationRateLimitedCode).ConfigureAwait(false);
                 return true;
@@ -118,6 +127,16 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
                 await WriteCollisionDenialAsync(context, securityContext, "tenant id collides with a registered tenant id (tenant registry)").ConfigureAwait(false);
                 return true;
         }
+    }
+
+    /// <summary>
+    /// Phase 5 L6: the budget key of a new tenant registration: the issuer of the token, or one bucket per authentication scheme for a token
+    /// without an issuer (API keys, forward auth), so that issuer-less callers do not share a single bucket.
+    /// </summary>
+    private static string BudgetKey(ClaimsPrincipal user)
+    {
+        var issuer = user.FindFirst("iss")?.Value;
+        return !string.IsNullOrWhiteSpace(issuer) ? issuer : $"scheme:{user.Identity?.AuthenticationType ?? "unknown"}";
     }
 
     private static Task WriteJsonAsync(HttpContext context, int status, string message, string code)

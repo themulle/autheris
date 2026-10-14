@@ -1,33 +1,49 @@
 namespace Autheris.Tests.Unit.Sql;
 
 using System;
+using System.Collections.Generic;
 using System.Globalization;
+using TrinoSqlEngine.Ast.Emit;
 using Microsoft.Data.Sqlite;
 using Shouldly;
 using TrinoSqlEngine;
 using Xunit;
 
 /// <summary>
-/// Wunsch 4: AST output for constructs the legacy rewriter passes through unchanged (and SQLite rejects), executed against
+/// Wunsch 4: Compiled output (the governed Compile path, bound through the SQLite binder) for constructs that need a dialect rewrite, executed against
 /// SQLite and checked against .NET. Trino semantics: DOW/DAY_OF_WEEK is ISO, Monday = 1 … Sunday = 7.
 /// </summary>
 public sealed class AstSqliteExecutionTests
 {
-    private static object? Scalar(string trinoSql, string date)
+    private static object? Scalar(string trinoSql, string date, bool inline = false)
     {
-        string sql = new FastSqlEngine().GenerateGovernedSql(trinoSql, new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'"),
-            TargetDialect = TargetSqlDialect.Sqlite
-        });
+        var env = new TestCompileEnv(TargetSqlDialect.Sqlite).Table("orders", "tenant_id", "id:INTEGER", "created_at", "tenant_id");
+        var compiled = inline ? null : env.Compile(trinoSql, tenant: "t1");
 
         using var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = $"CREATE TABLE orders (id INTEGER, created_at TEXT, tenant_id TEXT); INSERT INTO orders VALUES (1, '{date}', 't1');";
         command.ExecuteNonQuery();
-        command.CommandText = sql;
+        if (compiled is null)
+        {
+            // EXTRACT has no bound form on SQLite (the governed compiler rejects it, fail closed); the inline emission is what the
+            // text consumers (virtual filters) render, so its rules are checked against .NET here.
+            command.CommandText = InlineSql(trinoSql);
+        }
+        else
+        {
+            CompiledSqlBinders.For(TargetSqlDialect.Sqlite).Bind(command, compiled, new Dictionary<string, object?>());
+        }
+
         return command.ExecuteScalar();
+    }
+
+    private static string InlineSql(string trinoSql)
+    {
+        var (tree, _) = new FastSqlEngine().Parse(trinoSql.AsMemory(), SqlTokenSecurityOptions.ForDialect(TargetSqlDialect.Sqlite));
+        var ast = new TrinoSqlEngine.Ast.Builder.SqlAstBuilder(new TrinoSqlEngine.Ast.Builder.AstBuilderOptions()).BuildStatement(tree);
+        return TrinoSqlEngine.Ast.Generators.SqlDialectGeneratorFactory.GetGenerator(TargetSqlDialect.Sqlite).GenerateSql(ast);
     }
 
     [Theory]
@@ -41,12 +57,12 @@ public sealed class AstSqliteExecutionTests
         var d = DateTime.ParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture);
         int isoDow = d.DayOfWeek == DayOfWeek.Sunday ? 7 : (int)d.DayOfWeek;
 
-        Convert.ToInt32(Scalar("SELECT EXTRACT(DOW FROM created_at) FROM orders", date), CultureInfo.InvariantCulture).ShouldBe(isoDow);
-        Convert.ToInt32(Scalar("SELECT EXTRACT(YEAR FROM created_at) FROM orders", date), CultureInfo.InvariantCulture).ShouldBe(d.Year);
-        Convert.ToInt32(Scalar("SELECT EXTRACT(MONTH FROM created_at) FROM orders", date), CultureInfo.InvariantCulture).ShouldBe(d.Month);
-        Convert.ToInt32(Scalar("SELECT EXTRACT(DAY FROM created_at) FROM orders", date), CultureInfo.InvariantCulture).ShouldBe(d.Day);
-        Convert.ToInt32(Scalar("SELECT EXTRACT(DAY_OF_YEAR FROM created_at) FROM orders", date), CultureInfo.InvariantCulture).ShouldBe(d.DayOfYear);
-        Convert.ToInt32(Scalar("SELECT EXTRACT(QUARTER FROM created_at) FROM orders", date), CultureInfo.InvariantCulture).ShouldBe((d.Month + 2) / 3);
+        Convert.ToInt32(Scalar("SELECT EXTRACT(DOW FROM created_at) FROM orders", date, inline: true), CultureInfo.InvariantCulture).ShouldBe(isoDow);
+        Convert.ToInt32(Scalar("SELECT EXTRACT(YEAR FROM created_at) FROM orders", date, inline: true), CultureInfo.InvariantCulture).ShouldBe(d.Year);
+        Convert.ToInt32(Scalar("SELECT EXTRACT(MONTH FROM created_at) FROM orders", date, inline: true), CultureInfo.InvariantCulture).ShouldBe(d.Month);
+        Convert.ToInt32(Scalar("SELECT EXTRACT(DAY FROM created_at) FROM orders", date, inline: true), CultureInfo.InvariantCulture).ShouldBe(d.Day);
+        Convert.ToInt32(Scalar("SELECT EXTRACT(DAY_OF_YEAR FROM created_at) FROM orders", date, inline: true), CultureInfo.InvariantCulture).ShouldBe(d.DayOfYear);
+        Convert.ToInt32(Scalar("SELECT EXTRACT(QUARTER FROM created_at) FROM orders", date, inline: true), CultureInfo.InvariantCulture).ShouldBe((d.Month + 2) / 3);
     }
 
     [Theory]

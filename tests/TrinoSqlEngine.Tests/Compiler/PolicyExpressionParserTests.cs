@@ -7,6 +7,7 @@ using static TrinoSqlEngine.Tests.Compiler.PolicyFixtures;
 
 namespace TrinoSqlEngine.Tests.Compiler;
 
+[Trait("Category", "SqlGate")]
 public class PolicyExpressionParserTests
 {
     private readonly FakeTimeProvider _time = new();

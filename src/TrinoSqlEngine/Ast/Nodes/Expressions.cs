@@ -10,11 +10,31 @@ public abstract record Expression : SqlNode;
 public sealed record ColumnReference(SqlQualifiedName Name) : Expression;
 
 /// <summary>
-/// SQL-4: an expression rendered by the gateway itself for the target dialect (column mask expressions with bound key
-/// parameters, e.g. <c>ENCODE(HMAC(..., @key, 'sha256'), 'hex')</c> or T-SQL <c>HASHBYTES</c>). It is emitted verbatim,
-/// as the legacy rewriter does. The AST builder never creates it, so client SQL can never produce this node.
+/// A named bind marker <c>@Name</c> for the text consumers that render a typed predicate (OQ-4: <c>IPolicyPredicateRenderer</c>). It
+/// carries an identifier, never SQL text, and only the inline (string) emission accepts it; the governed compile path rejects it
+/// (<c>SecurityCoverageVerifier</c>) and policy parsing never produces it. The builder cannot create it from client SQL.
 /// </summary>
-public sealed record TrustedSqlExpression(string Sql) : Expression;
+public sealed record NamedBindMarkerExpression : Expression
+{
+    private static readonly System.Text.RegularExpressions.Regex SafeName = new(
+        @"\A[A-Za-z_][A-Za-z0-9_]{0,127}\z",
+        System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+        System.TimeSpan.FromMilliseconds(100));
+
+    public NamedBindMarkerExpression(string name)
+    {
+        System.ArgumentNullException.ThrowIfNull(name);
+        if (!SafeName.IsMatch(name))
+        {
+            throw new System.ArgumentException("A bind marker name must be a plain identifier.", nameof(name));
+        }
+
+        Name = name;
+    }
+
+    /// <summary>The marker name without the <c>@</c> prefix.</summary>
+    public string Name { get; }
+}
 
 /// <summary>
 /// A value bound by the gateway (tenant, policy, mask argument). It never originates from request text; the value comes from

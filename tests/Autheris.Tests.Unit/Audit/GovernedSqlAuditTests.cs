@@ -81,10 +81,10 @@ public sealed class GovernedSqlAuditTests
         };
 
         var service = new GovernedSqlExecutionService(
-            Options.Create(options),
+            Options.Create(options), executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: null,
             consentResolution: resolution,
-            tableRepository: repo,
+            tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             auditLogRepository: auditRepo,
             connectionFactory: Substitute.For<ISqlConnectionFactory>(),
             clientIpResolver: null,
@@ -136,10 +136,9 @@ public sealed class GovernedSqlAuditTests
         var factory = Substitute.For<ISqlConnectionFactory>();
         var conn = Substitute.For<DbConnection>();
         var cmd = Substitute.For<DbCommand>();
+        cmd.WireParameters();   // the binder owns the parameters of a governed command
         cmd.ExecuteReaderAsync(Arg.Any<CommandBehavior>(), Arg.Any<CancellationToken>())
             .Returns<Task<DbDataReader>>(_ => throw new InvalidOperationException("Database socket connection reset by peer"));
-        cmd.Parameters.Returns(Substitute.For<DbParameterCollection>());
-        cmd.CreateParameter().Returns(Substitute.For<DbParameter>());
         conn.CreateCommand().Returns(cmd);
         factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(conn));
@@ -163,10 +162,10 @@ public sealed class GovernedSqlAuditTests
         };
 
         var service = new GovernedSqlExecutionService(
-            Options.Create(options),
+            Options.Create(options), executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: null,
             consentResolution: resolution,
-            tableRepository: repo,
+            tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             auditLogRepository: auditRepo,
             connectionFactory: factory,
             clientIpResolver: null,

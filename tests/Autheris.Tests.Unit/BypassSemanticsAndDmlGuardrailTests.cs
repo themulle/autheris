@@ -26,6 +26,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
+using TrinoSqlEngine;
+using TrinoSqlEngine.Ast.Emit;
+using Autheris.Application.Sql.Errors;
 using Xunit;
 
 /// <summary>
@@ -456,8 +459,8 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
 
         var orders = new TableMetadata
         {
-            Identifier = new TableIdentifier("default", "public", "orders"),
-            Table = new Table { TableName = "orders", SchemaName = "public", SourceName = string.Empty, SourceType = "Sqlite" },
+            Identifier = new TableIdentifier("default", "main", "orders"),
+            Table = new Table { TableName = "orders", SchemaName = "main", SourceName = string.Empty, SourceType = "Sqlite" },
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },
@@ -502,10 +505,10 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             .Returns(_ => OpenSqliteAsync(fixture.ConnectionString));
 
         return new GovernedSqlExecutionService(
-            Options.Create(options),
+            Options.Create(options), executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: null,
             consentResolution: consentResolution,
-            tableRepository: repo,
+            tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             auditLogRepository: audit,
             connectionFactory: connectionFactory,
             clientIpResolver: null,
@@ -533,9 +536,11 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         await using var fixture = await DmlFixture.CreateAsync();
         var service = CreateDmlService(fixture);
 
-        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => ExecuteAsync(service, sql));
+        // X1: the engine's typed rejection (stable code SQL_UNFILTERED_DML) replaces the former WebSqlPolicyException text.
+        var ex = await Should.ThrowAsync<UnfilteredDmlException>(() => ExecuteAsync(service, sql));
 
-        ex.Message.ShouldContain("WHERE");
+        SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Code.ShouldBe("SQL_UNFILTERED_DML");
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM orders")).ShouldBe(7);
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM orders WHERE amount = 0")).ShouldBe(0);
 
@@ -581,7 +586,8 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         entry.TargetTable.ShouldBe("orders");
         entry.DetailsJson.ShouldContain("\"affectedRows\":1");
         entry.DetailsJson.ShouldContain("\"statementType\":\"Delete\"");
-        entry.DetailsJson.ShouldContain("sqlSha256");
+        entry.DetailsJson.ShouldContain("sql.compiled_digest");
+        entry.DetailsJson.ShouldContain("compiler_version");
         entry.DetailsJson.ShouldNotContain("DELETE FROM");
         entry.DetailsJson.ShouldNotContain("amount = 10");
     }
@@ -605,15 +611,17 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         await using var fixture = await DmlFixture.CreateAsync();
         var service = CreateDmlService(fixture, maxAffectedRows: 2);
 
-        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => ExecuteAsync(service, "UPDATE orders SET amount = 0 WHERE id > 0"));
+        // X1: the checked executor's typed error (code DML_AFFECTED_ROWS_LIMIT, fixed message, no counts) replaces the text with counts.
+        var ex = await Should.ThrowAsync<DmlAffectedRowsLimitException>(() => ExecuteAsync(service, "UPDATE orders SET amount = 0 WHERE id > 0"));
 
-        ex.Message.ShouldContain("MaxAffectedRows");
+        ex.Code.ShouldBe("DML_AFFECTED_ROWS_LIMIT");
+        ex.Message.ShouldNotContain("5");
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM orders WHERE amount = 0")).ShouldBe(0);
 
         var entry = fixture.AuditEntries.ShouldHaveSingleItem();
         entry.EventType.ShouldBe("WEBSQL_DML_REJECTED");
         entry.Decision.ShouldBe("DENY");
-        entry.DetailsJson.ShouldContain("\"affectedRows\":5");
+        entry.DetailsJson.ShouldContain("DML_AFFECTED_ROWS_LIMIT");
     }
 
     [Fact]

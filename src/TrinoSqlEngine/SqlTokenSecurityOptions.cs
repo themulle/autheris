@@ -71,24 +71,27 @@ public sealed record SqlTokenSecurityOptions
     public bool RejectVariableSubstitutionSequences { get; init; }
 
     /// <summary>
-    /// Derives the token switches from <see cref="RlsOptions"/>. Dollar quoting is always rejected for SQL Server targets.
+    /// Phase 5 L3: reject identifiers (quoted or not) that start with <see cref="ReservedIdentifierException.Prefix"/> with a
+    /// <see cref="ReservedIdentifierException"/>. For the user statement only (not part of <see cref="Strict"/>): the policy parser uses the strict
+    /// preset and must keep accepting the gateway aliases of the admin predicates.
     /// </summary>
-    public static SqlTokenSecurityOptions FromRlsOptions(RlsOptions options)
+    public bool RejectReservedIdentifiers { get; init; }
+
+    /// <summary>
+    /// The strict switches for a statement compiled for <paramref name="dialect"/> (used by the policy producers that parse administrator
+    /// text, such as virtual filter definitions). Bracket sequences are rejected for the dialects that lex <c>[...]</c> as a quoted
+    /// identifier (SQL Server, SQLite), and <c>${</c> for Databricks; dollar quoting is rejected everywhere.
+    /// </summary>
+    public static SqlTokenSecurityOptions ForDialect(TargetSqlDialect dialect) => new()
     {
-        ArgumentNullException.ThrowIfNull(options);
-        return new SqlTokenSecurityOptions
-        {
-            RejectComments = options.RejectComments,
-            RejectBackslashInStrings = options.RejectBackslashInStrings,
-            RejectEscapedStringLiterals = options.RejectEscapedStringLiterals,
-            RejectDollarQuoting = options.RejectDollarQuoting || options.TargetDialect == TargetSqlDialect.SqlServer,
-            RejectBracketLexerDifferentials = options.RejectBracketLexerDifferentials
-                || options.TargetDialect == TargetSqlDialect.SqlServer
-                || options.TargetDialect == TargetSqlDialect.Sqlite,
-            RejectNonAsciiIdentifiers = options.RejectNonAsciiIdentifiers,
-            RejectDotsInQuotedIdentifiers = options.RejectDotsInQuotedIdentifiers,
-            RejectTimeTravelQueries = options.RejectTimeTravelQueries,
-            RejectVariableSubstitutionSequences = options.TargetDialect == TargetSqlDialect.Databricks
-        };
-    }
+        RejectComments = true,
+        RejectBackslashInStrings = true,
+        RejectEscapedStringLiterals = true,
+        RejectDollarQuoting = true,
+        RejectBracketLexerDifferentials = dialect is TargetSqlDialect.SqlServer or TargetSqlDialect.Sqlite,
+        RejectNonAsciiIdentifiers = true,
+        RejectDotsInQuotedIdentifiers = true,
+        RejectTimeTravelQueries = true,
+        RejectVariableSubstitutionSequences = dialect == TargetSqlDialect.Databricks
+    };
 }

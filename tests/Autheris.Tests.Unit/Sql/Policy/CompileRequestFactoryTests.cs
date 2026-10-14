@@ -80,7 +80,7 @@ public sealed class CompileRequestFactoryTests
         guards.RejectNonAsciiIdentifiers.ShouldBeTrue();
         guards.RejectDotsInQuotedIdentifiers.ShouldBeTrue();
         guards.RejectTimeTravelQueries.ShouldBeTrue();
-        guards.RejectDollarQuoting.ShouldBe(dialect != TargetSqlDialect.PostgreSql);
+        guards.RejectDollarQuoting.ShouldBeTrue();
         guards.RejectBracketLexerDifferentials.ShouldBe(rejectBracketLexerDifferentials);
     }
 

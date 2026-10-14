@@ -1,0 +1,148 @@
+namespace Autheris.Tests.Unit.Security;
+
+using System.Security.Claims;
+using Autheris.Api.Endpoints;
+using Autheris.Domain.Audit;
+using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
+using Autheris.Domain.Model;
+using Autheris.Application.Interfaces;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
+using NSubstitute;
+using Shouldly;
+using Xunit;
+
+/// <summary>M-A2: the audited ClusterAdmin operation that resolves a tenant id collision.</summary>
+public sealed class TenantRegistryAdminEndpointTests
+{
+    private static DefaultHttpContext Context(params string[] roles)
+    {
+        var claims = new List<Claim> { new("sub", "S-1-5-21-ADMIN1"), new("tenant_id", "home") };
+        claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
+        return new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer")) };
+    }
+
+    private static ValueTask<TenantCollisionResolution> Resolved(string previous) =>
+        new(new TenantCollisionResolution(TenantCollisionResolutionStatus.Resolved, previous));
+
+    private static int Status(IResult result) => ((IStatusCodeHttpResult)result).StatusCode!.Value;
+
+    [Fact]
+    public async Task ClusterAdmin_Resolves_AndTheOperationIsAudited()
+    {
+        var registry = Substitute.For<ITenantRegistry>();
+        registry.ResolveCollisionAsync(new TenantId("Acme"), Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(Resolved("acme"));
+        var audit = Substitute.For<IAuditLogRepository>();
+
+        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("Acme", null, Context("ClusterAdmin"), registry, audit, default);
+
+        Status(result).ShouldBe(StatusCodes.Status200OK);
+        await audit.Received(1).RecordAuditEventAsync(
+            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.TenantCollisionResolved && e.DetailsJson!.Contains("Acme")), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("GovernanceAdmin")]
+    [InlineData("TenantAdmin")]
+    [InlineData("home:ClusterAdmin")]
+    public async Task NonClusterAdmin_Forbidden_NothingChanges(string role)
+    {
+        var registry = Substitute.For<ITenantRegistry>();
+        var audit = Substitute.For<IAuditLogRepository>();
+
+        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("Acme", null, Context(role), registry, audit, default);
+
+        Status(result).ShouldBe(StatusCodes.Status403Forbidden);
+        await registry.DidNotReceiveWithAnyArgs().ResolveCollisionAsync(default, default, default);
+    }
+
+    [Fact]
+    public async Task InvalidTenantId_BadRequest()
+    {
+        var registry = Substitute.For<ITenantRegistry>();
+
+        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("not valid!", null, Context("ClusterAdmin"), registry, Substitute.For<IAuditLogRepository>(), default);
+
+        Status(result).ShouldBe(StatusCodes.Status400BadRequest);
+        await registry.DidNotReceiveWithAnyArgs().ResolveCollisionAsync(default, default, default);
+    }
+
+    [Fact]
+    public async Task NoCollisionMark_NotFound_AndNoAuditOfAChange()
+    {
+        var registry = Substitute.For<ITenantRegistry>();
+        registry.ResolveCollisionAsync(Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<TenantCollisionResolution>(new TenantCollisionResolution(TenantCollisionResolutionStatus.NotFound, null)));
+        var audit = Substitute.For<IAuditLogRepository>();
+
+        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("Acme", null, Context("ClusterAdmin"), registry, audit, default);
+
+        Status(result).ShouldBe(StatusCodes.Status404NotFound);
+        await audit.DidNotReceiveWithAnyArgs().RecordAuditEventAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task Resolve_AuditsWithoutTheRequestToken_SoADisconnectAfterTheChangeCannotDropTheRecord()
+    {
+        // L-7: the registry change is already committed when the audit is written.
+        using var cts = new CancellationTokenSource();
+        var registry = Substitute.For<ITenantRegistry>();
+        registry.ResolveCollisionAsync(Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(_ => { cts.Cancel(); return Resolved("acme"); });
+        var audit = Substitute.For<IAuditLogRepository>();
+        audit.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<CancellationToken>(1).IsCancellationRequested ? Task.FromCanceled(call.ArgAt<CancellationToken>(1)) : Task.CompletedTask);
+
+        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("ACME", null, Context("ClusterAdmin"), registry, audit, cts.Token);
+
+        Status(result).ShouldBe(StatusCodes.Status200OK);
+        await audit.Received(1).RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Is<CancellationToken>(t => !t.CanBeCanceled));
+    }
+
+    // ---- L-4: the overwritten spelling is audited and returned; expectedCurrent is a compare-and-swap ---------------------------
+
+    [Fact]
+    public async Task Resolve_AuditsAndReturnsThePreviousSpelling()
+    {
+        var registry = Substitute.For<ITenantRegistry>();
+        registry.ResolveCollisionAsync(new TenantId("ACME"), Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(Resolved("acme"));
+        var audit = Substitute.For<IAuditLogRepository>();
+
+        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("ACME", null, Context("ClusterAdmin"), registry, audit, default);
+
+        Status(result).ShouldBe(StatusCodes.Status200OK);
+        await audit.Received(1).RecordAuditEventAsync(
+            Arg.Is<AuditLogEntry>(e => e.DetailsJson!.Contains("\"previousSpelling\":\"acme\"") && e.DetailsJson.Contains("\"keptSpelling\":\"ACME\"")),
+            Arg.Any<CancellationToken>());
+        var json = System.Text.Json.JsonSerializer.Serialize(((IValueHttpResult)result).Value);
+        json.ShouldContain("\"previous\":\"acme\"");
+    }
+
+    [Fact]
+    public async Task Resolve_ExpectedCurrentIsPassedToTheRegistry()
+    {
+        var registry = Substitute.For<ITenantRegistry>();
+        registry.ResolveCollisionAsync(Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(Resolved("acme"));
+
+        await TenantRegistryAdminEndpoints.ResolveCollisionAsync(
+            "ACME", new TenantRegistryAdminEndpoints.ResolveCollisionRequest("acme"), Context("ClusterAdmin"), registry, Substitute.For<IAuditLogRepository>(), default);
+
+        await registry.Received(1).ResolveCollisionAsync(new TenantId("ACME"), "acme", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Resolve_ExpectedCurrentMismatch_Conflict_NothingAudited()
+    {
+        var registry = Substitute.For<ITenantRegistry>();
+        registry.ResolveCollisionAsync(Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<TenantCollisionResolution>(new TenantCollisionResolution(TenantCollisionResolutionStatus.ExpectedMismatch, "acme")));
+        var audit = Substitute.For<IAuditLogRepository>();
+
+        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync(
+            "ACME", new TenantRegistryAdminEndpoints.ResolveCollisionRequest("Acme"), Context("ClusterAdmin"), registry, audit, default);
+
+        Status(result).ShouldBe(StatusCodes.Status409Conflict);
+        await audit.DidNotReceiveWithAnyArgs().RecordAuditEventAsync(default!, default);
+    }
+}

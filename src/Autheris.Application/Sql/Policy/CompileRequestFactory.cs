@@ -52,11 +52,12 @@ public static class CompileRequestFactory
                 RejectComments = true,
                 RejectBackslashInStrings = true,
                 RejectEscapedStringLiterals = true,
-                RejectDollarQuoting = dialect != TargetSqlDialect.PostgreSql,
+                RejectDollarQuoting = true,
                 RejectBracketLexerDifferentials = dialect is TargetSqlDialect.SqlServer or TargetSqlDialect.Sqlite,
                 RejectNonAsciiIdentifiers = true,
                 RejectDotsInQuotedIdentifiers = true,
-                RejectTimeTravelQueries = true
+                RejectTimeTravelQueries = true,
+                RejectReservedIdentifiers = true   // Phase 5 L3: the gateway prefix autheris_ is reserved in the user statement
             },
             Statements = isDml
                 ? StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge

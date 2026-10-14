@@ -25,7 +25,7 @@ public sealed class TenantRegistryMiddlewareTests
         public IDisposable? OnChange(Action<GatewayOptions, string?> listener) => null;
     }
 
-    private static (DefaultHttpContext Context, IAuditLogRepository Audit) Request(string tenant, ITenantRegistry? registry, bool authenticated = true, string issuer = "https://idp.example/")
+    private static (DefaultHttpContext Context, IAuditLogRepository Audit) Request(string tenant, ITenantRegistry? registry, bool authenticated = true, string? issuer = "https://idp.example/", string scheme = "Bearer")
     {
         var audit = Substitute.For<IAuditLogRepository>();
         var services = new ServiceCollection();
@@ -36,10 +36,13 @@ public sealed class TenantRegistryMiddlewareTests
         context.Response.Body = new MemoryStream();
         if (authenticated)
         {
-            context.User = new ClaimsPrincipal(new ClaimsIdentity(new[]
+            var claims = new List<Claim> { new("sub", "S-1-5-21-USER9"), new("tenant_id", tenant) };
+            if (issuer is not null)
             {
-                new Claim("sub", "S-1-5-21-USER9"), new Claim("tenant_id", tenant), new Claim("iss", issuer)
-            }, "Bearer"));
+                claims.Add(new Claim("iss", issuer));
+            }
+
+            context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, scheme));
         }
 
         return (context, audit);
@@ -72,6 +75,20 @@ public sealed class TenantRegistryMiddlewareTests
 
         nextInvoked.ShouldBeTrue();
         await registry.Received(1).RegisterOrGetAsync(new TenantId("acme"), "https://idp.example/", Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("Bearer")]
+    [InlineData("ApiKey")]
+    public async Task TokenWithoutIssuer_GetsABudgetPerAuthenticationScheme(string scheme)
+    {
+        // Phase 5 L6: issuer-less tokens (API keys, forward auth) must not all share one bucket: the budget key is the scheme.
+        var registry = Registry(TenantRegistration.Registered);
+        var (context, _) = Request("acme", registry, issuer: null, scheme: scheme);
+
+        await Run(context);
+
+        await registry.Received(1).RegisterOrGetAsync(new TenantId("acme"), $"scheme:{scheme}", Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -165,5 +182,104 @@ public sealed class TenantRegistryMiddlewareTests
         nextInvoked.ShouldBeFalse();
         context.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
         await registry.DidNotReceiveWithAnyArgs().RegisterOrGetAsync(default, default, default);
+    }
+
+    // ---- M-A2: a tenant selected by a ClusterAdmin header is looked up, never registered, never marked as colliding -------------
+
+    private static (DefaultHttpContext Context, IAuditLogRepository Audit) AdminRequest(string headerTenant, ITenantRegistry registry)
+    {
+        var (context, audit) = Request("home", registry);
+        context.User = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("sub", "S-1-5-21-ADMIN1"), new Claim("tenant_id", "home"), new Claim("iss", "https://idp.example/"), new Claim(ClaimTypes.Role, "ClusterAdmin")], "Bearer"));
+        context.Request.Headers["X-Tenant-ID"] = headerTenant;
+        return (context, audit);
+    }
+
+    private static ITenantRegistry LookupOnly(TenantRegistration? lookup)
+    {
+        var registry = Substitute.For<ITenantRegistry>();
+        registry.TryGetAsync(Arg.Any<TenantId>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration?>(lookup));
+        registry.RegisterOrGetAsync(Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration>(TenantRegistration.Collision));
+        return registry;
+    }
+
+    [Fact]
+    public async Task ClusterAdminHeaderTenant_Known_PassesWithLookupOnly()
+    {
+        var registry = LookupOnly(TenantRegistration.Existing);
+        var (context, _) = AdminRequest("other", registry);
+
+        var (nextInvoked, _) = await Run(context);
+
+        nextInvoked.ShouldBeTrue();
+        await registry.Received(1).TryGetAsync(new TenantId("other"), Arg.Any<CancellationToken>());
+        await registry.DidNotReceiveWithAnyArgs().RegisterOrGetAsync(default, default, default);
+    }
+
+    [Fact]
+    public async Task ClusterAdminHeaderTenant_Unknown_Denied403_NothingRegistered()
+    {
+        var registry = LookupOnly(null);
+        var (context, _) = AdminRequest("brandnew", registry);
+
+        var (nextInvoked, body) = await Run(context);
+
+        nextInvoked.ShouldBeFalse();
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+        body.ShouldContain("TENANT_UNKNOWN");
+        await registry.DidNotReceiveWithAnyArgs().RegisterOrGetAsync(default, default, default);
+    }
+
+    [Fact]
+    public async Task ClusterAdminHeaderTenant_CaseVariantOfAKnownTenant_Denied_AndNeverMarksACollision()
+    {
+        // the lookup reports "unknown" for another spelling of a known group: the header can never create the collision mark
+        var registry = LookupOnly(null);
+        var (context, _) = AdminRequest("ACME", registry);
+
+        var (nextInvoked, _) = await Run(context);
+
+        nextInvoked.ShouldBeFalse();
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+        await registry.DidNotReceiveWithAnyArgs().RegisterOrGetAsync(default, default, default);
+    }
+
+    [Fact]
+    public async Task ClusterAdminHeaderTenant_Collided_Denied403()
+    {
+        var registry = LookupOnly(TenantRegistration.Collision);
+        var (context, _) = AdminRequest("acme", registry);
+
+        var (nextInvoked, body) = await Run(context);
+
+        nextInvoked.ShouldBeFalse();
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+        body.ShouldContain("TENANT_ID_COLLISION");
+        await registry.DidNotReceiveWithAnyArgs().RegisterOrGetAsync(default, default, default);
+    }
+
+    [Fact]
+    public async Task ClusterAdminHeaderTenant_RegistryUnavailable_FailsClosed503()
+    {
+        var registry = Substitute.For<ITenantRegistry>();
+        registry.TryGetAsync(Arg.Any<TenantId>(), Arg.Any<CancellationToken>()).Returns<ValueTask<TenantRegistration?>>(_ => throw new InvalidOperationException("db down"));
+        var (context, _) = AdminRequest("other", registry);
+
+        var (nextInvoked, _) = await Run(context);
+
+        nextInvoked.ShouldBeFalse();
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status503ServiceUnavailable);
+    }
+
+    [Fact]
+    public async Task ClusterAdminWithoutHeader_UsesTheClaimTenant_ThroughRegistration()
+    {
+        var registry = Registry(TenantRegistration.Existing);
+        var (context, _) = AdminRequest("home", registry);   // header equals the claim: not a header-selected tenant
+
+        var (nextInvoked, _) = await Run(context);
+
+        nextInvoked.ShouldBeTrue();
+        await registry.Received(1).RegisterOrGetAsync(new TenantId("home"), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 }

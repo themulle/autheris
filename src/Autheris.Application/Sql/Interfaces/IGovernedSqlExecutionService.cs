@@ -34,7 +34,6 @@ public sealed record GovernedSqlQueryRequest(
 
 public sealed record GovernedSqlResult(
     string OriginalSql,
-    string RewrittenSql,
     IReadOnlyList<string> Columns,
     IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows,
     int RowCount,
@@ -57,7 +56,8 @@ public interface IGovernedSqlExecutionService
         TenantId tenantId,
         CancellationToken ct = default);
 
-    Task<string> RewriteSqlAsync(
+    /// <summary>G-6: validates a statement through the governed pipeline without executing it and without returning SQL text.</summary>
+    Task ValidateAsync(
         string rawSql,
         ClaimsPrincipal user,
         TenantId tenantId,

@@ -59,9 +59,9 @@ public sealed class TypeSafeMaskingExpressionTests
         env.EnvironmentName.Returns(Environments.Development);
 
         return new GovernedSqlExecutionService(
-            Options.Create(options),
+            Options.Create(options), executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,
-            tableRepository: repo,
+            tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             environment: env,
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: consents);
@@ -100,8 +100,16 @@ public sealed class TypeSafeMaskingExpressionTests
         var service = CreateService(tableMeta, decision);
         var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1")], "Test"));
 
-        var resultSql = await service.RewriteSqlAsync("SELECT id, secret_val FROM test_items", user, new TenantId("tenant_a"));
+        var compiled = await service.CompileAsync("SELECT id, secret_val FROM test_items", user, new TenantId("tenant_a"));
 
-        resultSql.ShouldContain(expectedMask);
+        if (expectedMask == "'***'")
+        {
+            // X1: a text redaction is a bound constant of the compiled statement.
+            compiled.ValuesOf(TrinoSqlEngine.Ast.Emit.ParameterOrigin.Mask).ShouldContain("***");
+        }
+        else
+        {
+            compiled.Sql.ShouldContain(expectedMask);
+        }
     }
 }

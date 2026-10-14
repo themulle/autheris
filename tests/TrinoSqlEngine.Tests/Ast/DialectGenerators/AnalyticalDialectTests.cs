@@ -6,6 +6,7 @@ using TrinoSqlEngine.Ast.Generators;
 using TrinoSqlEngine.Ast.Nodes;
 using Xunit;
 
+[Trait("Category", "SqlGate")]
 public sealed class AnalyticalDialectTests
 {
     private readonly DuckDbDialectGenerator _duckDbGenerator = new();
@@ -63,8 +64,7 @@ public sealed class AnalyticalDialectTests
     public void Snowflake_EmitsQuotedUpperIdentifiers_ProtectingKeywords()
     {
         string sql = "SELECT user, account, date FROM orders WHERE role = 'admin'";
-        var engine = new FastSqlEngine();
-        string generated = engine.GenerateGovernedSql(sql, new RlsOptions { TargetDialect = TargetSqlDialect.Snowflake });
+        string generated = AstEmit.Inline(sql, TargetSqlDialect.Snowflake);
 
         // Assert: Alle Bezeichner müssen gequotet und upper-case sein
         Assert.Contains("\"USER\"", generated);

@@ -6,6 +6,7 @@ using Xunit;
 namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>WP-X0l: the typed OR-merge of policy predicates (the counterpart of <see cref="PolicyPredicate.And"/>).</summary>
+[Trait("Category", "SqlGate")]
 public class PolicyPredicateOrTests
 {
     private static PolicyPredicate Eq(string column, string parameter, string value) => PolicyPredicate.Create(

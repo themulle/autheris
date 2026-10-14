@@ -746,7 +746,7 @@ public sealed class ParquetOutputNegotiationTests
         public Task<GovernedSqlResult> ExecuteQueryBufferedAsync(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default)
             => throw new NotSupportedException();
 
-        public Task<string> RewriteSqlAsync(string rawSql, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default)
+        public Task ValidateAsync(string rawSql, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default)
             => throw new NotSupportedException();
     }
 
@@ -923,7 +923,7 @@ public sealed class ParquetOutputNegotiationTests
         using var services = BuildServices(options);
         var context = CreateHttpContext(services, ParquetAccept, path: "/api/v1/queries/active_customers", method: "GET");
         var rows = Rows(new Dictionary<string, object?> { ["id"] = 1 }, new Dictionary<string, object?> { ["id"] = 2 });
-        var execution = CreateSqlEndpointService(new GovernedSqlResult("SELECT 1", "SELECT 1", ["id"], rows, 2, 3, Truncated: true));
+        var execution = CreateSqlEndpointService(new GovernedSqlResult("SELECT 1", ["id"], rows, 2, 3, Truncated: true));
 
         await SqlEndpointRoutes.HandleGetEndpoint("active_customers", context, execution, Options.Create(options), NullLoggerFactory.Instance);
 
@@ -953,7 +953,7 @@ public sealed class ParquetOutputNegotiationTests
         var rows = Rows(
             new Dictionary<string, object?> { ["id"] = 1, ["email"] = "a***@company.com" },
             new Dictionary<string, object?> { ["id"] = 2, ["email"] = "b***@company.com" });
-        var execution = CreateSqlEndpointService(new GovernedSqlResult("SELECT 1", "SELECT 1", ["id", "email"], rows, 2, 3));
+        var execution = CreateSqlEndpointService(new GovernedSqlResult("SELECT 1", ["id", "email"], rows, 2, 3));
 
         await SqlEndpointRoutes.HandleGetEndpoint("active_customers", context, execution, Options.Create(options), NullLoggerFactory.Instance);
 
@@ -971,7 +971,7 @@ public sealed class ParquetOutputNegotiationTests
         var options = CreateOptions(enabled: false);
         using var services = BuildServices(options);
         var context = CreateHttpContext(services, ParquetAccept, path: "/api/v1/queries/active_customers", method: "GET");
-        var execution = CreateSqlEndpointService(new GovernedSqlResult("SELECT 1", "SELECT 1", ["id"], Rows(), 0, 1));
+        var execution = CreateSqlEndpointService(new GovernedSqlResult("SELECT 1", ["id"], Rows(), 0, 1));
 
         await SqlEndpointRoutes.HandleGetEndpoint("active_customers", context, execution, Options.Create(options), NullLoggerFactory.Instance);
 

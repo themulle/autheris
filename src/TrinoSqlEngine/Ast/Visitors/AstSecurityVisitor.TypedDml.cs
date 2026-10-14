@@ -137,7 +137,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     {
         var id = entry.Identity;
         bool consent = _options.TablesWithConsentRowFilter.Contains(id.ToString()) || _options.TablesWithConsentRowFilter.Contains(id.Table);
-        if (!_typed!.RowFilters.ShouldApplyPolicy(id) && !consent) return false;
+        if (!_typed.RowFilters.ShouldApplyPolicy(id) && !consent) return false;
         if (consent)
         {
             throw new SecurityException("INSERT into a table with a consent-based row policy is not permitted.");
@@ -158,7 +158,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     private QueryBody WrapInCheckOption(TableCatalogEntry entry, InsertColumns columns, int tenantIndex, ValuesQueryBody values)
     {
-        var typed = _typed!;
+        var typed = _typed;
         var tid = entry.Identity;
         var written = columns.Columns.Select(c => c.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var policy = typed.RowFilters.GetPredicate(tid);
@@ -237,7 +237,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             throw new SecurityException("A DML target must be a catalog table, not a CTE.");
         }
 
-        var entry = _typed!.Catalog.Resolve(target.Name)
+        var entry = _typed.Catalog.Resolve(target.Name)
             ?? throw new SecurityException("A DML target could not be resolved against the catalog.");
         _typed.RecordDependency(target.Name, entry);
         return entry;
@@ -246,7 +246,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     /// <summary>CR-ADG-39: a dialect whose engine refuses a subquery in the condition of UPDATE or DELETE is rejected here, typed, before the backend.</summary>
     private void RejectUnsupportedSubquery(Expression? condition)
     {
-        if (condition is null || _typed!.Capabilities.SupportsSubqueryInDmlCondition) return;
+        if (condition is null || _typed.Capabilities.SupportsSubqueryInDmlCondition) return;
         bool subquery = false;
         AstReflection.Walk(condition, node =>
         {
@@ -260,7 +260,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     }
 
     private HashSet<string> MaskedColumnsOf(TableCatalogEntry entry) =>
-        entry.Columns.Where(c => _typed!.Masks.HasMask(entry.Identity, c.Name)).Select(c => c.Name)
+        entry.Columns.Where(c => _typed.Masks.HasMask(entry.Identity, c.Name)).Select(c => c.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     private void RejectMaskedReads(ISet<string> masked, ICollection<string> targetNames, params object?[] parts)
@@ -295,7 +295,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     /// <summary>The gateway-bound tenant as a value of a written row (INV-10); never request text.</summary>
     private PolicyParameterExpression TenantValue(TableCatalogEntry entry)
     {
-        var typed = _typed!;
+        var typed = _typed;
         typed.AddValue(typed.Tenant.ParameterName, new PolicyValue(typed.Tenant.Value, typed.Tenant.Type));
         var column = entry.Columns.First(c => string.Equals(c.Name, entry.TenantColumn, StringComparison.Ordinal));
         return new PolicyParameterExpression(typed.Tenant.ParameterName, typed.Tenant.Type, ParameterOrigin.Tenant, ColumnType: column.DataType);
@@ -310,7 +310,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         }
 
         string given = Convert.ToString(literal.Value, CultureInfo.InvariantCulture) ?? string.Empty;
-        string expected = Convert.ToString(_typed!.Tenant.Value, CultureInfo.InvariantCulture) ?? string.Empty;
+        string expected = Convert.ToString(_typed.Tenant.Value, CultureInfo.InvariantCulture) ?? string.Empty;
         if (!string.Equals(given, expected, StringComparison.Ordinal))
         {
             throw new SecurityException($"The tenant column value in {operation} does not match the caller's tenant.");
@@ -320,7 +320,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     private void RejectMergeInsertIntoPolicyTable(TableCatalogEntry entry)
     {
         var id = entry.Identity;
-        if (_typed!.RowFilters.ShouldApplyPolicy(id) ||
+        if (_typed.RowFilters.ShouldApplyPolicy(id) ||
             _options.TablesWithConsentRowFilter.Contains(id.ToString()) || _options.TablesWithConsentRowFilter.Contains(id.Table))
         {
             // SQ-07: the written row of a MERGE cannot be verified against the row policy (no check-option row count), so it is not writable.
@@ -445,7 +445,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         ISet<string> masked,
         ICollection<string> targetNames)
     {
-        var typed = _typed!;
+        var typed = _typed;
         var policyColumns = _options.RejectPolicyColumnAssignment && typed.RowFilters.ShouldApplyPolicy(entry.Identity)
             ? typed.RowFilters.GetPredicate(entry.Identity).ReferencedColumns
             : System.Collections.Immutable.ImmutableHashSet<string>.Empty;
@@ -497,7 +497,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     private List<Expression> BuildTargetPredicates(TableCatalogEntry entry, SecurityScope scope, SqlIdentifier? qualifier)
     {
-        var typed = _typed!;
+        var typed = _typed;
         var tid = entry.Identity;
         var predicates = new List<Expression>(2);
         var tenant = typed.BuildTenantPredicate(entry);
@@ -518,7 +518,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     /// <summary>The row policy of a DML target as an expression over the target's columns (parameters registered); a correlated policy is rejected.</summary>
     private Expression BuildPolicyExpression(TableCatalogEntry entry)
     {
-        var typed = _typed!;
+        var typed = _typed;
         var predicate = typed.RowFilters.GetPredicate(entry.Identity);
         typed.AddValues(predicate.Parameters);
         var expression = (Expression)new PolicySubqueryTenantRewriter(typed).Visit(predicate.Expression);

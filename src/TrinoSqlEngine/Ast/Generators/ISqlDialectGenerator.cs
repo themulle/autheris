@@ -13,7 +13,6 @@ using TrinoSqlEngine.Ast.Nodes;
 public interface ISqlDialectGenerator
 {
     TargetSqlDialect TargetDialect { get; }
-    int MaxParameterBudget { get; }
     void GenerateSql(SqlStatement statement, ref ValueStringBuilder builder, SqlEmitterContext context);
     string GenerateSql(SqlStatement statement);
 

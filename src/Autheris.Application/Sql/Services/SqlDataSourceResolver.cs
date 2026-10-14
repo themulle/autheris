@@ -90,7 +90,7 @@ public sealed class SqlDataSourceResolver
         if (!GovernedSqlExecutionService.TryMapProviderToDialect(connOptions.Provider, out var dialect))
         {
             _logger?.LogWarning("WebSQL rejected data source {DataSource}: provider is not supported by WebSQL.", dataSourceName);
-            throw new WebSqlPolicyException("The data source uses a database provider that is not supported by WebSQL (supported: PostgreSQL, SQL Server, SQLite).");
+            throw new WebSqlPolicyException(SqlDialectMapper.UnsupportedProviderMessage);
         }
 
         return dialect;
@@ -146,30 +146,6 @@ public sealed class SqlDataSourceResolver
 
     public static WebSqlTableDeniedException TableDenied(TableAccessTarget target) =>
         new($"Access to table '{target.FullName}' is denied or the table is not registered in the governance catalog.");
-
-    public static void AddInternalRowFilterParameters(IReadOnlyDictionary<string, object?>? source, Dictionary<string, object?> target)
-    {
-        if (source == null)
-        {
-            return;
-        }
-
-        // SEC-ADG-02: two keys of one decision that name the same parameter (marker prefix or case) fail closed.
-        _ = Autheris.Application.Sql.Policy.RowFilterParameterNames.Checked(source);
-
-        foreach (var (name, value) in source)
-        {
-            if (target.TryGetValue(name, out var existing) && !Equals(existing, value))
-            {
-                throw new WebSqlPolicyException("Conflicting row-level security parameters; the statement cannot be governed safely.");
-            }
-
-            target[name] = value;
-        }
-    }
-
-    public static bool IsWebSqlSupportedDialect(DatabaseDialect dialect) =>
-        dialect is DatabaseDialect.PostgreSql or DatabaseDialect.SqlServer or DatabaseDialect.Sqlite;
 
     public static bool MatchesPostgreSqlCatalogName(TableAccessTarget target, TableIdentifier catalogTable)
     {

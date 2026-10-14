@@ -9,7 +9,7 @@
 
 Direct database connections over proprietary ports (1433 for MSSQL, 5432 for Postgres) require broad firewall access and expose databases to uncontrolled connection exhaustion. F-DATA-02 introduces a governed HTTP-based WebSQL engine (`POST /api/v1/sql`, `POST /api/sql`, and `POST /v1/statement`) fully compatible with the Trino/Presto query language and REST client protocol.
 
-Ad-hoc SQL queries are parsed using an ANTLR4 parser, checked against AST security rules, injected with Casbin ABAC and tenant RLS filters, rewritten for the specific target dialect (PostgreSQL, SQL Server, SQLite), and executed safely over standard HTTPS.
+Ad-hoc SQL queries are compiled by the governed AST compiler ([F-DIALECT-02](f-dialect-02-ast-sql-compiler.md)): parsed with an ANTLR4 parser, checked against AST security rules, secured with typed Casbin ABAC, consent and tenant row filters and column masks, emitted for the target dialect (PostgreSQL, SQL Server, SQLite, Oracle) with every value bound as a parameter, and executed over standard HTTPS.
 
 ---
 
@@ -24,10 +24,10 @@ Ad-hoc SQL queries are parsed using an ANTLR4 parser, checked against AST securi
 - **Canonical 3-Part Table Names (`<catalog>.<schema>.<table>`)**:
   - Queries can reference tables as `finance.dbo.invoices` or `schema.table`.
   - The `catalog` part selects or validates against the target data source.
-  - The rewriter strips the catalog prefix when generating backend SQL (`"dbo"."invoices"` for PostgreSQL, `[dbo].[invoices]` for MSSQL, `[invoices]` for SQLite), preventing cross-database collision errors.
+  - The compiler strips the catalog prefix when generating backend SQL (`"dbo"."invoices"` for PostgreSQL, `[dbo].[invoices]` for MSSQL, `[invoices]` for SQLite), preventing cross-database collision errors.
 - **Deep AST SQL Injection Protection**: Prevents multi-statement attacks, system function execution, and comment-based evasion.
 - **Granular Transport Row Limits & Truncation Accuracy**: Configurable row limits per egress transport (`RowLimits:Trino`, `RowLimits:Parquet`, `RowLimits:FlightSql`) with accurate truncation reporting (only reported as truncated when rows were actually cut by the limit).
-- **Cross-Channel Virtual Filters Pushdown**: Seamlessly integrates relation-scoped Virtual Filters ([`F-GOV-09`](f-gov-09-virtual-filters.md)) into the AST security rewriter along with data-owner consents.
+- **Cross-Channel Virtual Filters Pushdown**: Seamlessly integrates relation-scoped Virtual Filters ([`F-GOV-09`](f-gov-09-virtual-filters.md)) into the AST compiler along with data-owner consents.
 - **Controlled DML Guardrails**: High-risk statements (`UPDATE`, `DELETE`) require special writer roles, are bounded by max affected row limits, and are logged to the cryptographic WORM audit chain.
 
 ---

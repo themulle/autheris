@@ -440,6 +440,30 @@ public sealed partial class SecurityCoverageVerifier
             }
         }
 
+        /// <summary>
+        /// The typed policy builders emit <c>EXISTS (SELECT 1 FROM dep WHERE ...)</c>. The projection of an EXISTS cannot decide its outcome
+        /// and carries no value of the policy, so exactly the integer 1 in that position is not a "raw literal value" (INV-5). The same
+        /// constant anywhere else, any other literal, and every literal of the subquery's conditions are still checked. The check walks a copy
+        /// in which the constant projection is a NULL; the verified tree itself is not changed.
+        /// </summary>
+        private static SelectStatement WithoutConstantProjection(SelectStatement subquery)
+        {
+            if (subquery.Body is not QuerySpecification spec ||
+                !spec.Projections.Any(static p => p is ColumnSelectItem { Expression: LiteralExpression { Type: LiteralType.Integer, Value: { } v } } &&
+                                                  Convert.ToInt64(v, System.Globalization.CultureInfo.InvariantCulture) == 1))
+            {
+                return subquery;
+            }
+
+            var projections = spec.Projections
+                .Select(static p => p is ColumnSelectItem { Expression: LiteralExpression { Type: LiteralType.Integer, Value: { } v } } column &&
+                                    Convert.ToInt64(v, System.Globalization.CultureInfo.InvariantCulture) == 1
+                    ? column with { Expression = new LiteralExpression(null, LiteralType.Null) }
+                    : p)
+                .ToList();
+            return subquery with { Body = spec with { Projections = projections } };
+        }
+
         private static bool IsCanonicalConstant(BinaryExpression b) =>
             b.Left is LiteralExpression { Value: { } l } && b.Right is LiteralExpression { Value: { } r } &&
             Convert.ToInt64(l, System.Globalization.CultureInfo.InvariantCulture) == 1 &&
@@ -477,8 +501,8 @@ public sealed partial class SecurityCoverageVerifier
                     }
 
                     break;
-                case TrustedSqlExpression:
-                    throw new SecurityCoverageException("Raw trusted SQL fragments are not permitted on the typed compiler path.");
+                case NamedBindMarkerExpression:
+                    throw new SecurityCoverageException("Text-rendering bind markers are not permitted on the typed compiler path.");
                 case LiteralExpression literal:
                     // INV-5: injected predicates carry parameters, never raw values. NULL and booleans are keywords.
                     if (_insidePredicate > 0 && literal.Type is not (LiteralType.Null or LiteralType.Boolean))
@@ -521,7 +545,7 @@ public sealed partial class SecurityCoverageVerifier
                     Select(inSub.Subquery, cte, policyScope);
                     break;
                 case ExistsExpression ex:
-                    Select(ex.Subquery, cte, policyScope);
+                    Select(WithoutConstantProjection(ex.Subquery), cte, policyScope);
                     break;
                 case ScalarSubqueryExpression sc:
                     Select(sc.Subquery, cte, policyScope);

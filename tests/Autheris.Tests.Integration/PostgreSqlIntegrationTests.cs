@@ -123,32 +123,23 @@ public class PostgreSqlIntegrationTests : IClassFixture<PostgreSqlContainerFixtu
             await setupCmd.ExecuteNonQueryAsync();
         }
 
-        // 2. RLS & AST Compiler konfigurieren
-        var policyProvider = new DefaultRlsPolicyProvider("tenant_id = 'tenant-alpha'");
-        var rlsOptions = new RlsOptions
-        {
-            TargetDialect = TargetSqlDialect.PostgreSql,
-            PolicyProvider = policyProvider
-        };
-
-        var engine = new FastSqlEngine();
-
-        // Quellabfrage in ANSI/Trino-Syntax mit Paginierung
+        // 2. Typed governed compile (tenant binding over a one-table catalog) for PostgreSQL
         string sourceSql = "SELECT id, customer_name, total_amount FROM orders ORDER BY id OFFSET 1 LIMIT 2";
+        var compiled = SingleTableGovernedCompile.Compile(
+            TargetSqlDialect.PostgreSql, "public", "orders",
+            [("id", "integer"), ("tenant_id", "character varying(50)"), ("customer_name", "character varying(100)"), ("total_amount", "numeric(18,2)")],
+            "tenant_id", "tenant-alpha", sourceSql);
 
-        // 3. Durch den neuen AST-Compiler für PostgreSQL kompilieren
-        string compiledPgSql = engine.GenerateGovernedSql(sourceSql, rlsOptions);
-
-        // Verifizieren der PostgreSQL-Spezifika (doppelte Anführungszeichen, LIMIT/OFFSET)
-        compiledPgSql.ShouldContain("\"orders\"");
-        compiledPgSql.ShouldContain("\"tenant_id\" = 'tenant-alpha'");
-        compiledPgSql.ShouldContain("LIMIT 2 OFFSET 1");
+        // PostgreSQL specifics: quoted names, the tenant value is a bound parameter (never text), LIMIT/OFFSET
+        compiled.Sql.ShouldContain("\"orders\"");
+        compiled.Sql.ShouldContain("\"tenant_id\" =");
+        compiled.Sql.ShouldNotContain("tenant-alpha");
+        compiled.Sql.ShouldContain("LIMIT");
+        compiled.Parameters.ShouldContain(p => p.Origin == TrinoSqlEngine.Ast.Emit.ParameterOrigin.Tenant && Equals(p.Value, "tenant-alpha"));
 
         // 4. Den generierten PostgreSQL-SQL-String direkt auf dem echten Container ausführen
-        await using (var queryCmd = connection.CreateCommand())
+        await using (var queryCmd = SingleTableGovernedCompile.BoundCommand(connection, compiled))
         {
-            queryCmd.CommandText = compiledPgSql;
-
             await using var reader = await queryCmd.ExecuteReaderAsync();
             var results = new List<(int Id, string Customer, decimal Amount)>();
 

@@ -17,6 +17,7 @@ using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Pipeline;
+using Autheris.Application.Sql.Policy;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -40,7 +41,6 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
 
     private readonly GovernedSqlRewriter _rewriter;
     private readonly GovernedSqlExecutor _executor;
-    private readonly IMandatoryRowFilterResolver? _rowFilterResolver;
     private readonly IServiceProvider? _serviceProvider;
     private readonly IFederatedQueryExecutionService? _federatedExecutionService;
 
@@ -48,6 +48,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
 
     public GovernedSqlExecutionService(
         IOptions<GatewayOptions> options,
+        IProviderExecutionGuard executionGuard,
         IPolicyEnforcementService? policyEnforcement = null,
         IConsentResolutionService? consentResolution = null,
         ITableMetadataRepository? tableRepository = null,
@@ -58,7 +59,6 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         IConsentRepository? consentRepository = null,
         IKeyVaultSecretProvider? secretProvider = null,
         ISqlEngine? sqlEngine = null,
-        ICompiledSqlQueryPlanCache planCache = null!,
         ISqlSecurityValidator? sqlSecurityValidator = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
         IDbSessionContextInitializer? sessionInitializer = null,
@@ -70,14 +70,17 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         IMemoryCache? memoryCache = null,
         IServiceProvider? serviceProvider = null,
         IFederatedQueryExecutionService? federatedExecutionService = null,
-        TypedPolicySources? typedPolicies = null)
-        : this(options, NullAuditLogRepository.Instance, policyEnforcement, consentResolution, tableRepository, connectionFactory, clientIpResolver, environment, logger, consentRepository, secretProvider, sqlEngine, planCache, sqlSecurityValidator, concurrencyGate, sessionInitializer, rebacEvaluator, consentCache, mandatoryFilters, contractManager, accessProfileRepository, memoryCache, serviceProvider, federatedExecutionService, typedPolicies)
+        TypedPolicySources? typedPolicies = null,
+        GovernancePolicyFactory? policyFactory = null,
+        CompiledSqlAuditDigester? auditDigester = null)
+        : this(options, NullAuditLogRepository.Instance, executionGuard, policyEnforcement, consentResolution, tableRepository, connectionFactory, clientIpResolver, environment, logger, consentRepository, secretProvider, sqlEngine, sqlSecurityValidator, concurrencyGate, sessionInitializer, rebacEvaluator, consentCache, mandatoryFilters, contractManager, accessProfileRepository, memoryCache, serviceProvider, federatedExecutionService, typedPolicies, policyFactory, auditDigester)
     {
     }
 
     public GovernedSqlExecutionService(
         IOptions<GatewayOptions> options,
         IAuditLogRepository auditLogRepository,
+        IProviderExecutionGuard executionGuard,
         IPolicyEnforcementService? policyEnforcement = null,
         IConsentResolutionService? consentResolution = null,
         ITableMetadataRepository? tableRepository = null,
@@ -88,7 +91,6 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         IConsentRepository? consentRepository = null,
         IKeyVaultSecretProvider? secretProvider = null,
         ISqlEngine? sqlEngine = null,
-        ICompiledSqlQueryPlanCache planCache = null!,
         ISqlSecurityValidator? sqlSecurityValidator = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
         IDbSessionContextInitializer? sessionInitializer = null,
@@ -100,8 +102,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         IMemoryCache? memoryCache = null,
         IServiceProvider? serviceProvider = null,
         IFederatedQueryExecutionService? federatedExecutionService = null,
-        TypedPolicySources? typedPolicies = null)
+        TypedPolicySources? typedPolicies = null,
+        GovernancePolicyFactory? policyFactory = null,
+        CompiledSqlAuditDigester? auditDigester = null)
     {
+        ArgumentNullException.ThrowIfNull(executionGuard);
         _serviceProvider = serviceProvider;
         _federatedExecutionService = federatedExecutionService;
 
@@ -113,9 +118,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             clientIpResolver,
             logger,
             consentRepository,
-            secretProvider,
             sqlEngine,
-            planCache,
+            policyFactory,
             sqlSecurityValidator,
             rebacEvaluator,
             consentCache,
@@ -125,17 +129,18 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             memoryCache,
             typedPolicies: typedPolicies);
 
-        _rowFilterResolver = mandatoryFilters;
-
         _executor = new GovernedSqlExecutor(
             _rewriter,
             options,
             auditLogRepository ?? NullAuditLogRepository.Instance,
+            executionGuard,
             connectionFactory,
             environment,
             logger,
             concurrencyGate,
-            sessionInitializer);
+            sessionInitializer,
+            secretProvider,
+            auditDigester);
     }
 
     private IFederatedQueryExecutionService ResolveFederatedService()
@@ -157,7 +162,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         throw new WebSqlPolicyException("Cross-source query execution service is not configured.");
     }
 
-    public async Task<string> RewriteSqlAsync(
+    public async Task ValidateAsync(
         string rawSql,
         ClaimsPrincipal user,
         TenantId tenantId,
@@ -165,14 +170,17 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
     {
         try
         {
-            return await _rewriter.RewriteSqlAsync(rawSql, user, tenantId, ct).ConfigureAwait(false);
+            await _rewriter.ValidateAsync(rawSql, user, tenantId, ct).ConfigureAwait(false);
         }
         catch (CrossSourceRoutingException)
         {
             var federatedService = ResolveFederatedService();
-            return await federatedService.RewriteSqlAsync(rawSql, user, tenantId, ct).ConfigureAwait(false);
+            await federatedService.ValidateAsync(rawSql, user, tenantId, ct).ConfigureAwait(false);
         }
     }
+
+    internal Task<TrinoSqlEngine.Ast.Emit.CompiledSql> CompileAsync(string rawSql, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default) =>
+        _rewriter.CompileAsync(rawSql, user, tenantId, ct);
 
     public async Task ExecuteGovernedQueryAsync(
         GovernedSqlQueryRequest request,
@@ -260,10 +268,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
     }
 
     internal static bool TryMapProviderToDialect(string? provider, out DatabaseDialect dialect) =>
-        DataSourceProvider.TryResolveDialect(provider, out dialect) && IsWebSqlSupportedDialect(dialect);
-
-    internal static bool IsWebSqlSupportedDialect(DatabaseDialect dialect) =>
-        dialect is DatabaseDialect.PostgreSql or DatabaseDialect.SqlServer or DatabaseDialect.Sqlite;
+        DataSourceProvider.TryResolveDialect(provider, out dialect) && SqlDialectMapper.IsExecutable(dialect);
 
     internal static bool ReferencesColumn(string? tableOrAlias, string referencedColumn, string columnName, TableAccessTarget target) =>
         SqlDataSourceResolver.ReferencesColumn(tableOrAlias, referencedColumn, columnName, target);
@@ -419,19 +424,5 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         }
 
         return sb.ToString();
-    }
-
-    internal static string RestoreClientParameters(string securedSql, IReadOnlyCollection<string> names)
-    {
-        if (names.Count == 0)
-        {
-            return securedSql;
-        }
-
-        return Regex.Replace(
-            securedSql,
-            "[\"`\\[]?" + ClientParameterPlaceholderPrefix + "([A-Za-z_][A-Za-z0-9_]*)[\"`\\]]?",
-            m => names.Contains(m.Groups[1].Value) ? "@" + m.Groups[1].Value : m.Value,
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 }

@@ -9,6 +9,7 @@ using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Visitors;
 using Xunit;
 
+[Trait("Category", "SqlGate")]
 public sealed class AstSimplificationVisitorTests
 {
     private readonly FastSqlEngine _engine = new();
@@ -169,59 +170,118 @@ public sealed class AstSimplificationVisitorTests
         Assert.Contains("\"tenant_id\" = 't1'", sql);
     }
 
-    [Fact]
-    public void EndToEnd_GenerateGovernedSql_IncorporatesSimplifier_DmlStatement()
+    // The compile path simplifies the USER tree (before any injection) and binds the literals that remain.
+    [Theory]
+    [InlineData("SELECT id FROM orders WHERE 1 = 1 AND status = 'x' AND status = 'x'")]
+    [InlineData("DELETE FROM orders WHERE 1 = 1 AND status = 'x' AND status = 'x'")]
+    public void EndToEnd_Compile_IncorporatesSimplifier(string sql)
     {
-        var options = new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'"),
-            EnforceReadOnlyQueries = false,
-            TargetDialect = TargetSqlDialect.PostgreSql
-        };
+        var env = new TrinoSqlEngine.Tests.Security.ProbeEnv(TargetSqlDialect.PostgreSql);
+        var compiled = env.Compile(sql);
 
-        // DML statement containing 1 = 1 and user filter; policy provider injects matching filter
-        string sql = "DELETE FROM orders WHERE 1 = 1 AND tenant_id = 't1'";
-        string result = _engine.GenerateGovernedSql(sql, options);
+        // 1 = 1 is gone and the duplicate conjunct is deduplicated: one status comparison, one bound query literal
+        Assert.DoesNotContain("1 = 1", compiled.Sql);
+        Assert.Single(compiled.Parameters, p => p.Origin == TrinoSqlEngine.Ast.Emit.ParameterOrigin.QueryLiteral);
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(compiled.Sql, "\"status\" = "));
+    }
 
-        // 1 = 1 should be gone, duplicate tenant_id filter deduplicated
-        Assert.DoesNotContain("1 = 1", result);
-        Assert.Contains("\"tenant_id\" = 't1'", result);
+    // ---- literal comparison folding must be exact, three-valued and dialect-independent ----
 
-        int count = 0;
-        int idx = 0;
-        while ((idx = result.IndexOf("\"tenant_id\" = 't1'", idx, StringComparison.Ordinal)) != -1)
-        {
-            count++;
-            idx += 18;
-        }
+    private Expression SimplifiedWhere(string sql) =>
+        ((QuerySpecification)((SelectStatement)SimplifySql(sql)).Body).Where!;
 
-        Assert.Equal(1, count);
+    private static bool IsCanonical(Expression e, long right) =>
+        e is BinaryExpression { Operator: BinaryOperator.Equal, Left: LiteralExpression { Value: 1L }, Right: LiteralExpression { Value: var r } } && Equals(r, right);
+
+    [Theory]
+    [InlineData("1 = 1.0", true)]
+    [InlineData("1.0 = 1", true)]
+    [InlineData("1 <> 1.0", false)]
+    [InlineData("1 < 1.5", true)]
+    [InlineData("1 >= 1.5", false)]
+    [InlineData("2 = 2.00", true)]
+    [InlineData("1.0 = 1.00", true)]
+    [InlineData("1.50 <> 1.5", false)]
+    [InlineData("1e0 = 1", true)]
+    [InlineData("1 = 2", false)]
+    [InlineData("9007199254740993 = 9007199254740993", true)]
+    [InlineData("9007199254740993 = 9007199254740992", false)]
+    [InlineData("'a' = 'a'", true)]
+    [InlineData("'a' <> 'a'", false)]
+    [InlineData("'tenant_a' = 'tenant_b'", false)]
+    [InlineData("'tenant_a' <> 'tenant_b'", true)]
+    public void LiteralComparison_FoldsOnlyWhenCertain(string predicate, bool expected)
+    {
+        var where = SimplifiedWhere($"SELECT id FROM orders WHERE {predicate}");
+        Assert.True(IsCanonical(where, expected ? 1L : 0L), $"'{predicate}' must fold to {expected} but became {where}");
+    }
+
+    [Theory]
+    [InlineData("'1' = 1")]
+    [InlineData("1 = '1'")]
+    [InlineData("'1.0' = 1")]
+    [InlineData("NULL = NULL")]
+    [InlineData("1 = NULL")]
+    [InlineData("NULL <> 1.0")]
+    [InlineData("'a' = 'A'")]
+    [InlineData("'a' = 'a '")]
+    [InlineData("'a' <> 'A'")]
+    [InlineData("'a' <> 'a '")]
+    [InlineData("'é' = 'e'")]
+    [InlineData("'a' < 'b'")]
+    [InlineData("9007199254740993 = 9007199254740992.0")]
+    [InlineData("0.1 = 0.1000000000000000055")]
+    [InlineData("true = 1")]
+    public void LiteralComparison_NotFoldedWhenDialectDependentOrUnknown(string predicate)
+    {
+        var where = SimplifiedWhere($"SELECT id FROM orders WHERE {predicate}");
+        Assert.True(where is BinaryExpression { Left: LiteralExpression, Right: LiteralExpression } b && b.Operator != BinaryOperator.And,
+            $"'{predicate}' must stay a literal comparison but became {where}");
+        Assert.False(IsCanonical(where, 1L) || IsCanonical(where, 0L), $"'{predicate}' must not fold to a constant");
+    }
+
+    [Theory]
+    [InlineData("NOT (1 = 1.0)", false)]
+    [InlineData("NOT (1 <> 1.0)", true)]
+    [InlineData("NOT (2 = 2.00)", false)]
+    public void Not_OfNumericLiteralComparison_IsExact(string predicate, bool expected)
+    {
+        var where = SimplifiedWhere($"SELECT id FROM orders WHERE {predicate}");
+        Assert.True(IsCanonical(where, expected ? 1L : 0L), $"'{predicate}' must fold to {expected} but became {where}");
+    }
+
+    [Theory]
+    [InlineData("NOT (NULL = NULL)")]
+    [InlineData("NOT (1 = NULL)")]
+    [InlineData("NOT ('1' = 1)")]
+    public void Not_OfUnknownOrMixedComparison_IsNeverConstant(string predicate)
+    {
+        var where = SimplifiedWhere($"SELECT id FROM orders WHERE {predicate}");
+        Assert.False(IsCanonical(where, 1L) || IsCanonical(where, 0L), $"'{predicate}' must not fold to a constant (became {where})");
     }
 
     [Fact]
-    public void EndToEnd_GenerateGovernedSql_IncorporatesSimplifier_SelectStatement()
+    public void Or_WithDecimalTautology_IsAConstantTrueNotDropped()
     {
-        var options = new RlsOptions
-        {
-            TargetDialect = TargetSqlDialect.PostgreSql
-        };
+        // the integer-vs-decimal comparison used to fold to FALSE, silently dropping this OR branch
+        Assert.True(IsCanonical(SimplifiedWhere("SELECT id FROM orders WHERE id = 5 OR 1 = 1.0"), 1L));
+    }
 
-        // Query containing 1 = 1 and duplicate filters in WHERE clause
-        string sql = "SELECT id FROM orders WHERE 1 = 1 AND tenant_id = 't1' AND tenant_id = 't1'";
-        string result = _engine.GenerateGovernedSql(sql, options);
+    [Fact]
+    public void Compile_AndNotDecimalTautology_DoesNotWidenDml()
+    {
+        // "id = 5 AND NOT (1 = 1.0)" is always empty; the wrong fold turned it into "id = 5" (a widened DELETE)
+        var env = new TrinoSqlEngine.Tests.Security.ProbeEnv(TargetSqlDialect.PostgreSql);
+        Assert.Throws<UnfilteredDmlException>(() => env.Compile("DELETE FROM orders WHERE id = 5 AND NOT (1 = 1.0)"));
+        Assert.Throws<UnfilteredDmlException>(() => env.Compile("UPDATE orders SET status = 'x' WHERE id = 5 AND NOT (2 = 2.00)"));
+    }
 
-        // 1 = 1 should be gone, duplicate tenant_id filter deduplicated
-        Assert.DoesNotContain("1 = 1", result);
-        Assert.Contains("\"tenant_id\" = 't1'", result);
-
-        int count = 0;
-        int idx = 0;
-        while ((idx = result.IndexOf("\"tenant_id\" = 't1'", idx, StringComparison.Ordinal)) != -1)
-        {
-            count++;
-            idx += 18;
-        }
-
-        Assert.Equal(1, count);
+    [Fact]
+    public void Compile_OrNotDecimalTautology_KeepsTheRealFilter()
+    {
+        var env = new TrinoSqlEngine.Tests.Security.ProbeEnv(TargetSqlDialect.PostgreSql);
+        var compiled = env.Compile("DELETE FROM orders WHERE id = 5 OR NOT (1 = 1.0)");
+        Assert.Contains("\"id\" = ", compiled.Sql);
+        Assert.DoesNotContain("1 = 1", compiled.Sql);
     }
 }

@@ -12,7 +12,8 @@ using TrinoSqlEngine.Ast.Nodes;
 /// - Boolean logic reduction: (x AND TRUE -> x, x OR FALSE -> x, x AND FALSE -> FALSE, x OR TRUE -> TRUE)
 /// - Double negation elimination: NOT(NOT(x)) -> x
 /// - Comparison inversion: NOT(a = b) -> a <> b, NOT(a > b) -> a <= b
-/// - Constant equality folding: ('a' = 'a' -> TRUE, 'a' = 'b' -> FALSE, 1 = 1 -> TRUE, 1 = 2 -> FALSE)
+/// - Constant comparison folding, only when certain in every dialect: numerics by exact decimal value (1 = 1.0 -> TRUE, 1 < 1.5 -> TRUE),
+/// identical strings, booleans. Never across type families, never for NULL, never for unequal strings (collation), never beyond double precision.
 /// - Strict Three-Valued Logic: NULL = NULL does NOT fold to TRUE (yields UNKNOWN/FALSE in SQL semantics)
 /// - Predicate deduplication in AND / OR chains: (a = 1 AND a = 1 -> a = 1)
 /// - Contradiction detection: (col = 'v1' AND col = 'v2' -> 1 = 0)
@@ -258,16 +259,9 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
                 return new BinaryExpression(left, op, right);
             }
 
-            if (op == BinaryOperator.Equal)
+            if (LiteralComparison.TryFold(op, lLit, rLit, out bool folded))
             {
-                bool areEqual = Equals(lLit.Value?.ToString(), rLit.Value?.ToString());
-                return areEqual ? CanonicalTrue : CanonicalFalse;
-            }
-
-            if (op == BinaryOperator.NotEqual)
-            {
-                bool areEqual = Equals(lLit.Value?.ToString(), rLit.Value?.ToString());
-                return areEqual ? CanonicalFalse : CanonicalTrue;
+                return folded ? CanonicalTrue : CanonicalFalse;
             }
         }
 
@@ -316,10 +310,9 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
         if (expr is LiteralExpression { Type: LiteralType.Boolean } lit && true.Equals(lit.Value))
             return true;
 
-        if (expr is BinaryExpression { Operator: BinaryOperator.Equal } b &&
+        if (expr is BinaryExpression b &&
             b.Left is LiteralExpression l1 && b.Right is LiteralExpression l2 &&
-            l1.Type != LiteralType.Null && l2.Type != LiteralType.Null &&
-            Equals(l1.Value?.ToString(), l2.Value?.ToString()))
+            LiteralComparison.TryFold(b.Operator, l1, l2, out bool isTrue) && isTrue)
             return true;
 
         if (expr is ParenthesizedExpression p)
@@ -333,10 +326,9 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
         if (expr is LiteralExpression { Type: LiteralType.Boolean } lit && false.Equals(lit.Value))
             return true;
 
-        if (expr is BinaryExpression { Operator: BinaryOperator.Equal } b &&
+        if (expr is BinaryExpression b &&
             b.Left is LiteralExpression l1 && b.Right is LiteralExpression l2 &&
-            l1.Type != LiteralType.Null && l2.Type != LiteralType.Null &&
-            !Equals(l1.Value?.ToString(), l2.Value?.ToString()))
+            LiteralComparison.TryFold(b.Operator, l1, l2, out bool isTrue) && !isTrue)
             return true;
 
         if (expr is ParenthesizedExpression p)

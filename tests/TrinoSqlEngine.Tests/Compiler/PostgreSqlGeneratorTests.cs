@@ -12,6 +12,7 @@ using static TrinoSqlEngine.Tests.Compiler.PolicyFixtures;
 
 namespace TrinoSqlEngine.Tests.Compiler;
 
+[Trait("Category", "SqlGate")]
 public class PostgreSqlCapabilityTests
 {
     private static readonly DialectCapabilities Caps = DialectCapabilityTable.Default.Get(TargetSqlDialect.PostgreSql);
@@ -39,6 +40,7 @@ public class PostgreSqlCapabilityTests
     }
 }
 
+[Trait("Category", "SqlGate")]
 public class PostgreSqlGeneratorTests
 {
     private static CompiledSql Gen(string sql, IDictionary<string, PolicyValue>? values = null) =>

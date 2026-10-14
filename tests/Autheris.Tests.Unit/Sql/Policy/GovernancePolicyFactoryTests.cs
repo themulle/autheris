@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Application.Sql.Masking;
@@ -36,13 +37,26 @@ public sealed class GovernancePolicyFactoryTests
 
     private static ITableCatalog Catalog(params TableCatalogEntry[] entries) => new InMemoryTableCatalog(entries, "main");
 
-    private static GovernancePolicyFactory Factory(ITableCatalog catalog, out IGovernedCatalogProvider provider)
+    private static GovernancePolicyFactory Factory(
+        ITableCatalog catalog, out IGovernedCatalogProvider provider, GatewayOptions? options = null, Func<TableIdentifier, TableMetadata?>? metadata = null)
     {
         provider = Substitute.For<IGovernedCatalogProvider>();
         provider.GetCatalogAsync(Arg.Any<string>(), Arg.Any<IReadOnlyCollection<TableIdentifier>>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ITableCatalog>(catalog));
-        return new GovernancePolicyFactory(provider);
+        var tables = Substitute.For<ITableMetadataRepository>();
+        tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(call => Task.FromResult(metadata is null ? DependentMetadata(call.Arg<TableIdentifier>(), withTenant: true) : metadata(call.Arg<TableIdentifier>())));
+        return new GovernancePolicyFactory(provider, tables, Microsoft.Extensions.Options.Options.Create(options ?? new GatewayOptions()));
     }
+
+    private static TableMetadata DependentMetadata(TableIdentifier id, bool withTenant, bool active = true, string sourceName = "ds") => new()
+    {
+        Table = new Table { SourceName = sourceName, SchemaName = id.Schema, TableName = id.TableName, IsActive = active },
+        Identifier = id,
+        Columns = withTenant
+            ? [new TableColumn { ColumnName = "id" }, new TableColumn { ColumnName = "tenant_id" }]
+            : [new TableColumn { ColumnName = "id" }]
+    };
 
     private static IRowPolicy RegionPolicy(string region = "EU", TargetSqlDialect dialect = TargetSqlDialect.Sqlite)
     {
@@ -377,5 +391,251 @@ public sealed class GovernancePolicyFactoryTests
 
         Should.Throw<SecurityException>(() => CompileRequestFactory.Create(
             policy, TargetSqlDialect.PostgreSql, new WebSqlOptions(), false, 100, new HashSet<string>()));
+    }
+
+    // ---- X1: tables read by a policy subquery -----------------------------------------------------------------------------------
+
+    /// <summary>EXISTS (SELECT 1 FROM main.invoices dep WHERE dep.id = autheris_target.id): the shape of a correlated consent filter.</summary>
+    private static IRowPolicy CorrelatedPolicy(string? domain = null) => new PolicyPredicateRowPolicy(PolicyPredicate.Create(
+        new ExistsExpression(new SelectStatement(null,
+            new QuerySpecification(
+                false,
+                [new ColumnSelectItem(new ColumnReference(new SqlQualifiedName(new[] { new SqlIdentifier("dep", true), new SqlIdentifier("id", true) })), null)],
+                new NamedTableSource(
+                    new SqlQualifiedName(domain is null
+                        ? new[] { new SqlIdentifier("main", true), new SqlIdentifier("invoices", true) }
+                        : new[] { new SqlIdentifier(domain, true), new SqlIdentifier("main", true), new SqlIdentifier("invoices", true) }),
+                    new SqlIdentifier("dep", true)),
+                new BinaryExpression(
+                    new ColumnReference(new SqlQualifiedName(new[] { new SqlIdentifier("dep", true), new SqlIdentifier("id", true) })),
+                    BinaryOperator.Equal,
+                    PolicyParameterNamer.Column($"{RowFilterAliases.Target}.id")),
+                null, null),
+            null, null)),
+        new Dictionary<string, PolicyValue>()), TargetSqlDialect.Sqlite, Renderer);
+
+    [Fact]
+    public async Task PolicySubqueryTable_IsRequestedFromTheProvider_ResolvableForThePolicy_ButNeverAdmitted()
+    {
+        var factory = Factory(Catalog(Entry(Orders), Entry(Invoices)), out var provider);
+        var decisions = new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, CorrelatedPolicy()) };
+
+        var policy = await factory.CreateAsync(Input(decisions), CancellationToken.None);
+
+        // the provider verifies the table that the policy reads, like any other table of the statement
+        await provider.Received().GetCatalogAsync(
+            "ds", Arg.Is<IReadOnlyCollection<TableIdentifier>>(t => t.Any(x => x.TableName == "invoices")), Arg.Any<CancellationToken>());
+        var request = Request(policy);
+        // the policy subquery resolves it (with the tenant predicate), so the statement compiles and filters by the other table's rows
+        Ids(Run(request, "SELECT id FROM orders ORDER BY id")).ShouldBe(new List<int> { 1 });
+        // a user reference is still decided by stage 3 and by the deny-all default: the table has no decision and no row policy
+        Ids(Run(request, "SELECT id FROM invoices")).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task PolicySubqueryTable_TheCatalogCannotVerify_DeniesTheTableOfThePolicy()
+    {
+        var factory = Factory(Catalog(Entry(Orders)), out _);   // invoices is not in the verified catalog
+        var decisions = new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, CorrelatedPolicy()) };
+
+        var policy = await factory.CreateAsync(Input(decisions), CancellationToken.None);
+
+        // fail closed: a policy that cannot be enforced makes its own table unknown to the compiler (the rewriter answers SQL_POLICY_DENIED)
+        policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task CorrelatedConsentFilter_BuiltByTheProducer_CompilesAndFiltersEndToEnd()
+    {
+        // The producer of correlated consent filters (AdvancedRlsFilterGenerator) through the assembly and the compiler on a real database.
+        var filter = new ConsentRowFilter
+        {
+            FilterType = RowFilterType.SubqueryCorrelated,
+            DependentTable = InvoicesId,
+            DependentTableAlias = "dep",
+            ForeignKeyColumn = "id",
+            PrimaryKeyColumn = "id",
+            SubqueryFilterPredicateJson = null
+        };
+        var predicate = Autheris.Application.Services.AdvancedRlsFilterGenerator.BuildCorrelatedPredicate(filter);
+        var policy = new PolicyPredicateRowPolicy(predicate, TargetSqlDialect.Sqlite, Renderer);
+        var factory = Factory(Catalog(Entry(Orders), Entry(Invoices)), out _);
+        var gp = await factory.CreateAsync(Input(new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, policy) }), CancellationToken.None);
+        var request = Request(gp);
+
+        Ids(Run(request, "SELECT id FROM orders ORDER BY id")).ShouldBe(new List<int> { 1 });
+    }
+
+    // ---- M-A1: dependent (policy-subquery) tables are governed like primary tables ---------------------------------------------
+
+    private static GatewayOptions RequireTenant(params string[] exempt) => new()
+    {
+        DataSources = new SqlDataSourceOptions { RequireTenantColumn = true, TenantColumnExemptTables = exempt.ToList() }
+    };
+
+    private async Task<GovernancePolicy> AssembleDependentAsync(GatewayOptions options, bool withTenant, bool active = true)
+    {
+        var factory = Factory(Catalog(Entry(Orders), Entry(Invoices)), out _, options,
+            id => id.TableName == "invoices" ? DependentMetadata(id, withTenant, active) : DependentMetadata(id, true));
+        return await factory.CreateAsync(
+            Input(new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, CorrelatedPolicy()) }), CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task DependentTable_WithoutTenantColumn_RequireTenantColumn_DeniesTheTableOfThePolicy()
+    {
+        var policy = await AssembleDependentAsync(RequireTenant(), withTenant: false);
+        policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task DependentTable_WithoutTenantColumn_Exempt_IsAllowed()
+    {
+        var policy = await AssembleDependentAsync(RequireTenant("main.invoices"), withTenant: false);
+        policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task DependentTable_WithoutTenantColumn_RequirementOff_Unchanged()
+    {
+        var policy = await AssembleDependentAsync(new GatewayOptions(), withTenant: false);
+        policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task DependentTable_Inactive_DeniesTheTableOfThePolicy()
+    {
+        var policy = await AssembleDependentAsync(new GatewayOptions(), withTenant: true, active: false);
+        policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task DependentTable_WithoutGovernanceRecord_DeniesTheTableOfThePolicy()
+    {
+        var factory = Factory(Catalog(Entry(Orders), Entry(Invoices)), out _, null, id => id.TableName == "invoices" ? null : DependentMetadata(id, true));
+        var policy = await factory.CreateAsync(
+            Input(new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, CorrelatedPolicy()) }), CancellationToken.None);
+        policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldBeNull();
+    }
+
+    // ---- L-1: the governance record that the catalog provider can admit decides, not the first homonymous one ---------------------
+
+    private static TableMetadata HomonymMetadata(TableIdentifier id, bool admittedRecordWithTenant, bool admittedRecordActive)
+    {
+        // The provider only admits a record whose data source is the one of the statement ("ds"); the homonym of the other domain is
+        // active and has a tenant column, i.e. it would pass every check if it were the one that was looked at.
+        var admitted = string.Equals(id.Domain, "ds", StringComparison.OrdinalIgnoreCase);
+        return DependentMetadata(id, admitted ? admittedRecordWithTenant : true, admitted ? admittedRecordActive : true, admitted ? "ds" : "elsewhere");
+    }
+
+    private async Task<GovernancePolicy> AssembleHomonymAsync(GatewayOptions options, bool admittedWithTenant, bool admittedActive)
+    {
+        var factory = Factory(Catalog(Entry(Orders), Entry(Invoices)), out _, options,
+            id => id.TableName == "invoices" ? HomonymMetadata(id, admittedWithTenant, admittedActive) : DependentMetadata(id, true));
+        return await factory.CreateAsync(
+            Input(new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, CorrelatedPolicy("elsewhere")) }), CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task DependentTable_HomonymInAnotherDomain_InactiveAdmittedRecord_DeniesTheTableOfThePolicy()
+    {
+        var policy = await AssembleHomonymAsync(new GatewayOptions(), admittedWithTenant: true, admittedActive: false);
+        policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task DependentTable_HomonymInAnotherDomain_TenantlessAdmittedRecord_RequireTenantColumn_DeniesTheTableOfThePolicy()
+    {
+        var policy = await AssembleHomonymAsync(RequireTenant(), admittedWithTenant: false, admittedActive: true);
+        policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task DependentTable_HomonymInAnotherDomain_UsableAdmittedRecord_IsAllowed()
+    {
+        var policy = await AssembleHomonymAsync(RequireTenant(), admittedWithTenant: true, admittedActive: true);
+        policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldNotBeNull();
+    }
+
+    // ---- M-2: a correlated policy table is loaded once, not once per statement --------------------------------------------------
+
+    private sealed class CountingReader : Autheris.Application.Sql.Catalog.IColumnMetadataReader
+    {
+        public TargetSqlDialect Dialect => TargetSqlDialect.Sqlite;
+
+        public int Loads { get; private set; }
+
+        public async IAsyncEnumerable<Autheris.Application.Sql.Catalog.DbColumnMetadata> ReadAsync(
+            System.Data.Common.DbConnection connection, TableIdentity table, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+        {
+            Loads++;
+            yield return new("id", "INTEGER", null);
+            yield return new("tenant_id", "TEXT", null);
+            await Task.CompletedTask;
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]   // no governance record under the legacy "default" domain
+    [InlineData(true)]    // a homonymous record of another data source under the "default" domain
+    public async Task CorrelatedPolicyTable_CompiledTwice_IsLoadedByTheCatalogProviderOnce(bool defaultDomainHomonym)
+    {
+        var governance = Substitute.For<IGovernanceRepository>();
+        governance.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(call =>
+        {
+            var id = call.Arg<TableIdentifier>();
+            var isDefault = string.Equals(id.Domain, "default", StringComparison.OrdinalIgnoreCase);
+            if (isDefault && !defaultDomainHomonym)
+            {
+                return Task.FromResult<TableMetadata?>(null);
+            }
+
+            return Task.FromResult<TableMetadata?>(new TableMetadata
+            {
+                Table = new Table { SourceType = "Sqlite", SourceName = isDefault ? "elsewhere" : "ds", SchemaName = id.Schema, TableName = id.TableName, IsActive = true },
+                Identifier = id,
+                Columns = [new TableColumn { ColumnName = "id" }, new TableColumn { ColumnName = "tenant_id" }]
+            });
+        });
+        var reader = new CountingReader();
+        var gateway = new GatewayOptions
+        {
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = { ["ds"] = new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = "x" } }
+            }
+        };
+        var connections = Substitute.For<ISqlConnectionFactory>();
+        connections.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromResult<System.Data.Common.DbConnection>(new SqliteConnection()));
+        var provider = new Autheris.Infrastructure.Persistence.Catalog.GovernedCatalogProvider(
+            governance, Microsoft.Extensions.Options.Options.Create(gateway), connections, [reader], new Autheris.Application.Sql.Catalog.GovernedCatalogOptions());
+        var factory = new GovernancePolicyFactory(provider, governance, Microsoft.Extensions.Options.Options.Create(gateway));
+        var decisions = new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(new TableIdentifier("ds", "main", "orders"), CorrelatedPolicy()) };
+
+        var first = await factory.CreateAsync(Input(decisions), CancellationToken.None);
+        var loadsAfterFirst = reader.Loads;
+        var second = await factory.CreateAsync(Input(decisions), CancellationToken.None);
+
+        first.Catalog.Resolve(Orders.ToQualifiedName()).ShouldNotBeNull();   // the correlated policy is enforceable
+        second.Catalog.Resolve(Orders.ToQualifiedName()).ShouldNotBeNull();
+        loadsAfterFirst.ShouldBe(2);          // orders and the policy table invoices
+        reader.Loads.ShouldBe(2);             // the second compile is served from the cache
+    }
+
+    [Fact]
+    public async Task CorrelatedPolicyTable_RegisteredOnlyUnderTheDefaultDomain_StaysResolvable()
+    {
+        // The legacy "default" domain still works: the record of the data source is found under it, and only under it.
+        var factory = Factory(Catalog(Entry(Orders), Entry(Invoices)), out var provider, metadata: id =>
+            string.Equals(id.Domain, "default", StringComparison.OrdinalIgnoreCase) || id.TableName == "orders" ? DependentMetadata(id, true) : null);
+        var decisions = new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, CorrelatedPolicy()) };
+
+        var policy = await factory.CreateAsync(Input(decisions), CancellationToken.None);
+
+        policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldNotBeNull();
+        await provider.Received().GetCatalogAsync("ds",
+            Arg.Is<IReadOnlyCollection<TableIdentifier>>(t => t.Contains(new TableIdentifier("default", "main", "invoices")) && !t.Contains(new TableIdentifier("ds", "main", "invoices"))),
+            Arg.Any<CancellationToken>());
     }
 }

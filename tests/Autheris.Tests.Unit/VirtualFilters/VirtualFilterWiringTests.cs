@@ -43,9 +43,18 @@ public sealed class VirtualFilterWiringTests
         return services.BuildServiceProvider();
     }
 
-    private static object? ResolverField(object service) =>
-        service.GetType().GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
+    private static object? ResolverField(object service)
+    {
+        // The governed SQL service hands the resolver to its rewriter (L-5: it keeps no copy of its own); read it where it is used.
+        var rewriterField = service.GetType().GetField("_rewriter", BindingFlags.Instance | BindingFlags.NonPublic);
+        if (rewriterField is not null)
+        {
+            service = rewriterField.GetValue(service)!;
+        }
+
+        return service.GetType().GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
             .Single(f => f.FieldType == typeof(IMandatoryRowFilterResolver)).GetValue(service);
+    }
 
     [Theory]
     [InlineData(typeof(IGatewayExecutionService))]

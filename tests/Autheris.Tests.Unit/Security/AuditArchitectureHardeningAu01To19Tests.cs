@@ -468,15 +468,12 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
     {
         var query = "SELECT id, name, salary FROM hr.salaries WHERE salary > 50000 AND department = 'Engineering' AND active = 1";
 
-        var (redactedSql, originalHash) = AstSecurityVisitor.AnonymizeSqlForAudit(query);
+        var redactedSql = AstSecurityVisitor.RedactSqlLiterals(query);
 
         redactedSql.ShouldNotContain("50000");
         redactedSql.ShouldNotContain("'Engineering'");
         redactedSql.ShouldContain("@p_redacted");
-
-        // Hash must match SHA256 of the original query
-        var expectedHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(query)));
-        originalHash.ShouldBe(expectedHash);
+        // M-A3: no unkeyed hash of the raw text exists any more; the keyed hash is the digester's (CompiledSqlAuditDigesterTests)
     }
 
     [Fact]
@@ -485,11 +482,10 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
         var longColumnList = string.Join(", ", System.Linq.Enumerable.Range(1, 50).Select(i => $"column_identifier_{i}"));
         var query = $"SELECT {longColumnList} FROM very_long_table_name_for_audit_testing WHERE comment = 'secret'";
 
-        var (redactedSql, originalHash) = AstSecurityVisitor.AnonymizeSqlForAudit(query, maxLength: 80);
+        var redactedSql = AstSecurityVisitor.TruncateForAudit(AstSecurityVisitor.RedactSqlLiterals(query), maxLength: 80);
 
         redactedSql.Length.ShouldBeLessThanOrEqualTo(80 + "...[TRUNCATED]".Length);
         redactedSql.ShouldEndWith("...[TRUNCATED]");
-        originalHash.ShouldNotBeNullOrWhiteSpace();
     }
 
     #endregion

@@ -71,6 +71,17 @@ public sealed class AstCompilerOracleFixture : IAsyncLifetime
                 INTO {AppUser}.ENTITLEMENTS VALUES (4, 'ACME', 3)
             SELECT 1 FROM DUAL
             """,
+            // X1: the dialect end-to-end scenarios (GovernedDialectEndToEndTests) run DML, so they own a table.
+            $"CREATE TABLE {AppUser}.X1_ORDERS (ID NUMBER(10) PRIMARY KEY, TENANT_ID VARCHAR2(64) NOT NULL, REGION VARCHAR2(20) NOT NULL, EMAIL VARCHAR2(200))",
+            $"""
+            INSERT ALL
+                INTO {AppUser}.X1_ORDERS VALUES (1, 'acme', 'EU', 'alice@x.example')
+                INTO {AppUser}.X1_ORDERS VALUES (2, 'acme', 'US', 'bob@x.example')
+                INTO {AppUser}.X1_ORDERS VALUES (3, 'acme', 'EU', 'cara@x.example')
+                INTO {AppUser}.X1_ORDERS VALUES (5, 'other', 'EU', 'dan@x.example')
+                INTO {AppUser}.X1_ORDERS VALUES (6, 'ACME', 'EU', 'eve@x.example')
+            SELECT 1 FROM DUAL
+            """,
             "COMMIT"
         })
         {
@@ -132,6 +143,7 @@ internal static class OracleGatewayHost
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{tag}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             builder.UseSetting("Gateway:WebSql:Enabled", "true");
+            builder.UseSetting("Gateway:WebSql:DefaultDataSourceName", Source);
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:Provider", "Oracle");
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:ConnectionString", fixture.AppConnectionString);
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:DefaultSchema", AstCompilerOracleFixture.AppUser);

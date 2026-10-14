@@ -3,6 +3,7 @@ namespace Autheris.Tests.Unit.Sql.Errors;
 using System;
 using System.Security;
 using Antlr4.Runtime.Misc;
+using Autheris.Application.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Errors;
 using Autheris.Application.Sql.Services;
@@ -55,6 +56,12 @@ public sealed class SqlCompilerErrorMapperTests
         { "config", () => new SqlCompileConfigurationException(), 500, "SQL_COMPILER_INVARIANT", null },
         { "checked-required", () => new CheckedExecutionRequiredException(TargetSqlDialect.PostgreSql), 500, "DML_CHECKED_EXECUTION_REQUIRED", null },
         { "timeout", () => new TimeoutException(HostileMarker), 504, "SQL_TIMEOUT", null },
+        // X1 / Phase 5 M4: a data source that cannot hand out a correctly pinned session (SessionPinning, RequireDefaultSchema).
+        // X1 / Phase 5 L3: a reserved identifier is a user error (400), never a gateway defect.
+        { "reserved-identifier", () => new ReservedIdentifierException(), 400, "SQL_RESERVED_IDENTIFIER", null },
+        { "reserved-identifier-wrapped", () => new InvalidOperationException(HostileMarker, new ReservedIdentifierException()), 400, "SQL_RESERVED_IDENTIFIER", null },
+        { "source-unavailable", () => new SqlSourceUnavailableException(HostileMarker), 503, "SQL_SOURCE_UNAVAILABLE", null },
+        { "source-unavailable-wrapped", () => new InvalidOperationException(HostileMarker, new SqlSourceUnavailableException(HostileMarker)), 503, "SQL_SOURCE_UNAVAILABLE", null },
     };
 
     [Theory]

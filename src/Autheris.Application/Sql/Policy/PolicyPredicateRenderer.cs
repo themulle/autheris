@@ -16,7 +16,8 @@ using TrinoSqlEngine.Governance;
 /// </summary>
 public sealed partial class PolicyPredicateRenderer : IPolicyPredicateRenderer
 {
-    private const string Marker = "\u0001policy\u0001";
+    private const string FrameName = "policy_frame_probe";
+    private const string Marker = "@" + FrameName;
 
     [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_]{0,127}\z", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 100)]
     private static partial Regex SafeNameRegex();
@@ -40,7 +41,7 @@ public sealed partial class PolicyPredicateRenderer : IPolicyPredicateRenderer
             new QuerySpecification(false, [new ColumnSelectItem(new LiteralExpression(1L, LiteralType.Integer), null)],
                 new NamedTableSource(new SqlQualifiedName("policy_probe"), null), where, null, null), null, null));
 
-        var framed = Emit(new TrustedSqlExpression(Marker));
+        var framed = Emit(new NamedBindMarkerExpression(FrameName));
         int at = framed.IndexOf(Marker, StringComparison.Ordinal);
         var prefix = framed[..at];
         var suffix = framed[(at + Marker.Length)..];
@@ -68,7 +69,7 @@ public sealed partial class PolicyPredicateRenderer : IPolicyPredicateRenderer
 
                     var marker = "@" + parameter.Name;
                     output[marker] = value.Value;
-                    return new TrustedSqlExpression(marker);
+                    return new NamedBindMarkerExpression(parameter.Name);
                 case ColumnReference { Name.Parts.Count: > 1 } column
                     when string.Equals(column.Name.Parts[0].Value, RowFilterAliases.Target, StringComparison.OrdinalIgnoreCase):
                     var parts = new List<SqlIdentifier>(column.Name.Parts) { [0] = column.Name.Parts[0] with { Value = targetAlias } };

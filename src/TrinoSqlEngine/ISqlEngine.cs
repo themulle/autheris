@@ -20,34 +20,6 @@ public interface ISqlEngine
     Ast.Emit.CompiledSql Compile(ReadOnlyMemory<char> sql, CompileRequest request, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Rewrites the query with Row-Level Security (RLS) policies, column masking, and dialect transformations.
-    /// Dispatches to AST compiler (<see cref="GenerateGovernedSql(ReadOnlyMemory{char}, RlsOptions?, CancellationToken)"/>)
-    /// or legacy rewriter based on <see cref="RlsOptions.RewriterEngine"/>.
-    /// </summary>
-    string RewriteRls(ReadOnlyMemory<char> sql, RlsOptions? options = null);
-
-    /// <summary>
-    /// Rewrites the query with Row-Level Security (RLS) policies, column masking, and dialect transformations with cancellation.
-    /// </summary>
-    string RewriteRls(ReadOnlyMemory<char> sql, RlsOptions? options, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Compiles governed SQL using the AST compiler pipeline:
-    /// ParseTree -> SqlAstBuilder -> AstSecurityVisitor -> ISqlDialectGenerator.
-    /// </summary>
-    string GenerateGovernedSql(ReadOnlyMemory<char> sql, RlsOptions? options = null);
-
-    /// <summary>
-    /// Compiles governed SQL using the AST compiler pipeline with cancellation.
-    /// </summary>
-    string GenerateGovernedSql(ReadOnlyMemory<char> sql, RlsOptions? options, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Compiles governed SQL using the AST compiler pipeline.
-    /// </summary>
-    string GenerateGovernedSql(string sql, RlsOptions? options = null);
-
-    /// <summary>
     /// Parses a SQL statement into an ANTLR parse tree and token stream, enforcing depth limits and token security.
     /// </summary>
     (SqlBaseParser.SingleStatementContext Tree, CommonTokenStream Tokens) Parse(

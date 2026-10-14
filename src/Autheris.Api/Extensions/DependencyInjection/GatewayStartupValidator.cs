@@ -1,14 +1,18 @@
 namespace Autheris.Api.Extensions.DependencyInjection;
 
 using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.IO;
 using System.Linq;
 using Autheris.Api.Configuration;
 using Autheris.Api.Security;
 using Autheris.Application.Governance;
+using Autheris.Application.Policy.Lint;
 using Autheris.Application.Security;
+using Autheris.Application.Sql;
 using Autheris.Domain.Common;
+using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Databricks;
 using Autheris.Infrastructure.Persistence;
@@ -186,6 +190,21 @@ public static class GatewayStartupValidator
         // but reported loudly at startup, regular options = no message (see GatewayOptions.GetAllActiveBypasses).
         var dangerBypasses = options.GetActiveDangerBypasses();
         var warnings = options.GetActiveWarnings();
+        if (options.IsWebSqlGovernanceBypassed)
+        {
+            // X1: there is one WebSQL code path and the former bypass no longer exists. The flag is inert but still a DANGER switch, so it
+            // fails the start outside Development (below); in Development it is reported once here, never per statement.
+            const string message = "[DANGER] danger_bypass_websql_governance has no effect since the AST compiler cutover; every WebSQL statement is governed. Remove the setting.";
+            if (logger is not null)
+            {
+                logger.LogWarning(message);
+            }
+            else
+            {
+                Console.WriteLine($"[Autheris] WARNING: {message}");
+            }
+        }
+
         if (dangerBypasses.Count > 0)
         {
             var bypasses = string.Join("\n  - ", dangerBypasses);
@@ -575,6 +594,82 @@ public static class GatewayStartupValidator
         }
     }
 
+    /// <summary>
+    /// SEC-ADG-28 (X1): <c>WebSql:SqlRewriterEngine</c> was the switch between the legacy string rewriter and the AST compiler. There is
+    /// one path now and no runtime switch (rollback is a revert), so a configured value fails the start in every environment:
+    /// warn-and-ignore would let an operator believe in a kill switch that does not exist. The configured value is never echoed.
+    /// </summary>
+    public static void ValidateSqlRewriterEngine(Microsoft.Extensions.Configuration.IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        if (configuration.GetSection($"{GatewayOptions.SectionName}:WebSql:SqlRewriterEngine").Exists())
+        {
+            throw new ValidationException(
+                "WebSql:SqlRewriterEngine is no longer supported: the AST compiler is the only SQL path and there is no runtime switch. Remove the key from the configuration.");
+        }
+    }
+
+    /// <summary>
+    /// X1: <c>WebSql:PlanCache</c> (incl. <c>MaxEntries</c>) configured the cache of the removed legacy path; the engine template cache has a
+    /// fixed size of 512. A configured section fails the start in every environment (it would otherwise be silently ignored). Values are never echoed.
+    /// </summary>
+    public static void ValidateRemovedWebSqlSettings(Microsoft.Extensions.Configuration.IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        if (configuration.GetSection($"{GatewayOptions.SectionName}:WebSql:PlanCache").Exists())
+        {
+            throw new ValidationException(
+                "WebSql:PlanCache is no longer supported: the engine template cache has a fixed size of 512 and is not configurable. Remove the section from the configuration.");
+        }
+    }
+
+    /// <summary>Code of a table that is denied because its dialect is not admitted to WebSQL (<see cref="SqlDialectMapper.IsExecutable(DatabaseDialect)"/>).</summary>
+    public const string DeniedDialectNotAdmitted = "DIALECT_NOT_ADMITTED";
+
+    /// <summary>One table that the governed pipeline denies: the table and policy ids and a stable code, never a predicate or a value.</summary>
+    public sealed record DeniedTable(string Table, string PolicyId, string Code);
+
+    /// <summary>
+    /// SEC-ADG-26 (X1): every stored row predicate that the production parser rejects denies its table, and so does a dialect that WebSQL
+    /// does not admit. A deny at scale is an outage, so the start lists all of them (a warning per table, ids and codes only). The same
+    /// lint runs as the blocking pre-deploy step <c>tools/PolicyPredicateLint</c>.
+    /// </summary>
+    public static IReadOnlyList<DeniedTable> ListDeniedTables(PolicyLintInput input, ILogger? logger = null)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        var denied = new List<DeniedTable>();
+
+        foreach (var finding in new PolicyPredicateLinter().Lint(input).Findings)
+        {
+            denied.Add(new DeniedTable(finding.Table, finding.PolicyId, finding.Code));
+        }
+
+        foreach (var table in input.Catalog)
+        {
+            if (table.DataSourceType != DataSourceType.Sql)
+            {
+                continue;   // not a WebSQL pushdown table
+            }
+
+            if (!DatabaseDialectExtensions.TryParseDialect(table.Table.SourceType, out var dialect) || !SqlDialectMapper.IsExecutable(dialect))
+            {
+                denied.Add(new DeniedTable(table.Identifier.ToString(), "-", DeniedDialectNotAdmitted));
+            }
+        }
+
+        foreach (var entry in denied)
+        {
+            logger?.LogWarning("Governed SQL: table {Table} is denied (policy {PolicyId}, code {Code}).", entry.Table, entry.PolicyId, entry.Code);
+        }
+
+        if (denied.Count > 0)
+        {
+            logger?.LogWarning("Governed SQL: {Count} table/policy combination(s) are denied at startup. Run tools/PolicyPredicateLint before the next deploy.", denied.Count);
+        }
+
+        return denied;
+    }
+
     /// <summary>WP-X0i / SEC-ADG-09: validates every Databricks data source (exact host, auth mode, Pat only in Development).</summary>
     public static void ValidateDatabricks(GatewayOptions options, IHostEnvironment environment)
     {
@@ -686,6 +781,13 @@ public static class GatewayStartupValidator
             {
                 throw new ValidationException(
                     $"WebSQL data source '{name}' ({connection.Provider}) needs DataSources:Connections:{name}:DefaultSchema; the session pin cannot be applied without it.");
+            }
+
+            // X1: RequireDefaultSchema defaults to true, so the factory would refuse this source at request time. Refuse the start instead.
+            if (pinned && connection.DefaultSchema is null && connection.RequireDefaultSchema)
+            {
+                throw new ValidationException(
+                    $"Data source '{name}' ({connection.Provider}) needs DataSources:Connections:{name}:DefaultSchema (or an explicit RequireDefaultSchema = false for a source that no WebSQL path reaches).");
             }
         }
     }

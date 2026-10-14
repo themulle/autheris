@@ -192,7 +192,7 @@ public sealed class OracleColumnMetadataReaderTests : IClassFixture<AstCompilerO
 
     private Task<DbConnection> Open() =>
         new SqlConnectionFactory(new DevelopmentEnvironment()).CreateOpenConnectionAsync(
-            new DataSourceConnectionOptions { Provider = "Oracle", ConnectionString = _fx.AppConnectionString });
+            new DataSourceConnectionOptions { Provider = "Oracle", ConnectionString = _fx.AppConnectionString, DefaultSchema = AstCompilerOracleFixture.AppUser });
 
     [Fact]
     public async Task Oracle_ReadsCharUsedAndCollation()

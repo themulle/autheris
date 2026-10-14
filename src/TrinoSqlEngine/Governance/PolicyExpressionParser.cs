@@ -415,7 +415,7 @@ public sealed class PolicyExpressionParser : IPolicyExpressionParser
                 throw new PolicyParseException("The policy predicate exceeds the maximum number of nodes.");
             }
 
-            if (node is CurrentDateTimeExpression or TypedLiteralExpression or IntervalLiteralExpression or DateFunctionExpression or TrustedSqlExpression)
+            if (node is CurrentDateTimeExpression or TypedLiteralExpression or IntervalLiteralExpression or DateFunctionExpression or NamedBindMarkerExpression)
             {
                 // Typed date literals and clocks would either embed a value in the cached shape or be non-deterministic.
                 throw Reject("The policy predicate uses a construct that is not permitted in policies.");

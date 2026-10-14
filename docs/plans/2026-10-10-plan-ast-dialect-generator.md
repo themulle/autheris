@@ -6,7 +6,7 @@
 **Author:** Solution Architect (`csharp-architect`); Phase 3 reviews (§16, §29) by Security Expert (`csharp-security-expert`)
 **Parent plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
 **Requirements baseline:** [2026-10-10-req-ast-dialect-generator.md](2026-10-10-req-ast-dialect-generator.md) (PRD, Phase 1)
-**Supersedes:** [2026-10-06-implementation-plan-ast-dialect-generator.md](2026-10-06-implementation-plan-ast-dialect-generator.md) (German draft, kept for history only)
+**Supersedes:** `2026-10-06-implementation-plan-ast-dialect-generator.md` *(archived, see git history)* (German draft, kept for history only)
 **Amends:** [ADR-017 §2](../adr/ADR-017-distributed-state-ast-generator-and-rbac.md) (amendment text in §13; Phase 6 writes it)
 **Branch base:** `feat/ast-target-dialect-generator` (commit `6985be1`)
 
@@ -4033,3 +4033,345 @@ Branch `feat/ast-x1-prefix` (on the merge `b4de3de`). One commit per finding, ea
 - **L1.** The regex is replaced by a hand-written linear parser (`CatalogTypeMap.TryParse`, ASCII, case-insensitive, no backtracking, no timeout), so the result no longer depends on load; no memoization was needed. `CatalogTypeMapGoldenTests` pins 200 type strings over all dialects (accepted, rejected, whitespace and time-zone variants, hostile input) recorded from the regex implementation before the change; every result is identical except one deliberate tightening: the case-insensitive regex also accepted the Kelvin sign U+212A as `k` (`intK` resolved on SQLite); only ASCII letters form a type name now (fail closed, no catalog produces such a type).
 - **Databricks admission.** `GovernedCatalogProvider` explicitly denies a Databricks source (warning log, no reader call) although the dialect is mapped and a reader exists; the stale comment is replaced. The former guard test is now a deny test. X1-DBX removes the check.
 - **Extras.** `CompiledSqlTemplate` returns the pooled key-material buffer with `clearArray: true` (L4; no meaningful test, the buffer is private); `GatewayStartupValidator` summary moved to `ValidateOracleRuntime`; `BenchModel` doc refers to `MaxGen2Ratio`; `SqlEmitterContext` sizes the marker cache from `ParameterMarkerStyle`.
+
+#### WP-X1 part A implementation log
+
+Branch `feat/ast-x1-cutover` (on `bb80e29`). Part A is the production wiring; part B (deletion of the legacy path, architecture/IL tests, docs) is open.
+
+**Commits.** `9918c67` cutover X1.1-X1.3, `a331864` startup checks and defaults, `8851121` Phase 5 items (L3, M4, L8, GitOps), `8d37359` SQLite interrupt and end-to-end tests (M-7), `6a79cac` policy-subquery fixes found by the end-to-end tests, `5c82fbc` PostgreSQL transaction test through the real host.
+
+**X1.1 Rewriter.** Stage 3 only decides (decisions keyed by `TableIdentity`); stage 4 builds `GovernedPolicyInput` and `CompileRequestFactory.Create` via `GovernancePolicyFactory` (typed row policy, typed masks, 3-argument function policy); stage 5 calls `ISqlEngine.Compile`. `GovernedRewrite` carries `Compiled`. `RewriteSqlAsync` became `Task ValidateAsync` in `IGovernedSqlExecutionService`, `ISqlRewritePipeline`, `IFederatedQueryExecutionService` and Arrow Flight (G-6). Engine exceptions propagate unwrapped. A missing policy factory fails with `SqlCompileConfigurationException`.
+
+**X1.2 Executor.** `CompiledSqlBinders.For`, DML through `CheckedDmlExecutor.ExecuteInTransactionAsync` inside the session transaction, `DmlErrorSanitizer.Map` after the timeout/unavailable classification, binder dialect from the connection provider asserted equal to `CompiledSql.Dialect` (mismatch or unmapped provider fails closed before any connection or command is created). Audit: `compiler_version`, `dialect`, `bind_count`, `sql.compiled_digest` (HMAC, HKDF sub-key, `CompiledSqlAuditDigester`), compiled text only with `Audit:StoreCompiledSql=true` (default false); error audit has code and type, never `ex.Message`. Synthetic fallback runs after a successful Compile on `Compiled.Sql`. `IProviderExecutionGuard` (SQLite statement interrupt at the timeout, SEC-X1-10) wraps read and DML.
+
+**X1.3 Admission.** `SqlDialectMapper.IsExecutable` derives from `DialectCapabilityTable` tier Production and `SqlConnectionFactory` support, exactly {PostgreSQL, SQL Server, SQLite, Oracle}; `ToTargetDialect` throws for unmapped dialects; messages are generated from the table; `DialectCapabilityTable.cs` is in security CODEOWNERS; the three-part-name catalog check is kept.
+
+**Startup.** `WebSql:SqlRewriterEngine` fails startup (SEC-ADG-28); `DeniedTablesStartupReporter` lists denied tables by id only (SEC-ADG-26); `RequireDefaultSchema` default true for PostgreSQL/Oracle (fixtures and `appsettings.Benchmark.json` updated).
+
+**Phase 5 items.** M4 (dataset endpoints use `SqlCompilerErrorMapper` through the shared `SqlErrorResponse`, `SqlSourceUnavailableException` -> 503), L2 (commit with `CancellationToken.None`), L3 (exact reserved alias check, `autheris_*` identifiers rejected with stable 400 `SQL_RESERVED_IDENTIFIER`, no defect metric), L6 (existence check before budget, per-scheme buckets, registry enabled by default), L8 (SQLite `trusted_schema` read-back), GitOps `/consents/apply` 400 without `JsonException.Message`.
+
+**Fixes found by the end-to-end tests** (`6a79cac`): policy-subquery tables are admitted to the catalog, `EXISTS (SELECT 1 ...)` constant projection accepted by `SecurityCoverageVerifier` (narrow `WithoutConstantProjection`, for security review), tenant-less tables inside joined policy subqueries are wrapped in a derived table.
+
+**Oracle transaction fix.** The Oracle connection wrapper maps `IsolationLevel.Unspecified` (what `BeginTransactionAsync()` passes) to `ReadCommitted`; ODP.NET rejects `Unspecified` (ORA-50002), which broke Oracle DML through the checked executor (found by Integration run 2, covered by `OracleGovernedEndToEndTests`).
+
+**Tests.** Integration 1020 (run 2: 1017 green, the 3 Oracle failures fixed and the Oracle classes re-run green, 141/141). Unit 5325, TrinoSqlEngine 7299, Architecture 43, Extensions 233, SqlCompilerGate (`pr`) 174, all green. New: `GovernedSqlExecutorX1Tests`, `DialectAdmissionTests` (Admission_ExactSet, Oracle only with F5 evidence), `GovernedPipelineCachePoisoningTests`, `X1StartupTests`, `ConsentManifestApplyEndpointTests`, `ReservedIdentifierTests`, `ExistsProjectionCoverageTests`; integration `GovernedEntryPointsEndToEndTests` (WebSQL, declared endpoint, REST dataset, Flight, Arrow export, async job) and `GovernedDialectEndToEndTests` (SQLite, PostgreSQL, SQL Server, Oracle through real DI).
+
+**Deviations.** Some X1.1-X1.3 tests were written after the code (red verified for reserved identifiers, M4, EXISTS projection, tenant-less join). `danger_bypass_websql_governance` now only logs and has no effect. `AdditionalAllowedFunctions` only narrows. Ast-stricter behavior: name-based masked-column guard, HMAC columns rejected in predicates and joins, unsupported constructs 422 (not 400), tenant-mismatch INSERT rejected as security exception. `RowFilters.SubqueryStrategy` ignored (correlated only). Application plan cache unused. Denied-table listing covers tables, profiles and virtual filters; correlated Casbin consents only via `tools/PolicyPredicateLint`. `ITenantRegistry.TryGetAsync` is a default interface method. Recursive CTEs are not usable in WebSQL. Unqualified names resolve under the legacy domain; tests use schema-qualified names.
+
+**Breaking changes (release notes).** `RewriteSqlAsync` -> `ValidateAsync`; error statuses/codes per §28.4.3 incl. dataset endpoints; `SqlRewriterEngine` fails startup; `RequireDefaultSchema` default true; tenant registry on by default; Oracle admitted (not announced, S-1); audit fields changed (no `securedSql`; `compiler_version`, `dialect`, `bind_count`, `sql.compiled_digest`, optional `compiledSql`); `GovernedSqlResult.RewrittenSql` is compiled text with markers; reserved `autheris_*` identifiers 400; GitOps 400 message; bypass flag no effect.
+
+**Open for part B.** Delete L-1..L-17 (RlsListener, RlsOptions, legacy engine methods, `SqlRewriterEngine` option, `ICompiledSqlQueryPlanCache`, `RestoreClientParameters`, `AddInternalRowFilterParameters`, unused ctor parameters), TrinoSqlEngine README, architecture/IL tests (X1.6), harness `EngineKind.Legacy`, golden-results freeze, docs/features (Phase 6), refine masked-column guard and HMAC predicate decision, security review of the EXISTS constant projection.
+
+#### WP-X1 part B implementation log
+
+Branch `feat/ast-x1-cutover`, on part A (`c1a2af2`). Legacy removal, architecture guards, gate freeze, README and the revert rehearsal. The Phase 3 findings L-A2 and L-A3 of the part A review are included; M-A1..M-A3 and L-A1 are a separate package.
+
+**Commits.** `bd0680c` architecture tests (X1.6); `b80cbc8` production deletion (X1.4); `fe352e2` `AstEmit` helper and removal of the L-14/L-16 tests; `78ef24c` README (X1.5); `5df53b5` gate harness, benchmark, container tests, door audit proofs and new doors; `7a802ed` visitor tests; `3a35731` golden-results freeze; `6ee1c72` row-cap fix; `aad05f7`, `d2ebc90`, `181f2c5` test ports (security suites, emission/conformance/typed-visitor, Autheris.Tests.Unit); `9ff3ab7` template cache tests.
+
+**Deleted (L-1..L-17).** `RlsListener` (980 lines), `FastSqlEngine.Rewrite.cs`, `IRlsPolicyProvider.cs` (string policy and mask provider interfaces, `RlsOptions`), `RewriteRls`, `RunLegacyRewrite`, `GenerateGovernedSql` and the `ISqlEngine` members, `FastSqlEngine.SqlRewriterEngine`, `WebSqlOptions.SqlRewriterEngine` and `WebSqlOptions.PlanCache`, `TrustedSqlExpression`, `AstSecurityVisitor.BuildDialectMaskExpression`, `DialectLimitExceededException` and the per-generator `MaxParameterBudget` (the inline emission takes the budget from `DialectCapabilityTable` and throws `SqlLimitExceededException`), `ICompiledSqlQueryPlanCache`, `CompiledSqlQueryPlanCache`, `NullCompiledSqlQueryPlanCache` and their DI registrations, `RestoreClientParameters`, the `__param_` text emission of the generator, `SqlDataSourceResolver.AddInternalRowFilterParameters`, and the unused `planCache` constructor parameter. `TargetSqlDialect` moved to its own file.
+
+**L-17 `RlsOptions`.** The typed security visitor was the last consumer. It now takes the internal `AstSecurityVisitorOptions` (switches the compiler derives from `CompileRequest`) plus a required `TypedPolicyContext`; the untyped string path of the visitor (tables, DML, mask guards, CTE checks) was deleted. `SqlTokenSecurityOptions.FromRlsOptions` became `ForDialect(TargetSqlDialect)` and `AstBuilderOptions.FromRlsOptions` was removed. No `RlsOptions` remains, so there is nothing to document as analyzer-only.
+
+**SEC-ADG-28.** `WebSql:SqlRewriterEngine` still fails the start: `GatewayStartupValidator.ValidateSqlRewriterEngine(IConfiguration)` checks that `Gateway:WebSql:SqlRewriterEngine` exists (also an empty value, also outside Development) and never echoes it. The property is gone from `GatewayOptions`.
+
+**Deviation: `NamedBindMarkerExpression`.** `PolicyPredicateRenderer` (the OQ-4 text renderer) used `TrustedSqlExpression` for its `@name` markers, which §28.6 did not list. It now uses the new node `NamedBindMarkerExpression(name)`: it holds a validated identifier (no SQL text), only the inline text emission accepts it, `SecurityCoverageVerifier` and `PolicyExpressionParser` reject it, and the architecture scan forbids free-text members on expression nodes.
+
+**Architecture tests (`CutoverArchitectureTests`).** Red before the deletion: `NoLegacyRewriterTypes`, `NoTrustedSqlExpression`, `DeletedPathsNotReintroduced`. Green from the start and kept as pins (part A had already done the work): `CompiledSqlIsOnlyConstructedByTheEngine` (IL scan: no `newobj CompiledSql::.ctor`, no `<Clone>$`, no `set_Sql`/`set_Parameters`/`set_Dialect` outside the engine assembly), `NoCommandTextAssignmentOnGovernedPath`, `GovernedEntryPoints_ReachCompileAndBinder` (call graph on type and method; the nine entry points of §28.2; the OQ-GQL and OQ-4 exceptions are listed and must not reach the binder). Each scan has a positive control. The obsolete `TypedMaskArchitectureTests` (scan for `BuildDialectMaskExpression`) was deleted; `NoLegacyRewriterTypes` covers it.
+
+**Gate freeze (X1.4).** `golden-results` did not exist as files before; G4 computed the legacy leg live. The legacy leg was recorded on the pre-cutover head `c1a2af2` with `SQLGATE_PROFILE=pr` on SQLite, PostgreSQL, SQL Server and Oracle, and committed as `tests/Autheris.Tests.SqlCompilerGate/golden-results/legacy-<Dialect>.json` (3310 outcomes per dialect: every corpus statement in both scenarios, typed cells included). `EngineKind.Legacy` is gone; the differential classifies the live AST outcome against `FrozenLegacy`, so direction (rows, mask, write), the `legacyDefects` rule and the oracle rule are unchanged. A corpus statement without a frozen result fails the gate. The files are never regenerated (the engine that produced them is deleted); `FrozenLegacyTests` pins the codec, the coverage of the whole corpus and the classification. `benchmarks/baselines/sql-compiler-legacy.json` is unchanged apart from its description (the legacy numbers came from the pre-cutover head; BenchCheck uses `legacyGen2PerThousandOps` and the frozen bytes when a result has no legacy sample); the `Legacy` benchmark method was removed. No benchmark was run.
+
+**L-A2 (door proofs).** Every door of `GovernedEntryPointsEndToEndTests` and the dialect tests now also asserts that an audit record with `compiler_version` and a 64-character `sql.compiled_digest` was written (and, per dialect, the dialect name). New end-to-end tests: WebSQL async statements (`/v1/statement` through `WebSqlStatementManager`), the MCP SQL tool and the MCP dataset tool.
+
+**L-A3.** `GovernedSqlExecutor` requires `IProviderExecutionGuard` (no silent pass-through). `GovernedSqlExecutionService` substitutes `PassThroughExecutionGuard` only when constructed without one (unit tests); the real host test `ProviderExecutionGuard_IsTheSqliteGuard_InTheRealHost` and `CompositionRootModularizationTests.ProviderExecutionGuard_IsResolvedFromTheHost_AsTheSqliteGuard` prove that the host hands over the SQLite guard.
+
+**Plan cache (L-16).** The unit tests of the string plan cache were deleted with it. Its bound and collision properties and the two cases "a different data source" and "changed catalog columns" now run against the engine `CompiledSqlTemplateCache` (`CompiledSqlTemplateCacheTests`); cache poisoning is covered by `GovernedPipelineCachePoisoningTests`.
+
+**Production fix found by the port.** The AST path clamped a root `FETCH FIRST n ROWS WITH TIES` but kept `WITH TIES`, so ties could return more rows than the enforced cap; legacy downgraded it. Fixed with a Red test first (`6ee1c72`).
+
+**Stricter than legacy (ported tests document each).**
+- `[` is rejected on SQL Server and SQLite (bracket-quoting lexer differential); on PostgreSQL it is array syntax; on Oracle arrays/subscripts are rejected with a typed not-supported error. Dollar-quoted strings are rejected on every dialect (pre-squash fix; the first draft of this log said `[` was rejected everywhere).
+- `DELETE ... WHERE 1 = 0` and a predicate such as `id = 3 AND 1 = 0` count as unfiltered DML (the predicate must not be literal-only or constant). Legacy accepted them.
+- An allowlisted table function is still rejected, with `NotSupportedException` instead of `SecurityException`.
+- Qualified function names are not accepted even when the caller lists them; only the dialect function map applies.
+- The DML guards and the function policy have no switches any more (`DmlGuardOptions.Strict` only).
+
+**For security review (open question).** A masked column used in `GROUP BY` inside a DML subquery (`UPDATE ... WHERE x IN (SELECT ... GROUP BY masked_col)`): the legacy suite expected a rejection; on the typed path the subquery reads the table through the masked projection, so grouping groups the mask value, not the clear value, and the statement compiles (`Dml_GroupByAMaskedColumnInASubquery_GroupsTheMaskNotTheValue`). Please confirm that this is acceptable or request a guard.
+
+**Revert rehearsal (M-11).** On a scratch branch from `9ff3ab7` (worktree, deleted afterwards). Commits reverted, newest first, with `git revert --no-edit`; a conflict in this plan file was always resolved with the current version (`git checkout --ours`), since the plan is not part of the revert:
+1. X1: `git revert --no-commit bb80e29..HEAD && git commit` (no conflicts).
+2. X0y: `c9bc3c9`, `45e88bb` (conflict in the gate csproj: keep the `SqlGate.BenchCheck` project reference, drop the `Autheris.Application` reference), `bf2dd42`. `cd953de` (a gate fix against the X0k `CheckedExecutorFor` signature) must NOT be reverted: reverting it breaks the build, so it stays. `6e4702f` is a plan-only commit (skipped).
+3. X0l: `5201a34`, `8d8a754`, `385ed74` (conflict: keep the current `GovernedDataQueryService.cs`, because X0n removed the dataset policy splice and X0n stays; delete `GovernedDataQueryServiceTypedPolicyTests` and `PolicyMarkerInlinerTests`), `6ed50f3`, `a5a06b3`, `a37d2aa`, `1490f43` (conflict: `git rm` `CompileRequestFactory.cs` and its test, which `56d33fc` had edited; `56d33fc` itself touched only those files and the plan, so it needs no revert of its own).
+4. X0g `d9c75eb`; X0f `3c57b01`, `393e210`; X0e `bfa181b`; X0d `3b5a1d1`. X0d-2 was never split out (the work stayed in X0d), so there is no separate commit set for it.
+5. **Amendment to the revert set: X0x (policy lint) must go too.** `PolicyPredicateLinter` (X0x) calls `IRlsFilterGenerator.BuildCorrelatedPredicate`, which X0d introduced; without X0d the tree does not build. `git revert -m 1 3da0248` (the merge of `feat/ast-x1-policy-lint`) removes X0x and `tools/PolicyPredicateLint`. The set is therefore {X1, X0y, X0l, X0g, X0f, X0e, X0d (with X0d-2), X0x}, with `cd953de` kept.
+6. Test expectations of the reverted tree that reference the removed X0y/X0l evidence: `SecurityRegressionCatalog` loses the Phase 3 evidence entries whose files no longer exist, and `Phase3IdsWithoutEvidence_AreOnlyThoseOwnedByTheX1Cutover` expects `SEC-ADG-02, -12, -25, -26, -28`.
+Result on the reverted tree: `dotnet build Autheris.sln` 0 errors, 0 warnings; G1 (the TrinoSqlEngine, Unit, Architecture and Extensions test projects): see the numbers below; G7 (`Category=Security`, 395 tests incl. the traceability tests) green.
+
+**Evidence on the cutover branch.**
+- `dotnet build Autheris.sln -m:2`: 0 errors, 0 warnings.
+- `tests/TrinoSqlEngine.Tests` (Debug) 7285, `tests/Autheris.Tests.Unit` 5293 (plus 2 new cache tests), `tests/Autheris.Tests.Architecture` 51, `tests/Autheris.Extensions.Tests` 233: all green (run on `181f2c5`; `9ff3ab7` only adds the two cache tests and a comment).
+- `tests/Autheris.Tests.SqlCompilerGate` with `SQLGATE_PROFILE=pr`: 181/181 green (also on `9ff3ab7`).
+- Full `tests/Autheris.Tests.Integration` on `9ff3ab7`: 1024/1024 green, including the door audit proofs, the three new doors and the guard DI test.
+- Timing flakes (parse budget under load, never retried): `DmlCompileTests.Insert_MultiRow_OverTheBindLimit_IsRejected_WithTheTypedError` (PostgreSQL, DuckDB) and `LimitBoundaryProperties.BindLimit_IsExact_ForEveryGovernedDialect` failed once under heavy machine load and passed in an isolated rerun; one DuckDB bind-limit compile-time test failed once in a fork run and passed alone.
+- Revert rehearsal tree: build 0/0; `TrinoSqlEngine.Tests` 7265 with only the load flake above (isolated rerun green), Unit 4995, Architecture 29, Extensions 233 green; G7 (`Category=Security`) 395/395 green after the catalog adjustment of step 6. The scratch worktree and branch were deleted.
+
+**X1 squash commit message (draft).** Rewritten after the Phase 5 review (M-4): complete breaking changes and new items; the revert section is a placeholder until the orchestrator has re-rehearsed M-11 on the final squash.
+
+```
+feat(governed-sql): cut over to the AST compiler and delete the legacy rewriter (WP-X1)
+
+The governed pipeline compiles every statement with ISqlEngine.Compile, binds it through
+the dialect binders and runs DML through the checked executor. The legacy string rewriter
+and everything that fed it are gone; there is no runtime switch.
+
+Deleted: RlsListener, RewriteRls/GenerateGovernedSql, FastSqlEngine.SqlRewriterEngine,
+the string policy providers and RlsOptions, TrustedSqlExpression, BuildDialectMaskExpression,
+DialectLimitExceededException, the string plan cache (ICompiledSqlQueryPlanCache and
+implementations), RestoreClientParameters, the __param_ text emission, the WebSQL governance
+bypass (danger_bypass_websql_governance is inert), TokenStreamRewriter in production code
+(SD-1), GovernedSqlResult.RewrittenSql and the unused secretProvider parameter of
+GovernedSqlRewriter.
+
+New:
+- Startup: AuditKeyStartupCheck (the audit digest key is resolved at the start; outside
+  Development and Test a missing, unreadable or too short key stops the host),
+  DeniedTablesStartupReporter (background listing of the tables the pipeline denies, ids and
+  stable codes only), a single startup warning for the inert governance bypass flag.
+- Providers: SQLite provider execution guard (a statement is interrupted at the timeout);
+  IProviderExecutionGuard is a required dependency of the executors.
+- Audit: keyed originalSqlHash (HMAC over the literal-redacted statement, key derived from the
+  audit key), compiled digest key derived from the audit key, compiler_version / dialect /
+  bind_count / sql.compiled_digest on every record; DML audits are written without the request
+  token and an audit failure after the commit is logged as Critical and counted
+  (autheris_dml_audit_failed_total) instead of failing the request; engine rejections
+  (unsupported construct, reserved identifier, syntax error, limits) are audited with their
+  stable code, never the message.
+- Tenants: tenant registry resolve-collision endpoint
+  (POST /api/admin/tenant-registry/{tenantId}/resolve-collision, ClusterAdmin, optional
+  expectedCurrent compare-and-swap, audit TENANT_COLLISION_RESOLVED), ITenantRegistry
+  TryGetAsync / ResolveCollisionAsync.
+- Policy: policy-subquery (dependent) tables are governed like primary tables (active,
+  DataSources:RequireTenantColumn, the governance record the catalog provider can admit);
+  only admittable candidates are requested from the catalog provider.
+- Guards: architecture guards (no legacy types, no free-text expression nodes, CompiledSql only
+  built by the engine, CommandText / command text only set by allowlisted types, entry points
+  reach Compile and the binder, deleted paths stay deleted, no TokenStreamRewriter),
+  NamedBindMarkerExpression for the OQ-4 text renderers, frozen legacy results for the G4
+  differential, door-level audit proofs.
+
+Breaking changes (release notes):
+- WebSql:SqlRewriterEngine is removed; configuring it fails the start (SEC-ADG-28).
+- A WebSql:PlanCache section fails the start (removed; the engine template cache has a fixed
+  size of 512).
+- Dollar-quoted strings are rejected on every dialect.
+- Startup: AuditKeyStartupCheck fails the start outside Development and Test without
+  GovernanceDb:AuditHmacKeyVaultRef or DataMasking:HmacSecretKeyVaultRef (a usable key of the
+  minimum length). Before, the first governed statement failed.
+- danger_bypass_websql_governance has no effect: every statement is governed. It stays a
+  DANGER switch, so it fails the start outside Development and is warned about once in
+  Development.
+- Tenants: a tenant selected by header must be registered (IdP login or the Tenants
+  configuration), otherwise 403 TENANT_UNKNOWN; the tenant registry is on by default. A
+  ClusterAdmin header never registers a tenant or marks a collision. New ClusterAdmin endpoint
+  to resolve a collision (body expectedCurrent; 409 when the group holds another spelling;
+  audit TENANT_COLLISION_RESOLVED); every other spelling of the tenant id stays denied.
+- ITenantRegistry gains TryGetAsync and ResolveCollisionAsync (implementers must add them).
+- RewriteSqlAsync is ValidateAsync; error statuses and codes follow section 28.4.3 (also
+  for dataset endpoints). Identifiers starting with autheris_ are reserved: 400
+  SQL_RESERVED_IDENTIFIER. GitOps (policy/endpoint declarations) answer a curated 400.
+- Audit records carry compiler_version, dialect, bind_count and sql.compiled_digest instead
+  of the secured SQL text; the compiled text is stored only with Audit:StoreCompiledSql.
+  originalSqlHash is a keyed HMAC over the redacted text (key derived from the audit key), not
+  a SHA-256 over the raw text; statements that differ only in literal values share it. The
+  compiled digest key derives from the audit key, not from the master secret.
+- Stricter than legacy: "[" is rejected on SQL Server and SQLite (bracket-quoting lexer differential); on PostgreSQL it is array syntax; on Oracle arrays/subscripts are rejected with a typed not-supported error; dollar-quoted strings are rejected on every dialect; constant-only DML predicates count
+  as unfiltered; qualified functions are not accepted from the caller list; AdditionalAllowedFunctions
+  only narrows the dialect function map; FETCH WITH TIES is downgraded under an enforced row
+  cap; recursive CTEs are not usable; HMAC-masked columns are rejected in predicates and joins;
+  an INSERT that names a foreign tenant is a security rejection (tenant mismatch).
+- Configuration: RequireDefaultSchema defaults to true for PostgreSQL and Oracle;
+  WebSql:PlanCache is removed; RowFilters.SubqueryStrategy is ignored.
+- Public API: SqlTokenSecurityOptions.FromRlsOptions is now ForDialect; AstBuilderOptions.
+  FromRlsOptions and the legacy ISqlEngine members are removed; the constructors of the
+  governed services require IProviderExecutionGuard; GovernedSqlResult.RewrittenSql is removed
+  (it was the compiled text with markers, never read by the gateway); the secretProvider
+  parameter of GovernedSqlRewriter is removed.
+- SQLite statements are interrupted at WebSql:ExecutionTimeoutSeconds (504); a client that
+  relied on an unbounded SQLite statement is cut off.
+- Oracle is admitted but not announced until S-1 is cleared.
+
+Revert procedure: re-rehearsed on the final squash by the orchestrator (see M-11).
+No schema or data migration is involved.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+```
+
+#### Phase 3 review (X1 part A) and security fixes implementation log
+
+Phase 3 reviewed WP-X1 part A (`bb80e29..c1a2af2`): sign-off with conditions, no Critical/High. Fixes on branch `feat/ast-x1-secfix` (from `181f2c5`).
+
+| Finding | Summary | Disposition |
+|---|---|---|
+| M-A1 | Policy-subquery (dependent) tables skipped `DataSources:RequireTenantColumn` and `IsActive` | Fixed (`d925271`) |
+| M-A2 | Tenant registry on by default: a ClusterAdmin header (or IdP variant claim) could mark a spelling group collided permanently, no clear path | Fixed (`2a610bc`) |
+| M-A3 | `originalSqlHash` was an unkeyed SHA-256 over raw SQL including values (SEC-ADG-23) | Fixed (keyed, see below) |
+| L-A1 | `CompiledSqlAuditDigester` ignored `AuditHmacKeyVaultRef`, no length check, silent ephemeral key in every environment, one digester per scoped executor | Fixed (same commit as M-A3) |
+| L-A2, L-A3 | Sent to part B | Handled by part B |
+| Info | `RequireDefaultSchema` XML doc is outdated (the pin matters for functions/operators, not tables) | Open for Phase 6 docs |
+| Info | EXISTS constant-projection relaxation only in policy scope (optional) | Not done, optional |
+
+**M-A1.** `GovernancePolicyFactory` now takes `ITableMetadataRepository` and `IOptions<GatewayOptions>` (both required). For every table that an admitted policy reads in a subquery it loads the governance record and applies `IsActive` and `TableMetadata.RequireTenantColumnOrThrow` (with `TenantColumnExemptTables`). A missing record, a load failure, an inactive table or a tenant-less non-exempt table under `RequireTenantColumn=true` denies the policy's own table (like SEC-X1-05). Tests (`GovernancePolicyFactoryTests`): no tenant column + required -> denied (red: 3 of 5 new tests failed before the check, exempt/off cases are regression guards), exempt -> allowed, requirement off -> unchanged, inactive -> denied, no record -> denied.
+
+**M-A2.** `SecurityPrincipalContext.TenantSelectedByHeader` is set by `SecurityContextFactory` when a ClusterAdmin selects the tenant by header. The middleware then calls `ITenantRegistry.TryGetAsync` only: never registers, never marks a collision; unknown -> 403 `TENANT_UNKNOWN`, collided -> 403 `TENANT_ID_COLLISION`, registry failure -> 503. `TenantRegistryGate` forwards `TryGetAsync` (positive cache only). New `ITenantRegistry.ResolveCollisionAsync(keep)` (store: conditional UPDATE, only a marked group changes) and the endpoint `POST /api/admin/tenant-registry/{tenantId}/resolve-collision` (policy ClusterAdmin plus canonical check; audit `TENANT_COLLISION_RESOLVED`; listed as a delegated audit route in `AuditEndpointCoverageTests`). Runbook: find the colliding spellings (audit `TENANT_COLLISION_DENIED`), call the endpoint with the exact spelling to keep; every other spelling stays denied (an IdP that still issues the other spelling marks the group again, so fix the IdP). `ExistingCollisionGroup_AllSpellingsDenied` (X0p) exists next to the preseed variant. Release note: header-selected tenants must already be registered (IdP login or `Tenants` configuration).
+
+**M-A3 / L-A1.** `AstSecurityVisitor.AnonymizeSqlForAudit` is gone (no hash over raw text); `RedactSqlLiterals` and `TruncateForAudit` replace it. `CompiledSqlAuditDigester.Anonymize` returns the redacted text and `originalSqlHash = HMAC-SHA256(HKDF(auditKey, "Autheris:SqlOriginalHash:v1"), redacted full text)`; statements that differ only in values share the hash. The digest key is `HKDF(auditKey, "Autheris:SqlCompiledDigest:v1")`. The audit key is `GovernanceDb:AuditHmacKeyVaultRef`, else the `Autheris:AuditChain:v1` key of `DataMasking:HmacSecretKeyVaultRef` (as the audit repositories); minimum length outside Development; no ephemeral fallback outside Development/Test: `Compute`/`Anonymize` throw and the governed statement fails closed (decision: per statement, not at startup, because the digester is created on first use). The key is read once (DI singleton, shared by the governed and federated executors). `FederatedDuckDbExecutionService` uses the same digester. Tests: `CompiledSqlAuditDigesterTests` (13; red = compile failure before `Anonymize`/the 3-argument constructor existed). Behavior change: the compiled digest key now derives from the audit key (the chain key for the master-secret fallback), not from the master secret directly.
+
+#### Phase 3 re-check (cutover) fixes implementation log
+
+The Phase 3 re-check of `feat/ast-x1-cutover` (`1ee24e6`) signed off with conditions: no Critical/High. Fixes on branch `feat/ast-x1-secfix2` (from `1ee24e6`), one commit per finding, strict Red-Green.
+
+| Finding | Summary | Disposition |
+|---|---|---|
+| M-1 | Rollback procedure stale, misordered and unscripted | Not part of this branch: orchestrator, after all code changes (re-rehearse M-11 on the final squash, scripted order, lost controls in the squash message) |
+| M-2 | `CutoverArchitectureTests`: entry point reachability started at every method of the type and over-approximated virtual dispatch, no negative control; the `CommandText` scan covered four types | Fixed |
+| L-1 | `FindUnusableDependentsAsync` took the first homonymous governance record regardless of domain | Fixed |
+| L-2 | The audit key was first resolved after the DML commit | Fixed |
+| L-3 | `RedactSqlLiterals` missed `DOUBLE_VALUE` and `BINARY_LITERAL` | Fixed |
+| L-4 | Collision resolution lost the overwritten spelling | Fixed |
+| L-5 | `NamedBindMarkerExpression` creation not guarded | Fixed (part of M-2) |
+| L-6 | Hand-written production assembly list | Fixed (part of M-2) |
+| Later items | HMAC and PartialMask GROUP BY variants; required `IProviderExecutionGuard` | Done |
+| Process items | 15 pending `accepted-differences.json` approvals (esp. Oracle FewerRows), required CI check, `PolicyPredicateLint` 0, Phase 5 approval, Oracle unannounced (S-1) | Not code; stay with the orchestrator / owners |
+
+**L-1.** `GovernancePolicyFactory.FindUnusableDependentsAsync` now loads the governance record of every requested candidate that has the schema and table of the catalog entry (a candidate is `(domain, schema, table)`; the catalog provider admits a record only when its data source is the statement's). Only records whose `SourceName` equals the statement's data source count as admittable; every admittable record must be active and satisfy `DataSources:RequireTenantColumn`, a failing or unreadable record and the absence of any admittable record are unusable (fail closed). A homonym of another domain can no longer vouch for the table. Tests (`GovernancePolicyFactoryTests`, three-part policy table name so that the other domain is the first candidate): inactive and tenant-less admitted record with an active homonym are denied (red before the fix), a usable admitted record is allowed.
+
+**L-2.** `CompiledSqlAuditDigester.EnsureKey()` resolves the key (same rules, same cache). `GovernedSqlExecutor` calls it before any DML is executed (before the concurrency leases and the connection), so a key that cannot be read fails the statement with the digester's stable `InvalidOperationException` and nothing is executed, begun or committed. `AuditKeyStartupCheck` (hosted service, registered with `WebSql:Enabled`) calls `EnsureKey()` at startup: outside Development and Test a missing, unreadable or too short key stops the host; Development and Test keep the ephemeral key. Tests: `WebSqlDml_AuditKeyUnavailable_FailsClosedBeforeAnyWrite` (PostgreSQL, SQLite; red: the command had been executed), `AuditKeyStartupCheckTests` (red against a no-op stub). Operators: a deployment without `AuditHmacKeyVaultRef`/`HmacSecretKeyVaultRef` now fails at the start, not at the first statement.
+
+**L-3.** `RedactSqlLiterals` also replaces `DOUBLE_VALUE` (`1.5E3`) and `BINARY_LITERAL` (`X'..'`). A lexer error, or an `UNRECOGNIZED` token (the quote of an unterminated string, whose text would otherwise lex as identifiers), redacts the whole statement to `@p_redacted_statement`; the regex fallback is gone (an exception also yields the full redaction). Tests: `originalSqlHash` equality for statements that differ only in such literals, no value in the redacted text, lexer-error statements keep nothing of the text.
+
+**M-2 / L-5 / L-6** (`CutoverArchitectureTests`).
+- `NoCommandTextAssignmentOutsideTheAllowlist` scans every `set_CommandText` call in every production assembly by member name (so `DbCommand`, `IDbCommand` and provider command subtypes are covered). Allowlist (each entry has a one-line reason in the test): the binder and the `BindByNameOracleCommand` decorator; the §28.9 consumers `GovernedTreeQueryService`, `SqlDataSourceExecutor`, `DuckDbOlapEngine` (staging), `SqlVirtualFilterKeySetProvider`; gateway-internal fixed statements (`DbSessionContextInitializer`, `SqlConnectionFactory`, `MssqlChangeTrackingPoller`, the column-metadata readers); the stored-procedure types (`MssqlProcedureInvoker`, `SqlProcedureRowScopeResolver`, `StoredProcedureCatalogValidator`, catalog names and bound values, not a WebSQL statement); the governance store repositories, the lint source, `TenantRegistryStore`, `VirtualFilterStore` (schema bootstrap and persistence). The test also fails on an allowlist entry that assigns nothing any more, and a control fixture proves the scanner sees a setter on a `DbCommand`. `TheGovernedPath_NeverAssignsCommandText` keeps the explicit check of the governed types. The first run without the allowlist failed with the set above (about 200 methods in 33 top-level types), which the previous four-type test could not see. Note: the procedure types are not in the §28.9 list; they are allowlisted as non-WebSQL consumers and should be confirmed by Phase 3.
+- `GovernedEntryPoints_ReachCompileAndBinder` now starts at the request-handling methods (`HandleWebSqlRequest`, `HandleParquetWebSqlRequestAsync`, `SubmitOrWaitAsync`, `ExecuteEndpointAsync`, `ProcessJobItemAsync`, `HandleArrowExportAsync`, `GetFlightInfoAsync` (Compile only: it validates before it issues a ticket), `DoGetStreamAsync`, `ExecuteToolAsync`, `InvokeApiAsync`, `ExecuteQueryAsync`) and no longer from every method of the type. `HandleTrinoQueuedStatementRequest` was dropped from the list: it only polls a session. Virtual and interface dispatch links only to implementations in types that derive from or implement the declaring type of the call, and compiler generated names (`<<Run>b__0>d`, closures, local functions) fold into the user method. Controls (top-level fixtures in `CutoverArchitectureControls.cs`): a handler that reaches the control engine passes, a raw SQL method on the same entry type and a renamed handler fail the same check, and a method of the same name on an unrelated type is not linked.
+- `TheScannedAssemblies_AreExactlyTheProjectsUnderSrc`: the scanned assemblies are derived from `src/**/*.csproj` (`AssemblyName`, else the file name) and must equal the loaded set and the anchor list of this test project.
+- `NamedBindMarkerExpression_IsOnlyConstructedByThePolicyPredicateRenderer`: IL scan for `newobj`/clone of the type outside the type itself, with a control fixture.
+
+**L-4.** `ITenantRegistry.ResolveCollisionAsync(keep, expectedCurrent, ct)` returns `TenantCollisionResolution(Status, PreviousTenantId)` (`NotFound`, `ExpectedMismatch`, `Resolved`). The store reads the group's `tenant_id` first, and the UPDATE is a compare-and-swap on that value (a concurrent change reports `ExpectedMismatch`). The endpoint takes an optional body `{ "expectedCurrent": "<spelling>" }`; a different current spelling answers 409 with `current` and changes nothing. The audit event (`TENANT_COLLISION_RESOLVED`) and the 200 response carry `previousSpelling`/`previous` (and `expectedCurrent` in the audit). Runbook addition: read the current spelling of the group from the audit record `TENANT_COLLISION_DENIED` or the 409 response, pass it as `expectedCurrent` so that two operators cannot overwrite each other's choice, and keep `previousSpelling` of the resolution audit record for the case that the wrong spelling was kept. Tests: store (previous spelling, matching and differing `expectedCurrent`), endpoint (audit, response, pass-through, 409), gate.
+
+**Later items.** `Dml_GroupByAMaskedColumnInASubquery_Hmac_And_PartialMask_GroupTheProjectedAlias` (regression guards, green by construction: the compiled text computes the mask inside the derived table of `orders` and the GROUP BY outside reads only the projected alias). `GovernedSqlExecutionService` takes `IProviderExecutionGuard` as a required constructor parameter (null is rejected, the pass-through fallback is gone); unit tests take it from `GovernedTestSupport.Guard`.
+
+#### Phase 5 review (X1 cutover) and fixes implementation log
+
+Phase 5 reviewed `bb80e29..a924f2b`: approve with conditions, no Blocker/High. Fixes on branch `feat/ast-x1-p5fix` (from `a924f2b`), one commit per finding (or small group), Red-Green where technically possible.
+
+| Finding | Summary | Disposition |
+|---|---|---|
+| M-1 | DML audit after the commit used the request token; an audit failure after the commit became a request failure (client retry duplicates the DML) | Fixed |
+| M-2 | `PolicySubqueryTables.Candidates` requested an inadmissible homonym that evicted the admitted catalog cache entry (one reload per statement) | Fixed |
+| M-3 | Flaky bind-limit probes (5 s parse budget incl. the wait on the static parser limiter, not the compile budget) | Fixed |
+| M-4 | Squash message draft incomplete | Fixed (revert section left as a placeholder for the orchestrator, M-11) |
+| L-1 | Cache-poisoning tests did not assert hits, shared engine | Fixed |
+| L-2 | `TokenStreamRewriter` in `RedactSqlLiterals` (SD-1) | Fixed, IL guard added |
+| L-3 | CommandText scan missed command constructors and `CreateCommand(string)` | Fixed |
+| L-4 | Engine errors (`AstBuildException`, `ReservedIdentifierException`, parse `ArgumentException`, ...) were not audited | Fixed |
+| L-5 | Dead code, multiplied `virtual_filters` audit keys | Fixed |
+| L-6 | Bypass flag warned per statement | Fixed (startup warning; the DANGER switch already fails the start outside Development) |
+| L-7 | Collision audit used the request token | Fixed |
+| L-8 | Stale docs | Phase 6 |
+| L-9 | Door tests matched the audit record by a global count | Fixed |
+| Nits | TryMap twice, ctor field copy, `"WEBSQL_QUERY"`, German comments, FrozenSet copy, repeated predicate walks, `DeniedTablesStartupReporter` | Fixed |
+| Perf (later) | Pipeline-level microbenchmark | G8, not done |
+
+**M-1.** `RecordDmlAuditAsync` never takes the request token (`CancellationToken.None`). The audit after the commit goes through `RecordCommittedDmlAuditAsync`: a failure is logged as Critical and counted by the new metric `autheris_dml_audit_failed_total`, and the response stays a success. The failure audit of a DML that failed before the commit never masks the original exception. Tests (`GovernedSqlExecutorX1Tests`, red before the change: both failed): token cancelled by the commit still writes the record; an audit failure after the commit does not throw, logs Critical, counts one failure.
+
+**M-2.** `GovernancePolicyFactory` reads the governance record of each candidate once per assembly and requests from the catalog provider only candidates whose record belongs to the statement's data source (an unreadable record stays requested and unusable: fail closed; the legacy `default` domain keeps working, a record only there is requested and resolvable). `PolicySubqueryTables.Names` is memoized per predicate instance (the repeated-walk nit). The domain is deliberately not removed from the candidate list: the primary tables resolve the same way (data source domain, then `default`). Tests: compile twice with a correlated policy and the real `GovernedCatalogProvider`: exactly two column loads in total (orders and the policy table), also with a homonym or no record under `default` (red before: three loads); a record only under `default` stays resolvable.
+
+**M-3.** The probes use `LimitProbeSupport.Engine()` (`ParseTimeout = TimeSpan.Zero`, own `ParseConcurrencyLimiter`, compile budget at its maximum). The boundary logic is deterministic: `GovernedSqlCompiler` now hands its resolved capabilities to the generator (`SqlDialectGeneratorBase.Generate(..., capabilities, ...)`, internal), so a capability provider with a lowered `MaxBindParameters` (`LimitProbeSupport.WithBindLimit`) governs the bind limit (red before: the lowered table was ignored, 6 tests failed). `DmlCompileTests.Insert_MultiRow_OverTheBindLimit...` and `LimitBoundaryProperties.BindLimit_IsExact...` run at a limit of 40 and 100; the production-limit probes (`BindLimitProductionProbeTests`, `BindLimit_IsExact..._AtTheProductionLimit`) are in the non-parallel collection `ProductionLimitProbes`; the DuckDB compile test uses a reduced table and an unbudgeted engine (the former "over the table" test only asserted that 2,200 values compile and is split into an honest rejection test and a compile test). Stability: the TrinoSqlEngine probe set (13 tests) and the DuckDB bind-limit tests passed in 5 consecutive runs while Stryker ran on the same machine. The misleading comment (it named the compile budget) is replaced.
+
+**L-1.** Fresh engine per test, `CompileCache.Stats` asserted (misses/hits for two principals, tenant case variants, catalog change, cancelled compile, writer then reader). These strengthen assertions on green behavior; there is no red phase.
+
+**L-2.** `RedactSqlLiterals` builds the text with a `StringBuilder` from the token stream (hidden-channel text included); the characterization test `RedactSqlLiteralsTests` passed before and after. `NoProductionAssembly_ReferencesTheTokenStreamRewriter` scans fields, locals and every operand of every production method (red before: `RedactSqlLiterals`), with a positive control.
+
+**L-3.** `PutsTextIntoACommand` also detects `newobj` of `*Command::.ctor` overloads taking a `string` and `CreateCommand(string)` / `CreateBatchCommand(string)`; positive controls for both. Production has no new site (the allowlist is unchanged and has no unused entry).
+
+**L-4.** The compile half audits every `SecurityException`, every exception the error mapper owns and every `ArgumentException` (code `SQL_BAD_REQUEST` when no mapper rule owns it), with the stable code (never the message), then rethrows; a client cancellation is not a rejection. A DML refused during the analysis (reserved identifier) is audited as a denied query because the statement is not yet known as DML there. Tests (`GovernedSqlRejectionAuditTests`, red before: no audit): construct, reserved identifier, syntax error, DML construct, bad request, cancelled request.
+
+**L-5.** Removed the unused `secretProvider` parameter of `GovernedSqlRewriter`, `_rowFilterResolver` of the service and `GovernedSqlResult.RewrittenSql` (no reader in `src`; about 30 test constructions adjusted; this changes the public record). `virtual_filters` has one key per table, the resolved qualified name (test red before: several keys). `VirtualFilterWiringTests` reads the resolver from the rewriter.
+
+**L-6.** The per-statement warning is gone. `GatewayStartupValidator` warns once that `danger_bypass_websql_governance` has no effect; the flag stays a DANGER switch and fails the start outside Development (test documents it). Decision: no new failure mode, because the existing DANGER rule is already fail closed.
+
+**L-7.** The collision audit uses `CancellationToken.None` (test red before).
+
+**L-9.** The door tests match the audit record by actor, data source, event type and outcome (`IsCompiledAuditOfTheCaller`); trace ids are generated per audit record, so they cannot be matched.
+
+**Nits.** `DatasetDataEndpoints` maps with one `catch ... when (TryMap(ex, out mapped))`; `AuditKeyStartupCheck` uses the primary-constructor parameter; `AuditEventTypes.WebSqlQuery`; German comments translated in `ISqlRewritePipeline.cs` and `GovernedSqlRewriter.cs`; `BuildOptions` passes a frozen case-insensitive set on without a copy; `DeniedTablesStartupReporter` is a `BackgroundService` (the host start no longer waits for the store; the test needs `ExecuteTask`, so there is no clean red run).
+
+**M-4.** The squash message draft above is complete (breaking changes, new items; the revert section is the placeholder "Revert procedure: re-rehearsed on the final squash by the orchestrator (see M-11)"; trailer `Co-Authored-By: Claude Opus 5.5`).
+
+**Deviations.** The environment was lost once and the work was redone from the findings; every commit is pushed. Red runs were recorded for M-1, M-2, M-3, L-2 (guard), L-4, L-5 (keys), L-6, L-7; not possible or not meaningful for L-1, L-3, L-9, the nits and M-4. Phase 6 keeps L-8 (docs) and the documentation of the new metric, `SQL_BAD_REQUEST` audit code and startup behavior.
+
+**Evidence.** `dotnet build Autheris.sln -m:2`: 0 errors, 0 warnings. `Autheris.Tests.Unit` 5375, `TrinoSqlEngine.Tests` (Debug) 7714, `Autheris.Tests.Architecture` 62, `Autheris.Extensions.Tests` 233, `SqlCompilerGate` (`SQLGATE_PROFILE=pr`) 181: all green. `Autheris.Tests.Integration` 1024: one load-sensitive timing test (`AstCompilerSqliteExecutionTests.ACrossJoinOfTheCallersRows_IsInterruptedWithinTheTimeoutPlusOneSecond`, 58 minute run next to Stryker) failed once and passed in an isolated rerun; the rest green.
+
+### Pre-squash fixes (Phase 3 spot check, Phase 6 findings) implementation log
+
+Branch `feat/ast-x1-smallfix` (from `83fb8ce`), one commit per item, strict Red-Green.
+
+1. **Dollar quoting.** `CompileRequestFactory` sets `RejectDollarQuoting = true` for every dialect (as `SqlTokenSecurityOptions.ForDialect`). Red: `Create_MapsTokenGuards_PerDialect` failed for PostgreSQL. The gate harness `GatePolicies` uses `ForDialect(Target)` unchanged.
+2. **Oracle arrays.** `OracleDialectGenerator.GenerateExpression` rejects `SubscriptExpression` and `ArrayConstructorExpression` with the typed `SqlCompileNotSupportedException` (reason `Construct`, as SQL Server); the error mapper answers 422 `ConstructNotSupported`. Red: `Oracle_ArraysAndSubscripts` (both inputs) failed.
+3. **`WebSql:PlanCache`.** `GatewayStartupValidator.ValidateRemovedWebSqlSettings` fails the start when the section exists (any environment, value never echoed); called from `AddGatewayOptions` next to the `SqlRewriterEngine` check. Red: three registration tests failed.
+4. **Architecture allowlist.** The reason of `SqlProcedureRowScopeResolver` now names the policy row-filter splice (section 7.3 consumer). Test-only text change.
+5. **Docs.** The `[` claims, the squash draft breaking-change list (`PlanCache`, dollar quoting) and `f-dialect-02` (token guards, Oracle arrays, removed settings) corrected.
+
+### Stryker coverage implementation log (M-12, cutover head)
+
+Mutation testing of the G7 scope (`stryker-config.json`: `Ast/Visitors/AstSecurityVisitor*.cs`, `AstSimplificationVisitor.cs`, `Ast/Security/*.cs`, `Ast/Emit/*.cs`; tests filtered by `Category=SqlGate`, break threshold 85%) on the cutover head (`a924f2b`, plus `d13ac28` for the Emit and Visitor groups). Stryker.NET 4.16.0, `--concurrency 4` to 6. The TrinoSqlEngine.Tests project starts no containers, so the SqlGate filter needs no container exclusion. Run time per group: Security 1161 mutants in 3 h 40 min (concurrency 4, shared machine), Emit 804 mutants in about 65 min, Visitors 629 mutants in about 60 min, the three re-measured visitor files 295 to 349 mutants in 8 to 20 min. About 1.2 s per mutant on an idle machine, 5 to 10 s when other builds run.
+
+| File | Before (pre-cutover, tests of the earlier Stryker branch) | After (cutover head) |
+|---|---|---|
+| Security group (13 files) | 84.23% as a group, TenantPredicateFactory 65.7% | all files at or above 90%: AstReflection 90.6, CatalogTypeMap 95.2, DmlMaskedReadGuard 90.0, InsertCheckOption 100, InsertCheckPolicy 98.4, LiteralColumnTypeAnnotator 96.7, MergeAliasGuard 100, PolicyColumnTypeAnnotator 100, PolicySubqueryTenantRewriter 94.7, SecurityCoverageVerifier 97.7, SecurityCoverageVerifier.Dml 99.1, SqliteTypeAffinity 100, TenantPredicateFactory 100 |
+| ICompiledSqlBinder.cs | 51.0 | 92.8 |
+| CompiledSqlBinders.cs | 7.1 | 100 |
+| ColumnBindAdapter.cs | 93.1 | 99.0 |
+| CheckedDmlExecutor.cs | 49.5 | 92.8 |
+| GovernedSqlException.cs | 23.8 | 95.5 (the reserved-identifier message was added to the code table test afterwards) |
+| EmittedSqlInvariantChecker.cs | 86.6 | 99.6 |
+| CompiledSqlTemplate.cs | 85.7 | 92.9 |
+| DmlConstraintViolationException.cs | 94.3 | 94.3 |
+| CompiledSql.cs | 33.3 | 100 |
+| AstSecurityVisitor.cs | 93.8 | 96.4 |
+| AstSecurityVisitor.Dml.cs | 47.4 | 99.2 |
+| AstSecurityVisitor.MaskGuards.cs | 14.2 | 92.5 |
+| AstSecurityVisitor.Support.cs | 51.4 | 97.2 |
+| AstSecurityVisitor.Tables.cs | 74.7 | 97.4 |
+| AstSecurityVisitor.TypedDml.cs | 78.7 | 92.9 |
+| AstSecurityVisitorOptions.cs | n/a | 100 |
+| AstSimplificationVisitor.cs | 91.3 | 92.3 |
+
+**What was done on the cutover head.** The first visitor measurement left `.Dml` at 48.4%, `.MaskGuards` at 47.5% and `.Support` at 42.4%: no SqlGate test reached the tautology detection (the simplifier folds most constant predicates before the visitor sees them), the masked-column predicate traversal or `RedactSqlLiterals`. The cutover deleted the options-path tests that covered them, so they were ported: `TypedGuardMutationTests` drives the unfiltered-DML truth tables, the masked column positions of a SELECT predicate, the join and HAVING/ORDER BY clauses, whole-row references, CTE scope rules and the TABLE body through the typed compiler; `AstSecurityVisitorGuardUnitTests` calls the private guards directly on hand-built trees (every comparison operator of `IsTriviallyTrue`/`IsTriviallyFalse`, every expression kind of `ContainsColumnReference` and of the masked-column traversal, `CollectTableSources`, join conditions, the DML and predicate entry points, `RedactSqlLiterals`, `TruncateForAudit`). `RedactSqlLiteralsTests` was tagged `SqlGate`.
+
+**Equivalent or unreachable survivors (one line each).**
+- `CheckedDmlExecutor` lines 82, 83, 134, 161, 166, 175: `ConfigureAwait(false)` to `true`. A context-counting test kills the flips at the first await of a chain; later awaits run without a captured context, so the flip changes nothing observable.
+- `CheckedDmlExecutor` line 194: block removal of a catch block that holds only a comment.
+- `ICompiledSqlBinder` lines 104 and 286: `?? string.Empty` on `Convert.ToString` of a non-null value; line 313: `>>` to `>>>` under a `& 0xFF` mask.
+- `ColumnBindAdapter` line 52: `||` to `&&` between conditions that all lead to an unchanged bind for an unknown column type.
+- `CompiledSqlTemplate` lines 291, 308, 309, 278, 303: unused `skipValue` argument, property ordering of types with one property, unreachable serializer branch for a non-`TrinoSqlEngine` type.
+- `MaskGuards` lines 68 and 100: `break` removed from a loop that sets a flag already set (no effect on the result); lines 93, 119, 139, 157: guards whose alternative branch yields the same outcome for every tree the compiler builds.
+- `Support` lines 254 and 256: lexer error listener wiring (the unrecognized-token check catches the same inputs); line 264 `Count < 0` and line 272 `i <= Count`: the loop body stops at the EOF token.
+- `AstSecurityVisitor.cs` lines 115, 182, 222: a flag set that only matters for the second root read, and a clamp that returns an equal literal.
+- `AstSimplificationVisitor` lines 82, 334, 350, 376: structural-equality helpers whose alternative returns an equal node.
+- `TypedDml` lines 369, 370, 387, 420: the tenant-column-appended path is reachable only with `RequireTenantColumnInInsert = false`, which the governed compiler rejects as a configuration error (CR-ADG-38).
+
+**Below 85%:** none.
+
+**Findings.**
+1. `DELETE ... WHERE id = 5 OR 1 = 1.0` is accepted on the typed path. The compiled SQL keeps only `[id] = @p0`, so the OR branch with `1 = 1.0` was dropped: it appears to be folded to false (an integer literal against a decimal literal; not traced to the exact fold). That is the safe direction here, but `1 = 1.0` is true and a wrong fold could widen a statement such as `NOT (1 = 1.0)`. `AstSimplificationVisitor`, literal comparison of mixed numeric kinds. Fixed, see "Simplifier literal-comparison fold fix implementation log" below.
+
+## Simplifier literal-comparison fold fix implementation log
+
+**Root cause.** `AstSimplificationVisitor` folded `Equal`/`NotEqual` of two literals by comparing `Value.ToString()`, so `1 = 1.0` (`"1"` vs `"1.0"`) became FALSE, and `NOT (1 = 1.0)` became TRUE: `id = 5 AND NOT (1 = 1.0)` widened to `id = 5`, `NOT (1 = 1.0)` in a SELECT returned every row. The same string comparison also folded mixed families (`'1' = 1`) and unequal strings (`'a' = 'A'`) whose result is collation or coercion dependent. The unfiltered-DML guard (`AstSecurityVisitor.Dml`) compared numerics through `double`, which loses precision beyond 2^53 (`9007199254740993 <> 9007199254740992` was not recognised as a tautology) and parsed string literals as numbers (`'1.0' <> '1'` was not recognised as a tautology).
+
+**Fix.** New internal `LiteralComparison` shared by both. `TryFold` (simplifier) folds only when the result is certain in every dialect: two integers exactly; integer/decimal combinations by exact `decimal` value when both have at most 15 significant digits (a double round trip cannot change equality or order); identical strings; unequal strings only for `=`/`<>` when both are plain ASCII word characters that differ case-insensitively after trimming trailing spaces (so the result holds under case-insensitive and PAD SPACE collations); booleans for `=`/`<>`. It never folds NULL operands (three-valued logic), mixed type families, string ordering, or numbers beyond double-safe precision. All six comparison operators now fold. `TryCompareNumeric` (guard) compares exact `decimal` without a size limit and never parses two strings as numbers, so tautology detection is stricter than before (`1 = 1.0`, `2 = 2.00`, big integers and `'1.0' <> '1'` are all rejected as trivially true).
+
+**Tests (SqlGate, written red first: 28 failures before the fix).** `AstSimplificationVisitorTests`: exact folds (`1 = 1.0`, `1 <> 1.0`, `1 < 1.5`, `1 >= 1.5`, `2 = 2.00`, `1.0 = 1.00`, `1.50 <> 1.5`, `1e0 = 1`, 2^53+1 integers, identical and distinct word strings), never-fold cases (`'1' = 1`, `1 = '1'`, `'1.0' = 1`, `NULL = NULL`, `1 = NULL`, `NULL <> 1.0`, `'a' = 'A'`, `'a' = 'a '`, non-ASCII, string ordering, 2^53+1 vs decimal, 19-digit decimals, `true = 1`), `NOT` of each, `OR`/`AND NOT` compile-path tests. `TypedGuardMutationTests`: tautologies `id = 5 OR 1 = 1.0 / 2 = 2.00 / NOT (1 <> 1.0) / 1 < 1.5`, big-integer `<>`/`<`, `'1.0' <> '1'` are rejected.
+
+**Goldens.** None changed. The conformance corpus entry `DELETE FROM orders WHERE 1 = 1.0` (literal-only, rejected) still passes; no golden encoded the wrong fold.
+
+**Verification.** Build 0/0; TrinoSqlEngine.Tests (Debug) 7985, Unit 5379, Architecture 62, SqlCompilerGate (`SQLGATE_PROFILE=pr`) 181, Integration `AstCompilerSqliteDmlExecutionTests` + `AstCompilerPostgreSqlDmlExecutionTests` 92, all green.

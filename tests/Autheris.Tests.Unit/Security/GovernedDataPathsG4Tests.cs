@@ -466,7 +466,7 @@ public sealed class GovernedDataPathsG4Tests
     {
         var sql = Substitute.For<IGovernedSqlExecutionService>();
         sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(new GovernedSqlResult("SELECT 1", "SELECT 1", ["_col0"], [], 0, 1));
+            .Returns(new GovernedSqlResult("SELECT 1", ["_col0"], [], 0, 1));
         var provider = Substitute.For<IServiceProvider>();
         provider.GetService(typeof(IGovernedSqlExecutionService)).Returns(sql);
         var scope = Substitute.For<IServiceScope>();

@@ -76,8 +76,21 @@ public sealed class CompositionRootModularizationTests
         sp.GetService<IGovernanceRepository>().ShouldNotBeNull();
         sp.GetService<IRebacStore>().ShouldNotBeNull();
         sp.GetService<IRebacEvaluator>().ShouldNotBeNull();
-        sp.GetService<ICompiledSqlQueryPlanCache>().ShouldNotBeNull();
         sp.GetService<IMcpToolRegistry>().ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void ProviderExecutionGuard_IsResolvedFromTheHost_AsTheSqliteGuard()
+    {
+        // L-A3: the governed executor requires the guard; the host must register the real (SQLite interrupting) one, never pass-through.
+        var (services, options, env) = CreateTestSetup();
+        services.AddAutherisStorage(options, env);
+        services.AddAutherisSqlEngine(options);
+        services.AddAutherisExecution(options, env);
+
+        var guard = services.BuildServiceProvider().GetRequiredService<IProviderExecutionGuard>();
+
+        guard.ShouldBeOfType<Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard>();
     }
 
     [Fact]

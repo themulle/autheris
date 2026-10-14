@@ -13,26 +13,33 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
-using Autheris.Application.Security;
+using Autheris.Application.Common;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Security;
 using Autheris.Application.Services;
 using Autheris.Application.Sql;
+using Autheris.Application.Sql.Errors;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Internal;
 using Autheris.Application.Sql.Synthetic;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TrinoSqlEngine;
 using TrinoSqlEngine.Analysis;
+using TrinoSqlEngine.Ast.Emit;
 
 /// <summary>
 /// AR-05: Dedicated execution engine for governed WebSQL queries and DML statements.
 /// Handles connection management, session initialization, concurrency gating, audit recording, and result buffering.
+/// X1.2: the only text that reaches a command is <see cref="CompiledSql.Sql"/>, bound through <see cref="CompiledSqlBinders"/>;
+/// governed DML runs through the checked executor inside the session transaction; provider errors are reduced to stable codes.
 /// </summary>
 public sealed class GovernedSqlExecutor
 {
@@ -48,16 +55,21 @@ public sealed class GovernedSqlExecutor
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
     private readonly IDbSessionContextInitializer _sessionInitializer;
     private readonly SqlDataSourceResolver _dataSourceResolver;
+    private readonly CompiledSqlAuditDigester _digester;
+    private readonly IProviderExecutionGuard _executionGuard;
 
     public GovernedSqlExecutor(
         GovernedSqlRewriter rewriter,
         IOptions<GatewayOptions> options,
         IAuditLogRepository auditLogRepository,
+        IProviderExecutionGuard executionGuard,
         ISqlConnectionFactory? connectionFactory = null,
         IHostEnvironment? environment = null,
         ILogger? logger = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
-        IDbSessionContextInitializer? sessionInitializer = null)
+        IDbSessionContextInitializer? sessionInitializer = null,
+        IKeyVaultSecretProvider? secretProvider = null,
+        CompiledSqlAuditDigester? auditDigester = null)
     {
         _rewriter = rewriter ?? throw new ArgumentNullException(nameof(rewriter));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -68,6 +80,10 @@ public sealed class GovernedSqlExecutor
         _concurrencyGate = concurrencyGate;
         _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
         _dataSourceResolver = new SqlDataSourceResolver(_options, logger);
+        // L-A1: the host registers one singleton (one key read); only unit-test construction builds its own.
+        _digester = auditDigester ?? new CompiledSqlAuditDigester(_options, secretProvider, environment);
+        // L-A3: the guard is a required dependency; there is no silent pass-through fallback in the executor.
+        _executionGuard = executionGuard ?? throw new ArgumentNullException(nameof(executionGuard));
     }
 
     public async Task ExecuteGovernedQueryAsync(
@@ -94,7 +110,7 @@ public sealed class GovernedSqlExecutor
         bool isTruncated = false;
         var sw = Stopwatch.StartNew();
 
-        string securedSql = await ExecuteCoreAsync(
+        await ExecuteCoreAsync(
             request,
             user,
             tenantId,
@@ -124,7 +140,6 @@ public sealed class GovernedSqlExecutor
 
         return new GovernedSqlResult(
             OriginalSql: request.Sql,
-            RewrittenSql: securedSql,
             Columns: columns.AsReadOnly(),
             Rows: rows.AsReadOnly(),
             RowCount: rows.Count,
@@ -161,7 +176,9 @@ public sealed class GovernedSqlExecutor
             }
         }
 
-        string sqlForRewrite = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, request.Parameters, out var clientParameterNames);
+        // Scalar values only (an array or object is a 400). The binder reads a client value only by the name the statement uses.
+        var clientValues = BuildClientValues(request.Parameters);
+        string sqlForRewrite = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, request.Parameters, out _);
 
         var dmlContext = new DmlAuditContext();
         GovernedRewrite rewrite;
@@ -169,23 +186,32 @@ public sealed class GovernedSqlExecutor
         {
             rewrite = await _rewriter.RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit, probeExtraRow: true).ConfigureAwait(false);
         }
-        catch (SecurityException policyEx)
+        catch (Exception policyEx) when (IsAuditedRejection(policyEx, ct))
         {
             string auditDs = requestedDs ?? _options.Value.WebSql.DefaultDataSourceName;
+            // SEC-ADG-23: only the gateway's own policy messages are stored; an engine exception is reduced to its stable code.
+            // L-4: the same holds for the engine errors that the error mapper owns (unsupported construct, reserved identifier, syntax
+            // error, limits): the stable code is stored, never the message, and the exception is rethrown for the error surface to map.
+            string reason = DeniedReason(policyEx);
             if (dmlContext.IsDml)
             {
-                await RecordDmlAuditAsync(tenantId, user, auditDs, dmlContext, "WEBSQL_DML_REJECTED", "DENY", request.Sql, affectedRows: null, reason: policyEx is WebSqlPolicyException ? policyEx.Message : "policy violation", synthetic: false, ct).ConfigureAwait(false);
+                await RecordDmlAuditAsync(tenantId, user, auditDs, dmlContext, "WEBSQL_DML_REJECTED", "DENY", compiled: null, affectedRows: null, reason: reason, synthetic: false, originalSql: request.Sql).ConfigureAwait(false);
             }
             else if (_auditLogRepository != null)
             {
-                var (redactedOriginalSql, originalSqlHash) = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.AnonymizeSqlForAudit(request.Sql);
+                var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
                 var userSid = user.GetUserSid() ?? new Sid("anonymous");
                 var detailsJson = new AuditDetailsBuilder()
                     .WithField("originalSql", redactedOriginalSql)
                     .WithField("originalSqlHash", originalSqlHash)
                     .WithField("dataSource", auditDs)
-                    .WithField("reasonCode", policyEx is WebSqlPolicyException ? "POLICY_VIOLATION" : "SECURITY_VIOLATION")
-                    .WithField("error", policyEx.Message)
+                    .WithField("reasonCode", policyEx switch
+                    {
+                        WebSqlPolicyException => "POLICY_VIOLATION",
+                        SecurityException => "SECURITY_VIOLATION",
+                        _ => reason
+                    })
+                    .WithField("error", reason)
                     .Build();
 
                 await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
@@ -202,30 +228,47 @@ public sealed class GovernedSqlExecutor
             throw;
         }
 
-        string securedSql = GovernedSqlExecutionService.RestoreClientParameters(rewrite.Sql, clientParameterNames);
+        return await ExecuteRewrittenAsync(request, user, tenantId, rewrite, dmlContext, clientValues, rowWriter, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Everything after a successful compile. Separate (and internal) so that the dialect agreement and the fail-closed rules of the
+    /// execution half are testable without a rewriter.
+    /// </summary>
+    internal async Task<string> ExecuteRewrittenAsync(
+        GovernedSqlQueryRequest request,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        GovernedRewrite rewrite,
+        DmlAuditContext dmlContext,
+        IReadOnlyDictionary<string, object?> clientValues,
+        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        CancellationToken ct)
+    {
+        var compiled = rewrite.Compiled;
         string dsName = rewrite.DataSourceName;
 
         if (_auditLogRepository != null && !dmlContext.IsDml)
         {
-            var (redactedOriginalSql, originalSqlHash) = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.AnonymizeSqlForAudit(request.Sql);
-            var (redactedSecuredSql, _) = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.AnonymizeSqlForAudit(securedSql);
+            var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
             var userSid = user.GetUserSid() ?? new Sid("anonymous");
+            var fields = new Dictionary<string, object?>
+            {
+                ["originalSql"] = redactedOriginalSql,
+                ["originalSqlHash"] = originalSqlHash,
+                ["dataSource"] = dsName,
+                ["virtual_filters"] = rewrite.VirtualFilters
+            };
+            AddCompiledAuditFields(fields, compiled);
             await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
             {
                 TenantId = tenantId,
-                EventType = "WEBSQL_QUERY",
+                EventType = AuditEventTypes.WebSqlQuery,
                 ActorSid = userSid,
                 TargetTable = dsName,
                 Decision = "ALLOW",
                 TraceId = Guid.NewGuid().ToString("N"),
-                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    originalSql = redactedOriginalSql,
-                    originalSqlHash,
-                    securedSql = redactedSecuredSql,
-                    dataSource = dsName,
-                    virtual_filters = rewrite.VirtualFilters
-                })
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(fields)
             }, ct).ConfigureAwait(false);
         }
 
@@ -244,12 +287,34 @@ public sealed class GovernedSqlExecutor
 
             if (dmlContext.IsDml)
             {
-                await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_EXECUTED", "ALLOW", securedSql, affectedRows: 0, reason: null, synthetic: true, ct).ConfigureAwait(false);
+                await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_EXECUTED", "ALLOW", compiled, affectedRows: 0, reason: null, synthetic: true).ConfigureAwait(false);
             }
 
-            using var syntheticReader = new SyntheticDataTableReader(securedSql);
+            // G-11: only after a successful Compile, and only the compiled text (markers, never a bound value).
+            using var syntheticReader = new SyntheticDataTableReader(compiled.Sql);
             await rowWriter(syntheticReader, ct).ConfigureAwait(false);
-            return securedSql;
+            return compiled.Sql;
+        }
+
+        // SEC-X1-14: the binder dialect comes from the connection provider and must be the dialect the statement was compiled for.
+        // An unmapped provider no longer skips the session initializer silently: it fails closed before a connection or command exists.
+        if (!DataSourceProvider.TryResolveDialect(connOptions.Provider, out var connectionDialect) ||
+            !SqlDialectMapper.TryToTargetDialect(connectionDialect, out var binderDialect) ||
+            binderDialect != compiled.Dialect)
+        {
+            _logger?.LogError(
+                "WebSQL refused to execute: the provider of data source {DataSource} does not map to the dialect {CompiledDialect} the statement was compiled for.",
+                dsName, compiled.Dialect);
+            throw new GovernedSqlException(GovernedSqlErrorCodes.CompilerInvariant, compiled.Dialect);
+        }
+
+        var binder = CompiledSqlBinders.For(binderDialect);
+
+        if (dmlContext.IsDml)
+        {
+            // L-2: the audit key is resolved before the statement can write. A key that cannot be read fails the statement closed here,
+            // not after the commit (a committed write without its audit record).
+            _digester.EnsureKey();
         }
 
         var maxConcurrentReads = _options.Value.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
@@ -281,24 +346,67 @@ public sealed class GovernedSqlExecutor
         }
 
         DbTransaction? tx = null;
-        bool txCommitted = false;
+        bool txCompleted = false;
         try
         {
             await using var connection = await _connectionFactory.CreateOpenConnectionAsync(connOptions, ct).ConfigureAwait(false);
 
-            if (GovernedSqlExecutionService.TryMapProviderToDialect(connOptions.Provider, out var connectionDialect))
-            {
-                var userSid = user.FindFirst(ClaimTypes.PrimarySid)?.Value
-                              ?? user.FindFirst("sub")?.Value;
+            var sessionSid = user.FindFirst(ClaimTypes.PrimarySid)?.Value
+                             ?? user.FindFirst("sub")?.Value;
+            tx = await _sessionInitializer.InitializeSessionAsync(
+                connection,
+                connectionDialect,
+                tenantId,
+                userSid: sessionSid,
+                purpose: null,
+                requireTransaction: true,
+                ct: ct).ConfigureAwait(false);
 
-                tx = await _sessionInitializer.InitializeSessionAsync(
-                    connection,
-                    connectionDialect,
-                    tenantId,
-                    userSid: userSid,
-                    purpose: null,
-                    requireTransaction: true,
-                    ct: ct).ConfigureAwait(false);
+            int commandTimeout = Math.Max(1, _options.Value.WebSql.ExecutionTimeoutSeconds);
+
+            if (dmlContext.IsDml)
+            {
+                // SEC-X1-06: the session initializer gives no transaction on SQL Server, Oracle and SQLite, so one is begun here. From the
+                // call on, the checked executor is the single owner of the completion (commit or rollback); this method only disposes it.
+                tx ??= await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+                txCompleted = true;
+
+                var limits = new CheckedDmlLimits(commandTimeout, _options.Value.WebSql.MaxAffectedRows);
+                int affectedRows;
+                try
+                {
+                    var checkedTx = tx;
+                    affectedRows = await _executionGuard.RunAsync(
+                        connection,
+                        TimeSpan.FromSeconds(commandTimeout),
+                        () => CompiledSqlBinders.CheckedExecutorFor(binderDialect).ExecuteInTransactionAsync(checkedTx, compiled, clientValues, limits, ct),
+                        ct).ConfigureAwait(false);
+                }
+                catch (Exception dmlEx)
+                {
+                    bool rejected = dmlEx is DmlAffectedRowsLimitException or DmlCheckOptionViolationException;
+                    try
+                    {
+                        await RecordDmlAuditAsync(
+                            tenantId, user, dsName, dmlContext,
+                            rejected ? "WEBSQL_DML_REJECTED" : "WEBSQL_DML_FAILED", "DENY", compiled,
+                            affectedRows: null, reason: rejected ? ErrorCodeOf(dmlEx) : dmlEx.GetType().Name, synthetic: false).ConfigureAwait(false);
+                    }
+                    catch (Exception auditEx)
+                    {
+                        // The statement's own failure is what the caller must see, not a failure of its audit.
+                        _logger?.LogError(auditEx, "WebSQL DML failure audit could not be written on data source {DataSource}.", dsName);
+                    }
+
+                    throw;
+                }
+
+                await RecordCommittedDmlAuditAsync(tenantId, user, dsName, dmlContext, compiled, affectedRows).ConfigureAwait(false);
+
+                using var emptyTable = new DataTable();
+                using var emptyReader = emptyTable.CreateDataReader();
+                await rowWriter(emptyReader, ct).ConfigureAwait(false);
+                return compiled.Sql;
             }
 
             await using var command = connection.CreateCommand();
@@ -306,88 +414,59 @@ public sealed class GovernedSqlExecutor
             {
                 command.Transaction = tx;
             }
-            command.CommandText = securedSql;
-            command.CommandTimeout = Math.Max(1, _options.Value.WebSql.ExecutionTimeoutSeconds);
 
-            foreach (var (paramName, paramVal) in rewrite.InternalParameters)
-            {
-                var p = command.CreateParameter();
-                p.ParameterName = paramName.StartsWith('@') ? paramName : "@" + paramName;
-                p.Value = paramVal ?? DBNull.Value;
-                command.Parameters.Add(p);
-            }
+            command.CommandTimeout = commandTimeout;
+            binder.Bind(command, compiled, clientValues);
 
-            if (request.Parameters != null)
-            {
-                var internalParamNames = new HashSet<string>(
-                    rewrite.InternalParameters.Keys.Select(k => k.StartsWith('@') ? k : "@" + k),
-                    StringComparer.OrdinalIgnoreCase);
-
-                var boundNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var (paramName, paramVal) in request.Parameters)
+            // SEC-X1-10: the execution and the streaming of the rows run under the provider guard (SQLite interrupts at the timeout).
+            await _executionGuard.RunAsync(
+                connection,
+                TimeSpan.FromSeconds(commandTimeout),
+                async () =>
                 {
-                    string normalizedName = paramName.StartsWith('@') ? paramName : "@" + paramName;
-                    if (internalParamNames.Contains(normalizedName))
+                    await using (var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false))
                     {
-                        throw new WebSqlPolicyException($"Client parameter '{paramName}' collides with an internal security rewrite parameter.");
+                        if (rewrite.DeliveredRowLimit > 0)
+                        {
+                            await rowWriter(new RowLimitedDataReader(reader, rewrite.DeliveredRowLimit), ct).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            await rowWriter(reader, ct).ConfigureAwait(false);
+                        }
                     }
 
-                    if (!boundNames.Add(normalizedName))
-                    {
-                        continue;
-                    }
-
-                    var p = command.CreateParameter();
-                    p.ParameterName = normalizedName;
-                    p.Value = WebSqlParameterValues.Normalize(paramVal) ?? DBNull.Value;
-                    command.Parameters.Add(p);
-                }
-            }
-
-            if (dmlContext.IsDml)
-            {
-                await ExecuteDmlInTransactionAsync(connection, command, tx, tenantId, user, dsName, dmlContext, securedSql, ct).ConfigureAwait(false);
-                txCommitted = true;
-
-                using var emptyTable = new DataTable();
-                using var emptyReader = emptyTable.CreateDataReader();
-                await rowWriter(emptyReader, ct).ConfigureAwait(false);
-                return securedSql;
-            }
-
-            await using (var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false))
-            {
-                if (rewrite.DeliveredRowLimit > 0)
-                {
-                    await rowWriter(new RowLimitedDataReader(reader, rewrite.DeliveredRowLimit), ct).ConfigureAwait(false);
-                }
-                else
-                {
-                    await rowWriter(reader, ct).ConfigureAwait(false);
-                }
-            }
+                    return true;
+                },
+                ct).ConfigureAwait(false);
 
             if (tx != null)
             {
                 await tx.CommitAsync(ct).ConfigureAwait(false);
-                txCommitted = true;
+                txCompleted = true;
             }
-            return securedSql;
+            return compiled.Sql;
         }
         catch (Exception ex)
         {
+            // A driver error is reduced to a stable code first; the original is logged server-side only (see SanitizeProviderError).
+            var sanitized = SanitizeProviderError(ex, binderDialect, dsName);
+            var reported = sanitized ?? ex;
+
             if (_auditLogRepository != null && !dmlContext.IsDml)
             {
                 try
                 {
-                    var (redactedOriginalSql, originalSqlHash) = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.AnonymizeSqlForAudit(request.Sql);
+                    var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
                     var userSid = user.GetUserSid() ?? new Sid("anonymous");
+                    // SEC-X1-12: the stable code and the exception type, never ex.Message (a driver message can carry key values).
                     var detailsJson = new AuditDetailsBuilder()
                         .WithField("originalSql", redactedOriginalSql)
                         .WithField("originalSqlHash", originalSqlHash)
                         .WithField("dataSource", dsName)
                         .WithField("reasonCode", (ex is OperationCanceledException && ct.IsCancellationRequested) ? "CLIENT_ABORTED" : ex.GetType().Name)
-                        .WithField("error", ex.Message)
+                        .WithField("errorCode", ErrorCodeOf(reported))
+                        .WithField("errorType", ex.GetType().Name)
                         .Build();
 
                     await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
@@ -406,7 +485,7 @@ public sealed class GovernedSqlExecutor
                 }
             }
 
-            if (tx != null && !txCommitted)
+            if (tx != null && !txCompleted)
             {
                 try
                 {
@@ -417,6 +496,12 @@ public sealed class GovernedSqlExecutor
                     _logger?.LogWarning(rbEx, "Failed to rollback WebSQL transaction.");
                 }
             }
+
+            if (sanitized is not null)
+            {
+                throw sanitized;
+            }
+
             throw;
         }
         finally
@@ -435,80 +520,91 @@ public sealed class GovernedSqlExecutor
         }
     }
 
-    private async Task ExecuteDmlInTransactionAsync(
-        DbConnection connection,
-        DbCommand command,
-        DbTransaction? existingTx,
-        TenantId tenantId,
-        ClaimsPrincipal user,
-        string dsName,
-        DmlAuditContext dmlContext,
-        string securedSql,
-        CancellationToken ct)
+    /// <summary>
+    /// A driver error becomes a typed error with a stable code and a fixed message; the original is logged server-side only. A timeout
+    /// or an unavailable source is classified first and keeps its own status (504, 503). Everything that is not a driver error
+    /// (policy and binder refusals, cancellation, the gateway's own exceptions) passes through unchanged.
+    /// </summary>
+    private GovernedSqlException? SanitizeProviderError(Exception error, TargetSqlDialect dialect, string dataSourceName)
     {
-        bool ownsTx = false;
-        DbTransaction transaction;
-        if (existingTx != null)
+        if (error is GovernedSqlException || !IsProviderError(error))
         {
-            transaction = existingTx;
-        }
-        else
-        {
-            transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-            command.Transaction = transaction;
-            ownsTx = true;
+            return null;
         }
 
-        long maxAffectedRows = _options.Value.WebSql.MaxAffectedRows;
-        int affectedRows;
-        try
+        if (DataAccessErrorClassifier.Classify(error) is DataAccessErrorKind.Timeout or DataAccessErrorKind.Unavailable)
         {
-            try
-            {
-                affectedRows = await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                try
-                {
-                    await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
-                }
-                catch (Exception rbEx)
-                {
-                    _logger?.LogWarning(rbEx, "Failed to rollback WebSQL DML transaction.");
-                }
-
-                await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_FAILED", "DENY", securedSql, affectedRows: null, reason: ex.GetType().Name, synthetic: false, ct).ConfigureAwait(false);
-                throw;
-            }
-
-            if (maxAffectedRows > 0 && (affectedRows < 0 || affectedRows > maxAffectedRows))
-            {
-                try
-                {
-                    await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
-                }
-                catch (Exception rbEx)
-                {
-                    _logger?.LogWarning(rbEx, "Failed to rollback WebSQL DML transaction after row limit exceeded.");
-                }
-
-                await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_REJECTED", "DENY", securedSql, affectedRows, reason: "MaxAffectedRows exceeded; rolled back", synthetic: false, ct).ConfigureAwait(false);
-
-                throw new WebSqlPolicyException(affectedRows < 0
-                    ? "The number of rows affected by the DML statement could not be verified against WebSql.MaxAffectedRows. The statement was rolled back."
-                    : $"The DML statement affected {affectedRows} rows, which exceeds the configured limit of {maxAffectedRows} (WebSql.MaxAffectedRows). The statement was rolled back.");
-            }
-
-            await transaction.CommitAsync(ct).ConfigureAwait(false);
-            await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_EXECUTED", "ALLOW", securedSql, affectedRows, reason: null, synthetic: false, ct).ConfigureAwait(false);
+            return null;
         }
-        finally
+
+        _logger?.LogWarning(error, "WebSQL provider error on data source {DataSource} ({Dialect}); the caller receives a sanitized error. TraceId={TraceId}",
+            dataSourceName, dialect, Activity.Current?.TraceId.ToString());
+        return DmlErrorSanitizer.Map(dialect, error);
+    }
+
+    private static bool IsProviderError(Exception error)
+    {
+        for (var current = error; current is not null; current = current.InnerException)
         {
-            if (ownsTx)
+            if (current is DbException)
             {
-                await transaction.DisposeAsync().ConfigureAwait(false);
+                return true;
             }
+        }
+
+        return false;
+    }
+
+    private static string ErrorCodeOf(Exception error) =>
+        SqlCompilerErrorMapper.TryMap(error, out var mapping) ? mapping.Code : "UNMAPPED";
+
+    /// <summary>The audit reason of a rejected statement: the gateway's own policy message, or the stable code of an engine rejection.</summary>
+    private static string DeniedReason(Exception error) => error switch
+    {
+        WebSqlPolicyException => error.Message,
+        SecurityException => ErrorCodeOf(error),
+        _ => SqlCompilerErrorMapper.TryMap(error, out var mapping) ? mapping.Code : BadRequestCode
+    };
+
+    /// <summary>The audit code of an <see cref="ArgumentException"/> that no mapper rule owns (an empty or oversized statement).</summary>
+    private const string BadRequestCode = "SQL_BAD_REQUEST";
+
+    /// <summary>
+    /// L-4: what the compile half refuses and audits before it rethrows: every security exception, and every exception that the error
+    /// mapper owns or that is a bad request (<see cref="ArgumentException"/>). A client that cancelled is not a rejection.
+    /// </summary>
+    private static bool IsAuditedRejection(Exception error, CancellationToken ct) =>
+        error is SecurityException ||
+        (!(error is OperationCanceledException && ct.IsCancellationRequested) &&
+         (error is ArgumentException || SqlCompilerErrorMapper.TryMap(error, out _)));
+
+    private static IReadOnlyDictionary<string, object?> BuildClientValues(IReadOnlyDictionary<string, object?>? parameters)
+    {
+        var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        if (parameters == null)
+        {
+            return values;
+        }
+
+        foreach (var (name, value) in parameters)
+        {
+            // The first spelling wins when two names differ only by case (as before).
+            values.TryAdd(name.TrimStart('@'), WebSqlParameterValues.Normalize(value));
+        }
+
+        return values;
+    }
+
+    /// <summary>X1.2 / SEC-ADG-23: compiler version, dialect, bind count and the digest; the compiled text only with Audit:StoreCompiledSql.</summary>
+    private void AddCompiledAuditFields(Dictionary<string, object?> fields, CompiledSql compiled)
+    {
+        fields["compiler_version"] = compiled.CompilerVersion;
+        fields["dialect"] = compiled.Dialect.ToString();
+        fields["bind_count"] = compiled.Parameters.Length;
+        fields["sql.compiled_digest"] = _digester.Compute(compiled);
+        if (_options.Value.Audit.StoreCompiledSql)
+        {
+            fields["compiledSql"] = compiled.Sql;
         }
     }
 
@@ -519,18 +615,37 @@ public sealed class GovernedSqlExecutor
         DmlAuditContext dmlContext,
         string eventType,
         string decision,
-        string sqlForHash,
+        CompiledSql? compiled,
         int? affectedRows,
         string? reason,
         bool synthetic,
-        CancellationToken ct)
+        string? originalSql = null)
     {
         if (_auditLogRepository == null)
         {
             return;
         }
 
-        string sqlHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sqlForHash)));
+        var fields = new Dictionary<string, object?>
+        {
+            ["statementType"] = dmlContext.StatementType?.ToString(),
+            ["tables"] = dmlContext.Tables,
+            ["dataSource"] = dsName,
+            ["affectedRows"] = affectedRows,
+            ["maxAffectedRows"] = _options.Value.WebSql.MaxAffectedRows,
+            ["reason"] = reason,
+            ["synthetic"] = synthetic
+        };
+        if (compiled is not null)
+        {
+            AddCompiledAuditFields(fields, compiled);
+        }
+        else if (originalSql is not null)
+        {
+            // A statement rejected before it compiled has no digest; the hash of its (literal-free) original text identifies it.
+            fields["originalSqlHash"] = _digester.Anonymize(originalSql).OriginalSqlHash;
+        }
+
         await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
         {
             TenantId = tenantId,
@@ -539,17 +654,29 @@ public sealed class GovernedSqlExecutor
             TargetTable = string.Join(",", dmlContext.Tables),
             Decision = decision,
             TraceId = Guid.NewGuid().ToString("N"),
-            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
-            {
-                statementType = dmlContext.StatementType?.ToString(),
-                tables = dmlContext.Tables,
-                dataSource = dsName,
-                affectedRows,
-                maxAffectedRows = _options.Value.WebSql.MaxAffectedRows,
-                sqlSha256 = sqlHash,
-                reason,
-                synthetic
-            })
-        }, ct).ConfigureAwait(false);
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(fields)
+            // M-1: a DML audit never takes the request token. The statement may already be committed; a client that disconnects must not
+            // leave it without its audit record.
+        }, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The audit of a DML that is already committed. An audit failure here is never a request failure (the client would retry and
+    /// duplicate the write): it is logged as Critical and counted for the operators.
+    /// </summary>
+    private async Task RecordCommittedDmlAuditAsync(
+        TenantId tenantId, ClaimsPrincipal user, string dsName, DmlAuditContext dmlContext, CompiledSql compiled, int affectedRows)
+    {
+        try
+        {
+            await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, AuditEventTypes.WebSqlDmlExecuted, "ALLOW", compiled, affectedRows, reason: null, synthetic: false).ConfigureAwait(false);
+        }
+        catch (Exception auditEx)
+        {
+            GatewayDiagnostics.DmlAuditFailedCounter.Add(1);
+            _logger?.LogCritical(auditEx,
+                "WebSQL DML on data source {DataSource} is committed but its audit record could not be written. TraceId={TraceId}",
+                dsName, Activity.Current?.TraceId.ToString());
+        }
     }
 }

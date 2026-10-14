@@ -33,6 +33,14 @@ public sealed class DifferentialFixture<TDatabase> : IAsyncLifetime
     /// <summary>One entry per scenario whose AST leg is unavailable (empty when every scenario ran).</summary>
     public IReadOnlyList<string> AstUnavailable { get; private set; } = [];
 
+    /// <summary>Corpus statements (per scenario) that have no frozen legacy result; a non-empty list fails the gate.</summary>
+    public IReadOnlyList<string> MissingFrozen { get; private set; } = [];
+
+    /// <summary>The recorded legacy results of the database's dialect (see <see cref="FrozenLegacy"/>).</summary>
+    public FrozenLegacy Frozen => _frozen ??= FrozenLegacy.Load(Database.Dialect);
+
+    private FrozenLegacy? _frozen;
+
     public Task InitializeAsync() => GateProfile.DifferentialEnabled ? Database.InitializeAsync() : Task.CompletedTask;
 
     public Task DisposeAsync() => GateProfile.DifferentialEnabled ? Database.DisposeAsync() : Task.CompletedTask;
@@ -44,6 +52,7 @@ public sealed class DifferentialFixture<TDatabase> : IAsyncLifetime
         {
             var results = new List<StatementResult>();
             var unavailable = new List<string>();
+            var missing = new List<string>();
             foreach (var scenario in Enum.GetValues<PolicyScenario>())
             {
                 var runner = new GateRunner(Database, scenario);
@@ -56,7 +65,12 @@ public sealed class DifferentialFixture<TDatabase> : IAsyncLifetime
                 var oracle = new PolicyOracle(scenario);
                 foreach (var statement in GateProfile.Corpus())
                 {
-                    var legacy = await runner.RunAsync(EngineKind.Legacy, statement);
+                    if (!Frozen.TryGet(statement.Id, scenario, out var legacy))
+                    {
+                        missing.Add($"{statement.Id}/{scenario}");
+                        continue;
+                    }
+
                     var ast = await runner.RunAsync(EngineKind.Ast, statement);
                     var legacyViolations = legacy switch
                     {
@@ -69,6 +83,7 @@ public sealed class DifferentialFixture<TDatabase> : IAsyncLifetime
             }
 
             AstUnavailable = unavailable;
+            MissingFrozen = missing;
             WriteReport(results);
             if (Environment.GetEnvironmentVariable("SQLGATE_UPDATE_ACCEPTED") is { Length: > 0 } acceptedPath)
             {
@@ -153,6 +168,14 @@ public static class DifferentialRules
         {
             Assert.Fail($"The AST leg is unavailable on {dialect}: {string.Join("; ", unavailableScenarios)}");
         }
+    }
+
+    /// <summary>A corpus statement without a frozen legacy result cannot be classified: the gate fails instead of comparing with nothing.</summary>
+    public static void RequireFrozenLegacy(string dialect, IReadOnlyList<string> missing)
+    {
+        if (missing.Count == 0) return;
+        Assert.Fail($"{missing.Count} corpus statements on {dialect} have no frozen legacy result (golden-results/legacy-{dialect}.json is not regenerated; " +
+                    $"a new statement needs a documented decision). First: {string.Join(", ", missing.Take(10))}");
     }
 
     /// <summary>A confirmed legacy defect is skipped only while the AST path has zero oracle violations; otherwise it stays red.</summary>

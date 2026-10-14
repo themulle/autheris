@@ -200,7 +200,8 @@ public sealed class WebSqlHeterogeneousJoinTests
         var governedSqlService = new GovernedSqlExecutionService(
             Options.Create(options),
             auditRepo,
-            tableRepository: tableRepo,
+            GovernedTestSupport.Guard,
+            tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             sqlEngine: sqlEngine,
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             federatedExecutionService: federatedService);

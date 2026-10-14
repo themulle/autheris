@@ -27,7 +27,6 @@ public sealed class PostgreSqlDialectGenerator : SqlDialectGeneratorBase
         "varbinary" => "bytea",
         _ => StandardTypeName(type)
     };
-    public override int MaxParameterBudget => 65535;
 
     /// <summary>Trino <c>replace(s, search)</c> removes the search string; PostgreSQL <c>replace</c> needs the replacement (an empty bound string).</summary>
     protected override void GenerateFunctionCall(FunctionCallExpression fn, ref ValueStringBuilder builder, SqlEmitterContext context)

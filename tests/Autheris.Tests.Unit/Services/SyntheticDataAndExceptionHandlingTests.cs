@@ -143,10 +143,10 @@ public sealed class SyntheticDataAndExceptionHandlingTests
             WebSql = new WebSqlOptions { Enabled = true, DefaultDataSourceName = "crm_db", AllowedDataSources = ["crm_db"] }
         });
         var service = new GovernedSqlExecutionService(
-            options,
+            options, executionGuard: GovernedTestSupport.Guard,
             consentResolution: _resolutionService,
             consentRepository: _consentRepo,
-            tableRepository: _metadataRepo,
+            tableRepository: _metadataRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(_metadataRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             environment: null); // null environment
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity([

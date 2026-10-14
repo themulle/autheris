@@ -12,6 +12,7 @@ using static TrinoSqlEngine.Tests.Compiler.PolicyFixtures;
 
 namespace TrinoSqlEngine.Tests.Compiler;
 
+[Trait("Category", "SqlGate")]
 public class DuckDbCapabilityTests
 {
     private static readonly DialectCapabilities Caps = DialectCapabilityTable.Default.Get(TargetSqlDialect.DuckDb);
@@ -47,6 +48,7 @@ public class DuckDbCapabilityTests
     }
 }
 
+[Trait("Category", "SqlGate")]
 public class DuckDbCheckerTests
 {
     private static readonly ImmutableArray<BoundParameter> None = ImmutableArray<BoundParameter>.Empty;
@@ -95,6 +97,7 @@ public class DuckDbCheckerTests
     }
 }
 
+[Trait("Category", "SqlGate")]
 public class DuckDbGeneratorTests
 {
     private static CompiledSql Gen(string sql, IDictionary<string, PolicyValue>? values = null) =>

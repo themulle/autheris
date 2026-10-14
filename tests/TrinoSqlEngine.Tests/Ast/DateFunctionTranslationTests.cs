@@ -7,21 +7,15 @@ using TrinoSqlEngine.Ast.Builder;
 using Xunit;
 
 /// <summary>
-/// Virtual filters, phase 7b: filters are written in Trino syntax. With <see cref="RlsOptions.TranslateTrinoDateFunctions"/>
+/// Virtual filters, phase 7b: filters are written in Trino syntax. With the date function translation of the request
 /// the AST compiler translates <c>date_add</c>, <c>date_trunc</c>, <c>now()</c> and <c>x ± INTERVAL</c> into each dialect's
 /// date arithmetic. Without the option (WebSQL) nothing changes.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public sealed class DateFunctionTranslationTests
 {
-    private readonly FastSqlEngine _engine = new();
-
     private string Generate(string expression, TargetSqlDialect dialect, bool translate = true) =>
-        _engine.GenerateGovernedSql($"SELECT id FROM orders WHERE ts >= {expression}", new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'"),
-            TargetDialect = dialect,
-            TranslateTrinoDateFunctions = translate
-        });
+        AstEmit.Inline($"SELECT id FROM orders WHERE tenant_id = 't1' AND ts >= {expression}", dialect, translateDates: translate);
 
     [Theory]
     [InlineData(TargetSqlDialect.SqlServer, "DATEADD(day, -1, SYSDATETIMEOFFSET())")]

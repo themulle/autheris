@@ -62,7 +62,6 @@ public sealed class WebSqlTrinoProtocolTests
 
         var queryResult = new GovernedSqlResult(
             OriginalSql: "SELECT 1 AS num",
-            RewrittenSql: "SELECT 1 AS num",
             Columns: new[] { "num" },
             Rows: new[] { new Dictionary<string, object?> { ["num"] = 1 } },
             RowCount: 1,
@@ -130,7 +129,7 @@ public sealed class WebSqlTrinoProtocolTests
         serviceProvider.GetService(typeof(IGovernedSqlExecutionService)).Returns(sqlExecutionService);
         using var statementManager = new WebSqlStatementManager(scopeFactory, NullLogger<WebSqlStatementManager>.Instance);
         sqlExecutionService.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(new GovernedSqlResult("q", "q", ["num"], [], 0, 1));
+            .Returns(new GovernedSqlResult("q", ["num"], [], 0, 1));
 
         var services = new ServiceCollection();
         services.AddSingleton<IWebSqlStatementManager>(statementManager);
@@ -213,7 +212,6 @@ public sealed class WebSqlTrinoProtocolTests
         // Now simulate completion of query
         tcs.SetResult(new GovernedSqlResult(
             OriginalSql: "SELECT * FROM large_table",
-            RewrittenSql: "SELECT * FROM large_table",
             Columns: new[] { "id" },
             Rows: new[] { new Dictionary<string, object?> { ["id"] = 99 } },
             RowCount: 1,

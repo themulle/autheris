@@ -59,7 +59,6 @@ public sealed class WebSqlStatementManagerTests : IDisposable
         var request = new GovernedSqlQueryRequest("SELECT id, name FROM default.dbo.users");
         var result = new GovernedSqlResult(
             OriginalSql: request.Sql,
-            RewrittenSql: "SELECT [id], [name] FROM [dbo].[users]",
             Columns: new[] { "id", "name" },
             Rows: new[]
             {
@@ -112,7 +111,6 @@ public sealed class WebSqlStatementManagerTests : IDisposable
         // Now complete the query and poll via statement ID
         var result = new GovernedSqlResult(
             OriginalSql: request.Sql,
-            RewrittenSql: "SELECT * FROM [dbo].[big_table]",
             Columns: new[] { "val" },
             Rows: new[] { new Dictionary<string, object?> { ["val"] = 42 } },
             RowCount: 1,
@@ -134,7 +132,7 @@ public sealed class WebSqlStatementManagerTests : IDisposable
         // Arrange
         var request = new GovernedSqlQueryRequest("SELECT 1");
         _sqlExecutionService.ExecuteQueryBufferedAsync(request, TestUser, TestTenant, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new GovernedSqlResult("SELECT 1", "SELECT 1", new[] { "1" }, Array.Empty<IReadOnlyDictionary<string, object?>>(), 0, 5)));
+            .Returns(Task.FromResult(new GovernedSqlResult("SELECT 1", new[] { "1" }, Array.Empty<IReadOnlyDictionary<string, object?>>(), 0, 5)));
 
         var status = await _manager.SubmitOrWaitAsync(request, TestUser, TestTenant, TimeSpan.FromMilliseconds(10));
 
@@ -277,7 +275,7 @@ public sealed class WebSqlStatementManagerTests : IDisposable
             maxSessionsPerUser: 2,
             maxTotalSessions: 10);
 
-        var fastResult = new GovernedSqlResult("SELECT 1", "SELECT 1", ["id"], [new Dictionary<string, object?> { ["id"] = 1 }], 1, 5);
+        var fastResult = new GovernedSqlResult("SELECT 1", ["id"], [new Dictionary<string, object?> { ["id"] = 1 }], 1, 5);
         _sqlExecutionService.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), TestUser, TestTenant, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(fastResult));
 

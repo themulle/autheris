@@ -98,21 +98,20 @@ public sealed class GovernedSqlExecutionTenantColumnTests
         var factory = Substitute.For<ISqlConnectionFactory>();
         var conn = Substitute.For<DbConnection>();
         var cmd = Substitute.For<DbCommand>();
+        cmd.WireParameters();   // the binder owns the parameters of a governed command
         var reader = Substitute.For<DbDataReader>();
         reader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
         reader.FieldCount.Returns(0);
         cmd.ExecuteReaderAsync(Arg.Any<CommandBehavior>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
-        cmd.Parameters.Returns(Substitute.For<DbParameterCollection>());
-        cmd.CreateParameter().Returns(Substitute.For<DbParameter>());
         conn.CreateCommand().Returns(cmd);
         factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(conn));
 
         var service = new GovernedSqlExecutionService(
-            Options.Create(options),
+            Options.Create(options), executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: null,
             consentResolution: resolution,
-            tableRepository: repo,
+            tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: factory,
             clientIpResolver: null,
             environment: null,
@@ -139,7 +138,9 @@ public sealed class GovernedSqlExecutionTenantColumnTests
             new TenantId(Tenant));
 
         cmd.CommandText.ShouldNotBeNull();
-        cmd.CommandText.ShouldContain("tenant_id = 'tenant_test'");
+        // X1: the tenant is a bound parameter of the compiled statement, never text.
+        cmd.CommandText.ShouldNotContain("tenant_test");
+        cmd.BoundValues().ShouldContain("tenant_test");
     }
 
     [Fact]
@@ -156,6 +157,8 @@ public sealed class GovernedSqlExecutionTenantColumnTests
             new TenantId(Tenant));
 
         cmd.CommandText.ShouldNotBeNull();
-        cmd.CommandText.ShouldContain("tenant_id = 'tenant_test'");
+        // X1: the tenant is a bound parameter of the compiled statement, never text.
+        cmd.CommandText.ShouldNotContain("tenant_test");
+        cmd.BoundValues().ShouldContain("tenant_test");
     }
 }

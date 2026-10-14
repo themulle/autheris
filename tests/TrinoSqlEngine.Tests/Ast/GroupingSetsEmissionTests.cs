@@ -9,16 +9,11 @@ using Xunit;
 /// Wunsch 4, Phase 5: ROLLUP, CUBE and GROUPING SETS used to remove the whole GROUP BY (silently different results),
 /// GROUP BY DISTINCT lost its quantifier and GROUPING(…) failed with 500.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public sealed class GroupingSetsEmissionTests
 {
-    private readonly FastSqlEngine _engine = new();
-
     private string Generate(string sql, TargetSqlDialect dialect) =>
-        _engine.GenerateGovernedSql(sql, new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'"),
-            TargetDialect = dialect
-        });
+        AstEmit.Inline(sql, dialect);
 
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql, "GROUP BY ROLLUP (\"dept\")")]

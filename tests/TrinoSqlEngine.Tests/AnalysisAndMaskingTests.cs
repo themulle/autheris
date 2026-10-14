@@ -6,6 +6,7 @@ using System.Linq;
 using TrinoSqlEngine.Analysis;
 using Xunit;
 
+[Trait("Category", "SqlGate")]
 public class AnalysisAndMaskingTests
 {
     private readonly FastSqlEngine _engine = new();
@@ -75,77 +76,33 @@ public class AnalysisAndMaskingTests
         Assert.Equal(50, meta.ExplicitLimitValue);
     }
 
-    [Fact]
-    public void RewriteRls_WithColumnMasking_PushesDownMaskExpressions()
+    // The string masking provider test (RewriteRls_WithColumnMasking_PushesDownMaskExpressions) is replaced by the typed mask tests
+    // (Compiler/MaskTests: TypedInjection_ProjectsMaskExpression_ForMaskedColumns_AndCollectsValues and the per-kind mask tests).
+
+    private static string CompileWithMaxRows(string sql)
     {
-        var options = new RlsOptions
-        {
-            AppendTableAlias = true,
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'"),
-            TableColumnsProvider = tableName => tableName.Equals("users", StringComparison.OrdinalIgnoreCase)
-                ? new[] { "id", "email", "salary", "tenant_id" }
-                : null,
-            ColumnMaskingProvider = new DefaultColumnMaskingPolicyProvider(
-                hasMaskPredicate: (tbl, col) => tbl.Equals("users", StringComparison.OrdinalIgnoreCase) && 
-                                                (col.Equals("email", StringComparison.OrdinalIgnoreCase) || col.Equals("salary", StringComparison.OrdinalIgnoreCase)),
-                maskExpressionProvider: (tbl, col) => col.ToLowerInvariant() switch
-                {
-                    "email" => "'***@masked.com'",
-                    "salary" => "0",
-                    _ => col
-                })
-        };
-
-        string sql = "SELECT id, email, salary FROM users";
-        string secured = _engine.RewriteRls(sql.AsMemory(), options);
-
-        // SEC M-24: catalog column names are emitted as delimited identifiers.
-        Assert.Contains("(SELECT \"id\", '***@masked.com' AS \"email\", 0 AS \"salary\", \"tenant_id\" FROM users WHERE tenant_id = 't1') AS users", secured);
+        var env = new TrinoSqlEngine.Tests.Security.ProbeEnv(TargetSqlDialect.PostgreSql);
+        return env.Engine.Compile(sql.AsMemory(), env.Request(enforcedMaxRows: 100), System.Threading.CancellationToken.None).Sql.Trim();
     }
 
     [Fact]
-    public void RewriteRls_WithEnforcedMaxRows_AppendsLimitWhenMissing()
+    public void Compile_WithEnforcedMaxRows_AppendsLimitWhenMissing()
     {
-        var options = new RlsOptions
-        {
-            EnforcedMaxRows = 100,
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'")
-        };
-
-        string sql = "SELECT * FROM customers";
-        string secured = _engine.RewriteRls(sql.AsMemory(), options);
-
-        Assert.EndsWith("LIMIT 100", secured.Trim());
+        Assert.EndsWith("LIMIT 100", CompileWithMaxRows("SELECT * FROM orders"));
     }
 
     [Fact]
-    public void RewriteRls_WithEnforcedMaxRows_ClampsExistingLimitWhenTooHigh()
+    public void Compile_WithEnforcedMaxRows_ClampsExistingLimitWhenTooHigh()
     {
-        var options = new RlsOptions
-        {
-            EnforcedMaxRows = 100,
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'")
-        };
+        string sql = CompileWithMaxRows("SELECT * FROM orders LIMIT 10000");
 
-        string sql = "SELECT * FROM customers LIMIT 10000";
-        string secured = _engine.RewriteRls(sql.AsMemory(), options);
-
-        Assert.DoesNotContain("10000", secured);
-        Assert.EndsWith("LIMIT 100", secured.Trim());
+        Assert.DoesNotContain("10000", sql);
+        Assert.EndsWith("LIMIT 100", sql);
     }
 
     [Fact]
-    public void RewriteRls_WithEnforcedMaxRows_LeavesSmallerLimitUnchanged()
+    public void Compile_WithEnforcedMaxRows_LeavesSmallerLimitUnchanged()
     {
-        var options = new RlsOptions
-        {
-            EnforcedMaxRows = 100,
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'")
-        };
-
-        string sql = "SELECT * FROM customers LIMIT 25";
-        string secured = _engine.RewriteRls(sql.AsMemory(), options);
-
-        Assert.EndsWith("LIMIT 25", secured.Trim());
+        Assert.EndsWith("LIMIT 25", CompileWithMaxRows("SELECT * FROM orders LIMIT 25"));
     }
 }

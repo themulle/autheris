@@ -156,7 +156,9 @@ public sealed class CheckedDmlExecutor : ICheckedDmlExecutor
                 throw new DmlAffectedRowsLimitException(compiled.Dialect);
             }
 
-            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            // L2: every check has passed. The commit does not take the caller's token: a client that disconnects at this moment must not
+            // leave the outcome to a cancellation race between the commit and the rollback of the catch block.
+            await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
             return affected;
         }
         catch

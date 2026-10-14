@@ -49,7 +49,7 @@ public sealed class AstCompilerOracleDmlExecutionTests : AstCompilerDmlContract,
 
     private string Physical(string logical) => logical == "Orders" ? "ORD_" + _suffix : "ENT_" + _suffix;
 
-    private DataSourceConnectionOptions Options() => new() { Provider = "Oracle", ConnectionString = _fx.AppConnectionString };
+    private DataSourceConnectionOptions Options() => new() { Provider = "Oracle", ConnectionString = _fx.AppConnectionString, DefaultSchema = AstCompilerOracleFixture.AppUser };
 
     private async Task<DbConnection> OpenAsync()
     {

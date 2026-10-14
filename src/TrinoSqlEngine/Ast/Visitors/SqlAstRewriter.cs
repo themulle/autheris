@@ -83,7 +83,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
             SubscriptExpression sub => VisitSubscriptExpression(sub),
             ExtractExpression ext => VisitExtractExpression(ext),
             ParenthesizedExpression paren => VisitParenthesizedExpression(paren),
-            TrustedSqlExpression trusted => trusted,
+            NamedBindMarkerExpression marker => marker,
             TypedLiteralExpression typed => typed,
             CurrentDateTimeExpression current => current,
             SubstringExpression substring => VisitSubstring(substring),

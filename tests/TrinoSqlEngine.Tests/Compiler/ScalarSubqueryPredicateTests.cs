@@ -9,6 +9,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// WP-X0-fix item 4: a scalar subquery in a select list kept the projection context of the outer query, so its injected WHERE
 /// predicate was emitted as the integer <c>CASE WHEN ... THEN 1 ELSE 0 END</c> that SQL Server and Oracle reject as a condition.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public class ScalarSubqueryPredicateTests
 {
     private static readonly InMemoryTableCatalog Catalog = new(new[]

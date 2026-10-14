@@ -53,7 +53,7 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-DBT-05** | Streaming dbt Metadata Ingestion & Automated Model Sync | [f-dbt-05-streaming-metadata-ingestion.md](f-dbt-05-streaming-metadata-ingestion.md) |
 | **F-DBT-6** | Policy & RLS Auto-Sync from dbt Metadata | [f-dbt-06-policy-rls-sync.md](f-dbt-06-policy-rls-sync.md) |
 | **F-DIALECT-01** | Multi-Target SQL AST Compiler & Native Dialect Pushdown (superseded by F-DIALECT-02) | [f-dialect-01-ast-target-dialect-pushdown.md](f-dialect-01-ast-target-dialect-pushdown.md) |
-| **F-DIALECT-02** | Governed AST SQL Compiler (DQL and DML: SQL Server, PostgreSQL, DuckDB, Oracle; Databricks experimental) | [f-dialect-02-ast-sql-compiler.md](f-dialect-02-ast-sql-compiler.md) |
+| **F-DIALECT-02** | Governed AST SQL Compiler: the single governed SQL path (DQL and DML; admitted dialects PostgreSQL, SQL Server, SQLite, Oracle; Databricks experimental) | [f-dialect-02-ast-sql-compiler.md](f-dialect-02-ast-sql-compiler.md) |
 | **F-DOC-01** | Omnichannel Semantic Documentation Passthrough | [f-doc-01-omnichannel-documentation.md](f-doc-01-omnichannel-documentation.md) |
 | **F-DX-01** | Zero-Config Developer Quickstart & Dev Portal Hub | [f-dx-01-developer-quickstart.md](f-dx-01-developer-quickstart.md) |
 | **F-EXT-01** | Generic C# DLL Plugin & Event/Webhook Subsystem | [f-ext-01-generic-plugin-events-and-webhooks.md](f-ext-01-generic-plugin-events-and-webhooks.md) |
@@ -76,7 +76,7 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-PERF-08** | Hierarchical Resource Groups & Workload Queuing | [f-perf-08-hierarchical-resource-groups.md](f-perf-08-hierarchical-resource-groups.md) |
 | **F-PERF-09** | GraphQL-to-SQL AST Single-Query Compiler | [f-perf-09-single-query-pushdown.md](f-perf-09-single-query-pushdown.md) |
 | **F-PERF-10** | Split-Engine & Zero-LOH Streaming Result Pipelining (not implemented) | [f-perf-10-streaming-pipelining.md](f-perf-10-streaming-pipelining.md) |
-| **F-PERF-11** | Multi-Tenant Isolated Query Plan Cache & Kestrel Tuning | [f-perf-11-query-plan-cache.md](f-perf-11-query-plan-cache.md) |
+| **F-PERF-11** | Query Plan Cache & Kestrel Tuning (plan cache superseded by the engine template cache of F-DIALECT-02) | [f-perf-11-query-plan-cache.md](f-perf-11-query-plan-cache.md) |
 | **F-PERF-12** | Incremental Delivery via @defer & @stream | [f-perf-12-incremental-delivery.md](f-perf-12-incremental-delivery.md) |
 | **F-PERF-13** | GraphQL Cost & Client-Tier Quota Rate Limiting (CostAndQuotaMiddleware) | [f-perf-13-cost-and-quota-rate-limiting.md](f-perf-13-cost-and-quota-rate-limiting.md) |
 | **F-SEC-04** | Relationship-Based Access Control (ReBAC via OpenFGA / Zanzibar) | [f-sec-04-rebac-openfga.md](f-sec-04-rebac-openfga.md) |

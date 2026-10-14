@@ -185,6 +185,8 @@ public static class GatewayServiceCollectionExtensions
                 sp.GetService<Microsoft.Extensions.Logging.ILogger<Autheris.Api.Extensions.DependencyInjection.GatewayEmptyListConfigurationValidator>>()));
 
         var gatewayOptions = configuration.GetSection(GatewayOptions.SectionName).Get<GatewayOptions>() ?? new GatewayOptions();
+        Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator.ValidateSqlRewriterEngine(configuration);
+        Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator.ValidateRemovedWebSqlSettings(configuration);
         ValidateGatewayOptions(gatewayOptions, environment);
 
         services.Configure<HostOptions>(o =>

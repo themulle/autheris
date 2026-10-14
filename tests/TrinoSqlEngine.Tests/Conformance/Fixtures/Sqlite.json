@@ -7254,10 +7254,10 @@
     {
       "Id": "ast-005",
       "Group": "ast",
-      "Sql": "@trusted-sql",
-      "Outcome": "ok",
-      "Expected": "SELECT UPPER(email) AS \"r\" FROM \"s\".\"t\"",
-      "Parameters": []
+      "Sql": "@named-bind-marker",
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "NotSupportedException"
     },
     {
       "Id": "ast-006",

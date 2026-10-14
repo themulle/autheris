@@ -242,7 +242,6 @@ public sealed class AsyncQueryJobManagerTests : IDisposable
         };
         var governedResult = new GovernedSqlResult(
             OriginalSql: "SELECT id, email FROM users",
-            RewrittenSql: "SELECT id, mask(email) FROM users",
             Columns: new[] { "id", "email" },
             Rows: rows,
             RowCount: 1,

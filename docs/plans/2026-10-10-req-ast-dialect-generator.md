@@ -6,7 +6,7 @@
 **Author:** Enterprise Product Manager (`product-manager`, Phase 1 of the 6-phase lifecycle)  
 **Parent Plan:** [00-master-plan-overview.md](00-master-plan-overview.md)  
 **Refines:** [ADR-017 §2 "AST Target Dialect Generator"](../adr/ADR-017-distributed-state-ast-generator-and-rbac.md)  
-**Supersedes (as requirement baseline):** [2026-10-06-implementation-plan-ast-dialect-generator.md](2026-10-06-implementation-plan-ast-dialect-generator.md) (German draft, see §11)  
+**Supersedes (as requirement baseline):** `2026-10-06-implementation-plan-ast-dialect-generator.md` *(archived, see git history)* (German draft, see §11)  
 **Related feature reference:** [F-DIALECT-01](../features/f-dialect-01-ast-target-dialect-pushdown.md), [F-DATA-02 Governed WebSQL](../features/f-data-02-governed-websql.md), [F-GOV-09 Virtual Filters](../features/f-gov-09-virtual-filters.md), [F-GOV-14 Federated Virtual Filters](../features/f-gov-14-federated-virtual-filters.md), [F-PERF-11 Query Plan Cache](../features/f-perf-11-query-plan-cache.md)
 
 ---
@@ -323,7 +323,7 @@ Each invariant must be backed by (a) example-based tests, (b) a property-based o
 
 ## 11. Handoff Instructions for Phase 2 (`csharp-architect`)
 
-1. The existing plan [2026-10-06-implementation-plan-ast-dialect-generator.md](2026-10-06-implementation-plan-ast-dialect-generator.md) is written in German and violates the English-only directive (AGENTS.md §1) and the naming convention (§3). **Do not translate it.** Deliver a new English implementation plan `doc/plan/YYYY-MM-DD-plan-ast-dialect-generator.md` that **supersedes** it, scoped to the increments in §5, and mark the old file as superseded with a link to the new plan.
+1. The existing plan `2026-10-06-implementation-plan-ast-dialect-generator.md` *(archived, see git history)* is written in German and violates the English-only directive (AGENTS.md §1) and the naming convention (§3). **Do not translate it.** Deliver a new English implementation plan `doc/plan/YYYY-MM-DD-plan-ast-dialect-generator.md` that **supersedes** it, scoped to the increments in §5, and mark the old file as superseded with a link to the new plan.
 2. Start from the as-built inventory in §2.2; do not re-plan M1-M4 as new work. Focus on G-1..G-8, the increment gates and the test infrastructure.
 3. Decide and document: simplifier position relative to security injection (INV-3); typed engine enum and per-data-source configuration shape (FR-1); capability table location (FR-4); shadow execution model (synchronous with budget vs background) (FR-2).
 4. Propose the ADR-017 amendment wording for Q-6 and the treatment of the premature `[Obsolete]` attribute on `RlsListener`.

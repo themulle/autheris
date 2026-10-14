@@ -267,8 +267,7 @@ public sealed class SqlEmitterContext
     {
         if (ParameterCount + additional > MaxParameterBudget)
         {
-            throw new DialectLimitExceededException(
-                $"Target dialect '{Dialect}' parameter budget exceeded: requested {ParameterCount + additional}, maximum allowed is {MaxParameterBudget}.");
+            throw new SqlLimitExceededException(SqlLimitKind.BindParameters, Dialect, ParameterCount + additional, MaxParameterBudget);
         }
     }
 

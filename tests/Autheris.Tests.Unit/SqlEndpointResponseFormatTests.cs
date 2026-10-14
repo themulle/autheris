@@ -44,7 +44,7 @@ public sealed class SqlEndpointResponseFormatTests
             new Dictionary<string, object?> { ["id"] = 1, ["name"] = "Alice" },
             new Dictionary<string, object?> { ["id"] = 2, ["name"] = "Bob" }
         };
-        var result = new GovernedSqlResult("SELECT 1", "SELECT 1", ["id", "name"], rows, 2, 5, Truncated: true);
+        var result = new GovernedSqlResult("SELECT 1", ["id", "name"], rows, 2, 5, Truncated: true);
         execution.ExecuteEndpointAsync(Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(result));
 
@@ -74,7 +74,7 @@ public sealed class SqlEndpointResponseFormatTests
         {
             new Dictionary<string, object?> { ["id"] = 1, ["name"] = "Alice" }
         };
-        var result = new GovernedSqlResult("SELECT 1", "SELECT 1", ["id", "name"], rows, 1, 5, Truncated: false);
+        var result = new GovernedSqlResult("SELECT 1", ["id", "name"], rows, 1, 5, Truncated: false);
         execution.ExecuteEndpointAsync(Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(result));
 

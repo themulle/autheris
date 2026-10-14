@@ -137,33 +137,23 @@ public class MsSqlIntegrationTests : IClassFixture<MsSqlContainerFixture>
             await setupCmd.ExecuteNonQueryAsync();
         }
 
-        // 2. RLS-Policy & FastSqlEngine konfigurieren
-        var policyProvider = new DefaultRlsPolicyProvider("tenantid = 'tenant-alpha'");
-
-        var rlsOptions = new RlsOptions
-        {
-            TargetDialect = TargetSqlDialect.SqlServer,
-            PolicyProvider = policyProvider
-        };
-
-        var engine = new FastSqlEngine();
-
-        // ANSI/Trino-Syntax mit OFFSET / LIMIT und unqualifizierten Identifiern
+        // 2. Typed governed compile (tenant binding over a one-table catalog) for SQL Server
         string sourceSql = "SELECT id, customername, totalamount FROM orders ORDER BY id OFFSET 1 LIMIT 2";
+        var compiled = SingleTableGovernedCompile.Compile(
+            TargetSqlDialect.SqlServer, "dbo", "Orders",
+            [("Id", "int"), ("TenantId", "nvarchar(50)"), ("CustomerName", "nvarchar(100)"), ("TotalAmount", "decimal(18,2)")],
+            "TenantId", "tenant-alpha", sourceSql);
 
-        // 3. Durch den neuen AST-Compiler jagen
-        string compiledTsql = engine.GenerateGovernedSql(sourceSql, rlsOptions);
-
-        // Verifizieren, dass T-SQL-Spezifika (Quoting, OFFSET/FETCH) korrekt generiert wurden
-        compiledTsql.ShouldContain("[orders]");
-        compiledTsql.ShouldContain("OFFSET 1 ROWS FETCH NEXT 2 ROWS ONLY");
-        compiledTsql.ShouldContain("N'tenant-alpha'");
+        // T-SQL specifics: bracket quoting, OFFSET/FETCH, and the tenant value as a bound parameter
+        compiled.Sql.ShouldContain("[Orders]");
+        compiled.Sql.ShouldContain("OFFSET");
+        compiled.Sql.ShouldContain("FETCH NEXT");
+        compiled.Sql.ShouldNotContain("tenant-alpha");
+        compiled.Parameters.ShouldContain(p => p.Origin == TrinoSqlEngine.Ast.Emit.ParameterOrigin.Tenant && Equals(p.Value, "tenant-alpha"));
 
         // 4. Den generierten T-SQL-String direkt auf dem echten SQL Server ausführen!
-        await using (var queryCmd = connection.CreateCommand())
+        await using (var queryCmd = SingleTableGovernedCompile.BoundCommand(connection, compiled))
         {
-            queryCmd.CommandText = compiledTsql;
-
             await using var reader = await queryCmd.ExecuteReaderAsync();
             var results = new List<(int Id, string Customer, decimal Amount)>();
 

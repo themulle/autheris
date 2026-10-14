@@ -12,6 +12,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// WP-X0k (G-3, SEC-X1-06, SEC-X1-07): the checked executor runs inside the caller's session transaction and is the single owner of
 /// its completion (commit on success, rollback on any failure, including timeout and cancellation).
 /// </summary>
+[Trait("Category", "SqlGate")]
 public class CheckedDmlExecutorTransactionTests
 {
     private static readonly IReadOnlyDictionary<string, object?> NoValues = new Dictionary<string, object?>();

@@ -99,9 +99,6 @@ public static class GatewayExecutionServiceExtensions
         services.AddScoped<IGovernedTreeQueryService, GovernedTreeQueryService>();
         services.AddScoped<IUnifiedPolicyDecisionPoint, UnifiedPolicyDecisionPoint>();
 
-        // Plan Cache (F-PERF-09 / graphql-bench)
-        services.AddSingleton<ICompiledSqlQueryPlanCache, CompiledSqlQueryPlanCache>();
-
         // Hierarchical Parquet Egress (F-DATA-01)
         services.AddSingleton<IParquetExportService, ParquetExportService>();
 

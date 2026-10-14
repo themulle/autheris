@@ -9,16 +9,11 @@ using Xunit;
 /// Wunsch 4, Phase 1: COUNT(*) used to become an empty call (<c>"count"()</c>, <c>[COUNT]()</c>) and every function name
 /// was quoted like an identifier (<c>"coalesce"(…)</c> does not resolve in PostgreSQL, <c>[SUM](…)</c> not in SQL Server).
 /// </summary>
+[Trait("Category", "SqlGate")]
 public sealed class FunctionCallEmissionTests
 {
-    private readonly FastSqlEngine _engine = new();
-
     private string Generate(string sql, TargetSqlDialect dialect) =>
-        _engine.GenerateGovernedSql(sql, new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'"),
-            TargetDialect = dialect
-        });
+        AstEmit.Inline(sql, dialect);
 
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql)]

@@ -66,6 +66,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
     private readonly IVirtualFilterFederationPlanner? _vfPlanner;
     private readonly Autheris.Application.Policy.TypedPolicySources? _typedPolicies;
     private readonly ILogger<FederatedDuckDbExecutionService>? _logger;
+    private readonly CompiledSqlAuditDigester _auditDigester;
 
     public FederatedDuckDbExecutionService(
         IOptions<GatewayOptions> options,
@@ -87,8 +88,10 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
         ILogger<FederatedDuckDbExecutionService>? logger = null,
         IVirtualFilterFederationPlanner? vfPlanner = null,
-        Autheris.Application.Policy.TypedPolicySources? typedPolicies = null)
+        Autheris.Application.Policy.TypedPolicySources? typedPolicies = null,
+        CompiledSqlAuditDigester? auditDigester = null)
     {
+        _auditDigester = auditDigester ?? new CompiledSqlAuditDigester(options);
         _typedPolicies = typedPolicies;
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
@@ -186,7 +189,6 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
 
         return new GovernedSqlResult(
             request.Sql,
-            plan.GeneratedDuckDbSql,
             duckDbResult.Columns,
             rows,
             rows.Count,
@@ -194,7 +196,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             truncated);
     }
 
-    public async Task<string> RewriteSqlAsync(
+    public async Task ValidateAsync(
         string rawSql,
         ClaimsPrincipal user,
         TenantId tenantId,
@@ -224,9 +226,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
 
         var (decisions, userSid) = await AuthorizeAllTablesAsync(metadata, routing.Tables, user, tenantId, isDml: false, ct).ConfigureAwait(false);
 
-        var plan = _planner.Plan(rawSql, metadata, routing.Tables, decisions, crossSourceOptions);
-
-        return plan.GeneratedDuckDbSql;
+        _planner.Plan(rawSql, metadata, routing.Tables, decisions, crossSourceOptions);
     }
 
     private async Task<(OlapQueryResult Result, CrossSourcePlan Plan)> ExecuteFederatedInternalAsync(
@@ -260,10 +260,10 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         // SqlFunctionPolicy check
         if (metadata.FunctionCalls is { Count: > 0 })
         {
-            var functionPolicy = new RlsOptions { EnforceFunctionPolicy = true };
             foreach (var functionName in metadata.FunctionCalls)
             {
-                if (!SqlFunctionPolicy.IsFunctionAllowed(functionName, functionPolicy))
+                // G-9: the denylist only; no RlsOptions bag.
+                if (!SqlFunctionPolicy.IsFunctionAllowed(functionName, allowedFunctions: null, additionalDeniedFunctions: null))
                 {
                     throw new WebSqlPolicyException($"Function '{functionName}' is not permitted in WebSQL.");
                 }
@@ -516,7 +516,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             throw new InvalidOperationException("Audit log repository is required for cross-source queries.");
         }
 
-        var (redactedOriginalSql, originalSqlHash) = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.AnonymizeSqlForAudit(request.Sql);
+        var (redactedOriginalSql, originalSqlHash) = _auditDigester.Anonymize(request.Sql);
         var tablesAudit = tables.Select(t => new
         {
             table = t.Target.FullName,
@@ -615,7 +615,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
                 await RecordKeySourceReadsAsync(unauditedKeySourceReads, ResolveUserSid(user), tenantId, correlationId, CancellationToken.None).ConfigureAwait(false);
             }
 
-            var (redactedOriginalSql, originalSqlHash) = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.AnonymizeSqlForAudit(request.Sql);
+            var (redactedOriginalSql, originalSqlHash) = _auditDigester.Anonymize(request.Sql);
             var userSid = ResolveUserSid(user);
             bool isDenied = ex is WebSqlPolicyException or SecurityException or GatewaySecurityException;
             var eventType = isDenied ? AuditEventTypes.WebSqlQueryDenied : AuditEventTypes.QueryExecutionError;

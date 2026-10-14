@@ -10,16 +10,9 @@ using Xunit;
 /// SQL-3: the AST generators emit cast target types and EXTRACT fields verbatim; only plain tokens are allowed, and an
 /// unknown dialect no longer falls back to ANSI.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public sealed class SafeTokenEmissionSql3Tests
 {
-    private readonly FastSqlEngine _engine = new();
-
-    private static RlsOptions Options(TargetSqlDialect dialect) => new()
-    {
-        PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 42"),
-        TargetDialect = dialect
-    };
-
     [Theory]
     [InlineData("SELECT CAST(amount AS decimal(10, 2)) FROM orders", "CAST(\"amount\" AS decimal(10, 2))")]
     [InlineData("SELECT CAST(ts AS timestamp(3) with time zone) FROM orders", "AS timestamp(3) with time zone)")]
@@ -27,7 +20,7 @@ public sealed class SafeTokenEmissionSql3Tests
     [InlineData("SELECT EXTRACT(year FROM ts) FROM orders", "EXTRACT(YEAR FROM")]
     public void PlainTypesAndFields_AreEmittedNormalized(string sql, string expected)
     {
-        var result = _engine.GenerateGovernedSql(sql.AsMemory(), Options(TargetSqlDialect.PostgreSql));
+        var result = AstEmit.Inline(sql, TargetSqlDialect.PostgreSql);
 
         Assert.Contains(expected, result, StringComparison.OrdinalIgnoreCase);
     }
@@ -39,7 +32,7 @@ public sealed class SafeTokenEmissionSql3Tests
     [InlineData("SELECT EXTRACT(foo FROM ts) FROM orders")]
     public void QuotedOrUnknownTokens_AreRejected(string sql)
     {
-        Assert.ThrowsAny<Exception>(() => _engine.GenerateGovernedSql(sql.AsMemory(), Options(TargetSqlDialect.SqlServer)));
+        Assert.ThrowsAny<Exception>(() => AstEmit.Inline(sql, TargetSqlDialect.SqlServer));
     }
 
     [Fact]

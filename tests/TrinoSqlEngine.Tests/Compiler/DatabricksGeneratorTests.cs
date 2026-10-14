@@ -11,6 +11,7 @@ using Xunit;
 
 namespace TrinoSqlEngine.Tests.Compiler;
 
+[Trait("Category", "SqlGate")]
 public class DatabricksCapabilityTests
 {
     private static readonly DialectCapabilities Caps = DialectCapabilityTable.Default.Get(TargetSqlDialect.Databricks);
@@ -38,6 +39,7 @@ public class DatabricksCapabilityTests
     }
 }
 
+[Trait("Category", "SqlGate")]
 public class DatabricksCheckerTests
 {
     private static BoundParameter P(int n) => new($":p{n}", $"p{n}", n - 1, "v", SqlParameterType.String, ParameterOrigin.QueryLiteral);
@@ -67,6 +69,7 @@ public class DatabricksCheckerTests
     }
 }
 
+[Trait("Category", "SqlGate")]
 public class DatabricksGeneratorTests
 {
     private static CompiledSql Gen(string sql, IDictionary<string, PolicyValue>? values = null) =>

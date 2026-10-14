@@ -139,38 +139,23 @@ public class OracleIntegrationTests : IDisposable
             await cmd.ExecuteNonQueryAsync();
         }
 
-        // 2. RLS & AST Compiler konfigurieren
-        var policyProvider = new DefaultRlsPolicyProvider("tenant_id = 'tenant-alpha'");
-        var rlsOptions = new RlsOptions
-        {
-            TargetDialect = TargetSqlDialect.Oracle,
-            PolicyProvider = policyProvider
-        };
-
-        var engine = new FastSqlEngine();
-
-        // Quellabfrage in ANSI/Trino-Syntax mit Paginierung
+        // 2. Typed governed compile (tenant binding over a one-table catalog) for Oracle
         string sourceSql = "SELECT id, customer_name, total_amount FROM x0z_legacy_orders ORDER BY id OFFSET 1 LIMIT 2";
+        var compiled = SingleTableGovernedCompile.Compile(
+            TargetSqlDialect.Oracle, AstCompilerOracleFixture.AppUser, "X0Z_LEGACY_ORDERS",
+            [("ID", "NUMBER(10)"), ("TENANT_ID", "VARCHAR2(50)"), ("CUSTOMER_NAME", "VARCHAR2(100)"), ("TOTAL_AMOUNT", "NUMBER(18,2)")],
+            "TENANT_ID", "tenant-alpha", sourceSql);
 
-        // 3. Durch den neuen AST-Compiler für Oracle kompilieren
-        string compiledOracleSql = engine.GenerateGovernedSql(sourceSql, rlsOptions);
-
-        // Verifizieren der Oracle-Spezifika:
-        // - Doppelte Anführungszeichen mit Großschreibung ("ORDERS", "ID")
-        // - RLS-Prädikat ("TENANT_ID" = 'tenant-alpha')
-        // - Subquery-Alias OHNE 'AS'-Schlüsselwort: ) "ORDERS"
-        // - Oracle 12c+ Paginierung (OFFSET 1 ROWS FETCH NEXT 2 ROWS ONLY)
-        compiledOracleSql.ShouldContain("\"X0Z_LEGACY_ORDERS\"");
-        compiledOracleSql.ShouldContain("\"TENANT_ID\" = 'tenant-alpha'");
-        compiledOracleSql.ShouldNotContain(") AS \"X0Z_LEGACY_ORDERS\"");
-        compiledOracleSql.ShouldContain(") \"X0Z_LEGACY_ORDERS\"");
-        compiledOracleSql.ShouldContain("OFFSET 1 ROWS FETCH NEXT 2 ROWS ONLY");
+        // Oracle specifics: quoted upper-case names, no AS before a subquery alias, 12c pagination, the tenant value bound
+        compiled.Sql.ShouldContain("\"X0Z_LEGACY_ORDERS\"");
+        compiled.Sql.ShouldNotContain(") AS \"X0Z_LEGACY_ORDERS\"");
+        compiled.Sql.ShouldContain("FETCH NEXT");
+        compiled.Sql.ShouldNotContain("tenant-alpha");
+        compiled.Parameters.ShouldContain(p => p.Origin == TrinoSqlEngine.Ast.Emit.ParameterOrigin.Tenant && Equals(p.Value, "tenant-alpha"));
 
         // 4. Den generierten Oracle-SQL-String direkt auf dem echten Container ausführen
-        await using (var queryCmd = connection.CreateCommand())
+        await using (var queryCmd = SingleTableGovernedCompile.BoundCommand(connection, compiled))
         {
-            queryCmd.CommandText = compiledOracleSql;
-
             await using var reader = await queryCmd.ExecuteReaderAsync();
             var results = new List<(int Id, string Customer, decimal Amount)>();
 

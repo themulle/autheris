@@ -132,12 +132,6 @@ public static class SqlFunctionPolicy
     /// Evaluates a function call against the configured policy.
     /// Order: additional denylist and default denylist (always win, SEC P-02) -> explicit allowlist (if configured, exclusive).
     /// </summary>
-    public static bool IsFunctionAllowed(string functionName, RlsOptions options)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return IsFunctionAllowed(functionName, options.AllowedFunctions, options.AdditionalDeniedFunctions);
-    }
-
     public static bool IsFunctionAllowed(
         string functionName,
         IReadOnlySet<string>? allowedFunctions,

@@ -3,10 +3,12 @@ namespace TrinoSqlEngine.Tests.Ast.DialectGenerators;
 using System;
 using System.Collections.Generic;
 using TrinoSqlEngine;
+using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Generators;
 using TrinoSqlEngine.Ast.Nodes;
 using Xunit;
 
+[Trait("Category", "SqlGate")]
 public sealed class OracleDialectTests
 {
     private readonly OracleDialectGenerator _generator = new();
@@ -119,10 +121,10 @@ public sealed class OracleDialectTests
     }
 
     [Fact]
-    public void Oracle_BudgetLimit_Enforces1000Parameters()
+    public void Oracle_BudgetLimit_EnforcesTheCapabilityLimit()
     {
         var items = new List<Expression>();
-        for (int i = 0; i < 1001; i++)
+        for (int i = 0; i < 32768; i++)
         {
             items.Add(new ParameterReference("?"));
         }
@@ -139,32 +141,31 @@ public sealed class OracleDialectTests
             OrderBy: null,
             Pagination: null);
 
-        Assert.Throws<DialectLimitExceededException>(() => _generator.GenerateSql(stmt));
+        var ex = Assert.Throws<SqlLimitExceededException>(() => _generator.GenerateSql(stmt));
+        Assert.Equal(SqlLimitKind.BindParameters, ex.Kind);
+        Assert.Equal(32767, ex.Maximum);
     }
 
     [Fact]
-    public void FastSqlEngine_GenerateGovernedSql_OracleDialect_GeneratesValidOracleSql()
+    public void FastSqlEngine_Compile_OracleDialect_GeneratesValidOracleSql()
     {
-        var engine = new FastSqlEngine();
-        var options = new RlsOptions
-        {
-            TargetDialect = TargetSqlDialect.Oracle,
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 'tenant-42'")
-        };
+        var compiled = new TrinoSqlEngine.Tests.Security.ProbeEnv(TargetSqlDialect.Oracle)
+            .Compile("SELECT id, email FROM orders ORDER BY id OFFSET 5 LIMIT 10");
+        string sql = compiled.Sql;
 
-        string sql = "SELECT id, name FROM orders ORDER BY id OFFSET 5 LIMIT 10";
-        string compiled = engine.GenerateGovernedSql(sql, options);
-
-        // Verify:
-        // 1. Double quotes on tables/columns with uppercase folding for unquoted identifiers
-        Assert.Contains("\"ORDERS\"", compiled, StringComparison.Ordinal);
-        Assert.Contains("\"ID\"", compiled, StringComparison.Ordinal);
-        Assert.Contains("\"NAME\"", compiled, StringComparison.Ordinal);
-        Assert.Contains("\"TENANT_ID\" = 'tenant-42'", compiled, StringComparison.Ordinal);
-        // 2. Table alias without AS keyword
-        Assert.DoesNotContain(") AS \"ORDERS\"", compiled, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(") \"ORDERS\"", compiled, StringComparison.Ordinal);
-        // 3. Oracle pagination
-        Assert.Contains("OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY", compiled, StringComparison.Ordinal);
+        // 1. Double quotes; the user's unquoted names fold to upper case, the catalog name is emitted as cataloged
+        Assert.Contains("\"ORDERS\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"ID\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"EMAIL\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"dbo\".\"Orders\"", sql, StringComparison.Ordinal);
+        // 2. The tenant value is bound (Oracle named marker), never part of the text
+        Assert.Contains("\"TenantId\" = :p1", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("acme", sql, StringComparison.Ordinal);
+        Assert.Contains(compiled.Parameters, p => p.Origin == TrinoSqlEngine.Ast.Emit.ParameterOrigin.Tenant);
+        // 3. Table alias without AS keyword
+        Assert.DoesNotContain(") AS \"ORDERS\"", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(") \"ORDERS\"", sql, StringComparison.Ordinal);
+        // 4. Oracle pagination
+        Assert.Contains("OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY", sql, StringComparison.Ordinal);
     }
 }

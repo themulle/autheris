@@ -4,6 +4,7 @@ using System.Security;
 using Antlr4.Runtime;
 using Antlr4.Runtime.Misc;
 using Autheris.Application.Common;
+using Autheris.Application.Interfaces;
 using Autheris.Domain.Exceptions;
 using Prometheus;
 using TrinoSqlEngine;
@@ -107,6 +108,8 @@ public static class SqlCompilerErrorMapper
         e => e is ParseCanceledException { InnerException: TimeoutException } ? Of(422, GovernedSqlErrorCodes.LimitExceeded, nameof(SqlLimitKind.CompileTime)) : null,
         e => e is ParseCanceledException or RecognitionException ? Of(400, GovernedSqlErrorCodes.SyntaxError) : null,
         e => e is MissingClientParameterException ? Of(400, GovernedSqlErrorCodes.ParameterMissing) : null,
+        // Phase 5 L3: a user error (a reserved identifier), not a gateway defect: no invariant metric.
+        e => e is ReservedIdentifierException ? Of(400, GovernedSqlErrorCodes.ReservedIdentifier) : null,
         e => e switch
         {
             SqlCompileNotSupportedException { Reason: SqlCompileNotSupportedReason.Construct } or AstBuildException
@@ -128,7 +131,10 @@ public static class SqlCompilerErrorMapper
         // Gateway defects fail closed. They precede the generic SecurityException row because they derive from it.
         e => e is SecurityCoverageException or EmittedSqlInvariantViolationException or SqlCompileConfigurationException ? Of(500, GovernedSqlErrorCodes.CompilerInvariant) : null,
         e => e is SecurityException ? Of(403, GovernedSqlErrorCodes.PolicyViolation) : null,
-        e => e is GovernedSqlException governed ? MapGoverned(governed.Code) : null
+        e => e is GovernedSqlException governed ? MapGoverned(governed.Code) : null,
+        // Phase 5 M4: a data source that cannot hand out a correctly pinned session (missing or invalid default schema, a pin that did
+        // not verify). The exception derives from InvalidOperationException, so the classifier would not know it.
+        e => e is SqlSourceUnavailableException ? Of(503, GovernedSqlErrorCodes.SourceUnavailable) : null
     ];
 
     private static SqlErrorMapping? MapGoverned(string code) => code switch

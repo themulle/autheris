@@ -7,21 +7,20 @@ using Xunit;
 namespace Autheris.Tests.Unit.Security;
 
 /// <summary>
-/// Client parameters (@name) are parsed as placeholder identifiers and restored to bound parameters after the rewrite.
+/// Client parameters (@name) are parsed as placeholder identifiers and bound by name by the compiler (CompiledSql, ParameterOrigin.ClientNamed).
 /// </summary>
 public sealed class WebSqlClientParameterTests
 {
     private static readonly Dictionary<string, object?> CraneType = new() { ["crane_type"] = "Mobilkran", ["@crane_type"] = "Mobilkran" };
 
     [Fact]
-    public void Normalize_ReplacesSuppliedParameter_AndRestoreTurnsItBack()
+    public void Normalize_ReplacesSuppliedParameter_AndReportsItsName()
     {
         var sql = GovernedSqlExecutionService.NormalizeClientParameters(
             "SELECT a FROM t WHERE crane_type = @crane_type", CraneType, out var names);
 
         sql.ShouldBe("SELECT a FROM t WHERE crane_type = __param_crane_type");
-        GovernedSqlExecutionService.RestoreClientParameters("SELECT a FROM t WHERE crane_type = \"__param_crane_type\" LIMIT 10", names)
-            .ShouldBe("SELECT a FROM t WHERE crane_type = @crane_type LIMIT 10");
+        names.ShouldBe(new[] { "crane_type" });   // the compiler binds the client parameter by name; there is no text restoration (L-12)
     }
 
     [Fact]

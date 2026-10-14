@@ -96,7 +96,7 @@ public sealed class OracleStartupValidationTests
     public async Task Factory_RefusesAPlaintextPassword_OutsideDevelopment_BeforeConnecting()
     {
         var factory = new SqlConnectionFactory(Env(Environments.Production), Substitute.For<IKeyVaultSecretProvider>());
-        var options = new DataSourceConnectionOptions { Provider = "Oracle", ConnectionString = "User Id=app;Password=hunter2;Data Source=" + Tcps, PasswordKeyVaultRef = "ref" };
+        var options = new DataSourceConnectionOptions { Provider = "Oracle", ConnectionString = "User Id=app;Password=hunter2;Data Source=" + Tcps, PasswordKeyVaultRef = "ref", DefaultSchema = "APP" };
         await Should.ThrowAsync<SecurityException>(() => factory.CreateOpenConnectionAsync(options));
     }
 
@@ -104,7 +104,7 @@ public sealed class OracleStartupValidationTests
     public async Task Factory_RefusesAMissingKeyVaultReference_OutsideDevelopment()
     {
         var factory = new SqlConnectionFactory(Env(Environments.Production), Substitute.For<IKeyVaultSecretProvider>());
-        var options = new DataSourceConnectionOptions { Provider = "Oracle", ConnectionString = "User Id=app;Data Source=" + Tcps };
+        var options = new DataSourceConnectionOptions { Provider = "Oracle", ConnectionString = "User Id=app;Data Source=" + Tcps, DefaultSchema = "APP" };
         await Should.ThrowAsync<SecurityException>(() => factory.CreateOpenConnectionAsync(options));
     }
 
@@ -114,7 +114,7 @@ public sealed class OracleStartupValidationTests
         var secrets = Substitute.For<IKeyVaultSecretProvider>();
         secrets.GetSecretBytes(Arg.Any<string>()).Returns(Array.Empty<byte>());
         var factory = new SqlConnectionFactory(Env(Environments.Production), secrets);
-        var options = new DataSourceConnectionOptions { Provider = "Oracle", ConnectionString = "User Id=app;Data Source=" + Tcps, PasswordKeyVaultRef = "ref" };
+        var options = new DataSourceConnectionOptions { Provider = "Oracle", ConnectionString = "User Id=app;Data Source=" + Tcps, PasswordKeyVaultRef = "ref", DefaultSchema = "APP" };
         await Should.ThrowAsync<SecurityException>(() => factory.CreateOpenConnectionAsync(options));
     }
 

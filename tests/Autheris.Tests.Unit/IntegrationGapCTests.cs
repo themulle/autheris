@@ -629,11 +629,13 @@ public sealed class IntegrationGapCTests
         var devEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         devEnv.EnvironmentName.Returns("Development");
 
+        var repo = CreateRepository();
         return new GovernedSqlExecutionService(
-            Options.Create(options),
+            Options.Create(options), executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: null,
             consentResolution: consentResolution,
-            tableRepository: CreateRepository(),
+            tableRepository: repo,
+            policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null,
             clientIpResolver: null,
             environment: devEnv,

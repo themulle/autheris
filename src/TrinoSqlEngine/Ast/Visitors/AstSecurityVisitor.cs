@@ -28,8 +28,7 @@ using TrinoSqlEngine.Governance;
 /// </summary>
 public sealed partial class AstSecurityVisitor : SqlAstRewriter
 {
-    private readonly RlsOptions _options;
-    private readonly ISqlEngine _engine;
+    private readonly AstSecurityVisitorOptions _options;
     private readonly Stack<HashSet<string>> _cteScopeStack = new();
 
     /// <summary>CTE names are compared by ordinal bytes: a delimited physical name that differs in case is not the CTE (INV-11).</summary>
@@ -41,20 +40,21 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     // CR-ADG-32: names of non-recursive CTEs whose body is being visited; a reference to one of them (not shadowed) is a self-reference.
     private readonly List<string> _definingNonRecursiveCtes = new();
-    private readonly TypedPolicyContext? _typed;
+    private readonly TypedPolicyContext _typed;
     private readonly Stack<SecurityScope> _securityScopes = new();
     private int _subqueryDepth = 0;
     private bool _rootLimitHandled = false;
 
+    /// <param name="options">The switches the typed compile path derives from the request (never from the caller's text).</param>
     /// <param name="typedPolicy">
-    /// When set, row-level security comes from typed providers: injected predicates are wrapped in
-    /// <see cref="SecurityPredicateExpression"/>, physical names come from the catalog, and values are parameters. The legacy
-    /// string providers of <paramref name="options"/> are not consulted for tables.
+    /// Row-level security comes from typed providers: injected predicates are wrapped in <see cref="SecurityPredicateExpression"/>,
+    /// physical names come from the catalog, and values are parameters. There is no string policy path.
     /// </param>
-    public AstSecurityVisitor(RlsOptions? options = null, ISqlEngine? engine = null, TypedPolicyContext? typedPolicy = null)
+    internal AstSecurityVisitor(AstSecurityVisitorOptions options, TypedPolicyContext typedPolicy)
     {
-        _options = options ?? new RlsOptions();
-        _engine = engine ?? new FastSqlEngine();
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(typedPolicy);
+        _options = options;
         _typed = typedPolicy;
         _cteScopeStack.Push(new HashSet<string>(CteScopeComparer));
     }
@@ -64,7 +64,6 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     private SqlNode WithScope(SecurityScope scope, Func<SqlNode> visit)
     {
-        if (_typed is null) return visit();
         _securityScopes.Push(scope);
         try
         {
@@ -78,7 +77,6 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     public override SqlNode VisitSetOperationQuery(SetOperationQuery node)
     {
-        if (_typed is null) return base.VisitSetOperationQuery(node);
         var left = (QueryBody)WithScope(SecurityScope.SetOperationBranch, () => Visit(node.Left));
         var right = (QueryBody)WithScope(SecurityScope.SetOperationBranch, () => Visit(node.Right));
         return ReferenceEquals(left, node.Left) && ReferenceEquals(right, node.Right) ? node : node with { Left = left, Right = right };
@@ -99,24 +97,6 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     public override SqlNode VisitSubqueryTableSource(SubqueryTableSource node) =>
         WithScope(SecurityScope.Subquery, () => base.VisitSubqueryTableSource(node));
 
-    /// <summary>
-    /// A policy filter as an expression: verbatim and parenthesized when it is gateway-rendered target-dialect SQL
-    /// (<see cref="RlsOptions.PolicyFiltersAreTargetDialectSql"/>), otherwise parsed as Trino SQL.
-    /// </summary>
-    private Expression PolicyFilterExpression(string filterSql) =>
-        _options.PolicyFiltersAreTargetDialectSql
-            ? new TrustedSqlExpression($"({filterSql})")
-            : ParseFilterExpression(filterSql);
-
-    private Expression ParseFilterExpression(string filterSql)
-    {
-        var tokenOptions = SqlTokenSecurityOptions.FromRlsOptions(_options);
-        var (tree, _) = _engine.ParseExpression(filterSql.AsMemory(), tokenOptions);
-        var builderOptions = AstBuilderOptions.FromRlsOptions(_options) with { EnforceReadOnlyQueries = false };
-        var builder = new SqlAstBuilder(builderOptions);
-        return builder.BuildStandaloneExpression(tree);
-    }
-
     public override SqlNode VisitSelectStatement(SelectStatement node)
     {
         bool isRootRead = _subqueryDepth == 0;
@@ -135,7 +115,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 {
                     // CR-ADG-29: a recursive CTE sees its own name in its body (self-reference); the base tables of the anchor
                     // and recursive members are still secured. A name that is also a catalog table is ambiguous and rejected.
-                    EnsureRecursiveCteIsNotACatalogTable(cte.Name, cteKey);
+                    EnsureRecursiveCteIsNotACatalogTable(cte.Name);
                     _cteScopeStack.Peek().Add(cteKey);
                 }
 
@@ -155,15 +135,13 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 // CR-ADG-01 / INV-11: on the typed path the definition is emitted as the delimited scope key, so the gateway's
                 // CTE decision and the database's name binding cannot diverge (Oracle upper-cases unquoted names, SQL Server
                 // keeps the user spelling and may be case-sensitive). References are rewritten to the same identifier.
-                ctes.Add(_typed != null
-                    ? cte with { Name = new SqlIdentifier(cteKey, IsQuoted: true), Query = cteQuery }
-                    : cte with { Query = cteQuery });
+                ctes.Add(cte with { Name = new SqlIdentifier(cteKey, IsQuoted: true), Query = cteQuery });
             }
             with = node.With with { Ctes = ctes.AsReadOnly() };
         }
 
         // Fail-Closed Predicate Guard: Check ORDER BY for masked columns
-        if (node.OrderBy != null && _options.RejectMaskedColumnsInPredicates && _options.ColumnMaskingProvider != null)
+        if (node.OrderBy != null && _options.RejectMaskedColumnsInPredicates)
         {
             var tables = new List<(string TableName, string? Alias)>();
             CollectTableSources(node.Body, tables);
@@ -183,7 +161,8 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             if (pagination != null)
             {
                 var clampedLimit = ClampLimit(pagination.Limit, _options.EnforcedMaxRows);
-                pagination = pagination with { Limit = clampedLimit };
+                // M-22: WITH TIES can return more rows than the limit, so it is downgraded to ONLY under an enforced cap.
+                pagination = pagination with { Limit = clampedLimit, WithTies = false };
             }
             else
             {
@@ -207,7 +186,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     public override SqlNode VisitQuerySpecification(QuerySpecification node)
     {
         // Fail-Closed Predicate Guard: Check WHERE, HAVING, and JOIN conditions for masked columns
-        if (_options.RejectMaskedColumnsInPredicates && _options.ColumnMaskingProvider != null && node.From != null)
+        if (_options.RejectMaskedColumnsInPredicates && node.From != null)
         {
             var tables = new List<(string TableName, string? Alias)>();
             CollectTableSources(node.From, tables);

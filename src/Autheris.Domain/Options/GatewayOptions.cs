@@ -917,6 +917,13 @@ public sealed class AuditOptions
     [Range(1, 3600)] public int CatalogSummaryWindowSeconds { get; init; } = 60;
     public AuditRetentionOptions Retention { get; init; } = new();
     public bool StoreStatementText { get; init; }
+
+    /// <summary>
+    /// SEC-ADG-23 (X1.2): store the compiled SQL text (markers only, no values by construction) in the audit record of a governed
+    /// statement. Default <c>false</c>: the record carries only the compiler version, the dialect, the bind count and the
+    /// <c>sql.compiled_digest</c>.
+    /// </summary>
+    public bool StoreCompiledSql { get; init; }
     [Range(1, 168)] public int VerifyHashChainIntervalHours { get; init; } = 24;
 
     /// <summary>Review E-11: verify the audit hash chain periodically at runtime (first run shortly after start).</summary>
@@ -1083,11 +1090,13 @@ public sealed class DataSourceConnectionOptions
     public string? DefaultSchema { get; init; }
 
     /// <summary>
-    /// WP-X0b: when true the connection factory refuses to hand out a PostgreSQL or Oracle connection of this data source unless
-    /// <see cref="DefaultSchema"/> is set and valid (SQL_SOURCE_UNAVAILABLE, fail closed). Startup validation sets the same
-    /// requirement for every WebSQL-reachable PostgreSQL/Oracle source; this flag extends it to request time (options reload).
+    /// WP-X0b: the connection factory refuses to hand out a PostgreSQL or Oracle connection of this data source unless
+    /// <see cref="DefaultSchema"/> is set and valid (SQL_SOURCE_UNAVAILABLE, fail closed), and startup validation refuses the start
+    /// for such a source. Default <c>true</c> since X1: the schema pin (<c>search_path</c>, <c>CURRENT_SCHEMA</c>) is what makes an
+    /// unqualified table name resolve to the governed table. A source that no WebSQL path reaches may opt out with <c>false</c>; a
+    /// WebSQL-reachable PostgreSQL or Oracle source always needs the schema. Other providers ignore the flag.
     /// </summary>
-    public bool RequireDefaultSchema { get; init; }
+    public bool RequireDefaultSchema { get; init; } = true;
 
     /// <summary>Databricks only (WP-X0i, SEC-ADG-09): Statement Execution API settings. Required when <c>Provider</c> is databricks.</summary>
     public DatabricksDataSourceOptions? Databricks { get; init; }
@@ -1604,20 +1613,10 @@ public sealed class WebSqlOptions
     /// <summary>
     /// SQ-06 / SEC P-02: Additional SQL function names (unqualified, case-insensitive) permitted in WebSQL on top of the
     /// curated allowlist of the target dialect (TrinoSqlEngine.SqlFunctionAllowlists). Names on the built-in function
-    /// denylist are never permitted, even if listed here.
+    /// denylist are never permitted, even if listed here. Since X1 the list can only narrow the dialect's function map
+    /// (the compiler needs an emission rule for every function): a name without a rule is still rejected.
     /// </summary>
     public List<string> AdditionalAllowedFunctions { get; init; } = [];
-    /// <summary>
-    /// Rewriter engine implementation: "AstCompiler" (AST target dialect generator),
-    /// "ShadowDualRun" (runs both engines with legacy authoritative for differential verification),
-    /// or null / "LegacyTokenStream" (defaults to engine's configuration).
-    /// </summary>
-    public string? SqlRewriterEngine { get; init; }
-
-    /// <summary>
-    /// Configuration for bounded compiled SQL query plan cache (AR-10 / AR-19).
-    /// </summary>
-    public WebSqlPlanCacheOptions PlanCache { get; init; } = new();
 
     /// <summary>
     /// Heterogeneous Cross-Source / Federation Join options (DuckDB in-process engine).
@@ -1667,12 +1666,6 @@ public sealed class CrossSourceOptions
 
     /// <summary>Configured <see cref="AllowedHttpAuthModes"/> or the default list.</summary>
     public IReadOnlyList<string> GetEffectiveAllowedHttpAuthModes() => AllowedHttpAuthModes ?? (IReadOnlyList<string>)DefaultAllowedHttpAuthModes;
-}
-
-public sealed class WebSqlPlanCacheOptions
-{
-    public int MaxEntries { get; init; } = 10_000;
-    public int TtlSeconds { get; init; } = 600;
 }
 
 public sealed class SqlEndpointsOptions
@@ -2014,11 +2007,15 @@ public sealed class TenantIsolationOptions
     public TenantRegistryOptions Registry { get; init; } = new();
 }
 
-/// <summary>Tenant registry settings (<c>Gateway:TenantIsolation:Registry</c>). Off by default; the legacy configured-tenant guard stays active either way.</summary>
+/// <summary>
+/// Tenant registry settings (<c>Gateway:TenantIsolation:Registry</c>). On by default since X1 (Phase 5 L6): the existence check precedes the
+/// budget and an issuer-less token has a budget per authentication scheme. <c>Enabled = false</c> is the explicit opt-out; the legacy
+/// configured-tenant guard stays active either way.
+/// </summary>
 public sealed class TenantRegistryOptions
 {
     /// <summary>When <c>true</c> every authenticated request registers its tenant id; the registry being unavailable then denies the request (503).</summary>
-    public bool Enabled { get; init; }
+    public bool Enabled { get; init; } = true;
 
     /// <summary>Budget of new tenant registrations per identity provider issuer and window (SEC-X1-13).</summary>
     [Range(1, 100_000)] public int MaxNewTenantsPerIssuerPerWindow { get; init; } = 20;

@@ -187,11 +187,9 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         }
     }
 
-    private void EnsureRecursiveCteIsNotACatalogTable(SqlIdentifier name, string cteKey)
+    private void EnsureRecursiveCteIsNotACatalogTable(SqlIdentifier name)
     {
-        bool isTable = _typed != null
-            ? _typed.Catalog.Resolve(new SqlQualifiedName(new[] { new SqlIdentifier(name.Value, name.IsQuoted) })) != null
-            : _options.PolicyProvider.ShouldApplyPolicy(cteKey);
+        bool isTable = _typed.Catalog.Resolve(new SqlQualifiedName(new[] { new SqlIdentifier(name.Value, name.IsQuoted) })) != null;
         if (isTable)
         {
             throw new SecurityException("A recursive CTE must not have the name of a catalog table; the reference would be ambiguous.");
@@ -207,8 +205,6 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     private bool HasMaskingForTable(string normalizedTableName)
     {
-        if (_options.ColumnMaskingProvider == null) return false;
-
         string simpleTableName = SqlIdentifierHelper.GetSimpleName(normalizedTableName);
         if (_options.TablesWithMaskedColumns.Contains(normalizedTableName) ||
             _options.TablesWithMaskedColumns.Contains(simpleTableName))
@@ -216,16 +212,13 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             return true;
         }
 
-        if (_options.TableColumnsProvider != null)
+        var columns = _options.TableColumns(normalizedTableName);
+        if (columns != null)
         {
-            var columns = _options.TableColumnsProvider(normalizedTableName);
-            if (columns != null)
+            foreach (var col in columns)
             {
-                foreach (var col in columns)
-                {
-                    if (_options.ColumnMaskingProvider.HasMask(normalizedTableName, col))
-                        return true;
-                }
+                if (_options.MaskedColumns.HasMask(normalizedTableName, col))
+                    return true;
             }
         }
 
@@ -235,40 +228,47 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     public const string RedactedLiteralPlaceholder = "@p_redacted";
     public const int DefaultMaxAuditSqlLength = 4096;
 
-    private static readonly Regex FallbackStringLiteralRegex = new(
-        @"'([^']|'')*'",
-        RegexOptions.Compiled,
-        TimeSpan.FromMilliseconds(200));
-
-    private static readonly Regex FallbackNumericLiteralRegex = new(
-        @"(?<=[=<>!,\s(+\-*/%])\d+(\.\d+)?(?=[=<>!,\s);+\-*/%]|$)|\b\d+(\.\d+)?\b",
-        RegexOptions.Compiled,
-        TimeSpan.FromMilliseconds(200));
+    /// <summary>
+    /// The audit text of a statement that cannot be redacted token by token (the lexer reported an error, so a literal may not have been
+    /// recognised as one, for example an unterminated string). Nothing of the statement is kept.
+    /// </summary>
+    public const string FullyRedactedStatement = "@p_redacted_statement";
 
     /// <summary>
     /// AU-06: DSGVO Art. 17 AST-Literal-Anonymisierung für SQL-Audit-Details (@p_redacted).
-    /// Ersetzt alle String- und numerischen Literale durch @p_redacted und liefert den SHA-256 Hash des Original-SQL.
+    /// Ersetzt alle String- und numerischen Literale durch @p_redacted. The result carries no literal value, so a hash over it (M-A3: the
+    /// keyed <c>originalSqlHash</c> that the gateway builds) can never leak or confirm a value; there is deliberately no hash over the raw text.
     /// </summary>
-    public static (string RedactedSql, string OriginalSqlHash) AnonymizeSqlForAudit(string? sql, int maxLength = DefaultMaxAuditSqlLength)
+    public static string RedactSqlLiterals(string? sql)
     {
         if (string.IsNullOrWhiteSpace(sql))
         {
-            return (string.Empty, Convert.ToHexString(SHA256.HashData(Array.Empty<byte>())));
+            return string.Empty;
         }
 
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sql)));
         string result;
         try
         {
             var charStream = new ZeroCopyCaseInsensitiveStream(sql.AsMemory());
             var lexer = new SqlBaseLexer(charStream);
             lexer.RemoveErrorListeners();
+            var lexerErrors = new LexerErrorCounter();
+            lexer.AddErrorListener(lexerErrors);
             var tokens = new CommonTokenStream(lexer);
             tokens.Fill();
 
-            var rewriter = new TokenStreamRewriter(tokens);
             var tokenList = tokens.GetTokens();
 
+            // L-3: an error of the lexer, or a character that it could not place (UNRECOGNIZED, such as the quote of an unterminated string
+            // whose text then lexes as plain identifiers), means that a literal may be left in the text: redact the whole statement.
+            if (lexerErrors.Count > 0 || tokenList.Any(static t => t.Type == SqlBaseLexer.UNRECOGNIZED))
+            {
+                return FullyRedactedStatement;
+            }
+
+            // SD-1: the text is built from the token indices (every token of the stream, hidden-channel whitespace and comments included),
+            // never by editing the statement through a TokenStreamRewriter.
+            var redacted = new System.Text.StringBuilder(sql.Length);
             for (int i = 0; i < tokenList.Count; i++)
             {
                 var tok = tokenList[i];
@@ -278,25 +278,36 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                     tok.Type == SqlBaseLexer.UNICODE_STRING ||
                     tok.Type == SqlBaseLexer.DOLLAR_STRING ||
                     tok.Type == SqlBaseLexer.INTEGER_VALUE ||
-                    tok.Type == SqlBaseLexer.DECIMAL_VALUE)
+                    tok.Type == SqlBaseLexer.DECIMAL_VALUE ||
+                    tok.Type == SqlBaseLexer.DOUBLE_VALUE ||
+                    tok.Type == SqlBaseLexer.BINARY_LITERAL)
                 {
-                    rewriter.Replace(tok.TokenIndex, RedactedLiteralPlaceholder);
+                    redacted.Append(RedactedLiteralPlaceholder);
+                }
+                else
+                {
+                    redacted.Append(tok.Text);
                 }
             }
 
-            result = rewriter.GetText();
+            result = redacted.ToString();
         }
         catch
         {
-            var s = FallbackStringLiteralRegex.Replace(sql, RedactedLiteralPlaceholder);
-            result = FallbackNumericLiteralRegex.Replace(s, RedactedLiteralPlaceholder);
+            result = FullyRedactedStatement;
         }
 
-        if (result.Length > maxLength)
-        {
-            result = result[..maxLength] + "...[TRUNCATED]";
-        }
-
-        return (result, hash);
+        return result;
     }
+
+    private sealed class LexerErrorCounter : IAntlrErrorListener<int>
+    {
+        public int Count { get; private set; }
+
+        public void SyntaxError(System.IO.TextWriter output, IRecognizer recognizer, int offendingSymbol, int line, int charPositionInLine, string msg, RecognitionException e) => Count++;
+    }
+
+    /// <summary>The audit text of an already redacted statement: cut to <paramref name="maxLength"/> characters.</summary>
+    public static string TruncateForAudit(string redactedSql, int maxLength = DefaultMaxAuditSqlLength) =>
+        redactedSql.Length > maxLength ? redactedSql[..maxLength] + "...[TRUNCATED]" : redactedSql;
 }

@@ -48,6 +48,9 @@ public class AuditEndpointCoverageTests : IClassFixture<WebApplicationFactory<Pr
         ["POST /api/admin/tokens/revoke"] =
             "TokenRevocationEndpoints writes the TOKEN_REVOKED record itself after revocation; " +
             "403/401/errors are finalized by AccessAuditMiddleware.",
+        ["POST /api/admin/tenant-registry/{tenantId}/resolve-collision"] =
+            "TenantRegistryAdminEndpoints writes the TENANT_COLLISION_RESOLVED record itself after the resolution; " +
+            "403/401/errors are finalized by AccessAuditMiddleware.",
         ["ANY /graphql/{**slug}"] =
             "GraphQL data access is audited by GatewayExecutionService, which records a per-table ALLOW/DENY decision for every table a query touches; " +
             "HTTP-level denials (401/403/429/5xx) and exceptions are finalized by AccessAuditMiddleware. " +

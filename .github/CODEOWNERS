@@ -9,3 +9,5 @@ Directory.Build.props              @themulle
 NuGet.config                       @themulle
 **/packages.lock.json              @themulle
 tests/Autheris.Tests.SqlCompilerGate/Corpus/accepted-differences*.json  @themulle
+# WP-X1.3 (SEC-X1-14): a tier flip in the capability table admits a dialect to WebSQL
+src/TrinoSqlEngine/Ast/Capabilities/DialectCapabilityTable.cs  @themulle

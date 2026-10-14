@@ -11,6 +11,7 @@ using Xunit;
 
 namespace TrinoSqlEngine.Tests.Compiler;
 
+[Trait("Category", "SqlGate")]
 public class OracleCapabilityTests
 {
     private static readonly DialectCapabilities Caps = DialectCapabilityTable.Default.Get(TargetSqlDialect.Oracle);
@@ -53,6 +54,7 @@ public class OracleCapabilityTests
     }
 }
 
+[Trait("Category", "SqlGate")]
 public class OracleCheckerTests
 {
     private static BoundParameter P(int n) => new($":p{n}", $"p{n}", n - 1, "v", SqlParameterType.String, ParameterOrigin.QueryLiteral);
@@ -78,6 +80,7 @@ public class OracleCheckerTests
     }
 }
 
+[Trait("Category", "SqlGate")]
 public class OracleGeneratorTests
 {
     private static CompiledSql Gen(string sql, IDictionary<string, PolicyValue>? values = null) =>

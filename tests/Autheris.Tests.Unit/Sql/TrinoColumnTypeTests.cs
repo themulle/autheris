@@ -126,7 +126,7 @@ public sealed class TrinoColumnTypeTests
         var created = new DateTimeOffset(2026, 10, 8, 10, 35, 0, TimeSpan.Zero);
         sql.ExecuteQueryBufferedAsync(request, user, tenant, Arg.Any<CancellationToken>())
             .Returns(new GovernedSqlResult(
-                request.Sql, request.Sql, ["_col0", "created"],
+                request.Sql, ["_col0", "created"],
                 [new Dictionary<string, object?> { ["_col0"] = 7235L, ["created"] = created }],
                 1, 1,
                 ColumnDescriptions: [new SqlResultColumn("_col0", typeof(long)), new SqlResultColumn("created", typeof(DateTimeOffset))]));

@@ -130,6 +130,7 @@ public sealed class WebSqlTwoPartNameDataSourceTests
         reader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
         reader.FieldCount.Returns(0);
         var command = Substitute.For<DbCommand>();
+        command.WireParameters();   // the binder owns the parameters of a governed command
         command.ExecuteReaderAsync(Arg.Any<CommandBehavior>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
         var connection = Substitute.For<DbConnection>();
         connection.CreateCommand().Returns(command);
@@ -138,10 +139,10 @@ public sealed class WebSqlTwoPartNameDataSourceTests
             .Returns(Task.FromResult(connection));
 
         var service = new GovernedSqlExecutionService(
-            Options.Create(options),
+            Options.Create(options), executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: null,
             consentResolution: resolution,
-            tableRepository: repo,
+            tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             auditLogRepository: audit ?? Autheris.Application.Audit.NullAuditLogRepository.Instance,
             connectionFactory: factory,
             clientIpResolver: null,

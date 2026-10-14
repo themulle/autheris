@@ -7,6 +7,7 @@ using TrinoSqlEngine.Ast.Builder;
 using TrinoSqlEngine.Ast.Nodes;
 using Xunit;
 
+[Trait("Category", "SqlGate")]
 public sealed class SqlAstBuilderTests
 {
     private readonly FastSqlEngine _engine = new();

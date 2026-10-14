@@ -3,19 +3,21 @@ namespace TrinoSqlEngine.Tests.Ast.DialectGenerators;
 using System;
 using System.Collections.Generic;
 using TrinoSqlEngine;
+using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Generators;
 using TrinoSqlEngine.Ast.Nodes;
 using Xunit;
 
+[Trait("Category", "SqlGate")]
 public sealed class SqliteDialectTests
 {
     private readonly SqliteDialectGenerator _generator = new();
 
     [Fact]
-    public void Sqlite_ParameterBudget_Exceeding999_ThrowsException()
+    public void Sqlite_ParameterBudget_ExceedingTheCapabilityLimit_Throws()
     {
         var paramsList = new List<Expression>();
-        for (int i = 0; i < 1005; i++)
+        for (int i = 0; i < 32770; i++)
         {
             paramsList.Add(new ParameterReference("?"));
         }
@@ -32,7 +34,9 @@ public sealed class SqliteDialectTests
             OrderBy: null,
             Pagination: null);
 
-        Assert.Throws<DialectLimitExceededException>(() => _generator.GenerateSql(stmt));
+        var ex = Assert.Throws<SqlLimitExceededException>(() => _generator.GenerateSql(stmt));
+        Assert.Equal(SqlLimitKind.BindParameters, ex.Kind);
+        Assert.Equal(32766, ex.Maximum);
     }
 
     [Fact]

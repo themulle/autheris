@@ -13,6 +13,7 @@ using static TrinoSqlEngine.Tests.Compiler.PolicyFixtures;
 
 namespace TrinoSqlEngine.Tests.Compiler;
 
+[Trait("Category", "SqlGate")]
 public class MaskTests
 {
     private static ColumnReference Col(string name) => new(new SqlQualifiedName(new[] { new SqlIdentifier(name, true) }));
@@ -216,7 +217,7 @@ public class MaskTests
         new Dictionary<string, PolicyValue> { ["__mask_email"] = new("[REDACTED]", SqlParameterType.String) }.ToFrozenDictionary());
 
     private SqlStatement Secure(string sql, TypedPolicyContext typed) =>
-        (SqlStatement)new AstSecurityVisitor(new RlsOptions(), new FastSqlEngine(), typed).Visit(CompilerTestHelpers.Build(sql));
+        TypedVisitor.Secure(CompilerTestHelpers.Build(sql), typed);
 
     [Fact]
     public void TypedInjection_ProjectsMaskExpression_ForMaskedColumns_AndCollectsValues()

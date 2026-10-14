@@ -1,342 +1,161 @@
 namespace TrinoSqlEngine.Tests.Ast;
 
 using System;
-using System.Collections.Generic;
+using System.Linq;
 using System.Security;
 using TrinoSqlEngine;
-using TrinoSqlEngine.Ast.Builder;
-using TrinoSqlEngine.Ast.Generators;
-using TrinoSqlEngine.Ast.Nodes;
-using TrinoSqlEngine.Ast.Visitors;
+using TrinoSqlEngine.Ast.Emit;
+using TrinoSqlEngine.Tests.Security;
 using Xunit;
 
+/// <summary>
+/// DML guardrails of the governed compile path (typed policy), ported from the string-path visitor tests. Covered elsewhere and
+/// therefore not repeated here: consent-filtered INSERT (<c>AstSecurityRegressionTests.SQ07_*</c>), the WITH CHECK OPTION for INSERT
+/// and UPDATE (<c>DmlCompileTests.InsertValues_*</c>, <c>Update_TenantColumnAssignment_IsRejected</c>), subqueries in UPDATE/DELETE
+/// (<c>Update_SubqueriesInWhereAndSet_AreSecuredOnEverySource</c>, <c>Delete_SubqueryInWhere_IsSecured</c>).
+/// </summary>
+[Trait("Category", "SqlGate")]
+[Trait("Category", "Security")]
 public sealed class AstSecurityVisitorDmlTests
 {
-    private readonly FastSqlEngine _engine = new();
-
-    private string SecureAndGenerate(string sql, RlsOptions options)
+    public static TheoryData<TargetSqlDialect> Dialects => new()
     {
-        var (tree, _) = _engine.Parse(sql.AsMemory(), SqlTokenSecurityOptions.None);
-        var builder = new SqlAstBuilder(AstBuilderOptions.FromRlsOptions(options));
-        var ast = builder.BuildStatement(tree);
+        TargetSqlDialect.PostgreSql, TargetSqlDialect.SqlServer, TargetSqlDialect.Oracle
+    };
 
-        var visitor = new AstSecurityVisitor(options, _engine);
-        var secured = (SqlStatement)visitor.Visit(ast);
-
-        var generator = SqlDialectGeneratorFactory.GetGenerator(options.TargetDialect);
-        return generator.GenerateSql(secured);
+    private static ProbeEnv Env(TargetSqlDialect dialect, bool maskEmail = false)
+    {
+        var env = new ProbeEnv(dialect);
+        if (maskEmail) env.MaskEmail();
+        return env;
     }
 
-    [Fact]
-    public void Dml_UnfilteredDml_ThrowsUnfilteredDmlException()
+    private static ProbeEnv MaskedEnv(string kind)
     {
-        var options = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            RejectUnfilteredDml = true
-        };
-
-        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders", options));
-        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("UPDATE orders SET x = 1", options));
-    }
-
-    [Fact]
-    public void Dml_TautologyWhere_ThrowsUnfilteredDmlException()
-    {
-        var options = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            RejectUnfilteredDml = true
-        };
-
-        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE 1 = 1", options));
-        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE 'a' = 'a'", options));
-        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("UPDATE orders SET x = 1 WHERE true", options));
-        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE 1 < 2", options));
-        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("UPDATE orders SET x = 1 WHERE 10 > 5", options));
-        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE 5 <= 5", options));
-        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("UPDATE orders SET x = 1 WHERE 5 >= 2", options));
-        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE 1 != 2", options));
-    }
-
-    [Fact]
-    public void Dml_WhereWithoutColumnReference_ThrowsUnfilteredDmlException()
-    {
-        var options = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            RejectUnfilteredDml = true
-        };
-
-        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("UPDATE orders SET x = 1 WHERE 'a' != 'b'", options));
-        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE 100 + 200 = 300", options));
-    }
-
-    [Fact]
-    public void Dml_LegitimateColumnFilter_Passes()
-    {
-        var options = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            RejectUnfilteredDml = true
-        };
-
-        var deleteResult = SecureAndGenerate("DELETE FROM orders WHERE id = 1", options);
-        Assert.Contains("DELETE FROM", deleteResult, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("orders", deleteResult, StringComparison.OrdinalIgnoreCase);
-
-        var updateResult = SecureAndGenerate("UPDATE orders SET x = 1 WHERE amount > 100", options);
-        Assert.Contains("UPDATE", updateResult, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("orders", updateResult, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void Dml_MaskedColumnsInDml_ThrowsSecurityException()
-    {
-        var options = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            RejectMaskedColumnsInDml = true,
-            ColumnMaskingProvider = new DefaultColumnMaskingPolicyProvider(
-                (t, c) => c.Equals("salary", StringComparison.OrdinalIgnoreCase),
-                (t, c) => "NULL")
-        };
-
-        // Probing masked column in WHERE is rejected
-        Assert.Throws<SecurityException>(() => SecureAndGenerate("DELETE FROM employees WHERE salary > 50000", options));
-
-        // Assigning masked column in SET is rejected
-        Assert.Throws<SecurityException>(() => SecureAndGenerate("UPDATE employees SET salary = 100000 WHERE id = 1", options));
-    }
-
-    [Fact]
-    public void Dml_ConsentFilteredInsert_ThrowsSecurityException()
-    {
-        var options = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            RejectConsentFilteredInsert = true,
-            TablesWithConsentRowFilter = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "patients" }
-        };
-
-        string sql = "INSERT INTO patients (id, name, tenant_id) VALUES (1, 'Alice', 42)";
-        Assert.Throws<SecurityException>(() => SecureAndGenerate(sql, options));
-    }
-
-    [Fact]
-    public void Dml_WithCheckOption_InsertTenantValidation()
-    {
-        var options = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            EnforceWithCheckOption = true,
-            TenantColumnName = "tenant_id",
-            ExpectedTenantValue = "42",
-            RequireTenantColumnInInsert = true
-        };
-
-        // Valid insert
-        string validSql = "INSERT INTO orders (id, amount, tenant_id) VALUES (1, 100, 42)";
-        string res = SecureAndGenerate(validSql, options);
-        Assert.Contains("INSERT INTO", res, StringComparison.OrdinalIgnoreCase);
-
-        // Missing tenant column
-        string missingTenantSql = "INSERT INTO orders (id, amount) VALUES (1, 100)";
-        Assert.Throws<SecurityException>(() => SecureAndGenerate(missingTenantSql, options));
-
-        // Wrong tenant value
-        string wrongTenantSql = "INSERT INTO orders (id, amount, tenant_id) VALUES (1, 100, 99)";
-        Assert.Throws<SecurityException>(() => SecureAndGenerate(wrongTenantSql, options));
-    }
-
-    [Fact]
-    public void Dml_WithCheckOption_UpdateTenantModification_ThrowsSecurityException()
-    {
-        var options = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            EnforceWithCheckOption = true,
-            TenantColumnName = "tenant_id",
-            ExpectedTenantValue = "42",
-            DisallowTenantColumnModificationInUpdate = true
-        };
-
-        string sql = "UPDATE orders SET tenant_id = 42 WHERE id = 1";
-        Assert.Throws<SecurityException>(() => SecureAndGenerate(sql, options));
-    }
-
-    [Fact]
-    public void Dml_SubqueryInUpdateSetAndWhere_RewritesWithRls()
-    {
-        var options = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'"),
-            TargetDialect = TargetSqlDialect.PostgreSql
-        };
-
-        string sql = "UPDATE orders SET total = (SELECT sum(price) FROM items) WHERE customer_id IN (SELECT id FROM customers)";
-        string result = SecureAndGenerate(sql, options);
-
-        // All three tables (orders, items, customers) must have RLS applied
-        Assert.Contains("WHERE \"tenant_id\" = 't1'", result, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("items", result, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("customers", result, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void Dml_SubqueryInDeleteWhere_RewritesWithRls()
-    {
-        var options = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'"),
-            TargetDialect = TargetSqlDialect.PostgreSql
-        };
-
-        string sql = "DELETE FROM orders WHERE customer_id IN (SELECT id FROM customers)";
-        string result = SecureAndGenerate(sql, options);
-
-        Assert.Contains("WHERE \"tenant_id\" = 't1'", result, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("customers", result, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void Dml_MaskedColumnInCastOrLike_ThrowsSecurityException()
-    {
-        var options = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            RejectMaskedColumnsInDml = true,
-            ColumnMaskingProvider = new DefaultColumnMaskingPolicyProvider(
-                (t, c) => c.Equals("salary", StringComparison.OrdinalIgnoreCase),
-                (t, c) => "NULL")
-        };
-
-        // CAST on masked column in WHERE is rejected
-        Assert.Throws<SecurityException>(() => SecureAndGenerate("DELETE FROM employees WHERE CAST(salary AS VARCHAR) = '50000'", options));
-
-        // LIKE on masked column in WHERE is rejected
-        Assert.Throws<SecurityException>(() => SecureAndGenerate("DELETE FROM employees WHERE salary LIKE '500%'", options));
-
-        // Subquery referencing masked column in UPDATE SET is rejected
-        Assert.Throws<SecurityException>(() => SecureAndGenerate("UPDATE notes SET content = (SELECT salary FROM employees WHERE id = 1) WHERE id = 1", options));
-    }
-
-    [Fact]
-    public void Dml_TautologyWhere_ColumnComparison_ThrowsUnfilteredDmlException()
-    {
-        var options = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            RejectUnfilteredDml = true
-        };
-
-        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE id <= id", options));
-        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("UPDATE orders SET x = 1 WHERE id >= id", options));
-        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE id BETWEEN id AND id", options));
-        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE id IN (id)", options));
-    }
-
-    [Fact]
-    public void Dml_ExistsWithoutColumnReference_ThrowsUnfilteredDmlException()
-    {
-        var options = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            RejectUnfilteredDml = true
-        };
-
-        // Subquery without any column reference does not satisfy column reference requirement
-        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE EXISTS (SELECT 1)", options));
-    }
-
-    [Fact]
-    public void Dml_MaskedColumnInJoinOnOrGroupByOrEscape_ThrowsSecurityException()
-    {
-        var options = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            RejectMaskedColumnsInDml = true,
-            ColumnMaskingProvider = new DefaultColumnMaskingPolicyProvider(
-                (t, c) => c.Equals("salary", StringComparison.OrdinalIgnoreCase),
-                (t, c) => "NULL")
-        };
-
-        // JOIN ON referencing masked column in WHERE subquery
-        Assert.Throws<SecurityException>(() => SecureAndGenerate("DELETE FROM orders WHERE id IN (SELECT o.id FROM orders o JOIN employees e ON o.user_id = e.salary)", options));
-
-        // GROUP BY referencing masked column in WHERE subquery
-        Assert.Throws<SecurityException>(() => SecureAndGenerate("DELETE FROM orders WHERE id IN (SELECT count(*) FROM employees GROUP BY salary)", options));
-
-        // LIKE ESCAPE referencing masked column in WHERE
-        Assert.Throws<SecurityException>(() => SecureAndGenerate("DELETE FROM employees WHERE name LIKE 'test%' ESCAPE salary", options));
+        var env = new ProbeEnv(TargetSqlDialect.PostgreSql);
+        if (kind == "hmac") env.MaskEmailHmac(); else env.MaskEmailPartial();
+        return env;
     }
 
     [Theory]
-    [InlineData(TargetSqlDialect.PostgreSql)]
-    [InlineData(TargetSqlDialect.Sqlite)]
-    [InlineData(TargetSqlDialect.SqlServer)]
-    public void Sg05_LikePatternOrEscape_Parenthesized_And_DmlFilterEnforcesExplicitGrouping(TargetSqlDialect dialect)
+    [MemberData(nameof(Dialects))]
+    public void Dml_UnfilteredDml_ThrowsUnfilteredDmlException(TargetSqlDialect dialect)
     {
-        var options = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            TargetDialect = dialect,
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'")
-        };
-
-        // 1. DELETE with OR in LIKE pattern
-        string deleteSql = "DELETE FROM orders WHERE col LIKE ('pattern' OR 'foo')";
-        string deleteResult = SecureAndGenerate(deleteSql, options);
-
-        // Pattern operand must be parenthesized to avoid precedence leak
-        Assert.Contains("LIKE (", deleteResult, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("'pattern' OR ", deleteResult, StringComparison.OrdinalIgnoreCase);
-        // Entire user where is parenthesized and combined with parenthesized RLS filter: (userWhere) AND (rls)
-        Assert.Contains("WHERE (", deleteResult, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(") AND (", deleteResult, StringComparison.OrdinalIgnoreCase);
-
-        // 2. UPDATE with OR in ESCAPE
-        string updateSql = "UPDATE orders SET status = 'done' WHERE col LIKE 'test' ESCAPE ('/' OR '\\')";
-        string updateResult = SecureAndGenerate(updateSql, options);
-
-        Assert.Contains("ESCAPE (", updateResult, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(") AND (", updateResult, StringComparison.OrdinalIgnoreCase);
+        var env = Env(dialect);
+        Assert.Throws<UnfilteredDmlException>(() => env.Compile("DELETE FROM orders"));
+        Assert.Throws<UnfilteredDmlException>(() => env.Compile("UPDATE orders SET status = 'x'"));
     }
 
-    [Fact]
-    public void Sg06_TargetWildcardInSubquery_ThrowsSecurityException_WhenTargetHasMaskedColumns()
+    [Theory]
+    [InlineData("'a' = 'a'")]
+    [InlineData("1 < 2")]
+    [InlineData("10 > 5")]
+    [InlineData("5 <= 5")]
+    [InlineData("5 >= 2")]
+    [InlineData("1 != 2")]
+    [InlineData("'a' != 'b'")]
+    [InlineData("100 + 200 = 300")]
+    [InlineData("1 = 1")]
+    [InlineData("true")]
+    [InlineData("id <= id")]
+    [InlineData("id >= id")]
+    [InlineData("id BETWEEN id AND id")]
+    [InlineData("id IN (id)")]
+    [InlineData("EXISTS (SELECT 1)")]
+    public void Dml_TautologyOrColumnFreeWhere_ThrowsUnfilteredDmlException(string where)
     {
-        var options = new RlsOptions
+        var env = Env(TargetSqlDialect.PostgreSql);
+        Assert.Throws<UnfilteredDmlException>(() => env.Compile("DELETE FROM orders WHERE " + where));
+        Assert.Throws<UnfilteredDmlException>(() => env.Compile("UPDATE orders SET status = 'x' WHERE " + where));
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public void Dml_LegitimateColumnFilter_Compiles_AndCarriesTheTenant(TargetSqlDialect dialect)
+    {
+        var env = Env(dialect);
+
+        var delete = env.Compile("DELETE FROM orders WHERE id = 1");
+        Assert.Equal(SqlStatementClass.Delete, delete.StatementClass);
+        Assert.Single(delete.Parameters, p => p.Origin == ParameterOrigin.Tenant);
+
+        var update = env.Compile("UPDATE orders SET status = 'x' WHERE amount > 100");
+        Assert.Equal(SqlStatementClass.Update, update.StatementClass);
+        Assert.Single(update.Parameters, p => p.Origin == ParameterOrigin.Tenant);
+    }
+
+    [Theory]
+    [InlineData("DELETE FROM orders WHERE email = 'x'")]
+    [InlineData("UPDATE orders SET email = 'x' WHERE id = 1")]
+    [InlineData("DELETE FROM orders WHERE CAST(email AS VARCHAR) = 'x'")]
+    [InlineData("DELETE FROM orders WHERE email LIKE 'x%'")]
+    [InlineData("DELETE FROM orders WHERE status LIKE 'test%' ESCAPE email")]
+    [InlineData("UPDATE entitlements SET orderid = (SELECT id FROM orders WHERE email = 'x') WHERE id = 1")]
+    [InlineData("DELETE FROM entitlements WHERE orderid IN (SELECT o.id FROM orders o JOIN entitlements e ON o.id = e.orderid WHERE o.email = 'x')")]
+    public void Dml_MaskedColumnInWhereSetLikeCastSubqueryOrGroupBy_ThrowsSecurityException(string sql)
+    {
+        Assert.ThrowsAny<SecurityException>(() => Env(TargetSqlDialect.PostgreSql, maskEmail: true).Compile(sql));
+    }
+
+    // The legacy guard also rejected GROUP BY over a masked column inside a DML subquery. On the typed path the table reference is
+    // already the masked projection, so grouping reads the mask (never the real value) and is not an oracle: it compiles.
+    [Fact]
+    public void Dml_GroupByAMaskedColumnInASubquery_GroupsTheMaskNotTheValue()
+    {
+        var compiled = Env(TargetSqlDialect.PostgreSql, maskEmail: true)
+            .Compile("DELETE FROM entitlements WHERE orderid IN (SELECT count(*) FROM orders GROUP BY email)");
+
+        Assert.Contains("CAST(NULL AS", compiled.Sql, StringComparison.Ordinal);
+    }
+
+    // The same for the keyed and the partial masks: the GROUP BY of the subquery groups the projected (masked) column of the derived table,
+    // never the stored value, so the mask is not an equality oracle.
+    [Theory]
+    [InlineData("hmac", "HMAC(")]
+    [InlineData("partial", "right(")]
+    public void Dml_GroupByAMaskedColumnInASubquery_Hmac_And_PartialMask_GroupTheProjectedAlias(string kind, string maskFunction)
+    {
+        var compiled = MaskedEnv(kind).Compile("DELETE FROM entitlements WHERE orderid IN (SELECT count(*) FROM orders GROUP BY email)");
+
+        // the mask is computed inside the derived table that stands for orders ...
+        const string derivedTableEnd = ") AS \"orders\" GROUP BY ";
+        int end = compiled.Sql.IndexOf(derivedTableEnd, StringComparison.Ordinal);
+        Assert.True(end > 0, compiled.Sql);
+        Assert.Contains(maskFunction, compiled.Sql[..end], StringComparison.OrdinalIgnoreCase);
+
+        // ... and the grouping outside of it reads only the projected alias: never the mask function, never the stored column of the base table
+        string grouping = compiled.Sql[(end + derivedTableEnd.Length)..];
+        string groupingExpression = grouping[..grouping.IndexOf(')', StringComparison.Ordinal)];
+        Assert.Equal("\"email\"", groupingExpression);
+    }
+
+    [Theory]
+    [InlineData("UPDATE orders SET status = (SELECT sub.val FROM (SELECT orders.*) sub) WHERE id = 1")]
+    [InlineData("UPDATE orders SET status = 'x' WHERE (SELECT count(*) FROM (SELECT orders.*) sub) > 0")]
+    [InlineData("DELETE FROM orders WHERE (SELECT count(*) FROM (SELECT orders.*) sub) > 0")]
+    [InlineData("DELETE FROM dbo.orders WHERE (SELECT count(*) FROM (SELECT dbo.orders.*) sub) > 0")]
+    public void Sg06_TargetWildcardInSubquery_ThrowsSecurityException_WhenTheTargetHasMaskedColumns(string sql)
+    {
+        var ex = Assert.ThrowsAny<SecurityException>(() => Env(TargetSqlDialect.PostgreSql, maskEmail: true).Compile(sql));
+        Assert.Contains("Whole-row reference", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public void Sg05_UserWhere_IsParenthesized_AndCombinedWithTheInjectedPredicates(TargetSqlDialect dialect)
+    {
+        var env = Env(dialect);
+        env.RegionPolicy();
+
+        var delete = env.Compile("DELETE FROM orders WHERE id = 1 OR status = 'x'");
+        var update = env.Compile("UPDATE orders SET status = 'done' WHERE id = 1 OR status = 'x'");
+
+        foreach (var compiled in new[] { delete, update })
         {
-            EnforceReadOnlyQueries = false,
-            RejectMaskedColumnsInDml = true,
-            TablesWithMaskedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "employees", "public.employees" },
-            ColumnMaskingProvider = new DefaultColumnMaskingPolicyProvider(
-                (t, c) => c.Equals("salary", StringComparison.OrdinalIgnoreCase),
-                (t, c) => "NULL")
-        };
-
-        // 1. UPDATE SET with correlated target table wildcard: employees.*
-        string sql1 = "UPDATE employees SET notes = (SELECT sub.val FROM (SELECT employees.*) sub) WHERE id = 1";
-        var ex1 = Assert.Throws<SecurityException>(() => SecureAndGenerate(sql1, options));
-        Assert.Contains("Whole-row reference", ex1.Message, StringComparison.OrdinalIgnoreCase);
-
-        // 2. UPDATE WHERE with correlated target table wildcard: employees.*
-        string sql2 = "UPDATE employees SET notes = 'x' WHERE (SELECT count(*) FROM (SELECT employees.*) sub) > 0";
-        var ex2 = Assert.Throws<SecurityException>(() => SecureAndGenerate(sql2, options));
-        Assert.Contains("Whole-row reference", ex2.Message, StringComparison.OrdinalIgnoreCase);
-
-        // 3. DELETE WHERE with correlated target table wildcard: employees.*
-        string sql3 = "DELETE FROM employees WHERE (SELECT count(*) FROM (SELECT employees.*) sub) > 0";
-        var ex3 = Assert.Throws<SecurityException>(() => SecureAndGenerate(sql3, options));
-        Assert.Contains("Whole-row reference", ex3.Message, StringComparison.OrdinalIgnoreCase);
-
-        // 4. Fully qualified target table wildcard: public.employees.*
-        string sql4 = "DELETE FROM public.employees WHERE (SELECT count(*) FROM (SELECT public.employees.*) sub) > 0";
-        var ex4 = Assert.Throws<SecurityException>(() => SecureAndGenerate(sql4, options));
-        Assert.Contains("Whole-row reference", ex4.Message, StringComparison.OrdinalIgnoreCase);
+            // the user OR can never absorb the injected tenant and policy predicates
+            Assert.Contains(") AND (", compiled.Sql, StringComparison.OrdinalIgnoreCase);
+            Assert.Single(compiled.Parameters, p => p.Origin == ParameterOrigin.Tenant);
+            Assert.Single(compiled.Parameters, p => p.Origin == ParameterOrigin.Policy);
+        }
     }
 }
-

@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Data;
 using System.Data.Common;
 using System.Text.RegularExpressions;
@@ -180,6 +181,26 @@ internal sealed class ProbeEnv
                     null, null), null, null)),
             new Dictionary<string, PolicyValue>());
     }
+
+    /// <summary>The email column of orders masked with a keyed HMAC (the key is a bound mask parameter).</summary>
+    public void MaskEmailHmac() =>
+        Masks.Masks[(Orders, "email")] = new MaskSpec(
+            MaskKind.Hmac,
+            new MaskArguments(HmacKey: new PolicyParameterExpression("m_key", SqlParameterType.String, ParameterOrigin.Mask)),
+            new Dictionary<string, PolicyValue> { ["m_key"] = new("00ff00ff00ff00ff", SqlParameterType.String) }.ToFrozenDictionary());
+
+    /// <summary>The email column of orders masked with a partial mask (prefix and suffix kept, the rest replaced).</summary>
+    public void MaskEmailPartial() =>
+        Masks.Masks[(Orders, "email")] = new MaskSpec(
+            MaskKind.PartialMask,
+            new MaskArguments(
+                KeepPrefix: new PolicyParameterExpression("m_p", SqlParameterType.Int32, ParameterOrigin.Mask),
+                KeepSuffix: new PolicyParameterExpression("m_s", SqlParameterType.Int32, ParameterOrigin.Mask),
+                MaskChar: new PolicyParameterExpression("m_c", SqlParameterType.String, ParameterOrigin.Mask)),
+            new Dictionary<string, PolicyValue>
+            {
+                ["m_p"] = new(1, SqlParameterType.Int32), ["m_s"] = new(1, SqlParameterType.Int32), ["m_c"] = new("*", SqlParameterType.String)
+            }.ToFrozenDictionary());
 
     public void MaskEmail() =>
         Masks.Masks[(Orders, "email")] = new MaskSpec(MaskKind.Nullify, new MaskArguments(), System.Collections.Frozen.FrozenDictionary<string, PolicyValue>.Empty);

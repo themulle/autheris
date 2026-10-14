@@ -219,9 +219,14 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                 GenerateExpression(sub.Index, ref builder, context);
                 builder.Append(']');
                 break;
-            case TrustedSqlExpression trusted:
-                // Only used as a projection item (column masks), so no precedence parentheses are needed.
-                builder.Append(trusted.Sql);
+            case NamedBindMarkerExpression marker:
+                if (context.IsBound)
+                {
+                    throw new NotSupportedException("Named bind markers are only emitted by the inline text rendering.");
+                }
+
+                builder.Append('@');
+                builder.Append(marker.Name);
                 break;
             case ExtractExpression ext:
                 FormatExtract(ref builder, CanonicalExtractField(ext.Field), ext.Source, context);
@@ -268,16 +273,6 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         if (context.IsBound)
         {
             builder.Append(context.BindClient(param));
-            return;
-        }
-
-        // Wunsch 4: a client parameter (@name → __param_name) stays a named placeholder. The caller binds by name and
-        // restores @name after the rewrite (GovernedSqlExecutionService.RestoreClientParameters); a positional marker
-        // ($1, @p0, ?1) could not be bound, because no mapping is returned.
-        if (param.IsSynthetic && SafeParamIdentifierRegex.IsMatch(param.Name))
-        {
-            builder.Append("__param_");
-            builder.Append(param.Name);
             return;
         }
 

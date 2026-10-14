@@ -8,6 +8,7 @@ using static TrinoSqlEngine.Tests.Compiler.PolicyFixtures;
 namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>CR-ADG-14 (budget knobs are bounded) and CR-ADG-15 (the Databricks token guard is forced inside the compiler).</summary>
+[Trait("Category", "SqlGate")]
 public class CompileLimitsTests
 {
     private readonly FastSqlEngine _engine = new();

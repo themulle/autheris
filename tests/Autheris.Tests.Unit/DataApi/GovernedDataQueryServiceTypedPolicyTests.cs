@@ -58,7 +58,7 @@ public sealed class GovernedDataQueryServiceTypedPolicyTests
         GovernedSqlQueryRequest? sent = null;
         var sql = Substitute.For<IGovernedSqlExecutionService>();
         sql.ExecuteQueryBufferedAsync(Arg.Do<GovernedSqlQueryRequest>(r => sent = r), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(new GovernedSqlResult("q", "r", ["id"], new List<IReadOnlyDictionary<string, object?>>(), 0, 1));
+            .Returns(new GovernedSqlResult("q", ["id"], new List<IReadOnlyDictionary<string, object?>>(), 0, 1));
         var service = new GovernedDataQueryService(repo, pdp, sql, Substitute.For<IFederatedQueryExecutionService>(), Substitute.For<IColumnMaskingProvider>());
         var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "u1"), new Claim("tenant", "default")], "t"));
 

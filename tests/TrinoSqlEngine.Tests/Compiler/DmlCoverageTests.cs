@@ -17,6 +17,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// the SQL Server MERGE terminator is accepted only at its registered position (SEC-ADG-08 c), and the capability matrix of the
 /// DML classes is pinned.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public class DmlCoverageTests
 {
     private readonly FastSqlEngine _engine = new();

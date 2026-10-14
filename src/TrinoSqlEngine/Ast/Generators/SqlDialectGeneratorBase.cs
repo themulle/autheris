@@ -20,7 +20,13 @@ using TrinoSqlEngine.Ast.Nodes;
 public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 {
     public abstract TargetSqlDialect TargetDialect { get; }
-    public abstract int MaxParameterBudget { get; }
+
+    /// <summary>
+    /// Bind-parameter budget of the inline (string only) emission: the capability table entry of the dialect, or a fixed ceiling for a
+    /// dialect without an entry (ANSI and the test-only Snowflake generator).
+    /// </summary>
+    private static int InlineParameterBudget(TargetSqlDialect dialect) =>
+        DialectCapabilityTable.Default.TryGet(dialect, out var caps) ? caps.MaxBindParameters : 65535;
 
     /// <summary>Capabilities from the capability table; a dialect without an entry throws (fail closed).</summary>
     public virtual DialectCapabilities Capabilities => DialectCapabilityTable.Default.Get(TargetDialect);
@@ -30,12 +36,19 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
     /// <see cref="BoundParameter"/> and counted against the capability bind limit. The emitted text is verified by
     /// <see cref="EmittedSqlInvariantChecker"/> before it is returned.
     /// </summary>
-    public virtual CompiledSql Generate(SqlStatement statement, ParameterSource values, CancellationToken cancellationToken = default)
+    public virtual CompiledSql Generate(SqlStatement statement, ParameterSource values, CancellationToken cancellationToken = default) =>
+        Generate(statement, values, Capabilities, cancellationToken);
+
+    /// <summary>
+    /// Generates with the capabilities the compiler resolved for the request (the bind limit comes from them, not from a second lookup in
+    /// the default table), so the capability provider of the compiler governs the whole pipeline.
+    /// </summary>
+    internal CompiledSql Generate(SqlStatement statement, ParameterSource values, DialectCapabilities capabilities, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(statement);
         ArgumentNullException.ThrowIfNull(values);
+        ArgumentNullException.ThrowIfNull(capabilities);
 
-        var capabilities = Capabilities;
         cancellationToken.ThrowIfCancellationRequested();
         var context = new SqlEmitterContext(TargetDialect, capabilities, values, cancellationToken);
         Span<char> initialBuffer = stackalloc char[512];
@@ -146,7 +159,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         var builder = new ValueStringBuilder(initialBuffer);
         try
         {
-            var context = new SqlEmitterContext(TargetDialect, MaxParameterBudget);
+            var context = new SqlEmitterContext(TargetDialect, InlineParameterBudget(TargetDialect));
             GenerateSql(statement, ref builder, context);
             return builder.ToString();
         }

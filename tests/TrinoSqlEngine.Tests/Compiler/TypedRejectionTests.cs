@@ -9,6 +9,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// WP-X0-fix item 6: constructs a dialect cannot emit under the bind-everything rule are rejected with the typed
 /// <see cref="SqlCompileNotSupportedException"/> before emission, not through the emitted-SQL invariant check.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public class TypedRejectionTests
 {
     private static readonly InMemoryTableCatalog Catalog = new(new[]
@@ -52,6 +53,13 @@ public class TypedRejectionTests
     [InlineData("SELECT ARRAY[1, 2, 3] AS r FROM t")]
     public void SqlServer_ArraysAndSubscripts(string sql) =>
         Assert.Equal(nameof(SqlCompileNotSupportedException), Conformance.ConformanceRunner.Run(sql, "operator", TargetSqlDialect.SqlServer).ExceptionType);
+
+    // Oracle has no array type: arrays and subscripts are rejected with the typed exception, never emitted as ARRAY[...] / x[i].
+    [Theory]
+    [InlineData("SELECT a[1] AS r FROM t")]
+    [InlineData("SELECT ARRAY[1, 2, 3] AS r FROM t")]
+    public void Oracle_ArraysAndSubscripts(string sql) =>
+        Assert.Equal(nameof(SqlCompileNotSupportedException), Conformance.ConformanceRunner.Run(sql, "operator", TargetSqlDialect.Oracle).ExceptionType);
 
     [Theory]
     [InlineData("SELECT DATE '2024-01-15' AS r FROM orders")]

@@ -16,7 +16,11 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Shouldly;
+using Autheris.Tests.Unit.Sql;
 using TrinoSqlEngine;
+using TrinoSqlEngine.Ast.Emit;
+using TrinoSqlEngine.Ast.Nodes;
+using TrinoSqlEngine.Governance;
 using Xunit;
 
 namespace Autheris.Tests.Unit.Security;
@@ -155,30 +159,45 @@ INSERT INTO invoices VALUES (10, 1, 100), (11, 2, 200), (12, 1, 300);";
         rows.Select(r => Convert.ToInt64(r["id"])).OrderBy(x => x).ShouldBe(new long[] { 10, 12 });
     }
 
+    private static ColumnReference Col(params string[] parts) =>
+        new(new SqlQualifiedName(parts.Select(p => new SqlIdentifier(p, false)).ToList()));
+
+    /// <summary>EXISTS (SELECT 1 FROM customers c WHERE c.id = autheris_target.customer_id): a correlated row policy.</summary>
+    private static PolicyPredicate CorrelatedPolicy() => PolicyPredicate.Create(
+        new ExistsExpression(new SelectStatement(null,
+            new QuerySpecification(false,
+                new SelectItem[] { new ColumnSelectItem(new LiteralExpression(1L, LiteralType.Integer), null) },
+                new NamedTableSource(new SqlQualifiedName(new[] { new SqlIdentifier("customers", false) }), new SqlIdentifier("c", false)),
+                new BinaryExpression(Col("c", "id"), BinaryOperator.Equal, Col(RowFilterAliases.Target, "customer_id")),
+                null, null), null, null)),
+        new Dictionary<string, PolicyValue>());
+
+    private static PolicyPredicate AmountPolicy() => PolicyPredicate.Create(
+        new BinaryExpression(Col("amount"), BinaryOperator.Equal, new PolicyParameterExpression("__pol_amount", SqlParameterType.Int64)),
+        new Dictionary<string, PolicyValue> { ["__pol_amount"] = new(1L, SqlParameterType.Int64) });
+
+    private static TestCompileEnv Env(PolicyPredicate policy) => new TestCompileEnv(TargetSqlDialect.Sqlite)
+        .Table("orders", "tenant_id", "id:INTEGER", "customer_id:INTEGER", "amount:INTEGER", "tenant_id")
+        .Table("customers", "tenant_id", "id:INTEGER", "country", "tenant_id")
+        .Policy("orders", policy);
+
+    // The legacy RlsListener tests (RlsListener_RejectsCorrelatedFilterOnDml, ..._AliasesFilteredTableOnlyForCorrelatedFilters) are
+    // ported to the typed compiler path: the same properties, asserted on Compile.
+
     [Theory]
     [InlineData("DELETE FROM orders WHERE id = 1")]
     [InlineData("UPDATE orders SET amount = 0 WHERE id = 1")]
-    public void RlsListener_RejectsCorrelatedFilterOnDml(string dml)
+    public void Compile_RejectsCorrelatedFilterOnDml(string dml)
     {
-        var correlated = $"EXISTS (SELECT 1 FROM customers AS c WHERE c.id = {RowFilterAliases.Target}.customer_id)";
-        var options = new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider(correlated),
-            EnforceReadOnlyQueries = false
-        };
+        var env = Env(CorrelatedPolicy());
 
-        Should.Throw<SecurityException>(() => new FastSqlEngine().RewriteRls(dml.AsMemory(), options));
+        Should.Throw<SecurityException>(() => env.Compile(dml, statements: StatementPermissions.Update | StatementPermissions.Delete));
     }
 
     [Fact]
-    public void RlsListener_AliasesFilteredTableOnlyForCorrelatedFilters()
+    public void Compile_AliasesFilteredTableOnlyForCorrelatedFilters()
     {
-        var engine = new FastSqlEngine();
-        var correlated = $"EXISTS (SELECT 1 FROM customers AS c WHERE c.id = {RowFilterAliases.Target}.customer_id)";
-
-        engine.RewriteRls("SELECT id FROM orders".AsMemory(), new RlsOptions { PolicyProvider = new DefaultRlsPolicyProvider(correlated) })
-            .ShouldContain($"FROM orders AS {RowFilterAliases.Target} WHERE {correlated}");
-        engine.RewriteRls("SELECT id FROM orders".AsMemory(), new RlsOptions { PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 1") })
-            .ShouldContain("FROM orders WHERE tenant_id = 1");
+        Env(CorrelatedPolicy()).Compile("SELECT id FROM orders").Sql.ShouldContain(RowFilterAliases.Target);
+        Env(AmountPolicy()).Compile("SELECT id FROM orders").Sql.ShouldNotContain(RowFilterAliases.Target);
     }
 }

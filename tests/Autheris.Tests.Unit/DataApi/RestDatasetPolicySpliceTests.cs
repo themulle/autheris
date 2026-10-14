@@ -107,7 +107,7 @@ public sealed class RestDatasetPolicySpliceTests
             Pdp.EvaluateAccessAsync(Customers, meta, Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
                 .Returns(decision ?? SqlServerPolicyDecision());
             Sql.ExecuteQueryBufferedAsync(Arg.Do<GovernedSqlQueryRequest>(Captured.Add), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-                .Returns(new GovernedSqlResult("q", "q", ["id"], [], 0, 1));
+                .Returns(new GovernedSqlResult("q", ["id"], [], 0, 1));
         }
 
         public GovernedDataQueryService Service(IFederatedQueryExecutionService? federated = null) =>
@@ -241,7 +241,7 @@ public sealed class RestDatasetPolicySpliceTests
         var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
         var service = new GovernedSqlExecutionService(
-            Options.Create(options), policyEnforcement: casbin, consentResolution: resolution, tableRepository: tableRepo,
+            Options.Create(options), executionGuard: GovernedTestSupport.Guard, policyEnforcement: casbin, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null, clientIpResolver: null, environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: repo, secretProvider: null);
         await service.RewriteSqlAsync("SELECT \"id\", \"name\" FROM default.dbo.customers LIMIT 11", user, new TenantId(TenantValue));
@@ -288,15 +288,17 @@ public sealed class RestDatasetPolicySpliceTests
         var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
         var service = new GovernedSqlExecutionService(
-            Options.Create(Options_()), policyEnforcement: null, consentResolution: resolution, tableRepository: tableRepo,
+            Options.Create(Options_()), executionGuard: GovernedTestSupport.Guard, policyEnforcement: null, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null, clientIpResolver: null, environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: repo, secretProvider: null);
 
-        var rewritten = await service.RewriteSqlAsync(emitted, Alice(), new TenantId(TenantValue));
-        var baseline = await service.RewriteSqlAsync("SELECT \"id\", \"name\" FROM default.dbo.customers ORDER BY \"id\" LIMIT 11", Alice(), new TenantId(TenantValue));
+        var rewritten = await service.CompileAsync(emitted, Alice(), new TenantId(TenantValue));
+        var baseline = await service.CompileAsync("SELECT \"id\", \"name\" FROM default.dbo.customers ORDER BY \"id\" LIMIT 11", Alice(), new TenantId(TenantValue));
 
-        CountOf(rewritten, "= 'EU'").ShouldBe(1);
-        rewritten.ShouldBe(baseline);
+        // X1: the policy value is a bound parameter. It appears exactly once (no second copy from a splice) and never in the text.
+        rewritten.CountOfValue(TrinoSqlEngine.Ast.Emit.ParameterOrigin.Policy, "EU").ShouldBe(1);
+        rewritten.Sql.ShouldNotContain("'EU'");
+        rewritten.Sql.ShouldBe(baseline.Sql);
     }
 
     // ---- MCP dataset tool: same SQL and rows as REST -----------------------------------------------------------------
@@ -314,7 +316,7 @@ public sealed class RestDatasetPolicySpliceTests
             .Returns(ci =>
             {
                 rest.Captured.Add(ci.Arg<GovernedSqlQueryRequest>());
-                return new GovernedSqlResult("q", "q", ["id", "name"], rows, 2, 1);
+                return new GovernedSqlResult("q", ["id", "name"], rows, 2, 1);
             });
         var restEnvelope = await rest.Service().ExecuteQueryAsync(
             new DatasetQueryRequest(Customers, ["id", "name"], "id gt 0", "name", 10, 0, SqlTransports.Rest),
@@ -325,7 +327,7 @@ public sealed class RestDatasetPolicySpliceTests
             .Returns(ci =>
             {
                 mcp.Captured.Add(ci.Arg<GovernedSqlQueryRequest>());
-                return new GovernedSqlResult("q", "q", ["id", "name"], rows, 2, 1);
+                return new GovernedSqlResult("q", ["id", "name"], rows, 2, 1);
             });
         var handler = new McpToolExecutionHandler(
             Substitute.For<IGovernedSqlExecutionService>(), new Services(mcp), Substitute.For<ICatalogDiscoveryService>(),
@@ -445,13 +447,14 @@ public sealed class RestDatasetPolicySpliceTests
             DataSources = new SqlDataSourceOptions { RequireTenantColumn = true }
         };
         var service = new GovernedSqlExecutionService(
-            Options.Create(options), policyEnforcement: null, consentResolution: resolution, tableRepository: tableRepo,
+            Options.Create(options), executionGuard: GovernedTestSupport.Guard, policyEnforcement: null, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null, clientIpResolver: null, environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: repo, secretProvider: null);
-        var rewritten = await service.RewriteSqlAsync(emitted, Alice(), new TenantId(TenantValue));
+        var rewritten = await service.CompileAsync(emitted, Alice(), new TenantId(TenantValue));
 
-        rewritten.ShouldContain($"tenant_id = '{TenantValue}'");
-        rewritten.ShouldNotContain("tenant_b");
+        rewritten.ShouldBindTenant(TenantValue);
+        rewritten.Sql.ShouldNotContain("tenant_b");
+        rewritten.ValuesOf(TrinoSqlEngine.Ast.Emit.ParameterOrigin.Tenant).ShouldNotContain("tenant_b");
     }
 
     [Theory]

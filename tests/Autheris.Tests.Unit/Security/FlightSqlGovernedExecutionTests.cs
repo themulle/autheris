@@ -76,7 +76,7 @@ public sealed class FlightSqlGovernedExecutionTests
         var (server, sql) = CreateServer();
         const string query = "SELECT id, name FROM lwetem_prod.md.crane LIMIT 5";
         sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(new GovernedSqlResult(query, query, ["id", "name"],
+            .Returns(new GovernedSqlResult(query, ["id", "name"],
                 [new Dictionary<string, object?> { ["id"] = 7L, ["name"] = "LTM 1300" }], 1, 1));
 
         var info = await server.GetFlightInfoAsync(query, User, Tenant);
@@ -100,7 +100,7 @@ public sealed class FlightSqlGovernedExecutionTests
             WebSql = new WebSqlOptions { DefaultMaxRows = 1000, MaxAllowedRows = 0 }
         });
         sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(new GovernedSqlResult("q", "q", ["id"], [], 0, 1));
+            .Returns(new GovernedSqlResult("q", ["id"], [], 0, 1));
 
         var info = await server.GetFlightInfoAsync("SELECT id FROM t", User, Tenant);
         await StreamAsync(server, info.Ticket);
@@ -114,7 +114,7 @@ public sealed class FlightSqlGovernedExecutionTests
     {
         var (server, sql) = CreateServer();
         sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(new GovernedSqlResult("q", "q", ["id", "name"], [], 0, 1));
+            .Returns(new GovernedSqlResult("q", ["id", "name"], [], 0, 1));
 
         var info = await server.GetFlightInfoAsync("SELECT id, name FROM t", User, Tenant);
         var batch = (await StreamAsync(server, info.Ticket)).ShouldHaveSingleItem();
@@ -128,7 +128,7 @@ public sealed class FlightSqlGovernedExecutionTests
     {
         var (server, sql) = CreateServer();
         sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(new GovernedSqlResult("q", "q", ["id"], [new Dictionary<string, object?> { ["id"] = 1 }], 1, 1, Truncated: true));
+            .Returns(new GovernedSqlResult("q", ["id"], [new Dictionary<string, object?> { ["id"] = 1 }], 1, 1, Truncated: true));
 
         var info = await server.GetFlightInfoAsync("SELECT id FROM t LIMIT 1", User, Tenant);
         var batch = (await StreamAsync(server, info.Ticket)).ShouldHaveSingleItem();
@@ -152,8 +152,8 @@ public sealed class FlightSqlGovernedExecutionTests
     public async Task FlightInfo_ValidatesTheStatementAndAnnouncesNoFakeSchema()
     {
         var (server, sql) = CreateServer();
-        sql.RewriteSqlAsync("SELECT * FROM hr.salaries", User, Tenant, Arg.Any<CancellationToken>())
-            .Returns<Task<string>>(_ => throw new WebSqlPolicyException("denied"));
+        sql.ValidateAsync("SELECT * FROM hr.salaries", User, Tenant, Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new WebSqlPolicyException("denied"));
 
         await Should.ThrowAsync<SecurityException>(() => server.GetFlightInfoAsync("SELECT * FROM hr.salaries", User, Tenant).AsTask());
 
