@@ -222,7 +222,7 @@ public sealed class SecurityReview20261002WebSqlTests
             consentResolution: withConsentServices ? (consentResolution ?? CreateConsentResolution(t => UnconstrainedAllow(t))) : null,
             tableRepository: repo,
             policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(gatewayOptions, secretProvider),
-            auditLogRepository: auditLog ?? Autheris.Application.Audit.NullAuditLogRepository.Instance,
+            auditLogRepository: auditLog ?? global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
             connectionFactory: null,
             clientIpResolver: null,
             environment: CreateDevEnvironment(),
@@ -808,7 +808,7 @@ public sealed class SecurityReview20261002WebSqlTests
             .Returns(ci => ci.Arg<TableIdentifier>().TableName == "employees" ? Task.FromResult<TableMetadata?>(employeesMeta) : Task.FromResult<TableMetadata?>(null));
 
         var service = new GovernedSqlExecutionService(
-            Options.Create(options), executionGuard: GovernedTestSupport.Guard,
+            Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: CreateCasbin(),
             consentResolution: CreateConsentResolution(t => UnconstrainedAllow(t)),
             consentRepository: CreateConsentRepository(),
@@ -876,7 +876,7 @@ public sealed class SecurityReview20261002WebSqlTests
             .Returns(ci => ci.Arg<TableIdentifier>().TableName == "employees" ? Task.FromResult<TableMetadata?>(employeesMeta) : Task.FromResult<TableMetadata?>(null));
 
         var service = new GovernedSqlExecutionService(
-            Options.Create(options), executionGuard: GovernedTestSupport.Guard,
+            Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: CreateCasbin(),
             consentResolution: CreateConsentResolution(t => UnconstrainedAllow(t)),
             consentRepository: CreateConsentRepository(),

@@ -44,21 +44,6 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         ITableMetadataRepository metadataRepo,
         IOptions<GatewayOptions> options,
         ILogger<IcebergRestCatalogFederationService> logger,
-        IConsentResolutionService? consentService = null,
-        IConsentRepository? consentRepo = null,
-        IPolicyEnforcementService? policyEnforcementService = null,
-        IClientIpResolver? clientIpResolver = null,
-        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
-        IRebacEvaluator? rebacEvaluator = null)
-        : this(metadataReader, metadataRepo, options, logger, Autheris.Application.Audit.NullAuditLogRepository.Instance, consentService, consentRepo, policyEnforcementService, clientIpResolver, mandatoryFilters, rebacEvaluator)
-    {
-    }
-
-    public IcebergRestCatalogFederationService(
-        IIcebergMetadataReader metadataReader,
-        ITableMetadataRepository metadataRepo,
-        IOptions<GatewayOptions> options,
-        ILogger<IcebergRestCatalogFederationService> logger,
         IAuditLogRepository auditRepository,
         IConsentResolutionService? consentService = null,
         IConsentRepository? consentRepo = null,

@@ -134,7 +134,7 @@ public class PipelineAndInfrastructureSecurityTests
             null,
             null,
             null,
-            dataSourceExecutors: [sqlExecutor]);
+            dataSourceExecutors: [sqlExecutor], policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
@@ -198,7 +198,7 @@ public class PipelineAndInfrastructureSecurityTests
             cacheService,
             maskingProvider,
             chunkedExecutor,
-            null);
+            null, policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {

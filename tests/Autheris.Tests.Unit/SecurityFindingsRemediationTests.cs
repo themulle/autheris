@@ -591,7 +591,7 @@ public class SecurityFindingsRemediationTests
             registry,
             options,
             NullLogger<AiDataGuardrailService>.Instance,
-            policyEnforcementService: policyService);
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, policyEnforcementService: policyService);
 
         var session = new McpSessionContext("sess-b2", "agent-unauthorized", "tenant-test", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         var request = new McpToolCallRequest("unmapped_generic_tool", "{}");
@@ -622,7 +622,7 @@ public class SecurityFindingsRemediationTests
             registry,
             options,
             NullLogger<AiDataGuardrailService>.Instance,
-            policyEnforcementService: policyService);
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, policyEnforcementService: policyService);
 
         var session = new McpSessionContext(
             SessionId: "sess-ip-test",
@@ -668,7 +668,7 @@ public class SecurityFindingsRemediationTests
             registry,
             options,
             NullLogger<AiDataGuardrailService>.Instance,
-            policyEnforcementService: policyService);
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, policyEnforcementService: policyService);
 
         var session = new McpSessionContext("sess-deals", "agent-deals", "tenant-sales", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         var request = new McpToolCallRequest("query_deals", "{}");

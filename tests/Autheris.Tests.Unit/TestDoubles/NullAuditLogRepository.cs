@@ -1,4 +1,4 @@
-namespace Autheris.Application.Audit;
+namespace Autheris.Tests.Unit.TestDoubles;
 
 using System;
 using System.Collections.Generic;
@@ -10,8 +10,8 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Null-Object-Pattern implementation of <see cref="IAuditLogRepository"/> for use in isolated unit tests (PLAN-AUDIT-02 §3.6 / L-5).
-/// Production environments require a real backing database store.
+/// Null-Object-Pattern implementation of <see cref="IAuditLogRepository"/> for isolated unit tests only (test-only; never referenced by production code).
+/// Production composition requires a real audit store and fails at startup without one.
 /// </summary>
 public sealed class NullAuditLogRepository : IAuditLogRepository
 {

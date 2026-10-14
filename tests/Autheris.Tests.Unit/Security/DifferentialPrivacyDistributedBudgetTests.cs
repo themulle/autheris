@@ -31,8 +31,8 @@ public sealed class DifferentialPrivacyDistributedBudgetTests
     {
         // Arrange: 2 engines sharing a single InMemoryClusterStateProvider
         var sharedStore = new InMemoryClusterStateProvider();
-        var engine1 = new DifferentialPrivacyEngine(sharedStore);
-        var engine2 = new DifferentialPrivacyEngine(sharedStore);
+        var engine1 = new DifferentialPrivacyEngine(global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, sharedStore);
+        var engine2 = new DifferentialPrivacyEngine(global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, sharedStore);
 
         const string clientId = "distributed-client-1";
         const int totalRequests = 1000;
@@ -117,7 +117,7 @@ public sealed class DifferentialPrivacyDistributedBudgetTests
         // Arrange: Start at 23:55 UTC
         var time = new TestTimeProvider(new DateTimeOffset(2026, 10, 9, 23, 55, 0, TimeSpan.Zero));
         var store = new InMemoryClusterStateProvider();
-        var engine = new DifferentialPrivacyEngine(store, timeProvider: time);
+        var engine = new DifferentialPrivacyEngine(global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, store, timeProvider: time);
         const string clientId = "client-rollover";
 
         // Consume all 10.0 epsilon on 2026-10-09
@@ -153,7 +153,7 @@ public sealed class DifferentialPrivacyDistributedBudgetTests
         // Arrange: Epsilon with sub-micro precision, e.g. 0.0000001 (0.1 micro-units)
         // With Math.Ceiling, it must be rounded UP to 1 micro-unit = 0.000001
         var store = new InMemoryClusterStateProvider();
-        var engine = new DifferentialPrivacyEngine(store);
+        var engine = new DifferentialPrivacyEngine(global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, store);
         const string clientId = "client-rounding";
 
         var req = new DifferentialPrivacyPerturbationRequest(

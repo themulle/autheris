@@ -221,7 +221,7 @@ public class PureYamlProcedureGovernanceTests
             tables,
             consents,
             resolution,
-            masking);
+            masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var result = await executionService.ExecuteAsync("get_orders", null, User("Reader"), Tenant);
 
@@ -324,7 +324,7 @@ public class PureYamlProcedureGovernanceTests
             tables,
             consents,
             resolution,
-            masking);
+            masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var result = await executionService.ExecuteAsync("get_orders_clear", null, User("Reader"), Tenant);
 
@@ -427,7 +427,7 @@ public class PureYamlProcedureGovernanceTests
             tables,
             consents,
             resolution,
-            masking);
+            masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var result = await executionService.ExecuteAsync("get_orders_override", null, User("Reader"), Tenant);
 

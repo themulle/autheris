@@ -142,7 +142,7 @@ public sealed class IntegrationGapBTests
             .Returns(Task.FromResult("""{"assets":[]}"""));
 
         var guardrail = new AiDataGuardrailService(new McpToolRegistry(), options, NullLogger<AiDataGuardrailService>.Instance,
-            executor, policyEnforcementService: policy);
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executor, policyEnforcementService: policy);
 
         var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("query_data_catalog", "{}"), CreateSession());
 
@@ -165,7 +165,7 @@ public sealed class IntegrationGapBTests
             .Returns(Task.FromResult("""{"assets":[]}"""));
 
         var guardrail = new AiDataGuardrailService(new McpToolRegistry(), options, NullLogger<AiDataGuardrailService>.Instance,
-            executor, policyEnforcementService: policy);
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executor, policyEnforcementService: policy);
 
         var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("query_data_catalog", "{}"), CreateSession());
 
@@ -227,7 +227,7 @@ public sealed class IntegrationGapBTests
             .Returns(Task.FromResult(errorJson));
 
         var registry = new McpToolRegistry();
-        var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, executor);
+        var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executor);
         var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance);
         var session = handler.CreateSession("svc-agent", "tenant-alpha");
 
@@ -250,7 +250,7 @@ public sealed class IntegrationGapBTests
             .Returns(Task.FromResult("""{"items":[{"id":"1"}],"isError":false}"""));
 
         var registry = new McpToolRegistry();
-        var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, executor);
+        var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executor);
         var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance);
         var session = handler.CreateSession("svc-agent", "tenant-alpha");
 

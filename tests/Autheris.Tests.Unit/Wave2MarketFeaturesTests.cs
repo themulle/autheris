@@ -315,7 +315,7 @@ public sealed class Wave2MarketFeaturesTests
             toolRegistry,
             Options.Create(new GatewayOptions()),
             NullLogger<AiDataGuardrailService>.Instance,
-            goldenQueryService: goldenService);
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, goldenQueryService: goldenService);
 
         var sessionContext = new McpSessionContext("sess-1", "agent-1", "tenant-alpha", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         var request = new McpToolCallRequest(

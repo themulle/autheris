@@ -27,7 +27,7 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
     private readonly IConsentRepository _consentRepository;
     private readonly IConsentResolutionService _resolutionService;
     private readonly IConsentCacheService _cacheService;
-    private readonly IPolicyEnforcementService? _policyEnforcementService;
+    private readonly IPolicyEnforcementService _policyEnforcementService;
     private readonly IRebacEvaluator? _rebacEvaluator;
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<UnifiedPolicyDecisionPoint> _logger;
@@ -42,7 +42,7 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
         IConsentCacheService cacheService,
         IOptions<GatewayOptions> options,
         ILogger<UnifiedPolicyDecisionPoint> logger,
-        IPolicyEnforcementService? policyEnforcementService = null,
+        IPolicyEnforcementService policyEnforcementService,
         IRebacEvaluator? rebacEvaluator = null,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
         Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null,
@@ -56,7 +56,7 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
         _cacheService = cacheService ?? throw new ArgumentNullException(nameof(cacheService));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _policyEnforcementService = policyEnforcementService;
+        _policyEnforcementService = policyEnforcementService ?? throw new ArgumentNullException(nameof(policyEnforcementService));
         _rebacEvaluator = rebacEvaluator;
     }
 
@@ -89,7 +89,7 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
             _consentRepository,
             _resolutionService,
             _cacheService,
-            _policyEnforcementService ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+            _policyEnforcementService,
             _rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             _options.Value,

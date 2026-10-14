@@ -9,7 +9,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Audit;
 using Autheris.Application.Governance.Contracts;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
@@ -45,37 +44,6 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
     private readonly IFederatedQueryExecutionService? _federatedExecutionService;
 
     public IReadOnlyList<SqlRewriteStageOrder> StageOrder => _rewriter.StageOrder;
-
-    public GovernedSqlExecutionService(
-        IOptions<GatewayOptions> options,
-        IProviderExecutionGuard executionGuard,
-        IPolicyEnforcementService? policyEnforcement = null,
-        IConsentResolutionService? consentResolution = null,
-        ITableMetadataRepository? tableRepository = null,
-        ISqlConnectionFactory? connectionFactory = null,
-        IClientIpResolver? clientIpResolver = null,
-        IHostEnvironment? environment = null,
-        ILogger<GovernedSqlExecutionService>? logger = null,
-        IConsentRepository? consentRepository = null,
-        IKeyVaultSecretProvider? secretProvider = null,
-        ISqlEngine? sqlEngine = null,
-        ISqlSecurityValidator? sqlSecurityValidator = null,
-        ITableReadConcurrencyGate? concurrencyGate = null,
-        IDbSessionContextInitializer? sessionInitializer = null,
-        IRebacEvaluator? rebacEvaluator = null,
-        IConsentCacheService? consentCache = null,
-        IMandatoryRowFilterResolver? mandatoryFilters = null,
-        ISchemaContractManager? contractManager = null,
-        IAccessProfileRepository? accessProfileRepository = null,
-        IMemoryCache? memoryCache = null,
-        IServiceProvider? serviceProvider = null,
-        IFederatedQueryExecutionService? federatedExecutionService = null,
-        TypedPolicySources? typedPolicies = null,
-        GovernancePolicyFactory? policyFactory = null,
-        CompiledSqlAuditDigester? auditDigester = null)
-        : this(options, NullAuditLogRepository.Instance, executionGuard, policyEnforcement, consentResolution, tableRepository, connectionFactory, clientIpResolver, environment, logger, consentRepository, secretProvider, sqlEngine, sqlSecurityValidator, concurrencyGate, sessionInitializer, rebacEvaluator, consentCache, mandatoryFilters, contractManager, accessProfileRepository, memoryCache, serviceProvider, federatedExecutionService, typedPolicies, policyFactory, auditDigester)
-    {
-    }
 
     public GovernedSqlExecutionService(
         IOptions<GatewayOptions> options,
@@ -132,7 +100,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         _executor = new GovernedSqlExecutor(
             _rewriter,
             options,
-            auditLogRepository ?? NullAuditLogRepository.Instance,
+            auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository)),
             executionGuard,
             connectionFactory,
             environment,

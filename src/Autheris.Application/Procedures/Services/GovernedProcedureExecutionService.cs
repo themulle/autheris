@@ -56,29 +56,6 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         IProcedureRegistry registry,
         IProcedureInvoker invoker,
         IOptions<GatewayOptions> options,
-        ITableMetadataRepository? tableRepository = null,
-        IConsentRepository? consentRepository = null,
-        IConsentResolutionService? consentResolution = null,
-        IColumnMaskingProvider? masking = null,
-        IPolicyEnforcementService? policyEnforcement = null,
-        IClientIpResolver? clientIpResolver = null,
-        ILogger<GovernedProcedureExecutionService>? logger = null,
-        IProcedureRowScopeResolver? rowScope = null,
-        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
-        IConsentCacheService? consentCache = null,
-        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
-        IAccessProfileRepository? accessProfileRepository = null,
-        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
-        Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null,
-        Autheris.Application.Policy.TypedPolicySources? typedPolicies = null)
-        : this(registry, invoker, options, Autheris.Application.Audit.NullAuditLogRepository.Instance, tableRepository, consentRepository, consentResolution, masking, policyEnforcement, clientIpResolver, logger, rowScope, rebacEvaluator, consentCache, mandatoryFilters, accessProfileRepository, memoryCache, accessProfileCache, typedPolicies)
-    {
-    }
-
-    public GovernedProcedureExecutionService(
-        IProcedureRegistry registry,
-        IProcedureInvoker invoker,
-        IOptions<GatewayOptions> options,
         IAuditLogRepository audit,
         ITableMetadataRepository? tableRepository = null,
         IConsentRepository? consentRepository = null,
@@ -390,7 +367,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 _consentRepository!,
                 _consentResolution!,
                 _consentCache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-                _policyEnforcement ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+                _policyEnforcement ?? throw new InvalidOperationException("IPolicyEnforcementService is not configured; refusing to evaluate table access without policy enforcement (fail-closed)."),
                 _rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
                 _clientIpResolver,
                 _options.Value,

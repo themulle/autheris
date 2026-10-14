@@ -29,7 +29,7 @@ public sealed class GovernedSqlExecutionServiceConstructionTests
     {
         var options = Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions());
 
-        Should.Throw<ArgumentNullException>(() => new GovernedSqlExecutionService(options, executionGuard: null!))
+        Should.Throw<ArgumentNullException>(() => new GovernedSqlExecutionService(options, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: null!, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance))
             .ParamName.ShouldBe("executionGuard");
     }
 }

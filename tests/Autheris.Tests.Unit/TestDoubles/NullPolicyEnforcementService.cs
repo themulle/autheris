@@ -1,4 +1,4 @@
-namespace Autheris.Application.Policy.Services;
+namespace Autheris.Tests.Unit.TestDoubles;
 
 using System;
 using System.Collections.Generic;
@@ -9,6 +9,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
+/// <summary>Allow-all <see cref="IPolicyEnforcementService"/> for isolated unit tests only (test-only; never referenced by production code).</summary>
 public sealed class NullPolicyEnforcementService : IPolicyEnforcementService
 {
     public static readonly NullPolicyEnforcementService Instance = new();

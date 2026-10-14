@@ -19,7 +19,7 @@ public sealed class SqlRewritePipelineTests
     public void Pipeline_StageOrder_IsFixed()
     {
         var options = Options.Create(new GatewayOptions());
-        var rewriter = new GovernedSqlRewriter(options);
+        var rewriter = new GovernedSqlRewriter(options, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var stages = rewriter.StageOrder;
 
@@ -30,7 +30,7 @@ public sealed class SqlRewritePipelineTests
         stages[3].ShouldBe(SqlRewriteStageOrder.RewriteOptions);
         stages[4].ShouldBe(SqlRewriteStageOrder.SecureRewrite);
 
-        var service = new GovernedSqlExecutionService(options, executionGuard: GovernedTestSupport.Guard);
+        var service = new GovernedSqlExecutionService(options, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
         service.StageOrder.ShouldBe(stages);
     }
 

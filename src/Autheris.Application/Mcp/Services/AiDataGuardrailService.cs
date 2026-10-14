@@ -69,28 +69,6 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         IMcpToolRegistry toolRegistry,
         IOptions<GatewayOptions> options,
         ILogger<AiDataGuardrailService> logger,
-        IMcpQueryExecutor? queryExecutor = null,
-        IPolicyEnforcementService? policyEnforcementService = null,
-        ITableMetadataRepository? tableMetadataRepository = null,
-        IMcpSessionStore? sessionStore = null,
-        ISemanticPromptGuardrail? promptGuardrail = null,
-        IGoldenQueryService? goldenQueryService = null,
-        IHitLStepUpApprovalService? stepUpApprovalService = null,
-        IGraphQlCatalogMap? graphQlCatalogMap = null,
-        IConsentRepository? consentRepository = null,
-        IAccessPlanningService? accessPlanningService = null,
-        IDocSearchService? docSearchService = null,
-        IUniversalDocStore? docStore = null,
-        IGatewayEventBus? eventBus = null,
-        TrinoSqlEngine.ISqlEngine? sqlEngine = null)
-        : this(toolRegistry, options, logger, Autheris.Application.Audit.NullAuditLogRepository.Instance, queryExecutor, policyEnforcementService, tableMetadataRepository, sessionStore, promptGuardrail, goldenQueryService, stepUpApprovalService, graphQlCatalogMap, consentRepository, accessPlanningService, docSearchService, docStore, eventBus, sqlEngine)
-    {
-    }
-
-    public AiDataGuardrailService(
-        IMcpToolRegistry toolRegistry,
-        IOptions<GatewayOptions> options,
-        ILogger<AiDataGuardrailService> logger,
         IAuditLogRepository auditLogRepository,
         IMcpQueryExecutor? queryExecutor = null,
         IPolicyEnforcementService? policyEnforcementService = null,

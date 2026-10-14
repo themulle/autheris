@@ -200,7 +200,7 @@ public sealed class GovernedDataPathsG4Tests
             Audit.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
             return new GovernedProcedureExecutionService(
                 Registry, Invoker, Options.Create(new GatewayOptions()), Audit, Tables, Consents, Resolution, Masking,
-                policyEnforcement: null, clientIpResolver: IpResolver);
+                policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, clientIpResolver: IpResolver);
         }
     }
 

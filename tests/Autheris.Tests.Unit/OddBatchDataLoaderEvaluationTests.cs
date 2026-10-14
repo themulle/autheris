@@ -198,7 +198,7 @@ public class OddBatchDataLoaderEvaluationTests
             maskingProvider,
             executor,
             options,
-            dataSourceExecutors: new[] { sqlExecutor });
+            dataSourceExecutors: new[] { sqlExecutor }, policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         // Grant consent for finance_items
         var childTableId = new TableIdentifier("finance", "dbo", "finance_items");

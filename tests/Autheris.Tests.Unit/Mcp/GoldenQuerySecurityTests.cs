@@ -77,7 +77,7 @@ public sealed class GoldenQuerySecurityTests
             _toolRegistry,
             Options.Create(options ?? new GatewayOptions()),
             NullLogger<AiDataGuardrailService>.Instance,
-            tableMetadataRepository: _metadataRepo,
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, tableMetadataRepository: _metadataRepo,
             goldenQueryService: _goldenService,
             consentRepository: _consentRepo);
     }
