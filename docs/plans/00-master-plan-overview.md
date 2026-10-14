@@ -1,6 +1,6 @@
 # Master Architecture & Implementation Backlog
 
-**Last Updated:** October 14, 2026 · **Branch:** `feat/ast-x1-security-consolidation`  
+**Last Updated:** October 14, 2026 · **Branch:** `docs/implementation-plans-2026-10-14`  
 **Role:** Solution Architect & Agent Coordinator  
 **Location:** `doc/plan/00-master-plan-overview.md` (or `docs/plans/00-master-plan-overview.md`)  
 **Purpose:** Canonical origin plan, dependency graph, and active track status for all AI agents and engineers working on the Autheris ecosystem.
@@ -31,6 +31,7 @@
 | [`security.md`](security.md)<br/>`PLAN-SECURITY-REVIEW` | **Security Review, Hardening & Compliance** | Wave A High (`SR-H-01`..`06`, `SR-D-01`) and Wave B Medium (`SR-M-01`..`26`, `SR-D-02`..`05`) remediated and verified with regression tests. Consolidated on `feat/ast-x1-security-consolidation`. | **WAVES A & B FIXED ✅** | Merge consolidated branch to `main`. Next: Wave C Low findings (`SR-L-01`..`24`, `SR-D-06`..`09`). |
 | [`architecture.md`](architecture.md)<br/>`PLAN-ARCH-REVIEW` | **Solution Architecture Review & Waves (R0–R6)** | 121 findings across 6 slices synthesized into 10 architectural themes: single query pipeline, audit contract, thinning Application layer, versioned schema migrations, HA readiness, outbox, options split, ProblemDetails, ANTLR pooling. | **REVIEW DELIVERED 📋** | Stakeholder decisions (§6), then execute Wave R0 (correctness/trust) and Wave R1 (unified query pipeline). |
 | [`features.md`](features.md)<br/>`PLAN-FEATURES-ROADMAP` | **Feature Roadmap & Analytics Execution** | Analytics and headless BI: #28 governed GraphQL aggregations, #37 minimum group size & k-anonymity guard, #38 dbt Semantic Layer (Stage 2/3), REST dataset LIMIT/OFFSET fix and deep paging. | **ACTIVE & IN EXECUTION 🚀** | Issue #28 after merging consolidation branch to main, then #37 and #38 Stage 2/3. |
+| [`implementation/00-implementation-roadmap.md`](implementation/00-implementation-roadmap.md)<br/>`IMPL-ROADMAP-2026-10-14` | **Cross-Scope Implementation Roadmap** | 77 work packages from six architect plans (Security Wave C ×2, Architecture R0/R2, R1/R3, R4–R6, Analytics features), verified against `main` 317e65b8, ordered into Gate 0 + Waves 1–6 with serialized hot-file lanes. | **PLANNED 📋** | Resolve Gate 0 decisions (G-1..G-14), then start Wave 1 (FEAT-02 masked-aggregate guard first). |
 | [`README.md`](README.md)<br/>`PLAN-AGENT-GOV-DOCS-01` | **Agent Governance & English Documentation Standards** | Project-wide English documentation policy; central `doc/plan/` repository; agent refinement lifecycle rules; root `AGENTS.md` & `CLAUDE.md`. | **ACTIVE & ADOPTED ✅** | Ongoing enforcement across all sub-agent and tool invocations. |
 
 ---
@@ -60,6 +61,10 @@ flowchart TD
     MP --> SR
     MP --> AR
     MP --> FT
+    IR["implementation/00-implementation-roadmap.md<br/>Cross-scope implementation roadmap"]
+    SR --> IR
+    AR --> IR
+    FT --> IR
     ADG --> FT
     VF --> FT
     AR -.->|"T1: single pipeline builds on AST"| ADG

@@ -4,6 +4,7 @@
 **Location:** `doc/plan/security.md` (or `docs/plans/security.md`)  
 **Status:** WAVES A & B COMPLETED ✅ · WAVE C ACTIVE 🚀  
 **Parent Plan:** [`00-master-plan-overview.md`](00-master-plan-overview.md)  
+**Implementation Plans:** [`implementation/impl-security-wave-c-1.md`](implementation/impl-security-wave-c-1.md), [`implementation/impl-security-wave-c-2.md`](implementation/impl-security-wave-c-2.md); global order in [`implementation/00-implementation-roadmap.md`](implementation/00-implementation-roadmap.md)  
 **Role:** Application Security Engineer (`csharp-security-expert`)  
 **Scope:** Full-solution security review covering all seven production assemblies (`Autheris.Api`, `Autheris.Application`, `Autheris.Domain`, `Autheris.Infrastructure`, `Autheris.Extensions`, `Autheris.GraphQL`, `TrinoSqlEngine`), deployment manifests, and supply chain.
 

@@ -4,6 +4,7 @@
 **Location:** `doc/plan/architecture.md` (or `docs/plans/architecture.md`)  
 **Status:** REVIEW DELIVERED · REMEDIATION ACTIVE 📋  
 **Parent Plan:** [`00-master-plan-overview.md`](00-master-plan-overview.md)  
+**Implementation Plans:** [`implementation/impl-arch-r0-r2-trust-ha-eventing.md`](implementation/impl-arch-r0-r2-trust-ha-eventing.md), [`implementation/impl-arch-r1-r3-pipeline-persistence.md`](implementation/impl-arch-r1-r3-pipeline-persistence.md), [`implementation/impl-arch-r4-r6-api-perf-hygiene.md`](implementation/impl-arch-r4-r6-api-perf-hygiene.md); global order in [`implementation/00-implementation-roadmap.md`](implementation/00-implementation-roadmap.md)  
 **Role:** Solution Architect & Engineering Lead  
 **Scope:** Full-solution architectural inspection across all production assemblies (`Autheris.Api`, `Autheris.Application`, `Autheris.Domain`, `Autheris.Infrastructure`, `Autheris.Extensions`, `Autheris.GraphQL`, `TrinoSqlEngine`), test suites, and deployment configurations.
 
