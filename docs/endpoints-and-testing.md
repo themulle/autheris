@@ -90,3 +90,7 @@ dotnet test tests/TrinoSqlEngine.Tests/TrinoSqlEngine.Tests.csproj
   curl -u admin:admin -H "X-Requested-With: x" -H "Content-Type: application/json" \
     -d '{"query":"{__typename}"}' http://localhost:8080/graphql
   ```
+
+### OpenLineage tenant scoping
+
+`PushLineageGraphAsync(tenant)` only pushes lineage nodes whose `TenantId` equals the pushed tenant. Nodes without a tenant (legacy data) are pushed only for `legacy-single-tenant`. dbt manifest ingestion tags nodes with the request tenant, and the in-memory lineage store replaces only the nodes of the ingesting tenant, keeping other tenants' graphs.

@@ -61,3 +61,7 @@ subscription OnCustomerChanged {
   }
 }
 ```
+
+## Tenant handling on `POST /api/v1/cdc/events`
+
+The row tenant is read from the tenant column registered for the target table (`TableMetadata.TenantColumnName`; `tenant_id`, `TenantId`, `tenantId` and `TENANT-ID` are all recognised). The endpoint rejects the event (400) when the before and after images carry different tenant values, and, for non-admin callers, when the table has a tenant column but the row value is empty. A foreign tenant value yields 403. The caller tenant is stamped onto an event only for tables registered without a tenant column while `DataSources:RequireTenantColumn` is false.

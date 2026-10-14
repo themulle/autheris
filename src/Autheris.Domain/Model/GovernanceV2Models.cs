@@ -54,7 +54,8 @@ public sealed record LineageNode(
     LineageNodeType Type,
     IReadOnlyCollection<string> DownstreamNodeIds,
     string? OwnerTeam = null,
-    string? OwnerEmail = null
+    string? OwnerEmail = null,
+    string? TenantId = null
 );
 
 public sealed record AffectedEntity(

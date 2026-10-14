@@ -104,6 +104,13 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
             predicates[TenantColumn] = tenantId;
         }
 
+        // SEC SR-L-22: rows are synthesized from file metadata, not read from Parquet. Outside demo mode the request is refused (501)
+        // before the Delta log is touched, so an unimplemented path cannot be used to probe storage or burn I/O.
+        if (_demoData?.Enabled != true)
+        {
+            throw new Autheris.Domain.Exceptions.GatewayNotImplementedException("Reading lakehouse data files is not implemented; only sample rows are available with demo data enabled (Development).");
+        }
+
         var tableLocation = context.Metadata.Table.TableName;
         var snapshot = await _metadataReader.LoadSnapshotAsync(tableLocation, null, null, ct).ConfigureAwait(false);
 
@@ -111,13 +118,6 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
         // SEC E-3: the tenant column is mandatory evidence - files without partition equality / min == max == tenant are dropped.
         var mandatoryColumns = string.IsNullOrWhiteSpace(tenantId) ? Array.Empty<string>() : new[] { TenantColumn };
         var prunedFiles = _partitionPruner.PruneDataFiles(snapshot.ActiveFiles, snapshot.Metadata.PartitionColumns, predicates, mandatoryColumns);
-
-        // EXT-4: rows are synthesized from file metadata, not read from Parquet. Outside demo mode that would answer with
-        // invented data, so the request is refused (501) instead.
-        if (prunedFiles.Count > 0 && _demoData?.Enabled != true)
-        {
-            throw new Autheris.Domain.Exceptions.GatewayNotImplementedException("Reading lakehouse data files is not implemented; only sample rows are available with demo data enabled (Development).");
-        }
 
         // Generate synthetic row data for pruned files respecting schema & partition values
         var rawRows = new List<Dictionary<string, object?>>();
