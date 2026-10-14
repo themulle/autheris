@@ -59,6 +59,39 @@ if ! grep -A 2 "location /metrics" "${REPO_ROOT}/deploy/containers/reverse-proxy
     FAILURES=$((FAILURES + 1))
 fi
 
+# 6. Reverse proxy must run non-root and the compose stack must drop capabilities (SR-D-08)
+echo "--> Checking benchmark reverse proxy hardening..."
+if ! grep -q "^USER nginx" "${REPO_ROOT}/deploy/containers/reverse-proxy/Containerfile"; then
+    echo "ERROR: reverse-proxy Containerfile does not run as non-root (USER nginx)" >&2
+    FAILURES=$((FAILURES + 1))
+fi
+if ! sed -n '/^  reverse-proxy:/,/^  load-generator:/p' "${REPO_ROOT}/deploy/podman-compose.yaml" | grep -q "cap_drop:"; then
+    echo "ERROR: podman-compose.yaml reverse-proxy does not drop capabilities" >&2
+    FAILURES=$((FAILURES + 1))
+fi
+if grep -Eq '\$\{[A-Z_]+:-\$\{GATEWAY_HMAC_SECRET' "${REPO_ROOT}/deploy/podman-compose.yaml"; then
+    echo "ERROR: podman-compose.yaml falls back to the shared GATEWAY_HMAC_SECRET for other consumers" >&2
+    FAILURES=$((FAILURES + 1))
+fi
+
+# 7. Helm: production render must fail without authenticated metrics scraping (SR-D-06)
+if command -v helm >/dev/null 2>&1; then
+    echo "--> Checking Helm ServiceMonitor authentication..."
+    CHART="${REPO_ROOT}/deploy/helm/autheris"
+    if helm template t "${CHART}" -f "${CHART}/values.production.yaml" --set image.digest=sha256:0 \
+        --set monitoring.serviceMonitor.auth.type=none >/dev/null 2>&1; then
+        echo "ERROR: production Helm render accepts an unauthenticated ServiceMonitor" >&2
+        FAILURES=$((FAILURES + 1))
+    fi
+    if ! helm template t "${CHART}" -f "${CHART}/values.production.yaml" --set image.digest=sha256:0 2>/dev/null \
+        | grep -q "authorization:"; then
+        echo "ERROR: production Helm render has no authenticated ServiceMonitor" >&2
+        FAILURES=$((FAILURES + 1))
+    fi
+else
+    echo "--> helm not installed; skipping Helm render checks."
+fi
+
 if [ "$FAILURES" -gt 0 ]; then
     echo "❌ Container hardening verification FAILED with ${FAILURES} error(s)." >&2
     exit 1

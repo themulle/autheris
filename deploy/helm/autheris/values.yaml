@@ -24,10 +24,9 @@ serviceAccount:
   # The gateway does not call the Kubernetes API; keep the API token unmounted.
   automountServiceAccountToken: false
 
-podAnnotations:
-  prometheus.io/scrape: "true"
-  prometheus.io/path: "/metrics"
-  prometheus.io/port: "5000"
+# Annotation-based Prometheus scraping is intentionally not enabled: /metrics requires authorization,
+# and annotation scraping cannot present credentials. Use the ServiceMonitor (monitoring.serviceMonitor).
+podAnnotations: {}
 
 podSecurityContext:
   runAsNonRoot: true
@@ -121,6 +120,21 @@ monitoring:
     enabled: true
     interval: "15s"
     scrapeTimeout: "10s"
+    # Rendering fails when auth.type is "none" and requireAuth is true (set in values.production.yaml).
+    requireAuth: false
+    # http or https. Use https together with tlsConfig when the service terminates TLS.
+    scheme: http
+    auth:
+      # bearer: Prometheus sends "Authorization: Bearer <token>" read from tokenSecret.
+      #         The token must be accepted by the gateway's JWT bearer authentication (/metrics requires authorization).
+      # mtls:   client certificate via tlsConfig (provide tlsConfig below).
+      # none:   unauthenticated scrape (not allowed when requireAuth is true).
+      type: bearer
+      tokenSecret:
+        name: "autheris-metrics-scrape"
+        key: "token"
+    # Optional Prometheus Operator TLSConfig (e.g. ca/cert/keySecret references), rendered verbatim.
+    tlsConfig: {}
   prometheusRule:
     enabled: true
 

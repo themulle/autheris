@@ -11,6 +11,12 @@ RUN apk add --no-cache wget curl
 ENV NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx
 COPY containers/reverse-proxy/nginx.conf /etc/nginx/templates/nginx.conf.template
 
+# SR-D-08: run as the unprivileged nginx user. Writable paths: rendered nginx.conf (envsubst output),
+# cache/temp dirs and the pid file.
+RUN touch /var/run/nginx.pid \
+    && chown -R nginx:nginx /etc/nginx /var/cache/nginx /var/run/nginx.pid
+USER nginx
+
 EXPOSE 8080
 
 HEALTHCHECK --interval=3s --timeout=3s --start-period=3s --retries=10 \
