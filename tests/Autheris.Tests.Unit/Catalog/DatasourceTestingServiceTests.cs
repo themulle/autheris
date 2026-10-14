@@ -161,6 +161,29 @@ public sealed class DatasourceTestingServiceTests
         result.ErrorMessage.ShouldContain("path traversal");
     }
 
+    [Theory]
+    [InlineData("\\/evil.com/x")]
+    [InlineData("http:\\\\evil.com")]
+    [InlineData("https:\\\\evil.com")]
+    [InlineData("//evil.com/x")]
+    [InlineData("/x@evil.com")]
+    public async Task SR_M_14_TestConnection_ProbePathRetargeting_IsRejected(string probePath)
+    {
+        var httpTable = CreateHttpTable("crm", "customers", "https://api.crm-sample.com");
+        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([httpTable]);
+
+        var service = new DatasourceTestingService(
+            _metadataRepo, _httpClientFactory, _auditRepo, _secretProvider, _environment, NullLogger<DatasourceTestingService>.Instance);
+
+        var result = await service.TestDatasourceAsync(
+            "crm.dbo.customers", new DatasourceTestRequest(RelativeProbePath: probePath), CreateAdminUser());
+
+        result.IsSuccess.ShouldBeFalse();
+        result.Diagnostics.SecretResolutionStatus.ShouldBe("Rejected");
+        result.Diagnostics.AuthHeaderApplied.ShouldBeFalse();
+    }
+
     [Fact]
     public async Task TestConnection_SqlDatasource_ValidSelectOne_ReturnsSuccess()
     {

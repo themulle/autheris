@@ -184,7 +184,13 @@ public sealed class TrafficShadowingService : ITrafficShadowingService, IHostedS
     {
         try
         {
-            var targetUri = new Uri(targetBaseUri, request.PathAndQuery.TrimStart('/'));
+            // SR-M-15: never let a replayed path re-target the shadow request (e.g. "/https://evil/x").
+            if (!OutboundPathPolicy.TryBuild(targetBaseUri, request.PathAndQuery, preserveBasePath: true, allowDotSegments: true, out var targetUri, out var pathError))
+            {
+                _logger.LogWarning("F-OPS-01 Shadow replay dropped: unsafe request path ({Reason}).", pathError);
+                return;
+            }
+
             using var msg = new HttpRequestMessage(new HttpMethod(request.Method), targetUri);
 
             foreach (var (headerKey, headerVal) in request.Headers)
