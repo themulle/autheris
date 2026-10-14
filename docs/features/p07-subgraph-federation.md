@@ -63,3 +63,15 @@ query GetCustomerOrderSummary {
   }
 }
 ```
+
+## Result Masking Classification
+
+Federated results of non-admin callers are masked field by field. A field is classified in this order:
+
+1. **Config override** (`Federation:FieldClassifications`): keys are `subgraph.type.field` (or `type.field` / `field`); the value is a masking rule type (`REDACT`, `MASK_EMAIL`, `MASK_PHONE`, `MASK_IBAN`, `NULLIFY`, ...) or `NONE` to exempt a field. Result trees carry no type information, so only the field segment is matched, case- and underscore-insensitively.
+2. **Catalog classification**: columns flagged sensitive, or carrying a masking rule, in the governance catalog are mapped by normalized column name (`tax_number` matches `taxNumber`). The map is cached per tenant for `Federation:CatalogMaskingCacheSeconds` (default 60) and never shared across tenants.
+3. **Name heuristic**: a built-in list of common sensitive names (email, iban, phone, salary, tax number, passport, national id, home address, license plate, ...). This is a safety floor, not a policy.
+
+Aliases are resolved to the real field name before classification; if conflicting type conditions map one response path to several fields, the value is masked when any of them is classified sensitive.
+
+If the catalog cannot be read, masking falls back to config and heuristic and a warning is logged. With `Federation:DefaultMaskUnknownSensitiveScalars=true` (default `false`) every scalar value except identifiers (`id`, `*Id`, `__typename`) is masked in that situation (fail closed). Users with `GovernanceAdmin` or `ClusterAdmin` roles are never masked.

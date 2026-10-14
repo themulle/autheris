@@ -45,6 +45,26 @@ public sealed class FederationOptions
     public bool EnableResultMasking { get; init; } = true;
 
     /// <summary>
+    /// SR-L-12: explicit field classification overrides for federated results. Keys are <c>subgraph.type.field</c>
+    /// (also <c>type.field</c> or just <c>field</c>; result trees carry no type information, so only the field segment is matched,
+    /// case- and underscore-insensitively). Values are masking rule types (<c>REDACT</c>, <c>MASK_EMAIL</c>, <c>MASK_PHONE</c>,
+    /// <c>MASK_IBAN</c>, <c>NULLIFY</c>, ...) or <c>NONE</c> to exempt a field. Entries take precedence over catalog and name heuristic.
+    /// </summary>
+    public Dictionary<string, string> FieldClassifications { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// SR-L-12: when the catalog classification cannot be loaded, mask all scalar result values except identifiers
+    /// (<c>id</c>, <c>*Id</c>, <c>__typename</c>) instead of relying on the name heuristic alone (fail closed).
+    /// Default false for compatibility; recommended true for new installations.
+    /// </summary>
+    public bool DefaultMaskUnknownSensitiveScalars { get; init; }
+
+    /// <summary>
+    /// SR-L-12: lifetime in seconds of the per-tenant catalog classification cache used for federated masking.
+    /// </summary>
+    public int CatalogMaskingCacheSeconds { get; init; } = 60;
+
+    /// <summary>
     /// Header name used to forward the authenticated caller SID or user identifier.
     /// </summary>
     public string SubjectHeaderName { get; init; } = "X-Gateway-Subject";

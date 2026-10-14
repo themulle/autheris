@@ -20,6 +20,7 @@ public static class FusionGatewayExtensions
         GatewayOptions options)
     {
         services.AddSingleton<ISubgraphContextPropagationService, SubgraphContextPropagationService>();
+        services.AddSingleton<IFederatedMaskingCatalog, CatalogFederatedMaskingCatalog>();
         services.AddSingleton<ISubgraphResultMasker, SubgraphResultMasker>();
         services.AddSingleton<Autheris.Application.Federation.Interfaces.ISubgraphCanaryRouter, Autheris.Application.Federation.Services.SubgraphCanaryRouter>();
 
