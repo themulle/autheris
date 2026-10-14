@@ -661,7 +661,60 @@ public sealed class AccessProfileTests
     }
 
     [Fact]
-    public async Task BulkConsent_ValidUnmaskedRequest_CreatesProfileAndLogsAudit()
+    public async Task SR_M_10_BulkConsent_Unmasked_IsRejectedAndNothingStored()
+    {
+        var repo = new InMemoryAccessProfileRepository();
+        var context = CreateEndpointContext(callerSid: "admin", callerName: "admin");
+        var req = new BulkConsentRequest
+        {
+            Subject = "david",
+            MaskingMode = "unmasked",
+            Tables = ["tem.*"],
+            Justification = "Enterprise PoC Telemetry Head cleartext exception approved",
+            ValidDays = 90
+        };
+
+        var result = await GovernanceEndpoints.CreateBulkConsentAsync(req, context, repo, CancellationToken.None);
+        var (status, _) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status403Forbidden);
+        (await repo.GetProfilesForSubjectAsync(TenantLiebherr, "david")).Count.ShouldBe(0);
+    }
+
+    [Theory]
+    [InlineData("ADMIN@AUTHERIS.INTERNAL")]
+    [InlineData("admin")]
+    [InlineData("AUTHERIS\\Admin")]
+    [InlineData("admin@other.example")]
+    [InlineData("S-1-5-21-1-2-3-500")]
+    [InlineData("S-1-5-21-1-2-3-1100")]
+    public async Task SR_M_10_BulkConsent_SelfGrant_AllIdentifierFormsAndGroups_AreRejected(string subject)
+    {
+        var repo = new InMemoryAccessProfileRepository();
+        var context = CreateEndpointContext(callerSid: "S-1-5-21-1-2-3-500", callerName: "Admin User");
+        var identity = (ClaimsIdentity)context.User.Identity!;
+        identity.AddClaim(new Claim(ClaimTypes.Upn, "admin@autheris.internal"));
+        identity.AddClaim(new Claim("preferred_username", "AUTHERIS\\admin"));
+        var sec = (SecurityPrincipalContext)context.Items[SecurityPrincipalContext.ItemKey]!;
+        context.Items[SecurityPrincipalContext.ItemKey] = sec with { GroupSids = new HashSet<Sid> { new("S-1-5-21-1-2-3-1100") } };
+        var req = new BulkConsentRequest
+        {
+            Subject = subject,
+            MaskingMode = "Default",
+            Tables = ["tem.*"],
+            Justification = "Trying to grant myself access via an alternate identifier",
+            ValidDays = 30
+        };
+
+        var result = await GovernanceEndpoints.CreateBulkConsentAsync(req, context, repo, CancellationToken.None);
+        var (status, body) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        body.ShouldContain("Segregation of Duties (SoD) violation");
+    }
+
+    [Fact]
+    public async Task BulkConsent_ValidStrictRequest_CreatesProfileAndLogsAudit()
     {
         var repo = new InMemoryAccessProfileRepository();
         var auditRepo = Substitute.For<IAuditLogRepository>();
@@ -682,7 +735,7 @@ public sealed class AccessProfileTests
         var req = new BulkConsentRequest
         {
             Subject = "david",
-            MaskingMode = "Unmasked",
+            MaskingMode = "Strict",
             Tables = ["tem.*"],
             RowFilter = "status != 'DELIVERED'",
             Justification = "Enterprise PoC Telemetry Head cleartext exception approved",
@@ -693,13 +746,13 @@ public sealed class AccessProfileTests
         var (status, body) = await ExecuteResultAsync(result, context);
 
         status.ShouldBe(StatusCodes.Status201Created);
-        body.ShouldContain("prof-david-unmasked-");
+        body.ShouldContain("prof-david-strict-");
 
         // Verify stored in repository
         var profiles = await repo.GetProfilesForSubjectAsync(TenantLiebherr, "david");
         profiles.Count.ShouldBe(1);
         var stored = profiles[0];
-        stored.MaskingMode.ShouldBe(MaskingPolicyMode.Unmasked);
+        stored.MaskingMode.ShouldBe(MaskingPolicyMode.Strict);
         stored.TargetTables.ShouldContain("tem.*");
         stored.RowFilterPredicate.ShouldBe("status != 'DELIVERED'");
         stored.Justification.ShouldBe(req.Justification);
