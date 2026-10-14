@@ -64,7 +64,7 @@ public sealed record SecurityPrincipalContext
         foreach (var r in ClusterRoles)
         {
             if (r.Contains(':')) continue;
-            if (GatewayRoleExtensions.TryParseRole(r, out var parsed) && parsed.Implies(role))
+            if (GatewayRoleExtensions.TryParseGlobalRole(r, out var parsed) && parsed.Implies(role))
             {
                 return true;
             }
@@ -80,7 +80,7 @@ public sealed record SecurityPrincipalContext
         foreach (var r in TenantRoles)
         {
             if (r.Contains(':')) continue;
-            if (GatewayRoleExtensions.TryParseRole(r, out var parsed))
+            if (GatewayRoleExtensions.TryParseGlobalRole(r, out var parsed))
             {
                 if (parsed is GatewayRole.ClusterAdmin or GatewayRole.GovernanceAdmin)
                 {
