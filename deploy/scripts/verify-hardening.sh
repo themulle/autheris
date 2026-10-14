@@ -74,22 +74,66 @@ if grep -Eq '\$\{[A-Z_]+:-\$\{GATEWAY_HMAC_SECRET' "${REPO_ROOT}/deploy/podman-c
     FAILURES=$((FAILURES + 1))
 fi
 
-# 7. Helm: production render must fail without authenticated metrics scraping (SR-D-06)
+# 7. Helm: production render must fail without authenticated metrics scraping (SR-D-06) and without the required
+#    authentication / trusted-proxy / tenant-column settings (SEC2-09).
 if command -v helm >/dev/null 2>&1; then
-    echo "--> Checking Helm ServiceMonitor authentication..."
+    echo "--> Checking Helm production render guards..."
     CHART="${REPO_ROOT}/deploy/helm/autheris"
-    if helm template t "${CHART}" -f "${CHART}/values.production.yaml" --set image.digest=sha256:0 \
-        --set monitoring.serviceMonitor.auth.type=none >/dev/null 2>&1; then
-        echo "ERROR: production Helm render accepts an unauthenticated ServiceMonitor" >&2
+    BASE=(-f "${CHART}/values.production.yaml" --set image.digest=sha256:0)
+    ENTRA=(--set gateway.authentication.entraId.enabled=true
+           --set gateway.authentication.entraId.tenantId=tenant
+           --set gateway.authentication.entraId.clientId=client
+           --set gateway.authentication.entraId.audience=api://autheris)
+
+    render() { helm template t "${CHART}" "$@" 2>&1; }
+    expect_failure() {
+        local label="$1"; shift
+        if helm template t "${CHART}" "$@" >/dev/null 2>&1; then
+            echo "ERROR: production Helm render must fail: ${label}" >&2
+            FAILURES=$((FAILURES + 1))
+        fi
+    }
+
+    # Positive render: a fully configured production release renders and carries the authenticated ServiceMonitor.
+    if ! POSITIVE="$(render "${BASE[@]}" "${ENTRA[@]}")"; then
+        echo "ERROR: fully configured production Helm render failed: ${POSITIVE}" >&2
+        FAILURES=$((FAILURES + 1))
+    else
+        grep -q "authorization:" <<<"${POSITIVE}" || { echo "ERROR: production Helm render has no authenticated ServiceMonitor" >&2; FAILURES=$((FAILURES + 1)); }
+        grep -q 'Gateway__DataSources__RequireTenantColumn: "true"' <<<"${POSITIVE}" || { echo "ERROR: production Helm render does not enable RequireTenantColumn" >&2; FAILURES=$((FAILURES + 1)); }
+        grep -q 'Gateway__Authentication__EntraId__Audience: "api://autheris"' <<<"${POSITIVE}" || { echo "ERROR: production Helm render does not carry the EntraId audience" >&2; FAILURES=$((FAILURES + 1)); }
+    fi
+
+    expect_failure "unauthenticated ServiceMonitor" "${BASE[@]}" "${ENTRA[@]}" --set monitoring.serviceMonitor.auth.type=none
+    expect_failure "no authentication provider" "${BASE[@]}"
+    expect_failure "two authentication providers" "${BASE[@]}" "${ENTRA[@]}" \
+        --set gateway.authentication.adfs.enabled=true --set gateway.authentication.adfs.authority=https://adfs.example/adfs \
+        --set gateway.authentication.adfs.audience=api://autheris
+    for field in tenantId clientId audience; do
+        expect_failure "EntraId ${field} missing" "${BASE[@]}" "${ENTRA[@]}" --set "gateway.authentication.entraId.${field}="
+    done
+    expect_failure "ADFS authority missing" "${BASE[@]}" --set gateway.authentication.adfs.enabled=true \
+        --set gateway.authentication.adfs.audience=api://autheris
+    expect_failure "ADFS audience missing" "${BASE[@]}" --set gateway.authentication.adfs.enabled=true \
+        --set gateway.authentication.adfs.authority=https://adfs.example/adfs
+    expect_failure "forwardAuth without trustedProxies" "${BASE[@]}" --set gateway.authentication.forwardAuth.enabled=true
+    expect_failure "RequireTenantColumn disabled without exemption" "${BASE[@]}" "${ENTRA[@]}" --set gateway.dataSources.requireTenantColumn=false
+
+    if ! render "${BASE[@]}" "${ENTRA[@]}" --set gateway.dataSources.requireTenantColumn=false \
+        --set gateway.dataSources.requireTenantColumnExemption=true >/dev/null; then
+        echo "ERROR: explicit RequireTenantColumn exemption must render" >&2
         FAILURES=$((FAILURES + 1))
     fi
-    if ! helm template t "${CHART}" -f "${CHART}/values.production.yaml" --set image.digest=sha256:0 2>/dev/null \
-        | grep -q "authorization:"; then
-        echo "ERROR: production Helm render has no authenticated ServiceMonitor" >&2
+    if ! FWD="$(render "${BASE[@]}" --set gateway.authentication.forwardAuth.enabled=true \
+        --set 'gateway.authentication.forwardAuth.trustedProxies={10.1.2.3}')"; then
+        echo "ERROR: forwardAuth with trustedProxies must render: ${FWD}" >&2
+        FAILURES=$((FAILURES + 1))
+    elif ! grep -q 'ForwardAuth__TrustedProxies__0: "10.1.2.3"' <<<"${FWD}" || ! grep -q 'ForwardAuth__TrustedNetworks__0:' <<<"${FWD}"; then
+        echo "ERROR: forwardAuth render does not carry trusted proxies and networks" >&2
         FAILURES=$((FAILURES + 1))
     fi
 else
-    echo "--> helm not installed; skipping Helm render checks."
+    echo "--> helm not installed; skipping Helm render checks (CI job helm-render runs them)."
 fi
 
 # 8. Every container base image is pinned to a full patch tag plus digest (SEC2-08)
