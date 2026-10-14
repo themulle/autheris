@@ -94,13 +94,12 @@ public interface IConsentApprovalRepository
 
     /// <summary>
     /// SEC H-06: Tenant-bound ticket lookup (<c>WHERE itsm_ticket_id = @t AND tenant_id = @tenant</c>).
-    /// The default implementation filters the unscoped lookup; persistent repositories override it with a scoped query.
+    /// SR-M-24: there is no safe default (filtering the unscoped LIMIT 1 lookup lets one tenant's ticket shadow another's),
+    /// so every provider must override it with a scoped query; the default fails closed.
     /// </summary>
-    async Task<ConsentRequest?> GetConsentRequestByTicketIdAsync(string ticketId, TenantId tenantId, CancellationToken ct = default)
-    {
-        var request = await GetConsentRequestByTicketIdAsync(ticketId, ct).ConfigureAwait(false);
-        return request != null && request.TenantId == tenantId ? request : null;
-    }
+    Task<ConsentRequest?> GetConsentRequestByTicketIdAsync(string ticketId, TenantId tenantId, CancellationToken ct = default)
+        => throw new NotSupportedException(
+            $"{GetType().Name} does not implement the tenant-scoped ticket lookup; refusing to fall back to an unscoped lookup.");
 
     /// <summary>
     /// SEC H-06: Activates a pending consent request and records <paramref name="approvedBy"/> as audit actor
