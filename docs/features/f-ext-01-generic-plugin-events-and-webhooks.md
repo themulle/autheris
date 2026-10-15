@@ -93,7 +93,7 @@ The outbox is the table `WEBHOOK_OUTBOX`, created by governance migration `0002`
 - A row never holds the target URL, the signing secret or custom headers. They are resolved from the subscription at delivery time, so URLs carrying query tokens are not persisted and a changed URL applies to pending retries.
 - The unique index `(source, subscription_id, event_id)` deduplicates: the same event is queued at most once per subscription.
 - States: `Pending`, `InFlight`, `Delivered`, `Dead`.
-- Events whose serialized CloudEvent exceeds `MaxPayloadBytes` are not enqueued (logged with `payload_too_large`).
+- Events whose serialized CloudEvent exceeds `MaxPayloadBytes` are not enqueued (logged with `payload_too_large`). CDC events over the limit are dropped with reason `bounds` (section 4.4.2).
 
 ### 3.2 Delivery Semantics
 
@@ -148,7 +148,7 @@ The former body-only header `X-Autheris-Signature` and the option `EmitLegacySig
 
 ### 3.7 CloudEvent (CDC) Subscriptions
 
-CDC CloudEvent subscriptions (`Gateway:CdcWebhooks`) share the outbox, `WebhookSubscriptionResolver`, `WebhookDeliveryClient` and `WebhookRetryPolicy`. `CloudEventOutboxMessageFactory` builds their rows (source `CloudEvent`, attempts clamped to 1..20); the resolver reads URL, secret, custom headers and the enabled flag through `ICloudEventSubscriptionStore.GetSubscriptionAsync(tenantId, subscriptionId)`. There is no separate CloudEvents dispatcher.
+CDC CloudEvent subscriptions (`Gateway:CdcWebhooks`) share the outbox, `WebhookSubscriptionResolver`, `WebhookDeliveryClient` and `WebhookRetryPolicy`. `CloudEventOutboxMessageFactory` builds their rows (source `CloudEvent`, attempts clamped to 1..20); the resolver reads URL, secret (unprotected with the KEK), custom headers and the enabled flag through `ICloudEventSubscriptionStore.GetSubscriptionAsync(tenantId, subscriptionId)`. There is no separate CloudEvents dispatcher.
 
 ### 3.8 Metrics
 
@@ -260,7 +260,86 @@ Parse `X-Autheris-Timestamp`, reject it if it differs from the receiver clock by
 
 ### 4.4 CDC Webhook Subscription Endpoints (`Gateway:CdcWebhooks`)
 
-The endpoints `GET/POST /api/v1/cdc/subscriptions` and `DELETE /api/v1/cdc/subscriptions/{id}` are disabled by default and answer `501 Not Implemented` (problem details). While disabled, no subscription store is registered. Setting `Gateway:CdcWebhooks:Enabled` to `true` activates them (callers still need the `GovernanceAdmin` or `TenantAdmin` role) and registers the webhook delivery service even when `Gateway:Webhooks:Enabled` is `false`.
+The endpoints `GET/POST /api/v1/cdc/subscriptions` and `DELETE /api/v1/cdc/subscriptions/{id}` require the `PlatformAdmin`, `GovernanceAdmin` or `TenantAdmin` role. CDC webhook delivery is enabled by default. The flag `Gateway:CdcWebhooks:Enabled` is read once at service registration and decides whether the subscription store and the delivery service (`CdcWebhookDeliveryService`) exist; changing it requires a restart. While it is `false` the endpoints answer `501 Not Implemented` (problem details), no store is registered and no delivery service runs. The delivery service is registered even when `Gateway:Webhooks:Enabled` is `false`.
+
+`CdcWebhooksOptions` (section `Gateway:CdcWebhooks`, validated at startup):
+
+| Option | Default | Valid range | Meaning |
+| :--- | :--- | :--- | :--- |
+| `Enabled` | `true` | - | Enables the endpoints and the delivery service (restart required). |
+| `MaxSubscriptionsPerTenant` | `100` | 1..10000 | Hard per-tenant quota; exceeding it answers `429 CDC_SUBSCRIPTION_QUOTA_EXCEEDED`. |
+| `SubscriptionCacheSeconds` | `5` | 0..3600 | How long the delivery service caches the subscriptions of one tenant (at most 1024 tenants cached). A deleted subscription stops matching after this interval. |
+| `CreatorSnapshotMaxAgeDays` | `90` | 0..3650 | Maximum age of the creator snapshot; `0` disables the expiry. |
+| `MaxSnapshotGroups` | `256` | 1..4096 | Maximum number of group SIDs captured; more is rejected, never truncated. |
+| `AuditBatchSeconds` | `30` | 1..3600 | Flush interval of the aggregated audit batch events. |
+
+#### Create (`POST /api/v1/cdc/subscriptions`)
+
+Request fields: `targetUrl`, `filterTable`, `filterOperations`, `hmacSecret`, `customHeaders`. The `id`, tenant, enabled flag and creator snapshot are always set server-side; client-supplied values are ignored. Validation errors and their codes:
+
+| Status | Code | Cause |
+| :--- | :--- | :--- |
+| 400 | `CDC_TARGET_URL_NOT_ALLOWED` | The target is not an absolute URL or is denied by `EgressUrlPolicy` (resolved-address check; the Development environment relaxes it, a missing host environment is treated as production). |
+| 400 | `CDC_FILTER_INVALID` | Target URL longer than 2048 characters, `filterTable` empty, longer than 512 characters or not `*` or `name[.name[.name]]` (characters `\w $ # -`), or an undefined operation. |
+| 400 | `CDC_CUSTOM_HEADER_NOT_ALLOWED` | More than 20 headers, a name over 128 or a value over 2048 characters, a forbidden header name (see 3.6), or CR/LF in a name or value. |
+| 400 | `CDC_SECRET_REQUIRED` | `hmacSecret` missing outside Development, shorter than 32 characters outside Development, or longer than 512 characters. |
+| 503 | `CDC_SECRET_STORE_UNAVAILABLE` | A secret or custom headers were supplied but the KEK is not provisioned or protecting failed (fail closed; nothing is stored in plaintext). |
+| 403 | - | The caller has no SID, so no creator snapshot can be captured. |
+| 400 | `CDC_SNAPSHOT_TOO_LARGE` | The caller has more than `MaxSnapshotGroups` distinct group SIDs. |
+| 429 | `CDC_SUBSCRIPTION_QUOTA_EXCEEDED` | `MaxSubscriptionsPerTenant` reached. |
+| 503 | `CDC_STORE_BUSY` | The SQL Server store hit a deadlock during the serialisable quota check; retry. |
+
+Success answers `201 Created` with a `CdcSubscriptionView`.
+
+#### Read (`GET`) and redaction
+
+`GET` and the `201` body return `CdcSubscriptionView`: `id`, `tenantId`, `targetUrl`, `filterTable`, `filterOperations`, `hmacSecret` (the literal `[REDACTED]` when a secret is set, otherwise empty; never the ciphertext), `isEnabled`, `hasCustomHeaders` (a flag, no names or values), `createdBySid`, `createdByRoleCount` and `createdAt`. The creator's group list and roles are never returned.
+
+#### Matching
+
+A subscription matches an event of its own tenant when it is enabled, `filterTable` is `*` or equals (case-insensitive) the table name, the schema-qualified name or the full identifier, and `filterOperations` is empty or contains the event operation.
+
+### 4.4.1 Creator Snapshot and Authorisation
+
+At creation the server captures the creating admin's SID, distinct group SIDs and roles from the authenticated principal and persists them with the subscription. A snapshot in the request body is ignored. For every event the delivery service rebuilds a minimal principal from the snapshot (the tenant claim always comes from the subscription) and authorises the event through `IStreamRlsPolicyEnforcer` against the policies in force at event time: tenant, consent, Casbin, ReBAC, row filter and column masking.
+
+- Revoking the creator's access, or changing policies, stops new deliveries at the next event. Outbox rows that were already enqueued are still delivered until the subscription is deleted. The roles and groups themselves stay frozen, so after a change of the creator's group membership delete and re-create the subscription.
+- A snapshot older than `CreatorSnapshotMaxAgeDays` (measured from `createdAt`) denies delivery (`snapshot_expired`). The remedy is to delete and re-create the subscription as a current admin.
+- A subscription without a complete snapshot (SID, groups, roles, creation time) delivers nothing (`no_snapshot`).
+- A subscription only receives changes whose event timestamp is not before its creation (`before_subscription`), so initial syncs and snapshot re-reads are not replayed into new subscriptions.
+
+### 4.4.2 Delivery Pipeline
+
+`CdcWebhookDeliveryService` subscribes to the CDC event channel (topic `cdc_all`; re-subscribes with jittered exponential backoff up to 30 s on channel failure) and, per event and matching subscription:
+
+1. Drops events without a tenant (`no_tenant`) and rows whose tenant differs from the event (`tenant_mismatch`).
+2. Applies the snapshot checks above, then authorises and masks the event. Only the masked payload is used: the raw event never reaches the outbox, the receiver or the logs, so the outbox row persists the masked CloudEvent JSON only. A denial drops the event (`denied`).
+3. Builds the CloudEvent with an opaque id `cdc-<first 40 hex characters of SHA-256(tenantId + "\n" + cdcEventId)>`. Native event ids (for example SQL Server change tracking ids with primary key values) never reach the outbox or the receiver, and equal ids of two tenants do not collide.
+4. Enqueues one `CloudEvent` outbox row per subscription. The unique index `(source, subscription_id, event_id)` deduplicates redelivered CDC events: a duplicate insert is counted as `deduped`, not delivered twice.
+
+Debezium events get a deterministic id `dbz-<first 32 hex characters of SHA-256(tenant + position key)>` from `DebeziumCdcParser`. The key is built from the source coordinates present (`lsn`, `txId`, `pos`, `change_lsn`, `commit_lsn`, `event_serial_no`, `file`, `sequence`, `ts_ms`), operation, server, schema, table and the whitespace-normalised `before`/`after` images; without any position the canonical whole event is hashed. The same event ingested twice therefore dedupes, and no row value appears in the id.
+
+Bounds: a candidate that violates an outbox column bound or the payload limit is dropped (`bounds`) instead of truncated or failing the insert: subscription id 128, event id 128, event type 256, event source 512 characters, serialized payload `Gateway:Webhooks:MaxPayloadBytes` (effective value; the factory default is 262144 bytes). Failures while enqueueing drop the event (`enqueue_failed`; the channel is at-most-once) and any other per-event failure is counted as `error`; neither stops the stream. Network delivery, retries and dead letters are handled by the shared webhook delivery worker (sections 3.2 to 3.5).
+
+Metrics (meter of the gateway):
+
+| Metric | Type | Labels |
+| :--- | :--- | :--- |
+| `autheris_cdc_webhook_enqueued_total` | Counter | - |
+| `autheris_cdc_webhook_dropped_total` | Counter | `reason`: `no_tenant`, `tenant_mismatch`, `before_subscription`, `no_snapshot`, `snapshot_expired`, `denied`, `bounds`, `enqueue_failed`, `error` |
+
+Drop reasons are reason codes only; the enforcer's reason text and event content are never logged above Debug level.
+
+#### Audit (Tier B)
+
+Per (tenant, subscription) with activity since the last flush the service writes one batched audit event `CDC_WEBHOOK_DELIVERY_BATCH` every `AuditBatchSeconds` and on shutdown, best effort, with the creator SID as actor. `details` holds `subscriptionId`, `enqueued`, `deduped`, `droppedDenied`, `droppedBounds`, `from` and `to`, never event content. The decision is `DENY` when nothing was enqueued or deduped and at least one candidate was dropped for denial or bounds, otherwise `ALLOW`. The subscription endpoints themselves are audited as `AUDIT_CONFIG_CHANGED`.
+
+### 4.4.3 Secrets and Durable Storage
+
+- **Secret protection:** the signing secret and the custom headers are stored only in protected form by `KeyVaultWebhookSecretProtector` (`IWebhookSecretProtector`): AES-256-GCM, value format `enc:v1:base64(nonce[12] | tag[16] | ciphertext)`, associated data `"{tenant}|{subscriptionId}"` (a value cannot be moved to another subscription). Custom headers are serialised to JSON and stored as a single entry `{"enc:v1": "<protected JSON>"}`; the GET view only exposes `hasCustomHeaders`.
+- **KEK:** the key is derived once per process (SHA-256) from the secret `cdc-webhook-kek` (environment variable `CDC_WEBHOOK_KEK`, a mounted `file:` secret or the vault), which must be at least 32 bytes. Without it subscriptions carrying a secret or headers cannot be created (`503 CDC_SECRET_STORE_UNAVAILABLE`); outside Development `CdcWebhookStartupCheck` logs a warning at startup.
+- **Rotation:** provision a new KEK and restart. `v1` values carry no key id, so existing subscriptions can no longer be unprotected and must be re-created. Delivery to a subscription whose secret cannot be unprotected fails closed (never signed with the ciphertext); the row's lease expires and the poison-attempt budget bounds retries. A non-empty secret without the `enc:v1:` prefix is accepted only from the in-memory (test) store.
+- **Table:** subscriptions are persisted in `CLOUDEVENT_SUBSCRIPTIONS` (governance migration `0004`, PostgreSQL, SQL Server, SQLite) with the columns `id`, `tenant_id`, `target_url`, `filter_table`, `filter_operations`, `hmac_secret_protected`, `is_enabled`, `custom_headers_json`, `created_by_sid`, `created_by_groups_json`, `created_by_roles_json`, `created_ms` (Unix milliseconds) and the index `ix_cloudevent_subs_tenant (tenant_id, is_enabled)`. Subscriptions therefore survive restarts and are shared by all nodes.
 
 ### 4.5 Authoring a C# DLL Plugin Event Listener
 
@@ -319,5 +398,6 @@ public sealed class CustomSyncActionHandler : IPluginActionHandler
 4. **Isolated Assembly Loading & Integrity Check:**
    - Plugin DLLs are loaded into isolated `PluginAssemblyLoadContext` instances.
    - In production environments, SHA-256 hash checks against `Gateway:Plugins:TrustedPluginHashes` prevent unauthorized code execution.
-5. **Subscriber Fault Isolation:**
+5. **CDC Webhook Authorisation:** every CDC delivery is authorised as the creator's server-captured principal snapshot against the current policies, is masked before it is enqueued, carries an opaque event id and fails closed on missing snapshot, expired snapshot, unavailable KEK or unprotectable secret (section 4.4).
+6. **Subscriber Fault Isolation:**
    - Unhandled exceptions within plugin event listeners are caught, structured error logs are recorded, and other listeners continue unaffected.
