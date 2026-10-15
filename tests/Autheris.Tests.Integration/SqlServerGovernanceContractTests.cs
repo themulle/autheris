@@ -99,6 +99,35 @@ public sealed class SqlServerGovernanceContractTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WP_PF_04_GroupCommitBatch_SpanningSeveralStatements_KeepsAGaplessVerifiableChain()
+    {
+        if (!_available) return;
+
+        await using var repo = NewRepository();
+        var batch = Enumerable.Range(0, 250).Select(i => Entry("TEST_EVENT", "S-1-" + i)).ToList();
+        var concurrent = Enumerable.Range(0, 3).Select(_ => Task.Run(() =>
+            repo.RecordAuditEventsAsync(Enumerable.Range(0, 120).Select(i => Entry("TEST_EVENT", "S-2-" + i)).ToList())));
+
+        await repo.RecordAuditEventsAsync(batch);
+        await Task.WhenAll(concurrent);
+
+        (await repo.VerifyAuditHashChainAsync()).ShouldBeTrue();
+        batch[0].PrevHash.ShouldNotBeNullOrEmpty();
+        batch[1].PrevHash.ShouldBe(batch[0].EntryHash);
+        batch[249].PrevHash.ShouldBe(batch[248].EntryHash);
+
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync();
+        await using var cmd = new SqlCommand("SELECT COUNT_BIG(*), COUNT_BIG(DISTINCT seq), MAX(seq), MIN(seq) FROM AUDIT_LOG_ENTRIES", conn);
+        await using var r = await cmd.ExecuteReaderAsync();
+        (await r.ReadAsync()).ShouldBeTrue();
+        long count = r.GetInt64(0);
+        r.GetInt64(1).ShouldBe(count);
+        (r.GetInt64(2) - r.GetInt64(3) + 1).ShouldBe(count);
+        count.ShouldBeGreaterThanOrEqualTo(250 + 3 * 120);
+    }
+
+    [Fact]
     public async Task AuditTable_RejectsUpdateDeleteAndTruncate()
     {
         if (!_available) return;

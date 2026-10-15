@@ -460,25 +460,8 @@ public partial class PostgreSqlGovernanceRepository
         long lastSequence = pendingState.LastSeq;
         string lastEntryHash = pendingState.LastHash;
 
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = @"INSERT INTO AUDIT_LOG_ENTRIES (id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq)
-                            VALUES (@id, @occ, @event, @actor, @target, @col, @dec, @trace, @det, @prev, @hash, @tenantId, @seq)";
-
-        var pId = cmd.Parameters.Add("@id", NpgsqlDbType.Text);
-        var pOcc = cmd.Parameters.Add("@occ", NpgsqlDbType.Text);
-        var pEvent = cmd.Parameters.Add("@event", NpgsqlDbType.Text);
-        var pActor = cmd.Parameters.Add("@actor", NpgsqlDbType.Text);
-        var pTarget = cmd.Parameters.Add("@target", NpgsqlDbType.Text);
-        var pCol = cmd.Parameters.Add("@col", NpgsqlDbType.Text);
-        var pDec = cmd.Parameters.Add("@dec", NpgsqlDbType.Text);
-        var pTrace = cmd.Parameters.Add("@trace", NpgsqlDbType.Text);
-        var pDet = cmd.Parameters.Add("@det", NpgsqlDbType.Text);
-        var pPrev = cmd.Parameters.Add("@prev", NpgsqlDbType.Text);
-        var pHash = cmd.Parameters.Add("@hash", NpgsqlDbType.Text);
-        var pTenantId = cmd.Parameters.Add("@tenantId", NpgsqlDbType.Text);
-        var pSeq = cmd.Parameters.Add("@seq", NpgsqlDbType.Bigint);
-
+        // WP-PF-04: hashes are computed in memory from the single tail read; the rows are then written with multi-row inserts.
+        var rows = new List<AuditInsertRow>(batch.Count);
         for (int i = 0; i < batch.Count; i++)
         {
             var entry = batch[i];
@@ -503,28 +486,46 @@ public partial class PostgreSqlGovernanceRepository
 
             entry.PrevHash = currentPrevHash;
             entry.EntryHash = entryHash;
-
-            pId.Value = entry.Id.ToString();
-            pOcc.Value = entry.OccurredAt.ToString("O");
-            pEvent.Value = entry.EventType;
-            pActor.Value = entry.ActorSid.Value;
-            pTarget.Value = entry.TargetTable;
-            pCol.Value = (object?)entry.TargetColumn ?? DBNull.Value;
-            pDec.Value = entry.Decision;
-            pTrace.Value = entry.TraceId;
-            pDet.Value = entry.DetailsJson;
-            pPrev.Value = currentPrevHash;
-            pHash.Value = entryHash;
-            pTenantId.Value = effectiveTenantId;
-            pSeq.Value = currentSequence;
-
-            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            rows.Add(new AuditInsertRow(entry.Id.ToString(), entry.OccurredAt.ToString("O"), entry.EventType, entry.ActorSid.Value, entry.TargetTable,
+                entry.TargetColumn, entry.Decision, entry.TraceId, entry.DetailsJson, currentPrevHash, entryHash, effectiveTenantId, currentSequence));
             lastEntryHash = entryHash;
         }
+
+        await InsertAuditRowsAsync(conn, tx, rows, ct).ConfigureAwait(false);
 
         // In-memory _lastAuditSeq/_lastAuditHash are advanced in OnTransactionCommitted only.
         pendingState.LastSeq = lastSequence;
         pendingState.LastHash = lastEntryHash;
+    }
+
+    private static async Task InsertAuditRowsAsync(NpgsqlConnection conn, NpgsqlTransaction tx, IReadOnlyList<AuditInsertRow> rows, CancellationToken ct)
+    {
+        for (int offset = 0; offset < rows.Count; offset += AuditBatchInsertSql.MaxRowsPerStatement)
+        {
+            int count = Math.Min(AuditBatchInsertSql.MaxRowsPerStatement, rows.Count - offset);
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = AuditBatchInsertSql.Build(count);
+            for (int k = 0; k < count; k++)
+            {
+                var r = rows[offset + k];
+                cmd.Parameters.Add($"@id{k}", NpgsqlDbType.Text).Value = r.Id;
+                cmd.Parameters.Add($"@occ{k}", NpgsqlDbType.Text).Value = r.OccurredAt;
+                cmd.Parameters.Add($"@event{k}", NpgsqlDbType.Text).Value = r.EventType;
+                cmd.Parameters.Add($"@actor{k}", NpgsqlDbType.Text).Value = r.ActorSid;
+                cmd.Parameters.Add($"@target{k}", NpgsqlDbType.Text).Value = r.TargetTable;
+                cmd.Parameters.Add($"@col{k}", NpgsqlDbType.Text).Value = (object?)r.TargetColumn ?? DBNull.Value;
+                cmd.Parameters.Add($"@dec{k}", NpgsqlDbType.Text).Value = r.Decision;
+                cmd.Parameters.Add($"@trace{k}", NpgsqlDbType.Text).Value = r.TraceId;
+                cmd.Parameters.Add($"@det{k}", NpgsqlDbType.Text).Value = r.DetailsJson;
+                cmd.Parameters.Add($"@prev{k}", NpgsqlDbType.Text).Value = r.PrevHash;
+                cmd.Parameters.Add($"@hash{k}", NpgsqlDbType.Text).Value = r.EntryHash;
+                cmd.Parameters.Add($"@tenantId{k}", NpgsqlDbType.Text).Value = r.TenantId;
+                cmd.Parameters.Add($"@seq{k}", NpgsqlDbType.Bigint).Value = r.Seq;
+            }
+
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
     }
 
     private async Task WriteAuditBatchOnceAsync(IReadOnlyList<AuditLogEntry> batch, CancellationToken ct)
@@ -563,25 +564,8 @@ public partial class PostgreSqlGovernanceRepository
         long lastSequence = dbTailSeq;
         string lastEntryHash = effectiveDbHash;
 
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = @"INSERT INTO AUDIT_LOG_ENTRIES (id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq)
-                            VALUES (@id, @occ, @event, @actor, @target, @col, @dec, @trace, @det, @prev, @hash, @tenantId, @seq)";
-
-        var pId = cmd.Parameters.Add("@id", NpgsqlDbType.Text);
-        var pOcc = cmd.Parameters.Add("@occ", NpgsqlDbType.Text);
-        var pEvent = cmd.Parameters.Add("@event", NpgsqlDbType.Text);
-        var pActor = cmd.Parameters.Add("@actor", NpgsqlDbType.Text);
-        var pTarget = cmd.Parameters.Add("@target", NpgsqlDbType.Text);
-        var pCol = cmd.Parameters.Add("@col", NpgsqlDbType.Text);
-        var pDec = cmd.Parameters.Add("@dec", NpgsqlDbType.Text);
-        var pTrace = cmd.Parameters.Add("@trace", NpgsqlDbType.Text);
-        var pDet = cmd.Parameters.Add("@det", NpgsqlDbType.Text);
-        var pPrev = cmd.Parameters.Add("@prev", NpgsqlDbType.Text);
-        var pHash = cmd.Parameters.Add("@hash", NpgsqlDbType.Text);
-        var pTenantId = cmd.Parameters.Add("@tenantId", NpgsqlDbType.Text);
-        var pSeq = cmd.Parameters.Add("@seq", NpgsqlDbType.Bigint);
-
+        // WP-PF-04: hashes are computed in memory from the single tail read; the rows are then written with multi-row inserts.
+        var rows = new List<AuditInsertRow>(batch.Count);
         for (int i = 0; i < batch.Count; i++)
         {
             var entry = batch[i];
@@ -606,24 +590,12 @@ public partial class PostgreSqlGovernanceRepository
 
             entry.PrevHash = currentPrevHash;
             entry.EntryHash = entryHash;
-
-            pId.Value = entry.Id.ToString();
-            pOcc.Value = entry.OccurredAt.ToString("O");
-            pEvent.Value = entry.EventType;
-            pActor.Value = entry.ActorSid.Value;
-            pTarget.Value = entry.TargetTable;
-            pCol.Value = (object?)entry.TargetColumn ?? DBNull.Value;
-            pDec.Value = entry.Decision;
-            pTrace.Value = entry.TraceId;
-            pDet.Value = entry.DetailsJson;
-            pPrev.Value = currentPrevHash;
-            pHash.Value = entryHash;
-            pTenantId.Value = effectiveTenantId;
-            pSeq.Value = currentSequence;
-
-            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            rows.Add(new AuditInsertRow(entry.Id.ToString(), entry.OccurredAt.ToString("O"), entry.EventType, entry.ActorSid.Value, entry.TargetTable,
+                entry.TargetColumn, entry.Decision, entry.TraceId, entry.DetailsJson, currentPrevHash, entryHash, effectiveTenantId, currentSequence));
             lastEntryHash = entryHash;
         }
+
+        await InsertAuditRowsAsync(conn, tx, rows, ct).ConfigureAwait(false);
 
         await tx.CommitAsync(ct).ConfigureAwait(false);
 
@@ -636,6 +608,7 @@ public partial class PostgreSqlGovernanceRepository
             }
         }
 
+        Exception? anchorFailure = null;
         if (Volatile.Read(ref _auditChainViolation) == null && _auditAnchorStore != null)
         {
             var anchor = CreateSignedAnchor(lastSequence, lastEntryHash);
@@ -651,7 +624,15 @@ public partial class PostgreSqlGovernanceRepository
             catch (Exception ex)
             {
                 _logger?.LogError(ex, "Failed to persist external audit chain anchor at seq {Sequence}.", anchor.Sequence);
+                anchorFailure = ex;
             }
+        }
+
+        // WP-PF-04 / SEC-SC-08: a batch containing a Tier-A event is acknowledged only after its anchor is written. The rows are
+        // committed and the next batch anchors the tail, but the caller fails closed. Tier-B-only batches never fail on a late anchor.
+        if (anchorFailure != null && AuditChainViolationGate.AnyTierA(batch))
+        {
+            throw new AuditUnavailableException("The audit chain anchor could not be persisted; the event is not acknowledged (fail-closed).", anchorFailure);
         }
     }
 
