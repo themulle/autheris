@@ -13,7 +13,7 @@
 | BL-03 | Scale to 5,000 users with many tables and access rules | Architect and performance expert check whether access can be governed efficiently and performantly at this size, which technical changes are needed, and how system performance and scaling behave. Findings are then implemented. | `feat/scale-5000-users` | Analysis |
 | BL-04 | Table cache: cache tables or parts of tables inside Autheris | See section 2.1. | to be created | Intake |
 | BL-05 | Granular configuration per data source | See section 2.2. | to be created | Intake |
-| BL-06 | Tracing and logging via open standards | See section 2.3. | to be created | Intake |
+| BL-06 | Tracing and logging via open standards | See section 2.3. PRD: [`2026-10-16-req-bl-06-open-telemetry.md`](2026-10-16-req-bl-06-open-telemetry.md) (`REQ-OPS-BL06`). | `feat/bl-06-open-telemetry` | PRD ready, next Phase 2 |
 
 ## 2. Item Details (owner requirements, not yet refined)
 
