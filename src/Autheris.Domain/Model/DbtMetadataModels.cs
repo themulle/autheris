@@ -12,6 +12,15 @@ public sealed record DbtColumnDefinition(
     IReadOnlyDictionary<string, string> Meta
 );
 
+/// <summary>
+/// Primary key and unique constraints a dbt model declares (model or column <c>constraints</c>, <c>unique</c> tests). The size caps are
+/// applied while parsing; <see cref="Invalid"/> marks a declaration that must be dropped as a whole.
+/// </summary>
+public sealed record DbtDeclaredKeys(
+    IReadOnlyList<string>? PrimaryKey,
+    IReadOnlyList<IReadOnlyList<string>> UniqueConstraints,
+    bool Invalid);
+
 public sealed record DbtModelDefinition(
     string UniqueId,
     string Name,
@@ -26,6 +35,9 @@ public sealed record DbtModelDefinition(
     bool ContractEnforced = false
 )
 {
+    /// <summary>Declared keys of the model; null when the manifest declares none.</summary>
+    public DbtDeclaredKeys? DeclaredKeys { get; init; }
+
     public TableIdentifier ToTableIdentifier() => new(Database, Schema, Name);
 }
 
