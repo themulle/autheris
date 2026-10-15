@@ -38,6 +38,8 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
     private readonly TimeProvider _time;
 
     private static readonly System.Diagnostics.Metrics.Meter Meter = new("Autheris.AsyncJobs");
+    private static readonly System.Diagnostics.Metrics.Counter<long> TombstoneCheckFailures =
+        Meter.CreateCounter<long>("autheris.asyncjobs.tombstone_check_failures", description: "Cancel tombstone reads that failed, so a transition proceeded without the check.");
     private static readonly System.Diagnostics.Metrics.Counter<long> ClusterWriteFailures =
         Meter.CreateCounter<long>("autheris.asyncjobs.cluster_write_failures", description: "Async job record writes to the cluster state that failed.");
 
@@ -109,14 +111,30 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         {
             // A cancel issued on another node is recorded as a tombstone; it wins over every later owner write
             // (Running as well as Completed or Failed).
+            // The read is retried for the result transitions (a lost cancel would publish a result); if the state stays
+            // unavailable the transition proceeds (fail open): the remaining window is a cancel issued while the shared
+            // state is down, which the owner then only honours through the cancel signal.
             AsyncJobCancelTombstone? tombstone = null;
-            try
+            var attempts = next.State is AsyncJobState.Completed or AsyncJobState.Failed ? 3 : 1;
+            for (var attempt = 1; attempt <= attempts; attempt++)
             {
-                tombstone = await _cluster.GetAsync<AsyncJobCancelTombstone>(TombstoneKey(next.TenantId, next.JobId), ct).ConfigureAwait(false);
-            }
-            catch (ClusterStateUnavailableException ex)
-            {
-                _logger.LogWarning(ex, "Cluster state unavailable while checking job {JobId} for a remote cancel.", next.JobId);
+                try
+                {
+                    tombstone = await _cluster.GetAsync<AsyncJobCancelTombstone>(TombstoneKey(next.TenantId, next.JobId), ct).ConfigureAwait(false);
+                    break;
+                }
+                catch (ClusterStateUnavailableException ex)
+                {
+                    if (attempt == attempts)
+                    {
+                        TombstoneCheckFailures.Add(1);
+                        _logger.LogWarning(ex, "Cluster state unavailable while checking job {JobId} for a remote cancel; proceeding.", next.JobId);
+                    }
+                    else
+                    {
+                        await Task.Delay(TimeSpan.FromMilliseconds(50), ct).ConfigureAwait(false);
+                    }
+                }
             }
 
             if (tombstone is not null)
@@ -332,6 +350,13 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
             // Bounded queue: a full channel rejects instead of blocking the request (the cleanup below removes the job).
             if (!_channel.Writer.TryWrite(new AsyncJobExecutionItem(descriptor, request, user, cts)))
             {
+                if (_channel.Reader.Completion.IsCompleted)
+                {
+                    throw new AsyncJobQueueStoppedException();
+                }
+
+                // Compensating audit row: the ALLOW row above was written before the queue refused the job.
+                await RecordAuditAsync(descriptor, user, AuditEventTypes.AsyncJobSubmitted, "DENY", "Queue full, rejected.", CancellationToken.None).ConfigureAwait(false);
                 throw new AsyncJobQueueLimitExceededException("The async job queue of this node is full. Retry later.", QueueCapacity);
             }
         }
@@ -733,6 +758,8 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
 
         return true;
     }
+
+    public void Complete() => _channel.Writer.TryComplete();
 
     public async ValueTask ApplyCancelSignalAsync(AsyncJobCancelSignal signal, CancellationToken ct)
     {

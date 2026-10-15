@@ -57,6 +57,13 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         _logger = logger ?? NullLogger<AsyncQueryJobBackgroundWorker>.Instance;
     }
 
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        // No new jobs are accepted once the worker stops (they would never run).
+        _queue.Complete();
+        await base.StopAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("AsyncQueryJobBackgroundWorker started.");
@@ -83,6 +90,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         }
         finally
         {
+            _queue.Complete();
             if (cancelSubscription is not null)
             {
                 await cancelSubscription.DisposeAsync().ConfigureAwait(false);
@@ -182,6 +190,17 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         // State writes must still work while the host is stopping: they get their own short deadline.
         using var writeCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var writeCt = writeCts.Token;
+        // Captured first: a concurrent cancel disposes the source, and reading its token afterwards would throw.
+        CancellationToken itemToken;
+        try
+        {
+            itemToken = item.Cts.Token;
+        }
+        catch (ObjectDisposedException)
+        {
+            itemToken = new CancellationToken(true);
+        }
+
         var startedAt = DateTimeOffset.UtcNow;
         var runningJob = item.Job with
         {
@@ -194,7 +213,14 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
             return;
         }
 
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, item.Cts.Token);
+        if (itemToken.IsCancellationRequested)
+        {
+            // Cancelled before it could start: nothing ran, the job ends Cancelled.
+            await _queue.TryTransitionAsync(runningJob with { State = AsyncJobState.Cancelled, CompletedAt = DateTimeOffset.UtcNow, ErrorMessage = "Job execution cancelled or timed out." }, writeCt).ConfigureAwait(false);
+            return;
+        }
+
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, itemToken);
         string? writtenPath = null;
 
         try

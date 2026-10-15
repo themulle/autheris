@@ -38,6 +38,14 @@ public static class AsyncJobEndpoints
             {
                 return StateUnavailable(httpContext);
             }
+            catch (AsyncJobQueueStoppedException)
+            {
+                httpContext.Response.Headers.RetryAfter = "5";
+                return Results.Problem(
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    title: "The async job queue is not accepting jobs.",
+                    detail: "The gateway is shutting down. Retry later.");
+            }
             catch (AsyncJobQueueLimitExceededException)
             {
                 httpContext.Response.Headers.RetryAfter = "30";
