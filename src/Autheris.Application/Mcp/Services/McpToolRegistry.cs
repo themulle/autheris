@@ -148,6 +148,12 @@ public sealed class McpToolRegistry : IMcpToolRegistry
             RegisterTool(docTool);
         }
 
+        // 9. Built-in semantic layer tools: list_metrics, describe_metric, query_metrics (F-DBT-07 / #38)
+        foreach (var semanticTool in McpSemanticTools.Definitions())
+        {
+            RegisterTool(semanticTool);
+        }
+
         // Register any explicitly declared operations
         if (allowedOperations != null)
         {
