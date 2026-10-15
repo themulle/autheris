@@ -339,26 +339,30 @@ internal sealed class PolicyEpochGuard : IDisposable
                 var wildcardValue = await _state.GetAsync<long>(_wildcard.Key).ConfigureAwait(false);
 
                 var tenantChanged = Observe(tenantState, tenantValue);
-                var wildcardChanged = Observe(_wildcard, wildcardValue);
-                if (tenantChanged || wildcardChanged)
+                var wildcardChanged = false;
+                lock (_wildcard.Gate)
                 {
-                    outcome = new EpochCheckOutcome(EpochCheckKind.Changed, tenantChanged, wildcardChanged);
-                    if (!onChanged(tenantChanged, wildcardChanged))
+                    wildcardChanged = Observe(_wildcard, wildcardValue);
+                    if (tenantChanged || wildcardChanged)
                     {
-                        MarkReloadFailed(tenantState.Key[KeyPrefix.Length..], tenantChanged, wildcardChanged);
+                        outcome = new EpochCheckOutcome(EpochCheckKind.Changed, tenantChanged, wildcardChanged);
+                        if (!onChanged(tenantChanged, wildcardChanged))
+                        {
+                            MarkReloadFailed(tenantState.Key[KeyPrefix.Length..], tenantChanged, wildcardChanged);
+                        }
                     }
-                }
-                else
-                {
-                    outcome = EpochCheckOutcome.Unchanged;
-                }
+                    else
+                    {
+                        outcome = EpochCheckOutcome.Unchanged;
+                    }
 
-                // The next check is scheduled only after a reload finished: until then the status stays Due, so concurrent
-                // callers wait for the reload instead of serving cached decisions of the old policy.
-                var next = _time.GetTimestamp() + _checkInterval;
-                Volatile.Write(ref tenantState.NextCheck, next);
-                Volatile.Write(ref _wildcard.NextCheck, next);
-                Volatile.Write(ref tenantState.UnavailableUntil, 0);
+                    // The next check is scheduled only after a reload finished: until then the status stays Due, so concurrent
+                    // callers wait for the reload instead of serving cached decisions of the old policy.
+                    var next = _time.GetTimestamp() + _checkInterval;
+                    Volatile.Write(ref tenantState.NextCheck, next);
+                    Volatile.Write(ref _wildcard.NextCheck, next);
+                    Volatile.Write(ref tenantState.UnavailableUntil, 0);
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

@@ -96,18 +96,25 @@ public static class DuckDbOlapEndpoints
                     executionDurationMs = result.ExecutionDuration.TotalMilliseconds
                 }, ct);
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Request aborted by caller.
+            }
             catch (Exception ex)
             {
                 // Same contract as before the extraction: a failure while writing the result is a 400 with a generic error.
                 logger.LogError(ex, "Error executing DuckDB OLAP query.");
-                httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-                if (isDev || gatewayOptions.Value.IsQuickstartProfile)
+                if (!httpContext.Response.HasStarted)
                 {
-                    await httpContext.Response.WriteAsJsonAsync(new { error = "Analytical query execution failed.", details = ex.Message }, ct);
-                }
-                else
-                {
-                    await httpContext.Response.WriteAsJsonAsync(new { error = "Analytical query execution failed." }, ct);
+                    httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+                    if (isDev || gatewayOptions.Value.IsQuickstartProfile)
+                    {
+                        await httpContext.Response.WriteAsJsonAsync(new { error = "Analytical query execution failed.", details = ex.Message }, ct);
+                    }
+                    else
+                    {
+                        await httpContext.Response.WriteAsJsonAsync(new { error = "Analytical query execution failed." }, ct);
+                    }
                 }
             }
         }

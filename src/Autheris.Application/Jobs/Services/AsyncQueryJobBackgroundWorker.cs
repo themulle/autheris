@@ -176,6 +176,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         try
         {
             await _jobManager.PurgeExpiredJobsAsync(retention, ct).ConfigureAwait(false);
+            await _queue.SweepOrphanedScratchFilesAsync(ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -201,6 +202,13 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
             itemToken = new CancellationToken(true);
         }
 
+        if (itemToken.IsCancellationRequested)
+        {
+            // Timed out or cancelled before it could start: nothing ran, the job ends Cancelled without a transient Running state.
+            await _queue.TryTransitionAsync(item.Job with { State = AsyncJobState.Cancelled, CompletedAt = DateTimeOffset.UtcNow, ErrorMessage = "Job execution cancelled or timed out." }, writeCt).ConfigureAwait(false);
+            return;
+        }
+
         var startedAt = DateTimeOffset.UtcNow;
         var runningJob = item.Job with
         {
@@ -215,7 +223,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
 
         if (itemToken.IsCancellationRequested)
         {
-            // Cancelled before it could start: nothing ran, the job ends Cancelled.
+            // Cancelled concurrently while transitioning to Running: nothing ran, the job ends Cancelled.
             await _queue.TryTransitionAsync(runningJob with { State = AsyncJobState.Cancelled, CompletedAt = DateTimeOffset.UtcNow, ErrorMessage = "Job execution cancelled or timed out." }, writeCt).ConfigureAwait(false);
             return;
         }
@@ -230,7 +238,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
 
             // SR-H-05 defence in depth: re-derive the bounds server-side; the queued request is never trusted.
             var options = _options?.Value;
-            linkedCts.CancelAfter(AsyncJobLimits.ResolveTimeout(item.Request, options));
+            linkedCts.CancelAfter(AsyncJobLimits.ResolveTimeout(item.Request, options, JobOptions));
             var queryRequest = new GovernedSqlQueryRequest(
                 Sql: item.Request.Query,
                 RowLimit: AsyncJobLimits.ResolveRowLimit(item.Request, options),

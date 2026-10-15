@@ -299,6 +299,13 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
                     var purePk = colName[3..];
                     pkValues.Add(val?.ToString() ?? string.Empty);
 
+                    if (tenantId is null &&
+                        (purePk.Equals("TenantId", StringComparison.OrdinalIgnoreCase) ||
+                         purePk.Equals("tenant_id", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        tenantId = val?.ToString();
+                    }
+
                     if (operation == CdcOperation.Delete && !rowData.ContainsKey(purePk))
                     {
                         rowData[purePk] = val;
@@ -313,10 +320,16 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
                     continue;
                 }
 
-                if (colName.Equals("TenantId", StringComparison.OrdinalIgnoreCase) ||
-                    colName.Equals("tenant_id", StringComparison.OrdinalIgnoreCase))
+                if (val is not null &&
+                    (colName.Equals("TenantId", StringComparison.OrdinalIgnoreCase) ||
+                     colName.Equals("tenant_id", StringComparison.OrdinalIgnoreCase)))
                 {
-                    tenantId = val?.ToString();
+                    tenantId = val.ToString();
+                }
+
+                if (operation == CdcOperation.Delete && val is null && rowData.ContainsKey(colName))
+                {
+                    continue;
                 }
 
                 rowData[colName] = val;

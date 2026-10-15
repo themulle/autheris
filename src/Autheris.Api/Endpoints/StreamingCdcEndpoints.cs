@@ -146,7 +146,7 @@ public static class StreamingCdcEndpoints
 
         if (!string.IsNullOrWhiteSpace(cdcEvent.TenantId))
         {
-            return string.Equals(cdcEvent.TenantId, callerTenant, StringComparison.OrdinalIgnoreCase)
+            return string.Equals(cdcEvent.TenantId, callerTenant, StringComparison.Ordinal)
                 ? null
                 : Results.StatusCode(StatusCodes.Status403Forbidden);
         }
@@ -234,9 +234,18 @@ public static class StreamingCdcEndpoints
         // Fail closed: without a host environment the deployment is treated as production.
         var isDev = services.GetService<IHostEnvironment>()?.IsDevelopment() == true;
 
-        if (subscription is null || !Uri.TryCreate(subscription.TargetUrl, UriKind.Absolute, out var targetUri))
+        if (subscription is null || string.IsNullOrWhiteSpace(subscription.TargetUrl) || !Uri.TryCreate(subscription.TargetUrl, UriKind.Absolute, out var targetUri))
         {
             return Results.BadRequest(new { error = "Invalid absolute target URL" });
+        }
+
+        if (subscription.TargetUrl.Length > 2048
+            || string.IsNullOrEmpty(subscription.FilterTable)
+            || subscription.FilterTable.Length > 512
+            || !TableFilterPattern.IsMatch(subscription.FilterTable)
+            || (subscription.FilterOperations ?? []).Any(o => !Enum.IsDefined(o)))
+        {
+            return SafeErrorResults.BadRequest("CDC_FILTER_INVALID", "The table or operation filter is invalid.", context);
         }
 
         try
@@ -247,15 +256,6 @@ public static class StreamingCdcEndpoints
         {
             SafeErrorResults.LogFailure(context, ex, "CDC_TARGET_URL_NOT_ALLOWED");
             return SafeErrorResults.BadRequest("CDC_TARGET_URL_NOT_ALLOWED", "The target URL is not allowed.", context);
-        }
-
-        if (subscription.TargetUrl.Length > 2048
-            || string.IsNullOrEmpty(subscription.FilterTable)
-            || subscription.FilterTable.Length > 512
-            || !TableFilterPattern.IsMatch(subscription.FilterTable)
-            || (subscription.FilterOperations ?? []).Any(o => !Enum.IsDefined(o)))
-        {
-            return SafeErrorResults.BadRequest("CDC_FILTER_INVALID", "The table or operation filter is invalid.", context);
         }
 
         if (!CdcCustomHeaders.WithinBounds(subscription.CustomHeaders)

@@ -114,14 +114,14 @@ public sealed class PluginManager : IPluginManager, IDisposable
             return PluginActionResult.Failed($"Action handler '{actionName}' not found.");
         }
 
-        if (_disposed)
-        {
-            return PluginActionResult.Failed("Plugin manager is shutting down.");
-        }
-
         Interlocked.Increment(ref _inFlightActions);
         try
         {
+            if (_disposed)
+            {
+                return PluginActionResult.Failed("Plugin manager is shutting down.");
+            }
+
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(ActionTimeout);
             return await entry.Handler.ExecuteActionAsync(context, cts.Token).WaitAsync(ActionTimeout, ct).ConfigureAwait(false);
@@ -336,13 +336,23 @@ public sealed class PluginManager : IPluginManager, IDisposable
 
                 var sub = eventBus.Subscribe(eventType, async (@event, ct) =>
                 {
+                    Interlocked.Increment(ref _inFlightActions);
                     try
                     {
+                        if (_disposed)
+                        {
+                            return;
+                        }
+
                         await invoker(@event, ct).ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "Plugin listener '{ListenerType}' failed while handling event {EventType}", listenerType.FullName, @event.EventType);
+                    }
+                    finally
+                    {
+                        Interlocked.Decrement(ref _inFlightActions);
                     }
                 });
 

@@ -211,10 +211,19 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             batch.Add(entry);
             if (batch.Count >= 250)
             {
-                await using var scope = await WriteScopeAsync(CancellationToken.None).ConfigureAwait(false);
-                var conn = scope.Connection;
+                try
                 {
-                    await RecordAuditEventsBatchInternalAsync(conn, batch, CancellationToken.None).ConfigureAwait(false);
+                    await using var scope = await WriteScopeAsync(CancellationToken.None).ConfigureAwait(false);
+                    var conn = scope.Connection;
+                    {
+                        await RecordAuditEventsBatchInternalAsync(conn, batch, CancellationToken.None).ConfigureAwait(false);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(ex, "Failed to flush audit batch of {Count} entries during shutdown drain; diverting to dead-letter queue.", batch.Count);
+                    await WriteToDeadLetterAsync(batch, ex.Message, CancellationToken.None).ConfigureAwait(false);
+                    Autheris.Domain.Diagnostics.GatewayDiagnostics.AuditDeadLetterCounter.Add(batch.Count);
                 }
                 batch.Clear();
             }
@@ -222,10 +231,19 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
 
         if (batch.Count > 0)
         {
-            await using var scope = await WriteScopeAsync(CancellationToken.None).ConfigureAwait(false);
-            var conn = scope.Connection;
+            try
             {
-                await RecordAuditEventsBatchInternalAsync(conn, batch, CancellationToken.None).ConfigureAwait(false);
+                await using var scope = await WriteScopeAsync(CancellationToken.None).ConfigureAwait(false);
+                var conn = scope.Connection;
+                {
+                    await RecordAuditEventsBatchInternalAsync(conn, batch, CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to flush audit batch of {Count} entries during shutdown drain; diverting to dead-letter queue.", batch.Count);
+                await WriteToDeadLetterAsync(batch, ex.Message, CancellationToken.None).ConfigureAwait(false);
+                Autheris.Domain.Diagnostics.GatewayDiagnostics.AuditDeadLetterCounter.Add(batch.Count);
             }
         }
     }

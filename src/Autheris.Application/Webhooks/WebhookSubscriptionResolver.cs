@@ -54,7 +54,7 @@ public sealed class WebhookSubscriptionResolver(IOptions<GatewayOptions> options
                 var subscription = await store.GetSubscriptionAsync(message.OwnerTenantId, message.SubscriptionId, ct).ConfigureAwait(false);
                 return subscription is null
                     ? null
-                    : new ResolvedWebhookTarget(subscription.TargetUrl, UnprotectSecret(subscription, store), UnprotectHeaders(subscription), subscription.IsEnabled);
+                    : new ResolvedWebhookTarget(subscription.TargetUrl, UnprotectSecret(subscription, store), UnprotectHeaders(subscription, store), subscription.IsEnabled);
 
             default:
                 return null;
@@ -85,11 +85,20 @@ public sealed class WebhookSubscriptionResolver(IOptions<GatewayOptions> options
         return protector.Unprotect(subscription.TenantId, subscription.Id, stored);
     }
 
-    private System.Collections.Generic.IReadOnlyDictionary<string, string>? UnprotectHeaders(CloudEventWebhookSubscription subscription)
+    private System.Collections.Generic.IReadOnlyDictionary<string, string>? UnprotectHeaders(
+        CloudEventWebhookSubscription subscription,
+        ICloudEventSubscriptionStore store)
     {
-        if (!Autheris.Application.Events.Services.CdcCustomHeaders.IsProtected(subscription.CustomHeaders))
+        if (subscription.CustomHeaders is null || subscription.CustomHeaders.Count == 0)
         {
             return subscription.CustomHeaders;
+        }
+
+        if (!Autheris.Application.Events.Services.CdcCustomHeaders.IsProtected(subscription.CustomHeaders))
+        {
+            return store is Autheris.Application.Events.Services.InMemoryCloudEventSubscriptionStore
+                ? subscription.CustomHeaders
+                : throw new WebhookSecretUnavailableException();
         }
 
         var protector = services.GetService<IWebhookSecretProtector>() ?? throw new WebhookSecretUnavailableException();

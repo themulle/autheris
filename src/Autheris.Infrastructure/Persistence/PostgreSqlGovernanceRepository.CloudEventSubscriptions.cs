@@ -16,7 +16,7 @@ public partial class PostgreSqlGovernanceRepository : ICloudEventSubscriptionSto
     {
         CloudEventSubscriptionMapping.Validate(subscription);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
 
         // Serialises concurrent registrations of one tenant so the count-then-insert quota is atomic under READ COMMITTED.
@@ -72,7 +72,7 @@ public partial class PostgreSqlGovernanceRepository : ICloudEventSubscriptionSto
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(subscriptionId);
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM CLOUDEVENT_SUBSCRIPTIONS WHERE tenant_id = @tenant AND id = @id;";
         cmd.Parameters.AddWithValue("@tenant", tenantId);
@@ -110,7 +110,7 @@ public partial class PostgreSqlGovernanceRepository : ICloudEventSubscriptionSto
 
     private async Task<IReadOnlyList<CloudEventWebhookSubscription>> QuerySubscriptionsAsync(string tenantId, string? id, bool enabledOnly, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = $"SELECT {CloudEventSubscriptionMapping.Columns} FROM CLOUDEVENT_SUBSCRIPTIONS WHERE tenant_id = @tenant"
                           + (id is null ? string.Empty : " AND id = @id")

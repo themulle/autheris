@@ -102,6 +102,7 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task FlushAuditChannelAsync(CancellationToken ct = default)
     {
+        ThrowIfNotReady();
         var batch = new List<AuditLogEntry>();
         while (_auditChannel.Reader.TryRead(out var entry))
         {
@@ -218,6 +219,12 @@ public partial class PostgreSqlGovernanceRepository
                 {
                     await RecordAuditEventsBatchInternalAsync(batch, CancellationToken.None).ConfigureAwait(false);
                 }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(ex, "Failed to flush audit batch of {Count} entries during shutdown drain; diverting to dead-letter queue.", batch.Count);
+                    await WriteToDeadLetterAsync(batch, ex.Message, CancellationToken.None).ConfigureAwait(false);
+                    Autheris.Domain.Diagnostics.GatewayDiagnostics.AuditDeadLetterCounter.Add(batch.Count);
+                }
                 finally
                 {
                     _auditLock.Release();
@@ -232,6 +239,12 @@ public partial class PostgreSqlGovernanceRepository
             try
             {
                 await RecordAuditEventsBatchInternalAsync(batch, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to flush audit batch of {Count} entries during shutdown drain; diverting to dead-letter queue.", batch.Count);
+                await WriteToDeadLetterAsync(batch, ex.Message, CancellationToken.None).ConfigureAwait(false);
+                Autheris.Domain.Diagnostics.GatewayDiagnostics.AuditDeadLetterCounter.Add(batch.Count);
             }
             finally
             {
@@ -265,6 +278,7 @@ public partial class PostgreSqlGovernanceRepository
 
     public Task RecordAuditEventAsync(AuditLogEntry entry, System.Data.Common.DbTransaction existingTx, CancellationToken ct = default)
     {
+        ThrowIfNotReady();
         if (existingTx == null)
         {
             return RecordAuditEventAsync(entry, ct);

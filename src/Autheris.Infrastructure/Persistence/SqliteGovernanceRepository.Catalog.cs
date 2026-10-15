@@ -356,6 +356,9 @@ public partial class SqliteGovernanceRepository
             using var tx = conn.BeginTransaction();
             try
             {
+                string? targetDesc = metadata.Table.Description;
+                string? targetLongDesc = metadata.Table.LongDescription;
+                string? targetDocSource = metadata.Table.DocumentationSource;
                 using (var selectCmd = conn.CreateCommand())
                 {
                     selectCmd.Transaction = tx;
@@ -383,9 +386,9 @@ public partial class SqliteGovernanceRepository
                                                     (!string.IsNullOrWhiteSpace(metadata.Table.LongDescription) &&
                                                      ShouldOverwriteDocumentation(existingDocSource, metadata.Table.DocumentationSource));
 
-                        var targetDesc = canOverwriteDesc ? metadata.Table.Description : existingDesc;
-                        var targetLongDesc = canOverwriteLongDesc ? metadata.Table.LongDescription : existingLongDesc;
-                        var targetDocSource = canOverwriteDesc ? (metadata.Table.DocumentationSource ?? existingDocSource) : existingDocSource;
+                        targetDesc = canOverwriteDesc ? metadata.Table.Description : existingDesc;
+                        targetLongDesc = canOverwriteLongDesc ? metadata.Table.LongDescription : existingLongDesc;
+                        targetDocSource = canOverwriteDesc ? (metadata.Table.DocumentationSource ?? existingDocSource) : existingDocSource;
 
                         using var updateCmd = conn.CreateCommand();
                         updateCmd.Transaction = tx;
@@ -565,7 +568,10 @@ public partial class SqliteGovernanceRepository
                 IsActive = metadata.Table.IsActive,
                 DataSourceType = metadata.Table.DataSourceType,
                 HttpEndpoint = metadata.Table.HttpEndpoint,
-                PluginName = metadata.Table.PluginName
+                PluginName = metadata.Table.PluginName,
+                Description = targetDesc,
+                LongDescription = targetLongDesc,
+                DocumentationSource = targetDocSource
             };
 
             return new TableMetadata

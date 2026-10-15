@@ -95,10 +95,11 @@ public sealed class MssqlChangeTrackingPollerTests
 
             foreach (var change in selected)
             {
+                var isDelete = string.Equals(change.Operation, "D", StringComparison.OrdinalIgnoreCase);
                 var values = new List<object> { change.Version, change.Operation };
                 values.AddRange(PrimaryKey.Select(c => c == "Id" ? (object)change.Id : "k" + change.Id));
-                values.Add(change.Id);
-                values.Add("row" + change.Id);
+                values.Add(isDelete ? DBNull.Value : change.Id);
+                values.Add(isDelete ? DBNull.Value : "row" + change.Id);
                 table.Rows.Add(values.ToArray());
             }
 

@@ -16,7 +16,7 @@ public partial class PostgreSqlGovernanceRepository : IWebhookOutbox
     {
         ArgumentNullException.ThrowIfNull(message);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = $@"
             INSERT INTO WEBHOOK_OUTBOX ({WebhookOutboxMapping.Columns}, updated_ms)
@@ -45,7 +45,7 @@ public partial class PostgreSqlGovernanceRepository : IWebhookOutbox
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(leaseOwner);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = $@"
             WITH picked AS (
@@ -94,7 +94,7 @@ public partial class PostgreSqlGovernanceRepository : IWebhookOutbox
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentException.ThrowIfNullOrWhiteSpace(leaseOwner);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = $"UPDATE WEBHOOK_OUTBOX SET {setClause} WHERE id = @id AND state = 1 AND lease_owner = @owner;";
         cmd.Parameters.AddWithValue("@id", id);
@@ -122,7 +122,7 @@ public partial class PostgreSqlGovernanceRepository : IWebhookOutbox
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(subscriptionId);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
             UPDATE WEBHOOK_OUTBOX SET next_attempt_ms = @until
@@ -137,7 +137,7 @@ public partial class PostgreSqlGovernanceRepository : IWebhookOutbox
     {
         WebhookOutboxMapping.ValidateScope(scope);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = $@"
             SELECT {WebhookOutboxMapping.DeadLetterColumns} FROM WEBHOOK_OUTBOX
@@ -161,7 +161,7 @@ public partial class PostgreSqlGovernanceRepository : IWebhookOutbox
 
     public async Task<long> CountPendingAsync(CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM WEBHOOK_OUTBOX WHERE state IN (0, 1);";
         return Convert.ToInt64(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false), CultureInfo.InvariantCulture);
@@ -169,7 +169,7 @@ public partial class PostgreSqlGovernanceRepository : IWebhookOutbox
 
     public async Task<int> PurgeAsync(DateTimeOffset deliveredBefore, DateTimeOffset deadBefore, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM WEBHOOK_OUTBOX WHERE (state = 2 AND updated_ms < @delivered) OR (state = 3 AND updated_ms < @dead);";
         cmd.Parameters.AddWithValue("@delivered", WebhookOutboxMapping.Ms(deliveredBefore));

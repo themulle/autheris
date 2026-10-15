@@ -70,7 +70,7 @@ public abstract class DistributedLeaseBase : IDistributedLease
 
     private void OnTick()
     {
-        if (Volatile.Read(ref _disposed) != 0)
+        if (_lost.IsCancellationRequested || Volatile.Read(ref _disposed) != 0)
         {
             return;
         }

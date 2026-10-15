@@ -214,6 +214,7 @@ public sealed class WebhookDeliveryClient
         return ForbiddenCustomHeaders.Contains(n) ||
                n.StartsWith("proxy-", StringComparison.OrdinalIgnoreCase) ||
                n.StartsWith("x-forwarded-", StringComparison.OrdinalIgnoreCase) ||
+               n.StartsWith("x-autheris-", StringComparison.OrdinalIgnoreCase) ||
                n.StartsWith("ce-", StringComparison.OrdinalIgnoreCase);
     }
 

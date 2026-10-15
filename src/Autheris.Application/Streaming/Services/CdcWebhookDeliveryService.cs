@@ -163,7 +163,15 @@ public sealed class CdcWebhookDeliveryService : BackgroundService
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(Math.Max(1, _options.CurrentValue.AuditBatchSeconds)), _time);
             while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
             {
-                await FlushAuditAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    await FlushAuditAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogError("CDC webhook audit batch flush failed ({ErrorType}).", ex.GetType().Name);
+                }
+
                 // Picks up a changed interval (options monitor) for the next tick.
                 timer.Period = TimeSpan.FromSeconds(Math.Max(1, _options.CurrentValue.AuditBatchSeconds));
             }
@@ -235,7 +243,7 @@ public sealed class CdcWebhookDeliveryService : BackgroundService
                 decision = await enforcer.EvaluateAndMaskAsync(cdcEvent, principal, ct).ConfigureAwait(false);
             }
 
-            if (!decision.IsAllowed || decision.MaskedPayload is null)
+            if (!decision.IsAllowed || decision.MaskedPayload is not { Count: > 0 })
             {
                 Drop("denied");
                 Record(subscription, b => b.DroppedDenied++);

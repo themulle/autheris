@@ -308,7 +308,7 @@ public static class GovernanceEndpoints
                     targetKey,
                     resetBy = callerId
                 })
-            }, context.RequestAborted).ConfigureAwait(false);
+            }, CancellationToken.None).ConfigureAwait(false);
 
             return Results.Ok(new { message = $"Privacy budget reset for client '{clientId}'." });
         }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
@@ -760,15 +760,15 @@ public static class GovernanceEndpoints
         };
 
         var auditRepo = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
-        await auditRepo.RecordRequiredAsync(auditEvent, ct).ConfigureAwait(false);
+        await auditRepo.RecordRequiredAsync(auditEvent, CancellationToken.None).ConfigureAwait(false);
 
-        // Cluster-weite Cache-Invalidierung (AR-01)
+        // Cluster-wide cache invalidation (AR-01)
         var accessProfileCache = context.RequestServices.GetService<Autheris.Application.Policy.Interfaces.IAccessProfileCache>();
         if (accessProfileCache != null)
         {
             try
             {
-                await accessProfileCache.InvalidateTenantAsync(tenantId, ct).ConfigureAwait(false);
+                await accessProfileCache.InvalidateTenantAsync(tenantId, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -786,7 +786,7 @@ public static class GovernanceEndpoints
                         subject = trimmedSubject
                     })
                 };
-                await auditRepo.RecordRequiredAsync(failAudit, ct).ConfigureAwait(false);
+                await auditRepo.RecordRequiredAsync(failAudit, CancellationToken.None).ConfigureAwait(false);
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             }
         }
@@ -795,7 +795,7 @@ public static class GovernanceEndpoints
             var clusterState = context.RequestServices.GetService<IDistributedClusterStateProvider>();
             if (clusterState != null)
             {
-                var bumped = await clusterState.IncrementAsync($"profile_epoch:{tenantId.Value}", 1, TimeSpan.Zero, ct).ConfigureAwait(false);
+                var bumped = await clusterState.IncrementAsync($"profile_epoch:{tenantId.Value}", 1, TimeSpan.Zero, CancellationToken.None).ConfigureAwait(false);
                 if (!bumped.HasValue)
                 {
                     return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
@@ -906,15 +906,15 @@ public static class GovernanceEndpoints
         };
 
         var auditRepo = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
-        await auditRepo.RecordRequiredAsync(auditEvent, ct).ConfigureAwait(false);
+        await auditRepo.RecordRequiredAsync(auditEvent, CancellationToken.None).ConfigureAwait(false);
 
-        // Cluster-weite Cache-Invalidierung (AR-01)
+        // Cluster-wide cache invalidation (AR-01)
         var accessProfileCache = context.RequestServices.GetService<Autheris.Application.Policy.Interfaces.IAccessProfileCache>();
         if (accessProfileCache != null)
         {
             try
             {
-                await accessProfileCache.InvalidateTenantAsync(tenantId, ct).ConfigureAwait(false);
+                await accessProfileCache.InvalidateTenantAsync(tenantId, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -932,7 +932,7 @@ public static class GovernanceEndpoints
                         profileId = id.ToString()
                     })
                 };
-                await auditRepo.RecordRequiredAsync(failAudit, ct).ConfigureAwait(false);
+                await auditRepo.RecordRequiredAsync(failAudit, CancellationToken.None).ConfigureAwait(false);
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             }
         }
@@ -941,7 +941,7 @@ public static class GovernanceEndpoints
             var clusterState = context.RequestServices.GetService<IDistributedClusterStateProvider>();
             if (clusterState != null)
             {
-                var bumped = await clusterState.IncrementAsync($"profile_epoch:{tenantId.Value}", 1, TimeSpan.Zero, ct).ConfigureAwait(false);
+                var bumped = await clusterState.IncrementAsync($"profile_epoch:{tenantId.Value}", 1, TimeSpan.Zero, CancellationToken.None).ConfigureAwait(false);
                 if (!bumped.HasValue)
                 {
                     return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);

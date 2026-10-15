@@ -328,7 +328,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         }
 
         // SR-H-05: row count and timeout are server-bounded; the client values only narrow them.
-        request = AsyncJobLimits.Normalize(request, _options?.Value);
+        request = AsyncJobLimits.Normalize(request, _options?.Value, _jobOptions?.Value);
         var cts = new CancellationTokenSource();
         cts.CancelAfter(request.Timeout!.Value);
         _activeCts[jobId] = cts;
@@ -765,13 +765,17 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
     {
         ArgumentNullException.ThrowIfNull(signal);
 
-        if (_cluster is null ||
-            !_jobs.TryGetValue(signal.JobId, out var job) ||
-            !string.Equals(job.TenantId, signal.TenantId, StringComparison.Ordinal) ||
+        if (_cluster is null || !_jobs.TryGetValue(signal.JobId, out var job))
+        {
+            // Broadcast cancel signal for a job owned by another replica: silently ignore.
+            return;
+        }
+
+        if (!string.Equals(job.TenantId, signal.TenantId, StringComparison.Ordinal) ||
             !string.Equals(job.SubmittedByUserId, signal.RequesterSid, StringComparison.OrdinalIgnoreCase))
         {
-            // Not our job, or not requested by its owner: a forged or misrouted signal changes nothing.
-            _logger.LogWarning("Ignored async job cancel signal for job {JobId}: unknown job or requester is not the owner.", signal.JobId);
+            // Not requested by the job's owner: a forged or misrouted signal changes nothing.
+            _logger.LogWarning("Ignored async job cancel signal for job {JobId}: requester is not the owner.", signal.JobId);
             return;
         }
 

@@ -21,9 +21,9 @@ internal static class AsyncJobLimits
     }
 
     /// <summary>The job timeout: the default when absent or non-positive, otherwise clamped to the configured maximum.</summary>
-    public static TimeSpan ResolveTimeout(AsyncQueryJobRequest request, GatewayOptions? options)
+    public static TimeSpan ResolveTimeout(AsyncQueryJobRequest request, GatewayOptions? options, AsyncJobOptions? jobOptions = null)
     {
-        var jobs = options?.AsyncJobs ?? new AsyncJobOptions();
+        var jobs = jobOptions ?? options?.AsyncJobs ?? new AsyncJobOptions();
         var max = TimeSpan.FromSeconds(Math.Max(1, jobs.MaxTimeoutSeconds));
         var def = TimeSpan.FromSeconds(Math.Max(1, jobs.DefaultTimeoutSeconds));
         var requested = request.Timeout is { } t && t > TimeSpan.Zero ? t : def;
@@ -31,10 +31,10 @@ internal static class AsyncJobLimits
     }
 
     /// <summary>The request with its row count and timeout replaced by the server-enforced values.</summary>
-    public static AsyncQueryJobRequest Normalize(AsyncQueryJobRequest request, GatewayOptions? options)
+    public static AsyncQueryJobRequest Normalize(AsyncQueryJobRequest request, GatewayOptions? options, AsyncJobOptions? jobOptions = null)
     {
         var limit = ResolveRowLimit(request, options);
         var rows = (int)Math.Min(limit.DefaultMaxRows, int.MaxValue);
-        return request with { MaxRows = rows, Timeout = ResolveTimeout(request, options) };
+        return request with { MaxRows = rows, Timeout = ResolveTimeout(request, options, jobOptions) };
     }
 }

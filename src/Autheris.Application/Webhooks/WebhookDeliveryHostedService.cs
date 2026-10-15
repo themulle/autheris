@@ -95,13 +95,12 @@ public sealed class WebhookDeliveryHostedService : BackgroundService
                     do
                     {
                         claimed = await RunOnceAsync(leaseOwner, ct).ConfigureAwait(false);
+                        if (primary)
+                        {
+                            await HousekeepingAsync(ct).ConfigureAwait(false);
+                        }
                     }
                     while (claimed >= Webhooks.EffectiveBatchSize && !ct.IsCancellationRequested);
-
-                    if (primary)
-                    {
-                        await HousekeepingAsync(ct).ConfigureAwait(false);
-                    }
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {

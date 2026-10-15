@@ -9,7 +9,7 @@ public partial class PostgreSqlGovernanceRepository : ICdcWatermarkRepository
 {
     public async Task<long?> GetAsync(string source, string domain, string schema, string table, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
             SELECT watermark FROM autheris_cdc_watermarks
@@ -25,7 +25,7 @@ public partial class PostgreSqlGovernanceRepository : ICdcWatermarkRepository
 
     public async Task<bool> TryAdvanceAsync(string source, string domain, string schema, string table, long watermark, long fencingToken, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
             INSERT INTO autheris_cdc_watermarks AS t (source, domain_name, schema_name, table_name, watermark, fencing_token, updated_at, updated_by)
