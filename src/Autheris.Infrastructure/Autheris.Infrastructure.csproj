@@ -28,6 +28,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Persistence\Migrations\Shape\governance-shape.*.json" LogicalName="%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Autheris.Tests.Unit" />
     <InternalsVisibleTo Include="Autheris.Tests.Integration" />
   </ItemGroup>
