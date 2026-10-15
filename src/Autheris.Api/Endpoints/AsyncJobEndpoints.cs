@@ -136,7 +136,7 @@ public static class AsyncJobEndpoints
                 return Results.Problem(
                     statusCode: StatusCodes.Status503ServiceUnavailable,
                     title: "The job result is not available on this node.",
-                    detail: ex.Message,
+                    detail: "The job result is stored on another gateway node and the scratch directory is not shared. Retry later or contact the operator.",
                     extensions: new Dictionary<string, object?> { ["code"] = ex.ErrorCode });
             }
 
