@@ -11,9 +11,8 @@ using Microsoft.Extensions.Logging;
 
 /// <summary>
 /// Runs async jobs in parallel: at most <c>maxConcurrent</c> overall and <c>maxPerTenant</c> per tenant. Jobs of a
-/// tenant at its cap wait in a per-tenant queue. A freed slot always goes back to the dispatch loop, which first reads
-/// new work from the channel (so a new tenant is never starved by backlogs) and then serves the waiting tenants
-/// round-robin. A finished job releases its per-tenant count and its global slot; nothing is handed over.
+/// tenant at its cap wait in a per-tenant queue. A freed slot always goes back to the dispatch loop, which files all
+/// readable work under its tenant and then serves the tenants round-robin. A finished job releases its per-tenant count and its global slot; nothing is handed over.
 /// </summary>
 internal sealed class AsyncJobScheduler : IDisposable
 {
@@ -94,7 +93,7 @@ internal sealed class AsyncJobScheduler : IDisposable
         }
     }
 
-    /// <summary>With a global slot held: new channel work first, then waiting tenants round-robin; null when the channel is done and nothing waits.</summary>
+    /// <summary>With a global slot held: files new channel work per tenant, then serves tenants round-robin; null when the channel is done and nothing waits.</summary>
     private async Task<AsyncJobExecutionItem?> NextItemAsync(ChannelReader<AsyncJobExecutionItem> reader, CancellationToken ct)
     {
         var channelDone = false;
@@ -104,14 +103,10 @@ internal sealed class AsyncJobScheduler : IDisposable
             Task eligible;
             lock (_gate)
             {
+                // Everything readable is filed under its tenant first; the slot is then given round-robin, so neither a
+                // backlog nor a flood of fresh items can keep another tenant waiting longer than one rotation.
                 while (reader.TryRead(out var fresh))
                 {
-                    if (UnderCap(fresh.Job.TenantId))
-                    {
-                        _running[fresh.Job.TenantId] = _running.GetValueOrDefault(fresh.Job.TenantId) + 1;
-                        return fresh;
-                    }
-
                     Enqueue(fresh);
                 }
 

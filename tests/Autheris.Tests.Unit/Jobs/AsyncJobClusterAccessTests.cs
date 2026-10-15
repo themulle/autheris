@@ -508,4 +508,78 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
         await done.Task.WaitAsync(TimeSpan.FromSeconds(10));
         await worker.StopAsync(CancellationToken.None);
     }
+
+    // ---- re-review minors ----
+
+    [Fact]
+    public async Task CancelSignal_TombstoneRequesterMismatch_IsIgnored()
+    {
+        var a = Node(_auditA, "a");
+        var job = await SubmitAsync(a);
+        await a.TryTransitionAsync(job with { State = AsyncJobState.Running, StartedAt = _time.GetUtcNow() }, CancellationToken.None);
+        await _state.SetAsync($"asyncjob:t:{job.JobId}:cancel", new AsyncJobCancelTombstone("t", job.JobId, "bob", _time.GetUtcNow()), TimeSpan.FromHours(1));
+
+        await a.ApplyCancelSignalAsync(new AsyncJobCancelSignal("t", job.JobId, "alice"), CancellationToken.None);
+
+        (await a.GetJobAsync(job.JobId, _tenant, "alice"))!.State.ShouldNotBe(AsyncJobState.Cancelled);
+    }
+
+    [Fact]
+    public async Task CancelSignal_WhileStateUnavailable_IsIgnored()
+    {
+        var state = Substitute.For<IDistributedClusterStateProvider>();
+        state.GetAsync<AsyncJobCancelTombstone>(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns<ValueTask<AsyncJobCancelTombstone?>>(_ => throw new ClusterStateUnavailableException());
+        var a = Node(_auditA, "a", state);
+        var job = await SubmitAsync(a);
+
+        await a.ApplyCancelSignalAsync(new AsyncJobCancelSignal("t", job.JobId, "alice"), CancellationToken.None);
+
+        (await a.GetJobAsync(job.JobId, _tenant, "alice"))!.State.ShouldBe(AsyncJobState.Queued);
+    }
+
+    [Fact]
+    public async Task CancelOnNodeB_DuringRunning_EndsCancelledAndDeletesFile()
+    {
+        var a = Node(_auditA, "a");
+        var b = Node(_auditB, "b");
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var running = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sql = Substitute.For<IGovernedSqlExecutionService>();
+        sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(async _ => { running.TrySetResult(); await release.Task; return AsyncJobWorkerConcurrencyTests.EmptyResult(); });
+        var worker = new AsyncQueryJobBackgroundWorker(
+            a, a, AsyncJobWorkerConcurrencyTests.Scopes(sql), Substitute.For<IAuditLogRepository>(),
+            NullLogger<AsyncQueryJobBackgroundWorker>.Instance,
+            clusterState: _state, topology: new ClusterStateTopology(ClusterStateMode.External));
+        await worker.StartAsync(CancellationToken.None);
+        var job = await SubmitAsync(a);
+        await running.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        (await b.CancelJobAsync(job.JobId, _tenant, "alice")).ShouldBeTrue();
+        release.SetResult(); // the driver ignores the token and finishes anyway
+        await Task.Delay(500);
+        await worker.StopAsync(CancellationToken.None);
+
+        (await b.GetJobAsync(job.JobId, _tenant, "alice"))!.State.ShouldBe(AsyncJobState.Cancelled);
+        Directory.Exists(a.ScratchDirectory).ShouldBeTrue();
+        Directory.GetFiles(a.ScratchDirectory, "*", SearchOption.AllDirectories).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task CompletedTransition_RetriesTombstoneRead_BeforeFailingOpen()
+    {
+        var state = Substitute.For<IDistributedClusterStateProvider>();
+        var tombstone = new AsyncJobCancelTombstone("t", "x", "alice", _time.GetUtcNow());
+        state.GetAsync<AsyncJobCancelTombstone>(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(
+                _ => throw new ClusterStateUnavailableException(),
+                _ => ValueTask.FromResult<AsyncJobCancelTombstone?>(tombstone));
+        var a = Node(_auditA, "a", state);
+        var job = await SubmitAsync(a);
+
+        var accepted = await a.TryTransitionAsync(job with { State = AsyncJobState.Completed, CompletedAt = _time.GetUtcNow() }, CancellationToken.None);
+
+        accepted.ShouldBeFalse("the second read sees the tombstone");
+    }
 }

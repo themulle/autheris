@@ -35,4 +35,7 @@ public interface IAsyncJobQueue
     /// match the local job entry.
     /// </summary>
     ValueTask ApplyCancelSignalAsync(AsyncJobCancelSignal signal, CancellationToken ct);
+
+    /// <summary>Stops accepting new jobs: later submits are rejected. Called when the worker stops.</summary>
+    void Complete();
 }

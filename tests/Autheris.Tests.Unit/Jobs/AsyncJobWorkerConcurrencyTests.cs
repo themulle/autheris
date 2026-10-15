@@ -14,6 +14,7 @@ using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Application.Jobs.Services;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -73,6 +74,7 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
 
         public ValueTask SweepOrphanedScratchFilesAsync(CancellationToken ct) => ValueTask.CompletedTask;
         public ValueTask ApplyCancelSignalAsync(AsyncJobCancelSignal signal, CancellationToken ct) => ValueTask.CompletedTask;
+        public void Complete() => _channel.Writer.TryComplete();
     }
 
     [Fact]
@@ -400,7 +402,8 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
         }
 
         started.Contains("c").ShouldBeTrue();
-        started.Count(t => t != "c").ShouldBeLessThan(15, "C must start before the backlog of A and B drained");
+        // Round-robin over three tenants: C is served within one rotation of the first freed slots.
+        started.Count(t => t != "c").ShouldBeLessThanOrEqualTo(7, "C must start within one rotation, not after the backlog drained");
         gate.Release(100);
         cts.Cancel();
         await loop;
@@ -422,8 +425,17 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
         for (var i = 0; i < 6; i++) channel.Writer.TryWrite(Item("b"));
 
         await WaitUntilAsync(() => order.Count == 12);
-        // Never more than one tenant-a job in a row beyond the first two slots is not guaranteed, but b must not wait for all of a.
-        order.ToArray().Take(4).ShouldContain("b");
+        var sequence = order.ToArray();
+        sequence.Take(4).ShouldContain("b");
+        var longest = 1;
+        var run = 1;
+        for (var i = 1; i < sequence.Length; i++)
+        {
+            run = sequence[i] == sequence[i - 1] ? run + 1 : 1;
+            longest = Math.Max(longest, run);
+        }
+
+        longest.ShouldBeLessThanOrEqualTo(2, "tenants must alternate, not run as blocks");
         cts.Cancel();
         await loop;
     }
@@ -482,5 +494,108 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
         validator.Validate(null, new AsyncJobOptions { PurgeIntervalMinutes = 0 }).Failed.ShouldBeTrue();
         validator.Validate(null, new AsyncJobOptions { SharedScratchDirectory = true }).Failed.ShouldBeTrue();
         validator.Validate(null, new AsyncJobOptions { SharedScratchDirectory = true, ScratchDirectory = Path.GetTempPath() }).Succeeded.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task PendingTenant_IsNotStarvedByFreshFlood()
+    {
+        var channel = Channel.CreateUnbounded<AsyncJobExecutionItem>();
+        using var gate = new SemaphoreSlim(0);
+        var started = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        using var scheduler = new AsyncJobScheduler(2, 1, async (item, ct) =>
+        {
+            started.Enqueue(item.Job.TenantId);
+            if (item.Job.TenantId == "a") await gate.WaitAsync(ct); else await Task.Delay(5, ct);
+        }, NullLogger.Instance);
+        using var cts = new CancellationTokenSource();
+        var loop = scheduler.RunAsync(channel.Reader, cts.Token);
+        channel.Writer.TryWrite(Item("a"));
+        channel.Writer.TryWrite(Item("a"));
+        await WaitUntilAsync(() => started.Count == 1);
+        await Task.Delay(100);
+        for (var i = 0; i < 300; i++) channel.Writer.TryWrite(Item("flood" + (i % 3)));
+        await WaitUntilAsync(() => started.Count > 20);
+
+        var before = started.Count;
+        gate.Release();
+        await WaitUntilAsync(() => started.Count(t => t == "a") == 2);
+
+        (started.ToArray().ToList().LastIndexOf("a") - before).ShouldBeLessThan(10, "the waiting tenant must not wait for the whole flood");
+        cts.Cancel();
+        await loop;
+    }
+
+    [Fact]
+    public async Task SlotIsReleased_WhenRunDelegateThrows()
+    {
+        var channel = Channel.CreateUnbounded<AsyncJobExecutionItem>();
+        var second = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var scheduler = new AsyncJobScheduler(1, 1, (item, _) =>
+        {
+            if (item.Job.TenantId == "bad") throw new InvalidOperationException("boom");
+            second.TrySetResult();
+            return Task.CompletedTask;
+        }, NullLogger.Instance);
+        using var cts = new CancellationTokenSource();
+        var loop = scheduler.RunAsync(channel.Reader, cts.Token);
+        channel.Writer.TryWrite(Item("bad"));
+        channel.Writer.TryWrite(Item("bad"));
+        channel.Writer.TryWrite(Item("good"));
+
+        await second.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        cts.Cancel();
+        await loop;
+    }
+
+    [Fact]
+    public async Task Worker_ItemWithDisposedCancellationSource_IsCancelledNotStuckRunning()
+    {
+        var queue = new FakeQueue { ScratchDirectory = Path.Combine(_dir, "fake2") };
+        Directory.CreateDirectory(queue.ScratchDirectory);
+        var sqlCalls = 0;
+        var sql = Substitute.For<IGovernedSqlExecutionService>();
+        sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(_ => { Interlocked.Increment(ref sqlCalls); return Task.FromResult(EmptyResult()); });
+        var manager = new AsyncQueryJobManager(_audit, environment: _env);
+        var worker = new AsyncQueryJobBackgroundWorker(manager, queue, Scopes(sql), _audit, NullLogger<AsyncQueryJobBackgroundWorker>.Instance);
+        var item = Item("t");
+        item.Cts.Dispose();
+        queue.Enqueue(item);
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitUntilAsync(() => { lock (queue.Transitions) { return queue.Transitions.Exists(d => d.State == AsyncJobState.Cancelled); } });
+        await worker.StopAsync(CancellationToken.None);
+
+        sqlCalls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Submit_WhenChannelIsFull_WritesDenyAudit()
+    {
+        var manager = new AsyncQueryJobManager(_audit, environment: _env,
+            jobOptions: Options.Create(new AsyncJobOptions { MaxQueuedJobsPerTenant = 10_000 }));
+        for (var i = 0; i < 1000; i++)
+        {
+            await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), User("alice", "t" + (i % 50)), new TenantId("t" + (i % 50)));
+        }
+
+        await Should.ThrowAsync<AsyncJobQueueLimitExceededException>(
+            () => manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), User(), new TenantId("t")));
+
+        await _audit.Received().RecordAuditEventAsync(
+            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.AsyncJobSubmitted && e.Decision == "DENY"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Submit_AfterWorkerStopped_IsRejectedAsStopped()
+    {
+        var manager = new AsyncQueryJobManager(_audit, environment: _env);
+        var worker = new AsyncQueryJobBackgroundWorker(manager, manager, Scopes(Substitute.For<IGovernedSqlExecutionService>()), _audit, NullLogger<AsyncQueryJobBackgroundWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        await worker.StopAsync(CancellationToken.None);
+
+        await Should.ThrowAsync<AsyncJobQueueStoppedException>(
+            () => manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), User(), new TenantId("t")));
     }
 }
