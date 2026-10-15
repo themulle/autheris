@@ -179,12 +179,12 @@ else
 end
 local cost = tonumber(ARGV[1])
 local limit = tonumber(ARGV[2])
-local ttl_seconds = tonumber(ARGV[3])
+local ttl_ms = tonumber(ARGV[3])
 
 if current + cost <= limit then
     local new_val = redis.call('INCRBY', KEYS[1], cost)
-    if current == 0 and ttl_seconds > 0 then
-        redis.call('EXPIRE', KEYS[1], ttl_seconds)
+    if ttl_ms > 0 and (current == 0 or redis.call('PTTL', KEYS[1]) < 0) then
+        redis.call('PEXPIRE', KEYS[1], ttl_ms)
     end
     return {1, new_val}
 else
@@ -200,12 +200,12 @@ end
         {
             var db = _multiplexer.GetDatabase();
             var redisKey = (RedisKey)BuildKey(key);
-            var ttlSeconds = (ttl > TimeSpan.Zero && ttl < TimeSpan.MaxValue) ? (long)ttl.TotalSeconds : 0L;
+            var ttlMs = (ttl > TimeSpan.Zero && ttl < TimeSpan.MaxValue) ? Math.Max(1L, (long)Math.Ceiling(ttl.TotalMilliseconds)) : 0L;
 
             var res = await db.ScriptEvaluateAsync(
                 TryConsumeBudgetScript,
                 [redisKey],
-                [cost, limit, ttlSeconds]).ConfigureAwait(false);
+                [cost, limit, ttlMs]).ConfigureAwait(false);
 
             var arr = (RedisResult[]?)res;
             if (arr is { Length: 2 })
@@ -247,8 +247,7 @@ end
 
         var redisChannel = RedisChannel.Literal(BuildKey(channel));
         var sub = _multiplexer.GetSubscriber();
-
-        sub.Subscribe(redisChannel, (ch, msg) =>
+        Action<RedisChannel, RedisValue> redisHandler = (ch, msg) =>
         {
             if (msg.IsNullOrEmpty) return;
             try
@@ -263,9 +262,11 @@ end
             {
                 _logger.LogError(ex, "Error processing cluster event from channel {Channel}.", channel);
             }
-        });
+        };
 
-        return new RedisSubscriptionLease(sub, redisChannel);
+        sub.Subscribe(redisChannel, redisHandler);
+
+        return new RedisSubscriptionLease(sub, redisChannel, redisHandler);
     }
 
     private async Task InvokeHandlerAsync<T>(Func<T, ValueTask> handler, T payload, string channel)
@@ -392,16 +393,18 @@ end
     {
         private readonly ISubscriber _subscriber;
         private readonly RedisChannel _channel;
-        public RedisSubscriptionLease(ISubscriber subscriber, RedisChannel channel)
+        private readonly Action<RedisChannel, RedisValue> _handler;
+
+        public RedisSubscriptionLease(ISubscriber subscriber, RedisChannel channel, Action<RedisChannel, RedisValue> handler)
         {
             _subscriber = subscriber;
             _channel = channel;
+            _handler = handler;
         }
 
-        public ValueTask DisposeAsync()
+        public async ValueTask DisposeAsync()
         {
-            _subscriber.Unsubscribe(_channel);
-            return ValueTask.CompletedTask;
+            await _subscriber.UnsubscribeAsync(_channel, _handler).ConfigureAwait(false);
         }
     }
 

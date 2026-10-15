@@ -336,7 +336,7 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
             }
 
             // Deterministic id: a re-published batch after a crash carries the same ids, so consumers can deduplicate.
-            var eventId = $"{table.Domain}_{table.TableName}_{changeVersion}_{string.Join('|', pkValues)}";
+            var eventId = $"{table.Domain}_{table.Schema}_{table.TableName}_{changeVersion}_{string.Join('|', pkValues)}";
             changes.Add((changeVersion, new CdcEvent(
                 EventId: eventId,
                 Table: table,

@@ -41,6 +41,7 @@ public sealed class WebhookDeliveryHostedService : BackgroundService
     private readonly ILogger<WebhookDeliveryHostedService> _logger;
     private readonly TimeProvider _timeProvider;
     private readonly ConcurrentDictionary<(WebhookSubscriptionSource Source, string SubscriptionId), int> _consecutiveFailures = new();
+    private readonly ConcurrentDictionary<(WebhookSubscriptionSource Source, string SubscriptionId), DateTimeOffset> _openCircuits = new();
     private long _lastPurgeTicks;
     private long _lastCountTicks;
 
@@ -161,6 +162,26 @@ public sealed class WebhookDeliveryHostedService : BackgroundService
             return;
         }
 
+        var key = (message.Source, message.SubscriptionId);
+        if (_openCircuits.TryGetValue(key, out var circuitUntil))
+        {
+            var now = _timeProvider.GetUtcNow();
+            if (circuitUntil > now)
+            {
+                await _outbox.RescheduleAsync(
+                    message.Id,
+                    leaseOwner,
+                    circuitUntil,
+                    message.LastStatusCode,
+                    message.LastErrorCode ?? WebhookDeliveryErrorCodes.HttpStatus,
+                    now,
+                    ct).ConfigureAwait(false);
+                return;
+            }
+
+            _openCircuits.TryRemove(KeyValuePair.Create(key, circuitUntil));
+        }
+
         var target = await _resolver.ResolveAsync(message, ct).ConfigureAwait(false);
         if (target is null)
         {
@@ -176,12 +197,12 @@ public sealed class WebhookDeliveryHostedService : BackgroundService
 
         var result = await _client.DeliverAsync(message, target, ct).ConfigureAwait(false);
         var decision = result.Decision;
-        var key = (message.Source, message.SubscriptionId);
 
         switch (decision.Outcome)
         {
             case WebhookRetryOutcome.Success:
                 _consecutiveFailures.TryRemove(key, out _);
+                _openCircuits.TryRemove(key, out _);
                 await _outbox.CompleteAsync(message.Id, leaseOwner, result.StatusCode ?? 200, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
                 DeliveriesCounter.Add(1, new KeyValuePair<string, object?>("outcome", "success"));
                 return;
@@ -239,6 +260,7 @@ public sealed class WebhookDeliveryHostedService : BackgroundService
         // Circuit: pause the subscription's pending rows for everyone (state lives in the outbox, so it works across nodes).
         _consecutiveFailures.TryRemove(key, out _);
         var until = _timeProvider.GetUtcNow().AddSeconds(Webhooks.EffectiveCircuitCooldownSeconds);
+        _openCircuits[key] = until;
         var deferred = await _outbox.DeferSubscriptionAsync(message.Source, message.SubscriptionId, until, ct).ConfigureAwait(false);
         _logger.LogWarning(
             "Webhook subscription {SubscriptionId} failed {Failures} times in a row; {Deferred} pending delivery(ies) paused for {CooldownSeconds}s.",

@@ -14,9 +14,10 @@ using Autheris.Application.Webhooks;
 /// </summary>
 public sealed class KeyVaultWebhookSecretProtector(IKeyVaultSecretProvider secrets) : IWebhookSecretProtector
 {
-    // Derived once per process: the key provider is not asked (and does not log) per call. Rotation = provision a new KEK and restart;
-    // v1 values carry no key id, so existing subscriptions must be re-created after a rotation.
-    private readonly Lazy<byte[]?> _key = new(() => DeriveKey(secrets), LazyThreadSafetyMode.ExecutionAndPublication);
+    // Derived once per process once available: the key provider is not asked per call after resolution, while a transient startup failure
+    // does not permanently latch null. Rotation = provision a new KEK and restart.
+    private readonly object _keyGate = new();
+    private byte[]? _key;
 
     public const string KekSecretRef = "cdc-webhook-kek";
     public const string Prefix = "enc:v1:";
@@ -24,7 +25,7 @@ public sealed class KeyVaultWebhookSecretProtector(IKeyVaultSecretProvider secre
     private const int TagSize = 16;
     private const int MinKekBytes = 32;
 
-    public bool IsAvailable => _key.Value is not null;
+    public bool IsAvailable => ResolveKey() is not null;
 
     public string Protect(string tenantId, string subscriptionId, string secret)
     {
@@ -32,7 +33,7 @@ public sealed class KeyVaultWebhookSecretProtector(IKeyVaultSecretProvider secre
         ArgumentException.ThrowIfNullOrWhiteSpace(subscriptionId);
         ArgumentNullException.ThrowIfNull(secret);
 
-        var key = (byte[]?)_key.Value?.Clone() ?? throw new WebhookSecretUnavailableException();
+        var key = (byte[]?)ResolveKey()?.Clone() ?? throw new WebhookSecretUnavailableException();
         var plaintext = Encoding.UTF8.GetBytes(secret);
         try
         {
@@ -79,7 +80,7 @@ public sealed class KeyVaultWebhookSecretProtector(IKeyVaultSecretProvider secre
             throw new WebhookSecretUnavailableException();
         }
 
-        var key = (byte[]?)_key.Value?.Clone() ?? throw new WebhookSecretUnavailableException();
+        var key = (byte[]?)ResolveKey()?.Clone() ?? throw new WebhookSecretUnavailableException();
         var plaintext = new byte[blob.Length - NonceSize - TagSize];
         try
         {
@@ -95,6 +96,32 @@ public sealed class KeyVaultWebhookSecretProtector(IKeyVaultSecretProvider secre
         {
             CryptographicOperations.ZeroMemory(plaintext);
             CryptographicOperations.ZeroMemory(key);
+        }
+    }
+
+    private byte[]? ResolveKey()
+    {
+        var cached = Volatile.Read(ref _key);
+        if (cached is not null)
+        {
+            return cached;
+        }
+
+        lock (_keyGate)
+        {
+            cached = _key;
+            if (cached is not null)
+            {
+                return cached;
+            }
+
+            var derived = DeriveKey(secrets);
+            if (derived is not null)
+            {
+                Volatile.Write(ref _key, derived);
+            }
+
+            return derived;
         }
     }
 

@@ -17,7 +17,7 @@ public class InMemoryClusterStateProvider : IDistributedClusterStateProvider
     private sealed record Entry(string Serialized, DateTimeOffset ExpiresAt);
 
     private readonly ConcurrentDictionary<string, Entry> _store = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, ConcurrentBag<Delegate>> _subscriptions = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<Guid, Delegate>> _subscriptions = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new(StringComparer.Ordinal);
     private readonly object _budgetLock = new();
     private readonly object _leaseLock = new();
@@ -139,7 +139,7 @@ public class InMemoryClusterStateProvider : IDistributedClusterStateProvider
 
         if (_subscriptions.TryGetValue(channel, out var handlers))
         {
-            foreach (var del in handlers)
+            foreach (var del in handlers.Values)
             {
                 if (del is Func<T, ValueTask> handler)
                 {
@@ -161,12 +161,13 @@ public class InMemoryClusterStateProvider : IDistributedClusterStateProvider
         ArgumentException.ThrowIfNullOrWhiteSpace(channel);
         ArgumentNullException.ThrowIfNull(handler);
 
-        var bag = _subscriptions.GetOrAdd(channel, _ => new ConcurrentBag<Delegate>());
-        bag.Add(handler);
+        var id = Guid.NewGuid();
+        var handlers = _subscriptions.GetOrAdd(channel, static _ => new ConcurrentDictionary<Guid, Delegate>());
+        handlers[id] = handler;
 
         return new SubscriptionLease(() =>
         {
-            // Simple lease
+            handlers.TryRemove(id, out _);
             return ValueTask.CompletedTask;
         });
     }

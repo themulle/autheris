@@ -441,7 +441,7 @@ public static class GovernanceEndpoints
             context.Response.Headers["X-Audit-Seal-SHA256"] = exportResult.Sha256AuditSeal;
             return Results.File(exportResult.DocumentBytes, exportResult.ContentType, exportResult.FileName);
         }).RequireAuthorization()
-          .WithAudit(AuditLevel.Full, AuditEventTypes.MetadataExport);
+          .WithAudit(AuditLevel.Full, AuditEventTypes.AuditExport);
 
         // OpenLineage Lineage Push Trigger
         app.MapPost("/api/lineage/openlineage/sync", async (
@@ -735,11 +735,11 @@ public static class GovernanceEndpoints
 
         await accessProfileRepo.UpsertProfileAsync(profile, ct).ConfigureAwait(false);
 
-        // Audit-Verankerung (Tier-A CONSENT_GRANTED)
+        // Tier-A audit anchoring (CONSENT_GRANTED)
         var auditEvent = new AuditLogEntry
         {
             TenantId = tenantId,
-            EventType = "CONSENT_GRANTED",
+            EventType = AuditEventTypes.ConsentGranted,
             ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
             TargetTable = string.Join(",", targetTables),
             Decision = "ALLOW",
@@ -775,7 +775,7 @@ public static class GovernanceEndpoints
                 var failAudit = new AuditLogEntry
                 {
                     TenantId = tenantId,
-                    EventType = "PROFILE_INVALIDATION_FAILED",
+                    EventType = AuditEventTypes.ProfileInvalidationFailed,
                     ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
                     Decision = "DENY",
                     TraceId = context.TraceIdentifier,
@@ -889,7 +889,7 @@ public static class GovernanceEndpoints
         var auditEvent = new AuditLogEntry
         {
             TenantId = tenantId,
-            EventType = "CONSENT_REVOKED",
+            EventType = AuditEventTypes.ConsentRevoked,
             ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
             TargetTable = string.Join(",", profile.TargetTables),
             Decision = "DENY",
@@ -921,7 +921,7 @@ public static class GovernanceEndpoints
                 var failAudit = new AuditLogEntry
                 {
                     TenantId = tenantId,
-                    EventType = "PROFILE_INVALIDATION_FAILED",
+                    EventType = AuditEventTypes.ProfileInvalidationFailed,
                     ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
                     Decision = "DENY",
                     TraceId = context.TraceIdentifier,

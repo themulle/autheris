@@ -135,7 +135,7 @@ WP-TS-02..05 (test speed-up) can run in any wave; they touch only tests and work
 | G-11 | Catalog owner tenant | B-12 follow-up | Visibility from consents plus a shared-tables list is delivered. Add an owner tenant with a versioned migration. |
 | G-12 | Analytics scope | FEAT-04..07 | No k-guard on free-form SQL in v1. DP only on compliance demand. Persist the semantic catalog (B-12 runner). Name the target BI clients before Stage 3. |
 | G-13 | Plugin compatibility promise | A-16 | No external compatibility promise yet. Skip A-16. |
-| G-14 | Reconcile WP-FEAT plans with the bodies of GitHub issues #28, #37 and #38 | FEAT-03..07 | **Open action:** owner review before Wave 4. Blocks the FEAT WPs. |
+| G-14 | Reconcile WP-FEAT plans with the bodies of GitHub issues #28, #37 and #38 | FEAT-03..07 | **Decided (`decision-g14-feat-scope.md`):** reconciled with issue bodies; FEAT-03/04 and FEAT-06a/b are unblocked. |
 
 ---
 

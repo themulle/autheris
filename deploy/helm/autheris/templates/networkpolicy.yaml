@@ -62,7 +62,9 @@ spec:
       app.kubernetes.io/name: {{ printf "%s-migrate" (include "autheris.name" .) | trunc 63 | trimSuffix "-" }}
       app.kubernetes.io/instance: {{ .Release.Name }}
   policyTypes:
+    - Ingress
     - Egress
+  ingress: []
   egress:
     {{- if .Values.networkPolicy.egress.allowAll }}
     - {}

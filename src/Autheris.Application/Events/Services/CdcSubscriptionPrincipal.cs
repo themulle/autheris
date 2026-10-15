@@ -44,7 +44,7 @@ public static class CdcSubscriptionPrincipal
         ArgumentNullException.ThrowIfNull(options);
 
         var sid = admin.GetUserSid();
-        if (sid is null || string.IsNullOrWhiteSpace(sid.Value.Value))
+        if (sid is null || string.IsNullOrWhiteSpace(sid.Value.Value) || sid.Value.Value.Length > 256)
         {
             return new CdcSnapshotCapture(null, null, null, CdcSnapshotCaptureError.MissingSid);
         }
@@ -55,7 +55,12 @@ public static class CdcSubscriptionPrincipal
             return new CdcSnapshotCapture(null, null, null, CdcSnapshotCaptureError.TooLarge);
         }
 
-        var roles = admin.GetUserRoles().ToList();
+        var roles = admin.GetUserRoles().Distinct(StringComparer.Ordinal).ToList();
+        if (roles.Count > 256 || roles.Any(static r => r.Length > 256))
+        {
+            return new CdcSnapshotCapture(null, null, null, CdcSnapshotCaptureError.TooLarge);
+        }
+
         return new CdcSnapshotCapture(sid.Value.Value, groups, roles, CdcSnapshotCaptureError.None);
     }
 

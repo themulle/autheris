@@ -19,5 +19,15 @@ public static class CdcCustomHeaders
 
     public static bool WithinBounds(IReadOnlyDictionary<string, string>? headers) =>
         headers is null
-        || (headers.Count <= MaxCount && headers.All(h => h.Key.Length is > 0 and <= MaxNameLength && h.Value is { Length: <= MaxValueLength }));
+        || (headers.Count <= MaxCount && headers.All(h => IsValidHeaderName(h.Key) && IsValidHeaderValue(h.Value)));
+
+    private static bool IsValidHeaderName(string? name) =>
+        name is { Length: > 0 and <= MaxNameLength } && name.All(IsHttpTokenChar);
+
+    private static bool IsValidHeaderValue(string? value) =>
+        value is { Length: <= MaxValueLength } && value.All(static c => (c >= 0x20 && c != 0x7F) || c == '\t');
+
+    private static bool IsHttpTokenChar(char c) =>
+        c is (>= '0' and <= '9') or (>= 'a' and <= 'z') or (>= 'A' and <= 'Z')
+            or '!' or '#' or '$' or '%' or '&' or '\'' or '*' or '+' or '-' or '.' or '^' or '_' or '`' or '|' or '~';
 }

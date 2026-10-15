@@ -37,7 +37,7 @@ flowchart TD
         PM --> Action
     end
 
-    subgraph Webhooks ["Outbound Webhooks (WP-ARC-A-02)"]
+    subgraph Webhooks ["Outbound Webhooks"]
         Bridge["WebhookEventBridgeHostedService"]
         Dispatcher["WebhookDispatcherService<br/>(match, sanitize, enqueue)"]
         Outbox[("WEBHOOK_OUTBOX<br/>governance database")]
