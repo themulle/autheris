@@ -406,7 +406,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
             if (!string.Equals(job.TenantId, tenantId.Value, StringComparison.Ordinal) ||
                 !string.Equals(job.SubmittedByUserId, userSid, StringComparison.OrdinalIgnoreCase))
             {
-                _logger.LogWarning("Zero-IDOR access violation blocked for job {JobId}. Tenant mismatch or user mismatch.", jobId);
+                _logger.LogWarning("Zero-IDOR access violation blocked for job {JobId}. Tenant mismatch or user mismatch.", job.JobId);
                 await RecordAccessDeniedAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
                 return null;
             }
@@ -429,7 +429,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         if (!string.Equals(record.TenantId, tenantId.Value, StringComparison.Ordinal) ||
             !string.Equals(record.OwnerSid, userSid, StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogWarning("Zero-IDOR access violation blocked for job {JobId}. Tenant mismatch or user mismatch.", jobId);
+            _logger.LogWarning("Zero-IDOR access violation blocked for job {JobId}. Tenant mismatch or user mismatch.", record.JobId);
             await RecordAccessDeniedAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
             return null;
         }
