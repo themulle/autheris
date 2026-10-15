@@ -11,6 +11,7 @@ using System.Threading.Channels;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Jobs.Interfaces;
+using Autheris.Application.State;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -31,17 +32,39 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
     private readonly IOptions<GatewayOptions>? _options;
     private readonly IOptions<AsyncJobOptions>? _jobOptions;
     private readonly object _submitGate = new();
+    private readonly IDistributedClusterStateProvider? _cluster;
+    private readonly AsyncJobNodeIdentity _node;
+    private readonly TimeProvider _time;
+
+    private static readonly System.Diagnostics.Metrics.Meter Meter = new("Autheris.AsyncJobs");
+    private static readonly System.Diagnostics.Metrics.Counter<long> ClusterWriteFailures =
+        Meter.CreateCounter<long>("autheris.asyncjobs.cluster_write_failures", description: "Async job record writes to the cluster state that failed.");
+
+    /// <summary>Grace period after the job deadline before a job of an unreachable owner node is reported as failed.</summary>
+    private static readonly TimeSpan OwnerLostGrace = TimeSpan.FromSeconds(60);
 
     public AsyncQueryJobManager(
         IAuditLogRepository auditLogRepository,
         ILogger<AsyncQueryJobManager>? logger = null,
         IHostEnvironment? environment = null,
         IOptions<GatewayOptions>? options = null,
-        IOptions<AsyncJobOptions>? jobOptions = null)
+        IOptions<AsyncJobOptions>? jobOptions = null,
+        IDistributedClusterStateProvider? clusterState = null,
+        IClusterStateTopology? topology = null,
+        AsyncJobNodeIdentity? node = null,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(auditLogRepository);
         _options = options;
         _jobOptions = jobOptions;
+        if (topology?.IsClusterWide == true && clusterState == null)
+        {
+            throw new InvalidOperationException("Async jobs in a cluster-wide topology require an IDistributedClusterStateProvider.");
+        }
+
+        _cluster = topology?.IsClusterWide == true ? clusterState : null;
+        _node = node ?? new AsyncJobNodeIdentity();
+        _time = timeProvider ?? TimeProvider.System;
         _auditLogRepository = auditLogRepository;
         _logger = logger ?? NullLogger<AsyncQueryJobManager>.Instance;
 
@@ -77,10 +100,94 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         _jobs[descriptor.JobId] = descriptor;
     }
 
-    public ValueTask<bool> TryTransitionAsync(AsyncJobDescriptor next, CancellationToken ct)
+    public async ValueTask<bool> TryTransitionAsync(AsyncJobDescriptor next, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(next);
-        return ValueTask.FromResult(TryTransitionLocal(next));
+
+        if (_cluster is not null && next.State is AsyncJobState.Completed or AsyncJobState.Failed)
+        {
+            // Another node may have cancelled this job meanwhile: a Cancelled record must not be overwritten.
+            try
+            {
+                var record = await _cluster.GetAsync<AsyncJobClusterRecord>(RecordKey(next.TenantId, next.JobId), ct).ConfigureAwait(false);
+                if (record is { State: AsyncJobState.Cancelled })
+                {
+                    TryTransitionLocal(next with { State = AsyncJobState.Cancelled, CompletedAt = record.CompletedAt, ErrorMessage = record.ErrorMessage, ResultFilePath = null });
+                    DeleteQuietly(next.ResultFilePath);
+                    return false;
+                }
+            }
+            catch (ClusterStateUnavailableException ex)
+            {
+                _logger.LogWarning(ex, "Cluster state unavailable while checking job {JobId} for a remote cancel.", next.JobId);
+            }
+        }
+
+        if (!TryTransitionLocal(next))
+        {
+            return false;
+        }
+
+        await WriteRecordAsync(next, throwOnFailure: false, ct).ConfigureAwait(false);
+        return true;
+    }
+
+    private static void DeleteQuietly(string? path)
+    {
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            try { File.Delete(path); } catch { }
+        }
+    }
+
+    private static string RecordKey(string tenantId, string jobId) => $"asyncjob:{tenantId}:{jobId}";
+
+    private TimeSpan RecordTtl
+    {
+        get
+        {
+            var jobs = _jobOptions?.Value ?? _options?.Value?.AsyncJobs ?? new AsyncJobOptions();
+            return TimeSpan.FromSeconds(Math.Max(1, jobs.MaxTimeoutSeconds)) + TimeSpan.FromHours(Math.Max(1, jobs.RetentionHours));
+        }
+    }
+
+    private AsyncJobClusterRecord ToRecord(AsyncJobDescriptor d) => new(
+        d.JobId,
+        d.TenantId,
+        d.SubmittedByUserId,
+        d.Format,
+        d.State,
+        d.CreatedAt,
+        d.StartedAt,
+        d.CompletedAt,
+        d.RowsProduced,
+        d.BytesProduced,
+        d.ErrorMessage,
+        string.IsNullOrWhiteSpace(d.ResultFilePath) ? null : Path.GetFileName(d.ResultFilePath),
+        _node.NodeId);
+
+    /// <summary>Writes the cluster record of a job (TTL is reset on every write). A failure is fatal only for the submit.</summary>
+    private async ValueTask WriteRecordAsync(AsyncJobDescriptor descriptor, bool throwOnFailure, CancellationToken ct)
+    {
+        if (_cluster is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _cluster.SetAsync(RecordKey(descriptor.TenantId, descriptor.JobId), ToRecord(descriptor), RecordTtl, ct).ConfigureAwait(false);
+        }
+        catch (ClusterStateUnavailableException ex)
+        {
+            if (throwOnFailure)
+            {
+                throw;
+            }
+
+            ClusterWriteFailures.Add(1);
+            _logger.LogError(ex, "Could not write the cluster record of job {JobId}; the local state is kept.", descriptor.JobId);
+        }
     }
 
     private static bool IsTerminal(AsyncJobState state) =>
@@ -147,7 +254,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
             Query: request.Query,
             Format: format,
             State: AsyncJobState.Queued,
-            CreatedAt: DateTimeOffset.UtcNow);
+            CreatedAt: _time.GetUtcNow());
 
         // Per-tenant backlog cap: counted and reserved under one gate so concurrent submits cannot overshoot it.
         var maxQueued = (_jobOptions?.Value ?? _options?.Value?.AsyncJobs ?? new AsyncJobOptions()).MaxQueuedJobsPerTenant;
@@ -176,8 +283,12 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         cts.CancelAfter(request.Timeout!.Value);
         _activeCts[jobId] = cts;
 
+        var recordWritten = false;
         try
         {
+            // Fail closed: when the shared state cannot take the record, no other replica could ever see this job.
+            await WriteRecordAsync(descriptor, throwOnFailure: true, ct).ConfigureAwait(false);
+            recordWritten = _cluster is not null;
             await RecordAuditAsync(
                 descriptor,
                 user,
@@ -190,6 +301,12 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         {
             // Fail-closed: no audit record, no job.
             _jobs.TryRemove(jobId, out _);
+            if (recordWritten)
+            {
+                try { await _cluster!.RemoveAsync(RecordKey(descriptor.TenantId, jobId), CancellationToken.None).ConfigureAwait(false); }
+                catch (ClusterStateUnavailableException) { }
+            }
+
             if (_activeCts.TryRemove(jobId, out var failedCts))
             {
                 failedCts.Dispose();
@@ -208,23 +325,83 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         string userSid,
         CancellationToken ct = default)
     {
+        var resolved = await ResolveAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
+        return resolved?.Descriptor;
+    }
+
+    private sealed record ResolvedJob(AsyncJobDescriptor Descriptor, AsyncJobClusterRecord? Record);
+
+    /// <summary>
+    /// Finds a job visible to the requester: the local entry wins, otherwise the cluster record under the requester's
+    /// tenant key. Tenant and owner are verified in both cases (Zero-IDOR: a mismatch is indistinguishable from "absent").
+    /// </summary>
+    private async Task<ResolvedJob?> ResolveAsync(string jobId, TenantId tenantId, string userSid, CancellationToken ct)
+    {
         ValidateJobId(jobId);
 
-        if (!_jobs.TryGetValue(jobId, out var job))
+        if (_jobs.TryGetValue(jobId, out var job))
+        {
+            // Zero-IDOR isolation: return 404 (null) if tenant or user do not match
+            if (!string.Equals(job.TenantId, tenantId.Value, StringComparison.Ordinal) ||
+                !string.Equals(job.SubmittedByUserId, userSid, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("Zero-IDOR access violation blocked for job {JobId}. Tenant mismatch or user mismatch.", jobId);
+                await RecordAccessDeniedAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
+                return null;
+            }
+
+            return new ResolvedJob(job, null);
+        }
+
+        if (_cluster is null || string.IsNullOrWhiteSpace(tenantId.Value) || !Guid.TryParseExact(jobId, "D", out _))
         {
             return null;
         }
 
-        // Zero-IDOR isolation: return 404 (null) if tenant or user do not match
-        if (!string.Equals(job.TenantId, tenantId.Value, StringComparison.Ordinal) ||
-            !string.Equals(job.SubmittedByUserId, userSid, StringComparison.OrdinalIgnoreCase))
+        // A failure of the shared state propagates: "unknown" must never be reported as "not found".
+        var record = await _cluster.GetAsync<AsyncJobClusterRecord>(RecordKey(tenantId.Value, jobId), ct).ConfigureAwait(false);
+        if (record is null)
+        {
+            return null;
+        }
+
+        if (!string.Equals(record.TenantId, tenantId.Value, StringComparison.Ordinal) ||
+            !string.Equals(record.OwnerSid, userSid, StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning("Zero-IDOR access violation blocked for job {JobId}. Tenant mismatch or user mismatch.", jobId);
             await RecordAccessDeniedAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
             return null;
         }
 
-        return job;
+        return new ResolvedJob(ToDescriptor(record), record);
+    }
+
+    private AsyncJobDescriptor ToDescriptor(AsyncJobClusterRecord record)
+    {
+        var descriptor = new AsyncJobDescriptor(
+            record.JobId,
+            record.TenantId,
+            record.OwnerSid,
+            Query: string.Empty,
+            record.Format,
+            record.State,
+            record.CreatedAt,
+            record.StartedAt,
+            record.CompletedAt,
+            ResultFilePath: null,
+            record.RowsProduced,
+            record.BytesProduced,
+            record.ErrorMessage);
+
+        // The owner node vanished without a terminal write: computed, never persisted.
+        var jobs = _jobOptions?.Value ?? _options?.Value?.AsyncJobs ?? new AsyncJobOptions();
+        var deadline = record.CreatedAt + TimeSpan.FromSeconds(Math.Max(1, jobs.MaxTimeoutSeconds)) + OwnerLostGrace;
+        if (record.State is AsyncJobState.Queued or AsyncJobState.Running && _time.GetUtcNow() > deadline)
+        {
+            return descriptor with { State = AsyncJobState.Failed, CompletedAt = deadline, ErrorMessage = "job owner node lost" };
+        }
+
+        return descriptor;
     }
 
     public async Task<Stream?> GetJobResultStreamAsync(
@@ -233,26 +410,57 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         string userSid,
         CancellationToken ct = default)
     {
-        var job = await GetJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
-        if (job == null || job.State != AsyncJobState.Completed || string.IsNullOrWhiteSpace(job.ResultFilePath))
+        var resolved = await ResolveAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
+        var job = resolved?.Descriptor;
+        if (job == null || job.State != AsyncJobState.Completed)
         {
             return null;
         }
 
-        var fullResultPath = Path.GetFullPath(job.ResultFilePath);
+        string fullResultPath;
+        if (resolved!.Record is { } record)
+        {
+            // The job lives on another replica: only a shared scratch directory can serve its result.
+            var jobOptions = _jobOptions?.Value ?? _options?.Value?.AsyncJobs ?? new AsyncJobOptions();
+            if (string.IsNullOrWhiteSpace(record.ResultFileName))
+            {
+                return null;
+            }
+
+            if (!jobOptions.SharedScratchDirectory)
+            {
+                throw new AsyncJobResultUnavailableException();
+            }
+
+            // The file name comes from shared state: it must be exactly "{jobId}.csv|json", never a path.
+            var expectedJson = jobId + ".json";
+            var expectedCsv = jobId + ".csv";
+            if (!string.Equals(record.ResultFileName, expectedJson, StringComparison.Ordinal) &&
+                !string.Equals(record.ResultFileName, expectedCsv, StringComparison.Ordinal))
+            {
+                await DenyResultAsync(job, tenantId, userSid, "Job result file name in the cluster record is invalid.", ct).ConfigureAwait(false);
+                throw new Autheris.Domain.Exceptions.GatewaySecurityException("Unauthorized path traversal detected in job result retrieval.", "JOB_RESULT_PATH_FORBIDDEN");
+            }
+
+            fullResultPath = Path.GetFullPath(Path.Combine(_scratchDirectory, record.TenantId, record.ResultFileName));
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(job.ResultFilePath))
+            {
+                return null;
+            }
+
+            fullResultPath = Path.GetFullPath(job.ResultFilePath);
+        }
+
         var fullScratchPath = Path.GetFullPath(_scratchDirectory);
         // Containment needs a trailing separator: ".../jobs-evil/x" must not match the ".../jobs" prefix.
         var scratchPrefix = Path.TrimEndingDirectorySeparator(fullScratchPath) + Path.DirectorySeparatorChar;
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         if (!fullResultPath.StartsWith(scratchPrefix, comparison))
         {
-            await RecordAuditAsync(
-                job,
-                new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, userSid), new Claim("tenant_id", tenantId.Value)], "JobAuth")),
-                AuditEventTypes.AsyncJobDownloaded,
-                "DENY",
-                "Job result path is outside the scratch directory.",
-                ct).ConfigureAwait(false);
+            await DenyResultAsync(job, tenantId, userSid, "Job result path is outside the scratch directory.", ct).ConfigureAwait(false);
             throw new Autheris.Domain.Exceptions.GatewaySecurityException("Unauthorized path traversal detected in job result retrieval.", "JOB_RESULT_PATH_FORBIDDEN");
         }
 
@@ -272,6 +480,15 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         return new FileStream(fullResultPath, FileMode.Open, FileAccess.Read, FileShare.Read);
     }
 
+    private Task DenyResultAsync(AsyncJobDescriptor job, TenantId tenantId, string userSid, string message, CancellationToken ct) =>
+        RecordAuditAsync(
+            job,
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, userSid), new Claim("tenant_id", tenantId.Value)], "JobAuth")),
+            AuditEventTypes.AsyncJobDownloaded,
+            "DENY",
+            message,
+            ct);
+
     public async Task<bool> CancelJobAsync(
         string jobId,
         TenantId tenantId,
@@ -279,7 +496,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         CancellationToken ct = default)
     {
         var job = await GetJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
-        if (job == null)
+        if (job == null || !_jobs.ContainsKey(jobId))
         {
             return false;
         }
@@ -301,6 +518,8 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         {
             return false;
         }
+
+        await WriteRecordAsync(updated, throwOnFailure: false, ct).ConfigureAwait(false);
 
         if (_activeCts.TryRemove(jobId, out var cts))
         {
@@ -396,8 +615,28 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         }
     }
 
-    private ValueTask<bool> IsJobKnownAsync(string tenantId, string jobId, CancellationToken ct) =>
-        ValueTask.FromResult(_jobs.TryGetValue(jobId, out var job) && string.Equals(job.TenantId, tenantId, StringComparison.Ordinal));
+    private async ValueTask<bool> IsJobKnownAsync(string tenantId, string jobId, CancellationToken ct)
+    {
+        if (_jobs.TryGetValue(jobId, out var job) && string.Equals(job.TenantId, tenantId, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (_cluster is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return await _cluster.GetAsync<AsyncJobClusterRecord>(RecordKey(tenantId, jobId), ct).ConfigureAwait(false) is not null;
+        }
+        catch (ClusterStateUnavailableException)
+        {
+            // Unknown, not absent: keep the file; only the retention age may delete it.
+            return true;
+        }
+    }
 
     public Task PurgeExpiredJobsAsync(TimeSpan retentionPeriod, CancellationToken ct = default)
     {

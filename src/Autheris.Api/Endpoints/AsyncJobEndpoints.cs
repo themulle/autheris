@@ -1,12 +1,15 @@
 namespace Autheris.Api.Endpoints;
 
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Security.Claims;
 using System.Threading;
 using Autheris.Api.Extensions;
 using Autheris.Application.Jobs.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Application.Jobs.Services;
+using Autheris.Application.State;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Builder;
@@ -30,6 +33,10 @@ public static class AsyncJobEndpoints
             try
             {
                 job = await jobManager.SubmitJobAsync(request, httpContext.User, tenantId, ct).ConfigureAwait(false);
+            }
+            catch (ClusterStateUnavailableException)
+            {
+                return StateUnavailable();
             }
             catch (AsyncJobQueueLimitExceededException)
             {
@@ -65,7 +72,16 @@ public static class AsyncJobEndpoints
             var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
             var userSid = AsyncJobOwner.Resolve(httpContext.User) ?? string.Empty;
 
-            var job = await jobManager.GetJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
+            AsyncJobDescriptor? job;
+            try
+            {
+                job = await jobManager.GetJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
+            }
+            catch (ClusterStateUnavailableException)
+            {
+                return StateUnavailable();
+            }
+
             if (job == null)
             {
                 return Results.NotFound();
@@ -98,15 +114,32 @@ public static class AsyncJobEndpoints
             var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
             var userSid = AsyncJobOwner.Resolve(httpContext.User) ?? string.Empty;
 
-            var stream = await jobManager.GetJobResultStreamAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
-            if (stream == null)
+            Stream? stream;
+            AsyncJobDescriptor? job;
+            try
             {
-                return Results.NotFound();
+                stream = await jobManager.GetJobResultStreamAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
+                if (stream == null)
+                {
+                    return Results.NotFound();
+                }
+
+                MarkDomainAudited(httpContext);
+                job = await jobManager.GetJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
+            }
+            catch (ClusterStateUnavailableException)
+            {
+                return StateUnavailable();
+            }
+            catch (AsyncJobResultUnavailableException ex)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    title: "The job result is not available on this node.",
+                    detail: ex.Message,
+                    extensions: new Dictionary<string, object?> { ["code"] = ex.ErrorCode });
             }
 
-            MarkDomainAudited(httpContext);
-
-            var job = await jobManager.GetJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
             var format = job?.Format ?? "json";
             var contentType = format.Equals("csv", StringComparison.OrdinalIgnoreCase) ? "text/csv" : "application/json";
             var fileName = $"query-result-{jobId}.{format}";
@@ -123,7 +156,16 @@ public static class AsyncJobEndpoints
             var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
             var userSid = AsyncJobOwner.Resolve(httpContext.User) ?? string.Empty;
 
-            var cancelled = await jobManager.CancelJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
+            bool cancelled;
+            try
+            {
+                cancelled = await jobManager.CancelJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
+            }
+            catch (ClusterStateUnavailableException)
+            {
+                return StateUnavailable();
+            }
+
             if (cancelled)
             {
                 MarkDomainAudited(httpContext);
@@ -134,6 +176,11 @@ public static class AsyncJobEndpoints
 
         return app;
     }
+
+    private static IResult StateUnavailable() => Results.Problem(
+        statusCode: StatusCodes.Status503ServiceUnavailable,
+        title: "The shared job state is temporarily unavailable.",
+        detail: "The cluster state store could not be reached. Retry later.");
 
     /// <summary>
     /// Delegated audit routes: the job manager has written the ALLOW audit record (fail-closed), so the central

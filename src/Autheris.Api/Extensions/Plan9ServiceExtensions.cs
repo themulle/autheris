@@ -23,6 +23,7 @@ public static class Plan9ServiceExtensions
         // AP-9.4: Async Long-Running Query Job Engine
         services.AddOptions<AsyncJobOptions>().BindConfiguration(AsyncJobOptions.SectionName).ValidateOnStart();
         services.AddSingleton<IValidateOptions<AsyncJobOptions>, AsyncJobOptionsValidator>();
+        services.AddSingleton<AsyncJobNodeIdentity>();
         services.AddSingleton<AsyncQueryJobManager>();
         services.AddSingleton<IAsyncQueryJobManager>(sp => sp.GetRequiredService<AsyncQueryJobManager>());
         services.AddSingleton<IAsyncJobQueue>(sp => sp.GetRequiredService<AsyncQueryJobManager>());
