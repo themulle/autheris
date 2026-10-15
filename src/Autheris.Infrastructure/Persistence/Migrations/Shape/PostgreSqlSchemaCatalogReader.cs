@@ -13,10 +13,11 @@ internal sealed class PostgreSqlSchemaCatalogReader : IGovernanceSchemaCatalogRe
     // quote_ident keeps the catalog spelling exact; every name is a bound parameter.
     private const string Resolve = "to_regclass(quote_ident(@n))";
 
-    public async Task<IReadOnlyList<string>> ListTablesAsync(DbConnection connection, CancellationToken ct)
+    public async Task<IReadOnlyList<string>> ListTablesAsync(DbConnection connection, CancellationToken ct, DbTransaction? transaction = null)
     {
+        var session = new CatalogSession(connection, transaction);
         var rows = await RowsAsync(
-            connection,
+            session,
             "SELECT c.relname::text FROM pg_class c WHERE c.relkind IN ('r', 'p') " +
             "AND c.relnamespace = (SELECT n.oid FROM pg_namespace n WHERE n.nspname = current_schema()) AND lower(c.relname::text) <> @migrations ORDER BY 1",
             1,
@@ -25,13 +26,14 @@ internal sealed class PostgreSqlSchemaCatalogReader : IGovernanceSchemaCatalogRe
         return rows.Select(r => Str(r[0])).ToArray();
     }
 
-    public async Task<GovernanceSchemaShape> ReadAsync(DbConnection connection, IReadOnlyCollection<string> tableNames, CancellationToken ct)
+    public async Task<GovernanceSchemaShape> ReadAsync(DbConnection connection, IReadOnlyCollection<string> tableNames, CancellationToken ct, DbTransaction? transaction = null)
     {
+        var session = new CatalogSession(connection, transaction);
         var tables = new List<SchemaTable>();
         foreach (var requested in tableNames)
         {
             var exists = await RowsAsync(
-                connection,
+                session,
                 $"SELECT c.relname::text FROM pg_class c WHERE c.oid = {Resolve} AND c.relkind IN ('r', 'p')",
                 1,
                 ct,
@@ -43,7 +45,7 @@ internal sealed class PostgreSqlSchemaCatalogReader : IGovernanceSchemaCatalogRe
 
             var name = Str(exists[0][0]);
             var columnRows = await RowsAsync(
-                connection,
+                session,
                 $"SELECT a.attname::text, t.typname::text, format_type(a.atttypid, a.atttypmod) FROM pg_attribute a JOIN pg_type t ON t.oid = a.atttypid " +
                 $"WHERE a.attrelid = {Resolve} AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum",
                 3,
@@ -52,7 +54,7 @@ internal sealed class PostgreSqlSchemaCatalogReader : IGovernanceSchemaCatalogRe
             var columns = columnRows.Select(r => new SchemaColumn(Str(r[0]), Str(r[2]).ToUpperInvariant(), Family(Str(r[1])))).ToArray();
 
             var keyRows = await RowsAsync(
-                connection,
+                session,
                 $"SELECT a.attname::text FROM pg_index i CROSS JOIN LATERAL unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord) " +
                 $"JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum WHERE i.indrelid = {Resolve} AND i.indisprimary ORDER BY k.ord",
                 1,
@@ -60,7 +62,7 @@ internal sealed class PostgreSqlSchemaCatalogReader : IGovernanceSchemaCatalogRe
                 ("@n", name)).ConfigureAwait(false);
 
             var indexRows = await RowsAsync(
-                connection,
+                session,
                 $"SELECT ic.relname::text, i.indisunique, COALESCE(a.attname::text, '(expression)'), k.ord FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid " +
                 $"CROSS JOIN LATERAL unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord) LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum " +
                 $"WHERE i.indrelid = {Resolve} AND NOT i.indisprimary AND k.ord <= i.indnkeyatts " +

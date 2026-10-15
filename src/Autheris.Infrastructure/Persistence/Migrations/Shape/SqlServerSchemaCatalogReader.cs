@@ -6,10 +6,11 @@ namespace Autheris.Infrastructure.Persistence.Migrations.Shape;
 /// <summary>SQL Server catalog reader on <c>sys.tables</c>, <c>sys.columns</c> and <c>sys.indexes</c>; the schema is <c>dbo</c>. Names are bound parameters.</summary>
 internal sealed class SqlServerSchemaCatalogReader : IGovernanceSchemaCatalogReader
 {
-    public async Task<IReadOnlyList<string>> ListTablesAsync(DbConnection connection, CancellationToken ct)
+    public async Task<IReadOnlyList<string>> ListTablesAsync(DbConnection connection, CancellationToken ct, DbTransaction? transaction = null)
     {
+        var session = new CatalogSession(connection, transaction);
         var rows = await RowsAsync(
-            connection,
+            session,
             "SELECT t.name FROM sys.tables t WHERE t.schema_id = SCHEMA_ID(N'dbo') AND LOWER(t.name) <> @migrations ORDER BY t.name",
             1,
             ct,
@@ -17,13 +18,14 @@ internal sealed class SqlServerSchemaCatalogReader : IGovernanceSchemaCatalogRea
         return rows.Select(r => Str(r[0])).ToArray();
     }
 
-    public async Task<GovernanceSchemaShape> ReadAsync(DbConnection connection, IReadOnlyCollection<string> tableNames, CancellationToken ct)
+    public async Task<GovernanceSchemaShape> ReadAsync(DbConnection connection, IReadOnlyCollection<string> tableNames, CancellationToken ct, DbTransaction? transaction = null)
     {
+        var session = new CatalogSession(connection, transaction);
         var tables = new List<SchemaTable>();
         foreach (var requested in tableNames)
         {
             var exists = await RowsAsync(
-                connection,
+                session,
                 "SELECT t.name, t.object_id FROM sys.tables t WHERE t.schema_id = SCHEMA_ID(N'dbo') AND t.name = @n",
                 2,
                 ct,
@@ -37,7 +39,7 @@ internal sealed class SqlServerSchemaCatalogReader : IGovernanceSchemaCatalogRea
             var objectId = Convert.ToInt32(exists[0][1], System.Globalization.CultureInfo.InvariantCulture);
 
             var columnRows = await RowsAsync(
-                connection,
+                session,
                 "SELECT c.name, TYPE_NAME(c.system_type_id) FROM sys.columns c WHERE c.object_id = @o ORDER BY c.column_id",
                 2,
                 ct,
@@ -45,7 +47,7 @@ internal sealed class SqlServerSchemaCatalogReader : IGovernanceSchemaCatalogRea
             var columns = columnRows.Select(r => new SchemaColumn(Str(r[0]), Str(r[1]).ToUpperInvariant(), Family(Str(r[1])))).ToArray();
 
             var keyRows = await RowsAsync(
-                connection,
+                session,
                 "SELECT c.name FROM sys.indexes i JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id " +
                 "JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id " +
                 "WHERE i.object_id = @o AND i.is_primary_key = 1 AND ic.is_included_column = 0 AND ic.key_ordinal > 0 ORDER BY ic.key_ordinal",
@@ -54,7 +56,7 @@ internal sealed class SqlServerSchemaCatalogReader : IGovernanceSchemaCatalogRea
                 ("@o", objectId)).ConfigureAwait(false);
 
             var indexRows = await RowsAsync(
-                connection,
+                session,
                 "SELECT i.name, i.is_unique, c.name, ic.key_ordinal FROM sys.indexes i JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id " +
                 "JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id " +
                 "WHERE i.object_id = @o AND i.is_primary_key = 0 AND i.is_unique_constraint = 0 AND i.type > 0 AND i.name IS NOT NULL " +

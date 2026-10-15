@@ -49,3 +49,32 @@ public sealed class GovernanceSchemaShapeVerifierTests
         }
     }
 }
+
+/// <summary>L2: catalog reader commands enlist the active step transaction (SQL Server and PostgreSQL require it).</summary>
+public sealed class SchemaCatalogReaderTransactionTests
+{
+    [Fact]
+    public async Task Command_EnlistsTheActiveTransaction()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var tx = await connection.BeginTransactionAsync();
+
+        using var withTx = SchemaCatalogReaderSupport.Command(new CatalogSession(connection, tx), "SELECT 1");
+
+        withTx.Transaction.ShouldBe(tx);
+    }
+
+    [Fact]
+    public async Task Verifier_InsideATransaction_ReadsThroughIt()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var tx = (SqliteTransaction)await connection.BeginTransactionAsync();
+        var verifier = new GovernanceSchemaShapeVerifier("sqlite", new SqliteSchemaCatalogReader());
+
+        var result = await verifier.VerifyAsync(connection, CancellationToken.None, tx);
+
+        result.Deviations.ShouldNotBeEmpty(); // empty database: every table missing, read without error inside the transaction
+    }
+}

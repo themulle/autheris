@@ -166,7 +166,7 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
                 ct.ThrowIfCancellationRequested();
                 _logger?.LogInformation("Applying governance migration {Version} '{Name}'.", step.Version, step.Name);
                 // The shape is verified after the last pending step and before its version row is recorded (plan D-1).
-                Func<Task>? beforeRecord = i == pending.Length - 1 ? () => VerifyShapeAsync(connection, applied, steps, ct) : null;
+                Func<DbTransaction?, Task>? beforeRecord = i == pending.Length - 1 ? stepTx => VerifyShapeAsync(connection, applied, steps, ct, stepTx) : null;
                 try
                 {
                     await ApplyStepAsync(connection, step, beforeRecord, ct).ConfigureAwait(false);
@@ -193,9 +193,9 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
         await VerifyPostConditionsAsync(connection, ct).ConfigureAwait(false);
     }
 
-    private async Task VerifyShapeAsync(DbConnection connection, Dictionary<int, string> applied, MigrationStep[] steps, CancellationToken ct)
+    private async Task VerifyShapeAsync(DbConnection connection, Dictionary<int, string> applied, MigrationStep[] steps, CancellationToken ct, DbTransaction? transaction = null)
     {
-        var result = await ShapeVerifier.VerifyAsync(connection, ct).ConfigureAwait(false);
+        var result = await ShapeVerifier.VerifyAsync(connection, ct, transaction).ConfigureAwait(false);
         if (result.ExtraTables.Count > 0)
         {
             _logger?.LogInformation(
@@ -240,7 +240,7 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
         return new GovernanceSchemaDriftException(message, deviations, inner);
     }
 
-    private async Task ApplyStepAsync(DbConnection connection, MigrationStep step, Func<Task>? beforeRecord, CancellationToken ct)
+    private async Task ApplyStepAsync(DbConnection connection, MigrationStep step, Func<DbTransaction?, Task>? beforeRecord, CancellationToken ct)
     {
         DbTransaction? tx = null;
         if (step.Transactional && UseStepTransactions)
@@ -253,7 +253,7 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
             await step.Apply(new MigrationContext(connection, tx, _logger, ct)).ConfigureAwait(false);
             if (beforeRecord != null)
             {
-                await beforeRecord().ConfigureAwait(false);
+                await beforeRecord(tx).ConfigureAwait(false);
             }
 
             await RecordAsync(connection, tx, step, ct).ConfigureAwait(false);
