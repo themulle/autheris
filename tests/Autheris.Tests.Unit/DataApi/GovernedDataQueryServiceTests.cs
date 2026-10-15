@@ -650,4 +650,16 @@ public sealed class GovernedDataQueryServiceTests
         result.HasMore.ShouldBeFalse();
         result.Count.ShouldBe(5);
     }
+
+    [Fact]
+    public async Task ExecuteQueryAsync_UnavailableMetadata_IsNotFound_NeverReadsOrLeaksDetail()
+    {
+        _metadataRepo.GetTableMetadataAsync(_customerTable, Arg.Any<CancellationToken>())
+            .Returns<TableMetadata?>(_ => throw new Autheris.Domain.Exceptions.TableMetadataUnavailableException(_customerTable));
+
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.TableNotFoundException>(() => CreateService().ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id" }, Limit: 5), Ctx()));
+
+        await _sqlExecutionService.DidNotReceive().ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>());
+    }
 }

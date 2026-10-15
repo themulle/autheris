@@ -77,8 +77,17 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
         ArgumentNullException.ThrowIfNull(context);
 
         // 1. Resolve table metadata from repository or virtual system tables
-        var metadata = await _metadataRepository.GetTableMetadataAsync(request.Table, ct).ConfigureAwait(false)
-            ?? VirtualSystemTables.Get(request.Table);
+        TableMetadata? metadata;
+        try
+        {
+            metadata = await _metadataRepository.GetTableMetadataAsync(request.Table, ct).ConfigureAwait(false)
+                ?? VirtualSystemTables.Get(request.Table);
+        }
+        catch (TableMetadataUnavailableException)
+        {
+            // Invalid persisted definition: unavailable, never "absent" and never served partially (SD-3).
+            throw new TableNotFoundException(request.Table);
+        }
 
         if (metadata == null)
         {
