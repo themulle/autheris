@@ -111,8 +111,8 @@ public sealed record TableIndexDefinition(string Name, IReadOnlyList<string> Col
 /// <summary>The declared key definition of a table: ordered primary key and indexes (identifiers only, no data).</summary>
 public sealed record TableKeyDefinition(IReadOnlyList<string> PrimaryKey, IReadOnlyList<TableIndexDefinition> Indexes);
 
-/// <summary>Result of a narrow key definition replacement (audit before/after).</summary>
-public sealed record TableKeyDefinitionChange(TableKeyDefinition Before, TableKeyDefinition After);
+/// <summary>Result of a narrow key definition replacement (audit before/after). <c>BeforeUnavailable</c>: the stored definition was invalid and is not reported.</summary>
+public sealed record TableKeyDefinitionChange(TableKeyDefinition Before, TableKeyDefinition After, bool BeforeUnavailable = false);
 
 public sealed record TableMetadata
 {

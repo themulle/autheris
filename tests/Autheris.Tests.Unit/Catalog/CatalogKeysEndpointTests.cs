@@ -103,7 +103,7 @@ public sealed class CatalogKeysEndpointTests : IDisposable
         var id = Guid.Parse((string)Scalar("SELECT id FROM TABLES WHERE table_name = 'orders'")!);
         var spy = Substitute.For<ITableMetadataRepository>();
         spy.GetActiveTableIdentifierByIdAsync(id, Arg.Any<CancellationToken>()).Returns(Orders);
-        spy.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(Meta(Orders));
+        spy.GetActiveTableIdentifierAsync(Orders, Arg.Any<CancellationToken>()).Returns(Orders);
         spy.ReplaceTableKeyDefinitionAsync(Orders, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyList<TableIndexDefinition>>(), Arg.Any<CancellationToken>())
             .Returns(new TableKeyDefinitionChange(new([], []), new(["a"], [])));
 
@@ -117,7 +117,7 @@ public sealed class CatalogKeysEndpointTests : IDisposable
     public async Task Success_UsesNarrowWrite_NeverFullUpsert()
     {
         var spy = Substitute.For<ITableMetadataRepository>();
-        spy.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(Meta(Orders));
+        spy.GetActiveTableIdentifierAsync(Orders, Arg.Any<CancellationToken>()).Returns(Orders);
         spy.ReplaceTableKeyDefinitionAsync(Orders, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyList<TableIndexDefinition>>(), Arg.Any<CancellationToken>())
             .Returns(new TableKeyDefinitionChange(new([], []), new(["a"], [])));
 
@@ -179,18 +179,15 @@ public sealed class CatalogKeysEndpointTests : IDisposable
     }
 
     [Fact]
-    public async Task UnknownOrUnavailableDataset_404_SameBody()
+    public async Task UnknownOrInactiveDataset_404_SameBody()
     {
         await _repo.UpsertTableMetadataAsync(Meta(Orders) with { PrimaryKeyColumns = ["a", "b"] });
         await _repo.UpsertTableMetadataAsync(Meta(new TableIdentifier("sales", "dbo", "inactive"), active: false));
-        await _repo.UpsertTableMetadataAsync(Meta(new TableIdentifier("sales", "dbo", "broken")) with { PrimaryKeyColumns = ["a", "b"] });
-        Exec("UPDATE TABLE_PRIMARY_KEY_COLUMNS SET key_ordinal = 7 WHERE key_ordinal = 2 AND table_id = (SELECT id FROM TABLES WHERE table_name = 'broken')");
-        _repo.InvalidateMetadataCacheForTesting();
         var inactiveId = (string)Scalar("SELECT id FROM TABLES WHERE table_name = 'inactive'")!;
         var dto = new SetDatasetKeysDto(PrimaryKey: ["a"]);
 
         var bodies = new List<(int, string)>();
-        foreach (var id in new[] { "sales.dbo.nothere", Guid.NewGuid().ToString("D"), "sales.dbo.inactive", inactiveId, "sales.dbo.broken", "not an id", "{" + Guid.NewGuid() + "}", new string('x', 5000) })
+        foreach (var id in new[] { "sales.dbo.nothere", Guid.NewGuid().ToString("D"), "sales.dbo.inactive", inactiveId, "not an id", "{" + Guid.NewGuid() + "}", new string('x', 5000) })
         {
             bodies.Add(await Run(await Put(id, dto)));
         }
@@ -198,7 +195,60 @@ public sealed class CatalogKeysEndpointTests : IDisposable
         bodies.Select(b => b.Item1).ShouldAllBe(s => s == 404);
         bodies.Select(b => b.Item2).Distinct().Count().ShouldBe(1);
         bodies[0].Item2.ShouldNotContain("nothere");
-        bodies[0].Item2.ShouldNotContain("broken");
+        bodies[0].Item2.ShouldNotContain("inactive");
+    }
+
+    [Fact]
+    public async Task CorruptStoredDefinition_CanBeRepaired_AndAuditRecordsBeforeAsUnavailable()
+    {
+        var broken = new TableIdentifier("sales", "dbo", "broken");
+        await _repo.UpsertTableMetadataAsync(Meta(broken) with { PrimaryKeyColumns = ["a", "b"] });
+        Exec("UPDATE TABLE_PRIMARY_KEY_COLUMNS SET key_ordinal = 7 WHERE key_ordinal = 2 AND table_id = (SELECT id FROM TABLES WHERE table_name = 'broken')");
+        _repo.InvalidateMetadataCacheForTesting();
+        await Should.ThrowAsync<TableMetadataUnavailableException>(() => _repo.GetTableMetadataAsync(broken));
+        var guid = (string)Scalar("SELECT id FROM TABLES WHERE table_name = 'broken'")!;
+
+        foreach (var id in new[] { "sales.dbo.broken", guid })
+        {
+            var (status, body) = await Run(await Put(id, new SetDatasetKeysDto(PrimaryKey: ["a"])));
+            status.ShouldBe(200);
+            body.ShouldContain("\"a\"");
+        }
+
+        _repo.InvalidateMetadataCacheForTesting();
+        (await _repo.GetTableMetadataAsync(broken))!.PrimaryKeyColumns.ShouldBe(["a"]);
+        Scalar("SELECT details_json FROM AUDIT_LOG_ENTRIES WHERE event_type = '" + AuditEventTypes.CatalogKeyDefinitionChanged + "' ORDER BY seq LIMIT 1")!
+            .ToString()!.ShouldContain("\"unavailable\":true");
+    }
+
+    [Fact]
+    public async Task CorruptStoredDefinition_InvalidNewDefinition_StillRejected()
+    {
+        var broken = new TableIdentifier("sales", "dbo", "broken");
+        await _repo.UpsertTableMetadataAsync(Meta(broken) with { PrimaryKeyColumns = ["a", "b"] });
+        Exec("UPDATE TABLE_PRIMARY_KEY_COLUMNS SET key_ordinal = 7 WHERE key_ordinal = 2 AND table_id = (SELECT id FROM TABLES WHERE table_name = 'broken')");
+
+        var (status, body) = await Run(await Put("sales.dbo.broken", new SetDatasetKeysDto(PrimaryKey: ["nope"])));
+
+        status.ShouldBe(400);
+        body.ShouldBe("{\"error\":\"Invalid table key or index definition.\"}");
+    }
+
+    [Fact]
+    public async Task IndexUniqueFlag_CanonicalUnique_IsUniqueAlias_DisagreementIs400()
+    {
+        await _repo.UpsertTableMetadataAsync(Meta(Orders));
+
+        foreach (var index in new[] { new DatasetIndexDto("ux1", ["a"], Unique: true), new DatasetIndexDto("ux1", ["a"], IsUnique: true), new DatasetIndexDto("ux1", ["a"], true, true) })
+        {
+            (await Run(await Put("sales.dbo.orders", new SetDatasetKeysDto(Indexes: [index])))).Status.ShouldBe(200);
+            _repo.InvalidateMetadataCacheForTesting();
+            (await _repo.GetTableMetadataAsync(Orders))!.Indexes.Single().IsUnique.ShouldBeTrue();
+        }
+
+        var (status, body) = await Run(await Put("sales.dbo.orders", new SetDatasetKeysDto(Indexes: [new DatasetIndexDto("ux1", ["a"], IsUnique: true, Unique: false)])));
+        status.ShouldBe(400);
+        body.ShouldBe("{\"error\":\"Invalid table key or index definition.\"}");
     }
 
     [Fact]
@@ -264,9 +314,11 @@ public sealed class CatalogKeysEndpointTests : IDisposable
     /// <summary>Runs an action (a concurrent masking commit) right after the endpoint resolved the dataset.</summary>
     private sealed class InterleavingRepository(ITableMetadataRepository inner, Func<Task> afterResolve) : ITableMetadataRepository
     {
-        public async Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
+        public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) => inner.GetTableMetadataAsync(table, ct);
+
+        public async Task<TableIdentifier?> GetActiveTableIdentifierAsync(TableIdentifier table, CancellationToken ct = default)
         {
-            var result = await inner.GetTableMetadataAsync(table, ct);
+            var result = await inner.GetActiveTableIdentifierAsync(table, ct);
             await afterResolve();
             return result;
         }

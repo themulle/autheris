@@ -408,6 +408,30 @@ public partial class PostgreSqlGovernanceRepository
         return change;
     }
 
+    public async Task<TableIdentifier?> GetActiveTableIdentifierAsync(TableIdentifier table, CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT source_name, schema_name, table_name FROM TABLES WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table) AND is_active = 1";
+        cmd.Parameters.AddWithValue("@domain", table.Domain);
+        cmd.Parameters.AddWithValue("@schema", table.Schema);
+        cmd.Parameters.AddWithValue("@table", table.TableName);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        try
+        {
+            return new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
     public async Task<TableIdentifier?> GetActiveTableIdentifierByIdAsync(Guid tableId, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);

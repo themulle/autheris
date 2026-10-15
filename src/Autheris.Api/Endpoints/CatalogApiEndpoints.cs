@@ -158,7 +158,7 @@ public static class CatalogApiEndpoints
 
     /// <summary>
     /// Resolves an active dataset by table id (strict "D" GUID) or by domain.schema.table without loading the whole catalog.
-    /// Unknown, inactive and unavailable datasets are indistinguishable (SEC-94-15).
+    /// Unknown and inactive datasets are indistinguishable (SEC-94-15); a dataset with an invalid stored definition resolves (repair).
     /// </summary>
     private static async Task<TableIdentifier?> ResolveActiveDatasetAsync(
         string? id,
@@ -186,15 +186,8 @@ public static class CatalogApiEndpoints
             return null;
         }
 
-        try
-        {
-            var existing = await metadataRepository.GetTableMetadataAsync(identifier, ct).ConfigureAwait(false);
-            return existing is { Table.IsActive: true } ? existing.Identifier : null;
-        }
-        catch (TableMetadataUnavailableException)
-        {
-            return null;
-        }
+        // Catalog row only: the stored key definition is neither loaded nor validated, so an invalid definition can be replaced.
+        return await metadataRepository.GetActiveTableIdentifierAsync(identifier, ct).ConfigureAwait(false);
     }
 
     internal static async Task<IResult> SetDatasetKeysHandler(
@@ -217,13 +210,19 @@ public static class CatalogApiEndpoints
         }
 
         var pkColumns = request.PrimaryKey ?? request.PrimaryKeyColumns ?? Array.Empty<string>();
+        if (request.Indexes != null && System.Linq.Enumerable.Any(request.Indexes, i => i is { Unique: not null, IsUnique: not null } && i.Unique != i.IsUnique))
+        {
+            // `unique` is canonical, `isUnique` an accepted alias; contradicting values are refused with the generic message.
+            return Results.BadRequest(new { error = "Invalid table key or index definition." });
+        }
+
         var indexes = request.Indexes != null
             ? System.Linq.Enumerable.Select(
                 request.Indexes,
                 i => new TableIndexDefinition(
                     i?.Name ?? string.Empty,
                     i?.Columns ?? Array.Empty<string>(),
-                    i?.IsUnique ?? false)).ToList()
+                    i?.Unique ?? i?.IsUnique ?? false)).ToList()
             : (System.Collections.Generic.IReadOnlyList<TableIndexDefinition>)Array.Empty<TableIndexDefinition>();
 
         // The caps are enforced by the validator inside the repository before anything is allocated per element.
@@ -255,7 +254,9 @@ public static class CatalogApiEndpoints
             DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
             {
                 datasetId = tableId.Value.ToString(),
-                before = new { primaryKey = change.Before.PrimaryKey, indexes = change.Before.Indexes },
+                before = change.BeforeUnavailable
+                    ? (object)new { unavailable = true }
+                    : new { primaryKey = change.Before.PrimaryKey, indexes = change.Before.Indexes },
                 after = new { primaryKey = change.After.PrimaryKey, indexes = change.After.Indexes }
             })
         }, CancellationToken.None).ConfigureAwait(false);
@@ -328,7 +329,8 @@ public sealed record AdminSetDatasetStateDto(string State, string? Reason = null
 public sealed record DatasetIndexDto(
     string Name,
     System.Collections.Generic.IReadOnlyList<string> Columns,
-    bool IsUnique = false);
+    bool? IsUnique = null,
+    bool? Unique = null);
 
 public sealed record SetDatasetKeysDto(
     System.Collections.Generic.IReadOnlyList<string>? PrimaryKey = null,

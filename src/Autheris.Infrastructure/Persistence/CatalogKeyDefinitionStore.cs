@@ -333,6 +333,7 @@ internal static class CatalogKeyDefinitionStore
         }
 
         var before = new TableKeyDefinition(Array.Empty<string>(), Array.Empty<TableIndexDefinition>());
+        var beforeUnavailable = false;
         try
         {
             var (pk, idx) = await ReadAsync(conn, tx, dialect, table, tableId, columns, ct).ConfigureAwait(false);
@@ -340,7 +341,8 @@ internal static class CatalogKeyDefinitionStore
         }
         catch (TableMetadataUnavailableException)
         {
-            // An invalid stored definition is exactly what an administrator replaces here; the audit "before" is then empty.
+            // An invalid stored definition is exactly what an administrator replaces here; the audit "before" is then flagged, no partial data.
+            beforeUnavailable = true;
         }
 
         var validated = TableKeyDefinitionValidator.Validate(new TableMetadata
@@ -374,7 +376,7 @@ internal static class CatalogKeyDefinitionStore
         }
 
         await bumpEpoch().ConfigureAwait(false);
-        return new TableKeyDefinitionChange(before, new TableKeyDefinition(validated.PrimaryKeyColumns, validated.Indexes));
+        return new TableKeyDefinitionChange(before, new TableKeyDefinition(validated.PrimaryKeyColumns, validated.Indexes), beforeUnavailable);
     }
 
     // ---------------------------------------------------------------- helpers

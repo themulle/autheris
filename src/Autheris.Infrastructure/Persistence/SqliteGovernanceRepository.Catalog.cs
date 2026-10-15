@@ -703,6 +703,30 @@ public partial class SqliteGovernanceRepository
         return change;
     }
 
+    public async Task<TableIdentifier?> GetActiveTableIdentifierAsync(TableIdentifier table, CancellationToken ct = default)
+    {
+        await using var scope = await ReadScopeAsync(ct, snapshot: false).ConfigureAwait(false);
+        using var cmd = scope.Connection.CreateCommand();
+        cmd.CommandText = "SELECT source_name, schema_name, table_name FROM TABLES WHERE source_name = @domain COLLATE NOCASE AND schema_name = @schema COLLATE NOCASE AND table_name = @table COLLATE NOCASE AND is_active = 1";
+        cmd.Parameters.AddWithValue("@domain", table.Domain);
+        cmd.Parameters.AddWithValue("@schema", table.Schema);
+        cmd.Parameters.AddWithValue("@table", table.TableName);
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        try
+        {
+            return new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
     public async Task<TableIdentifier?> GetActiveTableIdentifierByIdAsync(Guid tableId, CancellationToken ct = default)
     {
         await using var scope = await ReadScopeAsync(ct, snapshot: false).ConfigureAwait(false);

@@ -17,6 +17,24 @@ public interface ITableMetadataRepository
         IReadOnlyList<TableIndexDefinition> indexes,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Resolves an active table by identifier from its catalog row only: the stored key definition is NOT loaded or validated, so a
+    /// table whose definition is invalid still resolves (an administrator must be able to replace it). Null when unknown or inactive.
+    /// Default: via <see cref="GetTableMetadataAsync"/>, where an unavailable table resolves to null.
+    /// </summary>
+    async Task<TableIdentifier?> GetActiveTableIdentifierAsync(TableIdentifier table, CancellationToken ct = default)
+    {
+        try
+        {
+            var existing = await GetTableMetadataAsync(table, ct).ConfigureAwait(false);
+            return existing is { Table.IsActive: true } ? existing.Identifier : null;
+        }
+        catch (Autheris.Domain.Exceptions.TableMetadataUnavailableException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Resolves an active table by its id without loading every table (default: scan of <see cref="GetAllTablesAsync"/>).</summary>
     async Task<TableIdentifier?> GetActiveTableIdentifierByIdAsync(Guid tableId, CancellationToken ct = default)
     {
