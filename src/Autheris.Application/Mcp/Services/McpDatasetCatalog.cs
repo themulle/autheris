@@ -130,7 +130,9 @@ public sealed class McpDatasetCatalog(
         var graphQl = graphQlMap == null ? null : await graphQlMap.GetTableAsync(id, ct).ConfigureAwait(false);
         var graphQlColumns = (graphQl?.Columns ?? []).ToDictionary(c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
 
-        var primaryKeys = new HashSet<string>(table.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
+        // SD-4: only keys and indexes that lie wholly within the columns listed for this caller.
+        var keyView = Autheris.Application.Data.Services.TableKeyVisibility.Restrict(table, table.Columns);
+        var primaryKeys = new HashSet<string>(keyView.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
         var columns = table.Columns
             .Select(c =>
             {
@@ -202,7 +204,8 @@ public sealed class McpDatasetCatalog(
             Tags: table.Table.Tags ?? Array.Empty<string>(),
             DataOwner: dataOwner,
             DataOwnerDelegates: dataOwnerDelegates,
-            AccessStatus: accessStatus);
+            AccessStatus: accessStatus,
+            Indexes: keyView.Indexes);
     }
 
     private async Task<(IReadOnlyList<Consent> ActiveConsents, IReadOnlyList<ConsentRequest> PendingRequests, bool IsAdmin)> GetCallerConsentsAndRequestsAsync(ClaimsPrincipal principal, CancellationToken ct)
