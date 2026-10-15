@@ -83,6 +83,39 @@ public interface IConsentRepository
     /// </summary>
     Task<IReadOnlyList<TableIdentifier>> GetTablesWithConsentsForTenantAsync(TenantId tenantId, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<TableIdentifier>>(Array.Empty<TableIdentifier>());
+
+    /// <summary>
+    /// WP-SC-02: active (non-revoked, in-window) consents of exactly one role grantee on one table within <paramref name="tenantId"/>.
+    /// Role consents carry no subject SID, so the subject-based lookup never returns them. The default filters
+    /// <see cref="GetAllActiveConsentsForSubjectsAsync(IEnumerable{Sid}, IEnumerable{string}?, DateTimeOffset?, TenantId?, CancellationToken)"/>;
+    /// persistence overrides it with an indexed query.
+    /// </summary>
+    async Task<IReadOnlyList<Consent>> GetActiveRoleConsentsAsync(
+        TableIdentifier table, string roleName, TenantId? tenantId, DateTimeOffset atTime, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(roleName);
+        var all = await GetAllActiveConsentsForSubjectsAsync(Array.Empty<Sid>(), new[] { roleName }, atTime, tenantId, ct).ConfigureAwait(false);
+        return all
+            .Where(c => c.GranteeType == GranteeType.Role
+                && c.TableIdentifier.Equals(table)
+                && string.Equals(c.RoleName, roleName, StringComparison.OrdinalIgnoreCase)
+                && (tenantId is null || c.TenantId == tenantId.Value))
+            .ToList();
+    }
+
+    /// <summary>
+    /// WP-SC-02: atomically revokes <paramref name="revokeConsentIds"/> and creates <paramref name="create"/> in ONE transaction
+    /// with ONE epoch bump per affected table. Either every change is applied or none. There is no non-atomic fallback: the default
+    /// fails closed so that a provider without a transactional implementation can never apply a partial manifest.
+    /// </summary>
+    Task ReplaceConsentsAsync(
+        IReadOnlyList<Guid> revokeConsentIds,
+        IReadOnlyList<Consent> create,
+        Sid actor,
+        string reason,
+        CancellationToken ct = default)
+        => throw new NotSupportedException(
+            $"{GetType().Name} does not implement the transactional consent replacement; refusing a non-atomic apply.");
 }
 
 

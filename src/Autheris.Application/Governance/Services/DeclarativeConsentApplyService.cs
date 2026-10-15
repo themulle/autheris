@@ -56,6 +56,21 @@ public sealed class DeclarativeConsentApplyService(
             return new DeclarativeApplyResult(0, 0, 0, 0, dryRun, ["Empty manifest; 0 policies processed."]);
         }
 
+        var seenTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in manifest.Policies)
+        {
+            var key = $"{p.Domain}|{p.Schema}|{p.TableName}|{(string.Equals(p.GranteeType, "Role", StringComparison.OrdinalIgnoreCase) ? "Role" : "Sid")}|{p.GranteeRef}";
+            if (!seenTargets.Add(key))
+            {
+                throw new ArgumentException(
+                    $"Manifest contains more than one policy for '{p.Domain}.{p.Schema}.{p.TableName}' -> '{p.GranteeRef}'; refusing an ambiguous apply.", nameof(manifest));
+            }
+        }
+
+        var revokeIds = new List<Guid>();
+        var createList = new List<Consent>();
+        var auditEntries = new List<AuditLogEntry>();
+
         foreach (var policy in manifest.Policies)
         {
             totalEvaluated++;
@@ -90,12 +105,10 @@ public sealed class DeclarativeConsentApplyService(
                 granteeSid = new Sid(policy.GranteeRef);
             }
 
-            // Load existing active consents for table
-            var subjects = granteeSid != null ? new[] { granteeSid.Value } : Array.Empty<Sid>();
-            var roles = roleName != null ? new[] { roleName } : Array.Empty<string>();
-
-            var existingConsents = await consentRepository.GetActiveConsentsForSubjectsAsync(
-                subjects, tableId, now, tenantId, ct).ConfigureAwait(false);
+            // WP-SC-02: role consents have no subject SID, so they are looked up by role name (the subject lookup never returns them).
+            IReadOnlyList<Consent> existingConsents = granteeType == GranteeType.Role
+                ? await consentRepository.GetActiveRoleConsentsAsync(tableId, roleName!, tenantId, now, ct).ConfigureAwait(false)
+                : await consentRepository.GetActiveConsentsForSubjectsAsync(new[] { granteeSid!.Value }, tableId, now, tenantId, ct).ConfigureAwait(false);
 
             var activeExisting = existingConsents
                 .Where(c => c.IsActive(now) && c.TenantId == tenantId && MatchesGrantee(c, granteeType, granteeSid, roleName))
@@ -111,18 +124,10 @@ public sealed class DeclarativeConsentApplyService(
             }
 
             // Needs apply / change
+            revoked += activeExisting.Count;
             if (!dryRun)
             {
-                // Revoke old obsolete active consents
-                foreach (var oldConsent in activeExisting)
-                {
-                    await consentRepository.RevokeConsentAsync(
-                        oldConsent.Id,
-                        actorSid,
-                        $"Superseded by GitOps declarative apply (version: {manifest.Version})",
-                        ct).ConfigureAwait(false);
-                    revoked++;
-                }
+                revokeIds.AddRange(activeExisting.Select(c => c.Id));
 
                 // Construct new Consent
                 var validityDays = policy.ValidityDays is > 0 ? policy.ValidityDays.Value : 365;
@@ -188,10 +193,8 @@ public sealed class DeclarativeConsentApplyService(
                     newConsent.RowFilters = rowFilters;
                 }
 
-                await consentRepository.CreateConsentAsync(newConsent, ct).ConfigureAwait(false);
-
-                // Record WORM audit event
-                await auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+                createList.Add(newConsent);
+                auditEntries.Add(new AuditLogEntry
                 {
                     Id = Guid.NewGuid(),
                     OccurredAt = now,
@@ -201,18 +204,27 @@ public sealed class DeclarativeConsentApplyService(
                     Decision = "APPLIED",
                     DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { Reason = $"Applied declarative policy version {manifest.Version}: {policy.Description ?? "No description"}" }),
                     TenantId = tenantId
-                }, ct).ConfigureAwait(false);
-            }
-            else
-            {
-                if (activeExisting.Count > 0)
-                {
-                    revoked += activeExisting.Count;
-                }
+                });
             }
 
             applied++;
             details.Add($"{(dryRun ? "[DryRun] Would apply" : "Applied")} policy for '{tableId}' -> '{policy.GranteeRef}'.");
+        }
+
+        // WP-SC-02: one transaction and one epoch bump for the whole manifest; a fault leaves nothing changed and writes no audit.
+        if (!dryRun && (createList.Count > 0 || revokeIds.Count > 0))
+        {
+            await consentRepository.ReplaceConsentsAsync(
+                revokeIds,
+                createList,
+                actorSid,
+                $"Superseded by GitOps declarative apply (version: {manifest.Version})",
+                ct).ConfigureAwait(false);
+
+            foreach (var entry in auditEntries)
+            {
+                await auditLogRepository.RecordAuditEventAsync(entry, ct).ConfigureAwait(false);
+            }
         }
 
         return new DeclarativeApplyResult(totalEvaluated, applied, unchanged, revoked, dryRun, details);
