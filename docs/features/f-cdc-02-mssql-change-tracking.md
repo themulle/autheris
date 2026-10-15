@@ -98,4 +98,4 @@ subscription OnOrderChanged {
 | :--- | :--- |
 | `autheris_cdc_watermark_expired_total` | Polls aborted because the stored watermark is below the minimum valid version. |
 | `autheris_cdc_watermark_fenced_total` | Watermark writes rejected because a newer fencing token exists. |
-| `autheris_scheduled_job_*{job="MssqlChangeTrackingPollJob"}` | Lease, duration and failure metrics of the scheduled worker ([F-OPS-02](f-ops-02-high-availability-kubernetes-helm.md#45-metrics)). |
+| `autheris_scheduled_job_*{job="MssqlChangeTrackingPollJob"}` | Lease, duration and failure metrics of the scheduled worker ([F-OPS-02](f-ops-02-high-availability-kubernetes-helm.md#46-metrics)). |
