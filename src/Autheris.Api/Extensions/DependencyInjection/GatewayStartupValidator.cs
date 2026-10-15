@@ -39,9 +39,10 @@ public static class GatewayStartupValidator
 
         ValidateObjectRecursively(options);
 
-        ValidateOracleRuntime(options, environment, logger, registry);
-        ValidateDatabricks(options, environment, registry);
-        ValidateDefaultSchemas(options, registry);
+        _ = registry;
+        ValidateOracleRuntime(options, environment, logger);
+        ValidateDatabricks(options, environment);
+        ValidateDefaultSchemas(options);
         ValidateTenantCollisions(options, environment, logger);
         ValidateWebhookSubscriptions(options);
 
@@ -662,9 +663,14 @@ public static class GatewayStartupValidator
     /// does not admit. A deny at scale is an outage, so the start lists all of them (a warning per table, ids and codes only). The same
     /// lint runs as the blocking pre-deploy step <c>tools/PolicyPredicateLint</c>.
     /// </summary>
-    public static IReadOnlyList<DeniedTable> ListDeniedTables(PolicyLintInput input, ILogger? logger = null, SqlDataSourceOptions? dataSources = null)
+    public static IReadOnlyList<DeniedTable> ListDeniedTables(
+        PolicyLintInput input,
+        ILogger? logger = null,
+        SqlDataSourceOptions? dataSources = null,
+        ISqlDialectRegistry? dialectRegistry = null)
     {
         ArgumentNullException.ThrowIfNull(input);
+        var registry = dialectRegistry ?? SqlDialectRegistry.Default;
         var denied = new List<DeniedTable>();
 
         foreach (var finding in new PolicyPredicateLinter(dataSources: dataSources).Lint(input).Findings)
@@ -679,7 +685,7 @@ public static class GatewayStartupValidator
                 continue;   // not a WebSQL pushdown table
             }
 
-            if (!DatabaseDialectExtensions.TryParseDialect(table.Table.SourceType, out var dialect) || !SqlDialectMapper.IsExecutable(dialect))
+            if (!registry.TryGetByName(table.Table.SourceType, out var provider) || !provider.Descriptor.IsExecutable)
             {
                 denied.Add(new DeniedTable(table.Identifier.ToString(), "-", DeniedDialectNotAdmitted));
             }

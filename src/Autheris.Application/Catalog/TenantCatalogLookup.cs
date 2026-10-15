@@ -161,16 +161,14 @@ public sealed class TenantCatalogLookup : ICatalogLookup, IDisposable
         TenantId tenantId,
         HashSet<TableIdentifier>? consentedTables)
     {
-        if (_tenantRegistry == null && consentedTables == null)
+        if (!string.IsNullOrWhiteSpace(table.OwnerTenantId))
         {
-            return true;
-        }
+            if (string.Equals(table.OwnerTenantId, tenantId.Value, StringComparison.Ordinal))
+            {
+                return true;
+            }
 
-        if (_tenantRegistry != null &&
-            _tenantRegistry.TryResolveDomainTenant(table.Identifier.Domain, out var ownerTenant) &&
-            ownerTenant is not null)
-        {
-            return string.Equals(ownerTenant.Value.Value, tenantId.Value, StringComparison.Ordinal);
+            return consentedTables != null && consentedTables.Contains(table.Identifier);
         }
 
         if (consentedTables != null)

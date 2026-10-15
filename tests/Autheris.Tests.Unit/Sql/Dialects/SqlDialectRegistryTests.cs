@@ -166,7 +166,7 @@ public sealed class SqlDialectRegistryTests
         metaRepo.GetAllTablesAsync(Arg.Any<System.Threading.CancellationToken>()).Returns([oracleTable, dbxTable]);
         relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<System.Threading.CancellationToken>()).Returns([]);
 
-        var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo, dialectRegistry: registry);
+        var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo, logger: null, dialectRegistry: registry);
         model.Tables.Select(t => t.Identifier).ShouldBe([dbxTable.Identifier]);
 
         var denied = GatewayStartupValidator.ListDeniedTables(new PolicyLintInput([oracleTable, dbxTable], [], [], []), dialectRegistry: registry);

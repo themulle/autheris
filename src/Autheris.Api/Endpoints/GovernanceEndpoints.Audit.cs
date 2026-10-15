@@ -9,6 +9,7 @@ using Autheris.Api.Extensions;
 using Autheris.Api.Middleware;
 using Autheris.Api.Security;
 using Autheris.Application.Governance;
+using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;

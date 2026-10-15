@@ -84,7 +84,7 @@ public sealed class SqlConnectorStreamingTests
             hasUnconstrainedColumnAllow: true);
 
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetByIdentifierAsync(meta.Identifier, Arg.Any<CancellationToken>())
+        metadataRepo.GetTableMetadataAsync(meta.Identifier, Arg.Any<CancellationToken>())
             .Returns(meta);
 
         var governed = Substitute.For<IGovernedSqlExecutionService>();
@@ -104,7 +104,7 @@ public sealed class SqlConnectorStreamingTests
             Arguments: new Dictionary<string, object?>());
         session.Items["TableMetadata"] = meta;
 
-        var received = new List<IDictionary<string, object?>>();
+        var received = new List<IReadOnlyDictionary<string, object?>>();
         await foreach (var row in connector.RecordSource.ReadSplitAsync(ConnectorSplit.Default(), session))
         {
             received.Add(row);
@@ -132,7 +132,7 @@ public sealed class SqlConnectorStreamingTests
             hasUnconstrainedColumnAllow: true);
 
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetByIdentifierAsync(meta.Identifier, Arg.Any<CancellationToken>())
+        metadataRepo.GetTableMetadataAsync(meta.Identifier, Arg.Any<CancellationToken>())
             .Returns(meta);
 
         var producedCount = 0;
@@ -175,8 +175,8 @@ public sealed class SqlConnectorStreamingTests
             meta.Identifier,
             new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
             {
-                ["Id"] = ColumnAccessLevel.Plain,
-                ["Iban"] = ColumnAccessLevel.Masked
+                ["Id"] = ColumnAccessLevel.Clear,
+                ["Iban"] = ColumnAccessLevel.Mask
             });
 
         var metadataRepo = Substitute.For<ITableMetadataRepository>();

@@ -46,12 +46,12 @@ public interface IAuditLogRepository
 {
     Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default);
     Task RecordAuditEventAsync(AuditLogEntry entry, System.Data.Common.DbTransaction existingTx, CancellationToken ct = default);
-    async Task RecordAuditEventsAsync(IReadOnlyList<AuditLogEntry> entries, CancellationToken cancellationToken = default)
+    async Task RecordAuditEventsAsync(IReadOnlyList<AuditLogEntry> entries, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(entries);
         for (int i = 0; i < entries.Count; i++)
         {
-            await RecordAuditEventAsync(entries[i], cancellationToken).ConfigureAwait(false);
+            await RecordAuditEventAsync(entries[i], ct).ConfigureAwait(false);
         }
     }
     Task<IReadOnlyList<AuditLogEntry>> GetAuditLogEntriesAsync(int limit = 100, TenantId? tenantId = null, CancellationToken ct = default);

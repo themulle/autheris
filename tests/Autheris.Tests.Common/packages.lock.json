@@ -1,6 +1,235 @@
 {
   "version": 1,
   "dependencies": {
-    "net10.0": {}
+    "net10.0": {
+      "Antlr4.Runtime.Standard": {
+        "type": "Transitive",
+        "resolved": "4.13.1",
+        "contentHash": "Da5+i4kFHUseJRZGcBG5fmZGpA/Ns180ibrQMxgZzjpQOnENVvSL5gi5HZ8Ncz8/AR2WsKbOg2lMBzjz0HUQcA=="
+      },
+      "Apache.Arrow": {
+        "type": "Transitive",
+        "resolved": "23.0.0",
+        "contentHash": "cU4Zm7byFwnb82Ea9ZRvVnq2nJNf/TF9j+rj/MHlvu9RBYMqYtu4sJaR1JmMh3MmSIuwMafVg7PfJxPAMv9dGw==",
+        "dependencies": {
+          "Apache.Arrow.Scalars": "23.0.0"
+        }
+      },
+      "Apache.Arrow.Scalars": {
+        "type": "Transitive",
+        "resolved": "23.0.0",
+        "contentHash": "i53VmQ505ASXsStf7y29Z5qvhN6PGgFGNb6UUU7z1WmbzEgSjKQuIJkKKVbh+K5rtXRiKyr1Ah3Rmvbeb2BEHQ=="
+      },
+      "Casbin.NET": {
+        "type": "Transitive",
+        "resolved": "2.21.3",
+        "contentHash": "K17VAOGfYm6JOGw/QDnahOblsj2gP8En6RQ35v/5BrBMvPBl/cXzIiSXXzYWG6Ju7OkM+CVjBu3wisQ7j/tctg==",
+        "dependencies": {
+          "CsvHelper": "32.0.3",
+          "DotNet.Glob": "3.1.3",
+          "DynamicExpresso.Core": "2.16.1"
+        }
+      },
+      "CommunityToolkit.HighPerformance": {
+        "type": "Transitive",
+        "resolved": "8.4.2",
+        "contentHash": "2hmtrrU18x6NL3mbuAqwy0KpnoEEJOuK6sH5RKQfD/jHijn2pqvqBUC7WGy9dgNBL9BDA7eOC0kirsNPMp2f4Q=="
+      },
+      "CsvHelper": {
+        "type": "Transitive",
+        "resolved": "32.0.3",
+        "contentHash": "JNDkd4Wc2Tim5IuyL8Ai13RhzRvaHItseEvlJ2YRkx2SMBFrIsW8a5+/o4/O1jsb6mlviihR6Hfyn+nqY6CurA=="
+      },
+      "DotNet.Glob": {
+        "type": "Transitive",
+        "resolved": "3.1.3",
+        "contentHash": "hOfHw7MLJw/tbXaFwR1oiDb+dIXDp8URTxp5Pco42OOhiw77wrUNx6v6syNygHZbWwYdXQocL2Mo1l5FnfDVjg=="
+      },
+      "DuckDB.NET.Bindings.Full": {
+        "type": "Transitive",
+        "resolved": "1.5.6",
+        "contentHash": "phg/EJHrcG+bqgD/EnDryWlcFtL6L09Wn9o1UVoERTp7OnAmU5AyCSKreZUkFHacNRlxlAfAIJ2IGqJ2R6O18Q=="
+      },
+      "DuckDB.NET.Data.Full": {
+        "type": "Transitive",
+        "resolved": "1.5.6",
+        "contentHash": "9FPuQZKtKGT9lr6GfOHGNJWXsQKjRBnWdPus6/1e/f5R106DszaxLuRLCDDwlgy6XdC0Lgm4H9zqV6LkZ7gTQw==",
+        "dependencies": {
+          "Apache.Arrow": "23.0.0",
+          "DuckDB.NET.Bindings.Full": "1.5.6"
+        }
+      },
+      "DynamicExpresso.Core": {
+        "type": "Transitive",
+        "resolved": "2.16.1",
+        "contentHash": "RQxI6Ov/cfOcbTEQ8tLBJH5J7/W2uWvZjDCMTLAUZa91Z39Vj31wapSy6dyuEsw1FCZVqTipqoWw+t5qMi2ljA=="
+      },
+      "FluentValidation": {
+        "type": "Transitive",
+        "resolved": "12.2.0",
+        "contentHash": "DR3lFbdnKucaaj1/8zMNOACMz/64igzox1yVZSFVsLxYB5mxAB+wFP1WZ8fjwrZnbU1KA1DoMzHKYKxUfuZ4wQ=="
+      },
+      "HotChocolate.Language": {
+        "type": "Transitive",
+        "resolved": "16.6.8",
+        "contentHash": "f0pHdM7oTDx4SxtUmj9Lj/xeyHWWhioZD8ph45Ap30kYHVaeE217UD2g3zz0Y/H97vjdJ0GHix1LwOy8MDqT6g==",
+        "dependencies": {
+          "HotChocolate.Language.SyntaxTree": "16.6.8",
+          "HotChocolate.Language.Utf8": "16.6.8",
+          "HotChocolate.Language.Visitors": "16.6.8",
+          "HotChocolate.Language.Web": "16.6.8"
+        }
+      },
+      "HotChocolate.Language.SyntaxTree": {
+        "type": "Transitive",
+        "resolved": "16.6.8",
+        "contentHash": "d0sbjItZ8sxSPGuSR1JrlH+5VaRsjDECvZSkg2Me7p7ZmYqOtqWbhkC65wPnEdCrEkWxI3Ym7OTjirsYJuxzbA==",
+        "dependencies": {
+          "HotChocolate.Utilities.Buffers": "16.6.8"
+        }
+      },
+      "HotChocolate.Language.Utf8": {
+        "type": "Transitive",
+        "resolved": "16.6.8",
+        "contentHash": "YyJ5BhP59RnUcFIrQIU52kdBH5rRED0APp3QscWkudCkN5xaJf+k7NjX9mJ+amZgC8+UFYio1qOvUisjuUZQWQ==",
+        "dependencies": {
+          "HotChocolate.Language.SyntaxTree": "16.6.8",
+          "HotChocolate.Language.Utf8.SyntaxTree": "16.6.8",
+          "HotChocolate.Utilities.Buffers": "16.6.8"
+        }
+      },
+      "HotChocolate.Language.Utf8.SyntaxTree": {
+        "type": "Transitive",
+        "resolved": "16.6.8",
+        "contentHash": "quJmgVu/LsjYnMYaM54ndyubqg3mPoe2P2wLxwVIIKtcCZzre99gX6dhUoDQBPjd8QVVd5hOs1/YTDYL/3s7Ig==",
+        "dependencies": {
+          "HotChocolate.Language.SyntaxTree": "16.6.8",
+          "HotChocolate.Utilities.Buffers": "16.6.8"
+        }
+      },
+      "HotChocolate.Language.Visitors": {
+        "type": "Transitive",
+        "resolved": "16.6.8",
+        "contentHash": "pcdoY2R0UWHwaoU9cLl+1GB7rODC7fBKeYvJwiFQ46JfUg74ton6Wt41S1kmfO4aY4xsIExJjhviejv/08sFcg==",
+        "dependencies": {
+          "HotChocolate.Language.SyntaxTree": "16.6.8"
+        }
+      },
+      "HotChocolate.Language.Web": {
+        "type": "Transitive",
+        "resolved": "16.6.8",
+        "contentHash": "vhiBvhLP4iOp+zJyplABQXCnOgWLgALX6pF0CZmXHapETtz97FBH2VpP4bDHOfrNBarFsBssDWNQ1zVtUeY8pQ==",
+        "dependencies": {
+          "HotChocolate.Language.Utf8": "16.6.8",
+          "HotChocolate.Language.Visitors": "16.6.8"
+        }
+      },
+      "HotChocolate.Utilities.Buffers": {
+        "type": "Transitive",
+        "resolved": "16.6.8",
+        "contentHash": "hZE2Sad5nmtnTknpyCz9IAbmWa082z1AXMxmaRfGDMBqS1Ei2DElCsD8FGTcZOceUwxpGqmADI+E8MYsontGjw=="
+      },
+      "K4os.Compression.LZ4": {
+        "type": "Transitive",
+        "resolved": "1.3.8",
+        "contentHash": "LhwlPa7c1zs1OV2XadMtAWdImjLIsqFJPoRcIWAadSRn0Ri1DepK65UbWLPmt4riLqx2d40xjXRk0ogpqNtK7g=="
+      },
+      "MemoryPack": {
+        "type": "Transitive",
+        "resolved": "1.21.4",
+        "contentHash": "wy3JTBNBsO8LfQcBvvYsWr3lm2Oakolrfu0UQ3oSJSEiD+7ye0GUhYTaXuYYBowqsXBXWD9gf2218ae0JRiYVQ==",
+        "dependencies": {
+          "MemoryPack.Core": "1.21.4",
+          "MemoryPack.Generator": "1.21.4"
+        }
+      },
+      "MemoryPack.Core": {
+        "type": "Transitive",
+        "resolved": "1.21.4",
+        "contentHash": "6RszGorZ0ejNmp37ZcboPBMvvPCuNW2jlrdQfcs/lMzE5b3pmPF6hsm/laDc34hRlbAST1ZxaX/DvYu2DF5sBQ=="
+      },
+      "MemoryPack.Generator": {
+        "type": "Transitive",
+        "resolved": "1.21.4",
+        "contentHash": "g14EsSS85yn0lHTi0J9ivqlZMf09A2iI51fmI+0KkzIzyCbWOBWPi5mdaY7YWmXprk12aYh9u/qfWHQUYthlwg=="
+      },
+      "Microsoft.IO.RecyclableMemoryStream": {
+        "type": "Transitive",
+        "resolved": "3.0.1",
+        "contentHash": "s/s20YTVY9r9TPfTrN5g8zPF1YhwxyqO6PxUkrYTGI2B+OGPe9AdajWZrLhFqXIvqIW23fnUE4+ztrUWNU1+9g=="
+      },
+      "Parquet.Net": {
+        "type": "Transitive",
+        "resolved": "6.1.0",
+        "contentHash": "tnDAKvPH1d+rBPzE8y0/yz4lRqrOrdk06mhDRXM9WigS2VnSneb8EaIGPxv+kLsp13NX5Pzpg7NcfFw4EpPPDQ==",
+        "dependencies": {
+          "CommunityToolkit.HighPerformance": "8.4.2",
+          "K4os.Compression.LZ4": "1.3.8",
+          "Microsoft.IO.RecyclableMemoryStream": "3.0.1",
+          "Snappier": "1.3.1",
+          "ZstdSharp.Port": "0.8.8"
+        }
+      },
+      "Snappier": {
+        "type": "Transitive",
+        "resolved": "1.3.1",
+        "contentHash": "DOdDQiO8YZ5rBtVLY+6CmR1yp9WYoJRgEEktPBrR0tEj9QO2djA/zv0O3DX0OZpEAfosbY8pytQ9tQUogwQsEA=="
+      },
+      "System.ComponentModel.Annotations": {
+        "type": "Transitive",
+        "resolved": "5.0.0",
+        "contentHash": "dMkqfy2el8A8/I76n2Hi1oBFEbG1SfxD2l5nhwXV3XjlnOmwxJlQbYpJH4W51odnU9sARCSAgv7S3CyAFMkpYg=="
+      },
+      "System.IO.Hashing": {
+        "type": "Transitive",
+        "resolved": "10.0.13",
+        "contentHash": "ZlcywyQ7FJmgOV2nctdfOEPGS0kRK8T2CdOoPr6F4HPYpmjSo6GQfj3yTyOzNO6B+2U84/JKSPkJJMWqLmVsMw=="
+      },
+      "System.Numerics.Tensors": {
+        "type": "Transitive",
+        "resolved": "10.0.13",
+        "contentHash": "E4JC7KcY4j1yx9uy8tVsHlGThnwLdUWtUz6aLHCqbN/jbtwbwbZgnVEF9atUr/7ynFCbo8Rbij056Y9bWM9ALg=="
+      },
+      "YamlDotNet": {
+        "type": "Transitive",
+        "resolved": "18.1.0",
+        "contentHash": "5K+9KFg2TdTl7VXv88Qzi/0lqK6JFoNP3lRuImPYGRV7K/QYklDyTrj4+A+KAki1JsQi6qKY+hDyY7d6WRqjrw=="
+      },
+      "ZstdSharp.Port": {
+        "type": "Transitive",
+        "resolved": "0.8.8",
+        "contentHash": "UIDFkA5DC3en3tOJ3Mof11yBx9kUQLsaeo/oFdvN6Bbkr9E9+VCqfIadHci8cu+I51K2Sl7XYWVl2R/mA75NBQ=="
+      },
+      "autheris.application": {
+        "type": "Project",
+        "dependencies": {
+          "Apache.Arrow": "[23.0.0, )",
+          "Autheris.Domain": "[1.0.0, )",
+          "Casbin.NET": "[2.21.3, )",
+          "DuckDB.NET.Data.Full": "[1.5.6, )",
+          "FastSqlEngine": "[1.0.0, )",
+          "FluentValidation": "[12.2.0, )",
+          "HotChocolate.Language": "[16.6.8, )",
+          "MemoryPack": "[1.21.4, )",
+          "Parquet.Net": "[6.1.0, )",
+          "System.IO.Hashing": "[10.0.13, )",
+          "System.Numerics.Tensors": "[10.0.13, )",
+          "YamlDotNet": "[18.1.0, )"
+        }
+      },
+      "autheris.domain": {
+        "type": "Project",
+        "dependencies": {
+          "MemoryPack": "[1.21.4, )",
+          "System.ComponentModel.Annotations": "[5.0.0, )"
+        }
+      },
+      "FastSqlEngine": {
+        "type": "Project",
+        "dependencies": {
+          "Antlr4.Runtime.Standard": "[4.13.1, )"
+        }
+      }
+    }
   }
 }

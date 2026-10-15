@@ -43,8 +43,11 @@ public sealed class RedisConnectionInitializer : IRedisConnectionProvider, IHost
         _secretProvider = secretProvider;
         _environment = environment;
         _logger = logger;
-        _connectAsync = connectAsync ?? (static (cfg, _) => ConnectionMultiplexer.ConnectAsync(cfg));
+        _connectAsync = connectAsync ?? DefaultConnectAsync;
     }
+
+    private static async Task<IConnectionMultiplexer> DefaultConnectAsync(ConfigurationOptions cfg, CancellationToken _) =>
+        await ConnectionMultiplexer.ConnectAsync(cfg).ConfigureAwait(false);
 
     public bool IsConfigured =>
         _options.Caching.Garnet.EnableEmbeddedServer || _options.Caching.Redis.Enabled;
