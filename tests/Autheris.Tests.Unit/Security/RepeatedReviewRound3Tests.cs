@@ -124,7 +124,7 @@ public sealed class RepeatedReviewRound3Tests
             }
         });
 
-        var service = new GovernedSqlExecutionService(
+        var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             options, executionGuard: GovernedTestSupport.Guard,
             auditLogRepository: Substitute.For<IAuditLogRepository>(),
             tableRepository: metaRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(metaRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(options, secretProvider),
@@ -249,7 +249,7 @@ public sealed class RepeatedReviewRound3Tests
         var accessResolver = new DefaultCrossDomainAccessResolver(
             Substitute.For<IConsentRepository>(), Substitute.For<IConsentResolutionService>(), global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, options: options, rebacEvaluator: rebac);
 
-        await DuckDbOlapEndpoints.HandleOlapQueryAsync(
+        await Autheris.Tests.Unit.TestDoubles.OlapEndpointTestHost.HandleAsync(
             context, engine, metadataRepo, connectorRegistry, accessResolver, masking, options, NullLoggerFactory.Instance);
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
@@ -294,7 +294,7 @@ public sealed class RepeatedReviewRound3Tests
         var masking = Substitute.For<IColumnMaskingProvider>();
         var options = Options.Create(new GatewayOptions { DuckDbOlap = new DuckDbOlapOptions { Enabled = true } });
 
-        await DuckDbOlapEndpoints.HandleOlapQueryAsync(
+        await Autheris.Tests.Unit.TestDoubles.OlapEndpointTestHost.HandleAsync(
             context, engine, metadataRepo, connectorRegistry, accessResolver, masking, options, NullLoggerFactory.Instance);
 
         // Anti-oracle: returns 403 Forbidden with generic access denied (not 404 Table Not Found)

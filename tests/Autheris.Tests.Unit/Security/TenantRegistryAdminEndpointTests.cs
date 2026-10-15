@@ -35,7 +35,7 @@ public sealed class TenantRegistryAdminEndpointTests
         registry.ResolveCollisionAsync(new TenantId("Acme"), Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(Resolved("acme"));
         var audit = Substitute.For<IAuditLogRepository>();
 
-        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("Acme", null, Context("ClusterAdmin"), registry, audit, default);
+        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("Acme", null, Context("ClusterAdmin"), registry, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(audit), default);
 
         Status(result).ShouldBe(StatusCodes.Status200OK);
         await audit.Received(1).RecordAuditEventAsync(
@@ -51,7 +51,7 @@ public sealed class TenantRegistryAdminEndpointTests
         var registry = Substitute.For<ITenantRegistry>();
         var audit = Substitute.For<IAuditLogRepository>();
 
-        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("Acme", null, Context(role), registry, audit, default);
+        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("Acme", null, Context(role), registry, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(audit), default);
 
         Status(result).ShouldBe(StatusCodes.Status403Forbidden);
         await registry.DidNotReceiveWithAnyArgs().ResolveCollisionAsync(default, default, default);
@@ -62,7 +62,7 @@ public sealed class TenantRegistryAdminEndpointTests
     {
         var registry = Substitute.For<ITenantRegistry>();
 
-        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("not valid!", null, Context("ClusterAdmin"), registry, Substitute.For<IAuditLogRepository>(), default);
+        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("not valid!", null, Context("ClusterAdmin"), registry, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), default);
 
         Status(result).ShouldBe(StatusCodes.Status400BadRequest);
         await registry.DidNotReceiveWithAnyArgs().ResolveCollisionAsync(default, default, default);
@@ -76,7 +76,7 @@ public sealed class TenantRegistryAdminEndpointTests
             .Returns(new ValueTask<TenantCollisionResolution>(new TenantCollisionResolution(TenantCollisionResolutionStatus.NotFound, null)));
         var audit = Substitute.For<IAuditLogRepository>();
 
-        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("Acme", null, Context("ClusterAdmin"), registry, audit, default);
+        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("Acme", null, Context("ClusterAdmin"), registry, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(audit), default);
 
         Status(result).ShouldBe(StatusCodes.Status404NotFound);
         await audit.DidNotReceiveWithAnyArgs().RecordAuditEventAsync(default!, default);
@@ -94,7 +94,7 @@ public sealed class TenantRegistryAdminEndpointTests
         audit.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>())
             .Returns(call => call.ArgAt<CancellationToken>(1).IsCancellationRequested ? Task.FromCanceled(call.ArgAt<CancellationToken>(1)) : Task.CompletedTask);
 
-        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("ACME", null, Context("ClusterAdmin"), registry, audit, cts.Token);
+        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("ACME", null, Context("ClusterAdmin"), registry, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(audit), cts.Token);
 
         Status(result).ShouldBe(StatusCodes.Status200OK);
         await audit.Received(1).RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Is<CancellationToken>(t => !t.CanBeCanceled));
@@ -109,7 +109,7 @@ public sealed class TenantRegistryAdminEndpointTests
         registry.ResolveCollisionAsync(new TenantId("ACME"), Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(Resolved("acme"));
         var audit = Substitute.For<IAuditLogRepository>();
 
-        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("ACME", null, Context("ClusterAdmin"), registry, audit, default);
+        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("ACME", null, Context("ClusterAdmin"), registry, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(audit), default);
 
         Status(result).ShouldBe(StatusCodes.Status200OK);
         await audit.Received(1).RecordAuditEventAsync(
@@ -126,7 +126,7 @@ public sealed class TenantRegistryAdminEndpointTests
         registry.ResolveCollisionAsync(Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(Resolved("acme"));
 
         await TenantRegistryAdminEndpoints.ResolveCollisionAsync(
-            "ACME", new TenantRegistryAdminEndpoints.ResolveCollisionRequest("acme"), Context("ClusterAdmin"), registry, Substitute.For<IAuditLogRepository>(), default);
+            "ACME", new TenantRegistryAdminEndpoints.ResolveCollisionRequest("acme"), Context("ClusterAdmin"), registry, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), default);
 
         await registry.Received(1).ResolveCollisionAsync(new TenantId("ACME"), "acme", Arg.Any<CancellationToken>());
     }
@@ -140,7 +140,7 @@ public sealed class TenantRegistryAdminEndpointTests
         var audit = Substitute.For<IAuditLogRepository>();
 
         var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync(
-            "ACME", new TenantRegistryAdminEndpoints.ResolveCollisionRequest("Acme"), Context("ClusterAdmin"), registry, audit, default);
+            "ACME", new TenantRegistryAdminEndpoints.ResolveCollisionRequest("Acme"), Context("ClusterAdmin"), registry, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(audit), default);
 
         Status(result).ShouldBe(StatusCodes.Status409Conflict);
         await audit.DidNotReceiveWithAnyArgs().RecordAuditEventAsync(default!, default);

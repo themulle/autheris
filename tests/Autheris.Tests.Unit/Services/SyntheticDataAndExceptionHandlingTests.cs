@@ -106,7 +106,7 @@ public sealed class SyntheticDataAndExceptionHandlingTests
         {
             WebSql = new WebSqlOptions { Enabled = true, DefaultDataSourceName = "crm_db", AllowedDataSources = ["crm_db"] }
         });
-        var service = new GovernedSqlExecutionService(
+        var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             options, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
             consentResolution: _resolutionService,
             consentRepository: _consentRepo,

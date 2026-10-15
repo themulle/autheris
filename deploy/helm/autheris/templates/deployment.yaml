@@ -95,4 +95,9 @@ spec:
               mountPath: /tmp
       volumes:
         - name: tmp
+          {{- if .Values.tmpVolume.sizeLimit }}
+          emptyDir:
+            sizeLimit: {{ .Values.tmpVolume.sizeLimit | quote }}
+          {{- else }}
           emptyDir: {}
+          {{- end }}

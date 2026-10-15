@@ -3,7 +3,7 @@
 # Multi-protocol Enterprise GraphQL Gateway with Embedded Microsoft Garnet Cache
 # ==============================================================================
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:d5633778c754e89a386882eddf8dbee6942447a8a4b8267c19cf1e1158d0b0ac AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.13@sha256:d5633778c754e89a386882eddf8dbee6942447a8a4b8267c19cf1e1158d0b0ac AS runtime
 WORKDIR /app
 
 # Standard-Konfiguration (8080 HTTP)

@@ -11,6 +11,7 @@ using Autheris.Application.Mesh.Services;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Security.Rebac.Services;
 using Autheris.Application.Services;
+using Autheris.Application.State;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Rebac;
@@ -27,6 +28,11 @@ public static class GatewaySecurityServiceExtensions
         GatewayOptions gatewayOptions,
         IHostEnvironment? environment = null)
     {
+        services.AddOptions<CasbinDecisionCacheOptions>()
+            .BindConfiguration(CasbinDecisionCacheOptions.SectionName)
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<CasbinDecisionCacheOptions>, CasbinDecisionCacheOptionsValidator>();
+
         // Casbin ABAC Engine
         services.AddSingleton<IPolicyEnforcementService>(sp =>
         {
@@ -64,7 +70,11 @@ public static class GatewaySecurityServiceExtensions
                 rlsGen,
                 logger,
                 // WP-X0l: lets the Casbin decisions carry their row filters as typed policies.
-                sp.GetService<Autheris.Application.Policy.RowPolicyFactory>());
+                sp.GetService<Autheris.Application.Policy.RowPolicyFactory>(),
+                sp.GetRequiredService<IOptions<CasbinDecisionCacheOptions>>().Value,
+                TimeProvider.System,
+                sp.GetService<IDistributedClusterStateProvider>(),
+                sp.GetService<IClusterStateTopology>());
             if (options.Casbin.Enabled && !string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
             {
                 service.LoadPolicyFromFile(options.Casbin.PolicyPath, options.Casbin.WatchPolicyFile);

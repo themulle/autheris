@@ -217,7 +217,7 @@ public sealed class DataSourceAllowlistSrH06Tests
             DuckDbOlap = new DuckDbOlapOptions { Enabled = true }
         });
 
-        await DuckDbOlapEndpoints.HandleOlapQueryAsync(
+        await Autheris.Tests.Unit.TestDoubles.OlapEndpointTestHost.HandleAsync(
             httpContext, Substitute.For<IDuckDbOlapEngine>(), repo, registry, access,
             Substitute.For<IColumnMaskingProvider>(), options, NullLoggerFactory.Instance);
 

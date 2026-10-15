@@ -35,6 +35,10 @@ podSecurityContext:
   seccompProfile:
     type: RuntimeDefault
 
+# Writable /tmp emptyDir (also holds async job result files). Set sizeLimit, e.g. "2Gi", to bound it.
+tmpVolume:
+  sizeLimit: ""
+
 securityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
@@ -93,6 +97,43 @@ gateway:
   shutdownTimeoutSeconds: 30
   aspnetcoreEnvironment: "Production"
 
+  # SEC2-09: when true, rendering fails unless exactly one authentication provider is fully configured, forwardAuth has
+  # trusted proxies and tenant-column enforcement is on (enabled in values.production.yaml).
+  production:
+    enforceRequiredSettings: false
+
+  # Authentication providers (Gateway:Authentication:*). Enable exactly one in production.
+  authentication:
+    entraId:
+      enabled: false
+      tenantId: ""
+      clientId: ""
+      audience: ""
+    adfs:
+      enabled: false
+      authority: ""
+      audience: ""
+    forwardAuth:
+      enabled: false
+      # Gateway:Authentication:ForwardAuth:TrustedProxies (IP addresses of the authenticating reverse proxy).
+      trustedProxies: []
+      # Gateway:Authentication:ForwardAuth:TrustedNetworks. Must be set explicitly in production; when empty (non-production
+      # only) gateway.security.trustedNetworks is used.
+      trustedNetworks: []
+      # Shared secret between proxy and gateway (>= 32 bytes). Reference an existing Secret, or a Key Vault reference.
+      sharedSecret:
+        existingSecret: ""
+        key: "sharedSecret"
+        keyVaultRef: ""
+    kerberos:
+      enabled: false
+
+  # Gateway:DataSources:RequireTenantColumn: refuse tables without a tenant column (fail closed).
+  dataSources:
+    requireTenantColumn: false
+    # Explicit opt-out for production: accept shared tables without a tenant column.
+    requireTenantColumnExemption: false
+
   # Gateway:Hosting:AllowedHosts (SR-L-02): Host values the gateway accepts and the CSRF Origin allow-list.
   # Required outside Development (the gateway refuses to start without it). When empty, the ingress hosts are used.
   # Entries: exact host, host:port, or *.suffix. /health* is exempt, so pod-IP probes keep working.
@@ -120,6 +161,7 @@ gateway:
   security:
     hmacSecretExistingSecret: "autheris-security-secrets"
     hmacSecretKey: "hmacKey"
+    # Non-production fallback for Gateway:Authentication:ForwardAuth:TrustedNetworks when forwardAuth.trustedNetworks is empty.
     trustedNetworks:
       - "10.0.0.0/8"
       - "172.16.0.0/12"
@@ -155,7 +197,8 @@ monitoring:
     scheme: http
     auth:
       # bearer: Prometheus sends "Authorization: Bearer <token>" read from tokenSecret.
-      #         The token must be accepted by the gateway's JWT bearer authentication (/metrics requires authorization).
+      #         The token must be accepted by the gateway's JWT bearer authentication and carry the MetricsScraper (or
+      #         ClusterAdmin) role: /metrics requires the MetricsScrape policy (SEC2-09).
       # mtls:   client certificate via tlsConfig (provide tlsConfig below).
       # none:   unauthenticated scrape (not allowed when requireAuth is true).
       type: bearer

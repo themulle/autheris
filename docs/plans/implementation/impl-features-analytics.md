@@ -203,9 +203,82 @@ Gate 0 (G-12) settled: no k-guard on free-form SQL in v1; differential privacy o
 
 | ID | Question | Recommendation |
 |---|---|---|
-| D-1 (G-14) | Do the bodies of issues #28/#37/#38 contain requirements beyond `features.md` (e.g. nested aggregates, `having`, `count distinct`, specific response shape)? | **Blocking:** owner review before Wave 4. |
+| D-1 (G-14) | Do the bodies of issues #28/#37/#38 contain requirements beyond `features.md` (e.g. nested aggregates, `having`, `count distinct`, specific response shape)? | **Blocking:** owner review before Wave 4. Reconciliation proposal in section 7 (awaiting owner decision). |
 | D-3 | Suppress or merge into `Other`? | Default `Suppress`; offer `MergeToOther` as opt-in, since merging leaks the sum of suppressed groups and is easy to get wrong. |
 | D-4 | Expose `suppressedGroupsCount` by default? | Yes (the issue requires it), configurable off per dataset because the count itself leaks "there are small groups". |
 | D-5 | Treat `min`/`max` as disclosive and require a larger k (e.g. 2k) or disallow them below a threshold? | Accept the residual risk in v1 and document it; add `Privacy.MinMaxMultiplier` later if a regulated dataset needs it. |
 | D-6 | If WP-FEAT-05 is built: per-cell or per-query budget accounting, and cache identical noisy answers? | Per-query accounting with cached identical answers per (client, query shape, day). |
 | D-8 | Stage 3: which BI clients and protocols are actually required (Trino JDBC for Superset/Tableau, Flight SQL for Python only)? | Do 07a (conformance of what already exists) first; defer gRPC Flight SQL (07c) until a named client requires it; fix `f-data-04` wording either way. |
+
+---
+
+## 7. G-14 Reconciliation Proposal
+
+**Status: proposal, awaiting owner decision.** G-14 remains open until the owner accepts, amends or rejects the proposed decision text in 7.5. Nothing in this section changes the WPs above yet.
+
+**Sources:** issue bodies of #28, #37 and #38 as published on GitHub on 2026-10-14 (no comments on any of the three), this plan, `features.md` and roadmap decisions G-6/G-12. Code spot-checks on the worktree baseline.
+
+**Legend:** *Covered* = a WP meets the requirement; *Partial* = a WP addresses it with a gap; *Missing* = no WP; *Plan exceeds* = plan adds scope or restrictions the issue does not ask for; *Conflict* = plan or a gate decision contradicts the issue.
+
+### 7.1 Issue #28: Aggregation in GraphQL
+
+| # | Requirement in issue | Plan coverage | Assessment | Recommendation |
+|---|---|---|---|---|
+| A-1 | `count`, `sum`, `avg`, `min`, `max` and grouping in GraphQL | WP-FEAT-03 root `<queryField>_aggregate` with `groupBy` | Covered | None. |
+| A-2 | Same row filters and masks as row queries | WP-FEAT-03 (AST compiler injects row policy, tenant and consent before `GROUP BY`) | Covered | None. |
+| A-3 | Aggregate and group only over clear columns | WP-FEAT-03 validation; compiler guard `AGGREGATION_ON_MASKED_COLUMN` (WP-FEAT-02, delivered) | Covered | None. |
+| A-4 | Aggregations have their own cost in the cost model | WP-FEAT-03 fixed higher weight per aggregate field in `QueryCostAnalyzerRule` | Covered | Name the weight in the WP (configurable in `Analytics:Aggregation`). |
+| A-5 | Done when: two **persons** with different row filters get different, correct grouped sums | WP-FEAT-03 integration test uses two **tenants** | Partial | Adjust plan: add an integration test with two principals in the same tenant whose RLS predicates differ. |
+| A-6 | Done when: aggregating over a masked column is rejected | WP-FEAT-03 TDD `..._AggregateOnMaskedColumn_...` | Covered | None. |
+| A-7 | (not in issue) | `COUNT(DISTINCT)`, `having`, nested-relation aggregates and cross-source aggregates excluded; limits `MaxGroupByColumns`/`MaxAggregates`/`MaxGroups`; fail-closed on truncation; result wrapper `<T>_aggregate_result` | Plan exceeds (restrictions) | Keep in plan; record the exclusions in the issue as "not in v1". |
+| A-8 | (not in issue) | "Do not release #28 without #37" | Plan exceeds | Keep; note the coupling in #28. |
+
+### 7.2 Issue #37: Minimum group size for aggregated results
+
+| # | Requirement in issue | Plan coverage | Assessment | Recommendation |
+|---|---|---|---|---|
+| K-1 | Minimum group size per table (or per measure), **set by the data owner** | WP-FEAT-04 `Analytics:Privacy:Datasets` in operator configuration (options file); `meta.minimum_group_size` from dbt via WP-FEAT-06 | Partial | Owner question Q-2. Proposal: v1 keeps options plus dbt `meta` (the data owner's own artefact); a governance-API or catalog setting is deferred to a follow-up WP on the versioned governance store (WP-ARC-B-12). |
+| K-2 | Every aggregation path: GraphQL, **SQL** and metric queries | GraphQL (FEAT-03/04) and metrics (FEAT-06b) covered; free-form SQL excluded by **G-12**; Stage 2 metric queries over SQL/Trino not planned (see M-6) | **Conflict** | Owner question Q-1. Proposal: confirm G-12 (no k-guard on free-form SQL in v1, a parser cannot prove group sizes for arbitrary SQL) and amend #37 to say so explicitly; document that row-level SQL access to a k-protected table is a separate grant (consistent with K-6). Optional follow-up: deny free-form SQL on tables with a configured threshold unless the caller holds row-level access. |
+| K-3 | Suppress or merge into "other", as configured | WP-FEAT-04 `SuppressionMode` (`Suppress` default, `MergeToOther` opt-in) | Covered | None. |
+| K-4 | Count taken over rows the caller may see, after row filters | WP-FEAT-04 hidden `COUNT(*) AS __n` in the governed statement, row policy applied before grouping | Covered | None. |
+| K-5a | Protection against filters narrowing a group below the threshold | T-2: guard evaluates each filtered group, including the global group | Covered | None. |
+| K-5b | Protection against differencing via totals for suppressed groups | T-4: no grand total in the same response when a group is suppressed; cross-query complement (T-3) only mitigated (identifier filters, negated filters, rate limits); full defence only with optional WP-FEAT-05 (DP noise, gated by G-12) | Partial | Adjust issue: state that the guarantee covers a single response plus listed mitigations, and that cross-query differencing is a documented residual risk unless DP noise is enabled. Adjust plan: add the issue's exact "done when" scenario (total must not allow computing the suppressed group) as an integration test. |
+| K-6 | Response marks that groups were suppressed, without revealing their values | `suppressedGroupsCount` in the result wrapper; D-4 lets operators switch the count off | Partial | Adjust plan: always return a boolean `suppressed` flag (cannot be switched off); only the exact count is configurable. |
+| K-7 | Row-level access stays a separate consent; threshold applies to aggregates | T-7: guard protects aggregate channels only; row access governed by RLS/consent | Covered | None. |
+| K-8 | Done when: threshold 5, groups < 5 suppressed and marked; filtered group of 3 returns no value; total does not reveal the suppressed group | Integration test (1/4/20 departments) covers the first part | Partial | Adjust plan: add the filtered-group and total scenarios to the WP-FEAT-04 integration test. |
+| K-9 | (not in issue) | `MIN`/`MAX` residual risk (T-5, D-5); rejection of filters on identifier-like columns and negated filters; reserved `__n`; cache key includes k | Plan exceeds | Keep; the filter restrictions are visible API behaviour and should be listed in #37. |
+
+### 7.3 Issue #38: dbt Semantic Layer
+
+| # | Requirement in issue | Plan coverage | Assessment | Recommendation |
+|---|---|---|---|---|
+| M-1 | **Spike first:** does MetricFlow-compiled SQL (simple, ratio, cumulative, entity joins) pass the governed SQL path and rewriter unchanged; short report | No spike WP. WP-FEAT-06 builds an own `MetricQueryCompiler` on `IGovernedAggregationService` instead of MetricFlow | **Missing / conflict of approach** | Owner question Q-3. Proposal: add WP-FEAT-06s (spike, S, 1-2 days) before 06b: run a fixed set of MetricFlow-generated statements through `ISqlEngine.Compile` and the governed pipeline, report pass/fail per metric type. Decide own compiler vs MetricFlow from the result. |
+| M-2 | Stage 1: import `semantic_manifest.json` | Delivered (`POST /api/extensions/dbt/semantic-manifest`, `DbtSemanticManifestIngestionService`) | Covered | None. |
+| M-3 | Stage 1: metrics, dimensions, entities, **time granularities** in the catalog with **description, unit, format** and groupable dimensions | `DbtMetric` has description and label but no unit or format; time grain only as an opaque `TypeParams` string; `saved_queries` not imported | Partial | Adjust plan: extend WP-FEAT-06a with unit/format (from metric `meta` or `config`), parsed time granularity per time dimension and groupable dimensions per metric. `saved_queries` deferred (Q-5). |
+| M-4 | Stage 1: exposed via GraphQL and MCP | MCP `list_metrics`/`describe_metric` exist but are unregistered (confirmed: no reference to `McpSemanticTools` outside its own file in `src`); no metric catalog in GraphQL; REST `GET /api/extensions/dbt/metrics` exists | Partial | Adjust plan: WP-FEAT-06a registers the MCP tools **and** adds GraphQL catalog fields (`metrics`, `metric(name)`). Also apply the anti-oracle visibility filter to the REST endpoint, which today lists every metric to any authenticated caller without tenant or table-access filtering. |
+| M-5 | Stage 2: one query shape (metrics, group by dimensions, filters on dimensions, time grain, order, limit) via GraphQL and MCP `query_metrics` | WP-FEAT-06b | Covered | None. |
+| M-6 | Stage 2: metric queries also via **SQL/Trino protocol for BI tools** | WP-FEAT-07b exposes semantic models as catalog views; metric calculation stays in `query_metrics`; k-guard does not apply to free SQL (G-12) | Partial / conflict with K-2 | Owner question Q-4. Proposal: defer SQL/Trino metric queries to Stage 3 work with the named BI clients (G-12, D-8); amend #38 Stage 2 to GraphQL and MCP. |
+| M-7 | Stage 2: cumulative metrics and joins via entities ("typical metrics") | Simple, ratio and derived only; cumulative, conversion and cross-model joins rejected with `METRIC_TYPE_NOT_SUPPORTED` | Partial | Decide after the spike (M-1); until then amend the issue to the plan's subset. |
+| M-8 | Stage 2: row filters on base rows; masked-column metrics rejected; minimum group sizes; cost limits and audit | WP-FEAT-06b via `IGovernedAggregationService` (RLS, masking, guard, `METRIC_QUERY` audit, MCP guardrails) | Covered | Make the cost weight for `queryMetrics`/`query_metrics` explicit in WP-FEAT-06b. |
+| M-9 | Stage 2 done when: two persons with different row filters, masked-column rejection, small group suppressed | WP-FEAT-06b tests: two-tenant manifest, masked measure | Partial | Same adjustment as A-5 (two principals, same tenant, different RLS) plus a suppression assertion. |
+| M-10 | **Stage 3 = governance per metric:** consent per metric in addition to per table | Missing. The plan's "Stage 3" is headless BI connectivity (WP-FEAT-07) | **Missing / stage naming conflict** | Adjust plan: rename WP-FEAT-07 to "headless BI connectivity" (not Stage 3) and add WP-FEAT-08 "per-metric governance" for M-10..M-12. |
+| M-11 | Stage 3: a metric may be released while the underlying rows are not | WP-FEAT-06 security rule: a metric whose underlying table is denied behaves as not found | **Conflict** | Owner question Q-6. Proposal: keep the deny-as-not-found default and let WP-FEAT-08 add an explicit per-metric grant that authorizes the aggregate even when row reads are denied; the grant still requires the k-guard and never releases masked measures. |
+| M-12 | Stage 3: audit names the metric; metric definition version (dbt run) in responses | Audit `METRIC_QUERY` with metric names covered by WP-FEAT-06b; manifest version not tracked | Partial | WP-FEAT-08: store manifest version (dbt `invocation_id`/generation time) in the persisted catalog and return it in metric responses. |
+| M-13 | (not in issue) | Trino client conformance (07a), gRPC Arrow Flight SQL server (07c) | Plan exceeds | Keep 07a as a carry-over quality item; defer 07c until a named client requires it (D-8). Neither should be tracked under #38. |
+| M-14 | (not in issue) | Tenant-aware, persisted semantic catalog (G-12) | Plan exceeds (required by isolation) | Keep; it is a prerequisite for M-4 and M-8. |
+
+### 7.4 Owner Questions
+
+| ID | Question | Proposed answer |
+|---|---|---|
+| Q-1 | #37 requires the guard on SQL; G-12 excludes free-form SQL. Which prevails? | G-12 prevails for v1; amend #37. |
+| Q-2 | Must data owners set thresholds at runtime (API/UI), or are configuration plus dbt `meta` sufficient for v1? | Configuration plus dbt `meta` in v1; runtime setting as a follow-up. |
+| Q-3 | MetricFlow as the compiler (issue) or an own restricted compiler (plan)? | Run the spike first; default to the own compiler if MetricFlow SQL needs rewriting to pass the governed path. |
+| Q-4 | Are metric queries over the SQL/Trino protocol required in Stage 2? | No; move them to the BI connectivity work after the target clients are named. |
+| Q-5 | Is `saved_queries` import required? | Defer; not in any "done when" criterion. |
+| Q-6 | May a metric be released while its rows are denied (per-metric consent)? | Yes, but only through an explicit per-metric grant in WP-FEAT-08; default stays deny-as-not-found. |
+| Q-7 | Should the plan's restrictions (no `COUNT(DISTINCT)`, no `having`, no identifier or negated filters on aggregates) be written into the issues? | Yes, as "not in v1" notes. |
+
+### 7.5 Proposed Decision Text (for the owner)
+
+> **G-14 (proposed):** The WP-FEAT plans are accepted as the implementation basis for #28, #37 and #38 with these amendments: (1) WP-FEAT-03, WP-FEAT-04 and WP-FEAT-06b add integration tests for two principals in the same tenant with different row filters and for the #37 "done when" scenarios (filtered group of 3, total not revealing a suppressed group). (2) WP-FEAT-04 always returns a boolean `suppressed` flag; only the exact count is configurable. (3) A MetricFlow spike (WP-FEAT-06s) runs before WP-FEAT-06b and decides the compiler approach. (4) WP-FEAT-06a adds unit, format and time granularity to the semantic catalog, exposes it via GraphQL and MCP, and filters the REST metric listing by visibility. (5) WP-FEAT-07 is renamed "headless BI connectivity" and is no longer tracked as #38 Stage 3; a new WP-FEAT-08 covers per-metric consent and the manifest version in responses. (6) G-12 is confirmed: no k-guard on free-form SQL in v1; SQL/Trino metric queries are deferred to the BI connectivity work. The issues are updated accordingly: #37 states the SQL exclusion and the cross-query differencing residual risk, #38 states the Stage 2 metric subset and the deferral of SQL/Trino metric queries, and #28/#37 list the v1 restrictions.

@@ -4,7 +4,7 @@
 # ==============================================================================
 
 # --- Stage 1: Build & Publish ---
-FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:0d99ebf1ccad15037b5c98c9fe8979d6b8dbac23812feae2277a0b277b5c5ffa AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.402@sha256:0d99ebf1ccad15037b5c98c9fe8979d6b8dbac23812feae2277a0b277b5c5ffa AS build
 WORKDIR /
 
 # Copy project files first for optimal docker layer caching
@@ -31,7 +31,7 @@ WORKDIR /gql/src/Autheris.Api
 RUN dotnet publish -c Release -o /app/publish --no-restore -p:AutherisIncludeTestAuth=false
 
 # --- Stage 2: Runtime Image ---
-FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:d5633778c754e89a386882eddf8dbee6942447a8a4b8267c19cf1e1158d0b0ac AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.13@sha256:d5633778c754e89a386882eddf8dbee6942447a8a4b8267c19cf1e1158d0b0ac AS runtime
 WORKDIR /app
 
 # Install curl for robust container health checks

@@ -10,6 +10,7 @@ using Autheris.Domain.Common;
 /// </summary>
 public interface IMssqlChangeTrackingPoller
 {
-    Task<int> PollTableChangesAsync(TableIdentifier table, CancellationToken ct = default);
+    /// <summary>Polls one table and publishes its changes. <paramref name="fencingToken"/> is the lease token guarding the watermark commit.</summary>
+    Task<int> PollTableChangesAsync(TableIdentifier table, long fencingToken, CancellationToken ct = default);
     Task<long?> GetCurrentDbVersionAsync(CancellationToken ct = default);
 }

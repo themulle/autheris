@@ -48,6 +48,29 @@ jobs:
           helm template autheris deploy/helm/autheris > /dev/null
           helm template autheris deploy/helm/autheris --set governanceMigrationJob.enabled=true > /dev/null
 
+  # SEC2-09: production Helm render guards and container hardening posture (deploy/scripts/verify-hardening.sh).
+  helm-render:
+    name: Helm Render & Hardening Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.0
+
+      - name: Verify hardening and Helm render guards
+        run: |
+          command -v helm
+          bash deploy/scripts/verify-hardening.sh
+
   # SQL compiler evidence gate (plan 9.5, 16.5). It must run on the merge result: a pull_request run checks out
   # refs/pull/N/merge by default, so no explicit `ref:` is set (a test in tests/Autheris.Tests.SqlCompilerGate asserts that).
   # There is deliberately no path filter (policy producers live outside src/TrinoSqlEngine) and no retry of any kind

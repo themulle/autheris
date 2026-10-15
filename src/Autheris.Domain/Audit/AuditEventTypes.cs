@@ -29,6 +29,7 @@ public static class AuditEventTypes
     public const string WebSqlCrossSourceSourceRead = "WEBSQL_CROSS_SOURCE_SOURCE_READ";
     public const string WebSqlDmlExecuted = "WEBSQL_DML_EXECUTED";
     public const string WebSqlDmlRejected = "WEBSQL_DML_REJECTED";
+    public const string WebSqlDmlFailed = "WEBSQL_DML_FAILED";
     public const string QueryExecutionError = "QUERY_EXECUTION_ERROR";
     public const string StreamSubscribe = "STREAM_SUBSCRIBE";
     public const string EgressShadowCopy = "EGRESS_SHADOW_COPY";
@@ -75,4 +76,10 @@ public static class AuditEventTypes
     public const string DocIngestionBundleApplied = "DOC_INGESTION_BUNDLE_APPLIED";
     public const string DocIngestionDocumentApplied = "DOC_INGESTION_DOCUMENT_APPLIED";
     public const string DocDiscoveryRead = "DOC_DISCOVERY_READ";
+
+    // ReBAC relationship administration
+    public const string RebacTupleAdded = "REBAC_TUPLE_ADDED";
+    public const string RebacTupleRemoved = "REBAC_TUPLE_REMOVED";
+    public const string RebacInvalidationFailed = "REBAC_INVALIDATION_FAILED";
+    public const string RebacTupleSeed = "REBAC_TUPLE_SEED";
 }

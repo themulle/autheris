@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Autheris.Application.Interfaces;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -53,6 +54,7 @@ public sealed class RedisEventBus : IEventBus, IDisposable
         }
         catch (Exception ex)
         {
+            GatewayDiagnostics.EventBusPublishFailedCounter.Add(1, new KeyValuePair<string, object?>("message_type", typeof(T).Name));
             _logger.LogError(ex, "Failed to publish message of type {Type} to Redis channel {Channel}", typeof(T).Name, channel);
             throw;
         }
@@ -122,6 +124,7 @@ public sealed class RedisEventBus : IEventBus, IDisposable
                 }
                 catch (Exception ex)
                 {
+                    GatewayDiagnostics.EventBusHandlerFailedCounter.Add(1, new KeyValuePair<string, object?>("message_type", typeof(T).Name));
                     _logger.LogError(ex, "Error processing Redis subscription event for channel {Channel}", channel);
                 }
             });

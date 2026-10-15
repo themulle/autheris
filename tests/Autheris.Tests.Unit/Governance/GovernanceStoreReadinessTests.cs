@@ -44,6 +44,10 @@ public sealed class GovernanceStoreReadinessTests
         "TenantTryGet",
         "RecordAuditTierA",
         "RecordAuditTierB",
+        "WebhookOutboxClaim",
+        "WebhookOutboxCount",
+        "CdcWatermarkGet",
+        "CdcWatermarkAdvance",
     };
 
     private static Task Invoke(SqliteGovernanceRepository repository, string operation) => operation switch
@@ -55,6 +59,10 @@ public sealed class GovernanceStoreReadinessTests
         "TenantTryGet" => repository.TryGetAsync(TenantId.LegacySingleTenant, CancellationToken.None).AsTask(),
         "RecordAuditTierA" => repository.RecordAuditEventAsync(new AuditLogEntry { EventType = "ADMIN_ACTION", ActorSid = new Sid("S-1-5-21-A"), TargetTable = "t" }),
         "RecordAuditTierB" => repository.RecordAuditEventAsync(new AuditLogEntry { EventType = AuditEventTypes.TableQuery, ActorSid = new Sid("S-1-5-21-A"), TargetTable = "t" }),
+        "WebhookOutboxClaim" => ((Autheris.Application.Webhooks.IWebhookOutbox)repository).ClaimBatchAsync(5, DateTimeOffset.UtcNow, TimeSpan.FromMinutes(1), "worker"),
+        "WebhookOutboxCount" => ((Autheris.Application.Webhooks.IWebhookOutbox)repository).CountPendingAsync(),
+        "CdcWatermarkGet" => ((ICdcWatermarkRepository)repository).GetAsync("cdc", "d", "s", "t"),
+        "CdcWatermarkAdvance" => ((ICdcWatermarkRepository)repository).TryAdvanceAsync("cdc", "d", "s", "t", 1, 1),
         _ => throw new ArgumentOutOfRangeException(nameof(operation)),
     };
 

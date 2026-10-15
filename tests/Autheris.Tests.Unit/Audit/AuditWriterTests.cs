@@ -57,7 +57,39 @@ public sealed class AuditWriterTests
         var (writer, repo) = Create();
         repo.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).ThrowsAsync(new OperationCanceledException());
 
-        await Should.ThrowAsync<OperationCanceledException>(() => writer.RecordRequiredAsync(Entry()));
+        // An OperationCanceledException that does not stem from the caller's token is a store fault, not a cancellation.
+        await Should.ThrowAsync<AuditUnavailableException>(() => writer.RecordRequiredAsync(Entry()));
+    }
+
+    [Fact]
+    public async Task RecordRequired_WhenCallerTokenCancelled_Rethrows()
+    {
+        var (writer, repo) = Create();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        repo.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).ThrowsAsync(new OperationCanceledException(cts.Token));
+
+        await Should.ThrowAsync<OperationCanceledException>(() => writer.RecordRequiredAsync(Entry(), cts.Token));
+    }
+
+    [Fact]
+    public async Task RecordBestEffort_WhenStoreTimesOutWithoutCallerCancellation_DoesNotThrow()
+    {
+        var (writer, repo) = Create();
+        repo.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).ThrowsAsync(new OperationCanceledException());
+
+        await writer.RecordBestEffortAsync(Entry());
+    }
+
+    [Fact]
+    public async Task RecordBestEffort_WhenCallerTokenCancelled_Rethrows()
+    {
+        var (writer, repo) = Create();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        repo.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).ThrowsAsync(new OperationCanceledException(cts.Token));
+
+        await Should.ThrowAsync<OperationCanceledException>(() => writer.RecordBestEffortAsync(Entry(), cts.Token));
     }
 
     [Fact]

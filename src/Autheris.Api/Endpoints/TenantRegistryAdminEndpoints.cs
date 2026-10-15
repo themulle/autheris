@@ -3,6 +3,7 @@ namespace Autheris.Api.Endpoints;
 using System.Text.Json;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
+using Autheris.Application.Audit;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -25,7 +26,7 @@ public static class TenantRegistryAdminEndpoints
             string tenantId,
             HttpContext context,
             ITenantRegistry registry,
-            IAuditLogRepository audit,
+            IAuditWriter audit,
             CancellationToken ct,
             [Microsoft.AspNetCore.Mvc.FromBody] ResolveCollisionRequest? body = null) => ResolveCollisionAsync(tenantId, body, context, registry, audit, ct))
             .RequireAuthorization(GatewayPolicies.ClusterAdmin)
@@ -40,7 +41,7 @@ public static class TenantRegistryAdminEndpoints
     /// <param name="tenantId">The exact spelling to keep as the tenant of its group.</param>
     /// <param name="body">Optional; <see cref="ResolveCollisionRequest.ExpectedCurrent"/> makes the change conditional on the group's current spelling.</param>
     internal static async Task<IResult> ResolveCollisionAsync(
-        string tenantId, ResolveCollisionRequest? body, HttpContext context, ITenantRegistry registry, IAuditLogRepository audit, CancellationToken ct)
+        string tenantId, ResolveCollisionRequest? body, HttpContext context, ITenantRegistry registry, IAuditWriter audit, CancellationToken ct)
     {
         if (!EndpointSecurity.IsCanonicalClusterAdmin(context.User))
         {
@@ -73,7 +74,7 @@ public static class TenantRegistryAdminEndpoints
             return Results.Conflict(new { error = "The group holds another spelling than expectedCurrent; nothing was changed.", current = resolution.PreviousTenantId });
         }
 
-        await audit.RecordAuditEventAsync(new AuditLogEntry
+        await audit.RecordAsync(new AuditLogEntry
         {
             TenantId = actorTenant,
             EventType = AuditEventTypes.TenantCollisionResolved,

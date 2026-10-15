@@ -53,4 +53,10 @@ public interface IGovernedTableReadPlanner
     /// The single result column holds the total.
     /// </summary>
     PlannedTableRead PlanCount(TableReadIntent intent, TableMetadata metadata, TableAccessDecision decision);
+
+    /// <summary>
+    /// The text of an unfiltered, unpaged <c>SELECT *</c> over the table (Arrow export of a whole table). Like every planner text it is
+    /// Trino text for the governed compile path, which applies the policy.
+    /// </summary>
+    string BuildFullTableSelect(TableIdentifier table);
 }

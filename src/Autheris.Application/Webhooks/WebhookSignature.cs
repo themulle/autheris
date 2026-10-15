@@ -18,9 +18,6 @@ public static class WebhookSignature
     /// <summary>Header carrying the ISO-8601 (round-trip) timestamp covered by the signature.</summary>
     public const string TimestampHeader = "X-Autheris-Timestamp";
 
-    /// <summary>Legacy body-only signature header (deprecated, see <c>Gateway:Webhooks:EmitLegacySignature</c>).</summary>
-    public const string LegacySignatureHeader = "X-Autheris-Signature";
-
     /// <summary>Signature value prefix.</summary>
     public const string Prefix = "sha256=";
 

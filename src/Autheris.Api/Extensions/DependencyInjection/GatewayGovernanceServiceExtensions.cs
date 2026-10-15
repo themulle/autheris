@@ -15,8 +15,10 @@ using Autheris.Application.Lineage;
 using Autheris.Application.Policy.Interfaces;
 using Autheris.Application.Policy.Services;
 using Autheris.Application.Security;
+using Autheris.Application.Streaming.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters;
+using Autheris.Application.Webhooks;
 using Autheris.Application.Workflows;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -27,6 +29,7 @@ using Autheris.Infrastructure.Lineage;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Migrations;
 using Autheris.Infrastructure.Security;
+using Autheris.Infrastructure.Streaming;
 using Microsoft.Extensions.DependencyInjection;
 
 public static class GatewayGovernanceServiceExtensions
@@ -75,9 +78,11 @@ public static class GatewayGovernanceServiceExtensions
             services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
+            services.AddSingleton<IWebhookOutbox>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<IVirtualFilterRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<IAccessProfileRepository, InMemoryAccessProfileRepository>();
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
+            services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
         }
         else if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.SqlServer))
         {
@@ -93,9 +98,11 @@ public static class GatewayGovernanceServiceExtensions
             services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
             services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
             services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
+            services.AddSingleton<IWebhookOutbox>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
             services.AddSingleton<IVirtualFilterRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
             services.AddSingleton<IAccessProfileRepository, InMemoryAccessProfileRepository>();
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
+            services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
         }
         else
         {
@@ -111,10 +118,15 @@ public static class GatewayGovernanceServiceExtensions
             services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+            services.AddSingleton<IWebhookOutbox>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<IVirtualFilterRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<IAccessProfileRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+            services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
         }
+
+        // WP-ARC-A-11: durable, fenced CDC watermarks live in the governance database (the extension registers no store).
+        services.AddSingleton<IMssqlWatermarkStore, GovernanceDbMssqlWatermarkStore>();
 
         if (gatewayOptions.TenantIsolation.Registry.Enabled)
         {
@@ -140,6 +152,8 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IVirtualFilterPredicateBuilder, StructuredFilterSqlBuilder>();
         services.AddSingleton<MandatoryRowFilterResolver>();
         services.AddSingleton<IMandatoryRowFilterResolver>(sp => sp.GetRequiredService<MandatoryRowFilterResolver>());
+        services.AddSingleton<IEffectiveFilterInspector, EffectiveFilterInspector>();
+        services.AddScoped<Autheris.Application.Governance.IOpenApiIngestionUseCase, Autheris.Application.Governance.OpenApiIngestionUseCase>();
         // F-GOV-14 (M4, SEC-10): authorized key sets from the SQL key source, in a dedicated size-limited cache.
         services.AddSingleton<Autheris.Application.VirtualFilters.Federation.VirtualFilterKeySetCache>();
         services.AddSingleton<Autheris.Application.VirtualFilters.Federation.IVirtualFilterKeySetProvider, Autheris.Application.VirtualFilters.Federation.SqlVirtualFilterKeySetProvider>();

@@ -36,6 +36,54 @@ public sealed class AccessAuditMiddlewareTests
             aggregator);
     }
 
+    private static HttpContext ContextWithStatus(int status, out AuditContext auditContext)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/protected";
+        auditContext = new AuditContext();
+        context.Features.Set(auditContext);
+        context.Response.StatusCode = status;
+        return context;
+    }
+
+    [Fact]
+    public async Task AccessAuditMiddleware_DenyWithAuditStoreDown_StillReturnsDenial()
+    {
+        _auditRepo.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).Returns(Task.FromException(new InvalidOperationException("store down")));
+        var context = ContextWithStatus(403, out var auditContext);
+        var middleware = CreateMiddleware(c => { c.Response.StatusCode = 403; return Task.CompletedTask; });
+
+        await middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext);
+
+        // The denial never depends on the audit outcome: no exception, status untouched, one attempt made with a non-cancelable token.
+        context.Response.StatusCode.ShouldBe(403);
+        await _auditRepo.Received(1).RecordAuditEventAsync(Arg.Is<AuditLogEntry>(e => e.Decision == "DENY"), Arg.Is<CancellationToken>(t => !t.CanBeCanceled));
+    }
+
+    [Fact]
+    public async Task AccessAuditMiddleware_AllowWithAuditStoreDown_Throws()
+    {
+        _auditRepo.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).Returns(Task.FromException(new InvalidOperationException("store down")));
+        var context = ContextWithStatus(200, out var auditContext);
+        var middleware = CreateMiddleware(c => { c.Response.StatusCode = 200; return Task.CompletedTask; });
+
+        await Should.ThrowAsync<AuditUnavailableException>(() =>
+            middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext));
+    }
+
+    [Fact]
+    public async Task AccessAuditMiddleware_AuditWrite_DoesNotUseTheRequestToken()
+    {
+        using var cts = new CancellationTokenSource();
+        var context = ContextWithStatus(200, out var auditContext);
+        context.RequestAborted = cts.Token;
+        var middleware = CreateMiddleware(c => { cts.Cancel(); return Task.CompletedTask; });
+
+        await middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext);
+
+        await _auditRepo.Received(1).RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Is<CancellationToken>(t => !t.CanBeCanceled));
+    }
+
     [Fact]
     public async Task InvokeAsync_SuccessfulRequest_RecordsAllowAuditEntry()
     {
@@ -61,7 +109,7 @@ public sealed class AccessAuditMiddlewareTests
             return Task.CompletedTask;
         });
 
-        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+        await middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext);
 
         recorded.ShouldNotBeNull();
         recorded.Decision.ShouldBe("ALLOW");
@@ -86,7 +134,7 @@ public sealed class AccessAuditMiddlewareTests
         var middleware = CreateMiddleware(_ => throw new InvalidOperationException("Database crashed"));
 
         var thrown = await Should.ThrowAsync<InvalidOperationException>(() =>
-            middleware.InvokeAsync(context, _auditRepo, auditContext));
+            middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext));
 
         thrown.Message.ShouldBe("Database crashed");
         recorded.ShouldNotBeNull();
@@ -112,7 +160,7 @@ public sealed class AccessAuditMiddlewareTests
         var middleware = CreateMiddleware(_ => throw new OperationCanceledException(cts.Token));
 
         await Should.ThrowAsync<OperationCanceledException>(() =>
-            middleware.InvokeAsync(context, _auditRepo, auditContext));
+            middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext));
 
         recorded.ShouldNotBeNull();
         recorded.Decision.ShouldBe("ERROR");
@@ -138,7 +186,7 @@ public sealed class AccessAuditMiddlewareTests
             return Task.CompletedTask;
         });
 
-        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+        await middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext);
 
         recordedCount.ShouldBe(0);
     }
@@ -164,7 +212,7 @@ public sealed class AccessAuditMiddlewareTests
             return Task.CompletedTask;
         });
 
-        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+        await middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext);
 
         recorded.ShouldNotBeNull();
         recorded.Decision.ShouldBe("DENY");
@@ -193,7 +241,7 @@ public sealed class AccessAuditMiddlewareTests
         var auditContext = new AuditContext();
 
         var middleware = CreateMiddleware(c => { c.Response.StatusCode = status; return Task.CompletedTask; });
-        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+        await middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext);
 
         recorded.ShouldNotBeNull();
         recorded.Decision.ShouldBe(decision);
@@ -210,7 +258,7 @@ public sealed class AccessAuditMiddlewareTests
         var auditContext = new AuditContext();
 
         var middleware = CreateMiddleware(c => { c.Response.StatusCode = 401; return Task.CompletedTask; }, aggregator);
-        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+        await middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext);
 
         await aggregator.Received(1).RecordFailureAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>());
     }
@@ -227,7 +275,7 @@ public sealed class AccessAuditMiddlewareTests
         var auditContext = new AuditContext();
 
         var middleware = CreateMiddleware(_ => throw new InvalidOperationException("boom"));
-        await Should.ThrowAsync<InvalidOperationException>(() => middleware.InvokeAsync(context, _auditRepo, auditContext));
+        await Should.ThrowAsync<InvalidOperationException>(() => middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext));
 
         recorded.ShouldNotBeNull();
         recorded.Decision.ShouldBe("ERROR");
@@ -242,7 +290,7 @@ public sealed class AccessAuditMiddlewareTests
         var auditContext = new AuditContext();
 
         var middleware = CreateMiddleware(c => { c.Response.StatusCode = 202; return Task.CompletedTask; });
-        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+        await middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext);
 
         await _auditRepo.DidNotReceive().RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
     }
@@ -256,7 +304,7 @@ public sealed class AccessAuditMiddlewareTests
         var auditContext = new AuditContext();
 
         var middleware = CreateMiddleware(c => { auditContext.MarkHandled(); c.Response.StatusCode = 500; return Task.CompletedTask; });
-        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+        await middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext);
 
         await _auditRepo.DidNotReceive().RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
     }
@@ -275,7 +323,7 @@ public sealed class AccessAuditMiddlewareTests
         var auditContext = new AuditContext();
 
         var middleware = CreateMiddleware(c => { c.Response.StatusCode = status; return Task.CompletedTask; });
-        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+        await middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext);
 
         recorded.ShouldNotBeNull();
         return recorded;
@@ -338,7 +386,7 @@ public sealed class AccessAuditMiddlewareTests
         var auditContext = new AuditContext();
 
         var middleware = CreateMiddleware(c => { c.Response.StatusCode = status; return Task.CompletedTask; });
-        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+        await middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext);
 
         await _auditRepo.DidNotReceive().RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
         auditContext.IsHandled.ShouldBeTrue();
@@ -356,7 +404,7 @@ public sealed class AccessAuditMiddlewareTests
         var auditContext = new AuditContext();
 
         var middleware = CreateMiddleware(c => { c.Response.StatusCode = 404; return Task.CompletedTask; });
-        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+        await middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext);
 
         recorded.ShouldNotBeNull();
     }
@@ -373,7 +421,7 @@ public sealed class AccessAuditMiddlewareTests
         var auditContext = new AuditContext();
 
         var middleware = CreateMiddleware(c => { c.Response.StatusCode = 200; return Task.CompletedTask; });
-        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+        await middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext);
 
         recorded.ShouldNotBeNull();
         recorded.TargetTable.Length.ShouldBe(256);
@@ -388,7 +436,7 @@ public sealed class AccessAuditMiddlewareTests
         var auditContext = new AuditContext();
 
         var middleware = CreateMiddleware(c => { c.Response.StatusCode = 401; return Task.CompletedTask; }, aggregator);
-        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+        await middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext);
 
         await aggregator.Received(1).RecordFailureAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>());
         await _auditRepo.DidNotReceive().RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
@@ -406,7 +454,7 @@ public sealed class AccessAuditMiddlewareTests
         var auditContext = new AuditContext();
 
         var middleware = CreateMiddleware(_ => throw new InvalidOperationException("boom"));
-        await Should.ThrowAsync<InvalidOperationException>(() => middleware.InvokeAsync(context, _auditRepo, auditContext));
+        await Should.ThrowAsync<InvalidOperationException>(() => middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext));
 
         recorded.ShouldNotBeNull();
         recorded.Decision.ShouldBe("ERROR");

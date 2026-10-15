@@ -83,6 +83,8 @@ public static class SecureOutboundHttp
         return new SocketsHttpHandler
         {
             AllowAutoRedirect = false,
+            // Recycle pooled connections so DNS changes are picked up (the connect callback re-validates every new connection).
+            PooledConnectionLifetime = TimeSpan.FromMinutes(2),
             // SEC I-1: no system proxy by default; a proxy connection would bypass the ConnectCallback address rules.
             UseProxy = allowSystemProxy,
             SslOptions = allowUntrustedCertificates

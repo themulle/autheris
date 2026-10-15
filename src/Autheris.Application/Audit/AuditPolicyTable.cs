@@ -30,6 +30,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.WebSqlCrossSourceSourceRead] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.WebSqlDmlExecuted] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.WebSqlDmlRejected] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.WebSqlDmlFailed] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.QueryExecutionError] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.StreamSubscribe] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.EgressShadowCopy] = AuditFailurePolicy.FailClosed,
@@ -64,6 +65,10 @@ public static class AuditPolicyTable
         [AuditEventTypes.DocIngestionBundleApplied] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DocIngestionDocumentApplied] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DocDiscoveryRead] = AuditFailurePolicy.BestEffort,
+        [AuditEventTypes.RebacTupleAdded] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.RebacTupleRemoved] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.RebacInvalidationFailed] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.RebacTupleSeed] = AuditFailurePolicy.BestEffort,
     };
 
     public static IReadOnlyDictionary<string, AuditFailurePolicy> All => Table;

@@ -523,7 +523,7 @@ public sealed class CutoverArchitectureTests
     [
         "Autheris.Application.Sql.Tree.GovernedTreeQueryService",
         "Autheris.Application.Olap.FederatedStagingService",
-        "Autheris.Api.Endpoints.DuckDbOlapEndpoints"
+        "Autheris.Application.Olap.OlapStagingService"
     ];
 
     private sealed record Node(string Type, string Method);

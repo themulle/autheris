@@ -94,6 +94,25 @@ public sealed class CompositionRootModularizationTests
     }
 
     [Fact]
+    public void GovernedSqlExecutionService_ResolvesFromContainer()
+    {
+        var (services, options, env) = CreateTestSetup();
+        services.AddAutherisStorage(options, env);
+        services.AddAutherisGovernance(options);
+        services.AddAutherisSecurity(options, env);
+        services.AddAutherisSqlEngine(options);
+        services.AddAutherisExecution(options, env);
+
+        var sp = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        using var scope = sp.CreateScope();
+
+        scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>()
+            .ShouldBeOfType<Autheris.Application.Sql.Services.GovernedSqlExecutionService>();
+        // The federated service is reachable lazily from the same scope.
+        scope.ServiceProvider.GetRequiredService<Lazy<IFederatedQueryExecutionService>>().Value.ShouldNotBeNull();
+    }
+
+    [Fact]
     public void AddAutherisStorage_GarnetEmbedded_DoesNotStartServerDuringRegistration()
     {
         var (services, options, env) = CreateTestSetup(garnet: true);
@@ -122,7 +141,7 @@ public sealed class CompositionRootModularizationTests
             store,
             Options.Create(options),
             NullLogger<RebacSeedHostedService>.Instance,
-            audit,
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(audit),
             env);
 
         await hostedService.StartAsync(CancellationToken.None);
