@@ -21,6 +21,12 @@ public static class BenchmarkRunnerApp
             return;
         }
 
+        if (args.Length > 0 && args[0].Equals("casbin", StringComparison.OrdinalIgnoreCase))
+        {
+            CasbinDecisionBenchmark.Run();
+            return;
+        }
+
         if (args.Length > 0 && args[0].Equals("vf", StringComparison.OrdinalIgnoreCase))
         {
             await VirtualFilterResolverBenchmark.RunAsync();

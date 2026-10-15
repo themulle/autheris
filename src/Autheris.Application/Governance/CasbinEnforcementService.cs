@@ -75,6 +75,18 @@ public sealed partial class CasbinEnforcementService : IPolicyEnforcementService
                 .Distinct(StringComparer.OrdinalIgnoreCase);
     }
 
+    private readonly record struct CandidateKey(string Tenant, string Table, string Action);
+
+    /// <summary>
+    /// The rules of a tenant that can influence a decision for one table and action (tenant, object and action already match), in policy
+    /// order, with the cache-shape facts of <see cref="Caching.PolicyShapeAnalyzer"/>.
+    /// </summary>
+    private sealed record CandidateSet(
+        CasbinRuleMetadata[] Rules,
+        bool Shareable,
+        bool ReadsContext,
+        bool ReferencesTime);
+
     private sealed class PolicySnapshot(
         FrozenDictionary<string, Enforcer> enforcers,
         FrozenDictionary<string, ImmutableArray<CasbinRuleMetadata>> rules,
@@ -89,6 +101,9 @@ public sealed partial class CasbinEnforcementService : IPolicyEnforcementService
         public FrozenDictionary<string, FrozenSet<string>> WildcardRoleClosure { get; } = wildcardRoleClosure;
         public Enforcer WildcardEnforcer { get; } = wildcardEnforcer;
         public long Epoch { get; } = epoch;
+
+        /// <summary>WP-PF-09: candidate rules per (tenant, table, action); a snapshot is immutable, so entries never go stale.</summary>
+        public Autheris.Application.Caching.BoundedCache<CandidateKey, CandidateSet> Candidates { get; } = new(20_000);
 
         public FrozenDictionary<string, FrozenSet<string>> GetRoleClosure(string tenant) =>
             RoleClosures.TryGetValue(tenant, out var closure) ? closure : WildcardRoleClosure;
@@ -108,6 +123,8 @@ public sealed partial class CasbinEnforcementService : IPolicyEnforcementService
     private readonly CasbinDecisionCache _decisionCache;
     private readonly PolicyEpochGuard? _epochGuard;
     private long _decisionCacheHits;
+    private long _decisionEvaluations;
+    private readonly bool _shareAcrossUsers;
     private readonly ConcurrentDictionary<string, string> _tenantPolicyFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, FileSystemWatcher> _fileWatchers = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, System.Timers.Timer> _debounceTimers = new(StringComparer.OrdinalIgnoreCase);
@@ -162,6 +179,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         timeProvider ??= TimeProvider.System;
         _decisionCache = new CasbinDecisionCache(
             cacheOptions.Capacity, TimeSpan.FromSeconds(cacheOptions.TtlSeconds), timeProvider);
+        _shareAcrossUsers = cacheOptions.ShareAcrossUsers;
         _rowPolicies = rowPolicies;
         _logger = logger;
         _rlsFilterGenerator = rlsFilterGenerator ?? RlsFilterGenerator.Instance;
@@ -427,6 +445,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
 
     internal int DiagnosticDecisionCacheCount => _decisionCache.Count;
     internal long DiagnosticDecisionCacheHits => Interlocked.Read(ref _decisionCacheHits);
+    internal long DiagnosticDecisionEvaluations => Interlocked.Read(ref _decisionEvaluations);
 
     public void Dispose()
     {
