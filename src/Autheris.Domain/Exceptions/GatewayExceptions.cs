@@ -171,3 +171,19 @@ public sealed class GatewayRateLimitException : GatewaySecurityException
     }
 }
 
+
+/// <summary>
+/// Issue #94 (SD-3): the persisted key/index definition of a table is invalid, so its metadata is unavailable, never "absent".
+/// Read paths map it to deny or 404; write and ingestion paths stop for that table and never upsert it as a new table.
+/// The message contains only the table id.
+/// </summary>
+public sealed class TableMetadataUnavailableException : Exception
+{
+    public TableIdentifier Table { get; }
+
+    public TableMetadataUnavailableException(TableIdentifier table)
+        : base($"Metadata of table '{table}' is unavailable.")
+    {
+        Table = table;
+    }
+}
