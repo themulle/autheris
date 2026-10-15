@@ -11,28 +11,15 @@ using Microsoft.Data.Sqlite;
 
 /// <summary>
 /// SQLite <see cref="ICloudEventSubscriptionStore"/> (WP-ARC-A-03). Every statement runs through
-/// <see cref="WithSubscriptionsConnectionAsync{T}"/>, the only place in this file that touches the shared connection. Every
+/// <see cref="WriteAsync{T}"/> or <see cref="ReadAsync{T}"/> on a per-operation connection. Every
 /// statement is scoped by <c>tenant_id</c>.
 /// </summary>
 public partial class SqliteGovernanceRepository : ICloudEventSubscriptionStore
 {
-    private async Task<T> WithSubscriptionsConnectionAsync<T>(Func<SqliteConnection, Task<T>> op, CancellationToken ct)
-    {
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            return await op(_connection).ConfigureAwait(false);
-        }
-        finally
-        {
-            _lock.Release();
-        }
-    }
-
     public async ValueTask RegisterSubscriptionAsync(CloudEventWebhookSubscription subscription, int maxSubscriptionsPerTenant, CancellationToken ct = default)
     {
         CloudEventSubscriptionMapping.Validate(subscription);
-        await WithSubscriptionsConnectionAsync(async conn =>
+        await WriteAsync(async conn =>
         {
             await using var cmd = conn.CreateCommand();
             // The quota check and the insert are one statement under the connection lock; ON CONFLICT keeps another row intact.
@@ -77,7 +64,7 @@ public partial class SqliteGovernanceRepository : ICloudEventSubscriptionStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(subscriptionId);
-        return await WithSubscriptionsConnectionAsync(async conn =>
+        return await WriteAsync(async conn =>
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = "DELETE FROM CLOUDEVENT_SUBSCRIPTIONS WHERE tenant_id = @tenant AND id = @id;";
@@ -116,7 +103,7 @@ public partial class SqliteGovernanceRepository : ICloudEventSubscriptionStore
     }
 
     private Task<IReadOnlyList<CloudEventWebhookSubscription>> QuerySubscriptionsAsync(string tenantId, string? id, bool enabledOnly, CancellationToken ct) =>
-        WithSubscriptionsConnectionAsync<IReadOnlyList<CloudEventWebhookSubscription>>(async conn =>
+        ReadAsync<IReadOnlyList<CloudEventWebhookSubscription>>(async conn =>
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = $"SELECT {CloudEventSubscriptionMapping.Columns} FROM CLOUDEVENT_SUBSCRIPTIONS WHERE tenant_id = @tenant"
