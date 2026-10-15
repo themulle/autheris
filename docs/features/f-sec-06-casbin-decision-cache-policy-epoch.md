@@ -19,9 +19,10 @@ The Casbin ABAC/RBAC engine (`Gateway:Casbin`, see the configuration guide) eval
 
 ### 2.1 Eviction
 
-`CasbinDecisionCache` is a bounded LRU cache with O(1) operations under a single lock:
+`CasbinDecisionCache` is a bounded, **sharded** LRU cache. The key space is split over up to 32 independent shards (at least 256 entries each), each an exact O(1) LRU under its own lock, so hits and misses of different users do not serialise on one global lock. A cache with fewer than 512 entries uses a single shard and keeps strict LRU order.
 
-- At `Capacity`, only the **least recently used entry** is evicted. There is no global flush.
+- At `Capacity`, only the **least recently used entry of a shard** is evicted. There is no global flush.
+- Misses are **single-flight** per key: concurrent misses of the same key (for example right after a policy publish) share one evaluation. An evaluation that throws is not cached and the exception reaches every waiter (fail closed).
 - An entry older than `TtlSeconds` is dropped when it is accessed.
 - A local policy change publishes a new policy snapshot with a new local epoch. The epoch is part of the key, so entries of the previous snapshot are never hit again and age out through LRU or TTL.
 - A decision is not stored when the snapshot epoch changed while it was being evaluated.
@@ -44,6 +45,22 @@ The Casbin ABAC/RBAC engine (`Gateway:Casbin`, see the configuration guide) eval
 | Table columns | The table's column list when supplied (distinguished from "not supplied"). |
 
 Collections are normalised, so permutations of groups, attributes or columns hit the same entry.
+
+### 2.2a Shape-Shared Decisions (`ShareAcrossUsers`)
+
+With 5,000 users, a per-user key gives every user its own working set of decisions. When `ShareAcrossUsers` is `true` (default), users that match **exactly the same candidate rules** share one cached decision:
+
+- The candidate rules of a (tenant, table, action) are the rules whose tenant, object and action match, in policy order. They are memoised per policy snapshot in a bounded cache (20,000 entries; a snapshot is immutable, so entries never go stale).
+- `PolicyShapeAnalyzer` inspects the text of each candidate rule's `sub_rule` and row filter. A rule is shareable only when it reads nothing but the tenant, the object, the action and the attributes or purpose. Any identifier it does not positively recognise, and any reference to the user, its aliases or groups, the client IP or the clock, makes the rule user dependent.
+- When every candidate rule is shareable, the key is a **shared key**: instead of the user SID, groups and client IP it carries a bit vector saying which candidate rules the request's subjects match. Attributes and purpose are part of the shared key only when a candidate rule reads them. A shared key is never equal to a per-user key.
+- Otherwise, the key carries the user as described in section 2.2.
+- **Delegated sources** (`SecurityEvaluationContext.IsDelegatedSource`, where the data source evaluates access as the end user) never share decisions; their key always carries the user.
+
+Setting `ShareAcrossUsers` to `false` is the **kill switch**: every decision is keyed by user again. It takes effect on restart; no data migration is involved.
+
+### 2.2b Compiled `sub_rule` Expressions
+
+Each distinct `sub_rule` expression is compiled once into a typed delegate (DynamicExpresso `ParseAsDelegate`, assignment disabled, no additional types registered) instead of building an interpreter and running a regex per evaluation. The compiled cache holds up to 20,000 expressions; beyond that a rule is compiled per call (slower, equivalent). A rule that cannot be compiled or throws during evaluation yields an "unknown" result, which is treated fail closed: an allow rule does not match, a deny rule matches.
 
 ### 2.3 Decisions That Are Never Cached
 
@@ -131,7 +148,8 @@ Bound standalone from `Gateway:Casbin:DecisionCache` (`CasbinDecisionCacheOption
 
 | Key | Default | Validation | Description |
 | :--- | :--- | :--- | :--- |
-| `Capacity` | `10000` | 100..1,000,000 | Maximum number of cached decisions per node (LRU eviction). |
+| `Capacity` | `100000` | 100..1,000,000 | Maximum number of cached decisions per node (sharded LRU eviction). |
+| `ShareAcrossUsers` | `true` | bool | Lets users that match the same rules share one decision when no candidate rule reads a user-specific input (section 2.2a). Never applies to delegated sources. `false` keys every decision by user (kill switch). |
 | `TtlSeconds` | `60` | 1..3600 | Maximum age of a cached decision; also the idle eviction age of tracked tenants. |
 | `EpochCheckSeconds` | `5` | 1..`TtlSeconds` | How often a node reads the cluster epoch per tenant (cluster-wide topology only). |
 | `UnavailableBackoffMilliseconds` | `1000` | 100..10,000 | After a failed epoch read, the cache stays bypassed for this long before the next attempt. |
@@ -144,7 +162,8 @@ Bound standalone from `Gateway:Casbin:DecisionCache` (`CasbinDecisionCacheOption
       "PolicyPath": "/etc/autheris/casbin-policy.csv",
       "WatchPolicyFile": true,
       "DecisionCache": {
-        "Capacity": 10000,
+        "Capacity": 100000,
+        "ShareAcrossUsers": true,
         "TtlSeconds": 60,
         "EpochCheckSeconds": 5,
         "UnavailableBackoffMilliseconds": 1000

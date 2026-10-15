@@ -119,6 +119,32 @@ Response:
 }
 ```
 
+### Apply Semantics
+
+- **Atomic apply:** all revocations and creations of one manifest are written by `IConsentRepository.ReplaceConsentsAsync` in **one transaction with one epoch bump**. A fault leaves nothing changed and writes no audit record; the `GITOPS_CONSENT_APPLY` audit events are written after the commit.
+- **Idempotent role grants:** role consents carry no subject SID, so existing role grants are looked up by role name (`GetActiveRoleConsentsAsync`). Applying the same role manifest twice reports `unchanged` and never creates a duplicate role consent.
+- **Ambiguous manifests are refused:** a manifest with more than one policy for the same table and grantee is rejected as a whole before anything is written.
+- **Grantee types and expiry:**
+  - `Role` and `Group` grantees are standing grants. `validityDays` sets their expiry (default 365 days).
+  - `User` and `ServicePrincipal` grantees are **individual grants** and need an absolute `validUntil` within the class maximum of the [time-bound individual grant policy (F-GOV-22)](f-gov-22-time-bound-individual-grants.md) (for example 180 days for regular tables, 90 days for sensitive/PII tables). `validityDays` is ignored for them. The check also runs in dry-run.
+  - A missing, past or too long `validUntil` answers `400` with `INDIVIDUAL_GRANT_REQUIRES_EXPIRY`, `INDIVIDUAL_GRANT_EXPIRY_IN_PAST` or `INDIVIDUAL_GRANT_EXCEEDS_MAXIMUM` and the latest allowed `maxValidTo`; nothing is applied.
+  - Re-applying an unchanged manifest never extends an existing identical grant. A longer validity needs a renewal.
+
+Individual grant example:
+
+```json
+{
+  "domain": "default",
+  "schema": "sales",
+  "tableName": "orders",
+  "granteeType": "User",
+  "granteeRef": "S-1-5-21-ANALYST-7",
+  "effect": "Allow",
+  "validUntil": "2026-12-31T00:00:00Z",
+  "description": "Year-end analysis"
+}
+```
+
 ### MCP Tool `describe_my_access`
 
 An AI agent queries its effective permissions before constructing a data extraction request:
@@ -197,5 +223,7 @@ query CheckGovernanceStatus {
    - Scope-specific rules (`ApplicableScopes`) can only restrict access (e.g. `Clear` -> `Mask` or `Mask` -> `Deny`). A scope rule cannot elevate a base `Deny` to `Clear`, preventing malicious or compromised clients from escalating privileges via arbitrary delegated scopes.
 3. **Immutable Audit Verification:**
    - Applying declarative policies via `/api/v1/governance/consents/apply` records a WORM audit event sealed into the SHA-256 HMAC chain, attributing the action to the calling actor's SID, tenant, and timestamp.
-4. **Tenant Isolation:**
+4. **All-or-Nothing Apply:**
+   - A manifest is applied in one transaction with one epoch bump; a failure or a refused individual grant leaves the consent store unchanged.
+5. **Tenant Isolation:**
    - Both SQLite and PostgreSQL governance repositories strictly scope request lookups, consents, and declarative policies by `TenantId`. Requesters cannot view requests or consents belonging to other tenants.

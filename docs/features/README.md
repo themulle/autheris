@@ -76,6 +76,7 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-GOV-19** | Governed Cross-Source GraphQL Relations & Batched Key Lookup | [f-gov-19-cross-source-graphql-relations.md](f-gov-19-cross-source-graphql-relations.md) |
 | **F-GOV-20** | Zero-Read Static Query Analysis, Bundled Consents & Field Deprecation | [f-gov-20-static-query-analysis-and-bundled-consents.md](f-gov-20-static-query-analysis-and-bundled-consents.md) |
 | **F-GOV-21** | Declared Table Keys & Indexes, Deterministic Read Ordering & Least-Privilege Grants | [f-gov-21-declared-table-keys-and-read-ordering.md](f-gov-21-declared-table-keys-and-read-ordering.md) |
+| **F-GOV-22** | Time-Bound Individual Grants (Grant Policy, Class Maxima, Renewal & Read-Time Clamp) | [f-gov-22-time-bound-individual-grants.md](f-gov-22-time-bound-individual-grants.md) |
 | **F-INT-01** | Spotify Backstage Software Catalog Integration | [f-int-01-backstage-software-catalog.md](f-int-01-backstage-software-catalog.md) |
 | **F-MASK-02** | Extended Column Masking Engine (GEO_JITTER, PARTIAL_MASK, TOKENIZATION) | [f-mask-02-extended-masking-engine.md](f-mask-02-extended-masking-engine.md) |
 | **F-OPEN-01** | OpenSchema Mode, Multi-File OpenAPI & Catalog Slicing | [f-open-01-openschema-catalog-slicing.md](f-open-01-openschema-catalog-slicing.md) |

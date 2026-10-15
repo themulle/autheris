@@ -12,6 +12,7 @@ One login with user name and password is enough for every surface of the gateway
     "RequireKerberosOnly": false,
     "BasicAuth": {
       "Enabled": true,
+      "MarkerKeyRef": "basic-auth-marker-key",
       "Session": {
         "Enabled": true,
         "AllowedEnvironments": [ "Development", "Integration" ],
@@ -30,6 +31,8 @@ One login with user name and password is enough for every surface of the gateway
 
 | Option | Meaning |
 |---|---|
+| `MarkerKeyRef` | Secret reference of the key that signs the cluster-shared verified-credential marker (see "Behaviour and security"). Unset: the marker is per process. |
+| `SuccessCacheSeconds` | Lifetime of a verified-credential marker in seconds (default `30`, `0` disables the cache and the shared marker). |
 | `Session.Enabled` | Enables the cookie. Without `BasicAuth.Enabled` this is a startup error. |
 | `Session.AllowedEnvironments` | Environments in which the cookie is allowed. `Production` is never allowed, not even through this list. Default (when not configured): `Development`. A configured list replaces the default entirely; an empty array (`[]`) aborts startup, so disable the session with `Session.Enabled=false` instead. |
 | `Session.CookieName` | Must start with `__Host-`. |
@@ -96,6 +99,9 @@ Invoke-RestMethod https://localhost:7214/api/v1/queries/ -WebSession $s
 - **Script requests:** requests with `X-Requested-With` get no `WWW-Authenticate: Basic` on 401, so no browser dialog appears in the middle of a page.
 - **Development and test auth:** `TestAuthHandler` only applies with `X-Test-*` headers or `danger_allow_anonymous_access`. Requests without any header reach the Basic challenge, so the browser shows its login dialog.
 - **GraphQL / Banana Cake Pop:** there is no anonymous UI access. `/graphql` requires authentication like everything else. In a browser the one-time Basic login is enough; the cookie and the WebSocket carry the session afterwards.
+- **Verified-credential cache:** a successful password check is remembered for `SuccessCacheSeconds` (default 30, `0` disables it), so a client does not pay the password hash (PBKDF2/Argon2id) on every request.
+- **Cluster-shared marker (`MarkerKeyRef`):** when `BasicAuth.MarkerKeyRef` names a secret (resolved through the key vault secret provider) and a distributed cache (Redis) is registered, the verified marker is shared by all replicas, so a client pays the password hash once per cluster instead of once per replica. The Redis key is `autheris:basicok:` plus an HMAC-SHA256 (key derived with HKDF from the secret) over the `Authorization` header and a **credential version** derived from the stored password hash. A password change therefore invalidates every marker immediately; a removed user has no configured account and is never revived by a marker; lock-outs are checked before the marker. Without `MarkerKeyRef`, when the secret cannot be resolved, or on any cache error the marker stays per process and every replica verifies the password itself (fail closed, never open).
+- **IP rate limiting of Basic requests:** with `BasicAuth.Enabled` and `RateLimiting:PreAuthIpRateLimit:ExemptAuthenticatedRequests` (default `true`), requests carrying `Authorization: Basic` are exempt from the pre-authentication IP limiter, like Bearer requests, so a shared NAT address of many BI clients is not throttled. Failed Basic attempts are throttled by the credential guard **before** any password hash is computed (per user and IP, and per IP). A request whose credentials do not authenticate is charged against the pre-auth IP budget after authentication (`UnauthenticatedBearerIpRateLimitingMiddleware`).
 - **Health probes and metrics:** `/health/*` never runs Basic authentication (no PBKDF2 load, no password oracle). `/metrics` is now subject to the IP rate limiter (E-13).
 
 **Startup errors occur for:**
