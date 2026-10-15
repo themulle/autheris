@@ -24,7 +24,7 @@ namespace Autheris.Benchmarks;
 /// Run with <c>dotnet run -c Release --project benchmarks/Autheris.Benchmarks -- casbin</c>. Not part of CI.
 /// </summary>
 [MemoryDiagnoser]
-public class CasbinDecisionBenchmark
+public class CasbinDecisionBenchmark : IDisposable
 {
     private static readonly TableIdentifier Table = new("hr", "dbo", "employees");
     private static readonly TenantId Tenant = new("t1");
@@ -54,6 +54,9 @@ public class CasbinDecisionBenchmark
         _template = Context("template");
         _ = _service.EvaluatePolicyAsync(_template).AsTask().GetAwaiter().GetResult();
     }
+
+    [GlobalCleanup]
+    public void Dispose() => _service?.Dispose();
 
     private static SecurityEvaluationContext Context(string user) => new(
         new Sid(user),
