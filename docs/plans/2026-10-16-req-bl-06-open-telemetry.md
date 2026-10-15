@@ -2,7 +2,7 @@
 
 **Document ID:** `REQ-OPS-BL06`
 **Date:** 2026-10-16
-**Status:** PRD READY (Phase 1 done); next: Phase 2 (solution architect)
+**Status:** PRD READY (Phase 1 done); Phases 2-3 done in [`2026-10-16-plan-bl-06-open-telemetry.md`](2026-10-16-plan-bl-06-open-telemetry.md) (section 10.4 lists the PRD changes imposed by the security review); next: Phase 4
 **Author:** Enterprise Product Manager
 **Source:** Owner request BL-06 ("tracing / logging via open standards"), [backlog intake](2026-10-16-backlog-intake.md) section 2.3
 **Branch:** `feat/bl-06-open-telemetry` (base `main` `272ef93c`)
