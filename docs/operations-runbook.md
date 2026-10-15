@@ -264,6 +264,30 @@ The monthly FinOps budget is enforced against a cluster-wide counter in the shar
 - `autheris_cdc_watermark_expired_total` increasing: the stored watermark is below `CHANGE_TRACKING_MIN_VALID_VERSION`; polling of that table stops (with backoff) until an operator deletes its row in `autheris_cdc_watermarks`, accepting the gap. Procedure: F-CDC-02, section 3.3.
 - `autheris_cdc_watermark_fenced_total` increasing without a lease handover: the fence counter of the cluster-state store was reset; verify AOF persistence.
 
+### 4.ag Async query jobs on several replicas (WP-ARC-A-12)
+
+Reference: F-DATA-07, section 6.
+
+- **Choose one result-routing model.** A result file exists only on the replica that ran the job unless the scratch directory is shared.
+  - *Sticky routing* (default Helm layout, node-local `/tmp/autheris-jobs`): configure session affinity on the ingress or load balancer (for example cookie affinity) so a client reaches the same replica for submit, status and download. Without it, downloads of another replica's job answer `503` with `ASYNC_JOB_RESULT_NODE_LOCAL`.
+  - *Shared volume*: mount one ReadWriteMany volume (NFS, Azure Files, CephFS) at the same path on every replica and set `Gateway__AsyncJobs__ScratchDirectory` to that path and `Gateway__AsyncJobs__SharedScratchDirectory=true`. The chart does not provision this volume; add it through your own overlay. Restrict the volume to the gateway pods: it holds governed result files of all tenants.
+- **Size the scratch volume.** Results are kept for `RetentionHours` (default 24). Set `tmpVolume.sizeLimit` for the node-local layout; a full volume makes jobs fail.
+- **Capacity limits are per node.** `MaxConcurrentJobs`, `MaxConcurrentJobsPerTenant` and `MaxQueuedJobsPerTenant` apply to each replica; the cluster-wide limit is the per-node value times the replica count. Clients receive `429` (`Retry-After: 30`) at the cap.
+- **Cluster state outage.** Submits, and status/result/cancel requests for jobs of other replicas, answer `503` (`Retry-After: 5`). Restore Redis/Garnet; no manual job cleanup is needed.
+- **Node loss and rolling restarts.** Jobs are not resumed. Queued jobs of a stopping pod end `Cancelled` (`autheris_asyncjobs_discarded`); jobs of a crashed pod are reported `Failed` with `job owner node lost` once `MaxTimeoutSeconds + 60 s` have passed since submission. Clients resubmit. Leftover result files are removed by the startup sweeper and the purge loop.
+- **Watch:** `autheris_asyncjobs_running`, `autheris_asyncjobs_pending` (sustained growth means too few slots), `autheris_asyncjobs_cluster_write_failures`, `autheris_asyncjobs_tombstone_check_failures` and `autheris_asyncjobs_subscribe_failures` (remote cancels then take effect only at the owner's next state change).
+
+### 4.ah Casbin policy file distribution and the policy epoch (WP-ARC-A-14)
+
+Reference: F-SEC-06.
+
+- **Every replica must load the same policy file.** Distribute `Gateway:Casbin:PolicyPath` (and tenant policy files) identically to all pods, for example as one ConfigMap or a shared read-only volume, and keep `WatchPolicyFile` enabled. After a change on any node, every replica re-reads its *own* file, so a replica with an outdated file keeps enforcing the outdated policy.
+- **Do not rely on programmatic rule changes in multi-replica deployments.** Rules added at runtime through `AddPolicy` and related APIs exist only on the node that received them; the other replicas only discard their cached decisions. Persist rule changes in the policy file.
+- **Staleness.** After a change, other replicas stop serving cached decisions of the old policy within `min(TtlSeconds, EpochCheckSeconds + reload time)` (defaults 60 s and 5 s). Lower `Gateway:Casbin:DecisionCache:EpochCheckSeconds` for a tighter bound.
+- **Propagation failures.** `autheris_policy_epoch_propagation_failed_total` increasing: the changing node could not increment `policy:epoch:{tenant}` or `policy:epoch:*`; other replicas converge only after `TtlSeconds`. Check the cluster state store (`autheris_cluster_state_failure_total{operation="increment"}`).
+- **Cluster state outage.** The decision cache is bypassed on affected tenants (warning `Casbin policy epoch could not be read; decision cache bypassed.`). Decisions stay correct; expect higher policy evaluation latency until the store is back.
+- **Reload failures.** A missing or invalid policy file during a cluster-triggered reload keeps the last-known-good policy set and is retried at the next epoch check; check the gateway log for `Casbin policy reload after a cluster epoch change failed` or `policy file ... is missing`.
+
 ## 5. Data Catalog Synchronization Operations
 
 ### 5.1 Monitoring Background Sync
