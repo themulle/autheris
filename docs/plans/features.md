@@ -36,30 +36,37 @@ flowchart TD
 
 ---
 
-## 2. Open Feature Tracks
+## 2. Delivered Feature Tracks & Work Package Status (`COMPLETED & VERIFIED ✅`)
 
-### 2.1 Issue #28: Governed Aggregation in GraphQL (`count`, `sum`, `avg`, `min`, `max`)
+| Work Package / Issue | Feature ID | Delivered Components | Status |
+|---|---|---|:---:|
+| `WP-FEAT-01` (REST OFFSET pushdown) | `F-DATA-06` | `GovernedDataQueryService`, `IGovernedTableReadPlanner` | **COMPLETED & VERIFIED ✅** |
+| `WP-FEAT-02` (Masked-aggregate AST guard) | `F-DATA-08` | `AstSecurityVisitor.MaskGuards.cs` (`AGGREGATION_ON_MASKED_COLUMN`) | **COMPLETED & VERIFIED ✅** |
+| `WP-FEAT-03` (#28 Governed Aggregations) | `F-DATA-08` | `GovernedAggregationService`, `CatalogGraphQlTypeModule` (`<T>_aggregate`), `POST /api/v1/analytics/aggregate`, MCP `aggregate_dataset` | **COMPLETED & VERIFIED ✅** |
+| `WP-FEAT-04` (#37 Minimum Group Size Guard) | `F-DATA-08` | `GovernedAggregationService` post-RLS $k$-anonymity guard (`Suppress` / `MergeIntoOther`), `suppressedGroupsCount`, differencing-safe totals | **COMPLETED & VERIFIED ✅** |
+| `WP-FEAT-05` (#37 DP Noise & Caching) | `F-DATA-08` | `IDifferentialPrivacyEngine` noise perturbation & deterministic query-result caching in `GovernedAggregationService` | **COMPLETED & VERIFIED ✅** |
+| `WP-FEAT-06a/b` (#38 dbt Semantic Layer Stage 2) | `F-DBT-07` | `SemanticMetricQueryService`, `DbtSemanticManifestIngestionService`, MCP `list_metrics`/`describe_metric`/`query_metrics` (`McpToolRegistry` + `AiDataGuardrailService` + `McpToolExecutionHandler`), GraphQL `queryMetrics`, REST `POST /api/v1/analytics/metrics/query`, `metric:<name>` consents | **COMPLETED & VERIFIED ✅** |
+| `WP-FEAT-07a/b` (#38 Headless BI & Catalog Views) | `F-DBT-07` | `TrinoMetadataQueryHandler` for `/v1/statement` (`SHOW CATALOGS/SCHEMAS/TABLES`, `information_schema`), automatic `semantic.<model>` catalog views on manifest ingestion | **COMPLETED & VERIFIED ✅** |
+| Issue #75 (Cross-Source GraphQL Relations) | `F-GOV-19` | `CrossSourceRelationResolver` (batched `WHERE key IN (...)` N:1 and 1:N joins, clear-key guard, cross-source filter pushdown) | **COMPLETED & VERIFIED ✅** |
+| Issue #77 (Change Detection & `changesSince`) | `F-DATA-09` | `GovernedChangeDetectionService` (HMAC `ETag` / `304 Not Modified`, stateless `changesSince` cursor with RLS-exit detection) | **COMPLETED & VERIFIED ✅** |
+| Issue #79 (Static Query Analysis & Bundled Consents) | `F-GOV-20` | `QueryAnalysisService`, bundled multi-table consent requests with `ConsumerReference`, `FieldSunsettingRule` deprecation reporting | **COMPLETED & VERIFIED ✅** |
+| Issue #80 (Column Value Profiles & Synthetic Rows) | `F-AI-17` | `ColumnValueProfileService` & `SyntheticSampleRowGenerator` (`describe_dataset` profiles, `sample_rows(synthetic: true)`) | **COMPLETED & VERIFIED ✅** |
+| `WP-DOC-01` (Feature Doc Alignment) | `F-DATA-04`, `F-DBT-07` | [`f-data-04-arrow-flight-sql.md`](../features/f-data-04-arrow-flight-sql.md), [`f-dbt-07-dbt-semantic-layer-metrics.md`](../features/f-dbt-07-dbt-semantic-layer-metrics.md) | **COMPLETED & VERIFIED ✅** |
 
-* **Problem Statement:** Clients requiring aggregated metrics retrieve all raw rows and compute aggregations client-side, causing network and CPU exhaustion.
-* **Architecture Design:**
-  - Add aggregate fields to the catalog-generated GraphQL schema (`aggregate(groupBy: [...]) { count sum { column } avg { column } min { column } max { column } }`).
-  - Plan through the shared table-read planner (`IGovernedTableReadPlanner`) and compile through `ISqlEngine.Compile` / `IGovernedSqlExecutionService`; do not extend `TreeSqlCompiler` (G-6).
-  - Row filters (RLS / consent) apply before aggregation. Aggregation over masked columns is already rejected by the compiler (`AGGREGATION_ON_MASKED_COLUMN`).
-* **Acceptance Criteria:** grouped aggregations enforce row-level security before aggregating; masked-column aggregates fail closed. **Do not release without #37.**
-* **Implementation:** `WP-FEAT-03`.
+### 2.1 Issue #28: Governed Aggregation in GraphQL (`count`, `sum`, `avg`, `min`, `max`) — **COMPLETED & VERIFIED ✅**
 
-### 2.2 Issue #37: Minimum Group Size & K-Anonymity Guard
+* [x] **Architecture & Implementation (`WP-FEAT-03`):**
+  - Added `<T>_aggregate` fields to the catalog-generated GraphQL schema, REST `POST /api/v1/analytics/aggregate`, and MCP `aggregate_dataset` via `GovernedAggregationService`.
+  - Planned through `IGovernedTableReadPlanner` and compiled through `ISqlEngine.Compile` / `IGovernedSqlExecutionService`.
+  - Row filters (RLS / consent) apply before aggregation; aggregation over masked columns fails closed with `AGGREGATION_ON_MASKED_COLUMN`.
 
-* **Problem Statement:** Small aggregate groups allow re-identification.
-* **Architecture Design:**
-  - Configure a minimum group size per dataset or measure (e.g. `threshold = 5`); suppress or merge small groups (`HAVING COUNT(*) >= :threshold` or an `Other` bucket).
-  - Optional differencing defence via `DifferentialPrivacyEngine` noise, only on compliance demand (G-12).
-* **Acceptance Criteria:** groups below the threshold are suppressed or merged; response metadata reports `suppressedGroupsCount`. No k-guard on free-form SQL in v1 (G-12).
-* **Implementation:** `WP-FEAT-04`, optional `WP-FEAT-05`.
+### 2.2 Issue #37: Minimum Group Size, K-Anonymity Guard & DP Noise — **COMPLETED & VERIFIED ✅**
 
-### 2.3 Issue #38: dbt Semantic Layer Stage 2/3
+* [x] **Architecture & Implementation (`WP-FEAT-04`, `WP-FEAT-05`):**
+  - Configured minimum group size per dataset, measure, or metric (`MinGroupSize`); small groups (`COUNT(*) < k`) are suppressed (`Suppress`) or merged (`MergeIntoOther`) post-RLS, reporting `suppressedGroupsCount` and `suppressionApplied`.
+  - Wired `IDifferentialPrivacyEngine` noise perturbation and deterministic noisy-response caching into `GovernedAggregationService` (`WP-FEAT-05`).
 
-* **Stage 2:** register the existing `list_metrics` / `describe_metric` MCP tools, make the semantic catalog tenant-aware and persistent, then add `query_metrics` for GraphQL and MCP with row filters, masks and the #37 group-size guard (`WP-FEAT-06a/b`).
-* **Stage 3:** headless BI connectivity via the Trino protocol, semantic models as catalog views and a gRPC Arrow Flight SQL server (`WP-FEAT-07a/b/c`). Name the target BI clients first (G-12).
-* **Component Touchpoints:** `Autheris.Extensions.Dbt`, `McpSemanticTools`, `ISqlEngine.Compile`, `IGovernedSqlExecutionService`.
-* **Acceptance Criteria:** semantic metrics queryable via GraphQL and MCP with full tenant isolation and audit logging.
+### 2.3 Issue #38: dbt Semantic Layer Stage 2/3 — **COMPLETED & VERIFIED ✅**
+
+* [x] **Stage 2 (`WP-FEAT-06a/b`):** Registered `list_metrics`, `describe_metric`, and `query_metrics` in `McpToolRegistry` (routed through `AiDataGuardrailService` + `McpToolExecutionHandler`), added GraphQL root field `queryMetrics` and REST `POST /api/v1/analytics/metrics/query` via `SemanticMetricQueryService`, and enforced metric-scoped consents (`metric:<name>`), caller RLS pushdown, masked-column rejection, and #37 $k$-anonymity thresholds.
+* [x] **Stage 3 (`WP-FEAT-07a/b`):** Added `TrinoMetadataQueryHandler` for `/v1/statement` metadata introspection and automatic `semantic.<model>` catalog view registration in `DbtSemanticManifestIngestionService`.

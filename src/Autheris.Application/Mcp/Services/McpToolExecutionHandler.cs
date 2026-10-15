@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Data.Interfaces;
+using Autheris.Application.Dbt.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Sql.Interfaces;
@@ -33,6 +34,8 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
     private readonly IApiDispatcherService _apiDispatcherService;
     private readonly ILineageGraphStore _lineageGraphStore;
     private readonly ITableMetadataRepository _metadataRepo;
+    private readonly ISemanticCatalogService? _semanticCatalog;
+    private readonly Autheris.Application.Analytics.ISemanticMetricQueryService? _metricQueryService;
 
     public McpToolExecutionHandler(
         IGovernedSqlExecutionService sqlExecutionService,
@@ -40,7 +43,9 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         ICatalogDiscoveryService catalogDiscoveryService,
         IApiDispatcherService apiDispatcherService,
         ILineageGraphStore lineageGraphStore,
-        ITableMetadataRepository metadataRepo)
+        ITableMetadataRepository metadataRepo,
+        ISemanticCatalogService? semanticCatalog = null,
+        Autheris.Application.Analytics.ISemanticMetricQueryService? metricQueryService = null)
     {
         _sqlExecutionService = sqlExecutionService ?? throw new ArgumentNullException(nameof(sqlExecutionService));
         _dataQueryService = dataQueryService ?? throw new ArgumentNullException(nameof(dataQueryService));
@@ -48,6 +53,8 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         _apiDispatcherService = apiDispatcherService ?? throw new ArgumentNullException(nameof(apiDispatcherService));
         _lineageGraphStore = lineageGraphStore ?? throw new ArgumentNullException(nameof(lineageGraphStore));
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
+        _semanticCatalog = semanticCatalog;
+        _metricQueryService = metricQueryService;
     }
 
     public bool CanHandle(string toolName) =>
@@ -58,7 +65,8 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         string.Equals(toolName, McpDatasetTools.ListDatasources, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, McpDatasetTools.GetDataLineage, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, McpDatasetTools.DescribeApi, StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(toolName, McpDatasetTools.InvokeApi, StringComparison.OrdinalIgnoreCase);
+        string.Equals(toolName, McpDatasetTools.InvokeApi, StringComparison.OrdinalIgnoreCase) ||
+        McpSemanticTools.IsSemanticTool(toolName);
 
     public async Task<string> ExecuteToolAsync(
         McpToolDefinition tool,
@@ -265,6 +273,32 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
 
             object? body = root.TryGetProperty("body", out var bProp) ? bProp : null;
             return await _apiDispatcherService.InvokeApiAsync(endpoint, method, parameters, body, requestContext, ct).ConfigureAwait(false);
+        }
+
+        if (string.Equals(tool.Name, McpSemanticTools.ListMetrics, StringComparison.OrdinalIgnoreCase))
+        {
+            return await McpSemanticTools.ExecuteListMetricsAsync(
+                _semanticCatalog ?? new Autheris.Application.Dbt.Services.InMemorySemanticCatalog(),
+                argumentsJson,
+                ct).ConfigureAwait(false);
+        }
+
+        if (string.Equals(tool.Name, McpSemanticTools.DescribeMetric, StringComparison.OrdinalIgnoreCase))
+        {
+            return await McpSemanticTools.ExecuteDescribeMetricAsync(
+                _semanticCatalog ?? new Autheris.Application.Dbt.Services.InMemorySemanticCatalog(),
+                argumentsJson,
+                ct).ConfigureAwait(false);
+        }
+
+        if (string.Equals(tool.Name, McpSemanticTools.QueryMetrics, StringComparison.OrdinalIgnoreCase))
+        {
+            if (_metricQueryService == null)
+            {
+                return JsonSerializer.Serialize(new { isError = true, error = new { code = "NOT_AVAILABLE", message = "Semantic metric query service is not configured." } }, JsonOpts);
+            }
+
+            return await McpSemanticTools.ExecuteQueryMetricsAsync(_metricQueryService, userPrincipal, argumentsJson, ct).ConfigureAwait(false);
         }
 
         throw new NotSupportedException($"Tool '{tool.Name}' is not supported by McpToolExecutionHandler.");

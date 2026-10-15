@@ -1,10 +1,13 @@
 using System.Security.Claims;
 using System.Text.Json;
+using Autheris.Application.Analytics;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using HotChocolate;
 using HotChocolate.Types;
 using Microsoft.AspNetCore.Http;
@@ -681,6 +684,117 @@ public sealed class Query
             tenantId,
             isGovAdmin,
             isClusterAdmin);
+    }
+
+    [GraphQLName("queryMetrics")]
+    public Task<MetricQueryResult> QueryMetricsAsync(
+        IReadOnlyList<string> metrics,
+        IReadOnlyList<string>? groupBy = null,
+        string? where = null,
+        string? timeGranularity = null,
+        IReadOnlyList<string>? orderBy = null,
+        int? limit = null,
+        [Service] ISemanticMetricQueryService metricQueryService = default!,
+        [Service] IHttpContextAccessor httpContextAccessor = default!,
+        CancellationToken ct = default) =>
+        AnalyticsQueryExtensions.ExecuteQueryMetricsAsync(
+            metrics, groupBy, where, timeGranularity, orderBy, limit, metricQueryService, httpContextAccessor, ct);
+}
+
+[ExtendObjectType(typeof(Query))]
+public sealed class AnalyticsQueryExtensions
+{
+    [GraphQLName("queryMetrics")]
+    public Task<MetricQueryResult> QueryMetricsAsync(
+        IReadOnlyList<string> metrics,
+        IReadOnlyList<string>? groupBy = null,
+        string? where = null,
+        string? timeGranularity = null,
+        IReadOnlyList<string>? orderBy = null,
+        int? limit = null,
+        [Service] ISemanticMetricQueryService metricQueryService = default!,
+        [Service] IHttpContextAccessor httpContextAccessor = default!,
+        CancellationToken ct = default) =>
+        ExecuteQueryMetricsAsync(metrics, groupBy, where, timeGranularity, orderBy, limit, metricQueryService, httpContextAccessor, ct);
+
+    internal static async Task<MetricQueryResult> ExecuteQueryMetricsAsync(
+        IReadOnlyList<string> metrics,
+        IReadOnlyList<string>? groupBy,
+        string? where,
+        string? timeGranularity,
+        IReadOnlyList<string>? orderBy,
+        int? limit,
+        ISemanticMetricQueryService metricQueryService,
+        IHttpContextAccessor httpContextAccessor,
+        CancellationToken ct)
+    {
+        var principal = httpContextAccessor?.HttpContext?.User;
+        if (principal?.Identity?.IsAuthenticated != true)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("UNAUTHORIZED")
+                .SetMessage("Authentication is required for semantic metric queries.")
+                .Build());
+        }
+
+        if (metrics is not { Count: > 0 })
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("INVALID_METRIC_QUERY")
+                .SetMessage("At least one metric name must be specified.")
+                .Build());
+        }
+
+        TableFilterClause? whereClause = !string.IsNullOrWhiteSpace(where)
+            ? TableFilterClause.FromTrinoText(where, Array.Empty<string>())
+            : null;
+
+        List<TableOrderBy>? parsedOrder = null;
+        if (orderBy is { Count: > 0 })
+        {
+            parsedOrder = new List<TableOrderBy>(orderBy.Count);
+            foreach (var entry in orderBy)
+            {
+                if (string.IsNullOrWhiteSpace(entry)) continue;
+                var parts = entry.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                bool desc = parts.Length > 1 && string.Equals(parts[1], "DESC", StringComparison.OrdinalIgnoreCase);
+                parsedOrder.Add(new TableOrderBy(parts[0], desc));
+            }
+        }
+
+        try
+        {
+            var req = new MetricQueryRequest(metrics, groupBy, whereClause, timeGranularity, parsedOrder, limit);
+            return await metricQueryService.QueryMetricsAsync(principal, req, ct).ConfigureAwait(false);
+        }
+        catch (PrivacyBudgetExhaustedException)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("PRIVACY_BUDGET_EXHAUSTED")
+                .SetMessage("The daily differential privacy epsilon budget has been exhausted.")
+                .Build());
+        }
+        catch (MaskedAggregationException ex)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode(MaskedAggregationException.ErrorCodeConst)
+                .SetMessage(ex.Message)
+                .Build());
+        }
+        catch (GatewayInvalidQueryException ex)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode(ex.ErrorCode)
+                .SetMessage(ex.Message)
+                .Build());
+        }
+        catch (GatewaySecurityException ex)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode(ex.ErrorCode)
+                .SetMessage("Access to the requested semantic metric was denied by governance policy.")
+                .Build());
+        }
     }
 }
 

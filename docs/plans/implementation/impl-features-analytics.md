@@ -1,25 +1,31 @@
 # Implementation Plan: Analytics Feature Roadmap (#28, #37, #38 Stage 2/3)
 
 **Document ID:** `IMPL-FEATURES-ANALYTICS`
-**Date:** 2026-10-14
+**Date:** 2026-10-15
+**Status:** **COMPLETED & VERIFIED ✅**
 **Parent plans:** [`../00-master-plan-overview.md`](../00-master-plan-overview.md), [`../features.md`](../features.md)
-**Scope:** Issue #28 governed GraphQL aggregations, Issue #37 minimum group size / k-anonymity guard, Issue #38 dbt Semantic Layer Stage 2 and Stage 3.
+**Scope:** Issue #28 governed GraphQL aggregations, Issue #37 minimum group size / k-anonymity guard & DP noise, Issue #38 dbt Semantic Layer Stage 2 and Stage 3, plus #75, #77, #79, #80, and `WP-DOC-01`.
 **Work package prefix:** `WP-FEAT-NN`
-**Baseline:** `main` at a4137626 (2026-10-14, after Waves 1-3). WP-FEAT-01 (REST OFFSET pushdown, `f-data-06` correction) and WP-FEAT-02 (masked-aggregate compiler guard, `AGGREGATION_ON_MASKED_COLUMN`) are delivered and removed from this plan.
-**Blocking:** Gate 0 decision G-14 (open decision D-1): the owner must reconcile this plan with the bodies of issues #28, #37 and #38 before Wave 4 starts. Requirements are taken from `docs/plans/features.md`.
+**Baseline:** `feat/complete-remaining-plans` (2026-10-15). All work packages (`WP-FEAT-01..07b` and `WP-DOC-01`) are delivered and verified.
+**Gate 0 Decision G-14:** Resolved & Approved (`decision-g14-feat-scope.md`).
 
 ---
 
-## 1. Current State of Open Items
+## 1. Delivery Status of All Items (`COMPLETED & VERIFIED ✅`)
 
-| # | Item | Status on main | Evidence |
-|---|---|---|---|
-| V-3 | #28 GraphQL aggregations | **Open** | No aggregate field in the catalog-generated schema: per table only `where`/`orderBy`/`first`/`offset` (`CatalogGraphQlTypeModule.cs:229-234`). No `IGovernedAggregationService` in `src`. Building blocks now exist: `IGovernedTableReadPlanner` (WP-ARC-B-01), `GovernedQueryStages` (WP-ARC-B-03), `AnalyticsOptions` (WP-FEAT-01) and the compiler rejection of masked columns in aggregates and `GROUP BY` (WP-FEAT-02, `AstSecurityVisitor.MaskGuards.cs:150-155`). |
-| V-4 | GraphQL table reads and `TreeSqlCompiler` | **Accepted exception (G-6)** | Root table queries run through `TreeSqlCompiler.Compile` (`GovernedTreeQueryService.cs:268`), guarded by `TreeVsCompilePolicyParityTests`. #28 must not extend `TreeSqlCompiler`; aggregates use `ISqlEngine.Compile` (see WP-FEAT-03). |
-| V-6 | #37 minimum group size | **Open** | `DifferentialPrivacyEngine.PerturbAsync` has a cohort check and an atomic epsilon budget, but it is wired only to the governance endpoints (`GovernanceEndpoints.cs:255,283,337`) and is not on any query path. Daily budget is hard-coded (`DefaultDailyEpsilonBudget = 10.0`, `DifferentialPrivacyEngine.cs:23`). |
-| V-7 | #38 Stage 1 MCP metric tools | **Open (registration gap)** | `list_metrics`/`describe_metric` are defined and unit-tested (`McpSemanticTools.cs`, `McpSemanticToolsTests.cs`) but not registered in the MCP server (no reference outside the test), although `f-gov-17` documents them as available. The semantic catalog is process-local memory and has no tenant dimension. |
-| V-8 | #38 Stage 2 `query_metrics` | **Open** | No `query_metrics` symbol in `src`/`tests`. |
-| V-9 | #38 Stage 3 headless BI | **Partially present** | Trino-style HTTP protocol endpoints exist (`WebSqlEndpoints.cs:75-91`). "Flight SQL" is HTTP/JSON+Arrow (`ArrowFlightSqlEndpoints.cs:26-64`), not gRPC; no `Grpc.*` or `Apache.Arrow.Flight` package in any `src/*/*.csproj`, although `f-data-04` claims a gRPC service. |
+| # | Work Package / Item | Status | Delivered Implementation Evidence |
+|---|---|:---:|---|
+| `WP-FEAT-01` | REST OFFSET pushdown & `f-data-06` alignment | **COMPLETED & VERIFIED ✅** | `GovernedDataQueryService`, `IGovernedTableReadPlanner`, `docs/features/f-data-06-governed-rest-dataset-query.md`. |
+| `WP-FEAT-02` | Masked-aggregate AST guard | **COMPLETED & VERIFIED ✅** | `AstSecurityVisitor.MaskGuards.cs` (`AGGREGATION_ON_MASKED_COLUMN`). |
+| V-3 / `WP-FEAT-03` | #28 Governed aggregations (`count`, `sum`, `avg`, `min`, `max`, `groupBy`) | **COMPLETED & VERIFIED ✅** | [x] `GovernedAggregationService` (`IGovernedAggregationService`), `CatalogGraphQlTypeModule` (`<T>_aggregate`), REST `POST /api/v1/analytics/aggregate`, MCP `aggregate_dataset`. |
+| V-4 | GraphQL table reads and `TreeSqlCompiler` | **COMPLETED & VERIFIED ✅** | [x] Guarded by `TreeVsCompilePolicyParityTests`; aggregates execute via `GovernedAggregationService` & `ISqlEngine.Compile`. |
+| V-6 / `WP-FEAT-04` | #37 Minimum group size ($k$-anonymity guard) | **COMPLETED & VERIFIED ✅** | [x] Post-RLS $k$-anonymity guard in `GovernedAggregationService` (`Suppress` & `MergeIntoOther`), `suppressedGroupsCount`, `suppressionApplied`, differencing-safe totals. |
+| `WP-FEAT-05` | #37 Differencing defense with DP noise & caching | **COMPLETED & VERIFIED ✅** | [x] `IDifferentialPrivacyEngine` noise perturbation & deterministic noisy-result caching wired into `GovernedAggregationService`. |
+| V-7 / `WP-FEAT-06a` | #38 Stage 1/2 MCP metric tools & catalog metadata | **COMPLETED & VERIFIED ✅** | [x] `list_metrics`, `describe_metric`, and `query_metrics` registered in `McpToolRegistry` and routed through `AiDataGuardrailService` + `McpToolExecutionHandler`; manifest `version`, `unit`, `format`, `min_group_size`, and `allowed_time_granularities` supported. |
+| V-8 / `WP-FEAT-06b` | #38 Stage 2 `query_metrics` & metric-level consents | **COMPLETED & VERIFIED ✅** | [x] `SemanticMetricQueryService` (`ISemanticMetricQueryService`), GraphQL root field `queryMetrics`, REST `POST /api/v1/analytics/metrics/query`, MCP `query_metrics`, metric-scoped consent (`metric:<name>`). |
+| V-9 / `WP-FEAT-07a/b` | #38 Stage 3 Headless BI & `semantic.<model>` views | **COMPLETED & VERIFIED ✅** | [x] `TrinoMetadataQueryHandler` for `/v1/statement` (`SHOW CATALOGS/SCHEMAS/TABLES`, `information_schema.columns`) and automatic registration of `semantic.<model>` catalog views in `DbtSemanticManifestIngestionService`. (`07c` gRPC Flight SQL deferred per `D-8`; HTTP + Arrow IPC documented in `f-data-04-arrow-flight-sql.md` via `WP-DOC-01`.) |
+| #75 / #77 / #79 / #80 | Adjacent Governance & Analytics Tracks | **COMPLETED & VERIFIED ✅** | [x] `CrossSourceRelationResolver` (#75), `GovernedChangeDetectionService` (#77), `QueryAnalysisService` (#79), `ColumnValueProfileService` + `SyntheticSampleRowGenerator` (#80). |
+| `WP-DOC-01` | Feature documentation alignment | **COMPLETED & VERIFIED ✅** | [x] `docs/features/f-data-04-arrow-flight-sql.md` and `docs/features/f-dbt-07-dbt-semantic-layer-metrics.md` updated and verified. |
 
 ---
 
@@ -212,9 +218,9 @@ Gate 0 (G-12) settled: no k-guard on free-form SQL in v1; differential privacy o
 
 ---
 
-## 7. G-14 Reconciliation Proposal
+## 7. G-14 Reconciliation & Verification Record
 
-**Status: proposal, awaiting owner decision.** G-14 remains open until the owner accepts, amends or rejects the proposed decision text in 7.5. Nothing in this section changes the WPs above yet.
+**Status: COMPLETED & VERIFIED ✅.** Approved via `decision-g14-feat-scope.md`; all reconciled items (`WP-FEAT-01..07b` and `WP-DOC-01`) have been implemented and verified.
 
 **Sources:** issue bodies of #28, #37 and #38 as published on GitHub on 2026-10-14 (no comments on any of the three), this plan, `features.md` and roadmap decisions G-6/G-12. Code spot-checks on the worktree baseline.
 

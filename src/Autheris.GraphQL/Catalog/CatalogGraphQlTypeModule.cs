@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text.Json;
+using Autheris.Application.Analytics;
 using Autheris.Application.Common;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Sql.Tree;
@@ -8,6 +9,7 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Autheris.GraphQL.Catalog;
 using HotChocolate;
 using HotChocolate.Execution.Configuration;
@@ -48,15 +50,10 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
         _versionProvider = versionProvider;
     }
 
-    /// <summary>
-    /// R-GQL-12: raised when the catalog changed (or became reachable again) since the schema was built, so
-    /// HotChocolate rebuilds the schema without a restart. Detection polls a catalog fingerprint.
-    /// </summary>
     public event EventHandler<EventArgs>? TypesChanged;
 
     internal string? BuiltFingerprint => _builtFingerprint;
 
-    /// <summary>Compares the current catalog with the one the schema was built from; raises TypesChanged on a difference.</summary>
     internal async Task<bool> CheckForCatalogChangesAsync(CancellationToken ct = default)
     {
         if (Interlocked.Exchange(ref _checking, 1) == 1)
@@ -134,8 +131,6 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
         IDescriptorContext context,
         CancellationToken cancellationToken)
     {
-        // R-GQL-12: an unreachable governance database must not take down the whole GraphQL endpoint; the schema is built
-        // without catalog tables and rebuilt once the catalog can be read (change detection).
         CatalogSchemaModel schemaModel;
         try
         {
@@ -159,7 +154,6 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
 
         var types = new List<ITypeSystemMember>();
 
-        // 1. Sort Direction Enum
         types.Add(new EnumType(d =>
         {
             d.Name("AutherisSortDirection");
@@ -168,13 +162,34 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
             d.Value("DESC").Description("Descending order.");
         }));
 
-        // 2. Operator Filter Input Types
         RegisterOperatorFilterTypes(types);
 
-        // 3. For each table: Filter, OrderBy, ObjectType
+        types.Add(new ObjectType(d =>
+        {
+            d.Name("AutherisAggregationResult");
+            d.Description("Governed aggregation result with k-anonymity and differential privacy metadata.");
+            d.Field("count").Type(new NonNullTypeNode(new NamedTypeNode("Long")))
+                .Resolve(ctx => ctx.Parent<AggregationResult>().Totals?.Count ?? 0L);
+            d.Field("suppressed").Type(new NonNullTypeNode(new NamedTypeNode("Boolean")))
+                .Resolve(ctx => ctx.Parent<AggregationResult>().Suppressed);
+            d.Field("suppressedGroupsCount").Type(new NonNullTypeNode(new NamedTypeNode("Int")))
+                .Resolve(ctx => ctx.Parent<AggregationResult>().SuppressedGroupsCount);
+            d.Field("suppressedRowsCount").Type(new NonNullTypeNode(new NamedTypeNode("Long")))
+                .Resolve(ctx => ctx.Parent<AggregationResult>().SuppressedRowsCount);
+            d.Field("minimumGroupSize").Type(new NonNullTypeNode(new NamedTypeNode("Int")))
+                .Resolve(ctx => ctx.Parent<AggregationResult>().MinimumGroupSize);
+            d.Field("mergedIntoOther").Type(new NonNullTypeNode(new NamedTypeNode("Boolean")))
+                .Resolve(ctx => ctx.Parent<AggregationResult>().MergedIntoOther);
+            d.Field("truncated").Type(new NonNullTypeNode(new NamedTypeNode("Boolean")))
+                .Resolve(ctx => ctx.Parent<AggregationResult>().Truncated);
+            d.Field("noiseApplied").Type(new NonNullTypeNode(new NamedTypeNode("Boolean")))
+                .Resolve(ctx => ctx.Parent<AggregationResult>().NoiseApplied);
+            d.Field("groupsJson").Type(new NonNullTypeNode(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode("String")))))
+                .Resolve(ctx => ctx.Parent<AggregationResult>().Groups.Select(g => JsonSerializer.Serialize(g)).ToList());
+        }));
+
         foreach (var table in schemaModel.Tables)
         {
-            // Table Filter Input
             types.Add(new InputObjectType(d =>
             {
                 d.Name(table.FilterTypeName);
@@ -189,7 +204,6 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
                 }
             }));
 
-            // Table OrderBy Input
             types.Add(new InputObjectType(d =>
             {
                 d.Name(table.OrderByTypeName);
@@ -200,13 +214,11 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
                 }
             }));
 
-            // Table Object Type
             types.Add(new ObjectType(d =>
             {
                 d.Name(table.TypeName);
                 d.Description($"Entity type for {table.Metadata.Identifier}.");
 
-                // Columns
                 foreach (var col in table.Columns)
                 {
                     var scalarName = GetScalarName(col.FieldType);
@@ -219,12 +231,11 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
                         .Resolve(ctx => ResolveColumnValue(ctx, col));
                 }
 
-                // Relations
                 foreach (var rel in table.Relations)
                 {
                     if (rel.IsList)
                     {
-                        var field = d.Field(rel.FieldName)
+                        d.Field(rel.FieldName)
                             .Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode(rel.TargetTypeName))))
                             .Argument("where", a => a.Type(new NamedTypeNode($"{rel.TargetTypeName}_filter")))
                             .Argument("orderBy", a => a.Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode($"{rel.TargetTypeName}_order_by")))))
@@ -243,7 +254,6 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
             }));
         }
 
-        // 4. Query Root Extension
         types.Add(new ObjectTypeExtension(d =>
         {
             d.Name("Query");
@@ -258,6 +268,14 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
                     .Argument("first", a => a.Type(new NamedTypeNode("Int")).DefaultValue(100))
                     .Argument("offset", a => a.Type(new NamedTypeNode("Int")).DefaultValue(0))
                     .Resolve(async ctx => await ResolveRootQueryAsync(ctx, table, schemaModel).ConfigureAwait(false));
+
+                d.Field($"{table.QueryFieldName}_aggregate")
+                    .Description($"Governed aggregation for {table.TypeName} with k-anonymity and differential privacy.")
+                    .Type(new NonNullTypeNode(new NamedTypeNode("AutherisAggregationResult")))
+                    .Argument("groupBy", a => a.Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode("String")))))
+                    .Argument("where", a => a.Type(new NamedTypeNode("String")))
+                    .Argument("limit", a => a.Type(new NamedTypeNode("Int")).DefaultValue(100))
+                    .Resolve(async ctx => await ResolveTableAggregateAsync(ctx, table).ConfigureAwait(false));
             }
         }));
 
@@ -266,105 +284,39 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
 
     private static void RegisterOperatorFilterTypes(List<ITypeSystemMember> types)
     {
-        // AutherisStringFilter
-        types.Add(new InputObjectType(d =>
+        static void AddComparableFilter(List<ITypeSystemMember> list, string name, string scalar, bool includeStringOps = false)
         {
-            d.Name("AutherisStringFilter");
-            d.Field("eq").Type(new NamedTypeNode("String"));
-            d.Field("neq").Type(new NamedTypeNode("String"));
-            d.Field("gt").Type(new NamedTypeNode("String"));
-            d.Field("gte").Type(new NamedTypeNode("String"));
-            d.Field("lt").Type(new NamedTypeNode("String"));
-            d.Field("lte").Type(new NamedTypeNode("String"));
-            d.Field("in").Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode("String"))));
-            d.Field("nin").Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode("String"))));
-            d.Field("isNull").Type(new NamedTypeNode("Boolean"));
-            d.Field("contains").Type(new NamedTypeNode("String"));
-            d.Field("startsWith").Type(new NamedTypeNode("String"));
-            d.Field("endsWith").Type(new NamedTypeNode("String"));
-        }));
+            list.Add(new InputObjectType(d =>
+            {
+                d.Name(name);
+                foreach (var op in new[] { "eq", "neq", "gt", "gte", "lt", "lte" })
+                {
+                    d.Field(op).Type(new NamedTypeNode(scalar));
+                }
+                d.Field("in").Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode(scalar))));
+                d.Field("nin").Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode(scalar))));
+                d.Field("isNull").Type(new NamedTypeNode("Boolean"));
+                if (includeStringOps)
+                {
+                    d.Field("contains").Type(new NamedTypeNode("String"));
+                    d.Field("startsWith").Type(new NamedTypeNode("String"));
+                    d.Field("endsWith").Type(new NamedTypeNode("String"));
+                }
+            }));
+        }
 
-        // AutherisIntFilter
-        types.Add(new InputObjectType(d =>
-        {
-            d.Name("AutherisIntFilter");
-            d.Field("eq").Type(new NamedTypeNode("Int"));
-            d.Field("neq").Type(new NamedTypeNode("Int"));
-            d.Field("gt").Type(new NamedTypeNode("Int"));
-            d.Field("gte").Type(new NamedTypeNode("Int"));
-            d.Field("lt").Type(new NamedTypeNode("Int"));
-            d.Field("lte").Type(new NamedTypeNode("Int"));
-            d.Field("in").Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode("Int"))));
-            d.Field("nin").Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode("Int"))));
-            d.Field("isNull").Type(new NamedTypeNode("Boolean"));
-        }));
+        AddComparableFilter(types, "AutherisStringFilter", "String", includeStringOps: true);
+        AddComparableFilter(types, "AutherisIntFilter", "Int");
+        AddComparableFilter(types, "AutherisLongFilter", "Long");
+        AddComparableFilter(types, "AutherisFloatFilter", "Float");
+        AddComparableFilter(types, "AutherisDecimalFilter", "Decimal");
+        AddComparableFilter(types, "AutherisDateTimeFilter", "String");
 
-        // AutherisLongFilter
-        types.Add(new InputObjectType(d =>
-        {
-            d.Name("AutherisLongFilter");
-            d.Field("eq").Type(new NamedTypeNode("Long"));
-            d.Field("neq").Type(new NamedTypeNode("Long"));
-            d.Field("gt").Type(new NamedTypeNode("Long"));
-            d.Field("gte").Type(new NamedTypeNode("Long"));
-            d.Field("lt").Type(new NamedTypeNode("Long"));
-            d.Field("lte").Type(new NamedTypeNode("Long"));
-            d.Field("in").Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode("Long"))));
-            d.Field("nin").Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode("Long"))));
-            d.Field("isNull").Type(new NamedTypeNode("Boolean"));
-        }));
-
-        // AutherisFloatFilter
-        types.Add(new InputObjectType(d =>
-        {
-            d.Name("AutherisFloatFilter");
-            d.Field("eq").Type(new NamedTypeNode("Float"));
-            d.Field("neq").Type(new NamedTypeNode("Float"));
-            d.Field("gt").Type(new NamedTypeNode("Float"));
-            d.Field("gte").Type(new NamedTypeNode("Float"));
-            d.Field("lt").Type(new NamedTypeNode("Float"));
-            d.Field("lte").Type(new NamedTypeNode("Float"));
-            d.Field("in").Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode("Float"))));
-            d.Field("nin").Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode("Float"))));
-            d.Field("isNull").Type(new NamedTypeNode("Boolean"));
-        }));
-
-        // AutherisDecimalFilter
-        types.Add(new InputObjectType(d =>
-        {
-            d.Name("AutherisDecimalFilter");
-            d.Field("eq").Type(new NamedTypeNode("Decimal"));
-            d.Field("neq").Type(new NamedTypeNode("Decimal"));
-            d.Field("gt").Type(new NamedTypeNode("Decimal"));
-            d.Field("gte").Type(new NamedTypeNode("Decimal"));
-            d.Field("lt").Type(new NamedTypeNode("Decimal"));
-            d.Field("lte").Type(new NamedTypeNode("Decimal"));
-            d.Field("in").Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode("Decimal"))));
-            d.Field("nin").Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode("Decimal"))));
-            d.Field("isNull").Type(new NamedTypeNode("Boolean"));
-        }));
-
-        // AutherisBooleanFilter
         types.Add(new InputObjectType(d =>
         {
             d.Name("AutherisBooleanFilter");
             d.Field("eq").Type(new NamedTypeNode("Boolean"));
             d.Field("neq").Type(new NamedTypeNode("Boolean"));
-            d.Field("isNull").Type(new NamedTypeNode("Boolean"));
-        }));
-
-        // AutherisDateTimeFilter
-        types.Add(new InputObjectType(d =>
-        {
-            d.Name("AutherisDateTimeFilter");
-            d.Field("eq").Type(new NamedTypeNode("String"));
-            d.Field("neq").Type(new NamedTypeNode("String"));
-            d.Field("gt").Type(new NamedTypeNode("String"));
-            d.Field("gte").Type(new NamedTypeNode("String"));
-            d.Field("lt").Type(new NamedTypeNode("String"));
-            d.Field("lte").Type(new NamedTypeNode("String"));
-            d.Field("in").Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode("String"))));
-            d.Field("nin").Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode("String"))));
             d.Field("isNull").Type(new NamedTypeNode("Boolean"));
         }));
     }
@@ -406,55 +358,34 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
     private static object? ResolveColumnValue(IResolverContext ctx, CatalogColumnField col)
     {
         var parent = ctx.Parent<JsonElement>();
-        if (parent.ValueKind != JsonValueKind.Object)
-        {
-            return null;
-        }
+        if (parent.ValueKind != JsonValueKind.Object) return null;
+        if (!parent.TryGetProperty(col.ColumnName, out var prop) && !parent.TryGetProperty(col.FieldName, out prop)) return null;
+        if (prop.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined) return null;
 
-        if (!parent.TryGetProperty(col.ColumnName, out var prop) &&
-            !parent.TryGetProperty(col.FieldName, out prop))
-        {
-            return null;
-        }
-
-        if (prop.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
-        {
-            return null;
-        }
-
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
         return col.FieldType switch
         {
             CatalogFieldType.Int => prop.ValueKind == JsonValueKind.Number
-                ? (prop.TryGetInt32(out var n) ? n : (int.TryParse(prop.GetRawText(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var pi) ? pi : ReportMasked(ctx, col)))
-                : (int.TryParse(prop.GetString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var strN) ? strN : ReportMasked(ctx, col)),
-
+                ? (prop.TryGetInt32(out var n) ? n : (int.TryParse(prop.GetRawText(), System.Globalization.NumberStyles.Integer, inv, out var pi) ? pi : ReportMasked(ctx, col)))
+                : (int.TryParse(prop.GetString(), System.Globalization.NumberStyles.Integer, inv, out var strN) ? strN : ReportMasked(ctx, col)),
             CatalogFieldType.Long => prop.ValueKind == JsonValueKind.Number
-                ? (prop.TryGetInt64(out var l) ? l : (long.TryParse(prop.GetRawText(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var pl) ? pl : ReportMasked(ctx, col)))
-                : (long.TryParse(prop.GetString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var strL) ? strL : ReportMasked(ctx, col)),
-
+                ? (prop.TryGetInt64(out var l) ? l : (long.TryParse(prop.GetRawText(), System.Globalization.NumberStyles.Integer, inv, out var pl) ? pl : ReportMasked(ctx, col)))
+                : (long.TryParse(prop.GetString(), System.Globalization.NumberStyles.Integer, inv, out var strL) ? strL : ReportMasked(ctx, col)),
             CatalogFieldType.Float => prop.ValueKind == JsonValueKind.Number
-                ? (prop.TryGetDouble(out var d) ? d : (double.TryParse(prop.GetRawText(), System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture, out var pd) ? pd : ReportMasked(ctx, col)))
-                : (double.TryParse(prop.GetString(), System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture, out var strD) ? strD : ReportMasked(ctx, col)),
-
+                ? (prop.TryGetDouble(out var d) ? d : (double.TryParse(prop.GetRawText(), System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, inv, out var pd) ? pd : ReportMasked(ctx, col)))
+                : (double.TryParse(prop.GetString(), System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, inv, out var strD) ? strD : ReportMasked(ctx, col)),
             CatalogFieldType.Decimal => prop.ValueKind == JsonValueKind.Number
-                ? (prop.TryGetDecimal(out var m) ? m : (decimal.TryParse(prop.GetRawText(), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var pm) ? pm : ReportMasked(ctx, col)))
-                : (decimal.TryParse(prop.GetString(), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var strM) ? strM : ReportMasked(ctx, col)),
-
+                ? (prop.TryGetDecimal(out var m) ? m : (decimal.TryParse(prop.GetRawText(), System.Globalization.NumberStyles.Number, inv, out var pm) ? pm : ReportMasked(ctx, col)))
+                : (decimal.TryParse(prop.GetString(), System.Globalization.NumberStyles.Number, inv, out var strM) ? strM : ReportMasked(ctx, col)),
             CatalogFieldType.Boolean => prop.ValueKind switch
             {
                 JsonValueKind.True => true,
                 JsonValueKind.False => false,
-                JsonValueKind.Number => prop.TryGetInt64(out var i)
-                    ? i != 0
-                    : (prop.TryGetDouble(out var dVal) ? Math.Abs(dVal) > double.Epsilon : ReportMasked(ctx, col)),
-                JsonValueKind.String => string.Equals(prop.GetString(), "true", StringComparison.OrdinalIgnoreCase) ? true
-                    : (string.Equals(prop.GetString(), "false", StringComparison.OrdinalIgnoreCase) ? false
-                    : (prop.GetString() == "1" ? true
-                    : (prop.GetString() == "0" ? false
-                    : ReportMasked(ctx, col)))),
+                JsonValueKind.Number => prop.TryGetInt64(out var i) ? i != 0 : (prop.TryGetDouble(out var dVal) ? Math.Abs(dVal) > double.Epsilon : ReportMasked(ctx, col)),
+                JsonValueKind.String => string.Equals(prop.GetString(), "true", StringComparison.OrdinalIgnoreCase) || prop.GetString() == "1" ? true
+                    : (string.Equals(prop.GetString(), "false", StringComparison.OrdinalIgnoreCase) || prop.GetString() == "0" ? false : ReportMasked(ctx, col)),
                 _ => ReportMasked(ctx, col)
             },
-
             CatalogFieldType.String or CatalogFieldType.DateTime => prop.ValueKind == JsonValueKind.String ? prop.GetString() : prop.GetRawText(),
             _ => prop.ToString()
         };
@@ -463,39 +394,64 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
     private static object? ResolveRelationValue(IResolverContext ctx, CatalogRelationField rel)
     {
         var parent = ctx.Parent<JsonElement>();
-        if (parent.ValueKind != JsonValueKind.Object)
-        {
-            return null;
-        }
-
+        if (parent.ValueKind != JsonValueKind.Object) return null;
         var key = ctx.ResponseName;
-        if (!parent.TryGetProperty(key, out var prop) &&
-            !parent.TryGetProperty(rel.FieldName, out prop))
-        {
-            return null;
-        }
-
-        if (prop.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
-        {
-            return null;
-        }
+        if (!parent.TryGetProperty(key, out var prop) && !parent.TryGetProperty(rel.FieldName, out prop)) return null;
+        if (prop.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined) return null;
 
         if (rel.IsList)
         {
-            if (prop.ValueKind != JsonValueKind.Array)
-            {
-                return null;
-            }
-
+            if (prop.ValueKind != JsonValueKind.Array) return null;
             var list = new List<JsonElement>(prop.GetArrayLength());
-            foreach (var item in prop.EnumerateArray())
-            {
-                list.Add(item);
-            }
+            foreach (var item in prop.EnumerateArray()) list.Add(item);
             return list;
         }
 
         return prop;
+    }
+
+    private static async Task<AggregationResult> ResolveTableAggregateAsync(
+        IResolverContext ctx,
+        CatalogTableType table)
+    {
+        var aggregationService = ctx.Service<IGovernedAggregationService>();
+        var httpContext = ctx.Service<IHttpContextAccessor>()?.HttpContext;
+        var principal = httpContext?.User ?? new ClaimsPrincipal();
+
+        var groupBy = ctx.ArgumentValue<IReadOnlyList<string>?>("groupBy");
+        var whereStr = ctx.ArgumentValue<string?>("where");
+        var limit = ctx.ArgumentValue<int?>("limit");
+        var whereClause = !string.IsNullOrWhiteSpace(whereStr)
+            ? TableFilterClause.FromTrinoText(whereStr, Array.Empty<string>())
+            : null;
+
+        try
+        {
+            var aggQuery = new AggregationQuery(
+                Table: table.Metadata.Identifier,
+                GroupBy: groupBy,
+                Aggregates: [new AggregateSelection(AggregateFunction.Count)],
+                Where: whereClause,
+                Limit: limit,
+                Transport: "graphql");
+            return await aggregationService.ExecuteAggregationAsync(principal, aggQuery, ctx.RequestAborted).ConfigureAwait(false);
+        }
+        catch (PrivacyBudgetExhaustedException)
+        {
+            throw new GraphQLException(ErrorBuilder.New().SetMessage("Privacy budget exhausted.").SetCode("PRIVACY_BUDGET_EXHAUSTED").Build());
+        }
+        catch (MaskedAggregationException ex)
+        {
+            throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode(MaskedAggregationException.ErrorCodeConst).Build());
+        }
+        catch (GatewayInvalidQueryException ex)
+        {
+            throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode("INVALID_QUERY").Build());
+        }
+        catch (GatewayForbiddenException)
+        {
+            throw new GraphQLException(ErrorBuilder.New().SetMessage("Access denied.").SetCode("ACCESS_DENIED").Build());
+        }
     }
 
     private static async Task<IReadOnlyList<JsonElement>> ResolveRootQueryAsync(
@@ -504,8 +460,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
         CatalogSchemaModel schema)
     {
         var treeService = ctx.Service<IGovernedTreeQueryService>();
-        var httpContextAccessor = ctx.Service<IHttpContextAccessor>();
-        var httpContext = httpContextAccessor?.HttpContext;
+        var httpContext = ctx.Service<IHttpContextAccessor>()?.HttpContext;
         var principal = httpContext?.User ?? new ClaimsPrincipal();
 
         IReadOnlyDictionary<string, string[]>? headers = null;
@@ -563,50 +518,33 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
         }
         catch (GatewayInvalidQueryException ex)
         {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetMessage(ex.Message)
-                .SetCode("INVALID_QUERY")
-                .Build());
+            throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode("INVALID_QUERY").Build());
         }
         catch (GatewayForbiddenException)
         {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetMessage("Access denied.")
-                .SetCode("ACCESS_DENIED")
-                .Build());
+            throw new GraphQLException(ErrorBuilder.New().SetMessage("Access denied.").SetCode("ACCESS_DENIED").Build());
         }
         catch (GatewayThrottledException ex)
         {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetMessage(ex.Message)
-                .SetCode("TOO_MANY_REQUESTS")
-                .Build());
+            throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode("TOO_MANY_REQUESTS").Build());
         }
         catch (GatewaySecurityException ex) when (string.Equals(ex.ErrorCode, "RESPONSE_TOO_LARGE", StringComparison.OrdinalIgnoreCase))
         {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetMessage(ex.Message)
-                .SetCode("RESPONSE_TOO_LARGE")
-                .Build());
+            throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode("RESPONSE_TOO_LARGE").Build());
         }
         catch (Exception ex)
         {
             var classified = DataAccessErrorClassifier.Classify(ex);
             if (classified == DataAccessErrorKind.Timeout)
             {
-                throw new GraphQLException(ErrorBuilder.New()
-                    .SetMessage("The database query timed out.")
-                    .SetCode("TIMEOUT")
-                    .Build());
+                throw new GraphQLException(ErrorBuilder.New().SetMessage("The database query timed out.").SetCode("TIMEOUT").Build());
             }
             if (classified == DataAccessErrorKind.Unavailable)
             {
-                throw new GraphQLException(ErrorBuilder.New()
-                    .SetMessage("The database is currently unavailable.")
-                    .SetCode("UNAVAILABLE")
-                    .Build());
+                throw new GraphQLException(ErrorBuilder.New().SetMessage("The database is currently unavailable.").SetCode("UNAVAILABLE").Build());
             }
             throw;
         }
     }
 }
+
