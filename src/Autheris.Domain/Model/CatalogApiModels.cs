@@ -31,7 +31,8 @@ public sealed record CatalogDatasetDetail(
     IReadOnlyList<CatalogColumnDetail> Columns,
     IReadOnlyList<string> PrimaryKeys,
     string Sensitivity,
-    bool IsActive);
+    bool IsActive,
+    IReadOnlyList<TableIndexDefinition>? Indexes = null);
 
 public sealed record CatalogDatasourceSummary(
     string Id,

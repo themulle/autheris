@@ -117,11 +117,16 @@ public sealed record TablePageRequest(
     bool IncludeTotalCount = false,
     IReadOnlyDictionary<string, string[]>? RequestHeaders = null);
 
-/// <summary>Rows of the page, the access decision and (when requested) the total row count.</summary>
+/// <summary>
+/// Rows of the page, the access decision and (when requested) the total row count. <paramref name="Unordered"/> is true when no
+/// deterministic order could be applied (no orderable column readable in clear text): a transport must not return a
+/// continuation then. Internal signal only; it never reaches a response body.
+/// </summary>
 public sealed record TableQueryPage(
     IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows,
     TableAccessDecision Decision,
-    long? TotalCount);
+    long? TotalCount,
+    bool Unordered = false);
 
 /// <summary>
 /// Keys of <see cref="DataSourceExecutionContext.Items"/> that carry ordering, filtering and counting between the gateway and the
@@ -140,5 +145,11 @@ public static class TableQueryItems
 
     /// <summary>Response: the total row count (<see cref="long"/>).</summary>
     public const string TotalCount = "TableQuery.TotalCount";
+
+    /// <summary>
+    /// Response (internal): the name of the default ordering rule behind the page (<c>DefaultOrderingKind</c>). Diagnostics and the
+    /// <c>None</c> check only; it is never written to a response body, header or annotation.
+    /// </summary>
+    public const string Ordering = "TableQuery.Ordering";
 }
 

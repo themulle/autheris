@@ -581,4 +581,85 @@ public sealed class GovernedDataQueryServiceTests
         capturedRule.RuleType.ShouldBe("HMAC_SHA256");
         capturedRule.HmacKeyId.ShouldBe("key-2026-q1|tenant:default");
     }
+
+    private TableMetadata UnorderableUnkeyed(DataSourceType type = DataSourceType.Sql) =>
+        CreateCustomerTableMetadata(type, Array.Empty<string>()) with
+        {
+            Columns = new List<TableColumn>
+            {
+                new() { ColumnName = "id", DataType = "xml" },
+                new() { ColumnName = "name", DataType = "xml" }
+            }
+        };
+
+    [Fact]
+    public async Task ExecuteQueryAsync_CrossSourceUnkeyedTable_PlansStableOrderBeforeTheInMemorySkip()
+    {
+        AllowAll(CreateCustomerTableMetadata(DataSourceType.HttpDeclarative, Array.Empty<string>()));
+        GovernedSqlQueryRequest? captured = null;
+        _federatedExecutionService.ExecuteQueryBufferedAsync(
+                Arg.Do<GovernedSqlQueryRequest>(r => captured = r),
+                Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(SqlResult(61));
+
+        await CreateService().ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "name" }, Limit: 50, Offset: 10, Transport: "Rest"), Ctx());
+
+        captured.ShouldNotBeNull();
+        captured.Sql.ShouldContain("ORDER BY \"id\", \"email\", \"name\" LIMIT 61");
+        captured.Sql.ShouldNotContain("OFFSET", Case.Insensitive);
+    }
+
+    [Theory]
+    [InlineData(DataSourceType.Sql)]
+    [InlineData(DataSourceType.HttpDeclarative)]
+    public async Task ExecuteQueryAsync_NoOrderableColumnAndOffset_Rejects400WithoutColumnNames(DataSourceType type)
+    {
+        AllowAll(UnorderableUnkeyed(type));
+
+        var ex = await Should.ThrowAsync<ArgumentException>(() => CreateService().ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id" }, Limit: 5, Offset: 5), Ctx()));
+
+        ex.Message.ShouldContain("no orderable column readable in clear text");
+        ex.Message.ShouldNotContain("\"id\"");
+    }
+
+    [Fact]
+    public async Task ExecuteQueryAsync_NoOrderableColumnAndMoreRowsThanThePage_Rejects400()
+    {
+        AllowAll(UnorderableUnkeyed());
+        _sqlExecutionService.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(SqlResult(6));
+
+        var ex = await Should.ThrowAsync<ArgumentException>(() => CreateService().ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id" }, Limit: 5, Offset: 0), Ctx()));
+
+        ex.Message.ShouldContain("no orderable column readable in clear text");
+    }
+
+    [Fact]
+    public async Task ExecuteQueryAsync_NoOrderableColumnAndFullPageWithoutMoreRows_Succeeds()
+    {
+        AllowAll(UnorderableUnkeyed());
+        _sqlExecutionService.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(SqlResult(5));
+
+        var result = await CreateService().ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id" }, Limit: 5, Offset: 0), Ctx());
+
+        result.HasMore.ShouldBeFalse();
+        result.Count.ShouldBe(5);
+    }
+
+    [Fact]
+    public async Task ExecuteQueryAsync_UnavailableMetadata_IsNotFound_NeverReadsOrLeaksDetail()
+    {
+        _metadataRepo.GetTableMetadataAsync(_customerTable, Arg.Any<CancellationToken>())
+            .Returns<TableMetadata?>(_ => throw new Autheris.Domain.Exceptions.TableMetadataUnavailableException(_customerTable));
+
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.TableNotFoundException>(() => CreateService().ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id" }, Limit: 5), Ctx()));
+
+        await _sqlExecutionService.DidNotReceive().ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>());
+    }
 }

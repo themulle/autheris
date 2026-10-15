@@ -55,6 +55,8 @@ public sealed class OmnichannelDocumentationTests
                     LongDescription = "Foreign key referencing accounts.id in core billing system.",
                     Meta = metaDict
                 },
+                // The declared key (account_id, month) must be complete: a PK that names a missing column is never emitted as a subset.
+                new TableColumn { ColumnName = "month", DataType = "integer" },
                 new TableColumn
                 {
                     ColumnName = "revenue_amount",

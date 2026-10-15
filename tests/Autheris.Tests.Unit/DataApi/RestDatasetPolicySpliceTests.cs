@@ -141,7 +141,7 @@ public sealed class RestDatasetPolicySpliceTests
             new RequestContext(Alice(), new TenantId(TenantValue)));
 
         fx.Captured.ShouldHaveSingleItem().Sql.ShouldBe(
-            "SELECT \"id\", \"name\" FROM default.dbo.customers WHERE \"name\" = 'Anna' AND \"id\" > 5 ORDER BY \"name\" DESC LIMIT 11");
+            "SELECT \"id\", \"name\" FROM default.dbo.customers WHERE \"name\" = 'Anna' AND \"id\" > 5 ORDER BY \"name\" DESC, \"id\" LIMIT 11");
     }
 
     [Theory]

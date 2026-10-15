@@ -144,11 +144,12 @@ public sealed class GovernedTableReadPlannerTests
     }
 
     [Fact]
-    public void Plan_WithoutOrderAndWithoutPrimaryKey_EmitsNoOrderBy()
+    public void Plan_WithoutOrderAndWithoutPrimaryKey_OrdersByClearColumnsEvenWithoutOffset()
     {
+        // Issue #94: the first page must use the same order as the following pages.
         var planned = _planner.Plan(Intent(select: new[] { "id" }), Metadata(Array.Empty<string>()), Decision());
 
-        planned.Sql.ShouldNotContain("ORDER BY");
+        planned.Sql.ShouldContain("ORDER BY \"id\", \"name\" LIMIT");
     }
 
     [Fact]
@@ -159,7 +160,7 @@ public sealed class GovernedTableReadPlannerTests
             Metadata(),
             Decision());
 
-        planned.Sql.ShouldBe("SELECT \"id\", \"name\" FROM sales.dbo.customers ORDER BY \"name\" DESC OFFSET 10 ROWS LIMIT 51");
+        planned.Sql.ShouldBe("SELECT \"id\", \"name\" FROM sales.dbo.customers ORDER BY \"name\" DESC, \"id\" OFFSET 10 ROWS LIMIT 51");
     }
 
     [Fact]
@@ -235,11 +236,12 @@ public sealed class GovernedTableReadPlannerTests
     }
 
     [Fact]
-    public void Plan_UnpagedReadWithoutPrimaryKey_AddsNoOrderBy()
+    public void Plan_UnpagedReadWithoutPrimaryKey_OrdersByAllClearOrderableColumns()
     {
         var planned = _planner.Plan(Intent(), Metadata(primaryKey: Array.Empty<string>()), Decision());
 
-        planned.Sql.ShouldNotContain("ORDER BY");
+        planned.Sql.ShouldContain("ORDER BY \"id\", \"name\" LIMIT");
+        planned.Ordering.ShouldBe(DefaultOrderingKind.ClearColumnComposite);
     }
 
     [Fact]
@@ -308,12 +310,12 @@ public sealed class GovernedTableReadPlannerTests
     }
 
     [Fact]
-    public void Plan_KeyWithMaskedColumnAndNoOffset_AddsNoOrderBy()
+    public void Plan_KeyWithMaskedColumnAndNoOffset_NeverOrdersByTheKeyPrefix()
     {
-        var meta = Unkeyed(("a", "int"), ("b", "int")) with { PrimaryKeyColumns = new[] { "a", "b" } };
-        var planned = _planner.Plan(Intent(limit: 6), meta, Levels(("a", ColumnAccessLevel.Clear), ("b", ColumnAccessLevel.Mask)));
+        var meta = Unkeyed(("a", "int"), ("b", "int"), ("c", "int")) with { PrimaryKeyColumns = new[] { "a", "b" } };
+        var planned = _planner.Plan(Intent(limit: 6), meta, Levels(("a", ColumnAccessLevel.Clear), ("b", ColumnAccessLevel.Mask), ("c", ColumnAccessLevel.Clear)));
 
-        planned.Sql.ShouldNotContain("ORDER BY");
+        planned.Sql.ShouldContain("ORDER BY \"a\", \"c\" LIMIT 6");
     }
 
     [Fact]
@@ -342,7 +344,7 @@ public sealed class GovernedTableReadPlannerTests
     }
 
     [Fact]
-    public void Plan_TableWithClientIdOnly_AutomaticallyOrdersByClientId()
+    public void Plan_TableWithClientIdOnly_IsNotTreatedAsAKey()
     {
         var meta = Unkeyed(("client_id", "varchar"), ("value", "double"));
         var decision = Levels(
@@ -351,7 +353,9 @@ public sealed class GovernedTableReadPlannerTests
 
         var planned = _planner.Plan(Intent(limit: 6), meta, decision);
 
-        planned.Sql.ShouldContain("ORDER BY \"client_id\" LIMIT 6");
+        // H1: client_id alone is not a key; the clear columns form the order.
+        planned.Ordering.ShouldBe(DefaultOrderingKind.ClearColumnComposite);
+        planned.Sql.ShouldContain("ORDER BY \"client_id\", \"value\" LIMIT 6");
     }
 
     [Fact]
@@ -373,5 +377,77 @@ public sealed class GovernedTableReadPlannerTests
         var planned = _planner.Plan(Intent(limit: 6), meta, decision);
 
         planned.Sql.ShouldContain("ORDER BY \"a\", \"b\" LIMIT 6");
+    }
+
+    [Fact]
+    public void OrderByDeniedColumn_MessageEqualsUnknownColumn()
+    {
+        var denied = Should.Throw<ArgumentException>(() => _planner.Plan(Intent(orderBy: new[] { new TableOrderBy("secret") }), Metadata(), Decision()));
+        var unknown = Should.Throw<ArgumentException>(() => _planner.Plan(Intent(orderBy: new[] { new TableOrderBy("nope") }), Metadata(), Decision()));
+
+        denied.Message.Replace("'secret'", "'X'").ShouldBe(unknown.Message.Replace("'nope'", "'X'"));
+    }
+
+    [Fact]
+    public void FilterOnDeniedColumn_MessageEqualsUnknownColumn()
+    {
+        var denied = Should.Throw<ArgumentException>(() => _planner.Plan(
+            Intent(filter: TableFilterClause.FromTrinoText("\"secret\" = 'x'", new[] { "secret" })), Metadata(), Decision()));
+        var unknown = Should.Throw<ArgumentException>(() => _planner.Plan(
+            Intent(filter: TableFilterClause.FromTrinoText("\"nope\" = 'x'", new[] { "nope" })), Metadata(), Decision()));
+
+        denied.Message.Replace("'secret'", "'X'").ShouldBe(unknown.Message.Replace("'nope'", "'X'"));
+    }
+
+    [Fact]
+    public void SelectDeniedColumn_MessageEqualsUnknownColumn()
+    {
+        var denied = Should.Throw<ArgumentException>(() => _planner.Plan(Intent(select: new[] { "secret" }), Metadata(), Decision()));
+        var unknown = Should.Throw<ArgumentException>(() => _planner.Plan(Intent(select: new[] { "nope" }), Metadata(), Decision()));
+
+        denied.Message.Replace("'secret'", "'X'").ShouldBe(unknown.Message.Replace("'nope'", "'X'"));
+    }
+
+    [Fact]
+    public void Tiebreaker_UsesOnlyClearColumns()
+    {
+        var meta = Unkeyed(("a", "int"), ("b", "int"), ("c", "int")) with { PrimaryKeyColumns = new[] { "a", "b" } };
+        var decision = Levels(("a", ColumnAccessLevel.Clear), ("b", ColumnAccessLevel.Mask), ("c", ColumnAccessLevel.Clear));
+
+        var planned = _planner.Plan(Intent(orderBy: new[] { new TableOrderBy("c", Descending: true) }), meta, decision);
+
+        planned.Sql.ShouldContain("ORDER BY \"c\" DESC, \"a\" LIMIT");
+        planned.Ordering.ShouldBe(DefaultOrderingKind.Explicit);
+    }
+
+    [Fact]
+    public void ExplicitOrder_AppendsKeyAsTiebreaker_WithoutDuplicates()
+    {
+        var planned = _planner.Plan(Intent(select: new[] { "id" }, orderBy: new[] { new TableOrderBy("NAME") }), Metadata(new[] { "id", "name" }), Decision());
+
+        planned.Sql.ShouldBe("SELECT \"id\" FROM sales.dbo.customers ORDER BY \"name\", \"id\" LIMIT 51");
+    }
+
+    [Fact]
+    public void NoneWithOffset_400_FixedTextWithoutColumnNames()
+    {
+        var meta = Unkeyed(("secretcol", "int"), ("doc", "xml"));
+        var decision = Levels(("secretcol", ColumnAccessLevel.Mask), ("doc", ColumnAccessLevel.Clear));
+
+        var ex = Should.Throw<ArgumentException>(() => _planner.Plan(Intent(limit: 6, offset: 5), meta, decision));
+
+        ex.Message.ShouldContain("no orderable column readable in clear text");
+        ex.Message.ShouldNotContain("secretcol");
+        ex.Message.ShouldNotContain("doc");
+    }
+
+    [Fact]
+    public void NoneAtOffsetZero_IsPlannedWithoutOrderByAndReportsNone()
+    {
+        var meta = Unkeyed(("doc", "xml"));
+        var planned = _planner.Plan(Intent(limit: 6), meta, Levels(("doc", ColumnAccessLevel.Clear)));
+
+        planned.Sql.ShouldNotContain("ORDER BY");
+        planned.Ordering.ShouldBe(DefaultOrderingKind.None);
     }
 }
