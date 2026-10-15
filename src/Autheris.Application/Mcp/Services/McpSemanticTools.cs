@@ -19,6 +19,16 @@ public static class McpSemanticTools
     public const string DescribeMetric = "describe_metric";
     public const string QueryMetrics = "query_metrics";
 
+    public static readonly TableIdentifier SemanticCatalogTable = new("governance", "catalog", "semantic_metrics");
+
+    public static bool IsSemanticTool(string? toolName) =>
+        string.Equals(toolName, ListMetrics, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, DescribeMetric, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, QueryMetrics, StringComparison.OrdinalIgnoreCase);
+
+    public static bool ReadsRows(string? toolName) =>
+        string.Equals(toolName, QueryMetrics, StringComparison.OrdinalIgnoreCase);
+
     private static readonly JsonSerializerOptions IndentedOptions = new()
     {
         WriteIndented = true,
@@ -38,7 +48,8 @@ public static class McpSemanticTools
               }
             }
             """,
-            TargetGraphQLOperation: ListMetrics);
+            TargetGraphQLOperation: ListMetrics,
+            TargetTable: SemanticCatalogTable);
 
         yield return new McpToolDefinition(
             Name: DescribeMetric,
@@ -52,7 +63,8 @@ public static class McpSemanticTools
               }
             }
             """,
-            TargetGraphQLOperation: DescribeMetric);
+            TargetGraphQLOperation: DescribeMetric,
+            TargetTable: SemanticCatalogTable);
 
         yield return new McpToolDefinition(
             Name: QueryMetrics,
@@ -87,7 +99,8 @@ public static class McpSemanticTools
               }
             }
             """,
-            TargetGraphQLOperation: QueryMetrics);
+            TargetGraphQLOperation: QueryMetrics,
+            TargetTable: SemanticCatalogTable);
     }
 
     public static async Task<string> ExecuteListMetricsAsync(

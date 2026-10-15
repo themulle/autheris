@@ -15,6 +15,7 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -109,6 +110,15 @@ public static class AnalyticsEndpoints
             var result = await aggregationService.ExecuteAggregationAsync(httpContext.User, query, ct).ConfigureAwait(false);
             return Results.Ok(result);
         }
+        catch (PrivacyBudgetExhaustedException ex)
+        {
+            SafeErrorResults.LogFailure(httpContext, ex, "PRIVACY_BUDGET_EXHAUSTED");
+            return SafeErrorResults.Problem(
+                StatusCodes.Status429TooManyRequests,
+                "PRIVACY_BUDGET_EXHAUSTED",
+                "The daily differential privacy epsilon budget has been exhausted.",
+                httpContext);
+        }
         catch (MaskedAggregationException ex)
         {
             SafeErrorResults.LogFailure(httpContext, ex, MaskedAggregationException.ErrorCodeConst);
@@ -117,6 +127,11 @@ public static class AnalyticsEndpoints
                 MaskedAggregationException.ErrorCodeConst,
                 "Aggregation or grouping on a masked column is not permitted.",
                 httpContext);
+        }
+        catch (GatewayInvalidQueryException ex)
+        {
+            SafeErrorResults.LogFailure(httpContext, ex, ex.ErrorCode);
+            return SafeErrorResults.BadRequest(ex.ErrorCode, "The aggregation query parameters are invalid.", httpContext);
         }
         catch (TableNotFoundException ex)
         {
@@ -164,6 +179,15 @@ public static class AnalyticsEndpoints
             var result = await metricQueryService.QueryMetricsAsync(httpContext.User, metricRequest, ct).ConfigureAwait(false);
             return Results.Ok(result);
         }
+        catch (PrivacyBudgetExhaustedException ex)
+        {
+            SafeErrorResults.LogFailure(httpContext, ex, "PRIVACY_BUDGET_EXHAUSTED");
+            return SafeErrorResults.Problem(
+                StatusCodes.Status429TooManyRequests,
+                "PRIVACY_BUDGET_EXHAUSTED",
+                "The daily differential privacy epsilon budget has been exhausted.",
+                httpContext);
+        }
         catch (MaskedAggregationException ex)
         {
             SafeErrorResults.LogFailure(httpContext, ex, MaskedAggregationException.ErrorCodeConst);
@@ -172,6 +196,11 @@ public static class AnalyticsEndpoints
                 MaskedAggregationException.ErrorCodeConst,
                 "Metric measure or dimension references a column that is masked for the caller.",
                 httpContext);
+        }
+        catch (GatewayInvalidQueryException ex)
+        {
+            SafeErrorResults.LogFailure(httpContext, ex, ex.ErrorCode);
+            return SafeErrorResults.BadRequest(ex.ErrorCode, "The semantic metric query parameters are invalid.", httpContext);
         }
         catch (KeyNotFoundException ex)
         {
