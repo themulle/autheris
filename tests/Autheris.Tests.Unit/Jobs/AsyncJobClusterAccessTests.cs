@@ -7,6 +7,10 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Sql;
+using Autheris.Application.Sql.Interfaces;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Autheris.Application.Jobs.Services;
 using Autheris.Application.State;
 using Autheris.Domain.Audit;
@@ -305,5 +309,104 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
 
         Should.Throw<InvalidOperationException>(() => new AsyncQueryJobManager(
             _auditA, environment: env, topology: new ClusterStateTopology(ClusterStateMode.External)));
+    }
+
+    // ---- cross-node cancel ----
+
+    private async Task<(AsyncQueryJobBackgroundWorker Worker, TaskCompletionSource<CancellationToken> Token)> StartWorkerAsync(AsyncQueryJobManager node)
+    {
+        var tokenSeen = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sql = Substitute.For<IGovernedSqlExecutionService>();
+        sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(async call =>
+            {
+                var ct = call.Arg<CancellationToken>();
+                tokenSeen.TrySetResult(ct);
+                await Task.Delay(Timeout.Infinite, ct);
+                return AsyncJobWorkerConcurrencyTests.EmptyResult();
+            });
+        var worker = new AsyncQueryJobBackgroundWorker(
+            node, node, AsyncJobWorkerConcurrencyTests.Scopes(sql), Substitute.For<IAuditLogRepository>(),
+            NullLogger<AsyncQueryJobBackgroundWorker>.Instance,
+            clusterState: _state, topology: new ClusterStateTopology(ClusterStateMode.External));
+        await worker.StartAsync(CancellationToken.None);
+        return (worker, tokenSeen);
+    }
+
+    [Fact]
+    public async Task CancelOnNodeB_CancelsRunningJobOnNodeA()
+    {
+        var a = Node(_auditA, "a");
+        var b = Node(_auditB, "b");
+        var (worker, token) = await StartWorkerAsync(a);
+        var job = await SubmitAsync(a);
+        var ct = await token.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var ownerNode = (await _state.GetAsync<AsyncJobClusterRecord>($"asyncjob:t:{job.JobId}"))!.OwnerNodeId;
+
+        (await b.CancelJobAsync(job.JobId, _tenant, "alice")).ShouldBeTrue();
+
+        ct.IsCancellationRequested.ShouldBeTrue("the owner node must stop the running query");
+        (await a.GetJobAsync(job.JobId, _tenant, "alice"))!.State.ShouldBe(AsyncJobState.Cancelled);
+        var record = (await _state.GetAsync<AsyncJobClusterRecord>($"asyncjob:t:{job.JobId}"))!;
+        record.State.ShouldBe(AsyncJobState.Cancelled);
+        record.OwnerNodeId.ShouldBe(ownerNode);
+        await _auditB.Received(1).RecordAuditEventAsync(
+            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.AsyncJobCancelled && e.Decision == "ALLOW"),
+            Arg.Any<CancellationToken>());
+        await worker.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task CancelOnNodeB_ForeignOwner_IsDeniedAndAudited()
+    {
+        var a = Node(_auditA, "a");
+        var b = Node(_auditB, "b");
+        var job = await SubmitAsync(a);
+
+        (await b.CancelJobAsync(job.JobId, _tenant, "mallory")).ShouldBeFalse();
+
+        (await _state.GetAsync<AsyncJobClusterRecord>($"asyncjob:t:{job.JobId}"))!.State.ShouldBe(AsyncJobState.Queued);
+        await _auditB.Received(1).RecordAuditEventAsync(
+            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.AsyncJobAccessDenied && e.Decision == "DENY"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CancelSignal_ForeignOwner_IsIgnoredByOwner()
+    {
+        var a = Node(_auditA, "a");
+        var (worker, token) = await StartWorkerAsync(a);
+        var job = await SubmitAsync(a);
+        var ct = await token.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        await _state.PublishEventAsync("asyncjob:cancel", new AsyncJobCancelSignal("t", job.JobId, "mallory"));
+        await _state.PublishEventAsync("asyncjob:cancel", new AsyncJobCancelSignal("other-tenant", job.JobId, "alice"));
+
+        ct.IsCancellationRequested.ShouldBeFalse();
+        (await a.GetJobAsync(job.JobId, _tenant, "alice"))!.State.ShouldBe(AsyncJobState.Running);
+
+        // The legitimate owner signal does cancel.
+        await _state.PublishEventAsync("asyncjob:cancel", new AsyncJobCancelSignal("t", job.JobId, "alice"));
+        ct.IsCancellationRequested.ShouldBeTrue();
+        await worker.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task LateCompletionOnOwner_DoesNotOverwriteRemoteCancel()
+    {
+        var a = Node(_auditA, "a");
+        var b = Node(_auditB, "b");
+        var job = await SubmitAsync(a);
+        (await b.CancelJobAsync(job.JobId, _tenant, "alice")).ShouldBeTrue();
+        var file = Path.Combine(a.ScratchDirectory, "t", $"{job.JobId}.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        File.WriteAllText(file, "[]");
+
+        var accepted = await a.TryTransitionAsync(job with { State = AsyncJobState.Completed, ResultFilePath = file }, CancellationToken.None);
+
+        accepted.ShouldBeFalse();
+        File.Exists(file).ShouldBeFalse();
+        (await a.GetJobAsync(job.JobId, _tenant, "alice"))!.State.ShouldBe(AsyncJobState.Cancelled);
+        (await _state.GetAsync<AsyncJobClusterRecord>($"asyncjob:t:{job.JobId}"))!.State.ShouldBe(AsyncJobState.Cancelled);
     }
 }

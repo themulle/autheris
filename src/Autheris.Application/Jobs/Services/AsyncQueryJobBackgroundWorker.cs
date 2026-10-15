@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Jobs.Interfaces;
 using Autheris.Application.Sql;
+using Autheris.Application.State;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -29,6 +30,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
     private readonly ILogger<AsyncQueryJobBackgroundWorker> _logger;
     private readonly IOptions<GatewayOptions>? _options;
     private readonly IOptions<AsyncJobOptions>? _jobOptions;
+    private readonly IDistributedClusterStateProvider? _clusterState;
 
     public AsyncQueryJobBackgroundWorker(
         IAsyncQueryJobManager jobManager,
@@ -37,10 +39,13 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         IAuditLogRepository auditLogRepository,
         ILogger<AsyncQueryJobBackgroundWorker>? logger = null,
         IOptions<GatewayOptions>? options = null,
-        IOptions<AsyncJobOptions>? jobOptions = null)
+        IOptions<AsyncJobOptions>? jobOptions = null,
+        IDistributedClusterStateProvider? clusterState = null,
+        IClusterStateTopology? topology = null)
     {
         _options = options;
         _jobOptions = jobOptions;
+        _clusterState = topology?.IsClusterWide == true ? clusterState : null;
         ArgumentNullException.ThrowIfNull(jobManager);
         ArgumentNullException.ThrowIfNull(queue);
         ArgumentNullException.ThrowIfNull(scopeFactory);
@@ -55,6 +60,12 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("AsyncQueryJobBackgroundWorker started.");
+
+        // Cancel requests for jobs running here that were issued on another node.
+        await using var cancelSubscription = _clusterState?.SubscribeAsync<AsyncJobCancelSignal>(
+            AsyncJobCancelSignal.Channel,
+            signal => _queue.ApplyCancelSignalAsync(signal, stoppingToken),
+            stoppingToken);
 
         try
         {

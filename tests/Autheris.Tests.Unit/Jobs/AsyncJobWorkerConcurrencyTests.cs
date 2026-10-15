@@ -72,6 +72,7 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
         }
 
         public ValueTask SweepOrphanedScratchFilesAsync(CancellationToken ct) => ValueTask.CompletedTask;
+        public ValueTask ApplyCancelSignalAsync(AsyncJobCancelSignal signal, CancellationToken ct) => ValueTask.CompletedTask;
     }
 
     [Fact]

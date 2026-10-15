@@ -495,15 +495,22 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         string userSid,
         CancellationToken ct = default)
     {
-        var job = await GetJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
-        if (job == null || !_jobs.ContainsKey(jobId))
+        // Owner and tenant are verified first (local entry or cluster record), exactly like the status route.
+        var resolved = await ResolveAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
+        if (resolved == null)
         {
             return false;
         }
 
+        var job = resolved.Descriptor;
         if (job.State is AsyncJobState.Completed or AsyncJobState.Failed or AsyncJobState.Cancelled)
         {
             return false;
+        }
+
+        if (resolved.Record is { } remote)
+        {
+            return await CancelRemoteAsync(remote, tenantId, userSid, ct).ConfigureAwait(false);
         }
 
         var updated = job with
@@ -636,6 +643,75 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
             // Unknown, not absent: keep the file; only the retention age may delete it.
             return true;
         }
+    }
+
+    /// <summary>Cancels a job owned by another node: the shared record becomes Cancelled and the owner is signalled.</summary>
+    private async Task<bool> CancelRemoteAsync(AsyncJobClusterRecord record, TenantId tenantId, string userSid, CancellationToken ct)
+    {
+        var cancelled = record with
+        {
+            State = AsyncJobState.Cancelled,
+            CompletedAt = _time.GetUtcNow(),
+            ErrorMessage = "Job cancelled by user request.",
+            ResultFileName = null
+        };
+
+        // Authoritative state first (fail closed: an unreachable state surfaces as 503), then the best-effort signal.
+        await _cluster!.SetAsync(RecordKey(record.TenantId, record.JobId), cancelled, RecordTtl, ct).ConfigureAwait(false);
+        try
+        {
+            await _cluster.PublishEventAsync(AsyncJobCancelSignal.Channel, new AsyncJobCancelSignal(record.TenantId, record.JobId, userSid), ct).ConfigureAwait(false);
+        }
+        catch (ClusterStateUnavailableException ex)
+        {
+            _logger.LogWarning(ex, "Could not signal the owner node of job {JobId}; the cancelled record stops the job at its next state write.", record.JobId);
+        }
+
+        await RecordAuditAsync(
+            ToDescriptor(cancelled),
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, userSid), new Claim("tenant_id", tenantId.Value)], "JobAuth")),
+            AuditEventTypes.AsyncJobCancelled,
+            "ALLOW",
+            "Job cancelled.",
+            ct).ConfigureAwait(false);
+
+        return true;
+    }
+
+    public ValueTask ApplyCancelSignalAsync(AsyncJobCancelSignal signal, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(signal);
+
+        if (!_jobs.TryGetValue(signal.JobId, out var job) ||
+            !string.Equals(job.TenantId, signal.TenantId, StringComparison.Ordinal) ||
+            !string.Equals(job.SubmittedByUserId, signal.RequesterSid, StringComparison.OrdinalIgnoreCase))
+        {
+            // Not our job, or not requested by its owner: a forged or misrouted signal changes nothing.
+            _logger.LogWarning("Ignored async job cancel signal for job {JobId}: unknown job or requester is not the owner.", signal.JobId);
+            return ValueTask.CompletedTask;
+        }
+
+        var cancelled = job with
+        {
+            State = AsyncJobState.Cancelled,
+            CompletedAt = _time.GetUtcNow(),
+            ErrorMessage = "Job cancelled by user request.",
+            ResultFilePath = null
+        };
+        if (!TryTransitionLocal(cancelled))
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        if (_activeCts.TryRemove(signal.JobId, out var cts))
+        {
+            try { cts.Cancel(); }
+            catch (ObjectDisposedException) { }
+            cts.Dispose();
+        }
+
+        DeleteQuietly(job.ResultFilePath);
+        return ValueTask.CompletedTask;
     }
 
     public Task PurgeExpiredJobsAsync(TimeSpan retentionPeriod, CancellationToken ct = default)

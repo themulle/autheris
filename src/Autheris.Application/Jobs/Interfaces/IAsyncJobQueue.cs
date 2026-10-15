@@ -29,4 +29,10 @@ public interface IAsyncJobQueue
     /// jobs older than the maximum job timeout, and any file older than the retention period.
     /// </summary>
     ValueTask SweepOrphanedScratchFilesAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Applies a cancel request that another node published for a job running here. Ignored unless tenant and requester
+    /// match the local job entry.
+    /// </summary>
+    ValueTask ApplyCancelSignalAsync(AsyncJobCancelSignal signal, CancellationToken ct);
 }
