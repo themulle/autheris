@@ -33,11 +33,47 @@
           "name": "expires_at",
           "type": "DATETIMEOFFSET",
           "family": "datetime"
+        },
+        {
+          "name": "subject_norm",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_by",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "approved_by",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "approved_at",
+          "type": "DATETIMEOFFSET",
+          "family": "datetime"
+        },
+        {
+          "name": "justification",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "kind",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "renewal_count",
+          "type": "INT",
+          "family": "integer"
         }
       ],
       "primaryKey": [
         "tenant_id",
         "profile_id",
+        "subject_type",
         "subject"
       ],
       "indexes": [
@@ -46,7 +82,8 @@
           "unique": false,
           "columns": [
             "tenant_id",
-            "subject"
+            "subject_type",
+            "subject_norm"
           ]
         }
       ]
@@ -487,7 +524,15 @@
       "primaryKey": [
         "id"
       ],
-      "indexes": []
+      "indexes": [
+        {
+          "name": "ix_column_masking_rules_column",
+          "unique": false,
+          "columns": [
+            "table_column_id"
+          ]
+        }
+      ]
     },
     {
       "name": "CONSENT_COLUMN_RULES",
@@ -526,7 +571,15 @@
       "primaryKey": [
         "id"
       ],
-      "indexes": []
+      "indexes": [
+        {
+          "name": "ix_consent_column_rules_consent",
+          "unique": false,
+          "columns": [
+            "consent_id"
+          ]
+        }
+      ]
     },
     {
       "name": "CONSENT_REQUESTS",
@@ -718,7 +771,15 @@
       "primaryKey": [
         "id"
       ],
-      "indexes": []
+      "indexes": [
+        {
+          "name": "ix_consent_row_filters_consent",
+          "unique": false,
+          "columns": [
+            "consent_id"
+          ]
+        }
+      ]
     },
     {
       "name": "CONSENTS",
@@ -750,6 +811,11 @@
         },
         {
           "name": "grantee_sid",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "grantee_sid_norm",
           "type": "NVARCHAR",
           "family": "string"
         },
@@ -797,12 +863,43 @@
           "name": "tenant_id",
           "type": "NVARCHAR",
           "family": "string"
+        },
+        {
+          "name": "renewal_count",
+          "type": "INT",
+          "family": "integer"
         }
       ],
       "primaryKey": [
         "id"
       ],
       "indexes": [
+        {
+          "name": "ix_consents_tenant_grantee",
+          "unique": false,
+          "columns": [
+            "tenant_id",
+            "grantee_sid_norm",
+            "is_revoked"
+          ]
+        },
+        {
+          "name": "ix_consents_tenant_role",
+          "unique": false,
+          "columns": [
+            "tenant_id",
+            "role_name"
+          ]
+        },
+        {
+          "name": "ix_consents_tenant_table",
+          "unique": false,
+          "columns": [
+            "tenant_id",
+            "table_id",
+            "is_revoked"
+          ]
+        },
         {
           "name": "ux_consents_request",
           "unique": true,
@@ -1052,7 +1149,15 @@
       "primaryKey": [
         "id"
       ],
-      "indexes": []
+      "indexes": [
+        {
+          "name": "ix_role_members_member",
+          "unique": false,
+          "columns": [
+            "member_sid"
+          ]
+        }
+      ]
     },
     {
       "name": "ROLES",
@@ -1242,6 +1347,13 @@
       ],
       "indexes": [
         {
+          "name": "ix_table_owners_owner",
+          "unique": false,
+          "columns": [
+            "data_owner_id"
+          ]
+        },
+        {
           "name": "ux_table_owners_natural",
           "unique": true,
           "columns": [
@@ -1407,12 +1519,36 @@
           "name": "plugin_name",
           "type": "NVARCHAR",
           "family": "string"
+        },
+        {
+          "name": "source_name_lc",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "schema_name_lc",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "table_name_lc",
+          "type": "NVARCHAR",
+          "family": "string"
         }
       ],
       "primaryKey": [
         "id"
       ],
       "indexes": [
+        {
+          "name": "ix_tables_natural_ci",
+          "unique": false,
+          "columns": [
+            "source_name_lc",
+            "schema_name_lc",
+            "table_name_lc"
+          ]
+        },
         {
           "name": "ux_tables_natural",
           "unique": true,

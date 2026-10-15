@@ -407,6 +407,7 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.SqliteGovernanceLintSource", "read-only governance store reader of the pre-deploy policy lint"),
         ("Autheris.Infrastructure.Persistence.TenantRegistryStore", "tenant registry table of the governance store"),
         ("Autheris.Infrastructure.Persistence.VirtualFilterStore", "virtual filter table of the governance store"),
+        ("Autheris.Infrastructure.Persistence.AccessProfileStore", "access profile tables of the governance store (WP-SC-03): fixed statements with bound values, only integer-indexed parameter names and enum literals are spliced, no client text"),
     ];
 
     private static bool IsAllowedCommandTextSite(string top) =>

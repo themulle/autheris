@@ -548,6 +548,14 @@ public sealed class AccessProfileTests
         fetched.AssignedSubjects.ShouldContain("david");
         fetched.AssignedSubjects.ShouldContain("S-1-5-21-DAVID-SQLITE");
 
+        // SEC-SC-04: an Unmasked assignment of a user without four-eyes approval is inactive, whatever the legacy list says.
+        (await sqliteRepo.GetProfilesForSubjectAsync(TenantLiebherr, "david")).ShouldBeEmpty();
+        await sqliteRepo.AssignProfileAsync(TenantLiebherr, "prof-david-sqlite", new AccessProfileAssignment
+        {
+            Subject = "david", ExpiresAt = DateTimeOffset.UtcNow.AddDays(20), CreatedBy = "admin@autheris.internal",
+            ApprovedBy = "owner@autheris.internal", Justification = "Four-eyes approved telemetry exception"
+        });
+
         // Lookup by Subject
         var davidProfiles = await sqliteRepo.GetProfilesForSubjectAsync(TenantLiebherr, "david");
         davidProfiles.Count.ShouldBe(1);

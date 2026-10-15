@@ -33,7 +33,10 @@ CREATE TABLE dbo.TABLES (
     is_active INT NOT NULL,
     data_source_type INT NOT NULL DEFAULT 0,
     http_endpoint_json NVARCHAR(MAX) NULL,
-    plugin_name NVARCHAR(256) NULL
+    plugin_name NVARCHAR(256) NULL,
+    source_name_lc AS LOWER(source_name) PERSISTED,
+    schema_name_lc AS LOWER(schema_name) PERSISTED,
+    table_name_lc AS LOWER(table_name) PERSISTED
 );
 
 IF OBJECT_ID(N'dbo.TABLE_COLUMNS', N'U') IS NULL
@@ -110,6 +113,7 @@ CREATE TABLE dbo.CONSENTS (
     effect NVARCHAR(64) NOT NULL,
     grantee_type NVARCHAR(64) NOT NULL,
     grantee_sid NVARCHAR(256) NULL,
+    grantee_sid_norm NVARCHAR(256) NULL,
     role_id NVARCHAR(128) NULL,
     role_name NVARCHAR(256) NULL,
     valid_from NVARCHAR(64) NOT NULL,
@@ -118,7 +122,8 @@ CREATE TABLE dbo.CONSENTS (
     revoked_by_sid NVARCHAR(256) NULL,
     revoked_at NVARCHAR(64) NULL,
     revoke_reason NVARCHAR(MAX) NULL,
-    tenant_id NVARCHAR(128) NOT NULL DEFAULT 'legacy-single-tenant'
+    tenant_id NVARCHAR(128) NOT NULL DEFAULT 'legacy-single-tenant',
+    renewal_count INT NOT NULL CONSTRAINT DF_CONSENTS_renewals DEFAULT 0
 );
 
 IF OBJECT_ID(N'dbo.CONSENT_COLUMN_RULES', N'U') IS NULL
@@ -250,6 +255,36 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ux_table_owners_natural'
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ux_policy_epochs_natural' AND object_id = OBJECT_ID(N'dbo.POLICY_EPOCHS'))
     CREATE UNIQUE INDEX ux_policy_epochs_natural ON dbo.POLICY_EPOCHS (domain, schema_name, table_name);
 
+-- WP-SC-01: indexes of the consent query. grantee_sid_norm is the upper-invariant grantee SID written by the repository; rows without it
+-- (NULL) are always candidates and the C# filter stays authoritative. The lower-case TABLES columns make the natural key sargable.
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_consents_tenant_table' AND object_id = OBJECT_ID(N'dbo.CONSENTS'))
+    CREATE INDEX ix_consents_tenant_table ON dbo.CONSENTS (tenant_id, table_id, is_revoked);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_consents_tenant_grantee' AND object_id = OBJECT_ID(N'dbo.CONSENTS'))
+    CREATE INDEX ix_consents_tenant_grantee ON dbo.CONSENTS (tenant_id, grantee_sid_norm, is_revoked);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_consents_tenant_role' AND object_id = OBJECT_ID(N'dbo.CONSENTS'))
+    CREATE INDEX ix_consents_tenant_role ON dbo.CONSENTS (tenant_id, role_name);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_consent_column_rules_consent' AND object_id = OBJECT_ID(N'dbo.CONSENT_COLUMN_RULES'))
+    CREATE INDEX ix_consent_column_rules_consent ON dbo.CONSENT_COLUMN_RULES (consent_id);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_consent_row_filters_consent' AND object_id = OBJECT_ID(N'dbo.CONSENT_ROW_FILTERS'))
+    CREATE INDEX ix_consent_row_filters_consent ON dbo.CONSENT_ROW_FILTERS (consent_id);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_column_masking_rules_column' AND object_id = OBJECT_ID(N'dbo.COLUMN_MASKING_RULES'))
+    CREATE INDEX ix_column_masking_rules_column ON dbo.COLUMN_MASKING_RULES (table_column_id);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_role_members_member' AND object_id = OBJECT_ID(N'dbo.ROLE_MEMBERS'))
+    CREATE INDEX ix_role_members_member ON dbo.ROLE_MEMBERS (member_sid);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_table_owners_owner' AND object_id = OBJECT_ID(N'dbo.TABLE_OWNERS'))
+    CREATE INDEX ix_table_owners_owner ON dbo.TABLE_OWNERS (data_owner_id);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_tables_natural_ci' AND object_id = OBJECT_ID(N'dbo.TABLES'))
+    CREATE INDEX ix_tables_natural_ci ON dbo.TABLES (source_name_lc, schema_name_lc, table_name_lc);
+
 IF OBJECT_ID(N'dbo.TABLE_RELATIONS', N'U') IS NULL
 CREATE TABLE dbo.TABLE_RELATIONS (
     id NVARCHAR(128) NOT NULL PRIMARY KEY,
@@ -349,13 +384,20 @@ BEGIN
         subject_type NVARCHAR(32) NOT NULL CONSTRAINT DF_ACCESS_PROFILE_ASSIGNMENTS_type DEFAULT 'User',
         assigned_at DATETIMEOFFSET NOT NULL CONSTRAINT DF_ACCESS_PROFILE_ASSIGNMENTS_assigned DEFAULT SYSDATETIMEOFFSET(),
         expires_at DATETIMEOFFSET NULL,
-        CONSTRAINT PK_ACCESS_PROFILE_ASSIGNMENTS PRIMARY KEY (tenant_id, profile_id, subject),
+        subject_norm NVARCHAR(256) NULL,
+        created_by NVARCHAR(256) NULL,
+        approved_by NVARCHAR(256) NULL,
+        approved_at DATETIMEOFFSET NULL,
+        justification NVARCHAR(MAX) NULL,
+        kind NVARCHAR(32) NOT NULL CONSTRAINT DF_ACCESS_PROFILE_ASSIGNMENTS_kind DEFAULT 'Standard',
+        renewal_count INT NOT NULL CONSTRAINT DF_ACCESS_PROFILE_ASSIGNMENTS_renewals DEFAULT 0,
+        CONSTRAINT PK_ACCESS_PROFILE_ASSIGNMENTS PRIMARY KEY NONCLUSTERED (tenant_id, profile_id, subject_type, subject),
         CONSTRAINT FK_ACCESS_PROFILE_ASSIGNMENTS_PROFILE FOREIGN KEY (tenant_id, profile_id) 
             REFERENCES ACCESS_PROFILES (tenant_id, profile_id) ON DELETE CASCADE
     );
 
     CREATE NONCLUSTERED INDEX IX_ACCESS_PROFILE_ASSIGNMENTS_SUBJECT 
-        ON ACCESS_PROFILE_ASSIGNMENTS(tenant_id, subject);
+        ON ACCESS_PROFILE_ASSIGNMENTS(tenant_id, subject_type, subject_norm);
 END;
 
 IF OBJECT_ID(N'dbo.VIRTUAL_FILTER_GENERATION', N'U') IS NULL

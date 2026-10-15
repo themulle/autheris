@@ -87,6 +87,9 @@ public sealed class Consent
     public DateTimeOffset? RevokedAt { get; init; }
     public string? RevokeReason { get; init; }
 
+    /// <summary>WP-SC-16: number of approved renewals (extensions) of this grant; persisted by the repositories.</summary>
+    public int RenewalCount { get; init; }
+
     public IReadOnlyList<ConsentColumnRule> ColumnRules { get; set; } = Array.Empty<ConsentColumnRule>();
     public IReadOnlyList<ConsentRowFilter> RowFilters { get; set; } = Array.Empty<ConsentRowFilter>();
     public string? RowFilterCondition { get; init; }
