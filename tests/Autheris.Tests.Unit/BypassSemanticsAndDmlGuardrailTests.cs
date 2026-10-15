@@ -66,14 +66,14 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
 
     private static GatewayOptions WithWarnSwitch(string name) => name switch
     {
-        "warn_allow_all_cors_origins" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_allow_all_cors_origins = true }, DataMasking = ProdMasking() },
-        "warn_relaxed_query_limits" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_relaxed_query_limits = true }, DataMasking = ProdMasking() },
-        "warn_enable_introspection" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_enable_introspection = true }, DataMasking = ProdMasking() },
-        "warn_fallback_default_tenant_for_webhooks" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_fallback_default_tenant_for_webhooks = true }, DataMasking = ProdMasking() },
-        "catalog_legacy_payload_only_signature" => new GatewayOptions { Catalog = new DataCatalogOptions { AllowLegacyPayloadOnlySignature = true }, DataMasking = ProdMasking() },
-        "itsm_legacy_global_webhook_secret" => new GatewayOptions { Itsm = new ItsmOptions { LegacyGlobalWebhookSecret = true }, DataMasking = ProdMasking() },
-        "allow_development_in_container" => new GatewayOptions { AllowDevelopmentInContainer = true, DataMasking = ProdMasking() },
-        "warn_allow_websql_dml" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_allow_websql_dml = true }, DataMasking = ProdMasking() },
+        "warn_allow_all_cors_origins" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_allow_all_cors_origins = true }, DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" } },
+        "warn_relaxed_query_limits" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_relaxed_query_limits = true }, DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" } },
+        "warn_enable_introspection" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_enable_introspection = true }, DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" } },
+        "warn_fallback_default_tenant_for_webhooks" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_fallback_default_tenant_for_webhooks = true }, DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" } },
+        "catalog_legacy_payload_only_signature" => new GatewayOptions { Catalog = new DataCatalogOptions { AllowLegacyPayloadOnlySignature = true }, DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" } },
+        "itsm_legacy_global_webhook_secret" => new GatewayOptions { Itsm = new ItsmOptions { LegacyGlobalWebhookSecret = true }, DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" } },
+        "allow_development_in_container" => new GatewayOptions { AllowDevelopmentInContainer = true, DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" } },
+        "warn_allow_websql_dml" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_allow_websql_dml = true }, DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" } },
         _ => throw new ArgumentOutOfRangeException(nameof(name), name, "unknown switch")
     };
 
@@ -166,7 +166,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         {
             Insecure = new InsecureGettingStartedOptions { warn_enable_introspection = true },
             AllowInsecureWarnFlagsInProduction = true,
-            DataMasking = ProdMasking()
+            DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" }
         };
         Should.NotThrow(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(optInOptions, Env(Environments.Production), NoEnvironmentVariables));
@@ -178,7 +178,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         var options = new GatewayOptions
         {
             GraphQL = new GraphQLOptions { EnableIntrospection = true },
-            DataMasking = ProdMasking()
+            DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" }
         };
 
         // Prohibited in production without explicit opt-in
@@ -190,7 +190,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         {
             GraphQL = new GraphQLOptions { EnableIntrospection = true },
             AllowInsecureWarnFlagsInProduction = true,
-            DataMasking = ProdMasking()
+            DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" }
         };
         Should.NotThrow(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(optInOptions, Env(Environments.Production), NoEnvironmentVariables));
@@ -212,7 +212,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         {
             Insecure = new InsecureGettingStartedOptions { warn_allow_all_cors_origins = true },
             AllowInsecureWarnFlagsInProduction = true,
-            DataMasking = ProdMasking()
+            DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" }
         };
         Should.NotThrow(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(optInOptions, Env(Environments.Production), NoEnvironmentVariables));
@@ -265,7 +265,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         var options = new GatewayOptions
         {
             WebSql = new WebSqlOptions { AllowDml = true, DmlWriterRoles = ["WebSqlWriter"] },
-            DataMasking = ProdMasking()
+            DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" }
         };
 
         options.GetAllActiveBypasses().ShouldBeEmpty();
@@ -504,7 +504,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         connectionFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
             .Returns(_ => OpenSqliteAsync(fixture.ConnectionString));
 
-        return new GovernedSqlExecutionService(
+        return global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             consentResolution: consentResolution,

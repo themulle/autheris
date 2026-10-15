@@ -2,9 +2,11 @@ namespace Autheris.Application.State;
 
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging.Abstractions;
 
 /// <summary>
 /// K-K14: In-Memory reference implementation of IDistributedClusterStateProvider.
@@ -15,9 +17,20 @@ public class InMemoryClusterStateProvider : IDistributedClusterStateProvider
     private sealed record Entry(string Serialized, DateTimeOffset ExpiresAt);
 
     private readonly ConcurrentDictionary<string, Entry> _store = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, ConcurrentBag<Delegate>> _subscriptions = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<Guid, Delegate>> _subscriptions = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new(StringComparer.Ordinal);
     private readonly object _budgetLock = new();
+    private readonly object _leaseLock = new();
+    private readonly Dictionary<string, LeaseEntry> _leases = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, long> _fences = new(StringComparer.Ordinal);
+    private readonly TimeProvider _time;
+
+    public InMemoryClusterStateProvider(TimeProvider? timeProvider = null)
+    {
+        _time = timeProvider ?? TimeProvider.System;
+    }
+
+    private sealed record LeaseEntry(Guid Owner, long Token, DateTimeOffset ExpiresAt);
 
     public ValueTask<T?> GetAsync<T>(string key, CancellationToken ct = default)
     {
@@ -25,7 +38,7 @@ public class InMemoryClusterStateProvider : IDistributedClusterStateProvider
 
         if (_store.TryGetValue(key, out var entry))
         {
-            if (entry.ExpiresAt > DateTimeOffset.UtcNow)
+            if (entry.ExpiresAt > _time.GetUtcNow())
             {
                 var val = JsonSerializer.Deserialize<T>(entry.Serialized);
                 return ValueTask.FromResult(val);
@@ -42,7 +55,7 @@ public class InMemoryClusterStateProvider : IDistributedClusterStateProvider
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         ArgumentNullException.ThrowIfNull(value);
 
-        var expiresAt = (ttl <= TimeSpan.Zero || ttl == TimeSpan.MaxValue) ? DateTimeOffset.MaxValue : DateTimeOffset.UtcNow.Add(ttl);
+        var expiresAt = (ttl <= TimeSpan.Zero || ttl == TimeSpan.MaxValue) ? DateTimeOffset.MaxValue : _time.GetUtcNow().Add(ttl);
         var serialized = JsonSerializer.Serialize(value);
         _store[key] = new Entry(serialized, expiresAt);
 
@@ -62,7 +75,7 @@ public class InMemoryClusterStateProvider : IDistributedClusterStateProvider
         // All numeric operations share _budgetLock so a concurrent increment and budget consume cannot lose updates.
         lock (_budgetLock)
         {
-            var now = DateTimeOffset.UtcNow;
+            var now = _time.GetUtcNow();
             var newExpiry = (ttl <= TimeSpan.Zero || ttl == TimeSpan.MaxValue) ? DateTimeOffset.MaxValue : now.Add(ttl);
             long result;
             DateTimeOffset expiresAt;
@@ -91,7 +104,7 @@ public class InMemoryClusterStateProvider : IDistributedClusterStateProvider
 
         lock (_budgetLock)
         {
-            var now = DateTimeOffset.UtcNow;
+            var now = _time.GetUtcNow();
             long current = 0;
             DateTimeOffset expiresAt = (ttl <= TimeSpan.Zero || ttl == TimeSpan.MaxValue) ? DateTimeOffset.MaxValue : now.Add(ttl);
 
@@ -126,7 +139,7 @@ public class InMemoryClusterStateProvider : IDistributedClusterStateProvider
 
         if (_subscriptions.TryGetValue(channel, out var handlers))
         {
-            foreach (var del in handlers)
+            foreach (var del in handlers.Values)
             {
                 if (del is Func<T, ValueTask> handler)
                 {
@@ -148,12 +161,13 @@ public class InMemoryClusterStateProvider : IDistributedClusterStateProvider
         ArgumentException.ThrowIfNullOrWhiteSpace(channel);
         ArgumentNullException.ThrowIfNull(handler);
 
-        var bag = _subscriptions.GetOrAdd(channel, _ => new ConcurrentBag<Delegate>());
-        bag.Add(handler);
+        var id = Guid.NewGuid();
+        var handlers = _subscriptions.GetOrAdd(channel, static _ => new ConcurrentDictionary<Guid, Delegate>());
+        handlers[id] = handler;
 
         return new SubscriptionLease(() =>
         {
-            // Simple lease
+            handlers.TryRemove(id, out _);
             return ValueTask.CompletedTask;
         });
     }
@@ -170,6 +184,81 @@ public class InMemoryClusterStateProvider : IDistributedClusterStateProvider
         }
 
         return new LockLease(sem);
+    }
+
+    public ValueTask<IDistributedLease?> TryAcquireLeaseAsync(string resourceKey, TimeSpan ttl, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(resourceKey);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(ttl, TimeSpan.Zero);
+
+        var owner = Guid.NewGuid();
+        long token;
+        lock (_leaseLock)
+        {
+            var now = _time.GetUtcNow();
+            if (_leases.TryGetValue(resourceKey, out var held) && held.ExpiresAt > now)
+            {
+                return ValueTask.FromResult<IDistributedLease?>(null);
+            }
+
+            // Seeded from the wall clock so tokens stay above those of a previous process generation (durable stores remember them).
+            token = _fences.TryGetValue(resourceKey, out var last) ? last + 1 : _time.GetUtcNow().ToUnixTimeMilliseconds() * 1000;
+            _fences[resourceKey] = token;
+            _leases[resourceKey] = new LeaseEntry(owner, token, now.Add(ttl));
+        }
+
+        return ValueTask.FromResult<IDistributedLease?>(new InMemoryLease(this, resourceKey, owner, token, ttl, _time));
+    }
+
+    private bool ExtendLease(string resourceKey, Guid owner, TimeSpan ttl)
+    {
+        lock (_leaseLock)
+        {
+            var now = _time.GetUtcNow();
+            if (_leases.TryGetValue(resourceKey, out var held) && held.Owner == owner && held.ExpiresAt > now)
+            {
+                _leases[resourceKey] = held with { ExpiresAt = now.Add(ttl) };
+                return true;
+            }
+
+            return false;
+        }
+    }
+
+    private void ReleaseLease(string resourceKey, Guid owner)
+    {
+        lock (_leaseLock)
+        {
+            if (_leases.TryGetValue(resourceKey, out var held) && held.Owner == owner)
+            {
+                _leases.Remove(resourceKey);
+            }
+        }
+    }
+
+    private sealed class InMemoryLease : DistributedLeaseBase
+    {
+        private readonly InMemoryClusterStateProvider _owner;
+        private readonly Guid _ownerId;
+        private readonly TimeSpan _ttl;
+
+        public InMemoryLease(InMemoryClusterStateProvider owner, string resourceKey, Guid ownerId, long token, TimeSpan ttl, TimeProvider time)
+            : base(time, ttl, resourceKey, token, NullLogger.Instance)
+        {
+            _owner = owner;
+            _ownerId = ownerId;
+            _ttl = ttl;
+            StartHeartbeat();
+        }
+
+        protected override ValueTask<bool> TryExtendAsync(CancellationToken ct) =>
+            ValueTask.FromResult(_owner.ExtendLease(ResourceKey, _ownerId, _ttl));
+
+        protected override ValueTask ReleaseAsync()
+        {
+            _owner.ReleaseLease(ResourceKey, _ownerId);
+            return ValueTask.CompletedTask;
+        }
     }
 
     private sealed class SubscriptionLease : IAsyncDisposable

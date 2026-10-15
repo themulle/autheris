@@ -26,13 +26,18 @@ public sealed class EventPayloadRedactionTests
         var ev = Deposit();
 
         ev.RelativePath.ShouldBe("orders/architecture/overview");
-#pragma warning disable CS0618 // deprecated alias must stay relative
-        ev.SourceFilePath.ShouldBe(ev.RelativePath);
-#pragma warning restore CS0618
         var json = JsonSerializer.Serialize(ev, ev.GetType(), WebJson);
         json.ShouldNotContain("\"/");
         json.ShouldNotContain(":\\\\");
         json.ShouldContain("\"relativePath\":\"orders/architecture/overview\"");
+    }
+
+    [Fact]
+    public void DocDeposit_Event_HasNoSourceFilePathProperty()
+    {
+        // The deprecated alias is gone: neither the type nor the serialized payload carries a "source file path".
+        typeof(DocumentDepositedEvent).GetProperty("SourceFilePath").ShouldBeNull();
+        JsonSerializer.Serialize(Deposit(), WebJson).ShouldNotContain("sourceFilePath", Case.Insensitive);
     }
 
     [Fact]

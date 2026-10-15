@@ -706,7 +706,7 @@ public static class ODataEndpoints
 
     private static bool IsODataAnnotation(string key) => key.Contains("@odata.", StringComparison.Ordinal);
 
-    private const string SwaggerUiVersion = "5.18.2";
+    private const string SwaggerUiVersion = "5.33.2";
 
     private static readonly Dictionary<string, string> SwaggerUiAssets = new(StringComparer.Ordinal)
     {

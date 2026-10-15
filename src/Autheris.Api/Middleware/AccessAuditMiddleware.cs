@@ -45,10 +45,10 @@ public sealed class AccessAuditMiddleware
         _authFailureAggregator = authFailureAggregator;
     }
 
-    public async Task InvokeAsync(HttpContext context, IAuditLogRepository auditRepository, AuditContext auditContext)
+    public async Task InvokeAsync(HttpContext context, IAuditWriter auditWriter, AuditContext auditContext)
     {
         ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(auditRepository);
+        ArgumentNullException.ThrowIfNull(auditWriter);
         ArgumentNullException.ThrowIfNull(auditContext);
 
         context.Features.Set(auditContext);
@@ -83,11 +83,11 @@ public sealed class AccessAuditMiddleware
         }
         finally
         {
-            await FinalizeAuditAsync(context, auditRepository, auditContext, exceptionOccurred).ConfigureAwait(false);
+            await FinalizeAuditAsync(context, auditWriter, auditContext, exceptionOccurred).ConfigureAwait(false);
         }
     }
 
-    private async Task FinalizeAuditAsync(HttpContext context, IAuditLogRepository auditRepository, AuditContext auditContext, bool exceptionOccurred)
+    private async Task FinalizeAuditAsync(HttpContext context, IAuditWriter auditWriter, AuditContext auditContext, bool exceptionOccurred)
     {
         if (auditContext.IsHandled)
         {
@@ -199,17 +199,16 @@ public sealed class AccessAuditMiddleware
         }
         else
         {
-            try
+            // The denial never depends on the audit outcome: a DENY is written best-effort (failures are logged and counted by the
+            // writer), every other decision is required and an unavailable store fails the request closed (AuditUnavailableException).
+            // The write is not tied to the request token: the response may already be decided and the client may have disconnected.
+            if (auditContext.Decision == "DENY")
             {
-                await auditRepository.RecordAuditEventAsync(entry).ConfigureAwait(false);
+                await auditWriter.RecordBestEffortAsync(entry, CancellationToken.None).ConfigureAwait(false);
             }
-            catch (Exception ex)
+            else
             {
-                _logger.LogError(ex, "Failed to record audit log entry in AccessAuditMiddleware: {Message}", ex.Message);
-                if (auditContext.Decision != "DENY")
-                {
-                    throw;
-                }
+                await auditWriter.RecordRequiredAsync(entry, CancellationToken.None).ConfigureAwait(false);
             }
         }
 

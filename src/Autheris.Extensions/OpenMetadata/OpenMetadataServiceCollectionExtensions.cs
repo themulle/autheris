@@ -27,6 +27,7 @@ public static class OpenMetadataServiceCollectionExtensions
 
         if (gatewayOptions.OpenMetadata.Enabled)
         {
+            services.TryAddScoped<OpenMetadataSyncJob>();
             services.AddHostedService<OpenMetadataSyncBackgroundService>();
         }
 

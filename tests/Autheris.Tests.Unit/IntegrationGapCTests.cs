@@ -630,7 +630,7 @@ public sealed class IntegrationGapCTests
         devEnv.EnvironmentName.Returns("Development");
 
         var repo = CreateRepository();
-        return new GovernedSqlExecutionService(
+        return global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             consentResolution: consentResolution,

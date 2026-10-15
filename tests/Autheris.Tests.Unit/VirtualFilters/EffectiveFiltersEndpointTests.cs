@@ -64,7 +64,7 @@ public sealed class EffectiveFiltersEndpointTests
     private static async Task<(int Status, JsonDocument? Body)> GetAsync(string query, params string[] roles)
     {
         var context = Context(query, roles);
-        var result = await VirtualFilterEndpoints.EffectiveFiltersAsync(context, Resolver(), Catalog());
+        var result = await VirtualFilterEndpoints.EffectiveFiltersAsync(context, new EffectiveFilterInspector(Resolver(), Catalog(), AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>())));
         await result.ExecuteAsync(context);
         context.Response.Body.Position = 0;
         var text = await new StreamReader(context.Response.Body).ReadToEndAsync();

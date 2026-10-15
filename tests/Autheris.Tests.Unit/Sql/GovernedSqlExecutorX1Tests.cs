@@ -86,7 +86,7 @@ public sealed class GovernedSqlExecutorX1Tests
         var resolution = Substitute.For<IConsentResolutionService>();
         resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
             .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), null, hasUnconstrainedColumnAllow: true));
-        var service = new GovernedSqlExecutionService(
+        var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(Gateway(sourceType == "PostgreSQL" ? "PostgreSql" : sourceType)), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies(),
@@ -141,7 +141,7 @@ public sealed class GovernedSqlExecutorX1Tests
         var log = new CapturingLogger<GovernedSqlExecutor>();
         var opts = Options.Create(gateway);
         var executor = new GovernedSqlExecutor(
-            new GovernedSqlRewriter(opts, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance), opts, auditRepo, guard ?? PassThroughExecutionGuard.Instance, factory, environment: environment, logger: log, sessionInitializer: session, secretProvider: secrets);
+            new GovernedSqlRewriter(opts, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance), opts, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(auditRepo), guard ?? PassThroughExecutionGuard.Instance, factory, environment: environment, logger: log, sessionInitializer: session, secretProvider: secrets);
         return new Harness { Executor = executor, Factory = factory, Connection = connection, Audit = audit, Log = log };
     }
 
@@ -338,7 +338,7 @@ public sealed class GovernedSqlExecutorX1Tests
                 .Returns(Task.FromResult<DbTransaction?>(null));
             var opts = Options.Create(gateway);
             var executor = new GovernedSqlExecutor(
-                new GovernedSqlRewriter(opts, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance), opts, Substitute.For<IAuditLogRepository>(), new Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard(),
+                new GovernedSqlRewriter(opts, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance), opts, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), new Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard(),
                 factory, null, NullLogger.Instance, null, session);
             var clock = System.Diagnostics.Stopwatch.StartNew();
 
@@ -511,7 +511,7 @@ public sealed class GovernedSqlExecutorX1Tests
             .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), null, hasUnconstrainedColumnAllow: true));
         var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
-        return new GovernedSqlExecutionService(
+        return global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = webSqlEnabled, DefaultDataSourceName = DataSource } }), auditLog, executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies(),

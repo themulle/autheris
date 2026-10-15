@@ -48,7 +48,7 @@ public sealed class SecretKeyLengthRDep1Tests
         });
 
         var ex = Should.Throw<InvalidOperationException>(() =>
-            GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), options, Env(Environments.Production), Provider("short-key")));
+            GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), options, Env(Environments.Production), Provider("short-key"), auditAnchorStore: Substitute.For<Autheris.Application.Interfaces.IAuditChainAnchorStore>()));
 
         ex.Message.ShouldContain("32");
     }

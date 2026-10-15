@@ -29,8 +29,10 @@ public static class AuditEventTypes
     public const string WebSqlCrossSourceSourceRead = "WEBSQL_CROSS_SOURCE_SOURCE_READ";
     public const string WebSqlDmlExecuted = "WEBSQL_DML_EXECUTED";
     public const string WebSqlDmlRejected = "WEBSQL_DML_REJECTED";
+    public const string WebSqlDmlFailed = "WEBSQL_DML_FAILED";
     public const string QueryExecutionError = "QUERY_EXECUTION_ERROR";
     public const string StreamSubscribe = "STREAM_SUBSCRIBE";
+    public const string CdcWebhookDeliveryBatch = "CDC_WEBHOOK_DELIVERY_BATCH";
     public const string EgressShadowCopy = "EGRESS_SHADOW_COPY";
 
     // Administration & Audit Self-Governance (Tier A)
@@ -47,9 +49,11 @@ public static class AuditEventTypes
     // Regulatory & Consent
     public const string ConsentRequested = "CONSENT_REQUESTED";
     public const string ConsentApproved = "CONSENT_APPROVED";
+    public const string ConsentGranted = "CONSENT_GRANTED";
     public const string ConsentDenied = "CONSENT_DENIED";
     public const string ConsentRevoked = "CONSENT_REVOKED";
     public const string ConsentApplied = "CONSENT_APPLIED";
+    public const string ProfileInvalidationFailed = "PROFILE_INVALIDATION_FAILED";
     public const string BreakGlassActivated = "BREAK_GLASS_ACTIVATED";
 
     // Plan 9: Datasources & Async Jobs
@@ -75,4 +79,10 @@ public static class AuditEventTypes
     public const string DocIngestionBundleApplied = "DOC_INGESTION_BUNDLE_APPLIED";
     public const string DocIngestionDocumentApplied = "DOC_INGESTION_DOCUMENT_APPLIED";
     public const string DocDiscoveryRead = "DOC_DISCOVERY_READ";
+
+    // ReBAC relationship administration
+    public const string RebacTupleAdded = "REBAC_TUPLE_ADDED";
+    public const string RebacTupleRemoved = "REBAC_TUPLE_REMOVED";
+    public const string RebacInvalidationFailed = "REBAC_INVALIDATION_FAILED";
+    public const string RebacTupleSeed = "REBAC_TUPLE_SEED";
 }

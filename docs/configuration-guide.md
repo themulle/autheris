@@ -188,7 +188,7 @@ Speicherort für Metadaten, Freigaben, Delegationen, Vier-Augen-Genehmigungen un
 | `Migrations:Mode` | `string` | `Apply`, `Verify`, `Skip` | `Apply` | How the versioned schema migrations are handled at startup (see below). `Skip` is rejected outside Development. |
 | `Migrations:AllowNewerSchema` | `bool` | `true \| false` | `false` | When `false`, startup fails if the database holds migrations newer than the running build. |
 
-**Schema migrations.** The governance schema is created and evolved by ordered migrations recorded in the table `autheris_schema_migrations` (`version`, `name`, `checksum`, `applied_at`, `applied_by`). Repository constructors run no DDL. A hosted service that is registered before every other hosted service runs the migrations once at startup, holding the existing cross-replica lock (PostgreSQL `pg_advisory_lock`, SQL Server `sp_getapplock`, SQLite `BEGIN IMMEDIATE`), and then initializes the store (audit chain tail and anchor verification, optional demo seed, audit processor start). Startup fails when a migration cannot be applied, when a stored checksum differs from the build (schema drift), when the database is newer than the build (unless `AllowNewerSchema`), or when the append-only audit trigger is missing after the run (PostgreSQL, SQL Server). Migration `0001` is the idempotent baseline of the complete schema, so existing databases upgrade in place without a manual step.
+**Schema migrations.** The governance schema is created and evolved by ordered migrations recorded in the table `autheris_schema_migrations` (`version`, `name`, `checksum`, `applied_at`, `applied_by`). Repository constructors run no DDL. A hosted service that is registered before every other hosted service runs the migrations once at startup, holding the existing cross-replica lock (PostgreSQL `pg_advisory_lock`, SQL Server `sp_getapplock`, SQLite `BEGIN IMMEDIATE`), and then initializes the store (audit chain tail and anchor verification, optional demo seed, audit processor start). Startup fails when a migration cannot be applied, when a stored checksum differs from the build (schema drift), when the database is newer than the build (unless `AllowNewerSchema`), or when the append-only audit trigger is missing after the run (PostgreSQL, SQL Server). Migration `0001` (`baseline_governance_schema`) is the idempotent baseline of the complete governance schema (including `WEBHOOK_OUTBOX`, `autheris_cdc_watermarks`, and `CLOUDEVENT_SUBSCRIPTIONS`).
 
 - `Apply` (default): applies pending migrations.
 - `Verify`: changes nothing and fails startup while migrations are pending. Use it for replicas whose schema is migrated by a separate pipeline or init job.
@@ -451,7 +451,6 @@ Protokolliert Datenzugriffe manipulationssicher in einer kryptografisch verkette
 
 | Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
-| `TierAEnabled` | `bool` | `true \| false` | `true` | Tier-A Auditierung: Synchrones Schreiben sensibler Zugriffe mit HMAC-SHA256-Verkettung. |
 | `TierBAggregationWindowSeconds` | `int` | `1 .. 3600` | `60` | Aggregationsintervall für unkritische Tier-B Massenzugriffe. |
 | `AuditLogRetentionDays` | `int` | `1 .. 7300` | `3650` (10 Jahre) | Gesetzliche Aufbewahrungsfrist für Prüfprotokolle. |
 | `VerifyHashChainIntervalHours` | `int` | `1 .. 168` | `24` | Zyklische Integritätsprüfung der gesamten Prüfkette im Hintergrund mit timing-sicherem `FixedTimeEquals`. |
@@ -460,7 +459,6 @@ Protokolliert Datenzugriffe manipulationssicher in einer kryptografisch verkette
 
 ```json
 "Audit": {
-  "TierAEnabled": true,
   "TierBAggregationWindowSeconds": 60,
   "AuditLogRetentionDays": 3650,
   "VerifyHashChainIntervalHours": 24,

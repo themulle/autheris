@@ -396,7 +396,7 @@ public class SecurityFindingsRemediationTests
             {
                 warn_relaxed_query_limits = true
             },
-            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "vault://keys/prod-hmac" }
+            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "vault://keys/prod-hmac" }, Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" }
         };
 
         // WARN entries are permitted in Production (reported, not blocking).
@@ -873,7 +873,7 @@ public class SecurityFindingsRemediationTests
 
             // No secret provider and non-dev environment -> must throw InvalidOperationException
             var ex = Should.Throw<InvalidOperationException>(() =>
-                GovernanceStoreFactory.CreateSqlite(epochMock, options, env, secretProvider: null));
+                GovernanceStoreFactory.CreateSqlite(epochMock, options, env, secretProvider: null, auditAnchorStore: Substitute.For<IAuditChainAnchorStore>()));
             ex.Message.ShouldContain("Audit HMAC secret is missing");
         }
         finally

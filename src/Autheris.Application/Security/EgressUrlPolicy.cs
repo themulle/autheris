@@ -70,13 +70,13 @@ public static class EgressUrlPolicy
             catch (SocketException)
             {
                 // SEC I-1: fail closed; an unresolvable host must not pass validation.
-                throw new SecurityException($"SSRF protection: host '{host}' could not be resolved (fail-closed).");
+                throw WithReason(new SecurityException($"SSRF protection: host '{host}' could not be resolved (fail-closed)."), "unresolved");
             }
         }
 
         if (addresses.Length == 0)
         {
-            throw new SecurityException($"SSRF protection: host '{host}' did not resolve to any address (fail-closed).");
+            throw WithReason(new SecurityException($"SSRF protection: host '{host}' did not resolve to any address (fail-closed)."), "unresolved");
         }
 
         foreach (var ip in addresses)
@@ -87,6 +87,13 @@ public static class EgressUrlPolicy
                 throw WithResolvedIp(new SecurityException($"Outbound access to a private/loopback/restricted address (host '{host}') is strictly forbidden."), ip);
             }
         }
+    }
+
+    /// <summary>Marks a rejection as transient DNS failure (<c>EgressReason</c>) so delivery can retry instead of dead-lettering.</summary>
+    private static SecurityException WithReason(SecurityException ex, string reason)
+    {
+        ex.Data["EgressReason"] = reason;
+        return ex;
     }
 
     /// <summary>SR-L-14: the address is kept out of the message (client-visible) and only attached for operator logs.</summary>

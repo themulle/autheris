@@ -36,6 +36,10 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
     private static readonly byte[] L2MacDomain = "Autheris:ConsentCacheL2:v1"u8.ToArray();
     private static readonly TimeSpan MaxL1PromotionTtl = TimeSpan.FromMinutes(5);
 
+    /// <summary>R-3: the faults of the distributed tier (connection, timeout, frame crypto, serialization) that may degrade to a miss.</summary>
+    private static bool IsL2Failure(Exception ex) =>
+        ex is RedisException or TimeoutException or CryptographicException or MemoryPack.MemoryPackSerializationException;
+
     private sealed record CacheEntryEnvelope(TableAccessDecision Decision, long Epoch);
 
     public ConsentCacheService(
@@ -158,9 +162,19 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
                     }
                 }
             }
-            catch
+            catch (Exception ex) when (IsL2Failure(ex))
             {
-                // Fallback gracefully on L2 error
+                // A genuine L2 fault degrades to a cache miss (the decision is re-evaluated); anything else is a bug and propagates.
+                _logger?.LogWarning(ConsentCacheLogEvents.L2ReadFailed, ex, "Consent L2 cache read failed; treating as a cache miss.");
+                foreach (var table in missingTables)
+                {
+                    if (!result.ContainsKey(table) && !candidateEntries.ContainsKey(table))
+                    {
+                        result[table] = null;
+                        CacheMisses.Inc();
+                        RemoveKeyFromTableIndex(table, BuildCacheKey(tenant, userSid, table, contextHash));
+                    }
+                }
             }
         }
         else
@@ -205,7 +219,14 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
                 }
                 else if (candidate.L2Key.HasValue && _redisDb != null)
                 {
-                    try { await _redisDb.KeyDeleteAsync(candidate.L2Key.Value).ConfigureAwait(false); } catch { }
+                    try
+                    {
+                        await _redisDb.KeyDeleteAsync(candidate.L2Key.Value).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (IsL2Failure(ex))
+                    {
+                        _logger?.LogWarning(ConsentCacheLogEvents.L2DeleteFailed, ex, "Consent L2 cache delete of a stale entry failed; the entry expires by TTL.");
+                    }
                 }
                 RemoveKeyFromTableIndex(table, candidate.CacheKey);
                 result[table] = null;
@@ -283,9 +304,10 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
                     }
                 }
             }
-            catch
+            catch (Exception ex) when (IsL2Failure(ex))
             {
-                // Fallback gracefully on L2 error
+                // A genuine L2 fault degrades to a cache miss (the decision is re-evaluated); anything else is a bug and propagates.
+                _logger?.LogWarning(ConsentCacheLogEvents.L2ReadFailed, ex, "Consent L2 cache read failed; treating as a cache miss.");
             }
         }
 
@@ -358,9 +380,10 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
                 var protectedPayload = ProtectL2Payload(l2Key.ToString(), binaryPayload, DateTimeOffset.UtcNow.Add(ttl));
                 await _redisDb.StringSetAsync(l2Key, protectedPayload, ttl).ConfigureAwait(false);
             }
-            catch
+            catch (Exception ex) when (IsL2Failure(ex))
             {
-                // L1 remains active even if L2 fails
+                // L1 remains active even if L2 fails.
+                _logger?.LogWarning(ConsentCacheLogEvents.L2WriteFailed, ex, "Consent L2 cache write failed; the entry stays in L1 only.");
             }
         }
     }

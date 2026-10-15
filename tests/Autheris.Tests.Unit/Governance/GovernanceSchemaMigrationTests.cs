@@ -32,7 +32,7 @@ public sealed class GovernanceSchemaMigrationTests
     private static string NewConnectionString() => $"Data Source=mig_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
 
     private static SqliteGovernanceRepository NewRawRepository(string connectionString) =>
-        new(Substitute.For<IEpochValidationService>(), Options.Create(Gateway(connectionString)));
+        GovernanceStoreFactory.CreateUnmigratedSqlite(Substitute.For<IEpochValidationService>(), Options.Create(Gateway(connectionString)));
 
     private static SqliteGovernanceMigrationRunner NewRunner(
         SqliteGovernanceRepository repository,
@@ -43,14 +43,14 @@ public sealed class GovernanceSchemaMigrationTests
 
     private static long Scalar(SqliteGovernanceRepository repository, string sql)
     {
-        using var cmd = repository.Connection.CreateCommand();
+        using var cmd = repository.RawConnection().CreateCommand();
         cmd.CommandText = sql;
         return Convert.ToInt64(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
     private static void Exec(SqliteGovernanceRepository repository, string sql)
     {
-        using var cmd = repository.Connection.CreateCommand();
+        using var cmd = repository.RawConnection().CreateCommand();
         cmd.CommandText = sql;
         cmd.ExecuteNonQuery();
     }
@@ -69,10 +69,11 @@ public sealed class GovernanceSchemaMigrationTests
         var cs = NewConnectionString();
         using var repository = NewRawRepository(cs);
 
-        await NewRunner(repository, cs).RunAsync();
+        var runner = NewRunner(repository, cs);
+        await runner.RunAsync();
 
         Scalar(repository, "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('TABLES', 'AUDIT_LOG_ENTRIES', 'CONSENTS', 'autheris_schema_migrations')").ShouldBe(4);
-        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations").ShouldBe(1);
+        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations").ShouldBe(runner.Steps.Count);
         Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 1 AND name = 'baseline_governance_schema' AND length(checksum) = 64").ShouldBe(1);
     }
 
@@ -86,7 +87,38 @@ public sealed class GovernanceSchemaMigrationTests
         await runner.RunAsync();
         await runner.RunAsync();
 
-        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations").ShouldBe(1);
+        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations").ShouldBe(runner.Steps.Count);
+    }
+
+    [Fact]
+    public async Task Run_BaselineCreatesWebhookOutboxAndCdcWatermarks()
+    {
+        var cs = NewConnectionString();
+        using var repository = NewRawRepository(cs);
+        var runner = NewRunner(repository, cs);
+
+        runner.Steps.Count.ShouldBe(1);
+        runner.Steps[0].ShouldSatisfyAllConditions(
+            s => s.Version.ShouldBe(1),
+            s => s.Name.ShouldBe("baseline_governance_schema"));
+        await runner.RunAsync();
+        await runner.RunAsync();
+
+        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 1 AND name = 'baseline_governance_schema' AND length(checksum) = 64").ShouldBe(1);
+        Scalar(repository, "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('WEBHOOK_OUTBOX', 'ux_webhook_outbox_dedupe', 'ix_webhook_outbox_due', 'ix_webhook_outbox_lease', 'ix_webhook_outbox_owner', 'autheris_cdc_watermarks')").ShouldBe(6);
+    }
+
+    [Fact]
+    public async Task Run_BaselineCreatesCloudEventSubscriptions()
+    {
+        var cs = NewConnectionString();
+        using var repository = NewRawRepository(cs);
+        var runner = NewRunner(repository, cs);
+
+        await runner.RunAsync();
+        await runner.RunAsync();
+
+        Scalar(repository, "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('CLOUDEVENT_SUBSCRIPTIONS', 'ix_cloudevent_subs_tenant')").ShouldBe(2);
     }
 
     [Fact]
@@ -206,9 +238,9 @@ public sealed class GovernanceSchemaMigrationTests
         {
             GovernanceDb = new GovernanceDbOptions { Provider = "SqlServer", ConnectionString = "Server=localhost;Database=autheris_test;User Id=u;Password=p;TrustServerCertificate=true" }
         });
-        using var sqlite = new SqliteGovernanceRepository(Substitute.For<IEpochValidationService>(), sqliteOptions, env);
-        using var pg = new PostgreSqlGovernanceRepository(Substitute.For<IEpochValidationService>(), pgOptions, env);
-        using var mssql = new SqlServerGovernanceRepository(Substitute.For<IEpochValidationService>(), sqlServerOptions, env);
+        using var sqlite = GovernanceStoreFactory.CreateUnmigratedSqlite(Substitute.For<IEpochValidationService>(), sqliteOptions, env);
+        using var pg = GovernanceStoreFactory.CreateUnmigratedPostgreSql(Substitute.For<IEpochValidationService>(), pgOptions, env);
+        using var mssql = GovernanceStoreFactory.CreateUnmigratedSqlServer(Substitute.For<IEpochValidationService>(), sqlServerOptions, env);
 
         var catalogues = new[]
         {

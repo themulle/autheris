@@ -32,9 +32,11 @@ internal static class VirtualFilterStore
         FilterApprovalStatus? Status = null, string? CreatedBy = null, string? ApprovedBy = null, DateTimeOffset? ApprovedAt = null,
         ProfileDto? Draft = null, bool PendingDeletion = false, string? DeletionRequestedBy = null);
 
-    public static async Task<VirtualFilterSnapshot> LoadSnapshotAsync(DbConnection connection, CancellationToken ct)
+    /// <param name="snapshot">A read transaction the caller opened (SQLite: deferred, so it takes no write lock); the store then neither begins nor commits one.</param>
+    public static async Task<VirtualFilterSnapshot> LoadSnapshotAsync(DbConnection connection, CancellationToken ct, DbTransaction? snapshot = null)
     {
-        await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+        await using var ownedTx = snapshot == null ? await connection.BeginTransactionAsync(ct).ConfigureAwait(false) : null;
+        var tx = snapshot ?? ownedTx!;
         long generation = await ReadGenerationAsync(connection, tx, ct).ConfigureAwait(false);
 
         var filters = new List<VirtualFilter>();
@@ -61,7 +63,11 @@ internal static class VirtualFilterStore
             }
         }
 
-        await tx.CommitAsync(ct).ConfigureAwait(false);
+        if (ownedTx != null)
+        {
+            await ownedTx.CommitAsync(ct).ConfigureAwait(false);
+        }
+
         return new VirtualFilterSnapshot(generation, filters, profiles);
     }
 

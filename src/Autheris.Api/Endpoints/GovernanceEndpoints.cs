@@ -13,6 +13,7 @@ using Autheris.Api.Extensions;
 using Autheris.Api.Middleware;
 using Autheris.Api.Security;
 using Autheris.Application.DataCatalog.Interfaces;
+using Autheris.Application.Governance;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
@@ -58,80 +59,58 @@ public static class GovernanceEndpoints
         return await ownershipRepository.IsAuthorizedApproverForTableAsync(table, new Sid(sid), context.RequestAborted).ConfigureAwait(false);
     }
 
+    internal static async Task<IResult> IngestOpenApiAsync(HttpContext context, IOpenApiIngestionUseCase ingestionUseCase)
+    {
+        // Role first: an unprivileged caller gets 403 before any tenant resolution (a malformed tenant claim throws) or body read.
+        if (!ingestionUseCase.HasPublishRole(context.User))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var callerTenant = EndpointSecurity.GetRequestTenant(context);
+        var isClusterAdmin = EndpointSecurity.IsCanonicalClusterAdmin(context.User);
+
+        string? domain = context.Request.Query.TryGetValue("domain", out var dVal) && !string.IsNullOrWhiteSpace(dVal)
+            ? dVal.ToString()
+            : null;
+
+        var baseUrl = context.Request.Query.TryGetValue("baseUrl", out var bVal) && !string.IsNullOrWhiteSpace(bVal)
+            ? bVal.ToString().Trim()
+            : null;
+
+        // Reject before the body is read; IngestAsync re-checks the same authorization.
+        if (!ingestionUseCase.IsAuthorized(context.User, callerTenant, isClusterAdmin, domain))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        // SEC M-07: Bounded read instead of a bypassable Content-Length check.
+        var (json, tooLarge) = await EndpointSecurity.TryReadBodyAsync(
+            context.Request,
+            20 * 1024 * 1024,
+            "OpenAPI specification exceeds maximum allowed size (20 MB).",
+            context.RequestAborted);
+        if (json == null)
+        {
+            return tooLarge!;
+        }
+
+        var outcome = await ingestionUseCase.IngestAsync(
+            context.User, callerTenant, isClusterAdmin, domain, baseUrl, json, context.TraceIdentifier, context.RequestAborted);
+        return outcome.Kind switch
+        {
+            OpenApiIngestionOutcomeKind.Forbidden => Results.StatusCode(StatusCodes.Status403Forbidden),
+            OpenApiIngestionOutcomeKind.Rejected => Results.BadRequest(outcome.Result),
+            _ => Results.Ok(outcome.Result)
+        };
+    }
+
     public static IEndpointRouteBuilder MapGovernanceEndpoints(this IEndpointRouteBuilder app)
     {
         // F-API-04: Declarative Web API OpenAPI/Swagger Schema & Doc Ingestion
-        app.MapPost("/api/governance/catalog/ingest-openapi", async (
-            HttpContext context,
-            IOpenApiIngestionService ingestionService) =>
-        {
-            var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher]);
-            if (!isPrivileged)
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            var callerTenant = EndpointSecurity.GetRequestTenant(context);
-            var isClusterAdmin = EndpointSecurity.IsCanonicalClusterAdmin(context.User);
-
-            string domain;
-            if (context.Request.Query.TryGetValue("domain", out var dVal) && !string.IsNullOrWhiteSpace(dVal))
-            {
-                var requestedDomain = dVal.ToString().Trim();
-                if (!isClusterAdmin && !string.Equals(requestedDomain, callerTenant.Value, StringComparison.OrdinalIgnoreCase))
-                {
-                    return Results.StatusCode(StatusCodes.Status403Forbidden);
-                }
-                domain = requestedDomain;
-            }
-            else
-            {
-                domain = isClusterAdmin ? "external" : callerTenant.Value;
-            }
-
-            var baseUrl = context.Request.Query.TryGetValue("baseUrl", out var bVal) && !string.IsNullOrWhiteSpace(bVal)
-                ? bVal.ToString().Trim()
-                : null;
-
-            // SEC M-07: Bounded read instead of a bypassable Content-Length check.
-            var (json, tooLarge) = await EndpointSecurity.TryReadBodyAsync(
-                context.Request,
-                20 * 1024 * 1024,
-                "OpenAPI specification exceeds maximum allowed size (20 MB).",
-                context.RequestAborted);
-            if (json == null)
-            {
-                return tooLarge!;
-            }
-
-            var result = await ingestionService.IngestOpenApiJsonAsync(json, domain, baseUrl, context.RequestAborted);
-            if (!result.Success)
-            {
-                return Results.BadRequest(result);
-            }
-
-            var auditRepo = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
-            await auditRepo.RecordRequiredAsync(new AuditLogEntry
-            {
-                TenantId = callerTenant,
-                EventType = "OPENAPI_CATALOG_INGESTED",
-                ActorSid = context.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
-                TargetTable = domain,
-                Decision = "ALLOW",
-                TraceId = context.TraceIdentifier,
-                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    domain,
-                    serviceTitle = result.ServiceTitle,
-                    ingestedTablesCount = result.IngestedTablesCount,
-                    ingestedColumnsCount = result.IngestedColumnsCount,
-                    ingestedTableNames = result.IngestedTableNames,
-                    warnings = result.Warnings
-                })
-            }, context.RequestAborted).ConfigureAwait(false);
-
-            return Results.Ok(result);
-        }).RequireAuthorization()
+        app.MapPost("/api/governance/catalog/ingest-openapi", (HttpContext context, IOpenApiIngestionUseCase ingestionUseCase) =>
+            IngestOpenApiAsync(context, ingestionUseCase))
+          .RequireAuthorization()
           .WithRequestBodyLimit(20 * 1024 * 1024) // SEC M-01: explicit large-body exception to the global Kestrel limit
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
@@ -329,7 +308,7 @@ public static class GovernanceEndpoints
                     targetKey,
                     resetBy = callerId
                 })
-            }, context.RequestAborted).ConfigureAwait(false);
+            }, CancellationToken.None).ConfigureAwait(false);
 
             return Results.Ok(new { message = $"Privacy budget reset for client '{clientId}'." });
         }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
@@ -462,7 +441,7 @@ public static class GovernanceEndpoints
             context.Response.Headers["X-Audit-Seal-SHA256"] = exportResult.Sha256AuditSeal;
             return Results.File(exportResult.DocumentBytes, exportResult.ContentType, exportResult.FileName);
         }).RequireAuthorization()
-          .WithAudit(AuditLevel.Full, AuditEventTypes.MetadataExport);
+          .WithAudit(AuditLevel.Full, AuditEventTypes.AuditExport);
 
         // OpenLineage Lineage Push Trigger
         app.MapPost("/api/lineage/openlineage/sync", async (
@@ -756,11 +735,11 @@ public static class GovernanceEndpoints
 
         await accessProfileRepo.UpsertProfileAsync(profile, ct).ConfigureAwait(false);
 
-        // Audit-Verankerung (Tier-A CONSENT_GRANTED)
+        // Tier-A audit anchoring (CONSENT_GRANTED)
         var auditEvent = new AuditLogEntry
         {
             TenantId = tenantId,
-            EventType = "CONSENT_GRANTED",
+            EventType = AuditEventTypes.ConsentGranted,
             ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
             TargetTable = string.Join(",", targetTables),
             Decision = "ALLOW",
@@ -781,22 +760,22 @@ public static class GovernanceEndpoints
         };
 
         var auditRepo = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
-        await auditRepo.RecordRequiredAsync(auditEvent, ct).ConfigureAwait(false);
+        await auditRepo.RecordRequiredAsync(auditEvent, CancellationToken.None).ConfigureAwait(false);
 
-        // Cluster-weite Cache-Invalidierung (AR-01)
+        // Cluster-wide cache invalidation (AR-01)
         var accessProfileCache = context.RequestServices.GetService<Autheris.Application.Policy.Interfaces.IAccessProfileCache>();
         if (accessProfileCache != null)
         {
             try
             {
-                await accessProfileCache.InvalidateTenantAsync(tenantId, ct).ConfigureAwait(false);
+                await accessProfileCache.InvalidateTenantAsync(tenantId, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 var failAudit = new AuditLogEntry
                 {
                     TenantId = tenantId,
-                    EventType = "PROFILE_INVALIDATION_FAILED",
+                    EventType = AuditEventTypes.ProfileInvalidationFailed,
                     ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
                     Decision = "DENY",
                     TraceId = context.TraceIdentifier,
@@ -807,7 +786,7 @@ public static class GovernanceEndpoints
                         subject = trimmedSubject
                     })
                 };
-                await auditRepo.RecordRequiredAsync(failAudit, ct).ConfigureAwait(false);
+                await auditRepo.RecordRequiredAsync(failAudit, CancellationToken.None).ConfigureAwait(false);
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             }
         }
@@ -816,7 +795,7 @@ public static class GovernanceEndpoints
             var clusterState = context.RequestServices.GetService<IDistributedClusterStateProvider>();
             if (clusterState != null)
             {
-                var bumped = await clusterState.IncrementAsync($"profile_epoch:{tenantId.Value}", 1, TimeSpan.Zero, ct).ConfigureAwait(false);
+                var bumped = await clusterState.IncrementAsync($"profile_epoch:{tenantId.Value}", 1, TimeSpan.Zero, CancellationToken.None).ConfigureAwait(false);
                 if (!bumped.HasValue)
                 {
                     return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
@@ -910,7 +889,7 @@ public static class GovernanceEndpoints
         var auditEvent = new AuditLogEntry
         {
             TenantId = tenantId,
-            EventType = "CONSENT_REVOKED",
+            EventType = AuditEventTypes.ConsentRevoked,
             ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
             TargetTable = string.Join(",", profile.TargetTables),
             Decision = "DENY",
@@ -927,22 +906,22 @@ public static class GovernanceEndpoints
         };
 
         var auditRepo = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
-        await auditRepo.RecordRequiredAsync(auditEvent, ct).ConfigureAwait(false);
+        await auditRepo.RecordRequiredAsync(auditEvent, CancellationToken.None).ConfigureAwait(false);
 
-        // Cluster-weite Cache-Invalidierung (AR-01)
+        // Cluster-wide cache invalidation (AR-01)
         var accessProfileCache = context.RequestServices.GetService<Autheris.Application.Policy.Interfaces.IAccessProfileCache>();
         if (accessProfileCache != null)
         {
             try
             {
-                await accessProfileCache.InvalidateTenantAsync(tenantId, ct).ConfigureAwait(false);
+                await accessProfileCache.InvalidateTenantAsync(tenantId, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 var failAudit = new AuditLogEntry
                 {
                     TenantId = tenantId,
-                    EventType = "PROFILE_INVALIDATION_FAILED",
+                    EventType = AuditEventTypes.ProfileInvalidationFailed,
                     ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
                     Decision = "DENY",
                     TraceId = context.TraceIdentifier,
@@ -953,7 +932,7 @@ public static class GovernanceEndpoints
                         profileId = id.ToString()
                     })
                 };
-                await auditRepo.RecordRequiredAsync(failAudit, ct).ConfigureAwait(false);
+                await auditRepo.RecordRequiredAsync(failAudit, CancellationToken.None).ConfigureAwait(false);
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             }
         }
@@ -962,7 +941,7 @@ public static class GovernanceEndpoints
             var clusterState = context.RequestServices.GetService<IDistributedClusterStateProvider>();
             if (clusterState != null)
             {
-                var bumped = await clusterState.IncrementAsync($"profile_epoch:{tenantId.Value}", 1, TimeSpan.Zero, ct).ConfigureAwait(false);
+                var bumped = await clusterState.IncrementAsync($"profile_epoch:{tenantId.Value}", 1, TimeSpan.Zero, CancellationToken.None).ConfigureAwait(false);
                 if (!bumped.HasValue)
                 {
                     return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);

@@ -16,7 +16,19 @@ Complete feature, schema, and concurrency parities are maintained across **Micro
 | **Cluster Concurrency Locking** | Native session/tx application locks via `sp_getapplock` (`Review PG-1`) | Transaction-level advisory locks via `pg_advisory_xact_lock` | In-process reader-writer coordination via `SemaphoreSlim` |
 | **Audit Hash Chaining** | Transaction-enrolled SHA-256 HMAC with rollback state synchronization | Transaction-enrolled SHA-256 HMAC with rollback state synchronization | Transaction-enrolled SHA-256 HMAC with rollback state synchronization |
 | **KMS WORM Sealing** | Mandatory external anchor outside Dev/Test (AU-01/AU-03) | Mandatory external anchor outside Dev/Test (AU-01/AU-03) | Mandatory external anchor outside Dev/Test (AU-01/AU-03) |
-| **Schema Managed** | Consents, Delegations, Audit Log, Catalogs, Virtual Filters, Outbox, Access Profiles | Consents, Delegations, Audit Log, Catalogs, Virtual Filters, Outbox, Access Profiles | Consents, Delegations, Audit Log, Catalogs, Virtual Filters, Outbox, Access Profiles |
+| **Schema Managed** | Consents, Delegations, Audit Log, Catalogs, Virtual Filters, ITSM Outbox, Access Profiles, Webhook Outbox, CDC Watermarks | Consents, Delegations, Audit Log, Catalogs, Virtual Filters, ITSM Outbox, Access Profiles, Webhook Outbox, CDC Watermarks | Consents, Delegations, Audit Log, Catalogs, Virtual Filters, ITSM Outbox, Access Profiles, Webhook Outbox, CDC Watermarks |
+
+---
+
+## Versioned Schema Migrations
+
+The governance schema is created and evolved by ordered, checksummed migrations recorded in `autheris_schema_migrations` (`version`, `name`, `checksum`, `applied_at`, `applied_by`). They run once at startup under the cross-replica schema lock, or as a separate step with `--migrate-governance` (see the [configuration guide](../configuration-guide.md) and the [operations runbook](../operations-runbook.md)). Every engine has the same catalogue:
+
+| Version | Name | Content |
+| :--- | :--- | :--- |
+| `0001` | `baseline_governance_schema` | Idempotent baseline of the complete governance schema (including `WEBHOOK_OUTBOX`, `autheris_cdc_watermarks`, and `CLOUDEVENT_SUBSCRIPTIONS`). |
+
+Migrations are forward-only. An older build refuses to start against a newer schema unless `GovernanceDb:Migrations:AllowNewerSchema` is `true`.
 
 ---
 

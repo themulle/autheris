@@ -150,9 +150,11 @@ public static class DevConfiguration
 
         if (SameBool(configuration[G + "Dev:Persist:Enabled"], "true"))
         {
-            var directory = configuration[G + "Dev:Persist:Directory"] is { Length: > 0 } d ? d : ".data";
+            var directory = Autheris.Infrastructure.Persistence.GatewayStatePaths.ResolveDirectory(
+                configuration[G + "Dev:Persist:Directory"],
+                Autheris.Infrastructure.Persistence.GatewayStatePaths.ResolveDirectory(configuration[G + "State:StateDirectory"], ".data"));
             System.IO.Directory.CreateDirectory(directory);
-            var connectionString = $"Data Source={System.IO.Path.Combine(directory, "dev.db")};Cache=Shared";
+            var connectionString = $"Data Source={System.IO.Path.Combine(directory, "dev.db")}";
             var key = G + "GovernanceDb:ConnectionString";
             builder.Add(new MemoryConfigurationSource
             {

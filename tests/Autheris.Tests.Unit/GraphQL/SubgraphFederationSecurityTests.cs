@@ -245,7 +245,7 @@ public sealed class SubgraphFederationSecurityTests
     {
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
         var nonce = "nonce-" + Guid.NewGuid().ToString("N");
-        var payload = $"tenant_alpha:user1:{timestamp}:{nonce}:products::POST:/graphql";
+        var payload = Autheris.Application.Federation.Services.FederationContextSignature.BuildCanonicalV2("tenant_alpha", "user1", timestamp, nonce, "products", "", "POST", "/graphql", "00");
         using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(Secret));
         var signature = Convert.ToHexStringLower(hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(payload)));
 
@@ -260,7 +260,8 @@ public sealed class SubgraphFederationSecurityTests
             roles: "",
             method: "POST",
             path: "/graphql",
-            allowLegacy: true);
+            version: "v2",
+            bodySha256: "00");
 
         firstResult.ShouldBeTrue();
 
@@ -276,7 +277,8 @@ public sealed class SubgraphFederationSecurityTests
             roles: "",
             method: "POST",
             path: "/graphql",
-            allowLegacy: true);
+            version: "v2",
+            bodySha256: "00");
 
         replayResult.ShouldBeFalse();
     }

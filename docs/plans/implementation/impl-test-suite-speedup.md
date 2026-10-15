@@ -3,10 +3,11 @@
 **Plan ID:** `IMPL-TEST-SPEEDUP-2026-10-14`
 **Parent:** [`00-master-plan-overview.md`](../00-master-plan-overview.md)
 **Scope:** CI wall-clock time of the `Build & Test All Suites` job and local test feedback time. No production code changes.
+**State:** `main` at `a4137626` (2026-10-14). WP-TS-01 (one shared PostgreSQL / SQL Server server per run, `SharedDatabaseServers`) is merged; WP-TS-02..05 are open.
 
 ---
 
-## 1. Baseline (measured 2026-10-14, `feat/impl-wave-3` @ `e2488a48`)
+## 1. Baseline (measured 2026-10-14, `feat/impl-wave-3` @ `e2488a48`, before WP-TS-01)
 
 | Measurement | Value |
 |---|---|
@@ -21,32 +22,23 @@
 
 The integration test project is the critical path: the other test projects finish while it still runs.
 
-### Root cause of the container count
+### Open: CI effect of WP-TS-01 not confirmed
 
-About 46 of the 58 containers are started **per test**, not per class: the PostgreSQL and SQL Server contract tests
-(`PostgreSql*ContractTests`, `PostgreSqlWebSqlTransactionTests`, `SqlServer*ContractTests`, `*GovernedEndToEndTests`) implement
-`IAsyncLifetime` on the test class itself, and xUnit creates a new class instance for every test. The remaining containers are
-class fixtures (`AstCompilerPostgreSqlFixture`, `AstCompilerSqlServerFixture`, `PostgreSqlContainerFixture`, `MsSqlContainerFixture`)
-and the shared Oracle and federated virtual filter collection fixtures.
+WP-TS-01 removed the per-test containers (local integration run 26:50 → 18:56). On GitHub, however, `Build & Test` took
+23:14 for `f396e742` against 20:18 before WP-TS-01. Investigate before WP-TS-02: compare per-step timings of several runs
+(runner variance, container reuse vs Ryuk under `CI=true`, image pulls, the Spark job) and confirm or refute the expected
+CI gain. Re-baseline the table above with the result.
 
 ---
 
-## 2. Work Packages (ordered by impact)
+## 2. Open Work Packages (ordered by impact)
 
-### WP-TS-01: One database server per engine, one fresh database per consumer
+### WP-TS-00: Make CI test timings visible (prerequisite)
 
-- **Change:** a process-wide, lazily started PostgreSQL server and SQL Server server (`SharedDatabaseServers`). Every consumer
-  (test class instance or class fixture) gets its own freshly created database on that server (`PostgreSqlTestDatabase`,
-  `SqlServerTestDatabase`), so data, schemas, triggers and advisory locks stay isolated exactly as before.
-- **Preserved behavior:** `AUTHERIS_TEST_MSSQL` still selects an external SQL Server; under `CI=true` or
-  `SQLGATE_REQUIRE_DATABASES=1` a failed start still fails the run (`ContainerStartup`); without Docker the tests still skip.
-- **Cleanup:** under CI the resource reaper (Ryuk) removes the containers. On developer machines Ryuk is disabled and the test host
-  is killed before a process-exit handler completes, so the containers use Testcontainers reuse: at most one per engine stays
-  running and later runs skip the start. Each test database is dropped when its consumer is disposed.
-- **Risk:** server-wide state (roles, logins, server settings). Checked: the affected tests create no roles or logins and change no
-  server settings. A test that needs server-wide state keeps its own container.
-- **Acceptance:** at most one PostgreSQL and one SQL Server container per integration run (plus Oracle, Spark and the federated
-  fixture); integration wall-clock time reduced by at least 6 minutes; no test changes its assertions.
+- **Change:** `dotnet test --logger trx` for every test project in `ci.yml` and upload the TRX files as a workflow artifact
+  (`if: always()`). Job logs are not readable without repository access, so per-class durations are otherwise unknown on GitHub.
+- **Use:** resolves the open CI question in section 1 and sizes the WP-TS-02 shards on measured class durations.
+- **Acceptance:** each CI run publishes per-test durations for all test projects.
 
 ### WP-TS-02: Shard the integration tests across parallel CI jobs
 
@@ -87,8 +79,9 @@ and the shared Oracle and federated virtual filter collection fixtures.
 
 | Work package | Status |
 |---|---|
-| WP-TS-01 | Done: integration run locally 26:50 → 18:56 (1041/1041 green). Containers are reused across local runs (CI relies on Ryuk). |
+| CI check of WP-TS-01 | Open: GitHub `Build & Test` 23:14 (`f396e742`) vs 20:18 before; inspect TRX artifacts from WP-TS-00. |
+| WP-TS-00 | Implemented (`--logger trx` + `test-results-*` artifacts in `ci.yml`) |
 | WP-TS-02 | Planned |
-| WP-TS-03 | Planned |
-| WP-TS-04 | Re-measure first: an uncontended local run took 20 s (the 5:07 baseline ran next to other test projects). Drop if CI confirms. |
+| WP-TS-03 | Implemented (`Category=Spark` trait on Spark execution tests + parallel `spark-integration-tests` job in `ci.yml`) |
+| WP-TS-04 | Implemented (`CecilModuleCache` + cached production types and call graph in `Autheris.Tests.Architecture`) |
 | WP-TS-05 | Planned |

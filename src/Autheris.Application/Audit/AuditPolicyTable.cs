@@ -30,8 +30,11 @@ public static class AuditPolicyTable
         [AuditEventTypes.WebSqlCrossSourceSourceRead] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.WebSqlDmlExecuted] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.WebSqlDmlRejected] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.WebSqlDmlFailed] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.QueryExecutionError] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.StreamSubscribe] = AuditFailurePolicy.FailClosed,
+        // Tier B: aggregated per subscription; the raw CDC stream is high volume and nothing is denied by a failed audit write.
+        [AuditEventTypes.CdcWebhookDeliveryBatch] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.EgressShadowCopy] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.AuditRead] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.AuditExport] = AuditFailurePolicy.FailClosed,
@@ -42,9 +45,11 @@ public static class AuditPolicyTable
         [AuditEventTypes.ServiceStopped] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.ConsentRequested] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ConsentApproved] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ConsentGranted] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ConsentDenied] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ConsentRevoked] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ConsentApplied] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ProfileInvalidationFailed] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.BreakGlassActivated] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DatasourceTested] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.AsyncJobSubmitted] = AuditFailurePolicy.FailClosed,
@@ -64,6 +69,10 @@ public static class AuditPolicyTable
         [AuditEventTypes.DocIngestionBundleApplied] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DocIngestionDocumentApplied] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DocDiscoveryRead] = AuditFailurePolicy.BestEffort,
+        [AuditEventTypes.RebacTupleAdded] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.RebacTupleRemoved] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.RebacInvalidationFailed] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.RebacTupleSeed] = AuditFailurePolicy.BestEffort,
     };
 
     public static IReadOnlyDictionary<string, AuditFailurePolicy> All => Table;

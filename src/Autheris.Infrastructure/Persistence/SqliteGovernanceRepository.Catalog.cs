@@ -73,8 +73,10 @@ public partial class SqliteGovernanceRepository
             return entry.Metadata;
         }
 
-        await _lock.WaitAsync(ct);
-        try
+        // Captured before the snapshot is taken: a commit that invalidates the cache after this point makes this read stale.
+        var cacheGeneration = Volatile.Read(ref _metadataCacheGeneration);
+        await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             nowTicks = DateTime.UtcNow.Ticks;
             if (_metadataCache.TryGetValue(cacheKey, out entry) && (nowTicks - entry.CachedAtTicks < MetadataCacheTtlTicks))
@@ -85,7 +87,7 @@ public partial class SqliteGovernanceRepository
             Guid? tableId = null;
             Table? tableEntity = null;
 
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source
                                     FROM TABLES
@@ -131,7 +133,7 @@ public partial class SqliteGovernanceRepository
             var columns = new List<TableColumn>();
             var maskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
 
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"SELECT c.id, c.column_name, c.data_type, c.is_sensitive,
                                            m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
@@ -187,24 +189,30 @@ public partial class SqliteGovernanceRepository
                 ColumnMaskingRules = maskingRules
             };
 
-            _metadataCache[cacheKey] = (result, DateTime.UtcNow.Ticks);
+            if (AfterMetadataSnapshotForTesting is { } hook)
+            {
+                await hook(ct).ConfigureAwait(false);
+            }
+
+            // A reader whose snapshot predates a commit must not re-insert the stale metadata after the invalidation.
+            if (Volatile.Read(ref _metadataCacheGeneration) == cacheGeneration)
+            {
+                _metadataCache[cacheKey] = (result, DateTime.UtcNow.Ticks);
+            }
+
             return result;
-        }
-        finally
-        {
-            _lock.Release();
         }
     }
 
     public async Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             var results = new List<TableMetadata>();
             var tableRows = new List<(Guid id, string schema, string name, Table table)>();
 
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"SELECT t.id, t.source_type, t.source_name, t.schema_name, t.table_name,
                                            t.display_name, t.sensitivity, t.requires_four_eyes, t.is_active,
@@ -261,7 +269,7 @@ public partial class SqliteGovernanceRepository
             }
 
             var columnsByTable = new Dictionary<Guid, List<TableColumn>>();
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"SELECT id, table_id, column_name, data_type, is_sensitive, description, long_description, meta_json, doc_source FROM TABLE_COLUMNS";
                 using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -325,10 +333,6 @@ public partial class SqliteGovernanceRepository
 
             return results;
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
     private static string SafeValue(SqliteDataReader reader, int ordinal)
@@ -345,14 +349,17 @@ public partial class SqliteGovernanceRepository
 
     public async Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             Guid tableId;
-            using var tx = _connection.BeginTransaction();
+            string? targetDesc = metadata.Table.Description;
+            string? targetLongDesc = metadata.Table.LongDescription;
+            string? targetDocSource = metadata.Table.DocumentationSource;
+            using var tx = conn.BeginTransaction();
             try
             {
-                using (var selectCmd = _connection.CreateCommand())
+                using (var selectCmd = conn.CreateCommand())
                 {
                     selectCmd.Transaction = tx;
                     selectCmd.CommandText = @"SELECT id, description, long_description, doc_source FROM TABLES 
@@ -379,11 +386,11 @@ public partial class SqliteGovernanceRepository
                                                     (!string.IsNullOrWhiteSpace(metadata.Table.LongDescription) &&
                                                      ShouldOverwriteDocumentation(existingDocSource, metadata.Table.DocumentationSource));
 
-                        var targetDesc = canOverwriteDesc ? metadata.Table.Description : existingDesc;
-                        var targetLongDesc = canOverwriteLongDesc ? metadata.Table.LongDescription : existingLongDesc;
-                        var targetDocSource = canOverwriteDesc ? (metadata.Table.DocumentationSource ?? existingDocSource) : existingDocSource;
+                        targetDesc = canOverwriteDesc ? metadata.Table.Description : existingDesc;
+                        targetLongDesc = canOverwriteLongDesc ? metadata.Table.LongDescription : existingLongDesc;
+                        targetDocSource = canOverwriteDesc ? (metadata.Table.DocumentationSource ?? existingDocSource) : existingDocSource;
 
-                        using var updateCmd = _connection.CreateCommand();
+                        using var updateCmd = conn.CreateCommand();
                         updateCmd.Transaction = tx;
                         updateCmd.CommandText = @"UPDATE TABLES 
                                                   SET source_type = @sourceType, 
@@ -416,7 +423,7 @@ public partial class SqliteGovernanceRepository
                     {
                         await selectReader.CloseAsync();
                         tableId = metadata.Table.Id == Guid.Empty ? Guid.NewGuid() : metadata.Table.Id;
-                        using var insertCmd = _connection.CreateCommand();
+                        using var insertCmd = conn.CreateCommand();
                         insertCmd.Transaction = tx;
                         insertCmd.CommandText = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source)
                                                   VALUES (@id, @sourceType, @sourceName, @schemaName, @tableName, @displayName, @sensitivity, @requiresFourEyes, @isActive, @dataSourceType, @httpEndpointJson, @pluginName, @description, @longDescription, @docSource)";
@@ -440,7 +447,7 @@ public partial class SqliteGovernanceRepository
                 }
 
                 var existingColsByName = new Dictionary<string, (Guid Id, string? Description, string? LongDescription, string? DocSource)>(StringComparer.OrdinalIgnoreCase);
-                using (var getColsCmd = _connection.CreateCommand())
+                using (var getColsCmd = conn.CreateCommand())
                 {
                     getColsCmd.Transaction = tx;
                     getColsCmd.CommandText = "SELECT id, column_name, description, long_description, doc_source FROM TABLE_COLUMNS WHERE table_id = @tableId";
@@ -479,7 +486,7 @@ public partial class SqliteGovernanceRepository
                         var targetColLongDesc = canOverwriteColLongDesc ? col.LongDescription : existingCol.LongDescription;
                         var targetColDocSource = canOverwriteColDesc ? (incomingColSource ?? existingCol.DocSource) : existingCol.DocSource;
 
-                        using var updateColCmd = _connection.CreateCommand();
+                        using var updateColCmd = conn.CreateCommand();
                         updateColCmd.Transaction = tx;
                         updateColCmd.CommandText = @"UPDATE TABLE_COLUMNS 
                                                     SET data_type = @dataType, is_sensitive = @isSensitive, description = @description, long_description = @longDescription, doc_source = @docSource, meta_json = @metaJson
@@ -496,7 +503,7 @@ public partial class SqliteGovernanceRepository
                     else
                     {
                         colId = col.Id == Guid.Empty ? Guid.NewGuid() : col.Id;
-                        using var insertColCmd = _connection.CreateCommand();
+                        using var insertColCmd = conn.CreateCommand();
                         insertColCmd.Transaction = tx;
                         insertColCmd.CommandText = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, is_sensitive, description, long_description, doc_source, meta_json)
                                                     VALUES (@id, @tableId, @columnName, @dataType, @isSensitive, @description, @longDescription, @docSource, @metaJson)";
@@ -512,7 +519,7 @@ public partial class SqliteGovernanceRepository
                         await insertColCmd.ExecuteNonQueryAsync(ct);
                     }
 
-                    using (var delMaskCmd = _connection.CreateCommand())
+                    using (var delMaskCmd = conn.CreateCommand())
                     {
                         delMaskCmd.Transaction = tx;
                         delMaskCmd.CommandText = "DELETE FROM COLUMN_MASKING_RULES WHERE table_column_id = @colId";
@@ -522,7 +529,7 @@ public partial class SqliteGovernanceRepository
 
                     if (metadata.ColumnMaskingRules.TryGetValue(col.ColumnName, out var maskRule))
                     {
-                        using var insertMaskCmd = _connection.CreateCommand();
+                        using var insertMaskCmd = conn.CreateCommand();
                         insertMaskCmd.Transaction = tx;
                         insertMaskCmd.CommandText = @"INSERT INTO COLUMN_MASKING_RULES (id, table_column_id, rule_type, pattern_or_format, replacement, hmac_key_id)
                                                       VALUES (@id, @colId, @ruleType, @pattern, @replacement, @hmacKeyId)";
@@ -536,7 +543,7 @@ public partial class SqliteGovernanceRepository
                     }
                 }
 
-                await IncrementTableEpochInternalAsync(metadata.Identifier, tx, ct);
+                await IncrementTableEpochInternalAsync(conn, metadata.Identifier, tx, ct);
                 await tx.CommitAsync(ct);
             }
             catch
@@ -545,7 +552,7 @@ public partial class SqliteGovernanceRepository
                 throw;
             }
 
-            _metadataCache.TryRemove(metadata.Identifier.ToString().ToLowerInvariant(), out _);
+            QueueMetadataInvalidation(metadata.Identifier);
             await _epochValidationService.InvalidateEpochAsync(metadata.Identifier, ct);
 
             var updatedTable = new Table
@@ -561,7 +568,10 @@ public partial class SqliteGovernanceRepository
                 IsActive = metadata.Table.IsActive,
                 DataSourceType = metadata.Table.DataSourceType,
                 HttpEndpoint = metadata.Table.HttpEndpoint,
-                PluginName = metadata.Table.PluginName
+                PluginName = metadata.Table.PluginName,
+                Description = targetDesc,
+                LongDescription = targetLongDesc,
+                DocumentationSource = targetDocSource
             };
 
             return new TableMetadata
@@ -573,18 +583,14 @@ public partial class SqliteGovernanceRepository
                 PrimaryKeyColumns = metadata.PrimaryKeyColumns
             };
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
     public async Task<long> GetTableEpochAsync(TableIdentifier table, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = @"SELECT epoch FROM POLICY_EPOCHS
                                 WHERE domain = @domain COLLATE NOCASE AND schema_name = @schema COLLATE NOCASE AND table_name = @table COLLATE NOCASE";
             cmd.Parameters.AddWithValue("@domain", table.Domain);
@@ -594,19 +600,15 @@ public partial class SqliteGovernanceRepository
             var result = await cmd.ExecuteScalarAsync(ct);
             return result is long l ? l : (result is int i ? i : 1L);
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
     public async Task<long> IncrementTableEpochAsync(TableIdentifier table, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             long newEpoch;
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"UPDATE POLICY_EPOCHS
                                     SET epoch = epoch + 1, updated_at = @now
@@ -621,24 +623,20 @@ public partial class SqliteGovernanceRepository
                 newEpoch = result is long l ? l : (result is int i ? i : 2L);
             }
 
-            _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
+            QueueMetadataInvalidation(table);
             await _epochValidationService.InvalidateEpochAsync(table, ct);
             return newEpoch;
-        }
-        finally
-        {
-            _lock.Release();
         }
     }
 
 
-    private Task IncrementTableEpochInternalAsync(TableIdentifier table, CancellationToken ct) =>
-        IncrementTableEpochInternalAsync(table, null, ct);
+    private Task IncrementTableEpochInternalAsync(SqliteConnection conn, TableIdentifier table, CancellationToken ct) =>
+        IncrementTableEpochInternalAsync(conn, table, null, ct);
 
-    private async Task IncrementTableEpochInternalAsync(TableIdentifier table, SqliteTransaction? transaction, CancellationToken ct)
+    private async Task IncrementTableEpochInternalAsync(SqliteConnection conn, TableIdentifier table, SqliteTransaction? transaction, CancellationToken ct)
     {
-        _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
-        using (var cmd = _connection.CreateCommand())
+        QueueMetadataInvalidation(table);
+        using (var cmd = conn.CreateCommand())
         {
             if (transaction != null)
             {
@@ -654,7 +652,7 @@ public partial class SqliteGovernanceRepository
             int rowsAffected = await cmd.ExecuteNonQueryAsync(ct);
             if (rowsAffected == 0)
             {
-                using var insertCmd = _connection.CreateCommand();
+                using var insertCmd = conn.CreateCommand();
                 if (transaction != null)
                 {
                     insertCmd.Transaction = transaction;
@@ -679,29 +677,25 @@ public partial class SqliteGovernanceRepository
 
     public async Task DeletePolicyEpochForTableAsync(TableIdentifier table, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = @"DELETE FROM POLICY_EPOCHS WHERE domain = @domain COLLATE NOCASE AND schema_name = @schema COLLATE NOCASE AND table_name = @table COLLATE NOCASE";
             cmd.Parameters.AddWithValue("@domain", table.Domain);
             cmd.Parameters.AddWithValue("@schema", table.Schema);
             cmd.Parameters.AddWithValue("@table", table.TableName);
             await cmd.ExecuteNonQueryAsync(ct);
-            _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
-        }
-        finally
-        {
-            _lock.Release();
+            QueueMetadataInvalidation(table);
         }
     }
 
     public async Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = @"INSERT INTO DATA_OWNER_DELEGATIONS (id, data_owner_id, delegate_sid, valid_from, valid_to, reason)
                                 VALUES (@id, @ownerId, @delSid, @from, @to, @reason)";
             cmd.Parameters.AddWithValue("@id", delegation.Id.ToString());
@@ -714,19 +708,15 @@ public partial class SqliteGovernanceRepository
             await cmd.ExecuteNonQueryAsync(ct);
             return delegation;
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
     public async Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             var owners = new List<DataOwner>();
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = @"SELECT o.id, o.ad_sid, o.ad_account, o.display_name, o.email, o.is_active
                                 FROM DATA_OWNERS o
                                 JOIN TABLE_OWNERS tow ON o.id = tow.data_owner_id
@@ -751,35 +741,27 @@ public partial class SqliteGovernanceRepository
             }
             return owners;
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
     public async Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            return await IsAuthorizedApproverForTableInternalAsync(table, approverSid, ct);
-        }
-        finally
-        {
-            _lock.Release();
+            return await IsAuthorizedApproverForTableInternalAsync(conn, table, approverSid, ct);
         }
     }
 
-    private Task<bool> IsAuthorizedApproverForTableInternalAsync(TableIdentifier table, Sid approverSid, CancellationToken ct)
-        => IsAuthorizedApproverForTableInternalAsync(table, approverSid, null, ct);
+    private Task<bool> IsAuthorizedApproverForTableInternalAsync(SqliteConnection conn, TableIdentifier table, Sid approverSid, CancellationToken ct)
+        => IsAuthorizedApproverForTableInternalAsync(conn, table, approverSid, null, ct);
 
     /// <summary>Review R4-4 (rest): resolves SID, account or e-mail spellings to stable DATA_OWNERS ids (caller holds the lock).</summary>
-    private async Task<IReadOnlyCollection<string>> ResolveDataOwnerIdsInternalAsync(IEnumerable<string> identifiers, CancellationToken ct)
+    private async Task<IReadOnlyCollection<string>> ResolveDataOwnerIdsInternalAsync(SqliteConnection conn, IEnumerable<string> identifiers, CancellationToken ct)
     {
         var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var identifier in identifiers.Where(i => !string.IsNullOrWhiteSpace(i)))
         {
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = @"SELECT id FROM DATA_OWNERS
                                 WHERE ad_sid = @p COLLATE NOCASE OR ad_account = @p COLLATE NOCASE OR email = @p COLLATE NOCASE";
             cmd.Parameters.AddWithValue("@p", identifier);
@@ -793,7 +775,7 @@ public partial class SqliteGovernanceRepository
         return ids;
     }
 
-    private async Task<IReadOnlyCollection<string>> ResolveRequesterOwnerIdsInternalAsync(ConsentRequest req, CancellationToken ct)
+    private async Task<IReadOnlyCollection<string>> ResolveRequesterOwnerIdsInternalAsync(SqliteConnection conn, ConsentRequest req, CancellationToken ct)
     {
         var identifiers = ConsentApprovalPolicy.IdentifierCandidates(req.RequesterSid.Value).ToList();
         if (req.RequesterIdentifiers != null)
@@ -801,12 +783,12 @@ public partial class SqliteGovernanceRepository
             identifiers.AddRange(req.RequesterIdentifiers);
         }
 
-        return await ResolveDataOwnerIdsInternalAsync(identifiers, ct);
+        return await ResolveDataOwnerIdsInternalAsync(conn, identifiers, ct);
     }
 
-    private async Task<bool> IsAuthorizedApproverForTableInternalAsync(TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct)
+    private async Task<bool> IsAuthorizedApproverForTableInternalAsync(SqliteConnection conn, TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct)
     {
-        using var cmd = _connection.CreateCommand();
+        using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
             SELECT 1
             FROM TABLE_OWNERS tow
@@ -840,11 +822,11 @@ public partial class SqliteGovernanceRepository
 
     public async Task<IReadOnlySet<string>> GetTransitiveRolesAsync(Sid subjectSid, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             var roles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = @"SELECT r.role_name
                                 FROM ROLES r
                                 JOIN ROLE_MEMBERS m ON r.id = m.role_id
@@ -858,19 +840,15 @@ public partial class SqliteGovernanceRepository
             }
             return roles;
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
     public async Task<IReadOnlyList<TableRelation>> GetRelationsForTableAsync(TableIdentifier parentTable, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             var relations = new List<TableRelation>();
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = @"SELECT r.id, r.parent_table_id, COALESCE(tp.source_name, 'default'), tp.schema_name, tp.table_name,
                                        r.child_table_id, COALESCE(tc.source_name, 'default'), tc.schema_name, tc.table_name,
                                        r.relation_name, r.join_key_parent, r.join_key_child, r.cardinality
@@ -910,18 +888,14 @@ public partial class SqliteGovernanceRepository
             }
             return relations;
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
     public async Task CreateRelationAsync(TableRelation relation, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = @"INSERT OR REPLACE INTO TABLE_RELATIONS 
                                 (id, parent_table_id, child_table_id, relation_name, join_key_parent, join_key_child, cardinality)
                                 VALUES (@id, @pId, @cId, @relName, @jkP, @jkC, @card)";
@@ -933,10 +907,6 @@ public partial class SqliteGovernanceRepository
             cmd.Parameters.AddWithValue("@jkC", relation.JoinKeyChild);
             cmd.Parameters.AddWithValue("@card", relation.Cardinality.ToString());
             await cmd.ExecuteNonQueryAsync(ct);
-        }
-        finally
-        {
-            _lock.Release();
         }
     }
 

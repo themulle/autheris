@@ -198,4 +198,31 @@ public class ArchitectureTests
         result.IsSuccessful.ShouldBeTrue(
             $"Domain layer interfaces must follow standard 'I' prefix naming: {string.Join(", ", result.FailingTypeNames ?? Array.Empty<string>())}");
     }
+
+    /// <summary>
+    /// WP-ARC-B-07: endpoints whose use cases moved into Application (<c>IEffectiveFilterInspector</c>, <c>IOlapStagingService</c>)
+    /// no longer touch a repository directly. <c>GovernanceEndpoints</c> is not listed: it still contains routes that use repositories.
+    /// </summary>
+    [Fact]
+    public void MigratedEndpoints_DoNotDependOnRepositories()
+    {
+        var repositoryInterfaces = typeof(Autheris.Application.Services.ConsentResolutionService).Assembly.GetTypes()
+            .Concat(typeof(Autheris.Domain.Common.Sid).Assembly.GetTypes())
+            .Where(t => t.IsInterface && t.Name.EndsWith("Repository", StringComparison.Ordinal))
+            .Select(t => t.FullName!)
+            .ToArray();
+        repositoryInterfaces.ShouldContain("Autheris.Application.Interfaces.ITableMetadataRepository", "positive control: the repository list is populated");
+
+        var result = Types.InAssembly(typeof(Autheris.Api.Endpoints.DuckDbOlapEndpoints).Assembly)
+            .That()
+            .HaveNameStartingWith("VirtualFilterEndpoints")
+            .Or()
+            .HaveNameStartingWith("DuckDbOlapEndpoints")
+            .ShouldNot()
+            .HaveDependencyOnAny(repositoryInterfaces)
+            .GetResult();
+
+        result.IsSuccessful.ShouldBeTrue(
+            $"Migrated endpoints must go through their use case, not a repository: {string.Join(", ", result.FailingTypeNames ?? Array.Empty<string>())}");
+    }
 }

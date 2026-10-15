@@ -415,7 +415,7 @@ public sealed class DocumentationSourcePriorityTests
         await repository.UpsertTableMetadataAsync(meta);
 
         // Manually update TABLE_COLUMNS to inject a boolean meta_json (e.g. {"pii": false})
-        using (var cmd = repository.Connection.CreateCommand())
+        using (var cmd = repository.RawConnection().CreateCommand())
         {
             cmd.CommandText = "UPDATE TABLE_COLUMNS SET meta_json = '{\"pii\": false}' WHERE column_name = 'email'";
             await cmd.ExecuteNonQueryAsync();

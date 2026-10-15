@@ -13,6 +13,7 @@ using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -96,5 +97,57 @@ public sealed class DelegatedAuditRouteIntegrationTests : IClassFixture<WebAppli
         var entries = await ReadAuditAsync();
         entries.ShouldContain(e => e.EventType == AuditEventTypes.AuthzEndpointDenied && e.Decision == "DENY"
                                    && e.DetailsJson.Contains("/api/admin/tokens/revoke"));
+    }
+
+    [Fact]
+    public async Task OlapQuery_DeniedTable_IsAuditedAsAuthzEndpointDenied()
+    {
+        // The access resolver denies the table: the use case answers 403 and the middleware audits the denial.
+        var table = new Autheris.Domain.Common.TableIdentifier("secret", "main", "payroll");
+        var metadata = NSubstitute.Substitute.For<ITableMetadataRepository>();
+        metadata.GetTableMetadataAsync(Arg.Any<Autheris.Domain.Common.TableIdentifier>(), Arg.Any<System.Threading.CancellationToken>())
+            .Returns(new TableMetadata { Identifier = table, Columns = [new TableColumn { ColumnName = "id", DataType = "int" }] });
+        var resolver = NSubstitute.Substitute.For<Autheris.Application.Connectors.CrossDomain.ICrossDomainAccessResolver>();
+        resolver.ResolveAccessAsync(Arg.Any<System.Security.Claims.ClaimsPrincipal>(), Arg.Any<Autheris.Domain.Common.TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<Autheris.Domain.Common.TenantId>(), Arg.Any<System.Threading.CancellationToken>())
+            .Returns(Autheris.Domain.Interfaces.TableAccessDecision.Denied(table, "no grant"));
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Gateway:DuckDbOlap:Enabled", "true");
+            builder.ConfigureServices(services =>
+            {
+                services.AddSingleton(metadata);
+                services.AddScoped(_ => resolver);
+            });
+        });
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-PLAIN-USER");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "User");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant-default");
+
+        var response = await client.PostAsJsonAsync("/api/v1/olap/query", new { sql = "SELECT 1", tableNames = new[] { "secret.main.payroll" } });
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        // The denial must come from the access resolver, not from an earlier guard (allowlist, catalog).
+        await resolver.Received(1).ResolveAccessAsync(Arg.Any<System.Security.Claims.ClaimsPrincipal>(), Arg.Any<Autheris.Domain.Common.TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<Autheris.Domain.Common.TenantId>(), Arg.Any<System.Threading.CancellationToken>());
+        using var scope = factory.Services.CreateScope();
+        var entries = (await scope.ServiceProvider.GetRequiredService<IAuditLogRepository>().GetAuditLogEntriesAsync(1000)).ToArray();
+        entries.ShouldContain(e => e.EventType == AuditEventTypes.AuthzEndpointDenied && e.Decision == "DENY"
+                                   && e.DetailsJson.Contains("/api/v1/olap/query"));
+        entries.ShouldNotContain(e => e.EventType == "OLAP_TABLE_STAGED");
+    }
+
+    [Fact]
+    public async Task OpenApiIngestion_ByNonAdmin_Returns403_AndRecordsDenyAudit()
+    {
+        var client = CreateClient("S-1-5-21-PLAIN-USER", "StandardUser");
+        var content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
+
+        var response = await client.PostAsync("/api/governance/catalog/ingest-openapi", content);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        var entries = await ReadAuditAsync();
+        entries.ShouldContain(e => e.EventType == AuditEventTypes.AuthzEndpointDenied && e.Decision == "DENY"
+                                   && e.DetailsJson.Contains("/api/governance/catalog/ingest-openapi"));
+        entries.ShouldNotContain(e => e.EventType == "OPENAPI_CATALOG_INGESTED");
     }
 }

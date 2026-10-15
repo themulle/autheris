@@ -108,7 +108,7 @@ public sealed class GovernedConnectorReaderArch2Tests
         engine.ExecuteOlapQueryAsync(Arg.Do<OlapQueryRequest>(r => staged = r), Arg.Any<CancellationToken>())
             .Returns(new OlapQueryResult([], [], 0, TimeSpan.Zero));
 
-        await DuckDbOlapEndpoints.HandleOlapQueryAsync(
+        await Autheris.Tests.Unit.TestDoubles.OlapEndpointTestHost.HandleAsync(
             httpContext,
             engine,
             metadataRepo,

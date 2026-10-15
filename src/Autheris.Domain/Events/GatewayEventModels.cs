@@ -167,13 +167,6 @@ public sealed record DocumentDepositedEvent(
 {
     public string EventType => "docs.document.deposited";
 
-    /// <summary>
-    /// Deprecated (SR-L-15): always equals <see cref="RelativePath"/>, never an absolute filesystem path.
-    /// Kept for one release so existing plugin binaries and webhook consumers still bind; use <see cref="RelativePath"/>.
-    /// </summary>
-    [Obsolete("Use RelativePath. This property is populated with the redacted relative path and will be removed.")]
-    public string SourceFilePath => RelativePath;
-
     /// <summary>Builds the doc-lake relative path <c>{appId}/{category}/{docId}</c> from request values.</summary>
     public static string BuildRelativePath(string appId, string category, string docId) => $"{appId}/{category}/{docId}";
 }

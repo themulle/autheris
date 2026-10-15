@@ -56,4 +56,12 @@ public interface IDistributedClusterStateProvider
     /// Tries to acquire a distributed lock for atomicity across nodes. Returns an IAsyncDisposable lease, or null only if the lock is busy.
     /// </summary>
     ValueTask<IAsyncDisposable?> TryAcquireLockAsync(string resourceKey, TimeSpan expiry, CancellationToken ct = default);
+
+    /// <summary>
+    /// Tries to acquire a renewed, fenced lease for <paramref name="resourceKey"/>. The lease is extended in the background
+    /// every <c>ttl / 3</c> until disposed; <see cref="IDistributedLease.LeaseLost"/> fires when ownership can no longer be
+    /// guaranteed. Returns <c>null</c> only when the lease is held by someone else; an unreachable store throws
+    /// <see cref="ClusterStateUnavailableException"/>.
+    /// </summary>
+    ValueTask<IDistributedLease?> TryAcquireLeaseAsync(string resourceKey, TimeSpan ttl, CancellationToken ct = default);
 }

@@ -12,8 +12,7 @@ using Autheris.Application.State;
 /// <summary>
 /// Validates cryptographic HMAC-SHA256 signatures on forwarded Zero-Trust context headers (1.10).
 /// Protects downstream subgraphs against context spoofing and replay attacks.
-/// SR-M-18: only the versioned v2 canonical form (length-prefixed fields, body hash) is accepted unless
-/// <c>allowLegacy</c> is set explicitly for a rolling upgrade.
+/// SR-M-18: only the versioned v2 canonical form (length-prefixed fields, body hash) is accepted.
 /// </summary>
 public static class SubgraphSecurityValidator
 {
@@ -37,11 +36,10 @@ public static class SubgraphSecurityValidator
         string? method = null,
         string? path = null,
         string? version = null,
-        string? bodySha256 = null,
-        bool allowLegacy = false)
+        string? bodySha256 = null)
     {
         var drift = maxDrift ?? TimeSpan.FromSeconds(60);
-        if (!VerifyCore(tenant, userSid, timestampStr, nonce, signature, signingKey, drift, subgraph, roles, method, path, version, bodySha256, allowLegacy, out var now))
+        if (!VerifyCore(tenant, userSid, timestampStr, nonce, signature, signingKey, drift, subgraph, roles, method, path, version, bodySha256, out var now))
         {
             return false;
         }
@@ -69,12 +67,11 @@ public static class SubgraphSecurityValidator
         string? path = null,
         string? version = null,
         string? bodySha256 = null,
-        bool allowLegacy = false,
         IClusterStateTopology? topology = null,
         CancellationToken ct = default)
     {
         var drift = maxDrift ?? TimeSpan.FromSeconds(60);
-        if (!VerifyCore(tenant, userSid, timestampStr, nonce, signature, signingKey, drift, subgraph, roles, method, path, version, bodySha256, allowLegacy, out var now))
+        if (!VerifyCore(tenant, userSid, timestampStr, nonce, signature, signingKey, drift, subgraph, roles, method, path, version, bodySha256, out var now))
         {
             return false;
         }
@@ -120,7 +117,7 @@ public static class SubgraphSecurityValidator
     private static bool VerifyCore(
         string? tenant, string? userSid, string? timestampStr, string? nonce, string? signature, string signingKey,
         TimeSpan drift, string? subgraph, string? roles, string? method, string? path,
-        string? version, string? bodySha256, bool allowLegacy, out DateTimeOffset now)
+        string? version, string? bodySha256, out DateTimeOffset now)
     {
         now = DateTimeOffset.UtcNow;
 
@@ -152,25 +149,14 @@ public static class SubgraphSecurityValidator
             return false;
         }
 
-        string payload;
-        if (string.Equals(version, FederationContextSignature.CurrentVersion, StringComparison.Ordinal))
-        {
-            if (string.IsNullOrWhiteSpace(bodySha256))
-            {
-                return false;
-            }
-
-            payload = FederationContextSignature.BuildCanonicalV2(
-                tenant, userSid, timestampStr, nonce, subgraph, roles, method, path, bodySha256.ToLowerInvariant());
-        }
-        else if (allowLegacy && string.IsNullOrWhiteSpace(version))
-        {
-            payload = FederationContextSignature.BuildLegacy(tenant, userSid, timestampStr, nonce, subgraph, roles, method, path);
-        }
-        else
+        if (!string.Equals(version, FederationContextSignature.CurrentVersion, StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(bodySha256))
         {
             return false;
         }
+
+        var payload = FederationContextSignature.BuildCanonicalV2(
+            tenant, userSid, timestampStr, nonce, subgraph, roles, method, path, bodySha256.ToLowerInvariant());
 
         var expectedSignature = FederationContextSignature.Sign(payload, signingKey);
         return CryptographicOperations.FixedTimeEquals(

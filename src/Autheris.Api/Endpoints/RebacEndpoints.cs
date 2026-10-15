@@ -4,10 +4,11 @@ using System;
 using System.Linq;
 using System.Collections.Generic;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Audit;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -26,7 +27,7 @@ public static class RebacEndpoints
 {
     /// <summary>Review E-10: relationship changes decide access and belong in the audit hash chain.</summary>
     private static async Task AuditTupleChangeAsync(
-        IAuditLogRepository auditLog, HttpContext http, TenantId callerTenant, string eventType, string decision, RebacTuple tuple)
+        IAuditWriter auditWriter, HttpContext http, TenantId callerTenant, string eventType, string decision, RebacTuple tuple)
     {
         TenantId tenant;
         try
@@ -38,7 +39,7 @@ public static class RebacEndpoints
             tenant = callerTenant;
         }
 
-        await auditLog.RecordAuditEventAsync(new AuditLogEntry
+        await auditWriter.RecordAsync(new AuditLogEntry
         {
             TenantId = tenant,
             EventType = eventType,
@@ -47,11 +48,11 @@ public static class RebacEndpoints
             Decision = decision,
             TraceId = http.TraceIdentifier,
             DetailsJson = JsonSerializer.Serialize(new { tuple.User, tuple.Relation, tuple.Object, tenant = tuple.TenantId })
-        }, http.RequestAborted).ConfigureAwait(false);
+        }, CancellationToken.None).ConfigureAwait(false);   // post-commit: a client disconnect must not drop the record
     }
 
     private static async Task AuditInvalidationFailureAsync(
-        IAuditLogRepository auditLog, HttpContext http, TenantId callerTenant, string tenantId, Exception ex)
+        IAuditWriter auditWriter, HttpContext http, TenantId callerTenant, string tenantId, Exception ex)
     {
         TenantId tenant;
         try
@@ -63,16 +64,118 @@ public static class RebacEndpoints
             tenant = callerTenant;
         }
 
-        await auditLog.RecordAuditEventAsync(new AuditLogEntry
+        await auditWriter.RecordAsync(new AuditLogEntry
         {
             TenantId = tenant,
-            EventType = "REBAC_INVALIDATION_FAILED",
+            EventType = AuditEventTypes.RebacInvalidationFailed,
             ActorSid = http.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
             TargetTable = string.Empty,
             Decision = "DENY",
             TraceId = http.TraceIdentifier,
             DetailsJson = JsonSerializer.Serialize(new { error = ex.Message, tenant = tenantId })
-        }, http.RequestAborted).ConfigureAwait(false);
+        }, CancellationToken.None).ConfigureAwait(false);   // post-commit: a client disconnect must not drop the record
+    }
+
+    /// <summary>Adds tuples. The audit is fail-closed (an unavailable store surfaces as 503 through the exception handler) and non-cancelable.</summary>
+    internal static async Task<IResult> AddTuplesAsync(
+        List<RebacTuple> tuples, HttpRequest request, IRebacStore store, IRebacEvaluator evaluator, IAuditWriter auditWriter)
+    {
+        var secContext = EndpointSecurity.GetSecurityContext(request.HttpContext);
+        if (!secContext.HasAnyRole(GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        // POL-7: Reject empty tuple fields (User, Relation, Object, TenantId, Namespace)
+        foreach (var t in tuples)
+        {
+            if (t == null ||
+                string.IsNullOrWhiteSpace(t.User) ||
+                string.IsNullOrWhiteSpace(t.Relation) ||
+                string.IsNullOrWhiteSpace(t.Object) ||
+                string.IsNullOrWhiteSpace(t.TenantId) ||
+                (t.Object.Contains(':') && (string.IsNullOrWhiteSpace(t.Object.Split(':')[0]) || string.IsNullOrWhiteSpace(t.Object.Split(':')[1]))))
+            {
+                return Results.BadRequest(new { error = "ReBAC tuple fields (User, Relation, Object, TenantId) must not be empty." });
+            }
+        }
+
+        if (!secContext.IsClusterAdmin)
+        {
+            if (secContext.TenantId == TenantId.LegacySingleTenant || string.IsNullOrWhiteSpace(secContext.TenantId.Value))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            foreach (var t in tuples)
+            {
+                if (!string.Equals(secContext.TenantId.Value, t.TenantId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+            }
+        }
+
+        foreach (var t in tuples)
+        {
+            await store.AddTupleAsync(t, request.HttpContext.RequestAborted).ConfigureAwait(false);
+            try
+            {
+                await evaluator.InvalidateTenantCacheAsync(t.TenantId, request.HttpContext.RequestAborted).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                await AuditInvalidationFailureAsync(auditWriter, request.HttpContext, secContext.TenantId, t.TenantId, ex).ConfigureAwait(false);
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
+            await AuditTupleChangeAsync(auditWriter, request.HttpContext, secContext.TenantId, AuditEventTypes.RebacTupleAdded, "ALLOW", t).ConfigureAwait(false);
+        }
+
+        return Results.Ok(new { status = "Tuples added", count = tuples.Count });
+    }
+
+    internal static async Task<IResult> RemoveTupleAsync(
+        RebacTuple tuple, HttpRequest request, IRebacStore store, IRebacEvaluator evaluator, IAuditWriter auditWriter)
+    {
+        var secContext = EndpointSecurity.GetSecurityContext(request.HttpContext);
+        if (!secContext.HasAnyRole(GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        // POL-7: Reject empty tuple fields (User, Relation, Object, TenantId, Namespace)
+        if (tuple == null ||
+            string.IsNullOrWhiteSpace(tuple.User) ||
+            string.IsNullOrWhiteSpace(tuple.Relation) ||
+            string.IsNullOrWhiteSpace(tuple.Object) ||
+            string.IsNullOrWhiteSpace(tuple.TenantId) ||
+            (tuple.Object.Contains(':') && (string.IsNullOrWhiteSpace(tuple.Object.Split(':')[0]) || string.IsNullOrWhiteSpace(tuple.Object.Split(':')[1]))))
+        {
+            return Results.BadRequest(new { error = "ReBAC tuple fields (User, Relation, Object, TenantId) must not be empty." });
+        }
+
+        if (!secContext.IsClusterAdmin)
+        {
+            if (secContext.TenantId == TenantId.LegacySingleTenant || string.IsNullOrWhiteSpace(secContext.TenantId.Value) ||
+                !string.Equals(secContext.TenantId.Value, tuple.TenantId, StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+        }
+
+        var removed = await store.DeleteTupleAsync(tuple, request.HttpContext.RequestAborted).ConfigureAwait(false);
+        try
+        {
+            await evaluator.InvalidateTenantCacheAsync(tuple.TenantId, request.HttpContext.RequestAborted).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await AuditInvalidationFailureAsync(auditWriter, request.HttpContext, secContext.TenantId, tuple.TenantId, ex).ConfigureAwait(false);
+            return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+        }
+        await AuditTupleChangeAsync(auditWriter, request.HttpContext, secContext.TenantId, AuditEventTypes.RebacTupleRemoved, removed ? "REVOKED" : "NOOP", tuple).ConfigureAwait(false);
+
+        return Results.Ok(new { removed });
     }
 
     public static IEndpointRouteBuilder MapRebacEndpoints(this IEndpointRouteBuilder app)
@@ -82,115 +185,20 @@ public static class RebacEndpoints
             .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         // POST /api/v1/rebac/tuples - Add relationship tuples
-        group.MapPost("/tuples", async (
+        group.MapPost("/tuples", (
             List<RebacTuple> tuples,
             HttpRequest request,
             IRebacStore store,
             IRebacEvaluator evaluator,
-            IAuditLogRepository auditLog) =>
-        {
-            var secContext = EndpointSecurity.GetSecurityContext(request.HttpContext);
-            if (!secContext.HasAnyRole(GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin))
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            // POL-7: Reject empty tuple fields (User, Relation, Object, TenantId, Namespace)
-            foreach (var t in tuples)
-            {
-                if (t == null ||
-                    string.IsNullOrWhiteSpace(t.User) ||
-                    string.IsNullOrWhiteSpace(t.Relation) ||
-                    string.IsNullOrWhiteSpace(t.Object) ||
-                    string.IsNullOrWhiteSpace(t.TenantId) ||
-                    (t.Object.Contains(':') && (string.IsNullOrWhiteSpace(t.Object.Split(':')[0]) || string.IsNullOrWhiteSpace(t.Object.Split(':')[1]))))
-                {
-                    return Results.BadRequest(new { error = "ReBAC tuple fields (User, Relation, Object, TenantId) must not be empty." });
-                }
-            }
-
-            if (!secContext.IsClusterAdmin)
-            {
-                if (secContext.TenantId == TenantId.LegacySingleTenant || string.IsNullOrWhiteSpace(secContext.TenantId.Value))
-                {
-                    return Results.StatusCode(StatusCodes.Status403Forbidden);
-                }
-
-                foreach (var t in tuples)
-                {
-                    if (!string.Equals(secContext.TenantId.Value, t.TenantId, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return Results.StatusCode(StatusCodes.Status403Forbidden);
-                    }
-                }
-            }
-
-            foreach (var t in tuples)
-            {
-                await store.AddTupleAsync(t, request.HttpContext.RequestAborted).ConfigureAwait(false);
-                try
-                {
-                    await evaluator.InvalidateTenantCacheAsync(t.TenantId, request.HttpContext.RequestAborted).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    await AuditInvalidationFailureAsync(auditLog, request.HttpContext, secContext.TenantId, t.TenantId, ex).ConfigureAwait(false);
-                    return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-                }
-                await AuditTupleChangeAsync(auditLog, request.HttpContext, secContext.TenantId, "REBAC_TUPLE_ADDED", "ALLOW", t).ConfigureAwait(false);
-            }
-
-            return Results.Ok(new { status = "Tuples added", count = tuples.Count });
-        });
+            IAuditWriter auditWriter) => AddTuplesAsync(tuples, request, store, evaluator, auditWriter));
 
         // DELETE /api/v1/rebac/tuples - Remove relationship tuple
-        group.MapDelete("/tuples", async (
+        group.MapDelete("/tuples", (
             [FromBody] RebacTuple tuple,
             HttpRequest request,
             IRebacStore store,
             IRebacEvaluator evaluator,
-            IAuditLogRepository auditLog) =>
-        {
-            var secContext = EndpointSecurity.GetSecurityContext(request.HttpContext);
-            if (!secContext.HasAnyRole(GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin))
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            // POL-7: Reject empty tuple fields (User, Relation, Object, TenantId, Namespace)
-            if (tuple == null ||
-                string.IsNullOrWhiteSpace(tuple.User) ||
-                string.IsNullOrWhiteSpace(tuple.Relation) ||
-                string.IsNullOrWhiteSpace(tuple.Object) ||
-                string.IsNullOrWhiteSpace(tuple.TenantId) ||
-                (tuple.Object.Contains(':') && (string.IsNullOrWhiteSpace(tuple.Object.Split(':')[0]) || string.IsNullOrWhiteSpace(tuple.Object.Split(':')[1]))))
-            {
-                return Results.BadRequest(new { error = "ReBAC tuple fields (User, Relation, Object, TenantId) must not be empty." });
-            }
-
-            if (!secContext.IsClusterAdmin)
-            {
-                if (secContext.TenantId == TenantId.LegacySingleTenant || string.IsNullOrWhiteSpace(secContext.TenantId.Value) ||
-                    !string.Equals(secContext.TenantId.Value, tuple.TenantId, StringComparison.OrdinalIgnoreCase))
-                {
-                    return Results.StatusCode(StatusCodes.Status403Forbidden);
-                }
-            }
-
-            var removed = await store.DeleteTupleAsync(tuple, request.HttpContext.RequestAborted).ConfigureAwait(false);
-            try
-            {
-                await evaluator.InvalidateTenantCacheAsync(tuple.TenantId, request.HttpContext.RequestAborted).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                await AuditInvalidationFailureAsync(auditLog, request.HttpContext, secContext.TenantId, tuple.TenantId, ex).ConfigureAwait(false);
-                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-            }
-            await AuditTupleChangeAsync(auditLog, request.HttpContext, secContext.TenantId, "REBAC_TUPLE_REMOVED", removed ? "REVOKED" : "NOOP", tuple).ConfigureAwait(false);
-
-            return Results.Ok(new { removed });
-        });
+            IAuditWriter auditWriter) => RemoveTupleAsync(tuple, request, store, evaluator, auditWriter));
 
         // GET /api/v1/rebac/tuples - Query tuples (restricted to governance admins)
         group.MapGet("/tuples", async (

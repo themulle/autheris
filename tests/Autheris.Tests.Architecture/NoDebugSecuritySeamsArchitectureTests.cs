@@ -57,7 +57,7 @@ public sealed class NoDebugSecuritySeamsArchitectureTests
                      typeof(TrinoSqlEngine.FastSqlEngine).Assembly
                  })
         {
-            using var module = ModuleDefinition.ReadModule(assembly.Location);
+            var module = CecilModuleCache.For(assembly);
             foreach (var type in module.GetTypes())
             {
                 foreach (var method in type.Methods.Where(m => m.HasBody))

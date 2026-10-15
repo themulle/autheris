@@ -1,70 +1,71 @@
 namespace Autheris.Application.Webhooks;
 
 using System;
-using System.IO;
-using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Security;
 using Autheris.Domain.Events;
+using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Dispatches domain events as signed CloudEvents v1.0 webhooks with HMAC-SHA256 signature
-/// and exponential backoff retry.
+/// Facade of the webhook pipeline (WP-ARC-A-02): matches an event against the configured subscriptions, builds the signed-at-delivery
+/// CloudEvent body (sanitized) and durably enqueues one outbox row per matching subscription. Delivery, retries and dead letters are
+/// handled by <see cref="WebhookDeliveryHostedService"/>, so <see cref="DispatchEventAsync"/> completes after the enqueue, not after any HTTP call.
 /// </summary>
 public sealed class WebhookDispatcherService : IWebhookDispatcherService
 {
+    private const string EventSource = "https://autheris.gateway/events";
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = false
     };
 
-    private const int MaxBackoffMilliseconds = 5000;
-
-    private readonly HttpClient _httpClient;
+    private readonly IWebhookOutbox _outbox;
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<WebhookDispatcherService> _logger;
     private readonly IHostEnvironment? _environment;
+    private readonly TimeProvider _timeProvider;
 
     public WebhookDispatcherService(
-        HttpClient httpClient,
+        IWebhookOutbox outbox,
         IOptions<GatewayOptions> options,
         ILogger<WebhookDispatcherService> logger,
-        IHostEnvironment? environment = null)
+        IHostEnvironment? environment = null,
+        TimeProvider? timeProvider = null)
     {
-        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _outbox = outbox ?? throw new ArgumentNullException(nameof(outbox));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _environment = environment;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task DispatchEventAsync(IGatewayEvent @event, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(@event);
 
-        var webhooksConfig = _options.Value.Webhooks;
-        if (!webhooksConfig.Enabled || webhooksConfig.Subscriptions.Count == 0)
+        var webhooks = _options.Value.Webhooks;
+        if (!webhooks.Enabled || webhooks.Subscriptions.Count == 0)
         {
             return;
         }
 
-        var matchingSubscriptions = webhooksConfig.Subscriptions
-            .FindAll(s => s.MatchesEvent(@event.EventType, @event.TenantId));
-
-        if (matchingSubscriptions.Count == 0)
+        var matching = webhooks.Subscriptions.FindAll(s => s.MatchesEvent(@event.EventType, @event.TenantId));
+        if (matching.Count == 0)
         {
             return;
         }
 
         var cloudEvent = new GatewayCloudEvent(
             Id: @event.EventId,
-            Source: "https://autheris.gateway/events",
+            Source: EventSource,
             Type: @event.EventType,
             Time: @event.Timestamp,
             Subject: @event.CorrelationId,
@@ -73,126 +74,70 @@ public sealed class WebhookDispatcherService : IWebhookDispatcherService
             TenantId: @event.TenantId,
             CorrelationId: @event.CorrelationId);
 
-        var jsonPayload = JsonSerializer.Serialize(cloudEvent, JsonOptions);
-
-        var dispatchTasks = matchingSubscriptions.ConvertAll(sub =>
-            DeliverWebhookWithRetryAsync(sub, @event, jsonPayload, webhooksConfig.DefaultTimeoutSeconds, ct));
-
-        await Task.WhenAll(dispatchTasks).ConfigureAwait(false);
-    }
-
-    private async Task DeliverWebhookWithRetryAsync(
-        WebhookSubscription subscription,
-        IGatewayEvent @event,
-        string jsonPayload,
-        int defaultTimeoutSeconds,
-        CancellationToken ct)
-    {
-        var timestamp = WebhookSignature.FormatTimestamp(DateTimeOffset.UtcNow);
-        var maxRetries = subscription.EffectiveMaxRetries;
-
-        if (!Uri.TryCreate(subscription.TargetUrl, UriKind.Absolute, out var targetUri))
-        {
-            _logger.LogWarning("Webhook subscription {SubscriptionId} target URL is malformed. Dropping dispatch.", subscription.Id);
-            return;
-        }
-
-        var isDev = _environment?.IsDevelopment() ?? false;
-        var redactedUrl = UrlRedactor.Redact(targetUri);
-
-        // SR-L-13: fail closed, never deliver unsigned when a secret is required (default: outside Development).
-        var hasSecret = !string.IsNullOrEmpty(subscription.Secret);
-        if (!hasSecret && (_options.Value.Webhooks.RequireSecret ?? !isDev))
+        var payload = JsonSerializer.Serialize(cloudEvent, JsonOptions);
+        if (Encoding.UTF8.GetByteCount(payload) > webhooks.EffectiveMaxPayloadBytes)
         {
             _logger.LogWarning(
-                "Webhook subscription {SubscriptionId} has no secret; delivery to {TargetUrl} dropped (Gateway:Webhooks:RequireSecret).",
-                subscription.Id, redactedUrl);
+                "Webhook payload of event {EventType} ({EventId}) exceeds {MaxBytes} bytes ({ErrorCode}); not enqueued.",
+                @event.EventType, @event.EventId, webhooks.EffectiveMaxPayloadBytes, WebhookDeliveryErrorCodes.PayloadTooLarge);
             return;
         }
 
-        var signature = hasSecret ? WebhookSignature.SignHeaderValue(subscription.Secret, timestamp, jsonPayload) : null;
-        try
+        var requireSecret = webhooks.RequireSecret ?? !(_environment?.IsDevelopment() ?? false);
+        var now = _timeProvider.GetUtcNow();
+        foreach (var subscription in matching)
         {
-            await EgressUrlPolicy.ValidateResolvedAsync(targetUri, isDev: isDev, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning("SSRF violation: Webhook destination {TargetUrl} blocked by egress policy ({ErrorType}).", redactedUrl, ex.GetType().Name);
-            return;
-        }
+            if (string.IsNullOrWhiteSpace(subscription.Id))
+            {
+                _logger.LogError("A configured webhook subscription has no Id; delivery skipped (validated at startup).");
+                continue;
+            }
 
-        for (int attempt = 1; attempt <= maxRetries; attempt++)
-        {
+            // SR-L-13: fail closed, never queue a delivery that could only go out unsigned.
+            if (requireSecret && string.IsNullOrEmpty(subscription.Secret))
+            {
+                _logger.LogWarning(
+                    "Webhook subscription {SubscriptionId} has no secret; delivery to {TargetUrl} dropped (Gateway:Webhooks:RequireSecret).",
+                    subscription.Id, UrlRedactor.Redact(subscription.TargetUrl));
+                continue;
+            }
+
+            var message = new WebhookOutboxMessage(
+                Id: Guid.CreateVersion7().ToString("N"),
+                Source: WebhookSubscriptionSource.Configured,
+                SubscriptionId: subscription.Id,
+                OwnerTenantId: string.IsNullOrWhiteSpace(subscription.TenantId) ? null : subscription.TenantId,
+                EventTenantId: @event.TenantId,
+                EventId: @event.EventId,
+                EventType: @event.EventType,
+                EventSource: EventSource,
+                EventTime: @event.Timestamp,
+                PayloadJson: payload,
+                Attempt: 0,
+                MaxAttempts: subscription.EffectiveMaxAttempts,
+                State: WebhookOutboxState.Pending,
+                NextAttemptAt: now,
+                LeaseUntil: null,
+                LeaseOwner: null,
+                LastStatusCode: null,
+                LastErrorCode: null,
+                CreatedAt: now);
+
             try
             {
-                using var request = new HttpRequestMessage(HttpMethod.Post, subscription.TargetUrl);
-                request.Content = new StringContent(jsonPayload, Encoding.UTF8, "application/cloudevents+json");
-
-                // CloudEvents v1.0 standard headers
-                request.Headers.TryAddWithoutValidation("ce-specversion", "1.0");
-                request.Headers.TryAddWithoutValidation("ce-id", @event.EventId);
-                request.Headers.TryAddWithoutValidation("ce-source", "https://autheris.gateway/events");
-                request.Headers.TryAddWithoutValidation("ce-type", @event.EventType);
-                request.Headers.TryAddWithoutValidation("ce-time", @event.Timestamp.ToString("O"));
-
-                // Autheris HMAC signature & replay protection headers
-                if (signature is not null)
-                {
-                    request.Headers.TryAddWithoutValidation(WebhookSignature.SignatureHeader, signature);
-                }
-
-                request.Headers.TryAddWithoutValidation(WebhookSignature.TimestampHeader, timestamp);
-                request.Headers.TryAddWithoutValidation("X-Autheris-Event-Type", @event.EventType);
-                request.Headers.TryAddWithoutValidation("X-Autheris-Event-Id", @event.EventId);
-
-                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                timeoutCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, defaultTimeoutSeconds)));
-
-                var response = await _httpClient.SendAsync(request, timeoutCts.Token).ConfigureAwait(false);
-                if (response.IsSuccessStatusCode)
-                {
-                    _logger.LogDebug(
-                        "Successfully dispatched webhook for {EventType} ({EventId}) to {TargetUrl} [Attempt {Attempt}]",
-                        @event.EventType, @event.EventId, redactedUrl, attempt);
-                    return;
-                }
-
-                _logger.LogWarning(
-                    "Webhook endpoint {TargetUrl} responded with HTTP {StatusCode} on attempt {Attempt}/{MaxRetries}",
-                    redactedUrl, (int)response.StatusCode, attempt, maxRetries);
+                await _outbox.EnqueueAsync(message, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                _logger.LogInformation("Webhook dispatch cancelled for {TargetUrl}", redactedUrl);
-                return;
+                throw;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(
-                    "Webhook delivery to {TargetUrl} failed on attempt {Attempt}/{MaxRetries} ({ErrorType})",
-                    redactedUrl, attempt, maxRetries, ex.GetType().Name);
-            }
-
-            if (attempt < maxRetries)
-            {
-                // Exponential backoff
-                var delayMs = (int)Math.Min(Math.Pow(2, attempt) * 100, MaxBackoffMilliseconds);
-                await Task.Delay(delayMs, ct).ConfigureAwait(false);
+                // One failing enqueue must not block the other subscriptions; storage messages may carry connection details.
+                _logger.LogError(
+                    "Webhook enqueue for subscription {SubscriptionId} and event {EventId} failed ({ErrorType}).",
+                    subscription.Id, @event.EventId, ex.GetType().Name);
             }
         }
-
-        _logger.LogError(
-            "Exhausted {MaxRetries} attempts dispatching webhook for {EventType} ({EventId}) to {TargetUrl}",
-            maxRetries, @event.EventType, @event.EventId, redactedUrl);
-    }
-
-    public static string ComputeHmacSha256(string secret, string payload)
-    {
-        if (string.IsNullOrEmpty(secret))
-        {
-            return string.Empty;
-        }
-
-        return WebhookSignature.ComputeHex(secret, payload);
     }
 }

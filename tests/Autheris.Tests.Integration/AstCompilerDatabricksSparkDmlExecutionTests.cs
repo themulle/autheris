@@ -61,6 +61,7 @@ public sealed class SparkDeltaProxyFixture : SparkProxyFixture
 /// Databricks DML on Delta (the Spark proxy): the shared <see cref="AstCompilerDmlContract"/>. Databricks stays Experimental until
 /// the first green G9 run (CR-ADG-03); the proxy proves syntax, named markers and ANSI semantics, not Unity Catalog or Photon (R-7).
 /// </summary>
+[Trait("Category", "Spark")]
 public sealed class AstCompilerDatabricksSparkDmlExecutionTests : AstCompilerDmlContract, IClassFixture<SparkDeltaProxyFixture>, IAsyncLifetime
 {
     private const string CatalogName = "spark_catalog";

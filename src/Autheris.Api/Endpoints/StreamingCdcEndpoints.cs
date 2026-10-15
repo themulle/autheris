@@ -1,12 +1,17 @@
 namespace Autheris.Api.Endpoints;
 
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints.Support;
+using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Events.Interfaces;
+using Autheris.Application.Events.Services;
+using Autheris.Application.Webhooks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Audit;
@@ -18,6 +23,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -93,8 +99,8 @@ public static class StreamingCdcEndpoints
           .WithRequestBodyLimit(10 * 1024 * 1024) // SEC M-01: explicit large-body exception to the global Kestrel limit
           .WithAudit(AuditLevel.Full, AuditEventTypes.StreamSubscribe);
 
-        // F-EVT-01: CloudEvents Outbound Webhook Subscriptions (interim guard WP-ARC-A-01: 501 unless
-        // Gateway:CdcWebhooks:Enabled is true; the subscription store is not registered while disabled).
+        // F-EVT-01: CloudEvents Outbound Webhook Subscriptions (answer 501 when Gateway:CdcWebhooks:Enabled is false;
+        // the subscription store and the delivery service are not registered while disabled).
         app.MapGet("/api/v1/cdc/subscriptions", (Delegate)ListSubscriptionsAsync)
             .RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
@@ -140,7 +146,7 @@ public static class StreamingCdcEndpoints
 
         if (!string.IsNullOrWhiteSpace(cdcEvent.TenantId))
         {
-            return string.Equals(cdcEvent.TenantId, callerTenant, StringComparison.OrdinalIgnoreCase)
+            return string.Equals(cdcEvent.TenantId, callerTenant, StringComparison.Ordinal)
                 ? null
                 : Results.StatusCode(StatusCodes.Status403Forbidden);
         }
@@ -163,15 +169,20 @@ public static class StreamingCdcEndpoints
     /// <summary>Returns a 501 problem result while the CDC webhook feature flag is off; otherwise <c>null</c>.</summary>
     internal static IResult? GuardCdcWebhooksDisabled(HttpContext context)
     {
-        var options = context.RequestServices.GetService<IOptions<CdcWebhooksOptions>>()?.Value;
-        if (options is { Enabled: true })
+        // The registration-time flag is the single source of truth (it decides whether the store and delivery service exist).
+        // Changing the configuration later has no effect until a restart. Without a registered flag (unit hosts) the options decide.
+        var flag = context.RequestServices.GetService<CdcWebhooksFeatureFlag>();
+        var enabled = flag is not null
+            ? flag.Enabled
+            : context.RequestServices.GetService<IOptions<CdcWebhooksOptions>>()?.Value is { Enabled: true };
+        if (enabled)
         {
             return null;
         }
 
         return Results.Problem(
             title: "CDC webhook subscriptions are not enabled",
-            detail: "Outbound CDC webhook delivery is not available. Set Gateway:CdcWebhooks:Enabled to true once delivery is supported.",
+            detail: "Outbound CDC webhook delivery is disabled. Set Gateway:CdcWebhooks:Enabled to true to enable it.",
             statusCode: StatusCodes.Status501NotImplemented);
     }
 
@@ -196,10 +207,12 @@ public static class StreamingCdcEndpoints
 
         var store = context.RequestServices.GetRequiredService<ICloudEventSubscriptionStore>();
         var subs = await store.ListSubscriptionsAsync(ResolveTenant(context), context.RequestAborted);
-        // SEC M-5: Never return HMAC secrets in GET responses
-        var safeSubs = subs.Select(s => s with { HmacSecret = string.IsNullOrEmpty(s.HmacSecret) ? string.Empty : "[REDACTED]" });
-        return Results.Ok(safeSubs);
+        // SEC M-5: never return HMAC secrets or the creator's group list in GET responses.
+        return Results.Ok(subs.Select(CdcSubscriptionView.From));
     }
+
+    private static readonly System.Text.RegularExpressions.Regex TableFilterPattern =
+        new(@"^(\*|[\w$#\-]+(\.[\w$#\-]+){0,2})$", System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.NonBacktracking);
 
     internal static async Task<IResult> CreateSubscriptionAsync(HttpContext context, CloudEventWebhookSubscription subscription)
     {
@@ -214,17 +227,30 @@ public static class StreamingCdcEndpoints
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
 
-        var store = context.RequestServices.GetRequiredService<ICloudEventSubscriptionStore>();
+        var services = context.RequestServices;
+        var store = services.GetRequiredService<ICloudEventSubscriptionStore>();
+        var options = services.GetRequiredService<IOptions<CdcWebhooksOptions>>().Value;
         var tenantId = ResolveTenant(context);
+        // Fail closed: without a host environment the deployment is treated as production.
+        var isDev = services.GetService<IHostEnvironment>()?.IsDevelopment() == true;
 
-        if (!Uri.TryCreate(subscription.TargetUrl, UriKind.Absolute, out var targetUri))
+        if (subscription is null || string.IsNullOrWhiteSpace(subscription.TargetUrl) || !Uri.TryCreate(subscription.TargetUrl, UriKind.Absolute, out var targetUri))
         {
             return Results.BadRequest(new { error = "Invalid absolute target URL" });
         }
 
+        if (subscription.TargetUrl.Length > 2048
+            || string.IsNullOrEmpty(subscription.FilterTable)
+            || subscription.FilterTable.Length > 512
+            || !TableFilterPattern.IsMatch(subscription.FilterTable)
+            || (subscription.FilterOperations ?? []).Any(o => !Enum.IsDefined(o)))
+        {
+            return SafeErrorResults.BadRequest("CDC_FILTER_INVALID", "The table or operation filter is invalid.", context);
+        }
+
         try
         {
-            await Autheris.Application.Security.EgressUrlPolicy.ValidateResolvedAsync(targetUri, isDev: false, ct: context.RequestAborted);
+            await Autheris.Application.Security.EgressUrlPolicy.ValidateResolvedAsync(targetUri, isDev: isDev, ct: context.RequestAborted);
         }
         catch (Exception ex)
         {
@@ -232,12 +258,99 @@ public static class StreamingCdcEndpoints
             return SafeErrorResults.BadRequest("CDC_TARGET_URL_NOT_ALLOWED", "The target URL is not allowed.", context);
         }
 
+        if (!CdcCustomHeaders.WithinBounds(subscription.CustomHeaders)
+            || (subscription.CustomHeaders is { } headers
+            && headers.Any(h => Autheris.Application.Webhooks.WebhookDeliveryClient.IsForbiddenCustomHeader(h.Key)
+                                || h.Value is null || h.Value.Contains('\r') || h.Value.Contains('\n') || h.Key.Contains('\r') || h.Key.Contains('\n'))))
+        {
+            return SafeErrorResults.BadRequest("CDC_CUSTOM_HEADER_NOT_ALLOWED", "A custom header is not allowed.", context);
+        }
+
         // SEC M-5: Server-side ID generation; client-chosen ID is ignored to prevent overwrite attacks
         var serverId = Guid.NewGuid().ToString("N");
-        var securedSub = subscription with { Id = serverId, TenantId = tenantId };
+
+        // Secret: required (32..512 chars) outside Development, stored only KEK-protected; never persist plaintext (fail closed).
+        // Custom header values (tokens) are protected the same way.
+        var secret = subscription.HmacSecret ?? string.Empty;
+        var protectedSecret = string.Empty;
+        var hasHeaders = subscription.CustomHeaders is { Count: > 0 };
+        if (secret.Length == 0 && !isDev)
+        {
+            return SafeErrorResults.BadRequest("CDC_SECRET_REQUIRED", "A signing secret of 32 to 512 characters is required.", context);
+        }
+
+        if (secret.Length > 512 || (secret.Length > 0 && !isDev && secret.Length < 32))
+        {
+            return SafeErrorResults.BadRequest("CDC_SECRET_REQUIRED", "A signing secret of 32 to 512 characters is required.", context);
+        }
+
+        IReadOnlyDictionary<string, string>? protectedHeaders = null;
+        if (secret.Length > 0 || hasHeaders)
+        {
+            var protector = services.GetService<IWebhookSecretProtector>();
+            if (protector is null || !protector.IsAvailable)
+            {
+                return SafeErrorResults.Problem(
+                    StatusCodes.Status503ServiceUnavailable, "CDC_SECRET_STORE_UNAVAILABLE", "The secret store is not available.", context);
+            }
+
+            try
+            {
+                if (secret.Length > 0)
+                {
+                    protectedSecret = protector.Protect(tenantId, serverId, secret);
+                }
+
+                if (hasHeaders)
+                {
+                    protectedHeaders = new Dictionary<string, string>
+                    {
+                        [CdcCustomHeaders.ProtectedKey] = protector.Protect(tenantId, serverId, System.Text.Json.JsonSerializer.Serialize(subscription.CustomHeaders))
+                    };
+                }
+            }
+            catch (WebhookSecretUnavailableException ex)
+            {
+                SafeErrorResults.LogFailure(context, ex, "CDC_SECRET_STORE_UNAVAILABLE");
+                return SafeErrorResults.Problem(
+                    StatusCodes.Status503ServiceUnavailable, "CDC_SECRET_STORE_UNAVAILABLE", "The secret store is not available.", context);
+            }
+        }
+
+        // Creator snapshot: authorisation of every delivered event is evaluated as this principal. Never taken from the request body.
+        var capture = CdcSubscriptionPrincipal.Capture(context.User, options);
+        if (capture.Error == CdcSnapshotCaptureError.MissingSid)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        if (!capture.IsSuccess)
+        {
+            return SafeErrorResults.BadRequest("CDC_SNAPSHOT_TOO_LARGE", "The creator principal has too many group memberships.", context);
+        }
+
+        var time = services.GetService<TimeProvider>() ?? TimeProvider.System;
+        var securedSub = subscription with
+        {
+            Id = serverId,
+            TenantId = tenantId,
+            IsEnabled = true,
+            HmacSecret = protectedSecret,
+            CustomHeaders = protectedHeaders,
+            FilterOperations = subscription.FilterOperations ?? [],
+            CreatedBySid = capture.Sid,
+            CreatedByGroupSids = capture.GroupSids,
+            CreatedByRoles = capture.Roles,
+            CreatedAt = time.GetUtcNow()
+        };
         try
         {
-            await store.RegisterSubscriptionAsync(securedSub, context.RequestAborted);
+            await store.RegisterSubscriptionAsync(securedSub, options.MaxSubscriptionsPerTenant, context.RequestAborted);
+        }
+        catch (CloudEventSubscriptionStoreBusyException ex)
+        {
+            SafeErrorResults.LogFailure(context, ex, "CDC_STORE_BUSY");
+            return SafeErrorResults.Problem(StatusCodes.Status503ServiceUnavailable, "CDC_STORE_BUSY", "The subscription store is busy; retry.", context);
         }
         catch (InvalidOperationException ex)
         {
@@ -245,8 +358,7 @@ public static class StreamingCdcEndpoints
             return SafeErrorResults.TooManyRequests("CDC_SUBSCRIPTION_QUOTA_EXCEEDED", "The subscription limit has been reached.", context);
         }
 
-        var responseSub = securedSub with { HmacSecret = string.IsNullOrEmpty(securedSub.HmacSecret) ? string.Empty : "[REDACTED]" };
-        return Results.Created($"/api/v1/cdc/subscriptions/{securedSub.Id}", responseSub);
+        return Results.Created($"/api/v1/cdc/subscriptions/{securedSub.Id}", CdcSubscriptionView.From(securedSub));
     }
 
     internal static async Task<IResult> DeleteSubscriptionAsync(string id, HttpContext context)
@@ -283,4 +395,24 @@ public static class StreamingCdcEndpoints
            user.IsInRole("CdcIngestionService") ||
            user.IsInRole("PlatformAdmin") ||
            GatewayPolicies.HasAnyRole(user, [GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin]);
+}
+
+/// <summary>Redacted subscription representation: no secret (not even the ciphertext) and no creator group list.</summary>
+internal sealed record CdcSubscriptionView(
+    string Id,
+    string TenantId,
+    string TargetUrl,
+    string FilterTable,
+    IReadOnlyList<CdcOperation> FilterOperations,
+    string HmacSecret,
+    bool IsEnabled,
+    bool HasCustomHeaders,
+    string? CreatedBySid,
+    int CreatedByRoleCount,
+    DateTimeOffset? CreatedAt)
+{
+    public static CdcSubscriptionView From(CloudEventWebhookSubscription s) => new(
+        s.Id, s.TenantId, s.TargetUrl, s.FilterTable, s.FilterOperations,
+        string.IsNullOrEmpty(s.HmacSecret) ? string.Empty : "[REDACTED]",
+        s.IsEnabled, s.CustomHeaders is { Count: > 0 }, s.CreatedBySid, s.CreatedByRoles?.Count ?? 0, s.CreatedAt);
 }

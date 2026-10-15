@@ -54,7 +54,7 @@ public class SecurityWave2ExpertTests
 
         await Should.ThrowAsync<ArgumentException>(async () =>
         {
-            await poller.PollTableChangesAsync(table);
+            await poller.PollTableChangesAsync(table, 1);
         });
     }
 
@@ -166,20 +166,29 @@ public class SecurityWave2ExpertTests
         var store = new InMemoryMssqlWatermarkStore();
         var table = new TableIdentifier("finance", "dbo", "invoices");
 
-        var initial = await store.GetWatermarkAsync(table);
-        initial.ShouldBe(0);
+        (await store.GetWatermarkAsync(table)).ShouldBeNull();
 
-        await store.SetWatermarkAsync(table, 100);
-        var v1 = await store.GetWatermarkAsync(table);
-        v1.ShouldBe(100);
+        (await store.TryAdvanceWatermarkAsync(table, 100, 1)).ShouldBeTrue();
+        (await store.GetWatermarkAsync(table)).ShouldBe(100);
 
         // Watermark should not go backwards
-        await store.SetWatermarkAsync(table, 50);
-        var v2 = await store.GetWatermarkAsync(table);
-        v2.ShouldBe(100);
+        (await store.TryAdvanceWatermarkAsync(table, 50, 1)).ShouldBeTrue();
+        (await store.GetWatermarkAsync(table)).ShouldBe(100);
 
-        await store.SetWatermarkAsync(table, 150);
-        var v3 = await store.GetWatermarkAsync(table);
-        v3.ShouldBe(150);
+        (await store.TryAdvanceWatermarkAsync(table, 150, 1)).ShouldBeTrue();
+        (await store.GetWatermarkAsync(table)).ShouldBe(150);
+    }
+
+    [Fact]
+    public async Task WatermarkStore_StaleFencingToken_IsRejected()
+    {
+        var store = new InMemoryMssqlWatermarkStore();
+        var table = new TableIdentifier("finance", "dbo", "invoices");
+        await store.TryAdvanceWatermarkAsync(table, 10, 5);
+
+        (await store.TryAdvanceWatermarkAsync(table, 99, 4)).ShouldBeFalse();
+
+        (await store.GetWatermarkAsync(table)).ShouldBe(10);
+        store.IsDurable.ShouldBeFalse();
     }
 }

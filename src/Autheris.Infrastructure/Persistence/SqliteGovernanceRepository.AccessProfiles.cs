@@ -18,13 +18,13 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(subject);
 
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             var now = DateTimeOffset.UtcNow;
             var profiles = new Dictionary<string, AccessProfile>(StringComparer.OrdinalIgnoreCase);
 
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 SELECT p.profile_id, p.tenant_id, p.name, p.masking_mode, p.target_tables,
                        p.row_filter_predicate, p.justification, p.created_by, p.created_at, p.valid_to,
@@ -71,21 +71,17 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
 
             return [.. profiles.Values];
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
     public async Task<IReadOnlyList<AccessProfile>> GetAllProfilesAsync(TenantId tenantId, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             var profiles = new List<AccessProfile>();
             var profileMap = new Dictionary<string, AccessProfile>(StringComparer.OrdinalIgnoreCase);
 
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"
                     SELECT profile_id, tenant_id, name, masking_mode, target_tables,
@@ -107,7 +103,7 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
 
             if (profileMap.Count > 0)
             {
-                using var assignCmd = _connection.CreateCommand();
+                using var assignCmd = conn.CreateCommand();
                 assignCmd.CommandText = @"
                     SELECT profile_id, subject
                     FROM ACCESS_PROFILE_ASSIGNMENTS
@@ -129,22 +125,18 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
 
             return profiles;
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
     public async Task<AccessProfile?> GetProfileAsync(TenantId tenantId, string profileId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(profileId);
 
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             AccessProfile? profile = null;
 
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"
                     SELECT profile_id, tenant_id, name, masking_mode, target_tables,
@@ -164,7 +156,7 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
 
             if (profile != null)
             {
-                using var assignCmd = _connection.CreateCommand();
+                using var assignCmd = conn.CreateCommand();
                 assignCmd.CommandText = @"
                     SELECT subject
                     FROM ACCESS_PROFILE_ASSIGNMENTS
@@ -186,10 +178,6 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
 
             return profile;
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
     public async Task UpsertProfileAsync(AccessProfile profile, CancellationToken ct = default)
@@ -198,12 +186,12 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(profile.ProfileId);
         ArgumentException.ThrowIfNullOrWhiteSpace(profile.Name);
 
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            using var tx = _connection.BeginTransaction();
+            using var tx = conn.BeginTransaction();
 
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = tx;
                 cmd.CommandText = @"
@@ -241,7 +229,7 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
             }
 
             // Replace assignments
-            using (var delCmd = _connection.CreateCommand())
+            using (var delCmd = conn.CreateCommand())
             {
                 delCmd.Transaction = tx;
                 delCmd.CommandText = @"
@@ -259,7 +247,7 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
                 {
                     if (string.IsNullOrWhiteSpace(subject)) continue;
 
-                    using var insCmd = _connection.CreateCommand();
+                    using var insCmd = conn.CreateCommand();
                     insCmd.Transaction = tx;
                     insCmd.CommandText = @"
                         INSERT INTO ACCESS_PROFILE_ASSIGNMENTS (
@@ -282,22 +270,18 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
 
             tx.Commit();
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
     public async Task<bool> DeleteProfileAsync(TenantId tenantId, string profileId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(profileId);
 
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            using var tx = _connection.BeginTransaction();
+            using var tx = conn.BeginTransaction();
 
-            using var delAssignCmd = _connection.CreateCommand();
+            using var delAssignCmd = conn.CreateCommand();
             delAssignCmd.Transaction = tx;
             delAssignCmd.CommandText = @"
                 DELETE FROM ACCESS_PROFILE_ASSIGNMENTS
@@ -307,7 +291,7 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
             delAssignCmd.Parameters.AddWithValue("@profileId", profileId);
             await delAssignCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 
-            using var delProfileCmd = _connection.CreateCommand();
+            using var delProfileCmd = conn.CreateCommand();
             delProfileCmd.Transaction = tx;
             delProfileCmd.CommandText = @"
                 DELETE FROM ACCESS_PROFILES
@@ -319,10 +303,6 @@ public partial class SqliteGovernanceRepository : IAccessProfileRepository
 
             tx.Commit();
             return rows > 0;
-        }
-        finally
-        {
-            _lock.Release();
         }
     }
 

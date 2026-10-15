@@ -59,8 +59,8 @@ public static class VirtualFilterEndpoints
         group.MapGet("/virtual-filters/sync/status", (HttpContext context, VirtualFilterAdministrationService service, IOptions<GatewayOptions>? options) =>
             ConfigSyncStatusAsync(context, service, options))
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
-        group.MapGet("/effective-filters", (HttpContext context, MandatoryRowFilterResolver resolver, Autheris.Application.Interfaces.ITableMetadataRepository catalog) =>
-            EffectiveFiltersAsync(context, resolver, catalog))
+        group.MapGet("/effective-filters", (HttpContext context, IEffectiveFilterInspector inspector) =>
+            EffectiveFiltersAsync(context, inspector))
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // GitOps Webhook Triggers (GitHub push events)
@@ -221,109 +221,37 @@ public static class VirtualFilterEndpoints
     /// (domain.schema.table) which bindings apply, which columns are missing, what supersedes what, the decision and the
     /// SQL in the table's dialect. Without <c>table</c>: one line per catalog object (<c>page</c>, <c>pageSize</c>).
     /// </summary>
-    internal static async Task<IResult> EffectiveFiltersAsync(
-        HttpContext context,
-        MandatoryRowFilterResolver resolver,
-        Autheris.Application.Interfaces.ITableMetadataRepository catalog)
+    internal static async Task<IResult> EffectiveFiltersAsync(HttpContext context, IEffectiveFilterInspector inspector)
     {
         var security = EndpointSecurity.GetSecurityContext(context);
-        if (!security.HasRole(GatewayRole.FilterAdmin) && !security.HasRole(GatewayRole.GovernanceAdmin) && !security.HasRole(GatewayRole.SecurityAuditor))
+        var q = context.Request.Query;
+        var inspection = await inspector.InspectAsync(
+            security,
+            new EffectiveFilterQuery(q["user"], q["groups"], q["roles"], q["tenant"], q["table"], q["page"], q["pageSize"]),
+            context.RequestAborted).ConfigureAwait(false);
+
+        switch (inspection.Kind)
         {
-            var auditDenied = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
-            await auditDenied.RecordRequiredAsync(new AuditLogEntry
-            {
-                EventType = "VIRTUAL_FILTER_ADMIN_DENIED",
-                TargetTable = "effective-filters",
-                ActorSid = security.UserSid,
-                TenantId = security.TenantId,
-                Decision = "DENY",
-                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { error = "Forbidden: missing required role for effective-filters" }),
-                OccurredAt = DateTimeOffset.UtcNow
-            }, context.RequestAborted).ConfigureAwait(false);
-            return Forbidden();
+            case EffectiveFilterInspectionKind.Forbidden:
+                return Forbidden();
+            case EffectiveFilterInspectionKind.BadRequest:
+                return Results.Json(new { error = inspection.Error }, statusCode: StatusCodes.Status400BadRequest);
+            case EffectiveFilterInspectionKind.NotFound:
+                return Results.Json(new { error = inspection.Error }, statusCode: StatusCodes.Status404NotFound);
+            case EffectiveFilterInspectionKind.SingleTable:
+                return Results.Ok(ExplanationView(inspection.User!, inspection.Table!, inspection.Explanation!));
+            case EffectiveFilterInspectionKind.Page:
+                var objects = inspection.Items.Select(i => (object)new
+                {
+                    table = i.Table,
+                    decision = i.Decision,
+                    applied_filters = i.AppliedFilters,
+                    reason = i.Reason
+                }).ToList();
+                return Results.Ok(new { user = inspection.User, page = inspection.PageNo, page_size = inspection.PageSize, total = inspection.Total, objects });
+            default:
+                throw new System.Diagnostics.UnreachableException();
         }
-
-        var query = context.Request.Query;
-        string? user = query["user"];
-        if (string.IsNullOrWhiteSpace(user))
-        {
-            return Results.Json(new { error = "The query parameter 'user' (SID) is required." }, statusCode: StatusCodes.Status400BadRequest);
-        }
-
-        var tenant = ResolveTenant(security, query["tenant"]);
-        if (tenant == null)
-        {
-            return Forbidden();
-        }
-
-        static HashSet<T> List<T>(string? value, Func<string, T> create) =>
-            (value ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(create).ToHashSet();
-        var groups = List<Sid>(query["groups"], v => new Sid(v));
-        var roles = List<string>(query["roles"], v => v);
-        MandatoryFilterQuery For(TableMetadata table) => new(new Sid(user), groups, roles, tenant.Value, table);
-
-        string? tableName = query["table"];
-        if (!string.IsNullOrWhiteSpace(tableName))
-        {
-            if (!TableIdentifier.TryParse(tableName, out var id))
-            {
-                return Results.Json(new { error = "The query parameter 'table' must be domain.schema.table." }, statusCode: StatusCodes.Status400BadRequest);
-            }
-
-            var table = await catalog.GetTableMetadataAsync(id, context.RequestAborted).ConfigureAwait(false);
-            if (table == null)
-            {
-                return Results.Json(new { error = $"The table '{tableName}' is not in the catalog." }, statusCode: StatusCodes.Status404NotFound);
-            }
-
-            var explanation = await resolver.ExplainAsync(For(table), context.RequestAborted).ConfigureAwait(false);
-
-            var auditTable = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
-            await auditTable.RecordRequiredAsync(new AuditLogEntry
-            {
-                EventType = "VIRTUAL_FILTER_EFFECTIVE_INSPECTED",
-                TargetTable = table.Identifier.ToString(),
-                ActorSid = security.UserSid,
-                TenantId = tenant.Value,
-                Decision = "ALLOW",
-                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { user, table = table.Identifier.ToString() }),
-                OccurredAt = DateTimeOffset.UtcNow
-            }, context.RequestAborted).ConfigureAwait(false);
-
-            return Results.Ok(ExplanationView(user, table, explanation));
-        }
-
-        int page = int.TryParse(query["page"], out var p) && p > 0 ? p : 1;
-        int pageSize = int.TryParse(query["pageSize"], out var ps) ? Math.Clamp(ps, 1, 500) : 100;
-        var tables = (await catalog.GetAllTablesAsync(context.RequestAborted).ConfigureAwait(false))
-            .OrderBy(t => t.Identifier.ToString(), StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        var objects = new List<object>();
-        foreach (var table in tables.Skip((page - 1) * pageSize).Take(pageSize))
-        {
-            var explanation = await resolver.ExplainAsync(For(table), context.RequestAborted).ConfigureAwait(false);
-            objects.Add(new
-            {
-                table = table.Identifier.ToString(),
-                decision = explanation.Decision,
-                applied_filters = explanation.Outcome.AppliedFilters,
-                reason = explanation.Outcome.DenyReason
-            });
-        }
-
-        var auditBatch = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
-        await auditBatch.RecordRequiredAsync(new AuditLogEntry
-        {
-            EventType = "VIRTUAL_FILTER_EFFECTIVE_INSPECTED",
-            TargetTable = "all_tables",
-            ActorSid = security.UserSid,
-            TenantId = tenant.Value,
-            Decision = "ALLOW",
-            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { user, count = objects.Count }),
-            OccurredAt = DateTimeOffset.UtcNow
-        }, context.RequestAborted).ConfigureAwait(false);
-
-        return Results.Ok(new { user, page, page_size = pageSize, total = tables.Count, objects });
     }
 
     private static object ExplanationView(string user, TableMetadata table, MandatoryFilterExplanation explanation) => new

@@ -206,7 +206,7 @@ public class PostgreSqlGovernanceProviderTests
         });
 
         Should.Throw<ArgumentNullException>(() =>
-            new PostgreSqlGovernanceRepository(null!, options));
+            new PostgreSqlGovernanceRepository(null!, options, TestEnvironment(), Substitute.For<IKeyVaultSecretProvider>(), Substitute.For<IAuditChainAnchorStore>(), Substitute.For<ICallerContextProvider>()));
     }
 
     [Fact]
@@ -215,6 +215,13 @@ public class PostgreSqlGovernanceProviderTests
         var epochService = Substitute.For<IEpochValidationService>();
 
         Should.Throw<ArgumentNullException>(() =>
-            new PostgreSqlGovernanceRepository(epochService, null!));
+            new PostgreSqlGovernanceRepository(epochService, null!, TestEnvironment(), Substitute.For<IKeyVaultSecretProvider>(), Substitute.For<IAuditChainAnchorStore>(), Substitute.For<ICallerContextProvider>()));
+    }
+
+    private static IHostEnvironment TestEnvironment()
+    {
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Test");
+        return env;
     }
 }

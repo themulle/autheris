@@ -16,7 +16,7 @@ public partial class PostgreSqlGovernanceRepository
                              JOIN TABLES t ON c.table_id = t.id
                              WHERE c.is_revoked = 0 AND c.tenant_id = @tenantId";
         var result = new List<TableIdentifier>();
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         cmd.Parameters.AddWithValue("@tenantId", tenantId.Value);

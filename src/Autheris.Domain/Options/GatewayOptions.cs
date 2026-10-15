@@ -635,7 +635,11 @@ public sealed class AdfsAuthOptions
 public sealed class GovernanceDbOptions
 {
     public string Provider { get; init; } = "Sqlite"; // "Sqlite", "PostgreSql" ("Postgres", "PgSql") or "SqlServer" ("MsSql")
-    public string ConnectionString { get; init; } = "Data Source=governance.db;Cache=Shared";
+    /// <summary>
+    /// ADO.NET connection string. Empty (default) for SQLite: Development/Test use a private in-memory database, every other environment
+    /// the governance database file in <c>Gateway:State:StateDirectory</c> (WP-ARC-B-13).
+    /// </summary>
+    public string ConnectionString { get; init; } = string.Empty;
     [Range(1, 60)] public int CommandTimeoutSeconds { get; init; } = 15;
     public bool EnableOutboxProcessor { get; init; } = true;
     public bool? SeedDemoData { get; init; } = null;
@@ -977,12 +981,6 @@ public sealed class AuditOptions
     /// outside Development/Test and <see cref="AuditChainViolationPolicy.AlertOnly"/> in Development/Test.
     /// </summary>
     public AuditChainViolationPolicy? OnChainViolation { get; init; }
-
-    /// <summary>
-    /// Obsolete / no-op (L-7): Fail-closed tiering is now intrinsic to the audit pipeline.
-    /// </summary>
-    [Obsolete("TierAEnabled is no longer configurable; security-critical audit is fail-closed by default.")]
-    public bool TierAEnabled { get; init; } = true;
 
     [Range(1, 3600)] public int TierBAggregationWindowSeconds { get; init; } = 60;
     [Range(365, 7300)] public int AuditLogRetentionDays { get; init; } = 3650;
@@ -1661,6 +1659,24 @@ public sealed class TransportRowLimitsOptions
 /// <summary>Server-side bounds of asynchronous query jobs. Client-supplied timeout and row count never exceed them (SR-H-05).</summary>
 public sealed class AsyncJobOptions
 {
+    /// <summary>Configuration section the options are bound from (standalone and through <see cref="GatewayOptions.AsyncJobs"/>).</summary>
+    public const string SectionName = "Gateway:AsyncJobs";
+
+    /// <summary>Maximum number of jobs this node executes in parallel.</summary>
+    public int MaxConcurrentJobs { get; init; } = 4;
+
+    /// <summary>Maximum number of jobs of one tenant this node executes in parallel (at most <see cref="MaxConcurrentJobs"/>).</summary>
+    public int MaxConcurrentJobsPerTenant { get; init; } = 2;
+
+    /// <summary>Absolute directory for job result files; null uses ContentRoot/scratch/jobs (the Helm chart sets a path on its writable /tmp volume).</summary>
+    public string? ScratchDirectory { get; init; }
+
+    /// <summary>True when <see cref="ScratchDirectory"/> is a volume shared by all replicas, so any node can serve a result written by another.</summary>
+    public bool SharedScratchDirectory { get; init; }
+
+    /// <summary>Maximum number of queued plus running jobs of one tenant on this node; further submits are rejected (HTTP 429).</summary>
+    public int MaxQueuedJobsPerTenant { get; init; } = 50;
+
     /// <summary>Timeout applied when the client supplies none (or a non-positive one).</summary>
     public int DefaultTimeoutSeconds { get; init; } = 300;
 

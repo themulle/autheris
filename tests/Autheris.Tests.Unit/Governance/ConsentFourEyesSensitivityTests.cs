@@ -64,7 +64,7 @@ public sealed class ConsentFourEyesSensitivityTests
             TenantId = new TenantId("tenant-a")
         });
 
-        using (var cmd = repo.Connection.CreateCommand())
+        using (var cmd = repo.RawConnection().CreateCommand())
         {
             var adminRoleId = Guid.NewGuid().ToString();
             cmd.CommandText = @"

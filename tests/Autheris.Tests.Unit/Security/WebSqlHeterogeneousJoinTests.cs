@@ -197,7 +197,7 @@ public sealed class WebSqlHeterogeneousJoinTests
             sqlEngine: sqlEngine,
             logger: NullLogger<FederatedDuckDbExecutionService>.Instance, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
-        var governedSqlService = new GovernedSqlExecutionService(
+        var governedSqlService = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options),
             auditRepo,
             GovernedTestSupport.Guard,

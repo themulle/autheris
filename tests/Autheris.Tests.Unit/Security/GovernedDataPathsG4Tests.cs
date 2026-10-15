@@ -422,7 +422,7 @@ public sealed class GovernedDataPathsG4Tests
         engine.ExecuteOlapQueryAsync(Arg.Any<OlapQueryRequest>(), Arg.Any<CancellationToken>())
             .Returns(new OlapQueryResult(["x"], [new List<object?> { 1 }], 1, TimeSpan.FromMilliseconds(1)));
 
-        await DuckDbOlapEndpoints.HandleOlapQueryAsync(
+        await Autheris.Tests.Unit.TestDoubles.OlapEndpointTestHost.HandleAsync(
             context, engine, Substitute.For<ITableMetadataRepository>(), Substitute.For<IAutherisConnectorRegistry>(),
             Substitute.For<ICrossDomainAccessResolver>(), Substitute.For<IColumnMaskingProvider>(),
             Options.Create(new GatewayOptions { DuckDbOlap = new DuckDbOlapOptions { Enabled = true } }), NullLoggerFactory.Instance);

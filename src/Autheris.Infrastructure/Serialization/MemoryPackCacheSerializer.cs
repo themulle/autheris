@@ -89,23 +89,8 @@ public sealed class MemoryPackCacheSerializer : IBinaryCacheSerializer
             }
         }
 
-        // Legacy / untagged payloads: attempt MemoryPack first, then JSON
-        try
-        {
-            return MemoryPackSerializer.Deserialize<T>(bytes);
-        }
-        catch
-        {
-            try
-            {
-                return JsonSerializer.Deserialize<T>(bytes, JsonOptions);
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "Untagged deserialization failed for {Type}.", typeof(T).Name);
-                return default;
-            }
-        }
+        _logger?.LogWarning("Unknown cache payload magic byte 0x{Magic:X2} for {Type}.", magic, typeof(T).Name);
+        return default;
     }
 
     public bool TryDeserialize<T>(ReadOnlySpan<byte> bytes, out T? result)

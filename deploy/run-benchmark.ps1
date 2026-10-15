@@ -102,6 +102,7 @@ if (-not $composeCmd) {
 Write-Success "Using compose orchestrator: $composeCmd"
 
 # Ensure compose discovers podman-compose.yaml
+# SR-D-08: run ./scripts/generate-env.sh once (bash/openssl, e.g. WSL) to create deploy/.env and deploy/certs/ before the first run.
 $env:COMPOSE_FILE = "podman-compose.yaml"
 
 # 2. Stage Source Code if needed
@@ -316,7 +317,7 @@ try {
     if ($pythonCmd) {
         & python (Join-Path $ScriptDir "scripts\test_extensions.py")
     } else {
-        Invoke-Expression "podman run --rm --net=gateway-bench-net -e TARGET_PROXY=${env:TARGET_PROXY} -e BENCH_SCENARIO=${env:BENCH_SCENARIO} -e ENABLE_LAKEHOUSE=${env:ENABLE_LAKEHOUSE} -e ENABLE_ENTERPRISE=${env:ENABLE_ENTERPRISE} -v ${resultsDir}:/results:z -v ${ScriptDir}/scripts:/scripts:z docker.io/library/python:3.12-alpine python /scripts/test_extensions.py"
+        Invoke-Expression "podman run --rm --net=gateway-bench-net -e TARGET_PROXY=${env:TARGET_PROXY} -e BENCH_SCENARIO=${env:BENCH_SCENARIO} -e ENABLE_LAKEHOUSE=${env:ENABLE_LAKEHOUSE} -e ENABLE_ENTERPRISE=${env:ENABLE_ENTERPRISE} -v ${resultsDir}:/results:z -v ${ScriptDir}/scripts:/scripts:z docker.io/library/python:3.12.15-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4 python /scripts/test_extensions.py"
     }
 
     # 5. Execute k6 Load Generator
@@ -331,7 +332,7 @@ try {
             & python (Join-Path $ScriptDir "scripts\chaos_test.py")
         } else {
             # Run via python container if host lacks Python
-            Invoke-Expression "podman run --rm --net=gateway-bench-net -v ${resultsDir}:/results:z -v ${ScriptDir}/scripts:/scripts:z docker.io/library/python:3.12-alpine python /scripts/chaos_test.py"
+            Invoke-Expression "podman run --rm --net=gateway-bench-net -v ${resultsDir}:/results:z -v ${ScriptDir}/scripts:/scripts:z docker.io/library/python:3.12.15-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4 python /scripts/chaos_test.py"
         }
     }
 
@@ -341,7 +342,7 @@ try {
     if ($pythonCmd) {
         & python (Join-Path $ScriptDir "scripts\generate_report.py")
     } else {
-        Invoke-Expression "podman run --rm -v ${resultsDir}:/results:z -v ${ScriptDir}/scripts:/scripts:z docker.io/library/python:3.12-alpine python /scripts/generate_report.py"
+        Invoke-Expression "podman run --rm -v ${resultsDir}:/results:z -v ${ScriptDir}/scripts:/scripts:z docker.io/library/python:3.12.15-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4 python /scripts/generate_report.py"
     }
 
     $reportPath = Join-Path $resultsDir "benchmark-report.md"

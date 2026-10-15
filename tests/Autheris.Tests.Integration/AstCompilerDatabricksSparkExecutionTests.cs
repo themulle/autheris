@@ -194,6 +194,7 @@ public class SparkProxyFixture : IAsyncLifetime, IDisposable
     }
 }
 
+[Trait("Category", "Spark")]
 public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<SparkProxyFixture>
 {
     private const string Catalog_ = "spark_catalog";

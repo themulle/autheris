@@ -43,10 +43,6 @@ public static class FederationContextSignature
         return sb.ToString();
     }
 
-    /// <summary>Legacy (pre-v2) ':'-joined form; only for the opt-in rolling-upgrade verifier path.</summary>
-    public static string BuildLegacy(string tenant, string? userSid, string timestamp, string nonce, string subgraph, string? roles, string? method, string? path)
-        => $"{tenant}:{userSid ?? string.Empty}:{timestamp}:{nonce}:{subgraph}:{roles ?? string.Empty}:{method ?? string.Empty}:{path ?? string.Empty}";
-
     public static string Sign(string canonical, string signingKey)
     {
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(signingKey));

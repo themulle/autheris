@@ -4,25 +4,16 @@ using Autheris.Application.VirtualFilters;
 
 public partial class SqliteGovernanceRepository : IVirtualFilterRepository
 {
-    public Task<VirtualFilterSnapshot> LoadSnapshotAsync(CancellationToken ct = default) =>
-        LockedAsync(() => VirtualFilterStore.LoadSnapshotAsync(_connection, ct), ct);
+    public async Task<VirtualFilterSnapshot> LoadSnapshotAsync(CancellationToken ct = default)
+    {
+        // A deferred snapshot: the shared store would otherwise begin an IMMEDIATE (write-locking) transaction outside the write gate.
+        await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
+        return await VirtualFilterStore.LoadSnapshotAsync(scope.Connection, ct, scope.Snapshot).ConfigureAwait(false);
+    }
 
     public Task<long> GetGenerationAsync(CancellationToken ct = default) =>
-        LockedAsync(() => VirtualFilterStore.GetGenerationAsync(_connection, ct), ct);
+        ReadAsync(conn => VirtualFilterStore.GetGenerationAsync(conn, ct), ct);
 
     public Task ApplyAsync(VirtualFilterChangeSet changes, CancellationToken ct = default) =>
-        LockedAsync(async () => { await VirtualFilterStore.ApplyAsync(_connection, changes, ct).ConfigureAwait(false); return true; }, ct);
-
-    private async Task<T> LockedAsync<T>(Func<Task<T>> action, CancellationToken ct)
-    {
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            return await action().ConfigureAwait(false);
-        }
-        finally
-        {
-            _lock.Release();
-        }
-    }
+        WriteAsync(async conn => { await VirtualFilterStore.ApplyAsync(conn, changes, ct).ConfigureAwait(false); return true; }, ct);
 }

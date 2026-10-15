@@ -108,7 +108,7 @@ public sealed class WebSqlCrossSourceGuardTests
 
         var factory = Substitute.For<ISqlConnectionFactory>();
 
-        var service = new GovernedSqlExecutionService(
+        var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
             policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             consentResolution: resolution,
@@ -186,7 +186,7 @@ public sealed class WebSqlCrossSourceGuardTests
         var engine = Substitute.For<IDuckDbOlapEngine>();
 
         // Act
-        await DuckDbOlapEndpoints.HandleOlapQueryAsync(
+        await Autheris.Tests.Unit.TestDoubles.OlapEndpointTestHost.HandleAsync(
             httpContext,
             engine,
             metadataRepo,

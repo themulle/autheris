@@ -81,6 +81,13 @@ topologySpreadConstraints:
 terminationGracePeriodSeconds: 75
 
 gateway:
+  # SEC2-09: render fails until exactly one authentication provider is configured (and, for forwardAuth, trustedProxies).
+  production:
+    enforceRequiredSettings: true
+  # Enable exactly one provider and fill its fields, e.g.
+  #   --set gateway.authentication.entraId.enabled=true --set gateway.authentication.entraId.tenantId=... (clientId, audience)
+  dataSources:
+    requireTenantColumn: true
   drainDelaySeconds: 10
   shutdownTimeoutSeconds: 45
   aspnetcoreEnvironment: "Production"

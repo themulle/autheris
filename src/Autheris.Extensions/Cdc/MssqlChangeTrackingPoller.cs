@@ -8,6 +8,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
+using Autheris.Application.State;
+using Autheris.Application.Streaming;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -96,7 +98,16 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
         }
     }
 
-    public async Task<int> PollTableChangesAsync(TableIdentifier table, CancellationToken ct = default)
+    private static readonly Prometheus.Counter WatermarkExpiredTotal = Prometheus.Metrics.CreateCounter(
+        "autheris_cdc_watermark_expired_total", "Number of polls aborted because the stored CDC watermark is older than the minimum valid change tracking version");
+
+    /// <summary>
+    /// Polls one table and publishes its changes. Delivery is at-least-once: events are published first and the watermark is
+    /// committed afterwards (fenced by <paramref name="fencingToken"/>), so a crash between the two re-publishes the batch with the
+    /// same deterministic <c>EventId</c>; consumers deduplicate on it. Only complete change versions are published and committed
+    /// (a batch cut inside one SYS_CHANGE_VERSION never advances past that version).
+    /// </summary>
+    public async Task<int> PollTableChangesAsync(TableIdentifier table, long fencingToken, CancellationToken ct = default)
     {
         ValidateSqlIdentifier(table.Schema, nameof(table.Schema));
         ValidateSqlIdentifier(table.TableName, nameof(table.TableName));
@@ -110,150 +121,238 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
         var rawBatch = _gatewayOptions.Value.MssqlChangeTracking.BatchSize <= 0 ? 500 : _gatewayOptions.Value.MssqlChangeTracking.BatchSize;
         var batchSize = Math.Clamp(rawBatch, 1, 5000);
 
-        var lastVersion = await _watermarkStore.GetWatermarkAsync(table, ct).ConfigureAwait(false);
+        var stored = await _watermarkStore.GetWatermarkAsync(table, ct).ConfigureAwait(false);
 
         try
         {
             await using var conn = await _connectionFactory.CreateOpenConnectionAsync(dsOptions, ct).ConfigureAwait(false);
 
-            // 1. Resolve Primary Key Columns
+            // 1. Resolve primary key columns; a table without a readable primary key cannot be tracked safely.
             var pkColumns = await GetPrimaryKeyColumnsAsync(conn, table, ct).ConfigureAwait(false);
-            if (pkColumns.Count == 0)
-            {
-                _logger.LogWarning("No primary key found for tracked table {Table}. Defaulting to [Id].", table);
-                pkColumns = ["Id"];
-            }
-
             foreach (var pk in pkColumns)
             {
                 ValidateSqlIdentifier(pk, nameof(pk));
             }
 
-            // 2. Validate Retention / Minimum Valid Version
-            var minValidVersion = await GetMinValidVersionAsync(conn, table, ct).ConfigureAwait(false);
-            if (minValidVersion.HasValue && lastVersion < minValidVersion.Value)
+            // 2. First run: start at the current version instead of replaying the whole change history.
+            if (stored is null)
             {
-                _logger.LogWarning(
-                    "MSSQL Change Tracking watermark {LastVersion} for table {Table} is older than min valid version {MinValidVersion}. Resetting watermark.",
-                    lastVersion, table, minValidVersion.Value);
-                lastVersion = Math.Max(0, minValidVersion.Value - 1);
+                var current = await GetCurrentVersionAsync(conn, ct).ConfigureAwait(false)
+                    ?? throw new CdcSourceConfigurationException($"Change tracking is not enabled for the database of table '{table}'.");
+                await CommitAsync(table, current, fencingToken, ct).ConfigureAwait(false);
+                _logger.LogInformation("CDC for table {Table} starts at the current change tracking version {Version}; no history is replayed.", table, current);
+                return 0;
             }
 
-            // 3. Query CHANGETABLE changes with sanitized bracket escaping
-            var joinPredicates = string.Join(" AND ", pkColumns.Select(pk => $"T.[{pk}] = CT.[{pk}]"));
-            var sql = $"""
-                SELECT TOP (@batchSize)
-                    CT.SYS_CHANGE_VERSION,
-                    CT.SYS_CHANGE_OPERATION,
-                    {string.Join(", ", pkColumns.Select(pk => $"CT.[{pk}] AS [PK_{pk}]"))},
-                    T.*
-                FROM CHANGETABLE(CHANGES [{table.Schema}].[{table.TableName}], @lastVersion) AS CT
-                LEFT OUTER JOIN [{table.Schema}].[{table.TableName}] AS T ON {joinPredicates}
-                ORDER BY CT.SYS_CHANGE_VERSION ASC;
-                """;
+            var lastVersion = stored.Value;
 
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = sql;
+            // 3. A watermark behind the retention horizon means lost changes: fail instead of silently skipping them.
+            var minValidVersion = await GetMinValidVersionAsync(conn, table, ct).ConfigureAwait(false)
+                ?? throw new CdcSourceConfigurationException($"Change tracking is not enabled for table '{table}' (no minimum valid version).");
+            if (lastVersion < minValidVersion)
+            {
+                WatermarkExpiredTotal.Inc();
+                _logger.LogError(
+                    "MSSQL Change Tracking watermark {LastVersion} for table {Table} is older than min valid version {MinValidVersion}. Manual recovery is required (delete the row of the table in autheris_cdc_watermarks to restart at the current version).",
+                    lastVersion, table, minValidVersion);
+                throw new CdcWatermarkExpiredException(table, lastVersion, minValidVersion);
+            }
 
-            var pLastVersion = cmd.CreateParameter();
-            pLastVersion.ParameterName = "@lastVersion";
-            pLastVersion.Value = lastVersion;
-            cmd.Parameters.Add(pLastVersion);
+            // 4. Read one batch and keep only complete change versions.
+            var changes = await ReadChangesAsync(conn, table, pkColumns, lastVersion, batchSize, exactVersion: null, ct).ConfigureAwait(false);
+            if (changes.Count == 0)
+            {
+                return 0;
+            }
 
+            if (changes.Count >= batchSize)
+            {
+                var cutVersion = changes[^1].Version;
+                var complete = changes.TakeWhile(c => c.Version < cutVersion).ToList();
+                if (complete.Count == 0)
+                {
+                    // The whole batch is one version, which may continue beyond it: fetch that version completely.
+                    changes = await ReadChangesAsync(conn, table, pkColumns, lastVersion, batchSize, cutVersion, ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    changes = complete;
+                }
+            }
+
+            // Probe the fence before publishing: a writer that lost its lease must not publish (and, retried every cycle,
+            // republish) a batch it can never commit.
+            await CommitAsync(table, lastVersion, fencingToken, ct).ConfigureAwait(false);
+
+            foreach (var change in changes)
+            {
+                await _eventChannel.PublishAsync(change.Event, ct).ConfigureAwait(false);
+            }
+
+            var maxVersion = changes.Max(c => c.Version);
+            if (maxVersion > lastVersion)
+            {
+                await CommitAsync(table, maxVersion, fencingToken, ct).ConfigureAwait(false);
+            }
+
+            return changes.Count;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException
+                                      and not FencingTokenRejectedException
+                                      and not CdcWatermarkExpiredException
+                                      and not CdcSourceConfigurationException)
+        {
+            _logger.LogError(ex, "Error while polling CHANGETABLE for {Table} at version {Version}.", table, stored);
+            return 0;
+        }
+    }
+
+    private async Task CommitAsync(TableIdentifier table, long version, long fencingToken, CancellationToken ct)
+    {
+        if (!await _watermarkStore.TryAdvanceWatermarkAsync(table, version, fencingToken, ct).ConfigureAwait(false))
+        {
+            throw new FencingTokenRejectedException($"{table.Domain}.{table.Schema}.{table.TableName}", fencingToken);
+        }
+    }
+
+    private async Task<long?> GetCurrentVersionAsync(DbConnection conn, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT CHANGE_TRACKING_CURRENT_VERSION();";
+        var result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return result != null && result != DBNull.Value && long.TryParse(result.ToString(), out var version) ? version : null;
+    }
+
+    private async Task<List<(long Version, CdcEvent Event)>> ReadChangesAsync(
+        DbConnection conn,
+        TableIdentifier table,
+        IReadOnlyList<string> pkColumns,
+        long lastVersion,
+        int batchSize,
+        long? exactVersion,
+        CancellationToken ct)
+    {
+        var joinPredicates = string.Join(" AND ", pkColumns.Select(pk => $"T.[{pk}] = CT.[{pk}]"));
+        var top = exactVersion is null ? "TOP (@batchSize)" : string.Empty;
+        var versionFilter = exactVersion is null ? string.Empty : "WHERE CT.SYS_CHANGE_VERSION = @version";
+        var sql = $"""
+            SELECT {top}
+                CT.SYS_CHANGE_VERSION,
+                CT.SYS_CHANGE_OPERATION,
+                {string.Join(", ", pkColumns.Select(pk => $"CT.[{pk}] AS [PK_{pk}]"))},
+                T.*
+            FROM CHANGETABLE(CHANGES [{table.Schema}].[{table.TableName}], @lastVersion) AS CT
+            LEFT OUTER JOIN [{table.Schema}].[{table.TableName}] AS T ON {joinPredicates}
+            {versionFilter}
+            ORDER BY CT.SYS_CHANGE_VERSION ASC;
+            """;
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+
+        var pLastVersion = cmd.CreateParameter();
+        pLastVersion.ParameterName = "@lastVersion";
+        pLastVersion.Value = lastVersion;
+        cmd.Parameters.Add(pLastVersion);
+
+        if (exactVersion is null)
+        {
             var pBatchSize = cmd.CreateParameter();
             pBatchSize.ParameterName = "@batchSize";
             pBatchSize.Value = batchSize;
             cmd.Parameters.Add(pBatchSize);
+        }
+        else
+        {
+            var pVersion = cmd.CreateParameter();
+            pVersion.ParameterName = "@version";
+            pVersion.Value = exactVersion.Value;
+            cmd.Parameters.Add(pVersion);
+        }
 
-            var eventsProcessed = 0;
-            var maxVersion = lastVersion;
+        var changes = new List<(long Version, CdcEvent Event)>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var changeVersion = reader.GetInt64(reader.GetOrdinal("SYS_CHANGE_VERSION"));
+            var changeOpChar = reader.GetString(reader.GetOrdinal("SYS_CHANGE_OPERATION")).Trim().ToUpperInvariant();
 
-            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            var operation = changeOpChar switch
             {
-                var changeVersion = reader.GetInt64(reader.GetOrdinal("SYS_CHANGE_VERSION"));
-                var changeOpChar = reader.GetString(reader.GetOrdinal("SYS_CHANGE_OPERATION")).Trim().ToUpperInvariant();
+                "I" => CdcOperation.Insert,
+                "U" => CdcOperation.Update,
+                "D" => CdcOperation.Delete,
+                _ => CdcOperation.Update
+            };
 
-                var operation = changeOpChar switch
+            var rowData = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            string? tenantId = null;
+            var pkValues = new List<string>();
+
+            for (var i = 0; i < reader.FieldCount; i++)
+            {
+                var colName = reader.GetName(i);
+                var val = reader.IsDBNull(i) ? null : reader.GetValue(i);
+
+                if (colName.StartsWith("PK_", StringComparison.OrdinalIgnoreCase))
                 {
-                    "I" => CdcOperation.Insert,
-                    "U" => CdcOperation.Update,
-                    "D" => CdcOperation.Delete,
-                    _ => CdcOperation.Update
-                };
+                    var purePk = colName[3..];
+                    pkValues.Add(val?.ToString() ?? string.Empty);
 
-                // Read row dictionary
-                var rowData = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-                string? tenantId = null;
-                string pkValueStr = string.Empty;
-
-                for (var i = 0; i < reader.FieldCount; i++)
-                {
-                    var colName = reader.GetName(i);
-                    var val = reader.IsDBNull(i) ? null : reader.GetValue(i);
-
-                    if (colName.StartsWith("PK_", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var purePk = colName[3..];
-                        if (string.IsNullOrEmpty(pkValueStr) && val != null)
-                        {
-                            pkValueStr = val.ToString() ?? "";
-                        }
-                        if (operation == CdcOperation.Delete && !rowData.ContainsKey(purePk))
-                        {
-                            rowData[purePk] = val;
-                        }
-                        continue;
-                    }
-
-                    if (colName.Equals("SYS_CHANGE_VERSION", StringComparison.OrdinalIgnoreCase) ||
-                        colName.Equals("SYS_CHANGE_OPERATION", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    if (colName.Equals("TenantId", StringComparison.OrdinalIgnoreCase) ||
-                        colName.Equals("tenant_id", StringComparison.OrdinalIgnoreCase))
+                    if (tenantId is null &&
+                        (purePk.Equals("TenantId", StringComparison.OrdinalIgnoreCase) ||
+                         purePk.Equals("tenant_id", StringComparison.OrdinalIgnoreCase)))
                     {
                         tenantId = val?.ToString();
                     }
 
-                    rowData[colName] = val;
+                    if (operation == CdcOperation.Delete && !rowData.ContainsKey(purePk))
+                    {
+                        rowData[purePk] = val;
+                    }
+
+                    continue;
                 }
 
-                var eventId = $"{table.Domain}_{table.TableName}_{changeVersion}_{pkValueStr}";
-                var cdcEvent = new CdcEvent(
-                    EventId: eventId,
-                    Table: table,
-                    Operation: operation,
-                    TenantId: tenantId,
-                    Before: null,
-                    After: rowData,
-                    Timestamp: DateTimeOffset.UtcNow,
-                    Metadata: new Dictionary<string, string>
-                    {
-                        ["Source"] = "MssqlChangeTracking",
-                        ["SysChangeVersion"] = changeVersion.ToString()
-                    }
-                );
+                if (colName.Equals("SYS_CHANGE_VERSION", StringComparison.OrdinalIgnoreCase) ||
+                    colName.Equals("SYS_CHANGE_OPERATION", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
 
-                await _eventChannel.PublishAsync(cdcEvent, ct).ConfigureAwait(false);
-                eventsProcessed++;
-                maxVersion = Math.Max(maxVersion, changeVersion);
+                if (val is not null &&
+                    (colName.Equals("TenantId", StringComparison.OrdinalIgnoreCase) ||
+                     colName.Equals("tenant_id", StringComparison.OrdinalIgnoreCase)))
+                {
+                    tenantId = val.ToString();
+                }
+
+                if (operation == CdcOperation.Delete && val is null && rowData.ContainsKey(colName))
+                {
+                    continue;
+                }
+
+                rowData[colName] = val;
             }
 
-            if (maxVersion > lastVersion)
-            {
-                await _watermarkStore.SetWatermarkAsync(table, maxVersion, ct).ConfigureAwait(false);
-            }
+            // Deterministic id: a re-published batch after a crash carries the same ids, so consumers can deduplicate.
+            var eventId = $"{table.Domain}_{table.Schema}_{table.TableName}_{changeVersion}_{string.Join('|', pkValues)}";
+            changes.Add((changeVersion, new CdcEvent(
+                EventId: eventId,
+                Table: table,
+                Operation: operation,
+                TenantId: tenantId,
+                Before: null,
+                After: rowData,
+                Timestamp: DateTimeOffset.UtcNow,
+                Metadata: new Dictionary<string, string>
+                {
+                    ["Source"] = "MssqlChangeTracking",
+                    ["SysChangeVersion"] = changeVersion.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                })));
+        }
 
-            return eventsProcessed;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error while polling CHANGETABLE for {Table} at version {Version}.", table, lastVersion);
-            return 0;
-        }
+        return changes;
     }
 
     private async Task<IReadOnlyList<string>> GetPrimaryKeyColumnsAsync(DbConnection conn, TableIdentifier table, CancellationToken ct)
@@ -272,7 +371,7 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
             ORDER BY ic.key_ordinal;
             """;
 
-        try
+        List<string> list = [];
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = sql;
@@ -281,49 +380,33 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
             pName.Value = $"[{table.Schema}].[{table.TableName}]";
             cmd.Parameters.Add(pName);
 
-            var list = new List<string>();
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
                 list.Add(reader.GetString(0));
             }
-
-            if (list.Count > 0)
-            {
-                _pkCache[table] = list;
-                return list;
-            }
         }
-        catch (Exception ex)
+
+        // Transient query failures propagate and take the normal retry path; only a genuinely missing key is a configuration error.
+        if (list.Count == 0)
         {
-            _logger.LogDebug(ex, "Failed to query sys.indexes for PK on {Table}. Falling back to default [Id].", table);
+            throw new CdcSourceConfigurationException($"Tracked table '{table}' has no primary key; change tracking requires one.");
         }
 
-        return ["Id"];
+        _pkCache[table] = list;
+        return list;
     }
 
     private async Task<long?> GetMinValidVersionAsync(DbConnection conn, TableIdentifier table, CancellationToken ct)
     {
-        try
-        {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT CHANGE_TRACKING_MIN_VALID_VERSION(OBJECT_ID(@fullName));";
-            var pName = cmd.CreateParameter();
-            pName.ParameterName = "@fullName";
-            pName.Value = $"[{table.Schema}].[{table.TableName}]";
-            cmd.Parameters.Add(pName);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT CHANGE_TRACKING_MIN_VALID_VERSION(OBJECT_ID(@fullName));";
+        var pName = cmd.CreateParameter();
+        pName.ParameterName = "@fullName";
+        pName.Value = $"[{table.Schema}].[{table.TableName}]";
+        cmd.Parameters.Add(pName);
 
-            var res = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-            if (res != null && res != DBNull.Value && long.TryParse(res.ToString(), out var minVer))
-            {
-                return minVer;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "CHANGE_TRACKING_MIN_VALID_VERSION query failed for {Table}.", table);
-        }
-
-        return null;
+        var res = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return res != null && res != DBNull.Value && long.TryParse(res.ToString(), out var minVer) ? minVer : null;
     }
 }

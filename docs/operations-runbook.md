@@ -124,6 +124,8 @@ spec:
 ### 3.1 Failure Detection
 If the Redis cluster becomes unavailable:
 - L2 distributed cache calls fail gracefully and log a warning.
+- Consent cache (`ConsentCacheService`): only genuine L2 faults (Redis errors, timeouts, L2 frame crypto and serialization failures) degrade. A failed read is treated as a cache miss (the decision is re-evaluated), a failed write keeps the entry in L1 only, and a failed delete of a stale entry leaves it to expire by TTL. They are logged as warnings with the stable event ids `4111` (`ConsentCacheL2ReadFailed`), `4112` (`ConsentCacheL2DeleteFailed`) and `4113` (`ConsentCacheL2WriteFailed`). Any other exception propagates (fail closed).
+- Redis event bus: failed publishes are counted in `autheris_event_bus_publish_failed_total{message_type}` and rethrown; failed subscriber handlers in `autheris_event_bus_handler_failed_total{message_type}`.
 - The gateway automatically falls back to L1 local `IMemoryCache`.
 - Epoch validation queries the database directly with brief local caching.
 - Queries continue executing without dropping client requests or returning 500 errors.
@@ -135,6 +137,8 @@ The shared cluster state (`IDistributedClusterStateProvider`) distinguishes "key
 - A read of a missing key returns no value. An infrastructure failure (connection loss, timeout, Redis error) throws `ClusterStateUnavailableException` for reads, writes, deletes, event publishing and lock acquisition. A `null` lock lease only ever means "lock busy". Counters return `null` and budgets return `StoreUnavailable` when the store cannot be reached.
 - Consumers decide explicitly: TOTP secret reads and TOTP replay consumption fail closed (a valid code is rejected while the store is down), MCP session reads and HitL ticket reads treat the remote entry as not found, HitL locks honour `HitLStepUp:FailClosedOnClusterPartition`, FinOps budget enforcement fails closed, federation nonce replay checks reject requests when the topology is cluster-wide. Background singletons (catalog sync, CDC, ITSM) skip the cycle.
 - Every store failure increments `autheris_cluster_state_failure_total{operation}`; failed event handlers increment `autheris_cluster_state_handler_failure_total`. Alert on a sustained rate of the first.
+- Cluster singletons (catalog sync, OpenMetadata sync, MSSQL change tracking) run under renewed, fenced leases (`TryAcquireLeaseAsync`). A replica that cannot confirm its lease for two thirds of the TTL cancels its job. Watch `autheris_scheduled_job_last_success_timestamp_seconds{job}`, `autheris_scheduled_job_skipped_total{job,reason}` and `autheris_cluster_lease_lost_total{reason}` (see F-OPS-02).
+- Multi-replica deployments require an external Redis/Garnet with AOF persistence; without it a store restart drops leases and fence counters. An external Garnet must have Lua scripting enabled (the embedded server starts with `--lua`).
 - The embedded Garnet server is process-local. Startup fails when `HighAvailability:MultiNodeClusterMode` is set or `HighAvailability:Replicas` is greater than 1 while `Caching:Garnet:EnableEmbeddedServer` is true (also when `Caching:Redis:Enabled` is true as well, because the embedded server takes precedence). Use an external Redis/Garnet for multi-replica deployments.
 
 ### 3.2 Recovery
@@ -240,9 +244,57 @@ The monthly FinOps budget is enforced against a cluster-wide counter in the shar
 - The governance schema is versioned in `autheris_schema_migrations`. The first start of a new build applies pending migrations under the cross-replica schema lock; later replicas find nothing to do. Existing databases upgrade in place.
 - Startup fails closed (the host does not serve) when a migration fails, when a stored checksum differs from the build (`GovernanceSchemaDriftException`), when the database is newer than the build, or, in `Verify` mode, while migrations are pending. Read the critical log entry `Governance database migration or initialization failed` and the inner exception.
 - Separate pipelines: set `GovernanceDb:Migrations:Mode=Verify` on the application and run `Autheris.Api --migrate-governance` as a pre-deployment job (with `GovernanceDb:MigrationConnectionString` for a DDL-capable role). The command exits `0` on success and `1` on failure.
+- Helm: `governanceMigrationJob.enabled=true` renders this as a `pre-install,pre-upgrade` hook Job (`<release>-autheris-migrate`, `Migrations:Mode=Apply`) and sets the application to `Migrations:Mode=Verify`. The job runs with the same configuration and secrets as the application (governance connection string, audit and masking keys, Redis); set `governanceMigrationJob.migrationConnectionStringSecretKey` to a key of `gateway.governanceDb.existingSecret` that holds a DDL-capable connection string. It is not supported for the SQLite provider. A failed job (`backoffLimit: 0`) aborts the release before any application pod is replaced; read the job pod log for the migration error.
 - Migrations are forward-only. Rolling back to an older build means restoring a database backup taken before the upgrade; an older build refuses to start against a newer schema unless `GovernanceDb:Migrations:AllowNewerSchema=true`.
 
+### 4.ad State directory (SQLite governance provider, WP-ARC-B-13)
+
+- `Gateway:State:StateDirectory` (default `./state`; the container images set `/app/data`) is the one writable location for local state. With the SQLite provider and no `GovernanceDb:ConnectionString` it holds `governance.db`; Development and Test without a connection string use a private in-memory database instead. An explicitly configured connection string always wins, and an in-memory database is rejected outside Development.
+- Outside Development/Test the audit chain anchor must be configured explicitly (`Audit:ChainAnchorPath` on a separately protected volume, `Audit:ChainAnchorWormDirectory` or a KMS signer); the gateway refuses to start otherwise. Only in Development/Test the anchor defaults to `<governance database file>.audit-anchor.json` next to the database.
+- Backup set: back up `governance.db` together with its `-wal` and `-shm` side files (or checkpoint first) and the audit anchor file (`Audit:ChainAnchorPath`) as one unit. Restoring the database without the matching anchor makes the audit chain verification report a violation.
+- In a container the directory must be an absolute path on a mounted volume and not `/app`; the gateway refuses to start otherwise. `Cache=Shared` is ignored for file databases (connections are pooled per operation); WAL is the default journal mode, use `GovernanceDb:JournalMode=DELETE` on filesystems without shared-memory support (for example WSL bind mounts or network shares).
+
 ---
+
+### 4.ad Prometheus scrape access (SEC2-09)
+
+`/metrics` requires the `MetricsScrape` policy: the authenticated principal must carry the `MetricsScraper` (or `ClusterAdmin`) role. Any other authenticated caller gets 403, anonymous callers get 401. Grant the scrape identity (for example the service principal behind the ServiceMonitor bearer token) an app role named `MetricsScraper`; there is no configuration switch that relaxes this. The role must come from an authentication scheme that carries roles (JWT, Basic or Kerberos). A ForwardAuth-only deployment cannot be scraped by default: `ClusterAdmin` is never accepted from proxy headers and the default `ForwardAuth.AllowedRoles` does not include `MetricsScraper`; either list `MetricsScraper` in `ForwardAuth.AllowedRoles` for a trusted scrape proxy or scrape through a JWT-capable path.
+
+### 4.ae Webhook outbox (WP-ARC-A-02)
+
+- Undelivered webhooks are in `WEBHOOK_OUTBOX` (governance database). Watch `autheris_webhook_outbox_pending`, `autheris_webhook_deliveries_total{outcome}` and `autheris_webhook_dead_letters_total{code}`.
+- A growing `dead_letters_total{code="egress_denied"}` or `{code="http_status"}` points at a misconfigured target; `subscription_not_found` appears after a subscription `Id` was renamed or removed while rows were queued (ids must stay stable).
+- A subscription that fails `AutoDisableAfterConsecutiveFailures` times in a row has its pending rows paused for `CircuitCooldownSeconds` (log entry `... failed N times in a row; M pending delivery(ies) paused ...`); it resumes automatically.
+- Nodes must be NTP-synchronised: outbox times come from the node clock.
+
+### 4.af MSSQL change tracking watermark (WP-ARC-A-11)
+
+- `autheris_cdc_watermark_expired_total` increasing: the stored watermark is below `CHANGE_TRACKING_MIN_VALID_VERSION`; polling of that table stops (with backoff) until an operator deletes its row in `autheris_cdc_watermarks`, accepting the gap. Procedure: F-CDC-02, section 3.3.
+- `autheris_cdc_watermark_fenced_total` increasing without a lease handover: the fence counter of the cluster-state store was reset; verify AOF persistence.
+
+### 4.ag Async query jobs on several replicas (WP-ARC-A-12)
+
+Reference: F-DATA-07, section 6.
+
+- **Choose one result-routing model.** A result file exists only on the replica that ran the job unless the scratch directory is shared.
+  - *Sticky routing* (default Helm layout, node-local `/tmp/autheris-jobs`): configure session affinity on the ingress or load balancer (for example cookie affinity) so a client reaches the same replica for submit, status and download. Without it, downloads of another replica's job answer `503` with `ASYNC_JOB_RESULT_NODE_LOCAL`.
+  - *Shared volume*: mount one ReadWriteMany volume (NFS, Azure Files, CephFS) at the same path on every replica and set `Gateway__AsyncJobs__ScratchDirectory` to that path and `Gateway__AsyncJobs__SharedScratchDirectory=true`. The chart does not provision this volume; add it through your own overlay. Restrict the volume to the gateway pods: it holds governed result files of all tenants.
+- **Size the scratch volume.** Results are kept for `RetentionHours` (default 24). Set `tmpVolume.sizeLimit` for the node-local layout; a full volume makes jobs fail.
+- **Capacity limits are per node.** `MaxConcurrentJobs`, `MaxConcurrentJobsPerTenant` and `MaxQueuedJobsPerTenant` apply to each replica; the cluster-wide limit is the per-node value times the replica count. Clients receive `429` (`Retry-After: 30`) at the cap.
+- **Cluster state outage.** Submits, and status/result/cancel requests for jobs of other replicas, answer `503` (`Retry-After: 5`). Restore Redis/Garnet; no manual job cleanup is needed.
+- **Node loss and rolling restarts.** Jobs are not resumed. Queued jobs of a stopping pod end `Cancelled` (`autheris_asyncjobs_discarded`); jobs of a crashed pod are reported `Failed` with `job owner node lost` once `MaxTimeoutSeconds + 60 s` have passed since submission. Clients resubmit. Leftover result files are removed by the startup sweeper and the purge loop.
+- **Watch:** `autheris_asyncjobs_running`, `autheris_asyncjobs_pending` (sustained growth means too few slots), `autheris_asyncjobs_cluster_write_failures`, `autheris_asyncjobs_tombstone_check_failures` and `autheris_asyncjobs_subscribe_failures` (remote cancels then take effect only at the owner's next state change).
+
+### 4.ah Casbin policy file distribution and the policy epoch (WP-ARC-A-14)
+
+Reference: F-SEC-06.
+
+- **Every replica must load the same policy file.** Distribute `Gateway:Casbin:PolicyPath` (and tenant policy files) identically to all pods, for example as one ConfigMap or a shared read-only volume, and keep `WatchPolicyFile` enabled. After a change on any node, every replica re-reads its *own* file, so a replica with an outdated file keeps enforcing the outdated policy.
+- **Do not rely on programmatic rule changes in multi-replica deployments.** Rules added at runtime through `AddPolicy` and related APIs exist only on the node that received them; the other replicas only discard their cached decisions. Persist rule changes in the policy file.
+- **Staleness.** After a change, other replicas stop serving cached decisions of the old policy within `min(TtlSeconds, EpochCheckSeconds + reload time)` (defaults 60 s and 5 s). Lower `Gateway:Casbin:DecisionCache:EpochCheckSeconds` for a tighter bound.
+- **Propagation failures.** `autheris_policy_epoch_propagation_failed_total` increasing: the changing node could not increment `policy:epoch:{tenant}` or `policy:epoch:*`; other replicas converge only after `TtlSeconds`. Check the cluster state store (`autheris_cluster_state_failure_total{operation="increment"}`).
+- **Cluster state outage.** The decision cache is bypassed on affected tenants (warning `Casbin policy epoch could not be read; decision cache bypassed.`). Decisions stay correct; expect higher policy evaluation latency until the store is back.
+- **Reload failures.** A missing or invalid policy file during a cluster-triggered reload keeps the last-known-good policy set and is retried at the next epoch check; check the gateway log for `Casbin policy reload after a cluster epoch change failed` or `policy file ... is missing`.
 
 ## 5. Data Catalog Synchronization Operations
 
@@ -398,3 +450,11 @@ For high-throughput environments, configure ASP.NET Core Kestrel limits in `apps
 * **Connection Pooling:** Set upstream database `MaxPoolSize` according to pod replica count to avoid exhausting database connection pools (`MaxPoolSize=100` per pod on typical setups).
 * **Redis Sizing:** Maintain an active connection pool with `abortConnect=false` and keep-alive pings enabled; L2 policy cache size rarely exceeds 200 MB even with 50,000 active consents.
 
+
+## 10. CDC Webhook Subscriptions: Key Provisioning and Rotation
+
+CDC webhook delivery is enabled by default (`Gateway:CdcWebhooks:Enabled`; changing it requires a restart, the registration-time value is the only one that counts). Subscription signing secrets and custom header values are stored encrypted (AES-256-GCM) with a key-encryption key (KEK):
+
+* **Provisioning:** provide the secret `cdc-webhook-kek` of at least 32 bytes through the configured secret provider (environment variable `CDC_WEBHOOK_KEK`, a mounted `file:` secret or the vault). Without it, outside Development, `POST /api/v1/cdc/subscriptions` answers `503 CDC_SECRET_STORE_UNAVAILABLE` and the gateway logs a startup warning. Subscriptions are also rejected with `400 CDC_SECRET_REQUIRED` unless they carry a signing secret of 32 to 512 characters.
+* **Rotation:** v1 ciphertexts carry no key id. Provision the new KEK, restart the gateway, then delete and re-create every subscription (existing ones can no longer be decrypted and their deliveries are dead-lettered). All replicas must use the same KEK.
+* **Creator snapshot:** a subscription delivers events as the principal that created it (roles and groups are frozen at creation, `Gateway:CdcWebhooks:CreatorSnapshotMaxAgeDays`, default 90, then delivery stops). Delete and re-create it after the creator's group membership changes.

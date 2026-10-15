@@ -1,7 +1,6 @@
 # F-DATA-03: Embedded In-Memory OLAP via DuckDB.NET
 
-**Status:** [Done] (100% GA – Next-Gen)  
-**Components:** [`DuckDbOlapEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/DuckDbOlapEndpoints.cs), [`IDuckDbOlapEngine.cs`](file:///root/autheris/src/Autheris.Application/Olap/IDuckDbOlapEngine.cs), [`DuckDbOlapEngine.cs`](file:///root/autheris/src/Autheris.Infrastructure/Olap/DuckDbOlapEngine.cs)
+**Components:** [`DuckDbOlapEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/DuckDbOlapEndpoints.cs), [`IOlapStagingService.cs`](file:///root/autheris/src/Autheris.Application/Olap/IOlapStagingService.cs), [`OlapStagingService.cs`](file:///root/autheris/src/Autheris.Application/Olap/OlapStagingService.cs), [`IDuckDbOlapEngine.cs`](file:///root/autheris/src/Autheris.Application/Olap/IDuckDbOlapEngine.cs), [`DuckDbOlapEngine.cs`](file:///root/autheris/src/Autheris.Infrastructure/Olap/DuckDbOlapEngine.cs)
 
 ---
 
@@ -24,6 +23,19 @@ Cross-domain analytical queries joining disparate data sources (e.g. relational 
 - Sandboxed ephemeral in-memory sessions (`DataSource=:memory:`).
 - Hardware-accelerated vectorized processing of multi-table joins.
 - Strict memory quotas (`PRAGMA max_memory = '1GB'`) and thread pool capping.
+
+### 3.1 Staging Use Case
+
+`POST /api/v1/olap/query` only handles HTTP concerns (authentication, body parsing, response mapping). `IOlapStagingService` (Application layer) stages and executes the request:
+
+1. Rejects more than `MaxTableCount` distinct tables (`400`).
+2. Applies the tenant and global data-source allowlists before any access decision or read (`403`).
+3. Takes one access decision per table (ReBAC when enabled, consents, Casbin, row filters) without exposing policy details (`403`).
+4. Reads every table through the governed reader (row filter, masking applied exactly once) and enforces `MaxStagedRowsPerTable` and `MaxTotalStagedRows` (`400`).
+5. Writes the required audits `OLAP_TABLE_STAGED` (per table) and `OLAP_QUERY` through `IAuditWriter`; an unavailable audit store rejects the request with `503`.
+6. Runs the query in DuckDB and returns the result.
+
+The endpoint's request and response contract is unchanged by this split. An architecture test forbids repository dependencies in `DuckDbOlapEndpoints`.
 
 ---
 

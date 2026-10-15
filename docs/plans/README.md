@@ -1,6 +1,6 @@
-# Requirements & Planning Hub (`doc/plan/`)
+# Requirements & Planning Hub (`docs/plans/`)
 
-This directory (`doc/plan/` / `docs/plans/`) is the central repository for all project requirements, architectural concepts, technical designs, and execution plans for the Autheris platform.
+This directory (`docs/plans/`) is the central repository for all project requirements, architectural concepts, technical designs, and execution plans for the Autheris platform.
 
 ---
 
@@ -9,28 +9,28 @@ This directory (`doc/plan/` / `docs/plans/`) is the central repository for all p
 All AI agents (Antigravity, Claude, Copilot, Cursor, etc.) and contributing developers must follow these standard procedures:
 
 ### 1. English-Only Documentation Standard
-* All documents created or modified in `doc/plan/` **must be written in English**.
+* All documents created or modified in `docs/plans/` **must be written in English**.
 * Existing German documents may remain for historical reference, but all new requirements, revisions, additions, and status updates must be in English.
 
-### 2. Strict Separation: Documentation (`docs/`) vs. Development Progress (`doc/plan/`)
+### 2. Strict Separation: Documentation (`docs/`) vs. Development Progress (`docs/plans/`)
 * **Documentation (`docs/`)** is ONLY for user-facing, operator, and architecture reference describing how the software currently works.
 * **Development progress DOES NOT belong in `docs/`:** Never place status tags (`Status: In Progress`, `Done`), WIP notes, sprint backlogs, or implementation roadmaps in `docs/` (e.g. `docs/architecture/` or `docs/features/`).
-* **`doc/plan/` is the SOLE location** for development status, roadmaps, task breakdowns, checklists, and implementation tracking.
+* **`docs/plans/` is the SOLE location** for development status, roadmaps, task breakdowns, checklists, and implementation tracking.
 
 ### 3. The Origin Master Plan (`00-master-plan-overview.md`)
 * The single source of truth for all current and future work is:
-  👉 **[`00-master-plan-overview.md`](file:///root/autheris/doc/plan/00-master-plan-overview.md)**
+  👉 **[`00-master-plan-overview.md`](00-master-plan-overview.md)**
 * Before starting work on any task, agents must read this overview to understand active tracks, dependencies, and priorities.
 
 ### 4. Lifecycle for New Requirements
 Whenever a new user requirement or feature request is introduced:
 1. **Create the Requirement / Concept Document:**
-   Store it in `doc/plan/` following the naming convention:
+   Store it in `docs/plans/` following the naming convention:
    * `YYYY-MM-DD-req-<feature-name>.md` (for business/product requirements)
    * `YYYY-MM-DD-concept-<feature-name>.md` (for high-level technical architecture)
    * `YYYY-MM-DD-plan-<feature-name>.md` (for detailed implementation tasks)
 2. **Register in the Master Plan:**
-   Add an entry into the table in [`00-master-plan-overview.md`](file:///root/autheris/doc/plan/00-master-plan-overview.md) with:
+   Add an entry into the table in [`00-master-plan-overview.md`](00-master-plan-overview.md) with:
    * Document ID / Link
    * Topic & Scope
    * Addressed Components
@@ -40,7 +40,7 @@ Whenever a new user requirement or feature request is introduced:
 ### 5. Refining & Updating Plans
 Agents must refine the initial plan iteratively rather than spawning disconnected or duplicated files:
 * **Elaboration:** When breaking down a plan into concrete implementation tasks, update the existing plan document with subtasks, test cases, and edge cases.
-* **Sync State:** Update the status in [`00-master-plan-overview.md`](file:///root/autheris/doc/plan/00-master-plan-overview.md) as milestones are reached.
+* **Sync State:** Update the status in [`00-master-plan-overview.md`](00-master-plan-overview.md) as milestones are reached.
 * **Traceability:** Cross-reference related files, commits, and tests.
 
 ---

@@ -192,7 +192,7 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     {
         await _service.ApplySyncAsync(Desired("c1", VirtualFilterModelTests.DavidFilter()), Sync);
         // A direct write to the database (outside Autheris) leaves a stored hash that does not match the definition.
-        using (var cmd = _repository.Connection.CreateCommand())
+        using (var cmd = _repository.RawConnection().CreateCommand())
         {
             cmd.CommandText = "UPDATE VIRTUAL_FILTERS SET definition_hash = 'manipuliert' WHERE name = 'nicht_ausgelieferte_krane';";
             cmd.ExecuteNonQuery().ShouldBe(1);

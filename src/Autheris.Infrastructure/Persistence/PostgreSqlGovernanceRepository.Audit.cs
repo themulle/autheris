@@ -18,6 +18,9 @@ public partial class PostgreSqlGovernanceRepository
 {
     public async Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default)
     {
+        // Tier-B events are only enqueued (no connection); they must not be accepted before the audit processor runs.
+        ThrowIfNotReady();
+
         if (entry.Caller == null && _callerContextProvider != null)
         {
             entry.Caller = _callerContextProvider.ResolveCallerContext();
@@ -99,6 +102,7 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task FlushAuditChannelAsync(CancellationToken ct = default)
     {
+        ThrowIfNotReady();
         var batch = new List<AuditLogEntry>();
         while (_auditChannel.Reader.TryRead(out var entry))
         {
@@ -215,6 +219,12 @@ public partial class PostgreSqlGovernanceRepository
                 {
                     await RecordAuditEventsBatchInternalAsync(batch, CancellationToken.None).ConfigureAwait(false);
                 }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(ex, "Failed to flush audit batch of {Count} entries during shutdown drain; diverting to dead-letter queue.", batch.Count);
+                    await WriteToDeadLetterAsync(batch, ex.Message, CancellationToken.None).ConfigureAwait(false);
+                    Autheris.Domain.Diagnostics.GatewayDiagnostics.AuditDeadLetterCounter.Add(batch.Count);
+                }
                 finally
                 {
                     _auditLock.Release();
@@ -230,6 +240,12 @@ public partial class PostgreSqlGovernanceRepository
             {
                 await RecordAuditEventsBatchInternalAsync(batch, CancellationToken.None).ConfigureAwait(false);
             }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to flush audit batch of {Count} entries during shutdown drain; diverting to dead-letter queue.", batch.Count);
+                await WriteToDeadLetterAsync(batch, ex.Message, CancellationToken.None).ConfigureAwait(false);
+                Autheris.Domain.Diagnostics.GatewayDiagnostics.AuditDeadLetterCounter.Add(batch.Count);
+            }
             finally
             {
                 _auditLock.Release();
@@ -241,7 +257,7 @@ public partial class PostgreSqlGovernanceRepository
     {
         try
         {
-            await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+            await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = @"INSERT INTO AUDIT_DEAD_LETTER (id, batch_json, error_message, failed_at, tenant_id)
                                 VALUES (@id, @batch, @err, @failed, @tenant)";
@@ -262,6 +278,7 @@ public partial class PostgreSqlGovernanceRepository
 
     public Task RecordAuditEventAsync(AuditLogEntry entry, System.Data.Common.DbTransaction existingTx, CancellationToken ct = default)
     {
+        ThrowIfNotReady();
         if (existingTx == null)
         {
             return RecordAuditEventAsync(entry, ct);
@@ -456,7 +473,7 @@ public partial class PostgreSqlGovernanceRepository
 
     private async Task WriteAuditBatchOnceAsync(IReadOnlyList<AuditLogEntry> batch, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         // READ COMMITTED + advisory lock: the tail is read only after the previous writer has committed. (Under
         // SERIALIZABLE the snapshot would already be taken before the lock is acquired.)
         await using var tx = await conn.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct).ConfigureAwait(false);
@@ -587,7 +604,7 @@ public partial class PostgreSqlGovernanceRepository
         await FlushAuditChannelAsync(ct).ConfigureAwait(false);
         var list = new List<AuditLogEntry>();
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
 
         var tenantFilter = tenantId != null ? " WHERE tenant_id = @tenantId" : "";
@@ -622,7 +639,7 @@ public partial class PostgreSqlGovernanceRepository
         await FlushAuditChannelAsync(ct).ConfigureAwait(false);
         var list = new List<AuditLogEntry>();
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
 
         var whereClauses = new List<string>();
@@ -691,7 +708,7 @@ public partial class PostgreSqlGovernanceRepository
             return false;
         }
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, seq, tenant_id
                             FROM AUDIT_LOG_ENTRIES
@@ -835,7 +852,7 @@ public partial class PostgreSqlGovernanceRepository
     {
         await FlushAuditChannelAsync(ct).ConfigureAwait(false);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT MIN(rowid), MAX(rowid)
                             FROM AUDIT_LOG_ENTRIES
@@ -866,7 +883,7 @@ public partial class PostgreSqlGovernanceRepository
         await FlushAuditChannelAsync(ct).ConfigureAwait(false);
 
         var list = new List<AuditChainRecord>();
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT rowid, seq, id, occurred_at, event_type, actor_sid, target_table, target_column,
                                    decision, trace_id, details_json, prev_hash, entry_hash, tenant_id
