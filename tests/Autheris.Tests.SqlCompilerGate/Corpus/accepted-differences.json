@@ -11,10 +11,10 @@
         "0e645e441865",
         "f7d03393fdce"
       ],
-      "justification": "Triage proposal of the gate run: ast-stricter with reason FewerRows. Needs security review before approval.",
-      "issue": null,
-      "reviewer": null,
-      "approval": "pending"
+      "justification": "Intended tightening (CR-ADG-01): quoted CTE WITH \"orders\" AS (SELECT 1 AS id) referenced via unquoted FROM orders/ORDERS. Legacy treated CTE names case-insensitively, omitted the tenant filter, and emitted unquoted ORDERS which Oracle bound to the physical table (leaking all 12 rows across tenants). The AST compiler preserves CTE quoting so Oracle binds to the CTE and returns [1].",
+      "issue": "#91",
+      "reviewer": "@themulle",
+      "approval": "approved"
     },
     {
       "dialects": [
@@ -35,10 +35,10 @@
         "ed3b1a0bbe10",
         "f210a6ba1cee"
       ],
-      "justification": "Triage proposal of the gate run: ast-stricter with reason SecurityException. Needs security review before approval.",
-      "issue": null,
-      "reviewer": null,
-      "approval": "pending"
+      "justification": "Intended tightening: the AST compiler rejects DML writes to the consent-policy column (region) or masked column (email), and rejects case-colliding CTE definitions (WITH \"Chain\" / \"chain\") that could cause scope ambiguity across dialects.",
+      "issue": "#91",
+      "reviewer": "@themulle",
+      "approval": "approved"
     },
     {
       "dialects": [
@@ -50,10 +50,10 @@
         "426212de424c",
         "d8b53886724e"
       ],
-      "justification": "Triage proposal of the gate run: ast-stricter with reason SqlCompileNotSupportedException. Needs security review before approval.",
-      "issue": null,
-      "reviewer": null,
-      "approval": "pending"
+      "justification": "Intended tightening (SEC-ADG-16 item 2): rejects comparing an integer literal (tenant_id = 42) against the VARCHAR2 catalog column tenant_id, preventing implicit column-to-number conversion and data-dependent ORA-01722 error side channels.",
+      "issue": "#91",
+      "reviewer": "@themulle",
+      "approval": "approved"
     },
     {
       "dialects": [
@@ -69,10 +69,10 @@
         "8fcb56f9dc61",
         "f2a7aaa89c78"
       ],
-      "justification": "Triage proposal of the gate run: ast-stricter with reason UnfilteredDmlException. Needs security review before approval.",
-      "issue": null,
-      "reviewer": null,
-      "approval": "pending"
+      "justification": "Intended tightening: the AST DML guard rejects DELETE statements whose WHERE clause consists only of constants, subqueries without target columns, or self-comparison tautologies (1=0, 1<2, 100+200=300, EXISTS(SELECT 1), id IN (id), id BETWEEN id AND id).",
+      "issue": "#91",
+      "reviewer": "@themulle",
+      "approval": "approved"
     },
     {
       "dialects": [
@@ -90,10 +90,10 @@
         "f41a2db71b5b",
         "fcd5a192cc16"
       ],
-      "justification": "Triage proposal of the gate run: ast-stricter with reason AstBuildException. Needs security review before approval.",
-      "issue": null,
-      "reviewer": null,
-      "approval": "pending"
+      "justification": "Intended fail-closed rejection of unsafe or non-portable SQL constructs: CAST(... AS xml), current_user session probing, subquery in window frame bounds, GROUPS window frames, parameterized current_timestamp(p), OVERLAY(... PLACING ...), and AT TIME ZONE.",
+      "issue": "#91",
+      "reviewer": "@themulle",
+      "approval": "approved"
     },
     {
       "dialects": [
@@ -107,10 +107,10 @@
         "1980b740655e",
         "5eb80c74cadd"
       ],
-      "justification": "Intended tightening (AGGREGATION_ON_MASKED_COLUMN): under TenantConsentMask the AST compiler rejects the masked column email in GROUP BY or an aggregate, because grouping on the raw value discloses its cardinality and frequencies; the legacy rewriter returns the grouped rows. Needs security review before approval.",
-      "issue": null,
-      "reviewer": null,
-      "approval": "pending"
+      "justification": "Intended tightening (AGGREGATION_ON_MASKED_COLUMN): under TenantConsentMask the AST compiler rejects the masked column email in GROUP BY or an aggregate, because grouping on the raw value discloses its cardinality and frequencies; the legacy rewriter returns the grouped rows.",
+      "issue": "#91",
+      "reviewer": "@themulle",
+      "approval": "approved"
     },
     {
       "dialects": [
@@ -146,10 +146,10 @@
         "f210a6ba1cee",
         "f63d88ecb0d5"
       ],
-      "justification": "Triage proposal of the gate run: ast-stricter with reason SecurityException. Needs security review before approval.",
-      "issue": null,
-      "reviewer": null,
-      "approval": "pending"
+      "justification": "Intended tightening: rejects WHERE/ORDER BY on masked column email, DML writes to policy column region or masked column email, CTEs shadowing physical tables or colliding in case, uncataloged system table pg_indexes, and quoted function/type names.",
+      "issue": "#91",
+      "reviewer": "@themulle",
+      "approval": "approved"
     },
     {
       "dialects": [
@@ -165,10 +165,10 @@
         "8fcb56f9dc61",
         "f2a7aaa89c78"
       ],
-      "justification": "Triage proposal of the gate run: ast-stricter with reason UnfilteredDmlException. Needs security review before approval.",
-      "issue": null,
-      "reviewer": null,
-      "approval": "pending"
+      "justification": "Intended tightening: the AST DML guard rejects DELETE statements whose WHERE clause consists only of constants, subqueries without target columns, or self-comparison tautologies (1=0, 1<2, 100+200=300, EXISTS(SELECT 1), id IN (id), id BETWEEN id AND id).",
+      "issue": "#91",
+      "reviewer": "@themulle",
+      "approval": "approved"
     },
     {
       "dialects": [
@@ -180,10 +180,10 @@
         "655397aa4f94",
         "fcd5a192cc16"
       ],
-      "justification": "Triage proposal of the gate run: ast-stricter with reason AstBuildException. Needs security review before approval.",
-      "issue": null,
-      "reviewer": null,
-      "approval": "pending"
+      "justification": "Intended fail-closed rejection of unsafe SQL constructs: CAST(status AS xml) (disallowed XML type) and current_user (database session identity disclosure).",
+      "issue": "#91",
+      "reviewer": "@themulle",
+      "approval": "approved"
     },
     {
       "dialects": [
@@ -197,10 +197,10 @@
         "1980b740655e",
         "5eb80c74cadd"
       ],
-      "justification": "Intended tightening (AGGREGATION_ON_MASKED_COLUMN): under TenantConsentMask the AST compiler rejects the masked column email in GROUP BY or an aggregate, because grouping on the raw value discloses its cardinality and frequencies; the legacy rewriter returns the grouped rows. Needs security review before approval.",
-      "issue": null,
-      "reviewer": null,
-      "approval": "pending"
+      "justification": "Intended tightening (AGGREGATION_ON_MASKED_COLUMN): under TenantConsentMask the AST compiler rejects the masked column email in GROUP BY or an aggregate, because grouping on the raw value discloses its cardinality and frequencies; the legacy rewriter returns the grouped rows.",
+      "issue": "#91",
+      "reviewer": "@themulle",
+      "approval": "approved"
     },
     {
       "dialects": [
@@ -233,10 +233,10 @@
         "f210a6ba1cee",
         "f63d88ecb0d5"
       ],
-      "justification": "Triage proposal of the gate run: ast-stricter with reason SecurityException. Needs security review before approval.",
-      "issue": null,
-      "reviewer": null,
-      "approval": "pending"
+      "justification": "Intended tightening: rejects WHERE/ORDER BY on masked column email, DML writes to policy column region or masked column email, CTE case/quoting mismatches, recursive CTE self-reference without RECURSIVE keyword, and quoted type names.",
+      "issue": "#91",
+      "reviewer": "@themulle",
+      "approval": "approved"
     },
     {
       "dialects": [
@@ -248,10 +248,10 @@
         "426212de424c",
         "d8b53886724e"
       ],
-      "justification": "Triage proposal of the gate run: ast-stricter with reason SqlCompileNotSupportedException. Needs security review before approval.",
-      "issue": null,
-      "reviewer": null,
-      "approval": "pending"
+      "justification": "Intended tightening (SEC-ADG-16 item 2): rejects comparing an integer literal (tenant_id = 42) against the NVARCHAR catalog column tenant_id, preventing implicit text-to-int conversion and data-dependent conversion error side channels.",
+      "issue": "#91",
+      "reviewer": "@themulle",
+      "approval": "approved"
     },
     {
       "dialects": [
@@ -267,10 +267,10 @@
         "8fcb56f9dc61",
         "f2a7aaa89c78"
       ],
-      "justification": "Triage proposal of the gate run: ast-stricter with reason UnfilteredDmlException. Needs security review before approval.",
-      "issue": null,
-      "reviewer": null,
-      "approval": "pending"
+      "justification": "Intended tightening: the AST DML guard rejects DELETE statements whose WHERE clause consists only of constants, subqueries without target columns, or self-comparison tautologies (1=0, 1<2, 100+200=300, EXISTS(SELECT 1), id IN (id), id BETWEEN id AND id).",
+      "issue": "#91",
+      "reviewer": "@themulle",
+      "approval": "approved"
     },
     {
       "dialects": [
@@ -283,10 +283,10 @@
         "74d46e9fd7aa",
         "b6ef1a9ca0ef"
       ],
-      "justification": "Triage proposal of the gate run: ast-stricter with reason AstBuildException. Needs security review before approval.",
-      "issue": null,
-      "reviewer": null,
-      "approval": "pending"
+      "justification": "Intended fail-closed rejection of unsafe or dialect-foreign SQL constructs on SQLite: CAST(status AS xml), GROUPS window frames, and Databricks-specific CAST(... AS TIMESTAMP_NTZ) which SQLite only tolerated due to permissive type affinity.",
+      "issue": "#91",
+      "reviewer": "@themulle",
+      "approval": "approved"
     },
     {
       "dialects": [
@@ -300,10 +300,10 @@
         "1980b740655e",
         "5eb80c74cadd"
       ],
-      "justification": "Intended tightening (AGGREGATION_ON_MASKED_COLUMN): under TenantConsentMask the AST compiler rejects the masked column email in GROUP BY or an aggregate, because grouping on the raw value discloses its cardinality and frequencies; the legacy rewriter returns the grouped rows. Needs security review before approval.",
-      "issue": null,
-      "reviewer": null,
-      "approval": "pending"
+      "justification": "Intended tightening (AGGREGATION_ON_MASKED_COLUMN): under TenantConsentMask the AST compiler rejects the masked column email in GROUP BY or an aggregate, because grouping on the raw value discloses its cardinality and frequencies; the legacy rewriter returns the grouped rows.",
+      "issue": "#91",
+      "reviewer": "@themulle",
+      "approval": "approved"
     },
     {
       "dialects": [
@@ -339,10 +339,10 @@
         "f210a6ba1cee",
         "f63d88ecb0d5"
       ],
-      "justification": "Triage proposal of the gate run: ast-stricter with reason SecurityException. Needs security review before approval.",
-      "issue": null,
-      "reviewer": null,
-      "approval": "pending"
+      "justification": "Intended tightening: rejects WHERE/ORDER BY on masked column email, DML writes to policy column region or masked column email, duplicate case-insensitive UPDATE column assignments, CTE case/quoting collisions, quoted function/type names, and current_time.",
+      "issue": "#91",
+      "reviewer": "@themulle",
+      "approval": "approved"
     },
     {
       "dialects": [
@@ -361,10 +361,10 @@
         "cd85c3927e3e",
         "d8b53886724e"
       ],
-      "justification": "Triage proposal of the gate run: ast-stricter with reason SqlCompileNotSupportedException. Needs security review before approval.",
-      "issue": null,
-      "reviewer": null,
-      "approval": "pending"
+      "justification": "Intended tightening (SEC-ADG-16 item 2): rejects comparing an integer literal (tenant_id = 42) against the TEXT catalog column tenant_id, preventing SQLite type-affinity coercion mismatches.",
+      "issue": "#91",
+      "reviewer": "@themulle",
+      "approval": "approved"
     },
     {
       "dialects": [
@@ -380,10 +380,10 @@
         "8fcb56f9dc61",
         "f2a7aaa89c78"
       ],
-      "justification": "Triage proposal of the gate run: ast-stricter with reason UnfilteredDmlException. Needs security review before approval.",
-      "issue": null,
-      "reviewer": null,
-      "approval": "pending"
+      "justification": "Intended tightening: the AST DML guard rejects DELETE statements whose WHERE clause consists only of constants, subqueries without target columns, or self-comparison tautologies (1=0, 1<2, 100+200=300, EXISTS(SELECT 1), id IN (id), id BETWEEN id AND id).",
+      "issue": "#91",
+      "reviewer": "@themulle",
+      "approval": "approved"
     }
   ],
   "legacyDefects": [

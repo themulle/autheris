@@ -36,7 +36,7 @@ Details, file/line evidence and design in [`implementation/impl-security-wave-c-
 | **SR-D-08** | `deploy/` benchmark stack | Proxy runs non-root with `cap_drop`. Open: `TrustServerCertificate=True` in `podman-compose.yaml` and `appsettings.Benchmark.json`; proxy service not `read_only`. |
 | **SR-D-09** | Images, `Directory.Build.props` | SDK pinned via `global.json`. Open: patch-level image tags next to the digests; `NuGetAuditLevel` still `moderate` (decision D5). |
 | Follow-up | Webhooks, events | Remove the deprecated legacy `X-Autheris-Signature` header (`EmitLegacySignature`) and `DocumentDepositedEvent.SourceFilePath` (no production deployment yet). |
-| Review | SQL compiler gate | 18 `pending` entries in `tests/Autheris.Tests.SqlCompilerGate/Corpus/accepted-differences.json` need security approval before the cutover profile passes. |
+| **COMPLETED ✅** | SQL compiler gate | All 18 entries (57 unique statements) in `tests/Autheris.Tests.SqlCompilerGate/Corpus/accepted-differences.json` audited, documented with concrete security justifications, and signed off (`approved`, see [`2026-10-15-plan-sqlgate-cutover-and-accepted-differences.md`](2026-10-15-plan-sqlgate-cutover-and-accepted-differences.md)). |
 | Follow-up | Error hygiene | ~25 endpoint `ex.Message` sites remain on the allow-list of the raw-exception guard test; retired by `WP-ARC-C-05` (ProblemDetails). |
 
 ---
