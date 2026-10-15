@@ -35,7 +35,7 @@ public sealed class GatewayForbiddenException : GatewaySecurityException
     }
 }
 
-public sealed class TableNotFoundException : GatewaySecurityException
+public class TableNotFoundException : GatewaySecurityException
 {
     public TableIdentifier Table { get; }
 
@@ -174,16 +174,9 @@ public sealed class GatewayRateLimitException : GatewaySecurityException
 
 /// <summary>
 /// Issue #94 (SD-3): the persisted key/index definition of a table is invalid, so its metadata is unavailable, never "absent".
-/// Read paths map it to deny or 404; write and ingestion paths stop for that table and never upsert it as a new table.
-/// The message contains only the table id.
+/// It is a <see cref="TableNotFoundException"/> on purpose: every read transport (REST, WebSQL, OData, GraphQL, MCP, CDC) already
+/// maps that exception to its not-found/denied answer, so an unavailable table is indistinguishable from an unknown one (same
+/// status, same body, same message) and fails closed everywhere, including in callers added later. Ingestion and write paths catch
+/// this type first (it must never be treated as "new table"). The message is the not-found text and names only the table id.
 /// </summary>
-public sealed class TableMetadataUnavailableException : Exception
-{
-    public TableIdentifier Table { get; }
-
-    public TableMetadataUnavailableException(TableIdentifier table)
-        : base($"Metadata of table '{table}' is unavailable.")
-    {
-        Table = table;
-    }
-}
+public sealed class TableMetadataUnavailableException(TableIdentifier table) : TableNotFoundException(table);
