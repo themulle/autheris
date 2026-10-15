@@ -42,6 +42,9 @@ internal sealed class BasicAuthAttemptGuard
     private readonly TimeProvider _timeProvider;
     private readonly Microsoft.Extensions.Caching.Distributed.IDistributedCache? _distributedCache;
     private readonly StackExchange.Redis.IConnectionMultiplexer? _redis;
+    private readonly string? _markerKeyRef;
+    private byte[]? _sharedMarkerKey;
+    private int _sharedMarkerKeyResolved;
 
     private sealed class FailureState
     {
@@ -65,6 +68,81 @@ internal sealed class BasicAuthAttemptGuard
         _timeProvider = timeProvider ?? TimeProvider.System;
         _distributedCache = distributedCache;
         _redis = redis;
+        _markerKeyRef = string.IsNullOrWhiteSpace(options.MarkerKeyRef) ? null : options.MarkerKeyRef;
+    }
+
+    /// <summary>
+    /// WP-PF-08: provides the key of the cluster-shared marker (derived from the secret behind <c>MarkerKeyRef</c>). Resolved at most once;
+    /// a failure or an empty secret leaves the shared marker disabled (every replica verifies itself: fail closed, never open).
+    /// </summary>
+    internal void ConfigureSharedMarker(Func<string, byte[]?> resolveSecret)
+    {
+        if (_markerKeyRef == null || _distributedCache == null || Interlocked.Exchange(ref _sharedMarkerKeyResolved, 1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var ikm = resolveSecret(_markerKeyRef);
+            if (ikm is { Length: > 0 })
+            {
+                _sharedMarkerKey = HKDF.DeriveKey(HashAlgorithmName.SHA256, ikm, 32, salt: null, info: Encoding.UTF8.GetBytes("autheris/basicauth/verified-marker/v1"));
+            }
+        }
+        catch
+        {
+            _sharedMarkerKey = null;
+        }
+    }
+
+    /// <summary>Changes whenever the stored password hash of the user changes, so a marker never outlives a credential rotation.</summary>
+    internal static string CredentialVersion(string storedPasswordHash) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("basic-credential-v1\0" + storedPasswordHash)))[..16];
+
+    internal static string BuildMarkerKey(byte[] key, string authorizationHeader, string credentialVersion) =>
+        "autheris:basicok:" + Convert.ToHexString(HMACSHA256.HashData(key, Encoding.UTF8.GetBytes(authorizationHeader + "\0" + credentialVersion)));
+
+    /// <summary>Cluster-shared verified marker lookup. Any cache failure is a miss (the caller then verifies the password itself).</summary>
+    public async ValueTask<string?> TryGetSharedSuccessAsync(string authorizationHeader, string credentialVersion, CancellationToken ct = default)
+    {
+        var key = _sharedMarkerKey;
+        if (key == null || _distributedCache == null || _successLifetime <= TimeSpan.Zero)
+        {
+            return null;
+        }
+
+        try
+        {
+            var user = await _distributedCache.GetStringAsync(BuildMarkerKey(key, authorizationHeader, credentialVersion), ct).ConfigureAwait(false);
+            return string.IsNullOrEmpty(user) ? null : user;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public async ValueTask CacheSharedSuccessAsync(string authorizationHeader, string credentialVersion, string username, CancellationToken ct = default)
+    {
+        var key = _sharedMarkerKey;
+        if (key == null || _distributedCache == null || _successLifetime <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        try
+        {
+            await _distributedCache.SetStringAsync(
+                BuildMarkerKey(key, authorizationHeader, credentialVersion),
+                username,
+                new Microsoft.Extensions.Caching.Distributed.DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = _successLifetime },
+                ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            // The marker is an optimisation only.
+        }
     }
 
     public static BasicAuthAttemptGuard For(
