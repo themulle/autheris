@@ -1644,6 +1644,281 @@
       ]
     },
     {
+      "name": "autheris_cdc_row_images",
+      "columns": [
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "key_fingerprint",
+          "type": "BLOB",
+          "family": "binary"
+        },
+        {
+          "name": "tenant_scope",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "dek_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "image",
+          "type": "BLOB",
+          "family": "binary"
+        },
+        {
+          "name": "event_offset",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "updated_ms",
+          "type": "INTEGER",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "stream_id",
+        "key_fingerprint"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "autheris_cdc_stream_events",
+      "columns": [
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "event_offset",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "change_version",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "kind",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "operation",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "tenant_scope",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "prior_tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "dek_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "payload",
+          "type": "BLOB",
+          "family": "binary"
+        },
+        {
+          "name": "produced_ms",
+          "type": "INTEGER",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "stream_id",
+        "event_offset"
+      ],
+      "indexes": [
+        {
+          "name": "ix_cdc_stream_events_dek",
+          "unique": false,
+          "columns": [
+            "stream_id",
+            "dek_id"
+          ]
+        },
+        {
+          "name": "ix_cdc_stream_events_produced",
+          "unique": false,
+          "columns": [
+            "stream_id",
+            "produced_ms"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "autheris_cdc_stream_keys",
+      "columns": [
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "dek_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "purpose",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "kek_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "wrapped_key",
+          "type": "BLOB",
+          "family": "binary"
+        },
+        {
+          "name": "created_ms",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "retired_ms",
+          "type": "INTEGER",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "stream_id",
+        "dek_id"
+      ],
+      "indexes": [
+        {
+          "name": "ix_cdc_stream_keys_kek",
+          "unique": false,
+          "columns": [
+            "kek_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "autheris_cdc_streams",
+      "columns": [
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "domain_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "schema_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "table_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "status",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "activation_code",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "head_offset",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "tail_offset",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "producer_fencing_token",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "retention_fencing_token",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "last_polled_ms",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "created_ms",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "updated_ms",
+          "type": "INTEGER",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "stream_id"
+      ],
+      "indexes": [
+        {
+          "name": "ux_cdc_streams_table",
+          "unique": true,
+          "columns": [
+            "source",
+            "domain_name",
+            "schema_name",
+            "table_name"
+          ]
+        }
+      ]
+    },
+    {
       "name": "autheris_cdc_watermarks",
       "columns": [
         {

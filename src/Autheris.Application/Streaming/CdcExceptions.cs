@@ -58,3 +58,41 @@ public sealed class CdcSourceConfigurationException : Exception
     {
     }
 }
+
+/// <summary>The head-offset compare-and-swap of a stream append failed (a concurrent producer advanced the stream). Nothing was written.</summary>
+public sealed class CdcStreamConflictException : Exception
+{
+    public CdcStreamConflictException()
+        : base("CDC_STREAM_CONFLICT")
+    {
+    }
+
+    public CdcStreamConflictException(string message)
+        : base(message)
+    {
+    }
+
+    public CdcStreamConflictException(string message, Exception? innerException)
+        : base(message, innerException)
+    {
+    }
+}
+
+/// <summary>A stream key (KEK or DEK) is unavailable or failed authentication. The message carries only a stable code, never key material.</summary>
+public sealed class CdcStreamKeyUnavailableException : Exception
+{
+    public CdcStreamKeyUnavailableException()
+        : base(Autheris.Domain.Model.CdcActivationCodes.KeyUnavailable)
+    {
+    }
+
+    public CdcStreamKeyUnavailableException(string message)
+        : base(message)
+    {
+    }
+
+    public CdcStreamKeyUnavailableException(string message, Exception? innerException)
+        : base(message, innerException)
+    {
+    }
+}
