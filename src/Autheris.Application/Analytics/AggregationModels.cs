@@ -78,7 +78,10 @@ public sealed record AggregationMetadata(
     int SuppressedGroupsCount,
     long SuppressedRowsCount,
     bool MergedIntoOther,
-    bool Truncated);
+    bool Truncated,
+    bool NoiseApplied = false,
+    double? EpsilonConsumed = null,
+    double? RemainingEpsilon = null);
 
 /// <summary>
 /// Governed aggregation result with groups, differencing-safe totals, and privacy metadata (#28, #37).
@@ -95,6 +98,7 @@ public sealed record AggregationResult(
     public int MinimumGroupSize => Metadata.MinimumGroupSize;
     public bool MergedIntoOther => Metadata.MergedIntoOther;
     public bool Truncated => Metadata.Truncated;
+    public bool NoiseApplied => Metadata.NoiseApplied;
 }
 
 /// <summary>

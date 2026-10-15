@@ -55,7 +55,33 @@ public sealed class AnalyticsOptionsValidator : IValidateOptions<AnalyticsOption
             return ValidateOptionsResult.Fail("Analytics:Privacy:DefaultMinGroupSize must be >= 1.");
         }
 
+        if (options.Privacy.Noise is { Enabled: true } noise)
+        {
+            if (noise.Epsilon <= 0 || double.IsNaN(noise.Epsilon) || double.IsInfinity(noise.Epsilon))
+            {
+                return ValidateOptionsResult.Fail("Analytics:Privacy:Noise:Epsilon must be > 0 when Noise.Enabled is true.");
+            }
+
+            if (noise.DailyBudgetEpsilon < noise.Epsilon || double.IsNaN(noise.DailyBudgetEpsilon) || double.IsInfinity(noise.DailyBudgetEpsilon))
+            {
+                return ValidateOptionsResult.Fail("Analytics:Privacy:Noise:DailyBudgetEpsilon must be >= Epsilon when Noise.Enabled is true.");
+            }
+
+            if (noise.MeasureBounds is { Count: > 0 })
+            {
+                foreach (var (columnKey, bounds) in noise.MeasureBounds)
+                {
+                    if (bounds is null || bounds.Max <= bounds.Min || double.IsNaN(bounds.Min) || double.IsNaN(bounds.Max))
+                    {
+                        return ValidateOptionsResult.Fail(
+                            $"Analytics:Privacy:Noise:MeasureBounds['{columnKey}'] must have Max > Min.");
+                    }
+                }
+            }
+        }
+
         return ValidateOptionsResult.Success;
     }
 }
+
 

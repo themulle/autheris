@@ -2,10 +2,13 @@ namespace Autheris.Application.Dbt.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Dbt.Interfaces;
+using Autheris.Application.Interfaces;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 
@@ -13,16 +16,22 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
 {
     private readonly ISemanticCatalogService _catalogService;
     private readonly ILogger<DbtSemanticManifestIngestionService> _logger;
+    private readonly ITableMetadataRepository? _tableRepository;
 
     public DbtSemanticManifestIngestionService(
         ISemanticCatalogService catalogService,
-        ILogger<DbtSemanticManifestIngestionService> logger)
+        ILogger<DbtSemanticManifestIngestionService> logger,
+        ITableMetadataRepository? tableRepository = null)
     {
         _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _tableRepository = tableRepository;
     }
 
-    public async Task<DbtSemanticManifest> ParseAndIngestAsync(string manifestJson, CancellationToken cancellationToken = default)
+    public Task<DbtSemanticManifest> ParseAndIngestAsync(string manifestJson, CancellationToken cancellationToken = default) =>
+        ParseAndIngestAsync(manifestJson, TenantId.LegacySingleTenant, cancellationToken);
+
+    public async Task<DbtSemanticManifest> ParseAndIngestAsync(string manifestJson, TenantId tenantId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(manifestJson);
 
@@ -237,7 +246,100 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
         }
 
         var manifest = new DbtSemanticManifest(semanticModels, metrics, manifestVersion);
-        await _catalogService.RegisterManifestAsync(manifest, cancellationToken);
+        await _catalogService.RegisterManifestAsync(manifest, tenantId, cancellationToken).ConfigureAwait(false);
+
+        if (_tableRepository != null)
+        {
+            foreach (var model in semanticModels)
+            {
+                if (string.IsNullOrWhiteSpace(model.Name))
+                {
+                    continue;
+                }
+
+                var columns = new List<TableColumn>();
+                var primaryKeys = new List<string>();
+                var seenCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var entity in model.Entities)
+                {
+                    if (string.IsNullOrWhiteSpace(entity.Name) || !seenCols.Add(entity.Name))
+                    {
+                        continue;
+                    }
+
+                    columns.Add(new TableColumn
+                    {
+                        ColumnName = entity.Name,
+                        DataType = "varchar",
+                        Description = entity.Role ?? $"Entity ({entity.Type})",
+                        DocumentationSource = "dbt"
+                    });
+
+                    if (string.Equals(entity.Type, "primary", StringComparison.OrdinalIgnoreCase))
+                    {
+                        primaryKeys.Add(entity.Name);
+                    }
+                }
+
+                foreach (var dim in model.Dimensions)
+                {
+                    if (string.IsNullOrWhiteSpace(dim.Name) || !seenCols.Add(dim.Name))
+                    {
+                        continue;
+                    }
+
+                    columns.Add(new TableColumn
+                    {
+                        ColumnName = dim.Name,
+                        DataType = string.Equals(dim.Type, "time", StringComparison.OrdinalIgnoreCase) ? "timestamp" : "varchar",
+                        Description = dim.Description,
+                        DocumentationSource = "dbt"
+                    });
+                }
+
+                foreach (var measure in model.Measures)
+                {
+                    if (string.IsNullOrWhiteSpace(measure.Name) || !seenCols.Add(measure.Name))
+                    {
+                        continue;
+                    }
+
+                    columns.Add(new TableColumn
+                    {
+                        ColumnName = measure.Name,
+                        DataType = measure.Aggregation.Contains("count", StringComparison.OrdinalIgnoreCase) ? "bigint" : "decimal",
+                        Description = measure.Description,
+                        DocumentationSource = "dbt"
+                    });
+                }
+
+                if (primaryKeys.Count == 0 && columns.Count > 0)
+                {
+                    primaryKeys.Add(columns[0].ColumnName);
+                }
+
+                var tableMeta = new TableMetadata
+                {
+                    Identifier = new TableIdentifier("semantic", "semantic", model.Name),
+                    Table = new Table
+                    {
+                        SchemaName = "semantic",
+                        TableName = model.Name,
+                        DisplayName = model.Name,
+                        Description = model.Description,
+                        DocumentationSource = "dbt",
+                        IsActive = true,
+                        Tags = ["dbt", "semantic-model"]
+                    },
+                    Columns = columns,
+                    PrimaryKeyColumns = primaryKeys
+                };
+
+                await _tableRepository.UpsertTableMetadataAsync(tableMeta, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
         _logger.LogInformation("Successfully ingested dbt semantic manifest with {ModelCount} models and {MetricCount} metrics",
             semanticModels.Count, metrics.Count);
 

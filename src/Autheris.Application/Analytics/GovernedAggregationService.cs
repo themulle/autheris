@@ -1,15 +1,20 @@
 namespace Autheris.Application.Analytics;
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Data;
 using Autheris.Application.Data.Interfaces;
 using Autheris.Application.Data.Services;
+using Autheris.Application.Governance.Interfaces;
+using Autheris.Application.Governance.Services;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Sql.Interfaces;
@@ -17,6 +22,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -25,7 +31,7 @@ using Microsoft.Extensions.Options;
 /// Governed analytical aggregation service (#28, #37).
 /// Enforces caller RLS row filters, rejects masked columns in <c>GROUP BY</c>, aggregate arguments, and <c>WHERE</c> filters
 /// with <see cref="MaskedAggregationException"/> (<c>AGGREGATION_ON_MASKED_COLUMN</c>), and enforces k-anonymity minimum group size
-/// thresholds with differencing-safe grand totals.
+/// thresholds with differencing-safe grand totals and opt-in differential privacy Laplace noise.
 /// </summary>
 public sealed partial class GovernedAggregationService : IGovernedAggregationService
 {
@@ -43,6 +49,8 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
     private readonly IGovernedTableReadPlanner _planner;
     private readonly AnalyticsOptions _analyticsOptions;
     private readonly bool _hasExplicitAnalyticsOptions;
+    private readonly IDifferentialPrivacyEngine? _dpEngine;
+    private readonly ConcurrentDictionary<string, (string UtcDay, AggregationResult Result)> _noisyResultCache = new(StringComparer.Ordinal);
 
     [ActivatorUtilitiesConstructor]
     public GovernedAggregationService(
@@ -57,7 +65,8 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         IEnumerable<IDataSourceExecutor>? dataSourceExecutors = null,
         IAuditWriter? auditWriter = null,
         IOptions<AnalyticsOptions>? analyticsOptions = null,
-        IGovernedTableReadPlanner? planner = null)
+        IGovernedTableReadPlanner? planner = null,
+        IDifferentialPrivacyEngine? dpEngine = null)
     {
         ArgumentNullException.ThrowIfNull(auditLogRepository);
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
@@ -72,6 +81,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         _planner = planner ?? new GovernedTableReadPlanner();
         _hasExplicitAnalyticsOptions = analyticsOptions?.Value != null;
         _analyticsOptions = analyticsOptions?.Value ?? new AnalyticsOptions();
+        _dpEngine = dpEngine ?? new DifferentialPrivacyEngine(auditLogRepository, analyticsOptions: analyticsOptions);
     }
 
     public GovernedAggregationService(
@@ -85,7 +95,8 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         IEnumerable<IDataSourceExecutor>? dataSourceExecutors = null,
         IAuditWriter? auditWriter = null,
         IOptions<AnalyticsOptions>? analyticsOptions = null,
-        IGovernedTableReadPlanner? planner = null)
+        IGovernedTableReadPlanner? planner = null,
+        IDifferentialPrivacyEngine? dpEngine = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _pdp = pdp;
@@ -99,6 +110,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         _planner = planner ?? new GovernedTableReadPlanner();
         _hasExplicitAnalyticsOptions = analyticsOptions?.Value != null;
         _analyticsOptions = analyticsOptions?.Value ?? new AnalyticsOptions();
+        _dpEngine = dpEngine ?? (metadataRepository is IAuditLogRepository dpAudit ? new DifferentialPrivacyEngine(dpAudit, analyticsOptions: analyticsOptions) : null);
     }
 
     public async Task<AggregationResult> ExecuteAggregationAsync(
@@ -140,6 +152,9 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
                 $"Access to table '{query.Table.ToQualifiedName()}' denied: {string.Join("; ", decision.DeniedReasons)}");
         }
 
+        int effectiveMinGroupSize = ResolveEffectiveMinGroupSize(query, metadata);
+        SmallGroupStrategy effectiveStrategy = ResolveEffectiveSmallGroupStrategy(query, metadata);
+
         IReadOnlyList<string> groupByColumns;
         IReadOnlyList<AggregateSelection> resolvedAggregates;
         try
@@ -148,6 +163,10 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             resolvedAggregates = ValidateAndResolveAggregates(query, metadata, decision);
             ValidateWhereClause(query.Where, metadata, decision);
             ValidateOrderByClause(query.OrderBy, groupByColumns, resolvedAggregates, metadata, decision);
+            if (_analyticsOptions.Privacy.Noise.Enabled)
+            {
+                ValidateMeasureBoundsForNoise(resolvedAggregates, metadata);
+            }
         }
         catch (Exception ex)
         {
@@ -168,6 +187,17 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             ? Math.Min(query.Limit.Value, maxGroups)
             : maxGroups;
 
+        string? noiseCacheKey = null;
+        string utcDay = DateTimeOffset.UtcNow.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+        if (_analyticsOptions.Privacy.Noise.Enabled)
+        {
+            noiseCacheKey = BuildNoisyCacheKey(tenantId, userSid, metadata.Identifier, groupByColumns, resolvedAggregates, query.Where, query.OrderBy, requestedLimit, effectiveMinGroupSize, effectiveStrategy, utcDay);
+            if (_noisyResultCache.TryGetValue(noiseCacheKey, out var cached) && string.Equals(cached.UtcDay, utcDay, StringComparison.Ordinal))
+            {
+                return cached.Result;
+            }
+        }
+
         var rawBuckets = await ExecuteAndBuildBucketsAsync(
             principal,
             tenantId,
@@ -177,9 +207,6 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             groupByColumns,
             resolvedAggregates,
             ct).ConfigureAwait(false);
-
-        int effectiveMinGroupSize = ResolveEffectiveMinGroupSize(query, metadata);
-        SmallGroupStrategy effectiveStrategy = ResolveEffectiveSmallGroupStrategy(query, metadata);
 
         var survivingBuckets = new List<ComputedBucket>(rawBuckets.Count);
         var smallBuckets = new List<ComputedBucket>();
@@ -231,7 +258,6 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
                 }
                 else
                 {
-                    // Even the combined OTHER bucket falls below MinGroupSize; suppress it to prevent differencing attacks.
                     suppressed = true;
                     suppressedGroupsCount = smallBuckets.Count;
                     suppressedRowsCount = combinedSmallCount;
@@ -257,6 +283,25 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             orderedBuckets = orderedBuckets.Take(requestedLimit).ToList();
         }
 
+        bool noiseApplied = false;
+        double? epsilonConsumed = null;
+        double? remainingEpsilon = null;
+
+        if (_analyticsOptions.Privacy.Noise.Enabled)
+        {
+            var (noisyBuckets, consumed, remaining) = await ApplyDifferentialPrivacyNoiseAsync(
+                userSid,
+                orderedBuckets,
+                resolvedAggregates,
+                metadata,
+                effectiveMinGroupSize,
+                ct).ConfigureAwait(false);
+            orderedBuckets = noisyBuckets;
+            noiseApplied = true;
+            epsilonConsumed = consumed;
+            remainingEpsilon = remaining;
+        }
+
         var visibleGroupRows = orderedBuckets.Select(b => b.ToGroupRow()).ToList();
 
         // Differencing protection (#37): Totals are computed strictly over the surviving visible groups.
@@ -270,7 +315,10 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             SuppressedGroupsCount: exposedSuppressedGroups,
             SuppressedRowsCount: suppressedRowsCount,
             MergedIntoOther: mergedIntoOther,
-            Truncated: truncated);
+            Truncated: truncated,
+            NoiseApplied: noiseApplied,
+            EpsilonConsumed: epsilonConsumed,
+            RemainingEpsilon: remainingEpsilon);
 
         await RecordAuditAsync(tenantId, userSid, query.Table, allowed: true, new Dictionary<string, object?>
         {
@@ -284,13 +332,167 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             ["suppressed_groups_count"] = suppressedGroupsCount,
             ["suppressed_rows_count"] = suppressedRowsCount,
             ["merged_into_other"] = mergedIntoOther,
+            ["noise_applied"] = noiseApplied,
             ["returned_groups_count"] = visibleGroupRows.Count
         }, ct).ConfigureAwait(false);
 
-        return new AggregationResult(
+        var finalResult = new AggregationResult(
             Table: query.Table,
             Groups: visibleGroupRows,
             Totals: totalsRow,
             Metadata: resultMetadata);
+
+        if (noiseApplied && noiseCacheKey != null)
+        {
+            if (_noisyResultCache.Count >= Math.Max(1, _analyticsOptions.Privacy.Noise.CacheMaxEntries))
+            {
+                _noisyResultCache.Clear();
+            }
+
+            _noisyResultCache[noiseCacheKey] = (utcDay, finalResult);
+        }
+
+        return finalResult;
+    }
+
+    private readonly ConcurrentDictionary<string, double> _fallbackBudgetConsumed = new(StringComparer.Ordinal);
+
+    private void ValidateMeasureBoundsForNoise(IReadOnlyList<AggregateSelection> aggregates, TableMetadata metadata)
+    {
+        foreach (var agg in aggregates)
+        {
+            if (agg.Function is AggregateFunction.Sum or AggregateFunction.Avg && !string.IsNullOrWhiteSpace(agg.Column))
+            {
+                _ = ResolveMeasureBounds(metadata, agg.Column!);
+            }
+        }
+    }
+
+    private MeasureBoundsOptions ResolveMeasureBounds(TableMetadata metadata, string column)
+    {
+        var boundsMap = _analyticsOptions.Privacy.Noise.MeasureBounds;
+        if (boundsMap != null)
+        {
+            string[] candidates = [$"{metadata.Identifier}.{column}", $"{metadata.Identifier.ToQualifiedName()}.{column}", $"{metadata.Table.TableName}.{column}", column];
+            foreach (var key in candidates)
+            {
+                if (boundsMap.TryGetValue(key, out var b) && b is { Max: var max, Min: var min } && max > min)
+                {
+                    return b;
+                }
+            }
+        }
+
+        throw new GatewayInvalidQueryException($"Differential privacy noise requires configured MeasureBounds for column '{column}'.");
+    }
+
+    private static string BuildNoisyCacheKey(
+        TenantId tenantId, Sid userSid, TableIdentifier table, IReadOnlyList<string> groupBy,
+        IReadOnlyList<AggregateSelection> aggregates, TableFilterClause? where, IReadOnlyList<TableOrderBy>? orderBy,
+        int limit, int minGroupSize, SmallGroupStrategy strategy, string utcDay)
+    {
+        var gb = string.Join(",", groupBy);
+        var aggs = string.Join(",", aggregates.Select(a => $"{a.Function}:{a.Column}:{a.EffectiveAlias}"));
+        var ord = orderBy is { Count: > 0 } ? string.Join(",", orderBy.Select(o => $"{o.Column}:{(o.Descending ? "D" : "A")}")) : string.Empty;
+        return $"{tenantId.Value}|{userSid.Value}|{table}|{gb}|{aggs}|{where?.SqlPredicate}|{ord}|{limit}|{minGroupSize}|{strategy}|{utcDay}";
+    }
+
+    private async Task<(List<ComputedBucket> Buckets, double ConsumedEpsilon, double RemainingEpsilon)> ApplyDifferentialPrivacyNoiseAsync(
+        Sid userSid, List<ComputedBucket> buckets, IReadOnlyList<AggregateSelection> aggregates,
+        TableMetadata metadata, int effectiveMinGroupSize, CancellationToken ct)
+    {
+        double epsilon = _analyticsOptions.Privacy.Noise.Epsilon > 0 ? _analyticsOptions.Privacy.Noise.Epsilon : 1.0;
+        double dailyBudget = _analyticsOptions.Privacy.Noise.DailyBudgetEpsilon > 0 ? _analyticsOptions.Privacy.Noise.DailyBudgetEpsilon : 10.0;
+
+        double consumedEpsilon;
+        double remainingEpsilon;
+        if (_dpEngine != null)
+        {
+            var perturbRes = await _dpEngine.PerturbAsync(
+                new DifferentialPrivacyPerturbationRequest(userSid.Value, 0.0, Epsilon: epsilon, Sensitivity: 1.0), ct).ConfigureAwait(false);
+            consumedEpsilon = perturbRes.ConsumedEpsilon;
+            remainingEpsilon = perturbRes.RemainingEpsilon;
+        }
+        else
+        {
+            var dayKey = $"{userSid.Value}:{DateTimeOffset.UtcNow:yyyyMMdd}";
+            double newTotal = _fallbackBudgetConsumed.AddOrUpdate(dayKey, epsilon, (_, prev) => prev + epsilon);
+            if (newTotal > dailyBudget + 1e-9)
+            {
+                _fallbackBudgetConsumed.AddOrUpdate(dayKey, 0.0, (_, prev) => Math.Max(0.0, prev - epsilon));
+                throw new PrivacyBudgetExhaustedException(userSid.Value, newTotal, dailyBudget);
+            }
+            consumedEpsilon = newTotal;
+            remainingEpsilon = Math.Max(0.0, dailyBudget - newTotal);
+        }
+
+        var noisyBuckets = new List<ComputedBucket>(buckets.Count);
+        foreach (var bucket in buckets)
+        {
+            long countDelta = (long)Math.Round(SampleLaplace(1.0 / epsilon));
+            if (countDelta == 0) countDelta = 1L;
+            long noisyCount = Math.Max(1L, bucket.Count + countDelta);
+
+            var noisyAggs = new Dictionary<string, object?>(bucket.Aggregates, StringComparer.OrdinalIgnoreCase);
+            var noisySums = new Dictionary<string, object?>(bucket.Sum, StringComparer.OrdinalIgnoreCase);
+            var noisyAvgs = new Dictionary<string, object?>(bucket.Avg, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var agg in aggregates)
+            {
+                var alias = agg.EffectiveAlias;
+                if (agg.Column == null)
+                {
+                    noisyAggs[alias] = noisyCount;
+                    continue;
+                }
+
+                switch (agg.Function)
+                {
+                    case AggregateFunction.Count:
+                    case AggregateFunction.CountDistinct:
+                        long rawCnt = noisyAggs.TryGetValue(alias, out var cv) && cv != null
+                            ? Convert.ToInt64(cv, CultureInfo.InvariantCulture)
+                            : bucket.Count;
+                        long cDelta = (long)Math.Round(SampleLaplace(1.0 / epsilon));
+                        if (cDelta == 0) cDelta = 1L;
+                        noisyAggs[alias] = Math.Max(0L, rawCnt + cDelta);
+                        break;
+
+                    case AggregateFunction.Sum:
+                        var sumBounds = ResolveMeasureBounds(metadata, agg.Column);
+                        double sumSens = Math.Max(0.01, sumBounds.Max - sumBounds.Min);
+                        decimal rawSum = noisyAggs.TryGetValue(alias, out var sv) && sv != null ? ToDecimal(sv) : 0m;
+                        decimal sumNoise = Math.Round((decimal)SampleLaplace(sumSens / epsilon), 4);
+                        if (sumNoise == 0m) sumNoise = 0.01m;
+                        noisyAggs[alias] = rawSum + sumNoise;
+                        noisySums[agg.Column] = rawSum + sumNoise;
+                        break;
+
+                    case AggregateFunction.Avg:
+                        var avgBounds = ResolveMeasureBounds(metadata, agg.Column);
+                        double avgSens = Math.Max(0.01, (avgBounds.Max - avgBounds.Min) / Math.Max(1, effectiveMinGroupSize));
+                        decimal rawAvg = noisyAggs.TryGetValue(alias, out var av) && av != null ? ToDecimal(av) : 0m;
+                        decimal avgNoise = Math.Round((decimal)SampleLaplace(avgSens / epsilon), 4);
+                        if (avgNoise == 0m) avgNoise = 0.01m;
+                        noisyAggs[alias] = rawAvg + avgNoise;
+                        noisyAvgs[agg.Column] = rawAvg + avgNoise;
+                        break;
+                }
+            }
+
+            noisyBuckets.Add(new ComputedBucket(
+                bucket.GroupKey, noisyCount, noisyAggs, noisySums, noisyAvgs, bucket.Min, bucket.Max, [], bucket.IsMergedOther));
+        }
+
+        return (noisyBuckets, consumedEpsilon, remainingEpsilon);
+    }
+
+    private static double SampleLaplace(double scale)
+    {
+        int r = RandomNumberGenerator.GetInt32(1, int.MaxValue);
+        double u = ((double)r / int.MaxValue) - 0.5;
+        if (Math.Abs(u) < 1e-12) u = 1e-12;
+        return -scale * Math.Sign(u) * Math.Log(1.0 - (2.0 * Math.Abs(u)));
     }
 }
+

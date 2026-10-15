@@ -9,9 +9,11 @@ using Autheris.Application.Interfaces;
 using Autheris.Application.State;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// AR-04: High-performance Differential Privacy engine with atomic cluster-wide epsilon budget tracking.
@@ -28,6 +30,7 @@ public sealed class DifferentialPrivacyEngine : IDifferentialPrivacyEngine
     private readonly IAuditLogRepository _auditLog;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<DifferentialPrivacyEngine> _logger;
+    private readonly double _dailyEpsilonBudget;
 
     public DifferentialPrivacyEngine(
         IDistributedClusterStateProvider clusterState,
@@ -40,12 +43,16 @@ public sealed class DifferentialPrivacyEngine : IDifferentialPrivacyEngine
         IAuditLogRepository auditLog,
         IDistributedClusterStateProvider? clusterState = null,
         TimeProvider? timeProvider = null,
-        ILogger<DifferentialPrivacyEngine>? logger = null)
+        ILogger<DifferentialPrivacyEngine>? logger = null,
+        IOptions<AnalyticsOptions>? analyticsOptions = null)
     {
         _clusterState = clusterState ?? new InMemoryClusterStateProvider();
         _auditLog = auditLog ?? throw new ArgumentNullException(nameof(auditLog));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger ?? NullLogger<DifferentialPrivacyEngine>.Instance;
+        _dailyEpsilonBudget = analyticsOptions?.Value?.Privacy?.Noise?.DailyBudgetEpsilon is > 0 and var configuredBudget
+            ? configuredBudget
+            : DefaultDailyEpsilonBudget;
     }
 
     public async ValueTask<PrivacyBudget> GetBudgetAsync(string clientId, CancellationToken cancellationToken = default)
@@ -66,7 +73,7 @@ public sealed class DifferentialPrivacyEngine : IDifferentialPrivacyEngine
         var consumed = consumedMicro / (double)MicroUnits;
         return new PrivacyBudget(
             ClientId: clientId,
-            TotalDailyEpsilonBudget: DefaultDailyEpsilonBudget,
+            TotalDailyEpsilonBudget: _dailyEpsilonBudget,
             ConsumedEpsilon: consumed,
             LastResetUtc: _timeProvider.GetUtcNow()
         );
@@ -126,7 +133,7 @@ public sealed class DifferentialPrivacyEngine : IDifferentialPrivacyEngine
 
         // 2. Dynamic Epsilon Budget Verification & Deduction via Atomic Cluster Counter
         var costMicro = (long)Math.Ceiling(request.Epsilon * MicroUnits);
-        var limitMicro = (long)Math.Round(DefaultDailyEpsilonBudget * MicroUnits);
+        var limitMicro = (long)Math.Round(_dailyEpsilonBudget * MicroUnits);
         var key = GetBudgetKey(request.ClientId);
 
         var (outcome, consumedAfterMicro) = await _clusterState.TryConsumeBudgetAsync(
@@ -138,7 +145,7 @@ public sealed class DifferentialPrivacyEngine : IDifferentialPrivacyEngine
             var attemptedTotal = (consumedAfterMicro + costMicro) / (double)MicroUnits;
             _logger.LogWarning(
                 "Client '{ClientId}' exhausted daily privacy budget. Attempted to consume {Attempted:F2} with {Consumed:F2}/{Total:F2} already consumed.",
-                request.ClientId, request.Epsilon, consumed, DefaultDailyEpsilonBudget);
+                request.ClientId, request.Epsilon, consumed, _dailyEpsilonBudget);
 
             if (_auditLog != null)
             {
@@ -146,11 +153,11 @@ public sealed class DifferentialPrivacyEngine : IDifferentialPrivacyEngine
                 {
                     attempted = request.Epsilon,
                     consumed,
-                    limit = DefaultDailyEpsilonBudget
+                    limit = _dailyEpsilonBudget
                 }, cancellationToken).ConfigureAwait(false);
             }
 
-            throw new PrivacyBudgetExhaustedException(request.ClientId, attemptedTotal, DefaultDailyEpsilonBudget);
+            throw new PrivacyBudgetExhaustedException(request.ClientId, attemptedTotal, _dailyEpsilonBudget);
         }
 
         if (outcome == BudgetConsumeOutcome.StoreUnavailable)
@@ -174,7 +181,7 @@ public sealed class DifferentialPrivacyEngine : IDifferentialPrivacyEngine
         var noise = GenerateLaplaceNoise(scale);
         var perturbedValue = Math.Round(request.Value + noise, 4);
         var consumedEpsilon = consumedAfterMicro / (double)MicroUnits;
-        var remainingEpsilon = Math.Max(0.0, DefaultDailyEpsilonBudget - consumedEpsilon);
+        var remainingEpsilon = Math.Max(0.0, _dailyEpsilonBudget - consumedEpsilon);
 
         return new DifferentialPrivacyPerturbationResult(
             ClientId: request.ClientId,
