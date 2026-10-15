@@ -16,27 +16,41 @@ using Xunit;
 /// documented grants (VIEW DEFINITION only on AUDIT_LOG_TRUNCATE_GUARD so that Verify can see it, no data grant, no ALTER/CONTROL/db_owner/db_ddladmin) and still starts in Mode=Verify,
 /// initializes the store and reads and writes the catalog.
 /// </summary>
-public sealed class SqlServerGovernanceLeastPrivilegeTests : IAsyncLifetime
+public sealed class SqlServerGovernanceLeastPrivilegeTests : IClassFixture<SqlServerGovernanceLeastPrivilegeTests.Fixture>
 {
     private const string Password = "Lp-test-9f3a!x";
 
-    private readonly string _login = "autheris_rt_" + Guid.NewGuid().ToString("N")[..12];
-    private SqlServerTestDatabase _db = null!;
-    private string _runtimeConnectionString = string.Empty;
-
-    public async Task InitializeAsync()
+    /// <summary>One migrated database and one runtime login for the whole class (the tests only read or fail against it).</summary>
+    public sealed class Fixture : IAsyncLifetime
     {
-        _db = await SqlServerTestDatabase.CreateAsync();
-        await GovernanceSchemaTestSupport.RunSqlServerAsync(_db.ConnectionString, GovernanceMigrationMode.Apply);
-        await CreateRuntimeLoginAsync(_db.ConnectionString, _login, grantTables: true);
-        _runtimeConnectionString = new SqlConnectionStringBuilder(_db.ConnectionString) { UserID = _login, Password = Password, Pooling = false }.ConnectionString;
+        public string Login { get; } = "autheris_rt_" + Guid.NewGuid().ToString("N")[..12];
+        public SqlServerTestDatabase Db { get; private set; } = null!;
+        public string RuntimeConnectionString { get; private set; } = string.Empty;
+
+        public async Task InitializeAsync()
+        {
+            Db = await SqlServerTestDatabase.CreateAsync();
+            await GovernanceSchemaTestSupport.RunSqlServerAsync(Db.ConnectionString, GovernanceMigrationMode.Apply);
+            await CreateRuntimeLoginAsync(Db.ConnectionString, Login, grantTables: true);
+            RuntimeConnectionString = new SqlConnectionStringBuilder(Db.ConnectionString) { UserID = Login, Password = Password, Pooling = false }.ConnectionString;
+        }
+
+        public async Task DisposeAsync()
+        {
+            await DropLoginAsync(Db.ConnectionString, Login);
+            await Db.DisposeAsync();
+        }
     }
 
-    public async Task DisposeAsync()
-    {
-        await DropLoginAsync(_db.ConnectionString, _login);
-        await _db.DisposeAsync();
-    }
+    private readonly Fixture _fx;
+
+    public SqlServerGovernanceLeastPrivilegeTests(Fixture fixture) => _fx = fixture;
+
+    private string _login => _fx.Login;
+
+    private SqlServerTestDatabase _db => _fx.Db;
+
+    private string _runtimeConnectionString => _fx.RuntimeConnectionString;
 
     private static async Task ExecAsync(string connectionString, string sql)
     {

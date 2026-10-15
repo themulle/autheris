@@ -11,8 +11,26 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Issue #94, plan D-2/D-3 and SEC-94-08 on SQL Server: snapshot equality, Verify, pre-created drifted tables, message hygiene.</summary>
-public sealed class SqlServerGovernanceSchemaShapeTests
+public sealed class SqlServerGovernanceSchemaShapeTests : IClassFixture<SqlServerGovernanceSchemaShapeTests.MigratedDatabase>
 {
+    /// <summary>One migrated database shared by the tests that only read the schema.</summary>
+    public sealed class MigratedDatabase : IAsyncLifetime
+    {
+        public SqlServerTestDatabase Db { get; private set; } = null!;
+
+        public async Task InitializeAsync()
+        {
+            Db = await SqlServerTestDatabase.CreateAsync();
+            await GovernanceSchemaTestSupport.RunSqlServerAsync(Db.ConnectionString, GovernanceMigrationMode.Apply);
+        }
+
+        public async Task DisposeAsync() => await Db.DisposeAsync();
+    }
+
+    private readonly MigratedDatabase _shared;
+
+    public SqlServerGovernanceSchemaShapeTests(MigratedDatabase shared) => _shared = shared;
+
     private static async Task ExecAsync(string connectionString, string sql)
     {
         await using var conn = new SqlConnection(connectionString);
@@ -34,8 +52,7 @@ public sealed class SqlServerGovernanceSchemaShapeTests
     [Fact]
     public async Task EmbeddedSnapshot_EqualsShapeOfTheBaseline()
     {
-        await using var db = await SqlServerTestDatabase.CreateAsync();
-        await using var conn = new SqlConnection(db.ConnectionString);
+        await using var conn = new SqlConnection(_shared.Db.ConnectionString);
         await conn.OpenAsync();
         // The baseline DDL is applied directly: the runner itself depends on the snapshot that this test generates.
         SqlServerBaselineSchema.Apply(conn);
@@ -49,13 +66,12 @@ public sealed class SqlServerGovernanceSchemaShapeTests
     [Fact]
     public async Task AppliedBaseline_PassesApplyAndVerify_AndRunsAreIdempotent()
     {
-        await using var db = await SqlServerTestDatabase.CreateAsync();
 
-        await GovernanceSchemaTestSupport.RunSqlServerAsync(db.ConnectionString, GovernanceMigrationMode.Apply);
-        await GovernanceSchemaTestSupport.RunSqlServerAsync(db.ConnectionString, GovernanceMigrationMode.Apply);
-        await GovernanceSchemaTestSupport.RunSqlServerAsync(db.ConnectionString, GovernanceMigrationMode.Verify);
+        await GovernanceSchemaTestSupport.RunSqlServerAsync(_shared.Db.ConnectionString, GovernanceMigrationMode.Apply);
+        await GovernanceSchemaTestSupport.RunSqlServerAsync(_shared.Db.ConnectionString, GovernanceMigrationMode.Apply);
+        await GovernanceSchemaTestSupport.RunSqlServerAsync(_shared.Db.ConnectionString, GovernanceMigrationMode.Verify);
 
-        (await ScalarAsync(db.ConnectionString, "SELECT COUNT(*) FROM dbo.autheris_schema_migrations")).ShouldBe(1);
+        (await ScalarAsync(_shared.Db.ConnectionString, "SELECT COUNT(*) FROM dbo.autheris_schema_migrations")).ShouldBe(1);
     }
 
     [Fact]

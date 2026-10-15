@@ -11,8 +11,26 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Issue #94, plan D-2/D-3 and SEC-94-08d on PostgreSQL: snapshot equality, Verify, pre-created drifted tables, shadow tables.</summary>
-public sealed class PostgreSqlGovernanceSchemaShapeTests
+public sealed class PostgreSqlGovernanceSchemaShapeTests : IClassFixture<PostgreSqlGovernanceSchemaShapeTests.MigratedDatabase>
 {
+    /// <summary>One migrated database shared by the tests that only read the schema.</summary>
+    public sealed class MigratedDatabase : IAsyncLifetime
+    {
+        public PostgreSqlTestDatabase Db { get; private set; } = null!;
+
+        public async Task InitializeAsync()
+        {
+            Db = await PostgreSqlTestDatabase.CreateAsync();
+            await GovernanceSchemaTestSupport.RunPostgreSqlAsync(Db.ConnectionString, GovernanceMigrationMode.Apply);
+        }
+
+        public async Task DisposeAsync() => await Db.DisposeAsync();
+    }
+
+    private readonly MigratedDatabase _shared;
+
+    public PostgreSqlGovernanceSchemaShapeTests(MigratedDatabase shared) => _shared = shared;
+
     private static async Task ExecAsync(string connectionString, string sql)
     {
         await using var conn = new NpgsqlConnection(connectionString);
@@ -34,8 +52,7 @@ public sealed class PostgreSqlGovernanceSchemaShapeTests
     [Fact]
     public async Task EmbeddedSnapshot_EqualsShapeOfTheBaseline()
     {
-        await using var db = await PostgreSqlTestDatabase.CreateAsync();
-        await using (var conn = new NpgsqlConnection(db.ConnectionString))
+        await using (var conn = new NpgsqlConnection(_shared.Db.ConnectionString))
         {
             await conn.OpenAsync();
             // The baseline DDL is applied directly: the runner itself depends on the snapshot that this test generates.
@@ -51,13 +68,12 @@ public sealed class PostgreSqlGovernanceSchemaShapeTests
     [Fact]
     public async Task AppliedBaseline_PassesApplyAndVerify_AndRunsAreIdempotent()
     {
-        await using var db = await PostgreSqlTestDatabase.CreateAsync();
 
-        await GovernanceSchemaTestSupport.RunPostgreSqlAsync(db.ConnectionString, GovernanceMigrationMode.Apply);
-        await GovernanceSchemaTestSupport.RunPostgreSqlAsync(db.ConnectionString, GovernanceMigrationMode.Apply);
-        await GovernanceSchemaTestSupport.RunPostgreSqlAsync(db.ConnectionString, GovernanceMigrationMode.Verify);
+        await GovernanceSchemaTestSupport.RunPostgreSqlAsync(_shared.Db.ConnectionString, GovernanceMigrationMode.Apply);
+        await GovernanceSchemaTestSupport.RunPostgreSqlAsync(_shared.Db.ConnectionString, GovernanceMigrationMode.Apply);
+        await GovernanceSchemaTestSupport.RunPostgreSqlAsync(_shared.Db.ConnectionString, GovernanceMigrationMode.Verify);
 
-        (await ScalarAsync(db.ConnectionString, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(1);
+        (await ScalarAsync(_shared.Db.ConnectionString, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(1);
     }
 
     [Fact]
