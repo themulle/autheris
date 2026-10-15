@@ -73,9 +73,9 @@ public static class TableKeyMarkers
         return new TableKeyMarkerResult(true, names);
     }
 
+    /// <summary>True when the column carries any marker entry; key names are compared case-insensitively (stripping errs on the safe side).</summary>
     public static bool HasMarker(TableColumn column) =>
-        column.Meta is { Count: > 0 } meta &&
-        (meta.ContainsKey(OrdinalKey) || meta.ContainsKey(FlagKey) || IsFlagged(meta));
+        column.Meta is { Count: > 0 } meta && meta.Any(kv => IsMarkerEntry(kv.Key, kv.Value));
 
     public static bool IsMarkerEntry(string key, string value) =>
         string.Equals(key, OrdinalKey, StringComparison.OrdinalIgnoreCase) ||

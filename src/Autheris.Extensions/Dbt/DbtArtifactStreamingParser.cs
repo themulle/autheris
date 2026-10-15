@@ -1,3 +1,4 @@
+using Autheris.Application.DataCatalog.Services;
 using Autheris.Domain.Common;
 namespace Autheris.Extensions.Dbt;
 
@@ -27,7 +28,7 @@ public static class DbtArtifactStreamingParser
         var models = new List<DbtModelDefinition>();
         var relationships = new List<DbtRelationshipDefinition>();
         // Issue #94 (D-8): declared keys per model unique id (constraints and unique tests may arrive in any node order).
-        var keyBuilders = new Dictionary<string, KeyBuilder>(StringComparer.OrdinalIgnoreCase);
+        var keyBuilders = new Dictionary<string, CatalogKeyDefinitionImport.Collector>(StringComparer.OrdinalIgnoreCase);
 
         // Parse JsonDocument asynchronously using streaming options
         var jsonDocOptions = new JsonDocumentOptions
@@ -361,7 +362,7 @@ public static class DbtArtifactStreamingParser
 
         for (var i = 0; i < models.Count; i++)
         {
-            if (keyBuilders.TryGetValue(models[i].UniqueId, out var builder) && builder.Build() is { } keys)
+            if (keyBuilders.TryGetValue(models[i].UniqueId, out var builder) && ToDeclaredKeys(builder) is { } keys)
             {
                 models[i] = models[i] with { DeclaredKeys = keys };
             }
@@ -370,11 +371,11 @@ public static class DbtArtifactStreamingParser
         return (models, relationships);
     }
 
-    private static KeyBuilder GetBuilder(Dictionary<string, KeyBuilder> builders, string uniqueId)
+    private static CatalogKeyDefinitionImport.Collector GetBuilder(Dictionary<string, CatalogKeyDefinitionImport.Collector> builders, string uniqueId)
     {
         if (!builders.TryGetValue(uniqueId, out var builder))
         {
-            builder = new KeyBuilder();
+            builder = new CatalogKeyDefinitionImport.Collector();
             builders[uniqueId] = builder;
         }
 
@@ -410,7 +411,7 @@ public static class DbtArtifactStreamingParser
     }
 
     /// <summary>A model-level (<paramref name="columnName"/> null) or column-level dbt constraint of type primary_key or unique.</summary>
-    private static void CollectKeyConstraint(KeyBuilder builder, JsonElement constraint, string? columnName, List<string>? columnLevelPrimaryKey = null)
+    private static void CollectKeyConstraint(CatalogKeyDefinitionImport.Collector builder, JsonElement constraint, string? columnName, List<string>? columnLevelPrimaryKey = null)
     {
         if (constraint.ValueKind != JsonValueKind.Object ||
             !constraint.TryGetProperty("type", out var typeProp) ||
@@ -453,7 +454,7 @@ public static class DbtArtifactStreamingParser
     }
 
     /// <summary>dbt <c>unique</c> and <c>unique_combination_of_columns</c> tests declare a unique constraint on the attached model.</summary>
-    private static void CollectUniqueTest(JsonElement node, Dictionary<string, KeyBuilder> builders)
+    private static void CollectUniqueTest(JsonElement node, Dictionary<string, CatalogKeyDefinitionImport.Collector> builders)
     {
         if (!node.TryGetProperty("test_metadata", out var testMetadata) ||
             !testMetadata.TryGetProperty("name", out var nameProp) ||
@@ -506,40 +507,10 @@ public static class DbtArtifactStreamingParser
         }
     }
 
-    private sealed class KeyBuilder
-    {
-        private readonly List<IReadOnlyList<string>> _unique = new();
-        private IReadOnlyList<string>? _primaryKey;
-        private bool _invalid;
-
-        public void AddPrimaryKey(IReadOnlyList<string>? columns)
-        {
-            if (columns is not { Count: > 0 and <= TableKeyDefinitionValidator.MaxColumnsPerKey } || _primaryKey is not null)
-            {
-                _invalid = true;
-                return;
-            }
-
-            _primaryKey = columns.ToArray();
-        }
-
-        public void AddUnique(IReadOnlyList<string>? columns)
-        {
-            if (columns is not { Count: > 0 and <= TableKeyDefinitionValidator.MaxColumnsPerKey } ||
-                _unique.Count >= TableKeyDefinitionValidator.MaxIndexesPerTable)
-            {
-                _invalid = true;
-                return;
-            }
-
-            _unique.Add(columns.ToArray());
-        }
-
-        public DbtDeclaredKeys? Build() =>
-            _invalid ? new DbtDeclaredKeys(null, [], true)
-            : _primaryKey is null && _unique.Count == 0 ? null
-            : new DbtDeclaredKeys(_primaryKey, _unique, false);
-    }
+    private static DbtDeclaredKeys? ToDeclaredKeys(CatalogKeyDefinitionImport.Collector collector) =>
+        collector.Invalid ? new DbtDeclaredKeys(null, [], true)
+        : !collector.HasDeclaration ? null
+        : new DbtDeclaredKeys(collector.PrimaryKey, collector.Indexes!.Select(i => i.Columns).ToList(), false);
 
     public static string ExtractModelName(string raw)
     {

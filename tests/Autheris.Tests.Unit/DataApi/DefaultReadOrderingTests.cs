@@ -235,6 +235,25 @@ public sealed class DefaultReadOrderingTests
     }
 
     [Fact]
+    public void Restrict_StripsMarkersCaseInsensitively_WhenMarkerKeyIsNotWhollyVisible()
+    {
+        var m = Meta() with
+        {
+            Columns = new[]
+            {
+                new TableColumn { ColumnName = "k1", DataType = "int", Meta = new Dictionary<string, string> { ["primary_key_ordinal"] = "1" } },
+                new TableColumn { ColumnName = "k2", DataType = "int", Meta = new Dictionary<string, string> { ["primary_key_ordinal"] = "2" } },
+                new TableColumn { ColumnName = "x", DataType = "int", Meta = new Dictionary<string, string> { ["Primary_Key_Ordinal"] = "9", ["ROLE"] = "primary_key" } }
+            }
+        };
+
+        var restricted = TableKeyVisibility.Restrict(m, new[] { m.Columns[0], m.Columns[2] });
+
+        restricted.Columns.ShouldAllBe(c => !c.Meta.Keys.Any(k => string.Equals(k, "primary_key_ordinal", StringComparison.OrdinalIgnoreCase)));
+        restricted.Columns[1].Meta.ShouldNotContainKey("ROLE");
+    }
+
+    [Fact]
     public void ConventionClientIdTs_OnlyWhenBothClear()
     {
         var m = Meta(("client_id", "varchar"), ("ts", "datetime"), ("v", "int"));

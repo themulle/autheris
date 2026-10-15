@@ -63,7 +63,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
             var docContent = $"{t.Identifier.Domain} {t.Identifier.Schema} {t.Identifier.TableName} {cleanDesc} {colDetails}";
             bm25Docs.Add((t.Identifier, docContent));
 
-            var declaredKey = Autheris.Application.Data.Services.TableKeyVisibility.Restrict(t, t.Columns).PrimaryKeyColumns;
+            var declaredKey = t.PrimaryKeyColumns;
 
             // Relationen registrieren via Meta oder Konvention (z.B. customer_id -> customers)
             foreach (var col in t.Columns)
