@@ -98,6 +98,7 @@ public partial class SqliteGovernanceRepository
 
             var consents = byId.Values.ToList();
 
+            consents.RemoveAll(c => !c.IsActive(atTime) && !(c.Effect == ConsentEffect.Deny && c.ValidFrom > atTime)); // read-time clamp (WP-SC-16): never trust the raw valid_to
             // Hydrate column rules & row filters in batch (K-01)
             await HydrateConsentsBatchAsync(conn, consents, ct);
 
@@ -214,6 +215,7 @@ public partial class SqliteGovernanceRepository
 
             var consents = byId.Values.ToList();
 
+            consents.RemoveAll(c => !c.IsActive(effectiveAt)); // read-time clamp (WP-SC-16): never trust the raw valid_to
             // Hydrate column rules & row filters in batch (K-01)
             await HydrateConsentsBatchAsync(conn, consents, ct);
 
@@ -1407,7 +1409,7 @@ public partial class SqliteGovernanceRepository
                 cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                            c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
                                            c.is_revoked, c.revoked_by_sid, c.revoked_at, c.revoke_reason,
-                                           t.source_name, t.schema_name, t.table_name, c.tenant_id
+                                           t.source_name, t.schema_name, t.table_name, c.tenant_id, c.renewal_count
                                     FROM CONSENTS c
                                     JOIN TABLES t ON c.table_id = t.id
                                     WHERE c.id = @id";
@@ -1440,7 +1442,8 @@ public partial class SqliteGovernanceRepository
                         RevokedBySid = reader.IsDBNull(11) ? (Sid?)null : new Sid(reader.GetString(11)),
                         RevokedAt = reader.IsDBNull(12) ? null : DateTimeOffset.Parse(reader.GetString(12)),
                         RevokeReason = reader.IsDBNull(13) ? null : reader.GetString(13),
-                        TenantId = reader.IsDBNull(17) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(17))
+                        TenantId = reader.IsDBNull(17) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(17)),
+                        RenewalCount = reader.GetInt32(18)
                     };
                 }
             }
@@ -1550,7 +1553,7 @@ public partial class SqliteGovernanceRepository
             cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                        c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
                                        c.is_revoked, c.revoked_by_sid, c.revoked_at, c.revoke_reason,
-                                       c.tenant_id, t.source_name, t.schema_name, t.table_name
+                                       c.tenant_id, t.source_name, t.schema_name, t.table_name, c.renewal_count
                                 FROM CONSENTS c
                                 JOIN TABLES t ON c.table_id = t.id
                                 WHERE c.is_revoked = 0
@@ -1592,7 +1595,8 @@ public partial class SqliteGovernanceRepository
                     ValidFrom = validFrom,
                     ValidTo = validTo,
                     IsRevoked = isRevoked,
-                    TenantId = tenantId
+                    TenantId = tenantId,
+                    RenewalCount = reader.GetInt32(18)
                 });
             }
             return consents;
@@ -1627,7 +1631,7 @@ public partial class SqliteGovernanceRepository
             using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"UPDATE CONSENTS
-                                    SET valid_to = @validTo
+                                    SET valid_to = @validTo, renewal_count = renewal_count + 1
                                     WHERE id = @id";
                 cmd.Parameters.AddWithValue("@id", consentId.ToString());
                 cmd.Parameters.AddWithValue("@validTo", newValidTo.ToString("O"));

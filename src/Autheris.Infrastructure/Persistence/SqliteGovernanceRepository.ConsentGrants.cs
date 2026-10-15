@@ -11,7 +11,7 @@ public partial class SqliteGovernanceRepository
     public async Task<IReadOnlyList<Consent>> GetActiveRoleConsentsAsync(
         TableIdentifier table,
         string roleName,
-        TenantId tenantId,
+        TenantId? tenantId,
         DateTimeOffset atTime,
         CancellationToken ct = default)
     {
@@ -28,12 +28,16 @@ public partial class SqliteGovernanceRepository
                                 FROM CONSENTS c
                                 JOIN TABLES t ON c.table_id = t.id
                                 WHERE t.source_name = @domain COLLATE NOCASE AND t.schema_name = @schema COLLATE NOCASE AND t.table_name = @table COLLATE NOCASE
-                                  AND c.tenant_id = @tenantId AND c.is_revoked = 0
+                                  AND c.is_revoked = 0" + (tenantId != null ? " AND c.tenant_id = @tenantId" : "") + @"
                                   AND c.grantee_type = 'Role' AND c.role_name = @role COLLATE NOCASE";
             cmd.Parameters.AddWithValue("@domain", table.Domain);
             cmd.Parameters.AddWithValue("@schema", table.Schema);
             cmd.Parameters.AddWithValue("@table", table.TableName);
-            cmd.Parameters.AddWithValue("@tenantId", tenantId.Value);
+            if (tenantId != null)
+            {
+                cmd.Parameters.AddWithValue("@tenantId", tenantId.Value.Value);
+            }
+
             cmd.Parameters.AddWithValue("@role", roleName);
 
             using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -67,20 +71,20 @@ public partial class SqliteGovernanceRepository
     }
 
     public async Task ReplaceConsentsAsync(
-        IReadOnlyList<Guid> revokeIds,
+        IReadOnlyList<Guid> revokeConsentIds,
         IReadOnlyList<Consent> create,
         Sid actor,
         string reason,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(revokeIds);
+        ArgumentNullException.ThrowIfNull(revokeConsentIds);
         ArgumentNullException.ThrowIfNull(create);
         foreach (var consent in create)
         {
             consent.Validate();
         }
 
-        if (revokeIds.Count == 0 && create.Count == 0)
+        if (revokeConsentIds.Count == 0 && create.Count == 0)
         {
             return;
         }
@@ -90,7 +94,7 @@ public partial class SqliteGovernanceRepository
         var conn = scope.Connection;
         using var tx = conn.BeginTransaction();
 
-        foreach (var id in revokeIds.Distinct())
+        foreach (var id in revokeConsentIds.Distinct())
         {
             var table = await RevokeConsentInTransactionAsync(conn, tx, id, actor, reason, ct).ConfigureAwait(false);
             if (table is { } t)

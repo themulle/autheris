@@ -122,7 +122,8 @@ CREATE TABLE dbo.CONSENTS (
     revoked_by_sid NVARCHAR(256) NULL,
     revoked_at NVARCHAR(64) NULL,
     revoke_reason NVARCHAR(MAX) NULL,
-    tenant_id NVARCHAR(128) NOT NULL DEFAULT 'legacy-single-tenant'
+    tenant_id NVARCHAR(128) NOT NULL DEFAULT 'legacy-single-tenant',
+    renewal_count INT NOT NULL CONSTRAINT DF_CONSENTS_renewals DEFAULT 0
 );
 
 IF OBJECT_ID(N'dbo.CONSENT_COLUMN_RULES', N'U') IS NULL
@@ -383,13 +384,20 @@ BEGIN
         subject_type NVARCHAR(32) NOT NULL CONSTRAINT DF_ACCESS_PROFILE_ASSIGNMENTS_type DEFAULT 'User',
         assigned_at DATETIMEOFFSET NOT NULL CONSTRAINT DF_ACCESS_PROFILE_ASSIGNMENTS_assigned DEFAULT SYSDATETIMEOFFSET(),
         expires_at DATETIMEOFFSET NULL,
-        CONSTRAINT PK_ACCESS_PROFILE_ASSIGNMENTS PRIMARY KEY (tenant_id, profile_id, subject),
+        subject_norm NVARCHAR(256) NULL,
+        created_by NVARCHAR(256) NULL,
+        approved_by NVARCHAR(256) NULL,
+        approved_at DATETIMEOFFSET NULL,
+        justification NVARCHAR(MAX) NULL,
+        kind NVARCHAR(32) NOT NULL CONSTRAINT DF_ACCESS_PROFILE_ASSIGNMENTS_kind DEFAULT 'Standard',
+        renewal_count INT NOT NULL CONSTRAINT DF_ACCESS_PROFILE_ASSIGNMENTS_renewals DEFAULT 0,
+        CONSTRAINT PK_ACCESS_PROFILE_ASSIGNMENTS PRIMARY KEY NONCLUSTERED (tenant_id, profile_id, subject_type, subject),
         CONSTRAINT FK_ACCESS_PROFILE_ASSIGNMENTS_PROFILE FOREIGN KEY (tenant_id, profile_id) 
             REFERENCES ACCESS_PROFILES (tenant_id, profile_id) ON DELETE CASCADE
     );
 
     CREATE NONCLUSTERED INDEX IX_ACCESS_PROFILE_ASSIGNMENTS_SUBJECT 
-        ON ACCESS_PROFILE_ASSIGNMENTS(tenant_id, subject);
+        ON ACCESS_PROFILE_ASSIGNMENTS(tenant_id, subject_type, subject_norm);
 END;
 
 IF OBJECT_ID(N'dbo.VIRTUAL_FILTER_GENERATION', N'U') IS NULL

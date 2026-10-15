@@ -11,7 +11,7 @@ public partial class PostgreSqlGovernanceRepository
     public async Task<IReadOnlyList<Consent>> GetActiveRoleConsentsAsync(
         TableIdentifier table,
         string roleName,
-        TenantId tenantId,
+        TenantId? tenantId,
         DateTimeOffset atTime,
         CancellationToken ct = default)
     {
@@ -27,12 +27,16 @@ public partial class PostgreSqlGovernanceRepository
                                 FROM CONSENTS c
                                 JOIN TABLES t ON c.table_id = t.id
                                 WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
-                                  AND c.tenant_id = @tenantId AND c.is_revoked = 0
+                                  AND c.is_revoked = 0" + (tenantId != null ? " AND c.tenant_id = @tenantId" : "") + @"
                                   AND c.grantee_type = 'Role' AND LOWER(c.role_name) = LOWER(@role)";
             cmd.Parameters.AddWithValue("@domain", table.Domain);
             cmd.Parameters.AddWithValue("@schema", table.Schema);
             cmd.Parameters.AddWithValue("@table", table.TableName);
-            cmd.Parameters.AddWithValue("@tenantId", tenantId.Value);
+            if (tenantId != null)
+            {
+                cmd.Parameters.AddWithValue("@tenantId", tenantId.Value.Value);
+            }
+
             cmd.Parameters.AddWithValue("@role", roleName);
 
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -66,20 +70,20 @@ public partial class PostgreSqlGovernanceRepository
     }
 
     public async Task ReplaceConsentsAsync(
-        IReadOnlyList<Guid> revokeIds,
+        IReadOnlyList<Guid> revokeConsentIds,
         IReadOnlyList<Consent> create,
         Sid actor,
         string reason,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(revokeIds);
+        ArgumentNullException.ThrowIfNull(revokeConsentIds);
         ArgumentNullException.ThrowIfNull(create);
         foreach (var consent in create)
         {
             consent.Validate();
         }
 
-        if (revokeIds.Count == 0 && create.Count == 0)
+        if (revokeConsentIds.Count == 0 && create.Count == 0)
         {
             return;
         }
@@ -89,7 +93,7 @@ public partial class PostgreSqlGovernanceRepository
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
-            foreach (var id in revokeIds.Distinct())
+            foreach (var id in revokeConsentIds.Distinct())
             {
                 var table = await RevokeConsentInTransactionAsync(conn, tx, id, actor, reason, ct).ConfigureAwait(false);
                 if (table is { } t)

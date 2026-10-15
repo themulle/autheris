@@ -115,7 +115,8 @@ internal sealed class SqliteBaselineSchema
                 revoked_by_sid TEXT,
                 revoked_at TEXT,
                 revoke_reason TEXT,
-                tenant_id TEXT NOT NULL DEFAULT 'legacy-single-tenant'
+                tenant_id TEXT NOT NULL DEFAULT 'legacy-single-tenant',
+                renewal_count INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS CONSENT_COLUMN_RULES (
@@ -323,12 +324,19 @@ internal sealed class SqliteBaselineSchema
                 subject_type TEXT NOT NULL DEFAULT 'User',
                 assigned_at TEXT NOT NULL,
                 expires_at TEXT,
-                PRIMARY KEY (tenant_id, profile_id, subject),
+                subject_norm TEXT,
+                created_by TEXT,
+                approved_by TEXT,
+                approved_at TEXT,
+                justification TEXT,
+                kind TEXT NOT NULL DEFAULT 'Standard',
+                renewal_count INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (tenant_id, profile_id, subject_type, subject),
                 FOREIGN KEY (tenant_id, profile_id) REFERENCES ACCESS_PROFILES (tenant_id, profile_id) ON DELETE CASCADE
             );
 
             CREATE INDEX IF NOT EXISTS IX_ACCESS_PROFILE_ASSIGNMENTS_SUBJECT 
-                ON ACCESS_PROFILE_ASSIGNMENTS(tenant_id, subject);
+                ON ACCESS_PROFILE_ASSIGNMENTS(tenant_id, subject_type, subject_norm);
 
             CREATE TABLE IF NOT EXISTS VIRTUAL_FILTER_GENERATION (
                 id INTEGER PRIMARY KEY CHECK (id = 1),

@@ -62,4 +62,85 @@ public sealed class InMemoryAccessProfileRepository : IAccessProfileRepository
         var removed = _profiles.TryRemove((tenantId, profileId), out _);
         return Task.FromResult(removed);
     }
+
+    // WP-SC-03: the typed assignment API of the in-memory test double. It applies the same rules as the persisted stores for the explicit
+    // API; the legacy list-based reads above stay permissive. Production registers the persisted repositories.
+
+    public Task<IReadOnlyList<AccessProfile>> GetProfilesForSubjectsAsync(
+        TenantId tenantId, IReadOnlyCollection<string> users, IReadOnlyCollection<string> groups, IReadOnlyCollection<string> roles, CancellationToken ct = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var wanted = new HashSet<(AccessProfileSubjectType, string)>();
+        foreach (var u in users ?? []) wanted.Add((AccessProfileSubjectType.User, u.Trim().ToUpperInvariant()));
+        foreach (var g in groups ?? []) wanted.Add((AccessProfileSubjectType.Group, g.Trim().ToUpperInvariant()));
+        foreach (var r in roles ?? []) wanted.Add((AccessProfileSubjectType.Role, r.Trim().ToUpperInvariant()));
+
+        var matches = _profiles.Values
+            .Where(p => p.TenantId == tenantId &&
+                        p.Assignments.Any(a => wanted.Contains((a.SubjectType, a.Subject.Trim().ToUpperInvariant())) && AccessProfileAssignmentRules.IsEffective(p, a, now)))
+            .ToList();
+        return Task.FromResult(AccessProfileAssignmentRules.Order(matches));
+    }
+
+    public Task<AccessProfileAssignment> AssignProfileAsync(TenantId tenantId, string profileId, AccessProfileAssignment assignment, CancellationToken ct = default)
+    {
+        var profile = RequireProfile(tenantId, profileId);
+        var now = DateTimeOffset.UtcNow;
+        var stored = assignment with { AssignedAt = now, Subject = assignment.Subject.Trim() };
+        AccessProfileAssignmentRules.ValidateForAssignment(profile, stored, now);
+        Replace(profile, stored);
+        return Task.FromResult(stored);
+    }
+
+    public Task<AccessProfileAssignment> ApproveAssignmentAsync(TenantId tenantId, string profileId, AccessProfileSubjectType subjectType, string subject, string approvedBy, CancellationToken ct = default)
+    {
+        var profile = RequireProfile(tenantId, profileId);
+        var existing = RequireAssignment(profile, subjectType, subject);
+        AccessProfileAssignmentRules.ValidateApprover(profile, existing, approvedBy);
+        var approved = existing with { ApprovedBy = approvedBy.Trim(), ApprovedAt = DateTimeOffset.UtcNow };
+        Replace(profile, approved);
+        return Task.FromResult(approved);
+    }
+
+    public Task<AccessProfileAssignment> RenewAssignmentAsync(TenantId tenantId, string profileId, AccessProfileSubjectType subjectType, string subject, DateTimeOffset newExpiresAt, string approvedBy, CancellationToken ct = default)
+    {
+        var profile = RequireProfile(tenantId, profileId);
+        var existing = RequireAssignment(profile, subjectType, subject);
+        if (existing.Kind == AccessProfileAssignmentKind.BreakGlass)
+        {
+            throw new AccessProfileAssignmentRejectedException(AccessProfileAssignmentRules.BreakGlassNotRenewable, "A break-glass exception cannot be renewed.");
+        }
+
+        AccessProfileAssignmentRules.ValidateApprover(profile, existing, approvedBy);
+        var now = DateTimeOffset.UtcNow;
+        var renewed = existing with { AssignedAt = now, ExpiresAt = newExpiresAt, ApprovedBy = approvedBy.Trim(), ApprovedAt = now, RenewalCount = existing.RenewalCount + 1 };
+        AccessProfileAssignmentRules.ValidateForAssignment(profile, renewed, now);
+        Replace(profile, renewed);
+        return Task.FromResult(renewed);
+    }
+
+    public Task<bool> RemoveAssignmentAsync(TenantId tenantId, string profileId, AccessProfileSubjectType subjectType, string subject, CancellationToken ct = default)
+    {
+        var profile = RequireProfile(tenantId, profileId);
+        var removed = profile.Assignments.RemoveAll(a => a.SubjectType == subjectType && string.Equals(a.Subject, subject.Trim(), StringComparison.OrdinalIgnoreCase)) > 0;
+        profile.AssignedSubjects.RemoveAll(s => string.Equals(s, subject.Trim(), StringComparison.OrdinalIgnoreCase) && !profile.Assignments.Any(a => string.Equals(a.Subject, s, StringComparison.OrdinalIgnoreCase)));
+        return Task.FromResult(removed);
+    }
+
+    private AccessProfile RequireProfile(TenantId tenantId, string profileId) =>
+        _profiles.TryGetValue((tenantId, profileId), out var p) ? p : throw new KeyNotFoundException($"Access profile '{profileId}' does not exist.");
+
+    private static AccessProfileAssignment RequireAssignment(AccessProfile profile, AccessProfileSubjectType type, string subject) =>
+        profile.Assignments.FirstOrDefault(a => a.SubjectType == type && string.Equals(a.Subject, subject.Trim(), StringComparison.OrdinalIgnoreCase))
+        ?? throw new KeyNotFoundException($"Assignment of '{subject}' does not exist.");
+
+    private static void Replace(AccessProfile profile, AccessProfileAssignment assignment)
+    {
+        profile.Assignments.RemoveAll(a => a.SubjectType == assignment.SubjectType && string.Equals(a.Subject, assignment.Subject, StringComparison.OrdinalIgnoreCase));
+        profile.Assignments.Add(assignment);
+        if (!profile.AssignedSubjects.Contains(assignment.Subject, StringComparer.OrdinalIgnoreCase))
+        {
+            profile.AssignedSubjects.Add(assignment.Subject);
+        }
+    }
 }

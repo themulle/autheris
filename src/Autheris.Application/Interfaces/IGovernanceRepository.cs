@@ -64,25 +64,6 @@ public interface IConsentRepository
     Task ExtendConsentExpiryAsync(Guid consentId, DateTimeOffset newValidTo, CancellationToken ct = default);
 
     /// <summary>
-    /// WP-SC-02: the active (not revoked, valid at <paramref name="atTime"/>) consents whose grantee is the role
-    /// <paramref name="roleName"/> (case-insensitive) on <paramref name="table"/> in <paramref name="tenantId"/>. Role consents are matched by
-    /// role name only; the subject-based queries cannot find them without a subject. There is no safe default: it fails closed.
-    /// </summary>
-    Task<IReadOnlyList<Consent>> GetActiveRoleConsentsAsync(TableIdentifier table, string roleName, TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default)
-        => throw new NotSupportedException(
-            $"{GetType().Name} does not implement the role-grantee consent lookup; refusing to fall back to a subject-based lookup.");
-
-    /// <summary>
-    /// WP-SC-02: revokes <paramref name="revokeIds"/> and creates <paramref name="create"/> in ONE transaction with ONE epoch bump per affected
-    /// table. Every revocation is authorised exactly like <see cref="RevokeConsentAsync"/> (beneficiary, data owner, delegate or admin) and
-    /// every created consent is validated like <see cref="CreateConsentAsync"/>. Any failure rolls back everything (no partial apply).
-    /// There is no safe default: it fails closed.
-    /// </summary>
-    Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeIds, IReadOnlyList<Consent> create, Sid actor, string reason, CancellationToken ct = default)
-        => throw new NotSupportedException(
-            $"{GetType().Name} does not implement the atomic consent replacement; refusing to fall back to separate revoke and create calls.");
-
-    /// <summary>
     /// SEC E-05 / EX-02: All non-revoked, not yet expired consents carrying <paramref name="consentRequestId"/>
     /// (e.g. the OpenMetadata sync marker) – without any subject, role, table or tenant filter (used for reconcile).
     /// </summary>
@@ -102,6 +83,49 @@ public interface IConsentRepository
     /// </summary>
     Task<IReadOnlyList<TableIdentifier>> GetTablesWithConsentsForTenantAsync(TenantId tenantId, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<TableIdentifier>>(Array.Empty<TableIdentifier>());
+
+    /// <summary>
+    /// WP-SC-02: active (non-revoked, in-window) consents of exactly one role grantee on one table within <paramref name="tenantId"/>.
+    /// Role consents carry no subject SID, so the subject-based lookup never returns them. The default filters
+    /// <see cref="GetAllActiveConsentsForSubjectsAsync(IEnumerable{Sid}, IEnumerable{string}?, DateTimeOffset?, TenantId?, CancellationToken)"/>;
+    /// persistence overrides it with an indexed query.
+    /// </summary>
+    async Task<IReadOnlyList<Consent>> GetActiveRoleConsentsAsync(
+        TableIdentifier table, string roleName, TenantId? tenantId, DateTimeOffset atTime, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(roleName);
+        var all = await GetAllActiveConsentsForSubjectsAsync(Array.Empty<Sid>(), new[] { roleName }, atTime, tenantId, ct).ConfigureAwait(false);
+        return all
+            .Where(c => c.GranteeType == GranteeType.Role
+                && c.TableIdentifier.Equals(table)
+                && string.Equals(c.RoleName, roleName, StringComparison.OrdinalIgnoreCase)
+                && (tenantId is null || c.TenantId == tenantId.Value))
+            .ToList();
+    }
+
+    /// <summary>
+    /// WP-SC-10: one keyset page of the consents of a tenant (ordered by id), including role and group grants, optionally filtered by
+    /// table and grantee. The tenant predicate is mandatory. Persistence implements it with an indexed query; the default fails closed
+    /// instead of loading every consent into memory.
+    /// </summary>
+    Task<Autheris.Application.Governance.Paging.ConsentPage> GetConsentPageAsync(
+        Autheris.Application.Governance.Paging.ConsentPageQuery query, CancellationToken ct = default)
+        => throw new NotSupportedException(
+            $"{GetType().Name} does not implement paged consent listing; refusing an unbounded listing.");
+
+    /// <summary>
+    /// WP-SC-02: atomically revokes <paramref name="revokeConsentIds"/> and creates <paramref name="create"/> in ONE transaction
+    /// with ONE epoch bump per affected table. Either every change is applied or none. There is no non-atomic fallback: the default
+    /// fails closed so that a provider without a transactional implementation can never apply a partial manifest.
+    /// </summary>
+    Task ReplaceConsentsAsync(
+        IReadOnlyList<Guid> revokeConsentIds,
+        IReadOnlyList<Consent> create,
+        Sid actor,
+        string reason,
+        CancellationToken ct = default)
+        => throw new NotSupportedException(
+            $"{GetType().Name} does not implement the transactional consent replacement; refusing a non-atomic apply.");
 }
 
 

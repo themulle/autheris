@@ -33,11 +33,47 @@
           "name": "expires_at",
           "type": "DATETIMEOFFSET",
           "family": "datetime"
+        },
+        {
+          "name": "subject_norm",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_by",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "approved_by",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "approved_at",
+          "type": "DATETIMEOFFSET",
+          "family": "datetime"
+        },
+        {
+          "name": "justification",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "kind",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "renewal_count",
+          "type": "INT",
+          "family": "integer"
         }
       ],
       "primaryKey": [
         "tenant_id",
         "profile_id",
+        "subject_type",
         "subject"
       ],
       "indexes": [
@@ -46,7 +82,8 @@
           "unique": false,
           "columns": [
             "tenant_id",
-            "subject"
+            "subject_type",
+            "subject_norm"
           ]
         }
       ]
@@ -826,6 +863,11 @@
           "name": "tenant_id",
           "type": "NVARCHAR",
           "family": "string"
+        },
+        {
+          "name": "renewal_count",
+          "type": "INT",
+          "family": "integer"
         }
       ],
       "primaryKey": [

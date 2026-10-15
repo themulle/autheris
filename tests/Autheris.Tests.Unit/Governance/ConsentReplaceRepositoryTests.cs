@@ -164,4 +164,76 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         audit.ShouldContain(e => e.EventType == "CONSENT_REVOKED" && e.ActorSid == Admin);
         audit.Count(e => e.EventType == "CONSENT_GRANTED").ShouldBeGreaterThanOrEqualTo(2);
     }
+
+    [Fact]
+    public async Task SEC_SC_20_RenewalCount_StartsAtZero_AndIsIncrementedByEveryExtension()
+    {
+        await EnsureTableAsync();
+        var consent = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice"));
+        (await _repo.GetConsentByIdAsync(consent.Id))!.RenewalCount.ShouldBe(0);
+
+        await _repo.ExtendConsentExpiryAsync(consent.Id, DateTimeOffset.UtcNow.AddDays(60));
+        await _repo.ExtendConsentExpiryAsync(consent.Id, DateTimeOffset.UtcNow.AddDays(90));
+
+        (await _repo.GetConsentByIdAsync(consent.Id))!.RenewalCount.ShouldBe(2);
+        var expiring = await _repo.GetExpiringConsentsAsync(DateTimeOffset.UtcNow.AddDays(100));
+        expiring.Single(c => c.Id == consent.Id).RenewalCount.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task SEC_SC_16_ConsentPage_WalksTheTenantOnceByKeyset_AndNeverCrossesTenants()
+    {
+        await EnsureTableAsync();
+        var created = new List<Consent>();
+        for (var i = 0; i < 7; i++)
+        {
+            created.Add(await _repo.CreateConsentAsync(UserConsent("S-1-5-21-U" + i)));
+        }
+
+        created.Add(await _repo.CreateConsentAsync(RoleConsent("Analyst", TenantA)));
+        await _repo.CreateConsentAsync(RoleConsent("Analyst", TenantB));
+
+        var seen = new List<Guid>();
+        Guid? after = null;
+        var pages = 0;
+        do
+        {
+            var page = await _repo.GetConsentPageAsync(new Autheris.Application.Governance.Paging.ConsentPageQuery(TenantA, AfterId: after, PageSize: 3));
+            page.Items.Count.ShouldBeLessThanOrEqualTo(3);
+            page.Items.ShouldAllBe(c => c.TenantId == TenantA);
+            seen.AddRange(page.Items.Select(c => c.Id));
+            after = page.NextAfterId;
+            pages++;
+        }
+        while (after != null);
+
+        seen.ShouldBe(created.Select(c => c.Id).OrderBy(i => i.ToString(), StringComparer.Ordinal).ToList());
+        pages.ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task SEC_SC_16_ConsentPage_FiltersByTableGranteeTypeAndGrantee_AndHidesRevokedByDefault()
+    {
+        await EnsureTableAsync();
+        var alice = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice"));
+        await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Bob"));
+        var role = await _repo.CreateConsentAsync(RoleConsent("Analyst", TenantA));
+        await _repo.RevokeConsentAsync(alice.Id, new Sid("S-1-5-21-Alice"), "self");
+        var tenant = new Autheris.Application.Governance.Paging.ConsentPageQuery(TenantA, Table: _table);
+
+        (await _repo.GetConsentPageAsync(tenant with { GranteeType = GranteeType.Role })).Items.Select(c => c.Id).ShouldBe([role.Id]);
+        (await _repo.GetConsentPageAsync(tenant with { Grantee = "s-1-5-21-alice" })).Items.ShouldBeEmpty();
+        (await _repo.GetConsentPageAsync(tenant with { Grantee = "s-1-5-21-alice", IncludeInactive = true })).Items.Single().RenewalCount.ShouldBe(0);
+        (await _repo.GetConsentPageAsync(tenant with { Grantee = "ANALYST" })).Items.Single().Id.ShouldBe(role.Id);
+        (await _repo.GetConsentPageAsync(tenant with { Table = new TableIdentifier("x", "y", "z") })).Items.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task SEC_SC_16_ConsentPage_WithoutTenant_FailsClosed()
+    {
+        await EnsureTableAsync();
+
+        await Should.ThrowAsync<ArgumentException>(() =>
+            _repo.GetConsentPageAsync(new Autheris.Application.Governance.Paging.ConsentPageQuery(default)));
+    }
 }

@@ -93,11 +93,47 @@
           "name": "expires_at",
           "type": "TEXT",
           "family": "string"
+        },
+        {
+          "name": "subject_norm",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_by",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "approved_by",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "approved_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "justification",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "renewal_count",
+          "type": "INTEGER",
+          "family": "integer"
         }
       ],
       "primaryKey": [
         "tenant_id",
         "profile_id",
+        "subject_type",
         "subject"
       ],
       "indexes": [
@@ -106,7 +142,8 @@
           "unique": false,
           "columns": [
             "tenant_id",
-            "subject"
+            "subject_type",
+            "subject_norm"
           ]
         }
       ]
@@ -511,6 +548,11 @@
           "name": "tenant_id",
           "type": "TEXT",
           "family": "string"
+        },
+        {
+          "name": "renewal_count",
+          "type": "INTEGER",
+          "family": "integer"
         }
       ],
       "primaryKey": [

@@ -110,7 +110,8 @@ internal static class PostgreSqlBaselineSchema
                 revoked_by_sid TEXT,
                 revoked_at TEXT,
                 revoke_reason TEXT,
-                tenant_id TEXT NOT NULL DEFAULT 'legacy-single-tenant'
+                tenant_id TEXT NOT NULL DEFAULT 'legacy-single-tenant',
+                renewal_count INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS CONSENT_COLUMN_RULES (
@@ -332,13 +333,20 @@ internal static class PostgreSqlBaselineSchema
                 subject_type VARCHAR(32) NOT NULL DEFAULT 'User',
                 assigned_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 expires_at TIMESTAMPTZ NULL,
-                CONSTRAINT pk_access_profile_assignments PRIMARY KEY (tenant_id, profile_id, subject),
+                subject_norm VARCHAR(256) NULL,
+                created_by VARCHAR(256) NULL,
+                approved_by VARCHAR(256) NULL,
+                approved_at TIMESTAMPTZ NULL,
+                justification TEXT NULL,
+                kind VARCHAR(32) NOT NULL DEFAULT 'Standard',
+                renewal_count INTEGER NOT NULL DEFAULT 0,
+                CONSTRAINT pk_access_profile_assignments PRIMARY KEY (tenant_id, profile_id, subject_type, subject),
                 CONSTRAINT fk_profile_assignments_profile FOREIGN KEY (tenant_id, profile_id) 
                     REFERENCES access_profiles (tenant_id, profile_id) ON DELETE CASCADE
             );
 
             CREATE INDEX IF NOT EXISTS ix_access_profile_assignments_subject 
-                ON access_profile_assignments(tenant_id, subject);
+                ON access_profile_assignments(tenant_id, subject_type, subject_norm);
 
             CREATE TABLE IF NOT EXISTS VIRTUAL_FILTER_GENERATION (
                 id INTEGER PRIMARY KEY CHECK (id = 1),

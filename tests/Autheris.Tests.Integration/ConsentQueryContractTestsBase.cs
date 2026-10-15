@@ -278,4 +278,46 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         (await Repo.GetConsentByIdAsync(old.Id))!.IsRevoked.ShouldBeFalse();
         (await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Gina")], seed.Table, seed.Now, TenantA)).ShouldNotContain(c => c.GranteeType != GranteeType.Role);
     }
+
+    [Fact]
+    public async Task SEC_SC_20_RenewalCount_IsPersistedAndIncrementedByExtensions()
+    {
+        if (!Available) return;
+        var seed = await SeedAsync();
+        var consent = seed.Consents.First(c => c.TenantId == TenantA && string.Equals(c.GranteeSid?.Value, "S-1-5-21-Bob", StringComparison.OrdinalIgnoreCase));
+        (await Repo.GetConsentByIdAsync(consent.Id))!.RenewalCount.ShouldBe(0);
+
+        await Repo.ExtendConsentExpiryAsync(consent.Id, seed.Now.AddDays(60));
+        await Repo.ExtendConsentExpiryAsync(consent.Id, seed.Now.AddDays(90));
+
+        (await Repo.GetConsentByIdAsync(consent.Id))!.RenewalCount.ShouldBe(2);
+        (await Repo.GetExpiringConsentsAsync(seed.Now.AddDays(100))).Single(c => c.Id == consent.Id).RenewalCount.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task SEC_SC_16_ConsentPage_WalksTheTenantOnce_FiltersAndFailsClosedWithoutTenant()
+    {
+        if (!Available) return;
+        var seed = await SeedAsync();
+        var expected = seed.Consents.Where(c => c.TenantId == TenantA && c.TableId == seed.TableId).Select(c => c.Id).ToHashSet();
+        var query = new Autheris.Application.Governance.Paging.ConsentPageQuery(TenantA, Table: seed.Table, IncludeInactive: true, PageSize: 4);
+
+        var seen = new List<Guid>();
+        Guid? after = null;
+        do
+        {
+            var page = await Repo.GetConsentPageAsync(query with { AfterId = after });
+            page.Items.ShouldAllBe(c => c.TenantId == TenantA && c.TableId == seed.TableId);
+            seen.AddRange(page.Items.Select(c => c.Id));
+            after = page.NextAfterId;
+        }
+        while (after != null);
+
+        seen.Count.ShouldBe(seen.Distinct().Count());
+        seen.ShouldBe(expected, ignoreOrder: true);
+        (await Repo.GetConsentPageAsync(query with { PageSize = 500, IncludeInactive = false, Grantee = "s-1-5-21-alice" }))
+            .Items.ShouldAllBe(c => c.GranteeSid != null && c.GranteeSid.Value.Value.Equals("S-1-5-21-Alice", StringComparison.OrdinalIgnoreCase));
+        (await Repo.GetConsentPageAsync(query with { GranteeType = GranteeType.Role, PageSize = 500 })).Items.ShouldAllBe(c => c.GranteeType == GranteeType.Role);
+        await Should.ThrowAsync<ArgumentException>(() => Repo.GetConsentPageAsync(new Autheris.Application.Governance.Paging.ConsentPageQuery(default)));
+    }
 }
