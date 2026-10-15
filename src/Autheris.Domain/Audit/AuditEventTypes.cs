@@ -32,6 +32,7 @@ public static class AuditEventTypes
     public const string WebSqlDmlFailed = "WEBSQL_DML_FAILED";
     public const string QueryExecutionError = "QUERY_EXECUTION_ERROR";
     public const string StreamSubscribe = "STREAM_SUBSCRIBE";
+    public const string CdcWebhookDeliveryBatch = "CDC_WEBHOOK_DELIVERY_BATCH";
     public const string EgressShadowCopy = "EGRESS_SHADOW_COPY";
 
     // Administration & Audit Self-Governance (Tier A)

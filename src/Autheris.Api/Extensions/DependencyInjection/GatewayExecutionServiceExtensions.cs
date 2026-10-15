@@ -141,6 +141,8 @@ public static class GatewayExecutionServiceExtensions
             services.AddSingleton<IValidateOptions<Autheris.Domain.Options.CdcWebhooksOptions>, Autheris.Application.Events.Services.CdcWebhooksOptionsValidator>();
             services.AddSingleton<Autheris.Application.Webhooks.IWebhookSecretProtector, Autheris.Infrastructure.Security.KeyVaultWebhookSecretProtector>();
             services.AddSingleton<ICloudEventTransformer, CloudEventTransformer>();
+            Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddSingleton(services, TimeProvider.System);
+            services.AddHostedService<Autheris.Application.Streaming.Services.CdcWebhookDeliveryService>();
         }
 
         // AST-Aware Traffic Shadowing & Dark Replay (F-OPS-01, INF-2)
