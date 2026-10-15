@@ -78,6 +78,12 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
         return Task.CompletedTask;
     }
 
+    private const int BaseEntryBytes = 256;
+    private const int EstimatedBytesPerProfile = 1024;
+
+    private static long EstimateEntryBytes(string cacheKey, int profileCount) =>
+        BaseEntryBytes + (2L * cacheKey.Length) + ((long)EstimatedBytesPerProfile * profileCount);
+
     public async ValueTask<IReadOnlyList<AccessProfile>> GetProfilesAsync(TenantId tenantId, string subject, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(subject, nameof(subject));
@@ -122,7 +128,8 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
 
             using var entry = _memoryCache.CreateEntry(cacheKey);
             entry.Value = dbProfiles;
-            entry.Size = 1;
+            // WP-PF-06: the shared L1 SizeLimit counts bytes, so an entry is sized in (estimated) bytes, not as "1".
+            entry.Size = EstimateEntryBytes(cacheKey, dbProfiles.Count);
             entry.AbsoluteExpirationRelativeToNow = ProfileEntryTtl;
 
             return dbProfiles;

@@ -176,8 +176,9 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
 {
     private readonly IVirtualFilterSnapshotProvider _snapshots;
     private readonly IVirtualFilterPredicateBuilder _predicates;
-    private readonly ConcurrentDictionary<VirtualFilterMemoKey, MandatoryFilterOutcome> _memo = new();
-    private readonly ConcurrentDictionary<string, ObjectPattern> _patterns = new(StringComparer.Ordinal);
+    // WP-PF-06: bounded per-user memo (5,000 users x 100 tables would otherwise grow to hundreds of MB); a miss re-resolves.
+    private readonly Autheris.Application.Caching.BoundedCache<VirtualFilterMemoKey, MandatoryFilterOutcome> _memo = new(50_000);
+    private readonly Autheris.Application.Caching.BoundedCache<string, ObjectPattern> _patterns = new(10_000, comparer: StringComparer.Ordinal);
     private readonly ITableMetadataRepository? _catalog;
     private readonly SqlDataSourceOptions? _dataSources;
     private long _memoGeneration = -1;
