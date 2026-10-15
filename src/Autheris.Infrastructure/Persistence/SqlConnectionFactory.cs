@@ -86,6 +86,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
         }
 
         string connectionString = options.ConnectionString;
+        SspiContextProvider? sqlServerSspiProvider = null;
         if (dialect == DatabaseDialect.Oracle)
         {
             // WP-F1: validated before any network traffic.
@@ -94,14 +95,14 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
         }
         else if (dialect == DatabaseDialect.SqlServer)
         {
-            // Issue #102: validate and configure NTLM (gss-ntlmssp) / Kerberos (libgssapi-krb5-2) before opening.
-            connectionString = SqlServerWindowsAuthConfigurator.PrepareConnection(options, _secrets, _environment);
+            // Issue #102: validate and configure Managed NTLM (System.Net.Security.UseManagedNtlm) / GSSAPI (gss-ntlmssp / libgssapi-krb5-2) before opening.
+            connectionString = SqlServerWindowsAuthConfigurator.PrepareConnection(options, _secrets, _environment, out sqlServerSspiProvider);
         }
 
         DbConnection connection = dialect switch
         {
             DatabaseDialect.Sqlite => new SqliteConnection(options.ConnectionString),
-            DatabaseDialect.SqlServer => new SqlConnection(connectionString),
+            DatabaseDialect.SqlServer => CreateSqlServerConnection(connectionString, sqlServerSspiProvider),
             DatabaseDialect.PostgreSql => new Npgsql.NpgsqlConnection(options.ConnectionString),
             // CR-ADG-07: the raw driver connection never leaves this factory; every command is created with BindByName = true.
             DatabaseDialect.Oracle => new BindByNameOracleConnection(new OracleConnection(connectionString)),
@@ -264,6 +265,17 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
         string password = SecretReferenceResolver.Resolve(_secrets, options.PasswordKeyVaultRef, _environment, allowPlaintextInDevelopment: false, logger: null, "Oracle database password")
             ?? throw new System.Security.SecurityException("The Oracle database password could not be resolved (fail-closed).");
         return new OracleConnectionStringBuilder(connectionString) { Password = password }.ConnectionString;
+    }
+
+    private static SqlConnection CreateSqlServerConnection(string connectionString, SspiContextProvider? sspiContextProvider)
+    {
+        var sqlConnection = new SqlConnection(connectionString);
+        if (sspiContextProvider is not null)
+        {
+            sqlConnection.SspiContextProvider = sspiContextProvider;
+        }
+
+        return sqlConnection;
     }
 
     private static void AddParameter(DbCommand cmd, string name, object value)

@@ -136,6 +136,14 @@ public sealed class SqlServerWindowsAuthOptions
 
     /// <summary>Optional explicit SQL Server Service Principal Name (for example <c>MSSQLSvc/sqlhost.corp.local:1433@CORP.LOCAL</c>).</summary>
     public string? ServicePrincipalName { get; init; }
+
+    /// <summary>
+    /// Issue #102: Enables .NET's built-in managed NTLM implementation (<c>System.Net.Security.UseManagedNtlm</c>) together with a
+    /// per-connection <c>Microsoft.Data.SqlClient.SspiContextProvider</c> backed by <see cref="System.Net.Security.NegotiateAuthentication"/>.
+    /// Defaults to <c>true</c>, allowing NTLM authentication directly from .NET in Linux/Podman containers without requiring host
+    /// GSSAPI environment variables, while keeping <c>gss-ntlmssp</c> / <c>NTLM_USER_FILE</c> configured as fallback.
+    /// </summary>
+    public bool UseManagedNtlm { get; init; } = true;
 }
 
 /// <summary>Authentication modes of the Databricks Statement Execution client.</summary>

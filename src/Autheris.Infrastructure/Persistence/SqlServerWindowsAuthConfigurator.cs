@@ -1,3 +1,6 @@
+using System.Buffers;
+using System.Net;
+using System.Net.Security;
 using System.Security;
 using System.Text;
 using Autheris.Application.Interfaces;
@@ -10,22 +13,25 @@ using Microsoft.Extensions.Logging;
 namespace Autheris.Infrastructure.Persistence;
 
 /// <summary>
-/// Issue #102: Configures and validates SQL Server Windows Authentication (NTLM via <c>gss-ntlmssp</c> and Kerberos via
-/// <c>libgssapi-krb5-2</c>) for Linux containers and non-domain hosts.
+/// Issue #102: Configures and validates SQL Server Windows Authentication (Managed NTLM via
+/// <c>System.Net.Security.UseManagedNtlm</c> + <see cref="SspiContextProvider"/>, NTLM via <c>gss-ntlmssp</c>,
+/// and Kerberos via <c>libgssapi-krb5-2</c>) for Linux/Podman/Docker containers and non-domain hosts.
 /// <para>
 /// Security guarantees:
 /// <list type="bullet">
 ///   <item>Never logs or includes plaintext passwords in exception messages or connection strings.</item>
 ///   <item>Detects and rejects the common anti-pattern of putting <c>User ID=DOMAIN\user</c> without <c>Integrated Security=true</c>,
 ///   which would send an AD credential as a SQL login and risk locking the Active Directory account after failed attempts.</item>
-///   <item>Supports both pre-mounted <c>NTLM_USER_FILE</c> (<c>DOMAIN:USER:PASSWORD</c>, mode <c>0400</c>/<c>0600</c>) and
+///   <item>Supports .NET's managed NTLM (<c>System.Net.Security.UseManagedNtlm</c>) via a per-connection <see cref="SspiContextProvider"/>
+///   as well as pre-mounted <c>NTLM_USER_FILE</c> (<c>DOMAIN:USER:PASSWORD</c>, mode <c>0400</c>/<c>0600</c>) and
 ///   per-datasource <see cref="SqlServerWindowsAuthOptions"/> backed by <see cref="SecretReferenceResolver"/> (<c>file:/run/secrets/...</c> or Key Vault).</item>
-///   <item>Classifies runtime <see cref="SqlException"/> / GSSAPI failures into actionable operator diagnostics.</item>
+///   <item>Classifies runtime <see cref="SqlException"/> / GSSAPI / SSPI failures into actionable operator diagnostics.</item>
 /// </list>
 /// </para>
 /// </summary>
 public static class SqlServerWindowsAuthConfigurator
 {
+    public const string UseManagedNtlmSwitchName = "System.Net.Security.UseManagedNtlm";
     public const string DefaultGssStateDirectory = "/app/data/gss";
     public const string DefaultGeneratedNtlmFileName = "ntlm_users";
     public const string GssMechConfigPath = "/etc/gss/mech.d/mech.ntlmssp.conf";
@@ -34,19 +40,30 @@ public static class SqlServerWindowsAuthConfigurator
     private static readonly Lock SyncLock = new();
 
     /// <summary>
-    /// Prepares the SQL Server connection string and process GSSAPI environment for Windows Authentication (NTLM / Kerberos)
-    /// when configured on <paramref name="options"/> or when <c>Integrated Security=true</c> is present in the connection string.
+    /// Enables .NET's built-in managed NTLM implementation (<c>System.Net.Security.UseManagedNtlm</c>) so
+    /// <see cref="NegotiateAuthentication"/> can generate NTLMSSP tokens directly in managed code on Linux/containers.
+    /// </summary>
+    public static void EnableManagedNtlmSwitch()
+    {
+        AppContext.SetSwitch(UseManagedNtlmSwitchName, true);
+    }
+
+    /// <summary>
+    /// Prepares the SQL Server connection string, optional per-connection <see cref="SspiContextProvider"/> (using
+    /// <c>System.Net.Security.UseManagedNtlm</c>), and GSSAPI environment for Windows Authentication (NTLM / Kerberos).
     /// </summary>
     public static string PrepareConnection(
         DataSourceConnectionOptions options,
         IKeyVaultSecretProvider? secrets,
         IHostEnvironment? environment,
+        out SspiContextProvider? sspiContextProvider,
         ILogger? logger = null,
         string? gssStateDirectory = null,
         Func<string, string?>? getEnvVar = null,
         Action<string, string>? setEnvVar = null)
     {
         ArgumentNullException.ThrowIfNull(options);
+        sspiContextProvider = null;
 
         var getEnvironmentVariable = getEnvVar ?? Environment.GetEnvironmentVariable;
         var setEnvironmentVariable = setEnvVar ?? Environment.SetEnvironmentVariable;
@@ -75,17 +92,18 @@ public static class SqlServerWindowsAuthConfigurator
         if (hasWindowsAuthConfig)
         {
             // Enforce Integrated Security=true and strip any User ID / Password from the connection string so
-            // SqlClient uses GSSAPI (gss-ntlmssp / krb5) instead of SQL authentication.
+            // SqlClient uses SSPI/GSSAPI instead of SQL authentication.
             builder.IntegratedSecurity = true;
             builder.Remove("User ID");
             builder.Remove("UID");
             builder.Remove("Password");
             builder.Remove("PWD");
 
-            ConfigureGssEnvironment(
+            ConfigureGssEnvironmentAndSspiProvider(
                 winAuth!,
                 secrets,
                 environment,
+                out sspiContextProvider,
                 logger,
                 gssStateDirectory,
                 getEnvironmentVariable,
@@ -97,7 +115,15 @@ public static class SqlServerWindowsAuthConfigurator
             var ambientNtlmFile = getEnvironmentVariable("NTLM_USER_FILE");
             if (!string.IsNullOrWhiteSpace(ambientNtlmFile))
             {
-                ValidateNtlmUserFile(ambientNtlmFile, logger);
+                ValidateNtlmUserFile(ambientNtlmFile, logger, out var ambientDomain, out var ambientUser, out var ambientPassword);
+                if (!string.IsNullOrWhiteSpace(ambientUser) && !string.IsNullOrWhiteSpace(ambientPassword))
+                {
+                    EnableManagedNtlmSwitch();
+                    sspiContextProvider = new ManagedNtlmSspiContextProvider(
+                        new NetworkCredential(ambientUser, ambientPassword, ambientDomain ?? string.Empty),
+                        targetSpnOverride: null,
+                        package: "NTLM");
+                }
             }
         }
 
@@ -105,8 +131,22 @@ public static class SqlServerWindowsAuthConfigurator
     }
 
     /// <summary>
+    /// Backward-compatible overload of <see cref="PrepareConnection(DataSourceConnectionOptions, IKeyVaultSecretProvider?, IHostEnvironment?, out SspiContextProvider?, ILogger?, string?, Func{string, string?}?, Action{string, string}?)"/>.
+    /// </summary>
+    public static string PrepareConnection(
+        DataSourceConnectionOptions options,
+        IKeyVaultSecretProvider? secrets,
+        IHostEnvironment? environment,
+        ILogger? logger = null,
+        string? gssStateDirectory = null,
+        Func<string, string?>? getEnvVar = null,
+        Action<string, string>? setEnvVar = null) =>
+        PrepareConnection(options, secrets, environment, out _, logger, gssStateDirectory, getEnvVar, setEnvVar);
+
+    /// <summary>
     /// Configures the GSSAPI environment variables (<c>NTLM_USER_FILE</c>, <c>NTLMUSER</c>, <c>NETBIOS_DOMAIN_NAME</c>,
-    /// <c>KRB5_CONFIG</c>, <c>KRB5_CLIENT_KTNAME</c>, <c>KRB5CCNAME</c>) required by <c>gss-ntlmssp</c> and <c>libgssapi-krb5-2</c>.
+    /// <c>KRB5_CONFIG</c>, <c>KRB5_CLIENT_KTNAME</c>, <c>KRB5CCNAME</c>) and, when <see cref="SqlServerWindowsAuthOptions.UseManagedNtlm"/>
+    /// is enabled, creates a per-connection <see cref="SspiContextProvider"/> backed by <c>System.Net.Security.UseManagedNtlm</c>.
     /// </summary>
     public static void ConfigureGssEnvironment(
         SqlServerWindowsAuthOptions winAuth,
@@ -115,9 +155,29 @@ public static class SqlServerWindowsAuthConfigurator
         ILogger? logger = null,
         string? gssStateDirectory = null,
         Func<string, string?>? getEnvVar = null,
+        Action<string, string>? setEnvVar = null) =>
+        ConfigureGssEnvironmentAndSspiProvider(
+            winAuth,
+            secrets,
+            environment,
+            out _,
+            logger,
+            gssStateDirectory,
+            getEnvVar,
+            setEnvVar);
+
+    private static void ConfigureGssEnvironmentAndSspiProvider(
+        SqlServerWindowsAuthOptions winAuth,
+        IKeyVaultSecretProvider? secrets,
+        IHostEnvironment? environment,
+        out SspiContextProvider? sspiContextProvider,
+        ILogger? logger = null,
+        string? gssStateDirectory = null,
+        Func<string, string?>? getEnvVar = null,
         Action<string, string>? setEnvVar = null)
     {
         ArgumentNullException.ThrowIfNull(winAuth);
+        sspiContextProvider = null;
 
         var getEnvironmentVariable = getEnvVar ?? Environment.GetEnvironmentVariable;
         var setEnvironmentVariable = setEnvVar ?? Environment.SetEnvironmentVariable;
@@ -159,6 +219,7 @@ public static class SqlServerWindowsAuthConfigurator
         }
 
         var (domain, username) = NormalizeDomainAndUser(winAuth.Domain, winAuth.Username);
+        string? resolvedPassword = null;
 
         if (!string.IsNullOrWhiteSpace(winAuth.PasswordRef))
         {
@@ -168,9 +229,7 @@ public static class SqlServerWindowsAuthConfigurator
                     "SQL Server WindowsAuth with PasswordRef requires Username (and Domain) to be configured.");
             }
 
-            // Outside Development, never allow a literal plaintext password in PasswordRef: require a secret provider
-            // resolution (file:/run/secrets/..., Key Vault, or environment variable).
-            string password = SecretReferenceResolver.Resolve(
+            resolvedPassword = SecretReferenceResolver.Resolve(
                 secrets,
                 winAuth.PasswordRef,
                 environment,
@@ -179,16 +238,16 @@ public static class SqlServerWindowsAuthConfigurator
                 secretDescription: "SQL Server WindowsAuth AD password")
                 ?? throw new SecurityException("The SQL Server WindowsAuth password could not be resolved (fail-closed).");
 
-            if (password.AsSpan().IndexOfAny('\r', '\n') >= 0)
+            if (resolvedPassword.AsSpan().IndexOfAny('\r', '\n') >= 0)
             {
                 throw new SecurityException("The resolved SQL Server WindowsAuth password contains invalid newline characters.");
             }
 
-            ntlmFilePath = MaterializeNtlmUserFile(domain ?? string.Empty, username, password, gssStateDirectory);
+            ntlmFilePath = MaterializeNtlmUserFile(domain ?? string.Empty, username, resolvedPassword, gssStateDirectory);
         }
         else if (!string.IsNullOrWhiteSpace(ntlmFilePath))
         {
-            ValidateNtlmUserFile(ntlmFilePath, logger, out var fileDomain, out var fileUser);
+            ValidateNtlmUserFile(ntlmFilePath, logger, out var fileDomain, out var fileUser, out var filePassword);
             if (string.IsNullOrWhiteSpace(domain))
             {
                 domain = fileDomain;
@@ -198,11 +257,22 @@ public static class SqlServerWindowsAuthConfigurator
             {
                 username = fileUser;
             }
+
+            resolvedPassword = filePassword;
         }
         else
         {
             throw new SecurityException(
                 "SQL Server WindowsAuth (NTLM) requires either (Domain, Username, PasswordRef) or an existing NTLM_USER_FILE / NtlmUserFilePath.");
+        }
+
+        if (winAuth.UseManagedNtlm && !string.IsNullOrWhiteSpace(username) && !string.IsNullOrWhiteSpace(resolvedPassword))
+        {
+            EnableManagedNtlmSwitch();
+            sspiContextProvider = new ManagedNtlmSspiContextProvider(
+                new NetworkCredential(username, resolvedPassword, domain ?? string.Empty),
+                winAuth.ServicePrincipalName,
+                package: "NTLM");
         }
 
         lock (SyncLock)
@@ -287,16 +357,25 @@ public static class SqlServerWindowsAuthConfigurator
     /// Never includes file contents or passwords in exception messages or logs.
     /// </summary>
     public static void ValidateNtlmUserFile(string filePath, ILogger? logger = null) =>
-        ValidateNtlmUserFile(filePath, logger, out _, out _);
+        ValidateNtlmUserFile(filePath, logger, out _, out _, out _);
 
     public static void ValidateNtlmUserFile(
         string filePath,
         ILogger? logger,
         out string? firstDomain,
-        out string? firstUsername)
+        out string? firstUsername) =>
+        ValidateNtlmUserFile(filePath, logger, out firstDomain, out firstUsername, out _);
+
+    public static void ValidateNtlmUserFile(
+        string filePath,
+        ILogger? logger,
+        out string? firstDomain,
+        out string? firstUsername,
+        out string? firstPassword)
     {
         firstDomain = null;
         firstUsername = null;
+        firstPassword = null;
 
         if (string.IsNullOrWhiteSpace(filePath))
         {
@@ -332,6 +411,7 @@ public static class SqlServerWindowsAuthConfigurator
 
             string domainPart = line[..firstColon].Trim();
             string userPart = line[(firstColon + 1)..secondColon].Trim();
+            string passwordPart = line[(secondColon + 1)..];
             if (string.IsNullOrWhiteSpace(userPart))
             {
                 throw new SecurityException(
@@ -342,6 +422,7 @@ public static class SqlServerWindowsAuthConfigurator
             {
                 firstDomain = domainPart;
                 firstUsername = userPart;
+                firstPassword = passwordPart;
             }
 
             validEntries++;
@@ -411,7 +492,7 @@ public static class SqlServerWindowsAuthConfigurator
             return new InvalidOperationException(
                 "SQL Server Windows Authentication failed during SSPI/Kerberos negotiation ('Cannot generate SSPI context' / SPN error). " +
                 "Verify that the SQL Server Service Principal Name (MSSQLSvc/<fqdn>:<port>@REALM) is registered in Active Directory, " +
-                "or use NTLM authentication via 'gss-ntlmssp' (WindowsAuth.Mode = 'Ntlm' / NTLM_USER_FILE).",
+                "or use NTLM authentication via 'System.Net.Security.UseManagedNtlm' / 'gss-ntlmssp' (WindowsAuth.Mode = 'Ntlm').",
                 exception);
         }
 
@@ -587,5 +668,82 @@ public static class SqlServerWindowsAuthConfigurator
         }
 
         return sb.ToString();
+    }
+}
+
+/// <summary>
+/// Issue #102: Custom <see cref="SspiContextProvider"/> for <see cref="SqlConnection"/> that uses .NET's
+/// <see cref="NegotiateAuthentication"/> with explicit per-datasource <see cref="NetworkCredential"/> and
+/// <c>System.Net.Security.UseManagedNtlm = true</c>.
+/// </summary>
+public sealed class ManagedNtlmSspiContextProvider : SspiContextProvider, IDisposable
+{
+    private readonly NetworkCredential _credential;
+    private readonly string? _targetSpnOverride;
+    private readonly string _package;
+    private NegotiateAuthentication? _negotiateAuth;
+
+    public ManagedNtlmSspiContextProvider(
+        NetworkCredential credential,
+        string? targetSpnOverride = null,
+        string package = "NTLM")
+    {
+        ArgumentNullException.ThrowIfNull(credential);
+        _credential = credential;
+        _targetSpnOverride = targetSpnOverride;
+        _package = string.IsNullOrWhiteSpace(package) ? "NTLM" : package;
+        SqlServerWindowsAuthConfigurator.EnableManagedNtlmSwitch();
+    }
+
+    protected override bool GenerateContext(
+        ReadOnlySpan<byte> incomingBlob,
+        IBufferWriter<byte> outgoingBlobWriter,
+        SspiAuthenticationParameters authParams)
+    {
+        try
+        {
+            if (incomingBlob.IsEmpty)
+            {
+                _negotiateAuth?.Dispose();
+                string? targetName = !string.IsNullOrWhiteSpace(_targetSpnOverride)
+                    ? _targetSpnOverride
+                    : authParams.Resource;
+
+                _negotiateAuth = new NegotiateAuthentication(new NegotiateAuthenticationClientOptions
+                {
+                    Package = _package,
+                    Credential = _credential,
+                    TargetName = targetName
+                });
+            }
+
+            if (_negotiateAuth is null)
+            {
+                return false;
+            }
+
+            byte[]? sendBuff = _negotiateAuth.GetOutgoingBlob(incomingBlob, out var statusCode);
+            if (statusCode is not NegotiateAuthenticationStatusCode.Completed and not NegotiateAuthenticationStatusCode.ContinueNeeded)
+            {
+                return false;
+            }
+
+            if (sendBuff is { Length: > 0 })
+            {
+                outgoingBlobWriter.Write(sendBuff);
+            }
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _negotiateAuth?.Dispose();
+        _negotiateAuth = null;
     }
 }

@@ -11,6 +11,7 @@ ENV ASPNETCORE_HTTP_PORTS=8080 \
     ASPNETCORE_ENVIRONMENT=Production \
     DOTNET_RUNNING_IN_CONTAINER=true \
     DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=0 \
+    DOTNET_System_Net_Security_UseManagedNtlm=true \
     Gateway__Caching__Garnet__EnableEmbeddedServer=true \
     Gateway__Caching__Garnet__Host=127.0.0.1 \
     Gateway__Caching__Garnet__Port=3278 \

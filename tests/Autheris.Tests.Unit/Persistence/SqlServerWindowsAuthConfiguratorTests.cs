@@ -84,6 +84,7 @@ public sealed class SqlServerWindowsAuthConfiguratorTests : IDisposable
             options,
             secrets,
             new FakeHostEnvironment("Production"),
+            out var sspiContextProvider,
             gssStateDirectory: _tempDir,
             getEnvVar: k => envVars.GetValueOrDefault(k),
             setEnvVar: (k, v) => envVars[k] = v);
@@ -93,6 +94,9 @@ public sealed class SqlServerWindowsAuthConfiguratorTests : IDisposable
         Assert.True(string.IsNullOrEmpty(builder.UserID));
         Assert.True(string.IsNullOrEmpty(builder.Password));
         Assert.DoesNotContain(secretPassword, preparedConnStr, StringComparison.Ordinal);
+
+        Assert.True(AppContext.TryGetSwitch(SqlServerWindowsAuthConfigurator.UseManagedNtlmSwitchName, out bool managedNtlmEnabled) && managedNtlmEnabled);
+        Assert.IsType<ManagedNtlmSspiContextProvider>(sspiContextProvider);
 
         Assert.True(envVars.ContainsKey("NTLM_USER_FILE"));
         Assert.Equal("lwesvcbidbreportread", envVars["NTLMUSER"]);
