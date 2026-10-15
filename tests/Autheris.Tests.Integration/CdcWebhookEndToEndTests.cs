@@ -36,6 +36,9 @@ public sealed class CdcWebhookEndToEndTests : IClassFixture<WebApplicationFactor
     private static readonly string Secret = new('k', 40);
     private static readonly string Kek = new('e', 48);
 
+    // Source timestamp after every subscription's creation time: events older than the subscription are skipped (history replay).
+    private static readonly long EventMs = DateTimeOffset.UtcNow.AddMinutes(5).ToUnixTimeMilliseconds();
+
     private readonly WebApplicationFactory<Program> _baseFactory;
     private readonly string _workDir = Path.Combine(Path.GetTempPath(), "autheris-cdcwh-" + Guid.NewGuid().ToString("N"));
     private readonly List<IDisposable> _disposables = [];
@@ -210,7 +213,7 @@ public sealed class CdcWebhookEndToEndTests : IClassFixture<WebApplicationFactor
     private static async Task IngestAsync(HttpClient ingest, string name = "Alice")
     {
         var payload = $$$"""
-        {"op":"c","source":{"schema":"crm","table":"customers","name":"salesdb","ts_ms":1760000000000},
+        {"op":"c","source":{"schema":"crm","table":"customers","name":"salesdb","ts_ms":{{{EventMs}}}},
          "after":{"id":1,"name":"{{{name}}}","ssn":"123-45-6789","tenant_id":"{{{Tenant}}}"}}
         """;
         var response = await ingest.PostAsync("/api/v1/cdc/events", new StringContent(payload, Encoding.UTF8, "application/json"));

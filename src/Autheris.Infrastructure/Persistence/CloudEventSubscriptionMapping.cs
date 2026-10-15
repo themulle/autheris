@@ -42,6 +42,26 @@ internal static class CloudEventSubscriptionMapping
         {
             throw new ArgumentException("Subscription field exceeds its storage bound.", nameof(s));
         }
+
+        if ((s.CreatedByRoles?.Count ?? 0) > 256 || (s.CreatedByRoles?.Any(r => r is { Length: > 256 }) ?? false)
+            || (s.CreatedByGroupSids?.Count ?? 0) > 4096
+            || (HeadersJson(s.CustomHeaders)?.Length ?? 0) > 16384)
+        {
+            throw new ArgumentException("Subscription snapshot or headers exceed their storage bound.", nameof(s));
+        }
+    }
+
+    /// <summary>Reads the current row; a row with malformed JSON columns is skipped (<c>null</c>) so one bad row cannot break the whole tenant.</summary>
+    public static CloudEventWebhookSubscription? TryRead(DbDataReader r)
+    {
+        try
+        {
+            return Read(r);
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidCastException or ArgumentException or FormatException or NullReferenceException)
+        {
+            return null;
+        }
     }
 
     public static CloudEventWebhookSubscription Read(DbDataReader r)

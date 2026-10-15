@@ -95,4 +95,30 @@ public sealed class KeyVaultWebhookSecretProtectorTests
 
     [Fact]
     public void ValidKek_IsAvailable() => Create(Kek).IsAvailable.ShouldBeTrue();
+
+    [Fact]
+    public void Kek_IsResolvedOnce_NotPerCall()
+    {
+        var vault = Substitute.For<IKeyVaultSecretProvider>();
+        vault.GetSecretBytes("cdc-webhook-kek").Returns(Kek);
+        var p = new KeyVaultWebhookSecretProtector(vault);
+
+        _ = p.IsAvailable;
+        var v = p.Protect("t", "s", "x-secret");
+        p.Unprotect("t", "s", v);
+        _ = p.IsAvailable;
+
+        vault.Received(1).GetSecretBytes("cdc-webhook-kek");
+    }
+
+    [Fact]
+    public void DevelopmentFallbackKey_OfTheDefaultProvider_IsTooShort_SoTheProtectorIsUnavailable()
+    {
+        // In Development the default provider answers an unknown reference with the reference text itself (15 bytes).
+        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        env.EnvironmentName.Returns("Development");
+        var provider = new DefaultEnvironmentSecretProvider(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(), env);
+
+        new KeyVaultWebhookSecretProtector(provider).IsAvailable.ShouldBeFalse();
+    }
 }

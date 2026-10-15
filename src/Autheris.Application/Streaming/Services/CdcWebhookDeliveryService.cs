@@ -54,7 +54,7 @@ public sealed class CdcWebhookDeliveryService : BackgroundService
     private readonly TimeProvider _time;
     private readonly ILogger<CdcWebhookDeliveryService> _logger;
 
-    private readonly ConcurrentDictionary<string, CacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, CacheEntry> _cache = new(StringComparer.Ordinal);
     private readonly Dictionary<(string Tenant, string Subscription), AuditBatch> _batches = [];
     private readonly object _batchGate = new();
 
@@ -81,6 +81,11 @@ public sealed class CdcWebhookDeliveryService : BackgroundService
         _time = time;
         _logger = logger;
     }
+
+    private const int MaxCachedTenants = 1024;
+
+    /// <summary>Number of tenants currently cached (bounded by <see cref="MaxCachedTenants"/>).</summary>
+    internal int CachedTenantCount => _cache.Count;
 
     private sealed record CacheEntry(DateTimeOffset ExpiresAt, IReadOnlyList<CloudEventWebhookSubscription> Subscriptions);
 
@@ -111,7 +116,7 @@ public sealed class CdcWebhookDeliveryService : BackgroundService
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         await base.StopAsync(cancellationToken).ConfigureAwait(false);
-        await FlushAuditAsync(CancellationToken.None).ConfigureAwait(false);
+        await FlushAuditAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task ConsumeLoopAsync(CancellationToken ct)
@@ -159,6 +164,8 @@ public sealed class CdcWebhookDeliveryService : BackgroundService
             while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
             {
                 await FlushAuditAsync(ct).ConfigureAwait(false);
+                // Picks up a changed interval (options monitor) for the next tick.
+                timer.Period = TimeSpan.FromSeconds(Math.Max(1, _options.CurrentValue.AuditBatchSeconds));
             }
         }
         catch (OperationCanceledException)
@@ -200,16 +207,23 @@ public sealed class CdcWebhookDeliveryService : BackgroundService
         foreach (var subscription in subscriptions)
         {
             // Defence in depth: the store lookup is tenant-scoped, but a foreign row must never be served.
-            if (!string.Equals(subscription.TenantId, cdcEvent.TenantId, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(subscription.TenantId, cdcEvent.TenantId, StringComparison.Ordinal))
             {
                 Drop("tenant_mismatch");
                 continue;
             }
 
-            var principal = CdcSubscriptionPrincipal.TryBuild(subscription, _time, options);
+            // History replay (initial sync, snapshot re-reads): a subscription only receives changes that happened after its creation.
+            if (subscription.CreatedAt is { } createdAt && cdcEvent.Timestamp < createdAt)
+            {
+                Drop("before_subscription");
+                continue;
+            }
+
+            var denial = CdcSubscriptionPrincipal.Evaluate(subscription, _time, options, out var principal);
             if (principal is null)
             {
-                Drop("no_snapshot");
+                Drop(denial == CdcSnapshotDenial.Expired ? "snapshot_expired" : "no_snapshot");
                 Record(subscription, b => b.DroppedDenied++);
                 continue;
             }
@@ -289,6 +303,22 @@ public sealed class CdcWebhookDeliveryService : BackgroundService
             // All subscriptions of the tenant are cached (not per table), then matched in memory.
             var all = await _store.ListSubscriptionsAsync(tenant, ct).ConfigureAwait(false);
             entry = new CacheEntry(now.AddSeconds(options.SubscriptionCacheSeconds), all);
+            if (_cache.Count >= MaxCachedTenants)
+            {
+                foreach (var (key, value) in _cache)
+                {
+                    if (value.ExpiresAt <= now)
+                    {
+                        _cache.TryRemove(key, out _);
+                    }
+                }
+
+                if (_cache.Count >= MaxCachedTenants)
+                {
+                    _cache.Clear(); // hard cap: every tenant is just re-read on its next event
+                }
+            }
+
             _cache[tenant] = entry;
         }
 
@@ -348,7 +378,7 @@ public sealed class CdcWebhookDeliveryService : BackgroundService
                 TenantId = new TenantId(key.Tenant),
                 EventType = AuditEventTypes.CdcWebhookDeliveryBatch,
                 ActorSid = new Sid(batch.ActorSid ?? string.Empty),
-                Decision = "ALLOW",
+                Decision = batch.Enqueued == 0 && batch.Deduped == 0 && (batch.DroppedDenied > 0 || batch.DroppedBounds > 0) ? "DENY" : "ALLOW",
                 DetailsJson = details,
                 OccurredAt = _time.GetUtcNow()
             }, ct).ConfigureAwait(false);

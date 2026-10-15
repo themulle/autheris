@@ -1,6 +1,7 @@
 namespace Autheris.Infrastructure.Security;
 
 using System;
+using System.Threading;
 using System.Security.Cryptography;
 using System.Text;
 using Autheris.Application.Interfaces;
@@ -13,13 +14,17 @@ using Autheris.Application.Webhooks;
 /// </summary>
 public sealed class KeyVaultWebhookSecretProtector(IKeyVaultSecretProvider secrets) : IWebhookSecretProtector
 {
+    // Derived once per process: the key provider is not asked (and does not log) per call. Rotation = provision a new KEK and restart;
+    // v1 values carry no key id, so existing subscriptions must be re-created after a rotation.
+    private readonly Lazy<byte[]?> _key = new(() => DeriveKey(secrets), LazyThreadSafetyMode.ExecutionAndPublication);
+
     public const string KekSecretRef = "cdc-webhook-kek";
     public const string Prefix = "enc:v1:";
     private const int NonceSize = 12;
     private const int TagSize = 16;
     private const int MinKekBytes = 32;
 
-    public bool IsAvailable => TryDeriveKey() is not null;
+    public bool IsAvailable => _key.Value is not null;
 
     public string Protect(string tenantId, string subscriptionId, string secret)
     {
@@ -27,7 +32,7 @@ public sealed class KeyVaultWebhookSecretProtector(IKeyVaultSecretProvider secre
         ArgumentException.ThrowIfNullOrWhiteSpace(subscriptionId);
         ArgumentNullException.ThrowIfNull(secret);
 
-        var key = TryDeriveKey() ?? throw new WebhookSecretUnavailableException();
+        var key = (byte[]?)_key.Value?.Clone() ?? throw new WebhookSecretUnavailableException();
         var plaintext = Encoding.UTF8.GetBytes(secret);
         try
         {
@@ -74,7 +79,7 @@ public sealed class KeyVaultWebhookSecretProtector(IKeyVaultSecretProvider secre
             throw new WebhookSecretUnavailableException();
         }
 
-        var key = TryDeriveKey() ?? throw new WebhookSecretUnavailableException();
+        var key = (byte[]?)_key.Value?.Clone() ?? throw new WebhookSecretUnavailableException();
         var plaintext = new byte[blob.Length - NonceSize - TagSize];
         try
         {
@@ -95,7 +100,7 @@ public sealed class KeyVaultWebhookSecretProtector(IKeyVaultSecretProvider secre
 
     private static byte[] Aad(string tenantId, string subscriptionId) => Encoding.UTF8.GetBytes($"{tenantId}|{subscriptionId}");
 
-    private byte[]? TryDeriveKey()
+    private static byte[]? DeriveKey(IKeyVaultSecretProvider secrets)
     {
         try
         {

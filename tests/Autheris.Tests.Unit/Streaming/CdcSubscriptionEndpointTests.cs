@@ -3,6 +3,7 @@ namespace Autheris.Tests.Unit.Streaming;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -350,5 +351,46 @@ public sealed class CdcSubscriptionEndpointTests
 
         result.ShouldBeOfType<NotFound>();
         (await owner.Store.GetSubscriptionAsync("tenant-a", id)).ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task Post_CustomHeaders_AreProtectedAtRest_AndRedactedInResponses()
+    {
+        var h = Create();
+        var headers = new Dictionary<string, string> { ["X-Api-Key"] = "super-token" };
+
+        var result = await StreamingCdcEndpoints.CreateSubscriptionAsync(h.Ctx, Body() with { CustomHeaders = headers });
+
+        var stored = await SingleStored(h);
+        stored.CustomHeaders!.ShouldContainKey(CdcCustomHeaders.ProtectedKey);
+        stored.CustomHeaders!.Values.ShouldAllBe(v => !v.Contains("super-token"));
+        h.Protector.Received().Protect("tenant-a", stored.Id, Arg.Is<string>(j => j.Contains("super-token")));
+        var json = JsonSerializer.Serialize(result.ShouldBeOfType<Created<CdcSubscriptionView>>().Value);
+        json.ShouldNotContain("super-token");
+        json.ShouldNotContain("enc:v1:");
+        var list = await StreamingCdcEndpoints.ListSubscriptionsAsync(h.Ctx);
+        JsonSerializer.Serialize(list.ShouldBeOfType<Ok<IEnumerable<CdcSubscriptionView>>>().Value).ShouldNotContain("super-token");
+    }
+
+    [Fact]
+    public async Task Post_TooManyOrTooLargeCustomHeaders_Returns400()
+    {
+        var h = Create();
+        var many = Enumerable.Range(0, 21).ToDictionary(i => "X-H" + i, _ => "v");
+        var big = new Dictionary<string, string> { ["X-Big"] = new string('v', 2049) };
+
+        Problem(await StreamingCdcEndpoints.CreateSubscriptionAsync(h.Ctx, Body() with { CustomHeaders = many }), 400, "CDC_CUSTOM_HEADER_NOT_ALLOWED");
+        Problem(await StreamingCdcEndpoints.CreateSubscriptionAsync(h.Ctx, Body() with { CustomHeaders = big }), 400, "CDC_CUSTOM_HEADER_NOT_ALLOWED");
+    }
+
+    [Fact]
+    public async Task Post_StoreBusy_Returns503()
+    {
+        var store = Substitute.For<ICloudEventSubscriptionStore>();
+        store.RegisterSubscriptionAsync(Arg.Any<CloudEventWebhookSubscription>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns<ValueTask>(_ => throw new CloudEventSubscriptionStoreBusyException());
+        var h = Create(store);
+
+        Problem(await StreamingCdcEndpoints.CreateSubscriptionAsync(h.Ctx, Body()), 503, "CDC_STORE_BUSY");
     }
 }

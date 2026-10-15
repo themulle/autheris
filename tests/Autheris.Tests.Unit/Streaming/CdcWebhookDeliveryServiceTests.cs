@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
+using Autheris.Application.Interfaces;
 using Autheris.Application.Events.Interfaces;
 using Autheris.Application.Events.Services;
 using Autheris.Application.Streaming.Interfaces;
@@ -17,6 +18,7 @@ using Autheris.Application.Streaming.Services;
 using Autheris.Application.Webhooks;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.DependencyInjection;
@@ -106,6 +108,7 @@ public sealed class CdcWebhookDeliveryServiceTests
         public FakeTimeProvider Time { get; } = new(Now);
         public FakeOutbox Outbox { get; } = new();
         public FakeEnforcer Enforcer { get; } = new();
+        public IStreamRlsPolicyEnforcer? EnforcerOverride { get; set; }
         public FakeChannel Channel { get; } = new();
         public ICloudEventSubscriptionStore Store { get; set; } = new InMemoryCloudEventSubscriptionStore();
         public IAuditWriter Audit { get; } = Substitute.For<IAuditWriter>();
@@ -128,7 +131,7 @@ public sealed class CdcWebhookDeliveryServiceTests
         public CdcWebhookDeliveryService Create(Microsoft.Extensions.Logging.ILogger<CdcWebhookDeliveryService>? logger = null)
         {
             var services = new ServiceCollection();
-            services.AddScoped<IStreamRlsPolicyEnforcer>(_ => Enforcer);
+            services.AddScoped<IStreamRlsPolicyEnforcer>(_ => EnforcerOverride ?? Enforcer);
             var monitor = Substitute.For<IOptionsMonitor<CdcWebhooksOptions>>();
             monitor.CurrentValue.Returns(_ => Options);
             return new CdcWebhookDeliveryService(
@@ -524,6 +527,172 @@ public sealed class CdcWebhookDeliveryServiceTests
 
             yield break;
         }
+    }
+
+    [Fact]
+    public async Task Service_TenantComparison_IsOrdinal_NoCaseFolding()
+    {
+        var f = new Fixture();
+        var sub = await f.AddSubscription(tenant: "tenant-a");
+        var store = Substitute.For<ICloudEventSubscriptionStore>();
+        store.ListSubscriptionsAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ValueTask.FromResult<IReadOnlyList<CloudEventWebhookSubscription>>([sub]));
+        f.Store = store;
+
+        await f.Create().ProcessEventAsync(Event(tenant: "TENANT-A"), default);
+
+        f.Outbox.Rows.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Service_Cache_IsBounded_ExpiredEntriesAreEvicted()
+    {
+        var f = new Fixture();
+        var service = f.Create();
+        for (var i = 0; i < 1500; i++)
+        {
+            await service.ProcessEventAsync(Event(tenant: "tenant-" + i), default);
+            if (i % 100 == 0)
+            {
+                f.Time.Advance(TimeSpan.FromSeconds(6));
+            }
+        }
+
+        service.CachedTenantCount.ShouldBeLessThanOrEqualTo(1024);
+    }
+
+    [Fact]
+    public async Task Service_SkipsEvents_OlderThanTheSubscription_HistoryReplay()
+    {
+        var f = new Fixture();
+        await f.AddSubscription();
+
+        await f.Create().ProcessEventAsync(Event() with { Timestamp = Now.AddMinutes(-1) }, default);
+
+        f.Outbox.Rows.ShouldBeEmpty();
+        f.Enforcer.Principals.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Service_ExpiredSnapshot_UsesDistinctDropReason()
+    {
+        var reasons = new List<string>();
+        using var listener = new System.Diagnostics.Metrics.MeterListener();
+        listener.InstrumentPublished = (inst, l) =>
+        {
+            if (inst.Name == "autheris_cdc_webhook_dropped_total")
+            {
+                l.EnableMeasurementEvents(inst);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
+        {
+            foreach (var t in tags)
+            {
+                if (t.Key == "reason")
+                {
+                    lock (reasons) { reasons.Add((string)t.Value!); }
+                }
+            }
+        });
+        listener.Start();
+        var f = new Fixture();
+        await f.AddSubscription(id: "expired", createdAt: Now.AddDays(-91));
+        await f.AddSubscription(id: "missing", snapshot: false);
+
+        await f.Create().ProcessEventAsync(Event(), default);
+
+        lock (reasons)
+        {
+            reasons.ShouldContain("snapshot_expired");
+            reasons.ShouldContain("no_snapshot");
+        }
+    }
+
+    [Fact]
+    public async Task Service_AuditDecision_IsDeny_WhenEverythingWasDenied()
+    {
+        var f = new Fixture();
+        await f.AddSubscription();
+        f.Enforcer.Deny = true;
+        var service = f.Create();
+
+        await service.ProcessEventAsync(Event(), default);
+        await service.FlushAuditAsync(default);
+
+        f.AuditEntries.ShouldHaveSingleItem().Decision.ShouldBe("DENY");
+    }
+
+    [Fact]
+    public async Task RealEnforcer_MasksColumnPerCatalogRule_InPayloadJson()
+    {
+        var f = new Fixture();
+        await f.AddSubscription();
+        f.EnforcerOverride = RealEnforcer(withConsent: true);
+
+        await f.Create().ProcessEventAsync(Event(), default);
+
+        var row = f.Outbox.Rows.ShouldHaveSingleItem();
+        row.PayloadJson.ShouldNotContain("123-45-6789");
+        row.PayloadJson.ShouldContain("visible");
+    }
+
+    [Fact]
+    public async Task RealEnforcer_DeniesWhenCreatorConsentMissing()
+    {
+        var f = new Fixture();
+        await f.AddSubscription();
+        f.EnforcerOverride = RealEnforcer(withConsent: false);
+
+        await f.Create().ProcessEventAsync(Event(), default);
+
+        f.Outbox.Rows.ShouldBeEmpty();
+    }
+
+    private static IStreamRlsPolicyEnforcer RealEnforcer(bool withConsent)
+    {
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        metadataRepo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(Task.FromResult<TableMetadata?>(new TableMetadata
+        {
+            Identifier = Orders,
+            Table = new Table { SourceName = Orders.Domain, SchemaName = Orders.Schema, TableName = Orders.TableName },
+            Columns = [new TableColumn { ColumnName = "id" }, new TableColumn { ColumnName = "name" }, new TableColumn { ColumnName = "ssn" }],
+            ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["ssn"] = new MaskingRule { RuleType = "REDACT" } }
+        }));
+        var consentRepo = Substitute.For<IConsentRepository>();
+        IReadOnlyList<Consent> consents = withConsent
+            ?
+            [
+                new Consent
+                {
+                    TableIdentifier = Orders, Effect = ConsentEffect.Allow, GranteeType = GranteeType.User,
+                    GranteeSid = new Sid("S-1-5-21-CREATOR"), TenantId = new TenantId("tenant-a"),
+                    ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(30),
+                    ColumnRules =
+                    [
+                        new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
+                        new ConsentColumnRule { ColumnName = "name", AccessLevel = ColumnAccessLevel.Clear },
+                        new ConsentColumnRule { ColumnName = "ssn", AccessLevel = ColumnAccessLevel.Mask }
+                    ]
+                }
+            ]
+            : [];
+        consentRepo.GetActiveConsentsForSubjectsAsync(
+                Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(consents));
+        var policy = Substitute.For<IPolicyEnforcementService>();
+        policy.HasPolicies(Arg.Any<TenantId>()).Returns(false);
+        var epoch = new Autheris.Infrastructure.Cache.EpochValidationService();
+        var cache = new Autheris.Infrastructure.Cache.ConsentCacheService(
+            new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
+            epoch, new Autheris.Infrastructure.Messaging.InProcessChannelEventBus());
+        var masking = new Autheris.Application.Services.ColumnMaskingProvider(Options.Create(new GatewayOptions
+        {
+            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "Test-Vault-Key" }
+        }));
+        return new StreamRlsPolicyEnforcer(
+            policy, metadataRepo, masking, epoch, NullLogger<StreamRlsPolicyEnforcer>.Instance, consentRepo,
+            new Autheris.Application.Services.ConsentResolutionService(), cache);
     }
 
     private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger<CdcWebhookDeliveryService>

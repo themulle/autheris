@@ -132,7 +132,10 @@ public partial class SqliteGovernanceRepository : ICloudEventSubscriptionStore
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                rows.Add(CloudEventSubscriptionMapping.Read(reader));
+                if (CloudEventSubscriptionMapping.TryRead(reader) is { } parsed)
+            {
+                rows.Add(parsed);
+            }
             }
 
             return rows;

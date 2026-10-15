@@ -6,6 +6,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints.Support;
+using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Events.Interfaces;
@@ -168,8 +169,13 @@ public static class StreamingCdcEndpoints
     /// <summary>Returns a 501 problem result while the CDC webhook feature flag is off; otherwise <c>null</c>.</summary>
     internal static IResult? GuardCdcWebhooksDisabled(HttpContext context)
     {
-        var options = context.RequestServices.GetService<IOptions<CdcWebhooksOptions>>()?.Value;
-        if (options is { Enabled: true })
+        // The registration-time flag is the single source of truth (it decides whether the store and delivery service exist).
+        // Changing the configuration later has no effect until a restart. Without a registered flag (unit hosts) the options decide.
+        var flag = context.RequestServices.GetService<CdcWebhooksFeatureFlag>();
+        var enabled = flag is not null
+            ? flag.Enabled
+            : context.RequestServices.GetService<IOptions<CdcWebhooksOptions>>()?.Value is { Enabled: true };
+        if (enabled)
         {
             return null;
         }
@@ -252,9 +258,10 @@ public static class StreamingCdcEndpoints
             return SafeErrorResults.BadRequest("CDC_FILTER_INVALID", "The table or operation filter is invalid.", context);
         }
 
-        if (subscription.CustomHeaders is { } headers
+        if (!CdcCustomHeaders.WithinBounds(subscription.CustomHeaders)
+            || (subscription.CustomHeaders is { } headers
             && headers.Any(h => Autheris.Application.Webhooks.WebhookDeliveryClient.IsForbiddenCustomHeader(h.Key)
-                                || h.Value is null || h.Value.Contains('\r') || h.Value.Contains('\n') || h.Key.Contains('\r') || h.Key.Contains('\n')))
+                                || h.Value is null || h.Value.Contains('\r') || h.Value.Contains('\n') || h.Key.Contains('\r') || h.Key.Contains('\n'))))
         {
             return SafeErrorResults.BadRequest("CDC_CUSTOM_HEADER_NOT_ALLOWED", "A custom header is not allowed.", context);
         }
@@ -263,22 +270,23 @@ public static class StreamingCdcEndpoints
         var serverId = Guid.NewGuid().ToString("N");
 
         // Secret: required (32..512 chars) outside Development, stored only KEK-protected; never persist plaintext (fail closed).
+        // Custom header values (tokens) are protected the same way.
         var secret = subscription.HmacSecret ?? string.Empty;
         var protectedSecret = string.Empty;
-        if (secret.Length == 0)
+        var hasHeaders = subscription.CustomHeaders is { Count: > 0 };
+        if (secret.Length == 0 && !isDev)
         {
-            if (!isDev)
-            {
-                return SafeErrorResults.BadRequest("CDC_SECRET_REQUIRED", "A signing secret of 32 to 512 characters is required.", context);
-            }
+            return SafeErrorResults.BadRequest("CDC_SECRET_REQUIRED", "A signing secret of 32 to 512 characters is required.", context);
         }
-        else
-        {
-            if (secret.Length > 512 || (!isDev && secret.Length < 32))
-            {
-                return SafeErrorResults.BadRequest("CDC_SECRET_REQUIRED", "A signing secret of 32 to 512 characters is required.", context);
-            }
 
+        if (secret.Length > 512 || (secret.Length > 0 && !isDev && secret.Length < 32))
+        {
+            return SafeErrorResults.BadRequest("CDC_SECRET_REQUIRED", "A signing secret of 32 to 512 characters is required.", context);
+        }
+
+        IReadOnlyDictionary<string, string>? protectedHeaders = null;
+        if (secret.Length > 0 || hasHeaders)
+        {
             var protector = services.GetService<IWebhookSecretProtector>();
             if (protector is null || !protector.IsAvailable)
             {
@@ -288,7 +296,18 @@ public static class StreamingCdcEndpoints
 
             try
             {
-                protectedSecret = protector.Protect(tenantId, serverId, secret);
+                if (secret.Length > 0)
+                {
+                    protectedSecret = protector.Protect(tenantId, serverId, secret);
+                }
+
+                if (hasHeaders)
+                {
+                    protectedHeaders = new Dictionary<string, string>
+                    {
+                        [CdcCustomHeaders.ProtectedKey] = protector.Protect(tenantId, serverId, System.Text.Json.JsonSerializer.Serialize(subscription.CustomHeaders))
+                    };
+                }
             }
             catch (WebhookSecretUnavailableException ex)
             {
@@ -317,6 +336,7 @@ public static class StreamingCdcEndpoints
             TenantId = tenantId,
             IsEnabled = true,
             HmacSecret = protectedSecret,
+            CustomHeaders = protectedHeaders,
             FilterOperations = subscription.FilterOperations ?? [],
             CreatedBySid = capture.Sid,
             CreatedByGroupSids = capture.GroupSids,
@@ -326,6 +346,11 @@ public static class StreamingCdcEndpoints
         try
         {
             await store.RegisterSubscriptionAsync(securedSub, options.MaxSubscriptionsPerTenant, context.RequestAborted);
+        }
+        catch (CloudEventSubscriptionStoreBusyException ex)
+        {
+            SafeErrorResults.LogFailure(context, ex, "CDC_STORE_BUSY");
+            return SafeErrorResults.Problem(StatusCodes.Status503ServiceUnavailable, "CDC_STORE_BUSY", "The subscription store is busy; retry.", context);
         }
         catch (InvalidOperationException ex)
         {
@@ -381,7 +406,7 @@ internal sealed record CdcSubscriptionView(
     IReadOnlyList<CdcOperation> FilterOperations,
     string HmacSecret,
     bool IsEnabled,
-    IReadOnlyDictionary<string, string>? CustomHeaders,
+    bool HasCustomHeaders,
     string? CreatedBySid,
     int CreatedByRoleCount,
     DateTimeOffset? CreatedAt)
@@ -389,5 +414,5 @@ internal sealed record CdcSubscriptionView(
     public static CdcSubscriptionView From(CloudEventWebhookSubscription s) => new(
         s.Id, s.TenantId, s.TargetUrl, s.FilterTable, s.FilterOperations,
         string.IsNullOrEmpty(s.HmacSecret) ? string.Empty : "[REDACTED]",
-        s.IsEnabled, s.CustomHeaders, s.CreatedBySid, s.CreatedByRoles?.Count ?? 0, s.CreatedAt);
+        s.IsEnabled, s.CustomHeaders is { Count: > 0 }, s.CreatedBySid, s.CreatedByRoles?.Count ?? 0, s.CreatedAt);
 }

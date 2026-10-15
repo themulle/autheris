@@ -16,6 +16,14 @@ public enum CdcSnapshotCaptureError
     TooLarge
 }
 
+/// <summary>Why <see cref="CdcSubscriptionPrincipal.Evaluate"/> denied.</summary>
+public enum CdcSnapshotDenial
+{
+    None = 0,
+    Missing,
+    Expired
+}
+
 /// <summary>Result of capturing the creator principal of a CDC webhook subscription.</summary>
 public sealed record CdcSnapshotCapture(string? Sid, IReadOnlyList<string>? GroupSids, IReadOnlyList<string>? Roles, CdcSnapshotCaptureError Error)
 {
@@ -54,9 +62,17 @@ public static class CdcSubscriptionPrincipal
     /// <summary>Returns <c>null</c> (deny) when the snapshot is missing, incomplete or older than <see cref="CdcWebhooksOptions.CreatorSnapshotMaxAgeDays"/>.</summary>
     public static ClaimsPrincipal? TryBuild(CloudEventWebhookSubscription subscription, TimeProvider time, CdcWebhooksOptions options)
     {
+        Evaluate(subscription, time, options, out var principal);
+        return principal;
+    }
+
+    /// <summary>Like <see cref="TryBuild"/>, but tells an expired snapshot from a missing one.</summary>
+    public static CdcSnapshotDenial Evaluate(CloudEventWebhookSubscription subscription, TimeProvider time, CdcWebhooksOptions options, out ClaimsPrincipal? principal)
+    {
         ArgumentNullException.ThrowIfNull(subscription);
         ArgumentNullException.ThrowIfNull(time);
         ArgumentNullException.ThrowIfNull(options);
+        principal = null;
 
         if (string.IsNullOrWhiteSpace(subscription.CreatedBySid)
             || string.IsNullOrWhiteSpace(subscription.TenantId)
@@ -64,13 +80,13 @@ public static class CdcSubscriptionPrincipal
             || subscription.CreatedByRoles is null
             || subscription.CreatedAt is null)
         {
-            return null;
+            return CdcSnapshotDenial.Missing;
         }
 
         if (options.CreatorSnapshotMaxAgeDays > 0
             && time.GetUtcNow() - subscription.CreatedAt.Value > TimeSpan.FromDays(options.CreatorSnapshotMaxAgeDays))
         {
-            return null;
+            return CdcSnapshotDenial.Expired;
         }
 
         var claims = new List<Claim>
@@ -81,6 +97,7 @@ public static class CdcSubscriptionPrincipal
         claims.AddRange(subscription.CreatedByGroupSids.Where(g => !string.IsNullOrWhiteSpace(g)).Select(g => new Claim(ClaimTypes.GroupSid, g)));
         claims.AddRange(subscription.CreatedByRoles.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => new Claim(ClaimTypes.Role, r)));
 
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, AuthenticationType));
+        principal = new ClaimsPrincipal(new ClaimsIdentity(claims, AuthenticationType));
+        return CdcSnapshotDenial.None;
     }
 }

@@ -116,4 +116,19 @@ public sealed class CdcSubscriptionPrincipalTests
         capture.IsSuccess.ShouldBeFalse();
         capture.Error.ShouldBe(CdcSnapshotCaptureError.TooLarge);
     }
+
+    [Fact]
+    public void Evaluate_DistinguishesExpiredFromMissingSnapshot()
+    {
+        CdcSubscriptionPrincipal.Evaluate(Sub(createdAt: Now.AddDays(-91)), _time, _options, out var p1);
+        CdcSubscriptionPrincipal.Evaluate(Sub(sid: null), _time, _options, out var p2);
+        CdcSubscriptionPrincipal.Evaluate(Sub(), _time, _options, out var p3);
+
+        p1.ShouldBeNull();
+        p2.ShouldBeNull();
+        p3.ShouldNotBeNull();
+        CdcSubscriptionPrincipal.Evaluate(Sub(createdAt: Now.AddDays(-91)), _time, _options, out _).ShouldBe(CdcSnapshotDenial.Expired);
+        CdcSubscriptionPrincipal.Evaluate(Sub(sid: null), _time, _options, out _).ShouldBe(CdcSnapshotDenial.Missing);
+        CdcSubscriptionPrincipal.Evaluate(Sub(), _time, _options, out _).ShouldBe(CdcSnapshotDenial.None);
+    }
 }

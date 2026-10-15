@@ -132,17 +132,19 @@ public static class GatewayExecutionServiceExtensions
 
         // F-EVT-01: CloudEvents v1.0 Outbound Webhook Subscriptions
         // Enabled by default (G-2); while disabled nothing is registered (no store, no delivery service, no secret protector).
+        services.AddSingleton<IValidateOptions<Autheris.Domain.Options.CdcWebhooksOptions>, Autheris.Application.Events.Services.CdcWebhooksOptionsValidator>();
         services.AddOptions<Autheris.Domain.Options.CdcWebhooksOptions>()
-            .BindConfiguration(Autheris.Domain.Options.CdcWebhooksOptions.SectionName);
+            .BindConfiguration(Autheris.Domain.Options.CdcWebhooksOptions.SectionName)
+            .ValidateOnStart();
         var cdcWebhooksEnabled = CdcWebhooksFeature.IsEnabled(services);
         if (cdcWebhooksEnabled)
         {
             // The durable subscription store is registered with the governance repositories (AddAutherisGovernance).
-            services.AddSingleton<IValidateOptions<Autheris.Domain.Options.CdcWebhooksOptions>, Autheris.Application.Events.Services.CdcWebhooksOptionsValidator>();
             services.AddSingleton<Autheris.Application.Webhooks.IWebhookSecretProtector, Autheris.Infrastructure.Security.KeyVaultWebhookSecretProtector>();
             services.AddSingleton<ICloudEventTransformer, CloudEventTransformer>();
             Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddSingleton(services, TimeProvider.System);
             services.AddHostedService<Autheris.Application.Streaming.Services.CdcWebhookDeliveryService>();
+            services.AddHostedService<Autheris.Api.Hosting.CdcWebhookStartupCheck>();
         }
 
         // AST-Aware Traffic Shadowing & Dark Replay (F-OPS-01, INF-2)

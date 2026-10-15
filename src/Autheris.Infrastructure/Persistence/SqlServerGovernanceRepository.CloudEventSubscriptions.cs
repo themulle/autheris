@@ -47,6 +47,11 @@ public partial class SqlServerGovernanceRepository : ICloudEventSubscriptionStor
         {
             throw CloudEventSubscriptionMapping.Duplicate();
         }
+        catch (SqlException ex) when (ex.Number == 1205)
+        {
+            // Deadlock victim: the serialisable quota check can collide under heavy parallel registration; the caller may retry.
+            throw new CloudEventSubscriptionStoreBusyException();
+        }
 
         if (affected == 1)
         {
@@ -118,7 +123,10 @@ public partial class SqlServerGovernanceRepository : ICloudEventSubscriptionStor
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            rows.Add(CloudEventSubscriptionMapping.Read(reader));
+            if (CloudEventSubscriptionMapping.TryRead(reader) is { } parsed)
+            {
+                rows.Add(parsed);
+            }
         }
 
         return rows;

@@ -61,6 +61,19 @@ public sealed class CdcWebhookRegistrationTests
     }
 
     [Fact]
+    public void OptionsValidation_RunsOnStart_EvenWhenDisabled_AndStartupCheckIsRegisteredWhenEnabled()
+    {
+        var disabled = Register(false);
+        var enabled = Register(true);
+
+        disabled.Any(d => d.ServiceType == typeof(IValidateOptions<CdcWebhooksOptions>)).ShouldBeTrue();
+        enabled.Any(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(Autheris.Api.Hosting.CdcWebhookStartupCheck)).ShouldBeTrue();
+        disabled.Any(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(Autheris.Api.Hosting.CdcWebhookStartupCheck)).ShouldBeFalse();
+        // ValidateOnStart registers a startup validator hosted service of the options infrastructure.
+        disabled.Any(d => d.ServiceType.Name.Contains("IStartupValidator")).ShouldBeTrue();
+    }
+
+    [Fact]
     public void Disabled_RegistersNoDeliveryServiceStoreOrProtector()
     {
         var services = Register(false);
