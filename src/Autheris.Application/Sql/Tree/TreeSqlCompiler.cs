@@ -289,13 +289,24 @@ public static partial class TreeSqlCompiler
             var defaultOrdering = Autheris.Application.Data.Services.DefaultReadOrdering.Resolve(metadata, tableAccess.Decision);
             var useDefault = defaultOrdering.Kind != Autheris.Application.Data.Services.DefaultOrderingKind.None &&
                 (path.Count == 0 || defaultOrdering.Kind != Autheris.Application.Data.Services.DefaultOrderingKind.ClearColumnComposite);
-            if (useDefault && defaultOrdering.Columns.All(c => SafeNameRegex().IsMatch(c)))
+            if (useDefault)
             {
+                if (!defaultOrdering.Columns.All(c => SafeNameRegex().IsMatch(c)))
+                {
+                    // Fail closed (like the table-read planner): never silently drop the ORDER BY, which would make paging unstable.
+                    throw new GatewayInvalidQueryException("The table cannot be read in a stable order.");
+                }
+
                 foreach (var column in defaultOrdering.Columns)
                 {
                     order.Add((column, false));
                     Need(column);
                 }
+            }
+            else if (defaultOrdering.Kind == Autheris.Application.Data.Services.DefaultOrderingKind.None && path.Count == 0 && node.Offset > 0)
+            {
+                // No clear orderable column: paging beyond the first page would be unstable (same refusal and text as the planner).
+                throw new GatewayInvalidQueryException(Autheris.Application.Data.Services.GovernedTableReadPlanner.NoOrderableColumnMessage);
             }
         }
 

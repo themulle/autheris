@@ -74,4 +74,42 @@ public sealed class TreeSqlCompilerDefaultOrderingTests
 
         sql.ShouldNotContain("ORDER BY \"t1\".\"pid\"");
     }
+
+    [Fact]
+    public void DefaultOrderingColumnWithUnsafeName_FailsClosed_InsteadOfDroppingOrderBy()
+    {
+        var meta = Meta(Parent, ["bad col"], "bad col", "a");
+        var access = Access(meta, ("bad col", ColumnAccessLevel.Clear), ("a", ColumnAccessLevel.Clear));
+
+        var ex = Should.Throw<Autheris.Domain.Exceptions.GatewayInvalidQueryException>(() => Compile(new TreeQueryNode(Parent, ["a"]), access));
+
+        ex.Message.ShouldNotContain("bad col");
+    }
+
+    [Fact]
+    public void NoOrderableClearColumn_WithOffset_IsRefused_LikeThePlanner()
+    {
+        var meta = Meta(Parent, [], "a", "b") with
+        {
+            Columns = [new TableColumn { ColumnName = "a", DataType = "integer" }, new TableColumn { ColumnName = "b", DataType = "jsonb" }]
+        };
+        var access = Access(meta, ("a", ColumnAccessLevel.Mask), ("b", ColumnAccessLevel.Clear));
+
+        var ex = Should.Throw<Autheris.Domain.Exceptions.GatewayInvalidQueryException>(
+            () => Compile(new TreeQueryNode(Parent, ["a"]) { Offset = 5 }, access));
+
+        ex.Message.ShouldBe(Autheris.Application.Data.Services.GovernedTableReadPlanner.NoOrderableColumnMessage);
+    }
+
+    [Fact]
+    public void NoOrderableClearColumn_WithoutOffset_StillCompiles()
+    {
+        var meta = Meta(Parent, [], "a", "b") with
+        {
+            Columns = [new TableColumn { ColumnName = "a", DataType = "integer" }, new TableColumn { ColumnName = "b", DataType = "jsonb" }]
+        };
+        var access = Access(meta, ("a", ColumnAccessLevel.Mask), ("b", ColumnAccessLevel.Clear));
+
+        Should.NotThrow(() => Compile(new TreeQueryNode(Parent, ["a"]), access));
+    }
 }
