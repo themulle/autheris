@@ -22,6 +22,9 @@ internal readonly struct DecisionKey : IEquatable<DecisionKey>
 
     private readonly int _hash;
 
+    /// <summary>False when the context is ambiguous (attribute keys that differ only by case): such a decision is never cached.</summary>
+    public bool IsCacheable { get; }
+
     private DecisionKey(
         long epoch,
         string tenant,
@@ -34,8 +37,10 @@ internal readonly struct DecisionKey : IEquatable<DecisionKey>
         string[] groups,
         KeyValuePair<string, string?>[] attributes,
         string[] columns,
-        string[]? tableColumns)
+        string[]? tableColumns,
+        bool isCacheable)
     {
+        IsCacheable = isCacheable;
         Epoch = epoch;
         Tenant = tenant;
         UserSid = userSid;
@@ -102,21 +107,30 @@ internal readonly struct DecisionKey : IEquatable<DecisionKey>
     public static DecisionKey Create(long epoch, SecurityEvaluationContext context, string action)
     {
         ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(action);
+        return Create(epoch, context, action, context.TargetTable.ToString());
+    }
 
+    public static DecisionKey Create(long epoch, SecurityEvaluationContext context, string action, string table)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(action);
+        ArgumentNullException.ThrowIfNull(table);
+
+        var attributes = SortedAttributes(context.Attributes, out var cacheable);
         return new DecisionKey(
             epoch,
             context.Tenant.Value,
             context.UserSid.Value,
-            context.TargetTable.ToString(),
+            table,
             action,
             context.PurposeId,
             context.ClientIp,
             context.TargetDialect,
             SortedGroups(context.GroupSids),
-            SortedAttributes(context.Attributes),
+            attributes,
             SortedStrings(context.RequestedColumns),
-            context.TableColumns is null ? null : SortedStrings(context.TableColumns));
+            context.TableColumns is null ? null : SortedStrings(context.TableColumns),
+            cacheable);
     }
 
     public bool Equals(DecisionKey other)
@@ -237,8 +251,9 @@ internal readonly struct DecisionKey : IEquatable<DecisionKey>
         return result;
     }
 
-    private static KeyValuePair<string, string?>[] SortedAttributes(IReadOnlyDictionary<string, object?>? attributes)
+    private static KeyValuePair<string, string?>[] SortedAttributes(IReadOnlyDictionary<string, object?>? attributes, out bool cacheable)
     {
+        cacheable = true;
         if (attributes is null || attributes.Count == 0)
         {
             return NoAttributes;
@@ -251,12 +266,29 @@ internal readonly struct DecisionKey : IEquatable<DecisionKey>
             result[index++] = new KeyValuePair<string, string?>(key, Canonical(value));
         }
 
-        Array.Sort(result, static (a, b) => string.CompareOrdinal(a.Key, b.Key));
+        // Case-insensitive primary order puts keys that differ only by case next to each other.
+        Array.Sort(result, static (a, b) =>
+        {
+            var c = string.Compare(a.Key, b.Key, StringComparison.OrdinalIgnoreCase);
+            return c != 0 ? c : string.CompareOrdinal(a.Key, b.Key);
+        });
+
+        for (var i = 1; i < result.Length; i++)
+        {
+            if (string.Equals(result[i - 1].Key, result[i].Key, StringComparison.OrdinalIgnoreCase))
+            {
+                // Evaluation resolves such keys by dictionary comparer: ambiguous, so never cached.
+                cacheable = false;
+                break;
+            }
+        }
+
         return result;
     }
 
-    // Scalars use their invariant text. Collections get a length-prefixed encoding: a plain ToString() of a list is the type
-    // name, which would let different contents share a key.
+    // Every value carries a type tag, so a string, a number and a collection with the same text never share a key. Scalars that
+    // are formatted by the evaluator with the current culture are keyed with both the invariant and the current-culture text.
+    // Collections get a length-prefixed encoding.
     private static string? Canonical(object? value)
     {
         switch (value)
@@ -264,18 +296,22 @@ internal readonly struct DecisionKey : IEquatable<DecisionKey>
             case null:
                 return null;
             case string text:
-                return text;
+                return "s:" + text;
             case IEnumerable sequence:
-                var builder = new StringBuilder("[");
+                var builder = new StringBuilder("e:[");
                 foreach (var element in sequence)
                 {
-                    var item = Canonical(element) ?? string.Empty;
+                    var item = Canonical(element) ?? "null";
                     builder.Append(item.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(item);
                 }
 
                 return builder.Append(']').ToString();
             default:
-                return Convert.ToString(value, CultureInfo.InvariantCulture);
+                var invariant = Convert.ToString(value, CultureInfo.InvariantCulture);
+                var current = value.ToString();
+                return string.Equals(invariant, current, StringComparison.Ordinal)
+                    ? $"{value.GetType().FullName}:{invariant}"
+                    : $"{value.GetType().FullName}:{invariant}|{current}";
         }
     }
 }

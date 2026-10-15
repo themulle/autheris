@@ -171,9 +171,13 @@ public class CasbinDecisionCacheTests
         (await service.EvaluatePolicyAsync(ctx)).IsAllowed.ShouldBeTrue();
         service.DiagnosticDecisionCacheCount.ShouldBe(1);
 
-        time.Advance(TimeSpan.FromSeconds(31));
-        // Policy removed behind the cache's back would be invisible; here we only assert the entry is dropped and recomputed.
         (await service.EvaluatePolicyAsync(ctx)).IsAllowed.ShouldBeTrue();
+        service.DiagnosticDecisionCacheHits.ShouldBe(1);
+
+        time.Advance(TimeSpan.FromSeconds(31));
+        // Beyond the TTL the entry must not be served: the decision is recomputed (no additional hit) and cached again.
+        (await service.EvaluatePolicyAsync(ctx)).IsAllowed.ShouldBeTrue();
+        service.DiagnosticDecisionCacheHits.ShouldBe(1);
         service.DiagnosticDecisionCacheCount.ShouldBe(1);
     }
 
@@ -209,6 +213,46 @@ public class CasbinDecisionCacheTests
         }
 
         var perCall = (GC.GetAllocatedBytesForCurrentThread() - before) / 1000;
-        perCall.ShouldBeLessThan(768, $"cache-hit path allocated {perCall} bytes per call");
+        perCall.ShouldBeLessThan(512, $"cache-hit path allocated {perCall} bytes per call");
+    }
+
+    [Fact]
+    public void DecisionKey_NumericAttribute_DoesNotCollideWithStringOfSameText()
+    {
+        var number = DecisionKey.Create(1, Ctx(attributes: new() { ["level"] = 1.5 }), "read");
+        var text = DecisionKey.Create(1, Ctx(attributes: new() { ["level"] = "1.5" }), "read");
+        number.Equals(text).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void DecisionKey_StringLookingLikeEncodedList_DoesNotCollideWithList()
+    {
+        var list = DecisionKey.Create(1, Ctx(attributes: new() { ["roles"] = new List<string> { "a" } }), "read");
+        var text = DecisionKey.Create(1, Ctx(attributes: new() { ["roles"] = "[1:a]" }), "read");
+        list.Equals(text).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void DecisionKey_AttributeKeysDifferingByCaseOnly_AreNotCacheable()
+    {
+        var ambiguous = DecisionKey.Create(1, Ctx(attributes: new() { ["dept"] = "a", ["Dept"] = "b" }), "read");
+        var plain = DecisionKey.Create(1, Ctx(attributes: new() { ["dept"] = "a", ["region"] = "b" }), "read");
+
+        ambiguous.IsCacheable.ShouldBeFalse();
+        plain.IsCacheable.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Service_AmbiguousAttributeKeys_AreNeverCached()
+    {
+        using var service = new CasbinEnforcementService();
+        service.AddPolicy(new TenantId("t1"), "S-1-5-21-u1", Table.ToString(), "read");
+        var ctx = Ctx(attributes: new() { ["dept"] = "a", ["Dept"] = "b" });
+
+        await service.EvaluatePolicyAsync(ctx);
+        await service.EvaluatePolicyAsync(ctx);
+
+        service.DiagnosticDecisionCacheCount.ShouldBe(0);
+        service.DiagnosticDecisionCacheHits.ShouldBe(0);
     }
 }

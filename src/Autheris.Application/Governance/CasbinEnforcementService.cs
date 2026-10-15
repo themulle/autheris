@@ -188,17 +188,6 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         timeProvider ??= TimeProvider.System;
         _decisionCache = new CasbinDecisionCache(
             cacheOptions.Capacity, TimeSpan.FromSeconds(cacheOptions.TtlSeconds), timeProvider);
-        if (topology?.IsClusterWide == true)
-        {
-            // Cluster-wide state: policy changes propagate through a shared epoch (throws when no state provider is available).
-            _epochGuard = new PolicyEpochGuard(
-                stateProvider,
-                timeProvider,
-                TimeSpan.FromSeconds(cacheOptions.EpochCheckSeconds),
-                TimeSpan.FromMilliseconds(cacheOptions.UnavailableBackoffMilliseconds),
-                logger);
-        }
-
         _rowPolicies = rowPolicies;
         _logger = logger;
         _rlsFilterGenerator = rlsFilterGenerator ?? RlsFilterGenerator.Instance;
@@ -233,6 +222,18 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
             initialWildcardRoleClosure,
             initialWildcardEnforcer,
             1);
+
+        if (topology?.IsClusterWide == true)
+        {
+            // Cluster-wide state: policy changes propagate through a shared epoch (throws when no state provider is available).
+            _epochGuard = new PolicyEpochGuard(
+                stateProvider,
+                timeProvider,
+                TimeSpan.FromSeconds(cacheOptions.EpochCheckSeconds),
+                TimeSpan.FromMilliseconds(cacheOptions.UnavailableBackoffMilliseconds),
+                logger,
+                idleEvictionAfter: TimeSpan.FromSeconds(cacheOptions.TtlSeconds));
+        }
     }
 
     public long CurrentEpoch => Volatile.Read(ref _currentSnapshot).Epoch;
@@ -811,7 +812,8 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         var requestedAction = ResolveRequestedAction(context);
 
         var tableStr = context.TargetTable.ToString();
-        var cacheKey = DecisionKey.Create(snapshot.Epoch, context, requestedAction);
+        var cacheKey = DecisionKey.Create(snapshot.Epoch, context, requestedAction, tableStr);
+        useCache &= cacheKey.IsCacheable;
 
         if (useCache && _decisionCache.TryGet(cacheKey, out var cachedDecision))
         {

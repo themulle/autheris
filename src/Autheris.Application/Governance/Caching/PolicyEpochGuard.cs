@@ -38,18 +38,20 @@ internal readonly record struct EpochCheckOutcome(EpochCheckKind Kind, bool Tena
 /// Cluster-wide policy epoch for the decision cache. A policy change on any node increments an atomic counter in the shared
 /// state (<c>policy:epoch:{tenant}</c>, or <c>policy:epoch:*</c> for global policy); every node reads the counters at most
 /// every <c>EpochCheckSeconds</c> and reloads its own policy source when the value differs from the last observed one (any
-/// difference counts, so a counter reset also triggers a reload). While the shared state is unavailable the cache is
-/// bypassed, so a stale allow is never served.
+/// difference counts, so a counter reset also triggers a reload). While the epoch cannot be read the decision cache is
+/// bypassed, so no cached decision is served on an unknown epoch.
 /// </summary>
+/// <remarks>
+/// A cluster change makes this node's own policy source authoritative: the reload re-reads the node's policy file, so the file
+/// content (not the other node's in-memory rules) becomes active. Tenant names are case-insensitive, matching policy storage.
+/// </remarks>
 internal sealed class PolicyEpochGuard : IDisposable
 {
     public const string KeyPrefix = "policy:epoch:";
     public const string WildcardTenant = "*";
     public const string HintChannel = "policy:epoch:changed";
 
-    // Upper bound for tracked tenants so arbitrary tenant strings cannot grow the table without limit; further tenants are
-    // evaluated uncached.
-    private const int MaxTrackedTenants = 10_000;
+    private const int DefaultMaxTrackedTenants = 10_000;
 
     private sealed class KeyState(string key)
     {
@@ -61,6 +63,7 @@ internal sealed class PolicyEpochGuard : IDisposable
         public long NextCheck;
         public long UnavailableUntil;
         public Task<EpochCheckOutcome>? InFlight;
+        public long LastAccess;
     }
 
     private readonly IDistributedClusterStateProvider _state;
@@ -68,7 +71,12 @@ internal sealed class PolicyEpochGuard : IDisposable
     private readonly ILogger? _logger;
     private readonly long _checkInterval;
     private readonly long _backoff;
-    private readonly ConcurrentDictionary<string, KeyState> _tenants = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, KeyState> _tenants = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _evictionGate = new();
+    private readonly int _maxTrackedTenants;
+    private readonly long _idleEviction;
+    private readonly Func<long> _deltaSource;
+    private int _trackedTenants;
     private readonly KeyState _wildcard = new(KeyPrefix + WildcardTenant);
     private readonly IAsyncDisposable? _hintSubscription;
 
@@ -77,7 +85,10 @@ internal sealed class PolicyEpochGuard : IDisposable
         TimeProvider time,
         TimeSpan checkInterval,
         TimeSpan unavailableBackoff,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        int maxTrackedTenants = DefaultMaxTrackedTenants,
+        TimeSpan? idleEvictionAfter = null,
+        Func<long>? deltaSource = null)
     {
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(time);
@@ -87,6 +98,10 @@ internal sealed class PolicyEpochGuard : IDisposable
         _logger = logger;
         _checkInterval = ToTicks(checkInterval);
         _backoff = ToTicks(unavailableBackoff);
+        _maxTrackedTenants = maxTrackedTenants;
+        _idleEviction = ToTicks(idleEvictionAfter ?? TimeSpan.FromMinutes(1));
+        // A random positive delta (instead of always 1) keeps a counter reset to an equal value from hiding our own change.
+        _deltaSource = deltaSource ?? (static () => Random.Shared.NextInt64(1, 1 << 20));
 
         try
         {
@@ -99,19 +114,17 @@ internal sealed class PolicyEpochGuard : IDisposable
         }
     }
 
+    internal int TrackedTenantCount => Volatile.Read(ref _trackedTenants);
+
     public EpochStatus GetStatus(string tenant)
     {
         var now = _time.GetTimestamp();
-        if (now < Volatile.Read(ref _wildcard.UnavailableUntil))
-        {
-            return EpochStatus.Degraded;
-        }
-
         if (!_tenants.TryGetValue(tenant, out var state))
         {
-            return _tenants.Count >= MaxTrackedTenants ? EpochStatus.Degraded : EpochStatus.Due;
+            return EpochStatus.Due; // not tracked yet: CheckAsync decides whether the tenant can be tracked
         }
 
+        Volatile.Write(ref state.LastAccess, now);
         if (now < Volatile.Read(ref state.UnavailableUntil))
         {
             return EpochStatus.Degraded;
@@ -131,7 +144,12 @@ internal sealed class PolicyEpochGuard : IDisposable
         Func<bool, bool, bool> onChanged,
         CancellationToken ct)
     {
-        var state = _tenants.GetOrAdd(tenant, static t => new KeyState(KeyPrefix + t));
+        var state = TrackTenant(tenant);
+        if (state is null)
+        {
+            return EpochCheckOutcome.Unavailable; // table full of recently used tenants: evaluate uncached
+        }
+
         Task<EpochCheckOutcome> flight;
         lock (state.Gate)
         {
@@ -167,24 +185,31 @@ internal sealed class PolicyEpochGuard : IDisposable
         try
         {
             var state = StateFor(tenantOrWildcard);
-            var result = await _state.IncrementAsync(state.Key, 1, TimeSpan.Zero).ConfigureAwait(false);
+            if (state is null)
+            {
+                ReportPropagationFailure(tenantOrWildcard, null);
+                return;
+            }
+
+            var delta = _deltaSource();
+            var result = await _state.IncrementAsync(state.Key, delta, TimeSpan.Zero).ConfigureAwait(false);
             if (result is null)
             {
                 ReportPropagationFailure(tenantOrWildcard, null);
                 return;
             }
 
-            await PublishHintAsync(state.Key).ConfigureAwait(false);
-
             lock (state.Gate)
             {
-                // Only a clean +1 is our own change; anything else means another node also changed policy, which the next
-                // check must still observe and reload for.
-                if (state.Initialised && state.Observed + 1 == result.Value)
+                // Only a clean +delta is our own change; anything else means another node also changed policy, which the
+                // next check must still observe and reload for. Updated before the hint so our own hint finds it unchanged.
+                if (state.Initialised && state.Observed + delta == result.Value)
                 {
                     state.Observed = result.Value;
                 }
             }
+
+            await PublishHintAsync(state.Key).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -194,7 +219,12 @@ internal sealed class PolicyEpochGuard : IDisposable
 
     public void Dispose()
     {
-        if (_hintSubscription is not null)
+        if (_hintSubscription is null)
+        {
+            return;
+        }
+
+        try
         {
             _ = _hintSubscription.DisposeAsync().AsTask().ContinueWith(
                 static _ => { },
@@ -202,10 +232,16 @@ internal sealed class PolicyEpochGuard : IDisposable
                 TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
         }
+        catch (Exception ex)
+        {
+            _logger?.LogDebug(ex, "Casbin policy epoch hint unsubscribe failed.");
+        }
     }
 
     // A hint names the epoch key that changed; it makes the next evaluation read the counter instead of waiting for the
     // interval. Anything that is not a policy epoch key is ignored, and a hint never changes the observed value itself.
+    // A hint can race with a read that is just finishing: that read then schedules the next check from its own completion, so
+    // the hint may be lost. That only costs latency; the periodic check still converges.
     private ValueTask OnHintAsync(string key)
     {
         if (string.IsNullOrEmpty(key) || !key.StartsWith(KeyPrefix, StringComparison.Ordinal))
@@ -237,10 +273,60 @@ internal sealed class PolicyEpochGuard : IDisposable
         }
     }
 
-    private KeyState StateFor(string tenantOrWildcard) =>
-        tenantOrWildcard == WildcardTenant
-            ? _wildcard
-            : _tenants.GetOrAdd(tenantOrWildcard, static t => new KeyState(KeyPrefix + t));
+    private KeyState? StateFor(string tenantOrWildcard) =>
+        tenantOrWildcard == WildcardTenant ? _wildcard : TrackTenant(tenantOrWildcard);
+
+    // Returns the tracked state of a tenant, creating it when there is room. At the cap, tenants idle for longer than the
+    // idle threshold are evicted first (their cached decisions have expired by then); without room the result is null.
+    private KeyState? TrackTenant(string tenant)
+    {
+        if (_tenants.TryGetValue(tenant, out var existing))
+        {
+            return existing;
+        }
+
+        if (Volatile.Read(ref _trackedTenants) >= _maxTrackedTenants && !EvictIdle())
+        {
+            return null;
+        }
+
+        var created = new KeyState(KeyPrefix + tenant.ToLowerInvariant());
+        var state = _tenants.GetOrAdd(tenant, created);
+        if (ReferenceEquals(state, created))
+        {
+            Interlocked.Increment(ref _trackedTenants);
+            Volatile.Write(ref state.LastAccess, _time.GetTimestamp());
+        }
+
+        return state;
+    }
+
+    private bool EvictIdle()
+    {
+        lock (_evictionGate)
+        {
+            var now = _time.GetTimestamp();
+            var evicted = 0;
+            foreach (var (name, state) in _tenants)
+            {
+                if (now - Volatile.Read(ref state.LastAccess) < _idleEviction)
+                {
+                    continue;
+                }
+
+                lock (state.Gate)
+                {
+                    if (state.InFlight is null && _tenants.TryRemove(name, out _))
+                    {
+                        Interlocked.Decrement(ref _trackedTenants);
+                        evicted++;
+                    }
+                }
+            }
+
+            return evicted > 0;
+        }
+    }
 
     private async Task<EpochCheckOutcome> ReadAsync(KeyState tenantState, Func<bool, bool, bool> onChanged)
     {
@@ -274,11 +360,12 @@ internal sealed class PolicyEpochGuard : IDisposable
                 Volatile.Write(ref _wildcard.NextCheck, next);
                 Volatile.Write(ref tenantState.UnavailableUntil, 0);
             }
-            catch (ClusterStateUnavailableException ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                // Unreachable store, corrupted value or any other failure: the epoch is unknown, so bypass the cache.
                 var until = _time.GetTimestamp() + _backoff;
                 Volatile.Write(ref tenantState.UnavailableUntil, until);
-                _logger?.LogWarning(ex, "Casbin policy epoch unavailable; decision cache bypassed.");
+                _logger?.LogWarning(ex, "Casbin policy epoch could not be read; decision cache bypassed.");
                 outcome = EpochCheckOutcome.Unavailable;
             }
 
