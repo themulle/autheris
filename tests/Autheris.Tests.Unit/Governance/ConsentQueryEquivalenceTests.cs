@@ -115,7 +115,7 @@ public sealed class ConsentQueryEquivalenceTests : IDisposable
         {
             var actual = (await _repo.GetActiveConsentsForSubjectsAsync(sids, _table, Now, tenant)).Select(c => c.Id).ToHashSet();
             var expected = OracleForTable(_seeded.Where(c => !IsRevoked(c)), _tableId, subjects, tenant);
-            actual.ShouldBe(expected, $"tenant={tenant?.Value ?? "<none>"}");
+            actual.ShouldBe(expected, ignoreOrder: true, customMessage: $"tenant={tenant?.Value ?? "<none>"}");
         }
     }
 
@@ -213,6 +213,6 @@ public sealed class ConsentQueryEquivalenceTests : IDisposable
                 ? string.Equals(c.RoleName, "analyst", StringComparison.OrdinalIgnoreCase)
                 : c.GranteeSid != null && new[] { "S-1-5-21-ALICE", "S-1-5-21-GROUP-1" }.Contains(c.GranteeSid.Value.Value, StringComparer.OrdinalIgnoreCase))
             .Select(c => c.Id).ToHashSet();
-        result.Select(c => c.Id).ToHashSet().ShouldBe(expected);
+        result.Select(c => c.Id).ToHashSet().ShouldBe(expected, ignoreOrder: true);
     }
 }

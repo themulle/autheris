@@ -101,6 +101,7 @@ internal static class PostgreSqlBaselineSchema
                 effect TEXT NOT NULL,
                 grantee_type TEXT NOT NULL,
                 grantee_sid TEXT,
+                grantee_sid_norm TEXT,
                 role_id TEXT,
                 role_name TEXT,
                 valid_from TEXT NOT NULL,
@@ -228,6 +229,19 @@ internal static class PostgreSqlBaselineSchema
 
             CREATE UNIQUE INDEX IF NOT EXISTS ux_policy_epochs_natural
                 ON POLICY_EPOCHS (domain, schema_name, table_name);
+
+            -- WP-SC-01: indexes of the consent query. grantee_sid_norm is the upper-invariant grantee SID written by the repository
+            -- (case-insensitive subject match); rows without it (NULL) are always candidates, the C# filter stays authoritative.
+            CREATE INDEX IF NOT EXISTS ix_consents_tenant_table ON CONSENTS (tenant_id, table_id, is_revoked);
+            CREATE INDEX IF NOT EXISTS ix_consents_tenant_grantee ON CONSENTS (tenant_id, grantee_sid_norm, is_revoked);
+            CREATE INDEX IF NOT EXISTS ix_consents_tenant_role ON CONSENTS (tenant_id, role_name);
+            CREATE INDEX IF NOT EXISTS ix_consent_column_rules_consent ON CONSENT_COLUMN_RULES (consent_id);
+            CREATE INDEX IF NOT EXISTS ix_consent_row_filters_consent ON CONSENT_ROW_FILTERS (consent_id);
+            CREATE INDEX IF NOT EXISTS ix_column_masking_rules_column ON COLUMN_MASKING_RULES (table_column_id);
+            CREATE INDEX IF NOT EXISTS ix_role_members_member ON ROLE_MEMBERS (member_sid);
+            CREATE INDEX IF NOT EXISTS ix_table_owners_owner ON TABLE_OWNERS (data_owner_id);
+            CREATE INDEX IF NOT EXISTS ix_tables_natural_ci
+                ON TABLES (LOWER(source_name), LOWER(schema_name), LOWER(table_name));
 
             CREATE TABLE IF NOT EXISTS TABLE_RELATIONS (
                 id TEXT PRIMARY KEY,

@@ -468,7 +468,15 @@
       "primaryKey": [
         "id"
       ],
-      "indexes": []
+      "indexes": [
+        {
+          "name": "ix_column_masking_rules_column",
+          "unique": false,
+          "columns": [
+            "table_column_id"
+          ]
+        }
+      ]
     },
     {
       "name": "consent_column_rules",
@@ -507,7 +515,15 @@
       "primaryKey": [
         "id"
       ],
-      "indexes": []
+      "indexes": [
+        {
+          "name": "ix_consent_column_rules_consent",
+          "unique": false,
+          "columns": [
+            "consent_id"
+          ]
+        }
+      ]
     },
     {
       "name": "consent_requests",
@@ -699,7 +715,15 @@
       "primaryKey": [
         "id"
       ],
-      "indexes": []
+      "indexes": [
+        {
+          "name": "ix_consent_row_filters_consent",
+          "unique": false,
+          "columns": [
+            "consent_id"
+          ]
+        }
+      ]
     },
     {
       "name": "consents",
@@ -731,6 +755,11 @@
         },
         {
           "name": "grantee_sid",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "grantee_sid_norm",
           "type": "TEXT",
           "family": "string"
         },
@@ -784,6 +813,32 @@
         "id"
       ],
       "indexes": [
+        {
+          "name": "ix_consents_tenant_grantee",
+          "unique": false,
+          "columns": [
+            "tenant_id",
+            "grantee_sid_norm",
+            "is_revoked"
+          ]
+        },
+        {
+          "name": "ix_consents_tenant_role",
+          "unique": false,
+          "columns": [
+            "tenant_id",
+            "role_name"
+          ]
+        },
+        {
+          "name": "ix_consents_tenant_table",
+          "unique": false,
+          "columns": [
+            "tenant_id",
+            "table_id",
+            "is_revoked"
+          ]
+        },
         {
           "name": "ux_consents_request",
           "unique": true,
@@ -1033,7 +1088,15 @@
       "primaryKey": [
         "id"
       ],
-      "indexes": []
+      "indexes": [
+        {
+          "name": "ix_role_members_member",
+          "unique": false,
+          "columns": [
+            "member_sid"
+          ]
+        }
+      ]
     },
     {
       "name": "roles",
@@ -1223,6 +1286,13 @@
       ],
       "indexes": [
         {
+          "name": "ix_table_owners_owner",
+          "unique": false,
+          "columns": [
+            "data_owner_id"
+          ]
+        },
+        {
           "name": "ux_table_owners_natural",
           "unique": true,
           "columns": [
@@ -1394,6 +1464,15 @@
         "id"
       ],
       "indexes": [
+        {
+          "name": "ix_tables_natural_ci",
+          "unique": false,
+          "columns": [
+            "(expression)",
+            "(expression)",
+            "(expression)"
+          ]
+        },
         {
           "name": "ux_tables_natural",
           "unique": true,
