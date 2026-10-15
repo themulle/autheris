@@ -76,6 +76,13 @@ spec:
             # The root filesystem is read-only; async job results go to the writable /tmp emptyDir.
             - name: Gateway__AsyncJobs__ScratchDirectory
               value: "/tmp/autheris-jobs"
+            {{- if and .Values.gateway.authentication.forwardAuth.enabled .Values.gateway.authentication.forwardAuth.sharedSecret.existingSecret }}
+            - name: Gateway__Authentication__ForwardAuth__SharedSecret
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.gateway.authentication.forwardAuth.sharedSecret.existingSecret }}
+                  key: {{ .Values.gateway.authentication.forwardAuth.sharedSecret.key | default "sharedSecret" }}
+            {{- end }}
             {{- if .Values.gateway.governanceDb.existingSecret }}
             - name: Gateway__GovernanceDb__ConnectionString
               valueFrom:
@@ -122,4 +129,9 @@ spec:
               mountPath: /tmp
       volumes:
         - name: tmp
+          {{- if .Values.tmpVolume.sizeLimit }}
+          emptyDir:
+            sizeLimit: {{ .Values.tmpVolume.sizeLimit | quote }}
+          {{- else }}
           emptyDir: {}
+          {{- end }}

@@ -118,6 +118,9 @@ if [[ ! -f .env ]]; then
     log_warn_env() { echo -e "\033[1;33m[GqlGateway Bench]\033[0m $1"; }
     log_warn_env "No .env found - generating random benchmark secrets via scripts/generate-env.sh"
     ./scripts/generate-env.sh
+elif [[ ! -f certs/sqlserver.crt ]]; then
+    # SR-D-08: existing .env but no SQL Server TLS certificate yet; the script keeps the .env untouched.
+    ./scripts/generate-env.sh
 fi
 set -a
 # shellcheck disable=SC1091
@@ -199,7 +202,7 @@ export TARGET_PROXY="http://localhost:8080"
 if command -v python3 &>/dev/null; then
     python3 scripts/test_extensions.py || true
 else
-    podman run --rm --net=gateway-bench-net -e TARGET_PROXY="http://reverse-proxy:8080" -e BENCH_SCENARIO="${SCENARIO}" -e ENABLE_LAKEHOUSE="${ENABLE_LAKEHOUSE}" -e ENABLE_ENTERPRISE="${ENABLE_ENTERPRISE}" -v "$(pwd)/results:/results:z" -v "$(pwd)/scripts:/scripts:z" docker.io/library/python:3.12-alpine python /scripts/test_extensions.py || true
+    podman run --rm --net=gateway-bench-net -e TARGET_PROXY="http://reverse-proxy:8080" -e BENCH_SCENARIO="${SCENARIO}" -e ENABLE_LAKEHOUSE="${ENABLE_LAKEHOUSE}" -e ENABLE_ENTERPRISE="${ENABLE_ENTERPRISE}" -v "$(pwd)/results:/results:z" -v "$(pwd)/scripts:/scripts:z" docker.io/library/python:3.12.15-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4 python /scripts/test_extensions.py || true
 fi
 
 # 5. Run k6 Load Generator
@@ -212,7 +215,7 @@ if [[ "${CHAOS}" == "true" ]]; then
     if command -v python3 &>/dev/null; then
         python3 scripts/chaos_test.py || true
     else
-        podman run --rm --net=gateway-bench-net -v "$(pwd)/results:/results:z" -v "$(pwd)/scripts:/scripts:z" docker.io/library/python:3.12-alpine python /scripts/chaos_test.py || true
+        podman run --rm --net=gateway-bench-net -v "$(pwd)/results:/results:z" -v "$(pwd)/scripts:/scripts:z" docker.io/library/python:3.12.15-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4 python /scripts/chaos_test.py || true
     fi
 fi
 
@@ -221,7 +224,7 @@ log "Generating Markdown Benchmark Report..."
 if command -v python3 &>/dev/null; then
     python3 scripts/generate_report.py
 else
-    podman run --rm -v "$(pwd)/results:/results:z" -v "$(pwd)/scripts:/scripts:z" docker.io/library/python:3.12-alpine python /scripts/generate_report.py
+    podman run --rm -v "$(pwd)/results:/results:z" -v "$(pwd)/scripts:/scripts:z" docker.io/library/python:3.12.15-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4 python /scripts/generate_report.py
 fi
 
 if [[ -f results/benchmark-report.md ]]; then

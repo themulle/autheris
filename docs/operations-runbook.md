@@ -124,6 +124,8 @@ spec:
 ### 3.1 Failure Detection
 If the Redis cluster becomes unavailable:
 - L2 distributed cache calls fail gracefully and log a warning.
+- Consent cache (`ConsentCacheService`): only genuine L2 faults (Redis errors, timeouts, L2 frame crypto and serialization failures) degrade. A failed read is treated as a cache miss (the decision is re-evaluated), a failed write keeps the entry in L1 only, and a failed delete of a stale entry leaves it to expire by TTL. They are logged as warnings with the stable event ids `4111` (`ConsentCacheL2ReadFailed`), `4112` (`ConsentCacheL2DeleteFailed`) and `4113` (`ConsentCacheL2WriteFailed`). Any other exception propagates (fail closed).
+- Redis event bus: failed publishes are counted in `autheris_event_bus_publish_failed_total{message_type}` and rethrown; failed subscriber handlers in `autheris_event_bus_handler_failed_total{message_type}`.
 - The gateway automatically falls back to L1 local `IMemoryCache`.
 - Epoch validation queries the database directly with brief local caching.
 - Queries continue executing without dropping client requests or returning 500 errors.
@@ -135,6 +137,8 @@ The shared cluster state (`IDistributedClusterStateProvider`) distinguishes "key
 - A read of a missing key returns no value. An infrastructure failure (connection loss, timeout, Redis error) throws `ClusterStateUnavailableException` for reads, writes, deletes, event publishing and lock acquisition. A `null` lock lease only ever means "lock busy". Counters return `null` and budgets return `StoreUnavailable` when the store cannot be reached.
 - Consumers decide explicitly: TOTP secret reads and TOTP replay consumption fail closed (a valid code is rejected while the store is down), MCP session reads and HitL ticket reads treat the remote entry as not found, HitL locks honour `HitLStepUp:FailClosedOnClusterPartition`, FinOps budget enforcement fails closed, federation nonce replay checks reject requests when the topology is cluster-wide. Background singletons (catalog sync, CDC, ITSM) skip the cycle.
 - Every store failure increments `autheris_cluster_state_failure_total{operation}`; failed event handlers increment `autheris_cluster_state_handler_failure_total`. Alert on a sustained rate of the first.
+- Cluster singletons (catalog sync, OpenMetadata sync, MSSQL change tracking) run under renewed, fenced leases (`TryAcquireLeaseAsync`). A replica that cannot confirm its lease for two thirds of the TTL cancels its job. Watch `autheris_scheduled_job_last_success_timestamp_seconds{job}`, `autheris_scheduled_job_skipped_total{job,reason}` and `autheris_cluster_lease_lost_total{reason}` (see F-OPS-02).
+- Multi-replica deployments require an external Redis/Garnet with AOF persistence; without it a store restart drops leases and fence counters. An external Garnet must have Lua scripting enabled (the embedded server starts with `--lua`).
 - The embedded Garnet server is process-local. Startup fails when `HighAvailability:MultiNodeClusterMode` is set or `HighAvailability:Replicas` is greater than 1 while `Caching:Garnet:EnableEmbeddedServer` is true (also when `Caching:Redis:Enabled` is true as well, because the embedded server takes precedence). Use an external Redis/Garnet for multi-replica deployments.
 
 ### 3.2 Recovery
@@ -243,6 +247,22 @@ The monthly FinOps budget is enforced against a cluster-wide counter in the shar
 - Migrations are forward-only. Rolling back to an older build means restoring a database backup taken before the upgrade; an older build refuses to start against a newer schema unless `GovernanceDb:Migrations:AllowNewerSchema=true`.
 
 ---
+
+### 4.ad Prometheus scrape access (SEC2-09)
+
+`/metrics` requires the `MetricsScrape` policy: the authenticated principal must carry the `MetricsScraper` (or `ClusterAdmin`) role. Any other authenticated caller gets 403, anonymous callers get 401. Grant the scrape identity (for example the service principal behind the ServiceMonitor bearer token) an app role named `MetricsScraper`; there is no configuration switch that relaxes this. The role must come from an authentication scheme that carries roles (JWT, Basic or Kerberos). A ForwardAuth-only deployment cannot be scraped by default: `ClusterAdmin` is never accepted from proxy headers and the default `ForwardAuth.AllowedRoles` does not include `MetricsScraper`; either list `MetricsScraper` in `ForwardAuth.AllowedRoles` for a trusted scrape proxy or scrape through a JWT-capable path.
+
+### 4.ae Webhook outbox (WP-ARC-A-02)
+
+- Undelivered webhooks are in `WEBHOOK_OUTBOX` (governance database). Watch `autheris_webhook_outbox_pending`, `autheris_webhook_deliveries_total{outcome}` and `autheris_webhook_dead_letters_total{code}`.
+- A growing `dead_letters_total{code="egress_denied"}` or `{code="http_status"}` points at a misconfigured target; `subscription_not_found` appears after a subscription `Id` was renamed or removed while rows were queued (ids must stay stable).
+- A subscription that fails `AutoDisableAfterConsecutiveFailures` times in a row has its pending rows paused for `CircuitCooldownSeconds` (log entry `... failed N times in a row; M pending delivery(ies) paused ...`); it resumes automatically.
+- Nodes must be NTP-synchronised: outbox times come from the node clock.
+
+### 4.af MSSQL change tracking watermark (WP-ARC-A-11)
+
+- `autheris_cdc_watermark_expired_total` increasing: the stored watermark is below `CHANGE_TRACKING_MIN_VALID_VERSION`; polling of that table stops (with backoff) until an operator deletes its row in `autheris_cdc_watermarks`, accepting the gap. Procedure: F-CDC-02, section 3.3.
+- `autheris_cdc_watermark_fenced_total` increasing without a lease handover: the fence counter of the cluster-state store was reset; verify AOF persistence.
 
 ## 5. Data Catalog Synchronization Operations
 
