@@ -63,6 +63,30 @@ public sealed class ConsentCacheL2FailureTests
     private static RedisException RedisFault() => new("redis down");
 
     [Fact]
+    public async Task ConsentCache_L2Reads_ArePipelined_AllIssuedBeforeAnyCompletes()
+    {
+        var (cache, db, _, _) = Create();
+        var tables = Enumerable.Range(1, 6).Select(i => new TableIdentifier("corp", "hr", "t" + i)).ToList();
+        var pending = new List<TaskCompletionSource<RedisValue>>();
+        db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>()).Returns(_ =>
+        {
+            var tcs = new TaskCompletionSource<RedisValue>(TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (pending) { pending.Add(tcs); }
+            return tcs.Task;
+        });
+
+        var read = cache.GetCachedDecisionsAsync(new TenantId("t1"), User, tables);
+
+        // No reply has been delivered yet: a sequential loop would have issued exactly one command by now.
+        lock (pending) { pending.Count.ShouldBe(6); }
+        foreach (var tcs in pending) { tcs.SetResult(RedisValue.Null); }
+        var result = await read;
+
+        result.Count.ShouldBe(6);
+        result.Values.ShouldAllBe(v => v == null);
+    }
+
+    [Fact]
     public async Task ConsentCache_L2RedisException_FallsBackToMiss_AndLogsStableEventId()
     {
         var (cache, db, log, _) = Create();
