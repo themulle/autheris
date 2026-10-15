@@ -173,23 +173,8 @@ public sealed partial class ODataHandler(
                     continue;
                 }
 
-                var allowedColumnNames = new HashSet<string>(allowedColumns.Select(c => c.ColumnName), StringComparer.OrdinalIgnoreCase);
-                var filteredPk = tableMeta.PrimaryKeyColumns.Count > 0 && tableMeta.PrimaryKeyColumns.All(allowedColumnNames.Contains)
-                    ? tableMeta.PrimaryKeyColumns
-                    : Array.Empty<string>();
-                var filteredIndexes = tableMeta.Indexes.Count > 0
-                    ? tableMeta.Indexes.Where(idx => idx.Columns.Count > 0 && idx.Columns.All(allowedColumnNames.Contains)).ToList()
-                    : (IReadOnlyList<Autheris.Domain.Model.TableIndexDefinition>)Array.Empty<Autheris.Domain.Model.TableIndexDefinition>();
-
-                var filteredMeta = new Autheris.Domain.Model.TableMetadata
-                {
-                    Identifier = tableMeta.Identifier,
-                    Table = tableMeta.Table,
-                    PrimaryKeyColumns = filteredPk,
-                    Indexes = filteredIndexes,
-                    Columns = allowedColumns,
-                    ColumnMaskingRules = tableMeta.ColumnMaskingRules
-                };
+                // SD-4 / SEC-94-03: keys, indexes and Meta marker keys that touch a hidden column are dropped as a whole.
+                var filteredMeta = Autheris.Application.Data.Services.TableKeyVisibility.Restrict(tableMeta, allowedColumns);
 
                 authorizedTables.Add(filteredMeta);
             }
