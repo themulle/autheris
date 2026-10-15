@@ -58,14 +58,16 @@ public sealed class CutoverArchitectureTests
 
     private static readonly string EngineAssemblyName = typeof(TrinoSqlEngine.FastSqlEngine).Assembly.GetName().Name!;
 
-    private static List<(ModuleDefinition Module, TypeDefinition Type)> ProductionTypes() => TypesOf(ProductionAssemblies);
+    private static readonly List<(ModuleDefinition Module, TypeDefinition Type)> ProductionTypesList = TypesOf(ProductionAssemblies);
+
+    private static List<(ModuleDefinition Module, TypeDefinition Type)> ProductionTypes() => ProductionTypesList;
 
     private static List<(ModuleDefinition Module, TypeDefinition Type)> TypesOf(IEnumerable<Assembly> assemblies)
     {
         var result = new List<(ModuleDefinition, TypeDefinition)>();
         foreach (var assembly in assemblies)
         {
-            var module = ModuleDefinition.ReadModule(assembly.Location);
+            var module = CecilModuleCache.For(assembly);
             result.AddRange(module.GetTypes().Select(t => (module, t)));
         }
 
@@ -109,7 +111,7 @@ public sealed class CutoverArchitectureTests
     public void TheLegacyScanner_SeesAKnownTypeAndMember()
     {
         // Positive control against the test assembly itself: a type and a member with a scanned shape are found.
-        var module = ModuleDefinition.ReadModule(typeof(CutoverArchitectureTests).Assembly.Location);
+        var module = CecilModuleCache.For(typeof(CutoverArchitectureTests).Assembly);
         module.GetTypes().ShouldContain(t => t.Name == nameof(ControlRewriteRls));
         module.GetTypes().SelectMany(t => t.Methods).ShouldContain(m => m.Name == nameof(ControlRewriteRls.RewriteRls));
     }
@@ -192,7 +194,7 @@ public sealed class CutoverArchitectureTests
     private static List<string> ForgingCalls(string assemblyPath)
     {
         var callers = new List<string>();
-        using var module = ModuleDefinition.ReadModule(assemblyPath);
+        var module = CecilModuleCache.For(assemblyPath);
         foreach (var type in module.GetTypes())
         {
             foreach (var method in type.Methods.Where(m => m.HasBody))
@@ -566,12 +568,17 @@ public sealed class CutoverArchitectureTests
         return result;
     }
 
+    private static readonly CallGraph ProductionCallGraph = BuildCallGraphCore(ProductionAssemblies);
+
     /// <summary>
     /// Call graph on (top-level type, method name). Compiler generated types (async state machines, closures) are folded into the
     /// method they came from. A call through an interface, an abstract or a virtual method links only to the implementations of that name in
     /// types that derive from or implement the declaring type of the call (not to every method of that name).
     /// </summary>
-    private static CallGraph BuildCallGraph(IEnumerable<Assembly> assemblies)
+    private static CallGraph BuildCallGraph(IEnumerable<Assembly> assemblies) =>
+        ReferenceEquals(assemblies, ProductionAssemblies) ? ProductionCallGraph : BuildCallGraphCore(assemblies);
+
+    private static CallGraph BuildCallGraphCore(IEnumerable<Assembly> assemblies)
     {
         var types = TypesOf(assemblies);
         var edges = new Dictionary<Node, HashSet<Node>>();

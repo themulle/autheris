@@ -79,9 +79,9 @@ CI gain. Re-baseline the table above with the result.
 
 | Work package | Status |
 |---|---|
-| CI check of WP-TS-01 | Open: GitHub `Build & Test` 23:14 (`f396e742`) vs 20:18 before; investigate (section 1). |
-| WP-TS-00 | Planned (next) |
+| CI check of WP-TS-01 | Open: GitHub `Build & Test` 23:14 (`f396e742`) vs 20:18 before; inspect TRX artifacts from WP-TS-00. |
+| WP-TS-00 | Implemented (`--logger trx` + `test-results-*` artifacts in `ci.yml`) |
 | WP-TS-02 | Planned |
-| WP-TS-03 | Planned |
-| WP-TS-04 | Re-measure first: an uncontended local run took 20 s (the 5:07 baseline ran next to other test projects). Drop if CI confirms. |
+| WP-TS-03 | Implemented (`Category=Spark` trait on Spark execution tests + parallel `spark-integration-tests` job in `ci.yml`) |
+| WP-TS-04 | Implemented (`CecilModuleCache` + cached production types and call graph in `Autheris.Tests.Architecture`) |
 | WP-TS-05 | Planned |

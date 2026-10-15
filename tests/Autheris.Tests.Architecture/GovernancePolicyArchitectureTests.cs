@@ -28,7 +28,7 @@ public sealed class GovernancePolicyArchitectureTests
         var found = new List<TypeDefinition>();
         foreach (var path in Assemblies.Distinct())
         {
-            var module = ModuleDefinition.ReadModule(path);
+            var module = CecilModuleCache.For(path);
             foreach (var type in module.GetTypes().Where(t => t.FullName != typeName))
             {
                 bool creates = type.Methods.Where(m => m.HasBody).Any(m => m.Body.Instructions.Any(i =>
@@ -86,7 +86,7 @@ public sealed class GovernancePolicyArchitectureTests
     [InlineData("Autheris.Application.Sql.Policy.CompileRequestFactory")]
     public void PolicyAssembly_NeverUsesTheStringPolicyProvidersOrTheRlsOptionsBag(string typeName)
     {
-        var module = ModuleDefinition.ReadModule(typeof(Autheris.Application.Services.ConsentResolutionService).Assembly.Location);
+        var module = CecilModuleCache.For(typeof(Autheris.Application.Services.ConsentResolutionService).Assembly);
         var types = module.GetTypes().Where(t => t.FullName == typeName || (t.DeclaringType?.FullName == typeName)).ToList();
         types.ShouldNotBeEmpty();
 

@@ -982,12 +982,6 @@ public sealed class AuditOptions
     /// </summary>
     public AuditChainViolationPolicy? OnChainViolation { get; init; }
 
-    /// <summary>
-    /// Obsolete / no-op (L-7): Fail-closed tiering is now intrinsic to the audit pipeline.
-    /// </summary>
-    [Obsolete("TierAEnabled is no longer configurable; security-critical audit is fail-closed by default.")]
-    public bool TierAEnabled { get; init; } = true;
-
     [Range(1, 3600)] public int TierBAggregationWindowSeconds { get; init; } = 60;
     [Range(365, 7300)] public int AuditLogRetentionDays { get; init; } = 3650;
     public AuditCatalogReadMode CatalogReadMode { get; init; } = AuditCatalogReadMode.Summarized;

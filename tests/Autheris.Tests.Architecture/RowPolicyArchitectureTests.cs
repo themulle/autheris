@@ -44,13 +44,13 @@ public sealed class RowPolicyArchitectureTests
     }
 
     private static ModuleDefinition Application() =>
-        ModuleDefinition.ReadModule(typeof(Autheris.Application.Services.ConsentResolutionService).Assembly.Location);
+        CecilModuleCache.For(typeof(Autheris.Application.Services.ConsentResolutionService).Assembly);
 
     // Positive control: the scanner sees the call in a legacy method that really contains it.
     [Fact]
     public void TheScanner_FindsFormatSafeLiteral_InTheLegacyProducer()
     {
-        using var module = Application();
+        var module = Application();
         Callers(module, t => t.FullName == "Autheris.Application.Services.RowFilterSqlBuilder", _ => true)
             .ShouldNotBeEmpty();
     }
@@ -58,7 +58,7 @@ public sealed class RowPolicyArchitectureTests
     [Fact]
     public void NoFormatSafeLiteral_OnPolicyValuePaths()
     {
-        using var module = Application();
+        var module = Application();
         var present = module.GetTypes().Select(t => t.FullName).ToHashSet();
         foreach (var type in TypedProducerTypes)
         {
@@ -108,7 +108,7 @@ public sealed class RowPolicyArchitectureTests
     [Fact]
     public void TheScanner_FindsStringReplaceAndTheEngine_InTheLegacyCompile()
     {
-        using var module = Application();
+        var module = Application();
         var legacy = module.GetTypes().Single(t => t.FullName == "Autheris.Application.VirtualFilters.SqlFilterCompiler")
             .Methods.Single(m => m.Name == "Compile" && m.HasBody);
 
@@ -118,7 +118,7 @@ public sealed class RowPolicyArchitectureTests
     [Fact]
     public void NoStringReplaceOnSql_InTheTypedVirtualFilterProducers()
     {
-        using var module = Application();
+        var module = Application();
         var typedMethods = module.GetTypes()
             .Where(t => t.FullName.StartsWith("Autheris.Application.VirtualFilters.SqlFilterCompiler", StringComparison.Ordinal) ||
                         t.FullName.StartsWith("Autheris.Application.VirtualFilters.StructuredFilterSqlBuilder", StringComparison.Ordinal))

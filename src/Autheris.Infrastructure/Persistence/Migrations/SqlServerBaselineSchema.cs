@@ -131,12 +131,6 @@ CREATE TABLE dbo.CONSENT_COLUMN_RULES (
     applicable_scopes NVARCHAR(MAX) NOT NULL DEFAULT ''
 );
 
-IF COL_LENGTH(N'dbo.CONSENT_COLUMN_RULES', N'applicable_scopes') IS NULL
-    ALTER TABLE dbo.CONSENT_COLUMN_RULES ADD applicable_scopes NVARCHAR(MAX) NOT NULL DEFAULT '';
-
-IF COL_LENGTH(N'dbo.TABLE_COLUMNS', N'meta_json') IS NULL
-    ALTER TABLE dbo.TABLE_COLUMNS ADD meta_json NVARCHAR(MAX) NULL;
-
 IF OBJECT_ID(N'dbo.CONSENT_ROW_FILTERS', N'U') IS NULL
 CREATE TABLE dbo.CONSENT_ROW_FILTERS (
     id NVARCHAR(128) NOT NULL PRIMARY KEY,
@@ -248,16 +242,7 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ux_table_columns_natural
     CREATE UNIQUE INDEX ux_table_columns_natural ON dbo.TABLE_COLUMNS (table_id, column_name);
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ux_data_owners_sid' AND object_id = OBJECT_ID(N'dbo.DATA_OWNERS'))
-BEGIN
-    WITH DupOwners AS (
-        SELECT id, ad_sid, ROW_NUMBER() OVER(PARTITION BY ad_sid ORDER BY is_active DESC, id ASC) as rn
-        FROM dbo.DATA_OWNERS
-        WHERE ad_sid IS NOT NULL AND ad_sid <> ''
-    )
-    DELETE FROM dbo.DATA_OWNERS WHERE id IN (SELECT id FROM DupOwners WHERE rn > 1);
-
     CREATE UNIQUE INDEX ux_data_owners_sid ON dbo.DATA_OWNERS (ad_sid);
-END
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ux_table_owners_natural' AND object_id = OBJECT_ID(N'dbo.TABLE_OWNERS'))
     CREATE UNIQUE INDEX ux_table_owners_natural ON dbo.TABLE_OWNERS (table_id, data_owner_id, owner_role);
@@ -390,6 +375,74 @@ CREATE TABLE dbo.TENANT_REGISTRY (
     collided INT NOT NULL DEFAULT 0,
     first_seen_at NVARCHAR(64) NOT NULL
 );
+
+-- WP-ARC-A-02: durable webhook outbox (all times are Unix milliseconds)
+IF OBJECT_ID(N'dbo.WEBHOOK_OUTBOX', N'U') IS NULL
+CREATE TABLE dbo.WEBHOOK_OUTBOX (
+    id NVARCHAR(128) NOT NULL PRIMARY KEY,
+    source INT NOT NULL,
+    subscription_id NVARCHAR(128) NOT NULL,
+    owner_tenant_id NVARCHAR(128) NULL,
+    event_tenant_id NVARCHAR(128) NULL,
+    event_id NVARCHAR(128) NOT NULL,
+    event_type NVARCHAR(256) NOT NULL,
+    event_source NVARCHAR(512) NOT NULL,
+    event_time_ms BIGINT NOT NULL,
+    payload_json NVARCHAR(MAX) NOT NULL,
+    attempt INT NOT NULL,
+    max_attempts INT NOT NULL,
+    state INT NOT NULL,
+    next_attempt_ms BIGINT NOT NULL,
+    lease_until_ms BIGINT NULL,
+    lease_owner NVARCHAR(128) NULL,
+    last_status_code INT NULL,
+    last_error_code NVARCHAR(64) NULL,
+    created_ms BIGINT NOT NULL,
+    updated_ms BIGINT NOT NULL
+);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ux_webhook_outbox_dedupe' AND object_id = OBJECT_ID(N'dbo.WEBHOOK_OUTBOX'))
+    CREATE UNIQUE INDEX ux_webhook_outbox_dedupe ON dbo.WEBHOOK_OUTBOX (source, subscription_id, event_id);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_webhook_outbox_due' AND object_id = OBJECT_ID(N'dbo.WEBHOOK_OUTBOX'))
+    CREATE INDEX ix_webhook_outbox_due ON dbo.WEBHOOK_OUTBOX (state, next_attempt_ms);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_webhook_outbox_lease' AND object_id = OBJECT_ID(N'dbo.WEBHOOK_OUTBOX'))
+    CREATE INDEX ix_webhook_outbox_lease ON dbo.WEBHOOK_OUTBOX (state, lease_until_ms);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_webhook_outbox_owner' AND object_id = OBJECT_ID(N'dbo.WEBHOOK_OUTBOX'))
+    CREATE INDEX ix_webhook_outbox_owner ON dbo.WEBHOOK_OUTBOX (owner_tenant_id, state);
+
+-- WP-ARC-A-11: durable, fenced CDC watermarks
+IF OBJECT_ID(N'dbo.autheris_cdc_watermarks', N'U') IS NULL
+CREATE TABLE dbo.autheris_cdc_watermarks (
+    source NVARCHAR(32) NOT NULL,
+    domain_name NVARCHAR(128) NOT NULL,
+    schema_name NVARCHAR(128) NOT NULL,
+    table_name NVARCHAR(128) NOT NULL,
+    watermark BIGINT NOT NULL,
+    fencing_token BIGINT NOT NULL,
+    updated_at NVARCHAR(64) NOT NULL,
+    updated_by NVARCHAR(256) NOT NULL,
+    CONSTRAINT PK_autheris_cdc_watermarks PRIMARY KEY (source, domain_name, schema_name, table_name)
+);
+
+-- WP-ARC-A-03: durable CDC webhook (CloudEvent) subscriptions
+IF OBJECT_ID(N'dbo.CLOUDEVENT_SUBSCRIPTIONS', N'U') IS NULL
+CREATE TABLE dbo.CLOUDEVENT_SUBSCRIPTIONS (
+    id NVARCHAR(128) NOT NULL PRIMARY KEY,
+    tenant_id NVARCHAR(128) NOT NULL,
+    target_url NVARCHAR(2048) NOT NULL,
+    filter_table NVARCHAR(512) NOT NULL,
+    filter_operations NVARCHAR(MAX) NULL,
+    hmac_secret_protected NVARCHAR(MAX) NULL,
+    is_enabled BIT NOT NULL,
+    custom_headers_json NVARCHAR(MAX) NULL,
+    created_by_sid NVARCHAR(256) NULL,
+    created_by_groups_json NVARCHAR(MAX) NULL,
+    created_by_roles_json NVARCHAR(MAX) NULL,
+    created_ms BIGINT NOT NULL
+);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_cloudevent_subs_tenant' AND object_id = OBJECT_ID(N'dbo.CLOUDEVENT_SUBSCRIPTIONS'))
+    CREATE INDEX ix_cloudevent_subs_tenant ON dbo.CLOUDEVENT_SUBSCRIPTIONS (tenant_id, is_enabled);
 
 -- SQL Server cannot attach a trigger to TRUNCATE TABLE. A table that is referenced by a foreign key cannot be truncated,
 -- so this (always empty) guard table blocks TRUNCATE on the audit table, mirroring the PostgreSQL TRUNCATE trigger.

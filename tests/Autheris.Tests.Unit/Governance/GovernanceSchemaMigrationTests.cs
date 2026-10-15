@@ -91,32 +91,33 @@ public sealed class GovernanceSchemaMigrationTests
     }
 
     [Fact]
-    public async Task Run_AppliesWebhookOutboxMigration_AsVersion2()
+    public async Task Run_BaselineCreatesWebhookOutboxAndCdcWatermarks()
     {
         var cs = NewConnectionString();
         using var repository = NewRawRepository(cs);
         var runner = NewRunner(repository, cs);
 
-        runner.Steps.ShouldContain(s => s.Version == 2 && s.Name == "webhook_outbox");
+        runner.Steps.Count.ShouldBe(1);
+        runner.Steps[0].ShouldSatisfyAllConditions(
+            s => s.Version.ShouldBe(1),
+            s => s.Name.ShouldBe("baseline_governance_schema"));
         await runner.RunAsync();
         await runner.RunAsync();
 
-        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 2 AND name = 'webhook_outbox' AND length(checksum) = 64").ShouldBe(1);
-        Scalar(repository, "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('WEBHOOK_OUTBOX', 'ux_webhook_outbox_dedupe', 'ix_webhook_outbox_due', 'ix_webhook_outbox_lease', 'ix_webhook_outbox_owner')").ShouldBe(5);
+        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 1 AND name = 'baseline_governance_schema' AND length(checksum) = 64").ShouldBe(1);
+        Scalar(repository, "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('WEBHOOK_OUTBOX', 'ux_webhook_outbox_dedupe', 'ix_webhook_outbox_due', 'ix_webhook_outbox_lease', 'ix_webhook_outbox_owner', 'autheris_cdc_watermarks')").ShouldBe(6);
     }
 
     [Fact]
-    public async Task Run_AppliesCloudEventSubscriptionsMigration_AsVersion4()
+    public async Task Run_BaselineCreatesCloudEventSubscriptions()
     {
         var cs = NewConnectionString();
         using var repository = NewRawRepository(cs);
         var runner = NewRunner(repository, cs);
 
-        runner.Steps.ShouldContain(s => s.Version == 4 && s.Name == "cloudevent_subscriptions");
         await runner.RunAsync();
         await runner.RunAsync();
 
-        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 4 AND name = 'cloudevent_subscriptions' AND length(checksum) = 64").ShouldBe(1);
         Scalar(repository, "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('CLOUDEVENT_SUBSCRIPTIONS', 'ix_cloudevent_subs_tenant')").ShouldBe(2);
     }
 

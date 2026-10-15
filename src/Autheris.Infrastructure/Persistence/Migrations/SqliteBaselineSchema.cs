@@ -330,6 +330,64 @@ internal sealed class SqliteBaselineSchema
                 collided INTEGER NOT NULL DEFAULT 0,
                 first_seen_at TEXT NOT NULL
             );
+
+            -- WP-ARC-A-02: durable webhook outbox (all times are Unix milliseconds)
+            CREATE TABLE IF NOT EXISTS WEBHOOK_OUTBOX (
+                id TEXT PRIMARY KEY,
+                source INTEGER NOT NULL,
+                subscription_id TEXT NOT NULL,
+                owner_tenant_id TEXT NULL,
+                event_tenant_id TEXT NULL,
+                event_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                event_source TEXT NOT NULL,
+                event_time_ms INTEGER NOT NULL,
+                payload_json TEXT NOT NULL,
+                attempt INTEGER NOT NULL,
+                max_attempts INTEGER NOT NULL,
+                state INTEGER NOT NULL,
+                next_attempt_ms INTEGER NOT NULL,
+                lease_until_ms INTEGER NULL,
+                lease_owner TEXT NULL,
+                last_status_code INTEGER NULL,
+                last_error_code TEXT NULL,
+                created_ms INTEGER NOT NULL,
+                updated_ms INTEGER NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_webhook_outbox_dedupe ON WEBHOOK_OUTBOX (source, subscription_id, event_id);
+            CREATE INDEX IF NOT EXISTS ix_webhook_outbox_due ON WEBHOOK_OUTBOX (state, next_attempt_ms);
+            CREATE INDEX IF NOT EXISTS ix_webhook_outbox_lease ON WEBHOOK_OUTBOX (state, lease_until_ms);
+            CREATE INDEX IF NOT EXISTS ix_webhook_outbox_owner ON WEBHOOK_OUTBOX (owner_tenant_id, state);
+
+            -- WP-ARC-A-11: durable, fenced CDC watermarks
+            CREATE TABLE IF NOT EXISTS autheris_cdc_watermarks (
+                source TEXT NOT NULL,
+                domain_name TEXT NOT NULL,
+                schema_name TEXT NOT NULL,
+                table_name TEXT NOT NULL,
+                watermark INTEGER NOT NULL,
+                fencing_token INTEGER NOT NULL,
+                updated_at TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                PRIMARY KEY (source, domain_name, schema_name, table_name)
+            );
+
+            -- WP-ARC-A-03: durable CDC webhook (CloudEvent) subscriptions
+            CREATE TABLE IF NOT EXISTS CLOUDEVENT_SUBSCRIPTIONS (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                target_url TEXT NOT NULL,
+                filter_table TEXT NOT NULL,
+                filter_operations TEXT NULL,
+                hmac_secret_protected TEXT NULL,
+                is_enabled INTEGER NOT NULL,
+                custom_headers_json TEXT NULL,
+                created_by_sid TEXT NULL,
+                created_by_groups_json TEXT NULL,
+                created_by_roles_json TEXT NULL,
+                created_ms INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ix_cloudevent_subs_tenant ON CLOUDEVENT_SUBSCRIPTIONS (tenant_id, is_enabled);
         ";
         cmd.ExecuteNonQuery();
 

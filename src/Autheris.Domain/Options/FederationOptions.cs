@@ -34,12 +34,6 @@ public sealed class FederationOptions
     public bool SignContextHeaders { get; init; } = true;
 
     /// <summary>
-    /// SR-M-18: when true, subgraph-side verifiers built on <c>SubgraphSecurityValidator</c> also accept the legacy
-    /// (unversioned, body-less) signature format to allow rolling upgrades. Default false (fail closed, v2 only).
-    /// </summary>
-    public bool AllowLegacyContextSignature { get; init; }
-
-    /// <summary>
     /// Enables in-memory PII/sensitive column masking on aggregated subgraph response results.
     /// </summary>
     public bool EnableResultMasking { get; init; } = true;

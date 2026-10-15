@@ -39,9 +39,9 @@ public sealed class GovernanceRepositoryConstructorArchitectureTests
     ];
 
     private static ModuleDefinition InfrastructureModule() =>
-        ModuleDefinition.ReadModule(typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly.Location);
+        CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly);
 
-    private static ModuleDefinition TestModule() => ModuleDefinition.ReadModule(typeof(GovernanceRepositoryConstructorArchitectureTests).Assembly.Location);
+    private static ModuleDefinition TestModule() => CecilModuleCache.For(typeof(GovernanceRepositoryConstructorArchitectureTests).Assembly);
 
     private static bool IsForbidden(MethodReference method) =>
         ForbiddenCalls.Any(f => method.DeclaringType.FullName == f.Type && method.Name.StartsWith(f.MethodPrefix, StringComparison.Ordinal));

@@ -31,7 +31,7 @@ public sealed class CompilerSeamArchitectureTests
     private static List<string> CallersOfTheSetter(string assemblyPath)
     {
         var callers = new List<string>();
-        using var module = ModuleDefinition.ReadModule(assemblyPath);
+        var module = CecilModuleCache.For(assemblyPath);
         foreach (var type in module.GetTypes())
         {
             foreach (var method in type.Methods.Where(m => m.HasBody))
@@ -83,7 +83,7 @@ public sealed class CompilerSeamArchitectureTests
     private static List<string> CallersOfDmlGuardCustomisation(string assemblyPath)
     {
         var callers = new List<string>();
-        using var module = ModuleDefinition.ReadModule(assemblyPath);
+        var module = CecilModuleCache.For(assemblyPath);
         foreach (var type in module.GetTypes().Where(t => t.FullName != "TrinoSqlEngine.DmlGuardOptions"))
         {
             foreach (var method in type.Methods.Where(m => m.HasBody))
@@ -130,7 +130,7 @@ public sealed class CompilerSeamArchitectureTests
     private static List<string> CallersOfCheckedBinding(string assemblyPath)
     {
         var callers = new List<string>();
-        using var module = ModuleDefinition.ReadModule(assemblyPath);
+        var module = CecilModuleCache.For(assemblyPath);
         foreach (var type in module.GetTypes())
         {
             string top = (type.DeclaringType ?? type).FullName;   // the async state machine is a nested type of its owner
@@ -169,7 +169,7 @@ public sealed class CompilerSeamArchitectureTests
         var violations = new List<string>();
         foreach (var assembly in ProductionAssemblies)
         {
-            using var module = ModuleDefinition.ReadModule(assembly.Location);
+            var module = CecilModuleCache.For(assembly);
             foreach (var type in module.GetTypes().Where(t => !t.IsInterface && !t.IsAbstract))
             {
                 bool implementsBinder = type.Interfaces.Any(i => i.InterfaceType.FullName == "TrinoSqlEngine.Ast.Emit.ICompiledSqlBinder");
@@ -191,7 +191,7 @@ public sealed class CompilerSeamArchitectureTests
         int insideEngine = 0;
         foreach (var assembly in ProductionAssemblies)
         {
-            using var module = ModuleDefinition.ReadModule(assembly.Location);
+            var module = CecilModuleCache.For(assembly);
             foreach (var type in module.GetTypes())
             {
                 for (var b = type.BaseType; b is not null; b = b.Resolve()?.BaseType)
