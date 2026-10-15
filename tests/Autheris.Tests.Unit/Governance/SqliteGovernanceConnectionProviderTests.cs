@@ -144,7 +144,7 @@ public sealed class SqliteGovernanceConnectionProviderTests : IDisposable
 
                 using var cmd = connection.CreateCommand();
                 cmd.CommandText = $"PRAGMA journal_mode = {mode};";
-                cmd.ExecuteNonQuery();
+                return Convert.ToString(cmd.ExecuteScalar())!;
             });
 
         await using var connection = await provider.OpenAsync(CancellationToken.None);
@@ -196,5 +196,31 @@ public sealed class SqliteGovernanceConnectionProviderTests : IDisposable
         await provider.DisposeAsync();
 
         await Should.ThrowAsync<ObjectDisposedException>(async () => await provider.OpenAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task EffectiveJournalMode_IsReadBack_WhenTheFilesystemKeepsDelete()
+    {
+        // The pragma answers "delete" instead of the requested "wal" (no shared memory): synchronous must follow the effective mode.
+        await using var provider = new SqliteGovernanceConnectionProvider(
+            $"Data Source={DatabaseFile}",
+            "WAL",
+            null,
+            journalModeApplier: (connection, mode) => "delete");
+
+        await using var connection = await provider.OpenAsync(CancellationToken.None);
+
+        (await ScalarAsync(connection, "PRAGMA synchronous")).ShouldBe("2");
+    }
+
+    [Theory]
+    [InlineData("OFF")]
+    [InlineData("memory")]
+    public void UnsafeJournalModes_AreRejected_OutsideDevelopment(string mode)
+    {
+        Should.Throw<InvalidOperationException>(() =>
+            new SqliteGovernanceConnectionProvider($"Data Source={DatabaseFile}", mode, null, allowUnsafeJournalModes: false));
+
+        Should.NotThrow(() => new SqliteGovernanceConnectionProvider($"Data Source={DatabaseFile}", mode, null, allowUnsafeJournalModes: true).Dispose());
     }
 }

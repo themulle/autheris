@@ -41,6 +41,21 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
 {{/*
+Labels of the governance migration job (ConfigMap, Job, pod). Deliberately NOT derived from the application selector labels:
+the name differs, so the Service, ServiceMonitor, PodDisruptionBudget and the application NetworkPolicy never select the job pod.
+*/}}
+{{- define "autheris.migrationLabels" -}}
+helm.sh/chart: {{ include "autheris.chart" . }}
+app.kubernetes.io/name: {{ printf "%s-migrate" (include "autheris.name" .) | trunc 63 | trimSuffix "-" }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/component: governance-migration
+{{- end }}
+
+{{/*
 Selector labels
 */}}
 {{- define "autheris.selectorLabels" -}}

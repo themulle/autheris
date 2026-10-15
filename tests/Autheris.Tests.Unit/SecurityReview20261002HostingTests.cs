@@ -193,7 +193,7 @@ public sealed class SecurityReview20261002HostingTests
     {
         var options = new GatewayOptions
         {
-            DataMasking = ProdMasking(),
+            DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" },
             GovernanceDb = new GovernanceDbOptions
             {
                 Provider = "Sqlite",
@@ -314,7 +314,7 @@ public sealed class SecurityReview20261002HostingTests
     [Fact]
     public void H02_DefaultProductionConfiguration_HasNoBypass()
     {
-        var options = new GatewayOptions { DataMasking = ProdMasking() };
+        var options = new GatewayOptions { DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" } };
 
         options.GetAllActiveBypasses().ShouldBeEmpty();
         Should.NotThrow(() =>
@@ -362,7 +362,7 @@ public sealed class SecurityReview20261002HostingTests
     {
         var options = new GatewayOptions
         {
-            DataMasking = ProdMasking(),
+            DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" },
             Authentication = new Autheris.Domain.Options.AuthenticationOptions
             {
                 EntraId = new EntraIdAuthOptions { Enabled = true, TenantId = "contoso-tenant", ClientId = "11111111-2222-3333-4444-555555555555" }

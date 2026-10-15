@@ -501,8 +501,8 @@ public static class GatewayStartupValidator
                 throw new ValidationException("Security violation: Outside Development, S3 WORM with EnforceObjectLock requires S3AccessKey and S3SecretKey to be configured.");
             }
 
-            // WP-ARC-B-13: the check applies to the EFFECTIVE connection string. An unset value resolves to the state-directory file
-            // (WP-ARC-B-13), but an explicitly configured in-memory database is rejected.
+            // WP-ARC-B-13: an unset connection string resolves to the state-directory file outside Development/Test, so only an
+            // explicitly configured in-memory database can be in effect here (and is rejected).
             if (DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite) &&
                 IsInMemorySqlite(options.GovernanceDb.ConnectionString))
             {
@@ -546,30 +546,6 @@ public static class GatewayStartupValidator
             bool isDevOrTest = string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase) ||
                                string.Equals(envName, "Test", StringComparison.OrdinalIgnoreCase);
 
-            bool isSqliteFile = false;
-
-            // WP-ARC-B-13: an unset connection string resolves to the governance database file in the state directory outside Development/Test.
-            if (DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite) &&
-                string.IsNullOrWhiteSpace(options.GovernanceDb.ConnectionString))
-            {
-                isSqliteFile = true;
-            }
-            else if (DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite))
-            {
-                try
-                {
-                    var csb = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(options.GovernanceDb.ConnectionString);
-                    isSqliteFile = !string.IsNullOrWhiteSpace(csb.DataSource) &&
-                                   !csb.DataSource.StartsWith(":memory:", StringComparison.OrdinalIgnoreCase) &&
-                                   csb.Mode != Microsoft.Data.Sqlite.SqliteOpenMode.Memory;
-                }
-                catch (ArgumentException ex)
-                {
-                    // AR-06: Replace empty catch with logged warning, isSqliteFile remains false (fail-closed)
-                    logger?.LogWarning(ex, "Failed to parse SQLite connection string; falling back to strict production audit anchor requirements.");
-                }
-            }
-
             if (!isDevOrTest)
             {
                 if (options.Audit.HmacKeyIsFallback)
@@ -578,18 +554,16 @@ public static class GatewayStartupValidator
                         "CRITICAL SECURITY VIOLATION: Hardcoded or fallback HMAC audit keys are strictly prohibited in production.");
                 }
 
-                if (!isSqliteFile)
+                // Produktion: Leerer Wert gilt zwingend als Produktion! Every provider, SQLite files included, needs an explicit anchor:
+                // the anchor must not live only next to the database it protects (consistent with AuditChainAnchorStoreFactory).
+                if (string.IsNullOrWhiteSpace(options.Audit.ChainAnchorPath) &&
+                    string.IsNullOrWhiteSpace(options.Audit.ChainAnchorWormDirectory) &&
+                    string.IsNullOrWhiteSpace(options.Audit.ChainAnchorSignerKeyVaultRef))
                 {
-                    // Produktion: Leerer Wert gilt zwingend als Produktion!
-                    if (string.IsNullOrWhiteSpace(options.Audit.ChainAnchorPath) &&
-                        string.IsNullOrWhiteSpace(options.Audit.ChainAnchorWormDirectory) &&
-                        string.IsNullOrWhiteSpace(options.Audit.ChainAnchorSignerKeyVaultRef))
-                    {
-                        throw new ValidationException(
-                            "CRITICAL AUDIT MISCONFIGURATION (AU-01/AU-03): In production environments, " +
-                            "a persistent audit anchor store (ChainAnchorPath, ChainAnchorWormDirectory, or KMS Signer) " +
-                            "is mandatory. In-memory anchor stores are strictly prohibited outside Development/Test.");
-                    }
+                    throw new ValidationException(
+                        "CRITICAL AUDIT MISCONFIGURATION (AU-01/AU-03): In production environments, " +
+                        "a persistent audit anchor store (ChainAnchorPath, ChainAnchorWormDirectory, or KMS Signer) " +
+                        "is mandatory. In-memory anchor stores are strictly prohibited outside Development/Test.");
                 }
             }
         }

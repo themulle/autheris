@@ -36,6 +36,33 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
     /// repository has no connection field that could be shared between operations.
     /// </summary>
     private object? _writeConnection;
+    private long _metadataCacheGeneration;
+
+    // Keys invalidated by the write operation that holds the gate; applied once its transaction has committed (scope disposal).
+    private readonly List<string> _pendingMetadataInvalidations = [];
+
+    /// <summary>Test seam: runs after a metadata read has loaded its snapshot and before the result is cached.</summary>
+    internal Func<CancellationToken, Task>? AfterMetadataSnapshotForTesting { get; set; }
+
+    private void QueueMetadataInvalidation(TableIdentifier table) => _pendingMetadataInvalidations.Add(table.ToString().ToLowerInvariant());
+
+    private void ApplyMetadataInvalidations()
+    {
+        if (_pendingMetadataInvalidations.Count == 0)
+        {
+            return;
+        }
+
+        // The generation moves first so that readers with an older snapshot do not re-cache what is removed next.
+        Interlocked.Increment(ref _metadataCacheGeneration);
+        foreach (var key in _pendingMetadataInvalidations)
+        {
+            _metadataCache.TryRemove(key, out _);
+        }
+
+        _pendingMetadataInvalidations.Clear();
+    }
+
     private volatile bool _ready;
     private void ThrowIfNotReady()
     {
@@ -53,6 +80,9 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
     private sealed class OperationScope(SqliteGovernanceRepository owner, SqliteConnection connection, bool holdsGate, bool isWrite, SqliteTransaction? snapshot) : IAsyncDisposable
     {
         public SqliteConnection Connection => connection;
+
+        /// <summary>The deferred read transaction of a snapshot scope.</summary>
+        public SqliteTransaction? Snapshot => snapshot;
 
         public async ValueTask DisposeAsync()
         {
@@ -72,6 +102,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
                 if (isWrite)
                 {
                     owner.RollbackPendingAuditTransactions();
+                    owner.ApplyMetadataInvalidations();
                 }
             }
             finally
@@ -218,7 +249,11 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
 
         // No I/O and no DDL here: the provider opens connections lazily (directory, journal mode) and the schema is created and
         // evolved by the governance migration runner (WP-ARC-B-12).
-        _connections = new SqliteGovernanceConnectionProvider(connStr, options.Value?.GovernanceDb?.JournalMode, logger);
+        _connections = new SqliteGovernanceConnectionProvider(
+            connStr,
+            options.Value?.GovernanceDb?.JournalMode,
+            logger,
+            allowUnsafeJournalModes: string.Equals(environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase));
 
         // SEC R2-3: Bounded channel with backpressure to limit in-flight audit entries
         var channelOptions = new BoundedChannelOptions(Math.Max(1, options?.Value?.Audit?.QueryAuditChannelCapacity ?? 5_000))

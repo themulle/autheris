@@ -42,6 +42,7 @@ public sealed class ConnectionTlsPolicyDep7Tests
     private static GatewayOptions WithDataSource(string connectionString) => new()
     {
         DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "vault://keys/prod-hmac" },
+        Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" },
         DataSources = new SqlDataSourceOptions
         {
             Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)

@@ -18,7 +18,7 @@ internal sealed class SqliteGovernanceConnectionProvider : IAsyncDisposable, IDi
     private readonly string _connectionString;
     private readonly string _journalMode;
     private readonly ILogger? _logger;
-    private readonly Action<SqliteConnection, string> _journalModeApplier;
+    private readonly Func<SqliteConnection, string, string> _journalModeApplier;
     private readonly SemaphoreSlim _setupLock = new(1, 1);
     private SqliteConnection? _memorySentinel;
     private volatile bool _setupDone;
@@ -29,12 +29,20 @@ internal sealed class SqliteGovernanceConnectionProvider : IAsyncDisposable, IDi
         string connectionString,
         string? journalMode,
         ILogger? logger,
-        Action<SqliteConnection, string>? journalModeApplier = null)
+        Func<SqliteConnection, string, string>? journalModeApplier = null,
+        bool allowUnsafeJournalModes = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         _logger = logger;
         _journalModeApplier = journalModeApplier ?? ApplyJournalMode;
         _journalMode = NormalizeJournalMode(journalMode);
+
+        // OFF and MEMORY give up crash safety of the audit chain and the consent state; only Development may choose them.
+        if (!allowUnsafeJournalModes && _journalMode is "OFF" or "MEMORY")
+        {
+            throw new InvalidOperationException($"Security critical: GovernanceDb:JournalMode '{_journalMode}' is not allowed outside Development (no crash safety).");
+        }
+
         _effectiveJournalMode = _journalMode;
 
         var builder = new SqliteConnectionStringBuilder(connectionString);
@@ -141,16 +149,21 @@ internal sealed class SqliteGovernanceConnectionProvider : IAsyncDisposable, IDi
     {
         try
         {
-            _journalModeApplier(connection, _journalMode);
-            _effectiveJournalMode = _journalMode;
+            // The pragma reports the mode that is actually in effect (a filesystem without shared memory silently keeps DELETE).
+            var effective = _journalModeApplier(connection, _journalMode).ToUpperInvariant();
+            if (effective != _journalMode)
+            {
+                _logger?.LogWarning("Requested journal_mode={Requested} but SQLite reports {Effective}.", _journalMode, effective);
+            }
+
+            _effectiveJournalMode = effective;
         }
         catch (Exception ex)
         {
             _logger?.LogWarning(ex, "Failed to apply PRAGMA journal_mode={JournalMode}; attempting graceful fallback to DELETE mode (R-42).", _journalMode);
             try
             {
-                _journalModeApplier(connection, "DELETE");
-                _effectiveJournalMode = "DELETE";
+                _effectiveJournalMode = _journalModeApplier(connection, "DELETE").ToUpperInvariant();
             }
             catch (Exception fallbackException)
             {
@@ -187,11 +200,11 @@ internal sealed class SqliteGovernanceConnectionProvider : IAsyncDisposable, IDi
         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
-    private static void ApplyJournalMode(SqliteConnection connection, string mode)
+    private static string ApplyJournalMode(SqliteConnection connection, string mode)
     {
         using var command = connection.CreateCommand();
         command.CommandText = $"PRAGMA journal_mode = {mode};";
-        command.ExecuteNonQuery();
+        return Convert.ToString(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) ?? mode;
     }
 
     private static string NormalizeJournalMode(string? configured)

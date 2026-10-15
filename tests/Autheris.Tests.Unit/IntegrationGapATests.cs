@@ -178,7 +178,7 @@ public sealed class IntegrationGapATests
         {
             Catalog = new DataCatalogOptions { AllowLegacyPayloadOnlySignature = true },
             WebSql = new WebSqlOptions { AllowDml = true, DmlWriterRoles = ["WebSqlWriter"] },
-            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "vault://keys/prod-hmac" }
+            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "vault://keys/prod-hmac" }, Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" }
         };
 
         Should.NotThrow(() =>
@@ -207,7 +207,7 @@ public sealed class IntegrationGapATests
         {
             WebSql = new WebSqlOptions { DmlWriterRoles = ["WebSqlWriter"] },
             Insecure = new InsecureGettingStartedOptions { warn_allow_websql_dml = true },
-            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "vault://keys/prod-hmac" }
+            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "vault://keys/prod-hmac" }, Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" }
         };
 
         options.GetActiveWarnings().ShouldContain(w => w.StartsWith("WARN:warn_allow_websql_dml", StringComparison.Ordinal) &&

@@ -35,6 +35,18 @@ public sealed class GatewayStatePathsTests
     }
 
     [Fact]
+    public void StatePaths_ResolveRelativeDirectoryAgainstTheContentRoot()
+    {
+        var env = Env("Production");
+        env.ContentRootPath.Returns("/srv/autheris");
+
+        var paths = new GatewayStatePaths(Options.Create(new StateOptions { StateDirectory = "state" }), env);
+
+        paths.StateDirectory.ShouldBe("/srv/autheris/state");
+        new GatewayStatePaths(Options.Create(new StateOptions { StateDirectory = "/var/x" }), env).StateDirectory.ShouldBe("/var/x");
+    }
+
+    [Fact]
     public void ExplicitConnectionString_Wins()
     {
         var paths = Paths("Production");
@@ -184,5 +196,22 @@ public sealed class GatewayStatePathsTests
         };
 
         Should.NotThrow(() => GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env("Production"), _ => null));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("Data Source=/var/lib/autheris/governance.db")]
+    public void StartupValidator_SqliteWithoutAnAuditAnchor_FailsEarly_OutsideDevelopment(string connectionString)
+    {
+        var options = new GatewayOptions
+        {
+            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "vault://keys/prod-hmac" },
+            GovernanceDb = new GovernanceDbOptions { Provider = "Sqlite", ConnectionString = connectionString }
+        };
+
+        var ex = Should.Throw<ValidationException>(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env("Production"), _ => null));
+
+        ex.Message.ShouldContain("AU-01/AU-03");
     }
 }

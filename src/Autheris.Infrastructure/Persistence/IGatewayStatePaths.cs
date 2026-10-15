@@ -25,7 +25,10 @@ public sealed class GatewayStatePaths(IOptions<StateOptions> options, IHostEnvir
 {
     private const string GovernanceDatabaseFileName = "governance.db";
 
-    public string StateDirectory { get; } = Path.GetFullPath(options.Value.StateDirectory);
+    // A relative directory is resolved against the application content root, not the (arbitrary) working directory.
+    public string StateDirectory { get; } = Path.IsPathRooted(environment.ContentRootPath)
+        ? Path.GetFullPath(options.Value.StateDirectory, environment.ContentRootPath)
+        : Path.GetFullPath(options.Value.StateDirectory);
 
     public string GovernanceDatabaseFile => Path.Combine(StateDirectory, GovernanceDatabaseFileName);
 

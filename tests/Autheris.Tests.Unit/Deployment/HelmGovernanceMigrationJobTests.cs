@@ -89,7 +89,7 @@ public sealed partial class HelmGovernanceMigrationJobTests
         var job = Job();
 
         job.ShouldContain("automountServiceAccountToken: false");
-        job.ShouldNotContain("serviceAccountName");
+        job.ShouldNotContain("serviceAccountName: {{ include");
         job.ShouldContain(".Values.podSecurityContext");
         job.ShouldContain(".Values.securityContext");
         Read("values.yaml").ShouldContain("runAsNonRoot: true");
@@ -98,14 +98,77 @@ public sealed partial class HelmGovernanceMigrationJobTests
     }
 
     [Fact]
-    public void Job_PodLabels_DoNotMatchTheDeploymentSelector()
+    public void Job_PodLabels_AreNotDerivedFromTheApplicationSelectorLabels()
     {
         var job = Job();
 
-        job.ShouldContain("app.kubernetes.io/component: governance-migration");
-        // The job pod must not carry the selector labels of the Deployment, the Service or the NetworkPolicy of the application.
+        Read("templates/_helpers.tpl").ShouldContain("app.kubernetes.io/component: governance-migration");
+        job.ShouldContain("autheris.migrationLabels");
         job.ShouldNotContain("autheris.selectorLabels");
-        job.ShouldContain("autheris.labels");
+        job.ShouldNotContain("include \"autheris.labels\"");
+        Read("templates/_helpers.tpl").ShouldContain("printf \"%s-migrate\"");
+    }
+
+    [Fact]
+    public void HelmTemplate_JobPodLabels_AreNotASupersetOfTheApplicationSelector()
+    {
+        if (!HelmAvailable())
+        {
+            return;
+        }
+
+        var rendered = RunHelm("template rel " + ChartDirectory() + " --set governanceMigrationJob.enabled=true");
+        var documents = rendered.Split("\n---", StringSplitOptions.RemoveEmptyEntries);
+        var deployment = documents.Single(d => System.Text.RegularExpressions.Regex.IsMatch(d, "^kind: Deployment$", System.Text.RegularExpressions.RegexOptions.Multiline));
+        var job = documents.Single(d => System.Text.RegularExpressions.Regex.IsMatch(d, "^kind: Job$", System.Text.RegularExpressions.RegexOptions.Multiline));
+
+        var selector = LabelsUnder(deployment, "matchLabels:");
+        var podLabels = LabelsUnder(job, "template:\n    metadata:\n      labels:");
+
+        selector.ShouldNotBeEmpty();
+        podLabels.ShouldNotBeEmpty();
+        selector.All(pair => podLabels.Contains(pair)).ShouldBeFalse("the job pod must not match the application selector (Service, PDB, NetworkPolicy, ServiceMonitor)");
+        podLabels["app.kubernetes.io/component"].ShouldBe("governance-migration");
+    }
+
+    private static Dictionary<string, string> LabelsUnder(string document, string marker)
+    {
+        var index = document.IndexOf(marker, StringComparison.Ordinal);
+        index.ShouldBeGreaterThanOrEqualTo(0, marker);
+        var result = new Dictionary<string, string>();
+        var lines = document[(index + marker.Length)..].Split('\n').Skip(1);
+        var indent = -1;
+        foreach (var line in lines)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                break;
+            }
+
+            var current = line.Length - line.TrimStart().Length;
+            indent = indent < 0 ? current : indent;
+            if (current < indent || !line.Contains(':', StringComparison.Ordinal))
+            {
+                break;
+            }
+
+            var parts = line.Trim().Split(':', 2);
+            result[parts[0].Trim()] = parts[1].Trim().Trim('"');
+        }
+
+        return result;
+    }
+
+    [Fact]
+    public void Job_ServiceAccountAndPodMetadata_AreOptional()
+    {
+        var job = Job();
+
+        job.ShouldContain(".Values.governanceMigrationJob.serviceAccountName");
+        job.ShouldContain(".Values.governanceMigrationJob.podLabels");
+        job.ShouldContain(".Values.governanceMigrationJob.podAnnotations");
+        job.ShouldContain("automountServiceAccountToken: false");
+        Read("values.yaml").ShouldContain("serviceAccountName: \"\"");
     }
 
     [Fact]
@@ -128,7 +191,10 @@ public sealed partial class HelmGovernanceMigrationJobTests
         var policy = Read("templates/networkpolicy.yaml");
 
         policy.ShouldContain(".Values.governanceMigrationJob.enabled");
-        policy.ShouldContain("app.kubernetes.io/component: governance-migration");
+        policy.ShouldContain("autheris.migrationLabels");
+        policy.ShouldContain("\"helm.sh/hook\": pre-install,pre-upgrade");
+        policy.ShouldContain("\"helm.sh/hook-weight\": \"-20\"");
+        policy.ShouldContain("before-hook-creation");
     }
 
     [Fact]

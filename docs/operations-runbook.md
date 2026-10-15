@@ -246,8 +246,8 @@ The monthly FinOps budget is enforced against a cluster-wide counter in the shar
 ### 4.ad State directory (SQLite governance provider, WP-ARC-B-13)
 
 - `Gateway:State:StateDirectory` (default `./state`; the container images set `/app/data`) is the one writable location for local state. With the SQLite provider and no `GovernanceDb:ConnectionString` it holds `governance.db`; Development and Test without a connection string use a private in-memory database instead. An explicitly configured connection string always wins, and an in-memory database is rejected outside Development.
-- The audit chain anchor defaults to `<governance database file>.audit-anchor.json` next to the database; `Audit:ChainAnchorPath` overrides it (keep it on a separately protected volume).
-- Backup set: back up `governance.db` together with its `-wal` and `-shm` side files (or checkpoint first) and the `.audit-anchor.json` file as one unit. Restoring the database without the matching anchor makes the audit chain verification report a violation.
+- Outside Development/Test the audit chain anchor must be configured explicitly (`Audit:ChainAnchorPath` on a separately protected volume, `Audit:ChainAnchorWormDirectory` or a KMS signer); the gateway refuses to start otherwise. Only in Development/Test the anchor defaults to `<governance database file>.audit-anchor.json` next to the database.
+- Backup set: back up `governance.db` together with its `-wal` and `-shm` side files (or checkpoint first) and the audit anchor file (`Audit:ChainAnchorPath`) as one unit. Restoring the database without the matching anchor makes the audit chain verification report a violation.
 - In a container the directory must be an absolute path on a mounted volume and not `/app`; the gateway refuses to start otherwise. `Cache=Shared` is ignored for file databases (connections are pooled per operation); WAL is the default journal mode, use `GovernanceDb:JournalMode=DELETE` on filesystems without shared-memory support (for example WSL bind mounts or network shares).
 
 ---

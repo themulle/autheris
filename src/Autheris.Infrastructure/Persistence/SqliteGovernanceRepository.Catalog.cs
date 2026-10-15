@@ -73,6 +73,8 @@ public partial class SqliteGovernanceRepository
             return entry.Metadata;
         }
 
+        // Captured before the snapshot is taken: a commit that invalidates the cache after this point makes this read stale.
+        var cacheGeneration = Volatile.Read(ref _metadataCacheGeneration);
         await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
         var conn = scope.Connection;
         {
@@ -187,7 +189,17 @@ public partial class SqliteGovernanceRepository
                 ColumnMaskingRules = maskingRules
             };
 
-            _metadataCache[cacheKey] = (result, DateTime.UtcNow.Ticks);
+            if (AfterMetadataSnapshotForTesting is { } hook)
+            {
+                await hook(ct).ConfigureAwait(false);
+            }
+
+            // A reader whose snapshot predates a commit must not re-insert the stale metadata after the invalidation.
+            if (Volatile.Read(ref _metadataCacheGeneration) == cacheGeneration)
+            {
+                _metadataCache[cacheKey] = (result, DateTime.UtcNow.Ticks);
+            }
+
             return result;
         }
     }
@@ -537,7 +549,7 @@ public partial class SqliteGovernanceRepository
                 throw;
             }
 
-            _metadataCache.TryRemove(metadata.Identifier.ToString().ToLowerInvariant(), out _);
+            QueueMetadataInvalidation(metadata.Identifier);
             await _epochValidationService.InvalidateEpochAsync(metadata.Identifier, ct);
 
             var updatedTable = new Table
@@ -605,7 +617,7 @@ public partial class SqliteGovernanceRepository
                 newEpoch = result is long l ? l : (result is int i ? i : 2L);
             }
 
-            _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
+            QueueMetadataInvalidation(table);
             await _epochValidationService.InvalidateEpochAsync(table, ct);
             return newEpoch;
         }
@@ -617,7 +629,7 @@ public partial class SqliteGovernanceRepository
 
     private async Task IncrementTableEpochInternalAsync(SqliteConnection conn, TableIdentifier table, SqliteTransaction? transaction, CancellationToken ct)
     {
-        _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
+        QueueMetadataInvalidation(table);
         using (var cmd = conn.CreateCommand())
         {
             if (transaction != null)
@@ -668,7 +680,7 @@ public partial class SqliteGovernanceRepository
             cmd.Parameters.AddWithValue("@schema", table.Schema);
             cmd.Parameters.AddWithValue("@table", table.TableName);
             await cmd.ExecuteNonQueryAsync(ct);
-            _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
+            QueueMetadataInvalidation(table);
         }
     }
 

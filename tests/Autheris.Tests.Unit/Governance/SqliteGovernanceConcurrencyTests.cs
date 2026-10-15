@@ -264,7 +264,7 @@ public sealed class SqliteGovernanceConcurrencyTests : IDisposable
             }
 
             steps.ShouldBe(approved ? 1 : 0);
-            stepAudits.ShouldBeLessThanOrEqualTo(steps);
+            stepAudits.ShouldBe(steps);
         }
 
         (await _repository.VerifyAuditHashChainAsync()).ShouldBeTrue();
@@ -328,5 +328,126 @@ public sealed class SqliteGovernanceConcurrencyTests : IDisposable
 
         entries.Count.ShouldBe(30);
         (await _repository.VerifyAuditHashChainAsync()).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task MetadataReader_WithSnapshotBeforeACommit_DoesNotRecacheStaleMetadata()
+    {
+        var table = new TableIdentifier("sales", "dbo", "cache_race");
+        Table Entity(string description) => new()
+        {
+            SourceType = "sql",
+            SourceName = "sales",
+            SchemaName = "dbo",
+            TableName = "cache_race",
+            DisplayName = "Cache race",
+            Description = description,
+            DataSourceType = DataSourceType.Sql
+        };
+        await _repository.UpsertTableMetadataAsync(new TableMetadata { Identifier = table, Table = Entity("old"), Columns = [] });
+
+        // Make the next metadata read stall after it loaded its snapshot and before it is cached.
+        var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _repository.AfterMetadataSnapshotForTesting = async _ =>
+        {
+            _repository.AfterMetadataSnapshotForTesting = null;
+            reached.SetResult();
+            await release.Task;
+        };
+        var staleReader = Task.Run(() => _repository.GetTableMetadataAsync(table));
+        await reached.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // A commit (and its cache invalidation) happens while the reader still holds the old snapshot.
+        await _repository.UpsertTableMetadataAsync(new TableMetadata { Identifier = table, Table = Entity("new"), Columns = [] });
+        release.SetResult();
+        (await staleReader)!.Table.Description.ShouldBe("old", "the stalled reader legitimately saw the old snapshot");
+
+        (await _repository.GetTableMetadataAsync(table))!.Table.Description.ShouldBe("new", "the stale result must not have been cached");
+    }
+
+    [Fact]
+    public async Task VirtualFilterSnapshot_DoesNotTakeAWriteLock()
+    {
+        // A writer holds the database write lock; the snapshot read must be deferred and not wait for it (it is outside the gate).
+        await using var raw = _repository.RawConnection().CreateCommand();
+        raw.CommandText = "BEGIN IMMEDIATE;";
+        await raw.ExecuteNonQueryAsync();
+        try
+        {
+            var snapshot = await _repository.LoadSnapshotAsync().WaitAsync(TimeSpan.FromSeconds(2));
+            snapshot.ShouldNotBeNull();
+        }
+        finally
+        {
+            raw.CommandText = "ROLLBACK;";
+            await raw.ExecuteNonQueryAsync();
+        }
+    }
+
+    [Fact]
+    public async Task AuditChain_TierBChannel_WithApprovalsFlushAndVerify_RemainsSequentialAndVerifiable()
+    {
+        // The Tier-B channel (SynchronousQueryAudit=false) writes its batches from the background processor under the same gate.
+        var directory = Path.Combine(_directory, "channel");
+        var options = Options.Create(new GatewayOptions
+        {
+            GovernanceDb = new GovernanceDbOptions
+            {
+                ConnectionString = $"Data Source={Path.Combine(directory, "governance.db")}",
+                JournalMode = "WAL",
+                SeedDemoData = true
+            },
+            Audit = new AuditOptions { ChainAnchorPath = Path.Combine(directory, "anchor.json"), SynchronousQueryAudit = false }
+        });
+        using var repository = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options);
+        var meta = await repository.GetTableMetadataAsync(FourEyesTable);
+        meta.ShouldNotBeNull();
+
+        const int writers = 4;
+        const int perWriter = 60;
+        var tierB = Enumerable.Range(0, writers).Select(w => Task.Run(async () =>
+        {
+            for (var i = 0; i < perWriter; i++)
+            {
+                await repository.RecordAuditEventAsync(new AuditLogEntry
+                {
+                    EventType = AuditEventTypes.TableQuery,
+                    ActorSid = new Sid($"S-1-5-21-CHANNEL-{w}"),
+                    TargetTable = "finance.dbo.finance_table_1",
+                    TraceId = $"channel-{w}-{i}"
+                });
+            }
+        }));
+        var approvals = Enumerable.Range(0, 5).Select(n => Task.Run(async () =>
+        {
+            var request = await repository.CreateConsentRequestAsync(new ConsentRequest
+            {
+                TableId = meta.Table.Id,
+                TableIdentifier = FourEyesTable,
+                RequesterSid = new Sid($"S-1-5-21-REQ-CHANNEL-{n}"),
+                RequestedGranteeType = GranteeType.User,
+                RequestedGranteeRef = $"S-1-5-21-REQ-CHANNEL-{n}",
+                BusinessJustification = "Channel test",
+                RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7)
+            });
+            await repository.ApproveConsentRequestStepAsync(request.Id, new Sid("S-1-5-21-APPROVER-A"));
+        }));
+        var flushAndVerify = Task.Run(async () =>
+        {
+            for (var i = 0; i < 5; i++)
+            {
+                await repository.FlushAuditChannelAsync();
+                (await repository.VerifyAuditHashChainAsync()).ShouldBeTrue();
+            }
+        });
+
+        await Task.WhenAll(tierB.Concat(approvals).Append(flushAndVerify));
+        await repository.FlushAuditChannelAsync();
+
+        (await repository.VerifyAuditHashChainAsync()).ShouldBeTrue();
+        repository.IsAuditPipelineFaulted.ShouldBeFalse();
+        var entries = await repository.QueryAuditLogsAsync(limit: 5000);
+        entries.Count(e => e.EventType == AuditEventTypes.TableQuery).ShouldBe(writers * perWriter);
     }
 }

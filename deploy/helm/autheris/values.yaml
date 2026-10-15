@@ -138,6 +138,11 @@ governanceMigrationJob:
   activeDeadlineSeconds: 600
   ttlSecondsAfterFinished: 3600
   resources: {}
+  # Optional identity of the job pod (for example an Azure workload identity that can read Key Vault). The token is still not
+  # automounted; the platform webhook projects the workload-identity token. Empty: no serviceAccountName (the namespace default).
+  serviceAccountName: ""
+  podLabels: {}
+  podAnnotations: {}
 
 monitoring:
   serviceMonitor:

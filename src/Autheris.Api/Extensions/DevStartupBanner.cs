@@ -34,7 +34,7 @@ public static class DevStartupBanner
         sb.AppendLine($"  Health       {baseUrl}/health");
 
         var features = DevFeatures.Resolve(options, env.IsDevelopment());
-        sb.AppendLine($"  Preset       {options.Dev.Preset}" + (options.GovernanceDb.ConnectionString.Contains("Mode=Memory", StringComparison.OrdinalIgnoreCase)
+        sb.AppendLine($"  Preset       {options.Dev.Preset}" + (string.IsNullOrWhiteSpace(options.GovernanceDb.ConnectionString) || options.GovernanceDb.ConnectionString.Contains("Mode=Memory", StringComparison.OrdinalIgnoreCase)
             ? " (in-memory database)"
             : features.PersistDb ? " (persistent database)" : string.Empty));
         if (features.DevSecurity.Count > 0)

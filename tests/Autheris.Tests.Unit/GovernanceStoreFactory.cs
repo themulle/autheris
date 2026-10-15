@@ -62,12 +62,13 @@ public static class GovernanceStoreFactory
         var env = environment ?? DefaultEnvironment();
         var paths = statePaths ?? DefaultStatePaths(env);
         var secrets = secretProvider ?? Substitute.For<IKeyVaultSecretProvider>();
-        // Outside Development/Test the anchor factory (AU-01/AU-03) is covered by its own tests; here a stand-in lets the
-        // constructor-level checks (for example the audit key length) be reached.
-        var anchorStore = auditAnchorStore
-            ?? (IsDevOrTest(env)
-                ? AuditChainAnchorStoreFactory.CreateForGovernance(gateway.Value, env, secrets, auditAnchorSigner, logger, paths)
-                : Substitute.For<IAuditChainAnchorStore>());
+        // Outside Development/Test a test must name its anchor store explicitly (no silent stand-in for AU-01/AU-03).
+        if (auditAnchorStore == null && !IsDevOrTest(env))
+        {
+            throw new InvalidOperationException("Pass an explicit auditAnchorStore when the test environment is not Development/Test.");
+        }
+
+        var anchorStore = auditAnchorStore ?? AuditChainAnchorStoreFactory.CreateForGovernance(gateway.Value, env, secrets, auditAnchorSigner, logger, paths);
         return new SqliteGovernanceRepository(
             epochValidationService,
             gateway,
