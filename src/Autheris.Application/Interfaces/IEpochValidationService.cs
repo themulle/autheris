@@ -1,6 +1,10 @@
 namespace Autheris.Application.Interfaces;
 
-public record EpochCheck(TableIdentifier Table, long CachedEpoch, bool IsHighlySensitive);
+/// <param name="Table">Table whose policy epoch is validated.</param>
+/// <param name="CachedEpoch">Epoch stored with the cached entry.</param>
+/// <param name="IsHighlySensitive">Sensitive tables are never served from the local staleness budget.</param>
+/// <param name="IsDelegatedSource">Delegated (OBO) sources never use the staleness budget (WP-PF-07, SEC-SC-05).</param>
+public record EpochCheck(TableIdentifier Table, long CachedEpoch, bool IsHighlySensitive, bool IsDelegatedSource = false);
 
 public interface IEpochValidationService
 {

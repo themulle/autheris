@@ -48,22 +48,8 @@ public sealed partial class CasbinEnforcementService
             return false;
         }
 
-        try
-        {
-            var interpreter = new DynamicExpresso.Interpreter();
-            // SEC H-12: Same request shape as the Casbin request (r.sub, r.tenant, r.obj, r.act, r.ctx).
-            interpreter.SetVariable("r", new { ctx = context, sub = subject, tenant = context.Tenant.Value, obj = tableStr, act });
-            interpreter.SetVariable("ctx", context);
-            interpreter.SetVariable("context", context);
-
-            var normalized = Regex.Replace(subRule, @"'([^']{2,})'", "\"$1\"");
-            var evalResult = interpreter.Eval(normalized);
-            return evalResult is bool b ? b : null;
-        }
-        catch
-        {
-            return null;
-        }
+        // WP-PF-03: compiled once per distinct sub_rule; null (unknown) is handled fail-closed by the callers.
+        return CompiledSubRuleCache.Evaluate(subRule, context, subject, tableStr, act);
     }
 
     private static readonly Regex SafeClaimValueRegex = new(@"^[a-zA-Z0-9\-_.@: ]{1,256}$", RegexOptions.Compiled);

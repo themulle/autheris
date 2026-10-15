@@ -23,7 +23,7 @@ public sealed class EpochBatchingAndPipeliningTests
     private readonly ITableSensitivityLookup _sensitivityLookup = Substitute.For<ITableSensitivityLookup>();
 
     [Fact]
-    public async Task AreEpochsValidAsync_With5Tables_ExecutesExactlyOneMGet_AndNoIndividualGet()
+    public async Task AreEpochsValidAsync_With5Tables_UsesSingleKeyGets_AndNeverMultiKeyMGet()
     {
         var db = Substitute.For<IDatabase>();
         var multiplexer = Substitute.For<IConnectionMultiplexer>();
@@ -39,12 +39,8 @@ public sealed class EpochBatchingAndPipeliningTests
             .ToList();
 
         // Setup MGET return values
-        db.StringGetAsync(Arg.Any<RedisKey[]>(), Arg.Any<CommandFlags>())
-            .Returns(ci =>
-            {
-                var keys = ci.Arg<RedisKey[]>();
-                return Task.FromResult(keys.Select(_ => (RedisValue)"1").ToArray());
-            });
+        db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())
+            .Returns(Task.FromResult((RedisValue)"1"));
 
         var options = Options.Create(new GatewayOptions
         {
@@ -70,10 +66,9 @@ public sealed class EpochBatchingAndPipeliningTests
         result.Count.ShouldBe(5);
         result.Values.All(v => v).ShouldBeTrue();
 
-        // Exactly ONE batch call
-        await db.Received(1).StringGetAsync(Arg.Any<RedisKey[]>(), Arg.Any<CommandFlags>());
-        // ZERO individual StringGetAsync calls
-        await db.DidNotReceive().StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
+        // SEC-SC-05: Redis Cluster rejects multi-key MGET across slots; only single-key GETs are allowed.
+        await db.DidNotReceive().StringGetAsync(Arg.Any<RedisKey[]>(), Arg.Any<CommandFlags>());
+        await db.Received(5).StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
     }
 
     [Fact]
@@ -154,14 +149,14 @@ public sealed class EpochBatchingAndPipeliningTests
             NullLogger<EpochValidationService>.Instance);
 
         // First read sees epoch 5
-        db.StringGetAsync(Arg.Any<RedisKey[]>(), Arg.Any<CommandFlags>())
-            .Returns(Task.FromResult(new[] { (RedisValue)"5" }));
+        db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())
+            .Returns(Task.FromResult((RedisValue)"5"));
 
         await service.AreEpochsValidAsync([new EpochCheck(table, 5, false)]);
 
         // Second read returns 3 (Redis rollback/tamper)
-        db.StringGetAsync(Arg.Any<RedisKey[]>(), Arg.Any<CommandFlags>())
-            .Returns(Task.FromResult(new[] { (RedisValue)"3" }));
+        db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())
+            .Returns(Task.FromResult((RedisValue)"3"));
 
         db.ScriptEvaluateAsync(Arg.Any<string>(), Arg.Any<RedisKey[]>(), Arg.Any<RedisValue[]>(), Arg.Any<CommandFlags>())
             .Returns(Task.FromResult(RedisResult.Create((RedisValue)6)));
@@ -194,8 +189,8 @@ public sealed class EpochBatchingAndPipeliningTests
             }
         });
 
-        db.StringGetAsync(Arg.Any<RedisKey[]>(), Arg.Any<CommandFlags>())
-            .Returns(Task.FromResult(new[] { (RedisValue)"1" }));
+        db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())
+            .Returns(Task.FromResult((RedisValue)"1"));
         db.StringIncrementAsync(Arg.Any<RedisKey>(), Arg.Any<long>(), Arg.Any<CommandFlags>())
             .Returns(Task.FromResult(2L));
 
@@ -239,8 +234,8 @@ public sealed class EpochBatchingAndPipeliningTests
             }
         });
 
-        db.StringGetAsync(Arg.Any<RedisKey[]>(), Arg.Any<CommandFlags>())
-            .Returns(Task.FromResult(new[] { (RedisValue)"1" }));
+        db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())
+            .Returns(Task.FromResult((RedisValue)"1"));
 
         var service = new EpochValidationService(
             options,
@@ -255,7 +250,7 @@ public sealed class EpochBatchingAndPipeliningTests
         // Second check with IsHighlySensitive: true must still read Redis, bypassing micro-cache budget
         await service.AreEpochsValidAsync([new EpochCheck(table, 1, IsHighlySensitive: true)]);
 
-        await db.Received(2).StringGetAsync(Arg.Any<RedisKey[]>(), Arg.Any<CommandFlags>());
+        await db.Received(2).StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
     }
 
     [Fact]
@@ -280,7 +275,7 @@ public sealed class EpochBatchingAndPipeliningTests
         });
 
 #pragma warning disable CS0618
-        db.StringGetAsync(Arg.Any<RedisKey[]>(), Arg.Any<CommandFlags>())
+        db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())
             .Throws(new RedisConnectionException(ConnectionFailureType.SocketClosed, "Connection failed"));
 #pragma warning restore CS0618
 
@@ -295,5 +290,49 @@ public sealed class EpochBatchingAndPipeliningTests
 
         // INF-1: Redis error -> non-authoritative -> fail closed (false)
         result[table].ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task SEC_SC_05_CrossSlotRejectingRedis_MultiTableValidation_StillSucceeds()
+    {
+        var db = Substitute.For<IDatabase>();
+        var multiplexer = Substitute.For<IConnectionMultiplexer>();
+        multiplexer.IsConnected.Returns(true);
+        multiplexer.GetDatabase(Arg.Any<int>(), Arg.Any<object>()).Returns(db);
+
+        // Emulates Redis Cluster: any multi-key command spanning slots fails.
+        db.StringGetAsync(Arg.Any<RedisKey[]>(), Arg.Any<CommandFlags>())
+            .Returns<Task<RedisValue[]>>(_ => throw new InvalidOperationException("CROSSSLOT Keys in request don't hash to the same slot"));
+        db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())
+            .Returns(Task.FromResult((RedisValue)"4"));
+
+        var service = new EpochValidationService(multiplexer: multiplexer);
+        var checks = Enumerable.Range(1, 4)
+            .Select(i => new EpochCheck(new TableIdentifier("default", "public", $"t{i}"), 4, false)).ToList();
+
+        var result = await service.AreEpochsValidAsync(checks);
+
+        result.Values.ShouldAllBe(v => v);
+    }
+
+    [Fact]
+    public async Task SEC_SC_05_AnySingleKeyReadFailure_FailsClosedForAllPendingTables()
+    {
+        var db = Substitute.For<IDatabase>();
+        var multiplexer = Substitute.For<IConnectionMultiplexer>();
+        multiplexer.IsConnected.Returns(true);
+        multiplexer.GetDatabase(Arg.Any<int>(), Arg.Any<object>()).Returns(db);
+
+        var tables = Enumerable.Range(1, 3).Select(i => new TableIdentifier("default", "public", $"t{i}")).ToList();
+        db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>()).Returns(ci =>
+            ((string?)ci.Arg<RedisKey>() ?? "").EndsWith("t2", StringComparison.Ordinal)
+                ? Task.FromException<RedisValue>(new TimeoutException("redis timeout"))
+                : Task.FromResult((RedisValue)"1"));
+
+        var service = new EpochValidationService(multiplexer: multiplexer);
+        var result = await service.AreEpochsValidAsync(tables.Select(t => new EpochCheck(t, 1, false)).ToList());
+
+        result.Count.ShouldBe(3);
+        result.Values.ShouldAllBe(v => !v);
     }
 }

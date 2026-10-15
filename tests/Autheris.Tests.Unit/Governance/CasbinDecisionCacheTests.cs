@@ -246,7 +246,8 @@ public class CasbinDecisionCacheTests
     public async Task Service_AmbiguousAttributeKeys_AreNeverCached()
     {
         using var service = new CasbinEnforcementService();
-        service.AddPolicy(new TenantId("t1"), "S-1-5-21-u1", Table.ToString(), "read");
+        // The rule reads the attributes, so they are part of the key (a rule that reads none shares one entry regardless of them).
+        service.AddPolicy(new TenantId("t1"), "S-1-5-21-u1", Table.ToString(), "read", rlsFilter: "dept = ${department}");
         var ctx = Ctx(attributes: new() { ["dept"] = "a", ["Dept"] = "b" });
 
         await service.EvaluatePolicyAsync(ctx);

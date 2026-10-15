@@ -129,11 +129,24 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
         {
             try
             {
-                foreach (var table in missingTables)
+                // WP-PF-05: issue every L2 read first (the multiplexer pipelines them), then await them together.
+                // Single-key commands only, so this is also safe on Redis Cluster.
+                var l2Keys = new RedisKey[missingTables.Count];
+                var l2Reads = new Task<RedisValue>[missingTables.Count];
+                for (var i = 0; i < l2Reads.Length; i++)
                 {
+                    l2Keys[i] = (RedisKey)$"{_prefix}consent:l2:{BuildCacheKey(tenant, userSid, missingTables[i], contextHash)}";
+                    l2Reads[i] = _redisDb.StringGetAsync(l2Keys[i]);
+                }
+
+                await Task.WhenAll(l2Reads).ConfigureAwait(false);
+
+                for (var i = 0; i < missingTables.Count; i++)
+                {
+                    var table = missingTables[i];
                     var cacheKey = BuildCacheKey(tenant, userSid, table, contextHash);
-                    var l2Key = (RedisKey)$"{_prefix}consent:l2:{cacheKey}";
-                    var rawValue = await _redisDb.StringGetAsync(l2Key).ConfigureAwait(false);
+                    var l2Key = l2Keys[i];
+                    var rawValue = l2Reads[i].Result;
                     byte[]? payloadBytes = null;
                     DateTimeOffset l2ExpiresAt = default;
                     byte[]? rawBytes = rawValue.IsNullOrEmpty ? null : (byte[]?)rawValue;

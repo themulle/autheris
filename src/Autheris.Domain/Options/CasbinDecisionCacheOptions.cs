@@ -14,7 +14,13 @@ public sealed class CasbinDecisionCacheOptions
     public const string SectionName = "Gateway:Casbin:DecisionCache";
 
     /// <summary>Maximum number of cached decisions; the least recently used entry is evicted when full.</summary>
-    public int Capacity { get; init; } = 10_000;
+    public int Capacity { get; init; } = 100_000;
+
+    /// <summary>
+    /// WP-PF-09: lets users that match exactly the same policy rules share one cached decision, when no rule reads a user-specific
+    /// input. Never applies to delegated sources. Turn off to key every decision by user.
+    /// </summary>
+    public bool ShareAcrossUsers { get; init; } = true;
 
     /// <summary>Maximum age of a cached decision in seconds.</summary>
     public int TtlSeconds { get; init; } = 60;
