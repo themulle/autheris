@@ -1284,100 +1284,7 @@ public partial class SqliteGovernanceRepository
         var conn = scope.Connection;
         {
             using var tx = conn.BeginTransaction();
-
-            using var cmd = conn.CreateCommand();
-            cmd.Transaction = tx;
-            cmd.CommandText = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, grantee_sid_norm, role_id, role_name, valid_from, valid_to, is_revoked, tenant_id)
-                                VALUES (@id, @tid, @reqId, @effect, @type, @sid, @sidNorm, @roleId, @roleName, @from, @to, 0, @tenantId)";
-            cmd.Parameters.AddWithValue("@id", consent.Id.ToString());
-            cmd.Parameters.AddWithValue("@tid", consent.TableId.ToString());
-            cmd.Parameters.AddWithValue("@reqId", (object?)consent.ConsentRequestId?.ToString() ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@effect", consent.Effect.ToString());
-            cmd.Parameters.AddWithValue("@type", consent.GranteeType.ToString());
-            cmd.Parameters.AddWithValue("@sid", (object?)consent.GranteeSid?.Value ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@sidNorm", ConsentSubjectFilter.NormalizeParameter((object?)consent.GranteeSid?.Value ?? DBNull.Value));
-            cmd.Parameters.AddWithValue("@roleId", (object?)consent.RoleId?.ToString() ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@roleName", (object?)consent.RoleName ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@from", consent.ValidFrom.ToString("O"));
-            cmd.Parameters.AddWithValue("@to", consent.ValidTo.ToString("O"));
-            cmd.Parameters.AddWithValue("@tenantId", (object?)consent.TenantId.Value ?? TenantId.LegacySingleTenant.Value);
-
-            await cmd.ExecuteNonQueryAsync(ct);
-
-            foreach (var rule in consent.ColumnRules)
-            {
-                using var ruleCmd = conn.CreateCommand();
-                ruleCmd.Transaction = tx;
-                ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level, applicable_scopes)
-                                        VALUES (@id, @cid, @tcid, @col, @lvl, @scopes)";
-                ruleCmd.Parameters.AddWithValue("@id", rule.Id.ToString());
-                ruleCmd.Parameters.AddWithValue("@cid", consent.Id.ToString());
-                ruleCmd.Parameters.AddWithValue("@tcid", rule.TableColumnId.ToString());
-                ruleCmd.Parameters.AddWithValue("@col", rule.ColumnName);
-                ruleCmd.Parameters.AddWithValue("@lvl", (int)rule.AccessLevel);
-                ruleCmd.Parameters.AddWithValue("@scopes", rule.ApplicableScopes != null && rule.ApplicableScopes.Count > 0 ? string.Join(",", rule.ApplicableScopes) : string.Empty);
-                await ruleCmd.ExecuteNonQueryAsync(ct);
-            }
-
-            foreach (var filter in consent.RowFilters)
-            {
-                using var filterCmd = conn.CreateCommand();
-                filterCmd.Transaction = tx;
-                filterCmd.CommandText = @"INSERT INTO CONSENT_ROW_FILTERS (
-                    id, consent_id, filter_group, table_column_id, column_name, operator, value_type, value_json, value_source, user_attribute,
-                    filter_type, dependent_table, dependent_table_alias, foreign_key_column, primary_key_column,
-                    subquery_predicate_json, target_temporal_column, dependent_valid_from_column, dependent_valid_to_column,
-                    target_table_alias, additional_hops_json)
-                VALUES (
-                    @id, @cid, @grp, @tcid, @col, @op, @type, @json, @src, @attr,
-                    @ftype, @deptbl, @depalias, @fkcol, @pkcol,
-                    @subpred, @ttemp, @dvfrom, @dvto,
-                    @talias, @hops)";
-                filterCmd.Parameters.AddWithValue("@id", filter.Id.ToString());
-                filterCmd.Parameters.AddWithValue("@cid", consent.Id.ToString());
-                filterCmd.Parameters.AddWithValue("@grp", filter.FilterGroup);
-                filterCmd.Parameters.AddWithValue("@tcid", filter.TableColumnId.ToString());
-                filterCmd.Parameters.AddWithValue("@col", filter.ColumnName);
-                filterCmd.Parameters.AddWithValue("@op", filter.Operator);
-                filterCmd.Parameters.AddWithValue("@type", filter.ValueType);
-                filterCmd.Parameters.AddWithValue("@json", filter.ValueJson);
-                filterCmd.Parameters.AddWithValue("@src", filter.ValueSource);
-                filterCmd.Parameters.AddWithValue("@attr", (object?)filter.UserAttribute ?? DBNull.Value);
-
-                filterCmd.Parameters.AddWithValue("@ftype", (int)filter.FilterType);
-                filterCmd.Parameters.AddWithValue("@deptbl", filter.DependentTable.HasValue ? (object)filter.DependentTable.Value.ToString() : DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@depalias", (object?)filter.DependentTableAlias ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@fkcol", (object?)filter.ForeignKeyColumn ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@pkcol", (object?)filter.PrimaryKeyColumn ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@subpred", (object?)filter.SubqueryFilterPredicateJson ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@ttemp", (object?)filter.TargetTemporalColumn ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@dvfrom", (object?)filter.DependentValidFromColumn ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@dvto", (object?)filter.DependentValidToColumn ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@talias", (object?)filter.TargetTableAlias ?? DBNull.Value);
-                var hopsJson = filter.AdditionalHops != null ? System.Text.Json.JsonSerializer.Serialize(filter.AdditionalHops) : null;
-                filterCmd.Parameters.AddWithValue("@hops", (object?)hopsJson ?? DBNull.Value);
-
-                await filterCmd.ExecuteNonQueryAsync(ct);
-            }
-
-            var auditEntry = new AuditLogEntry
-            {
-                TenantId = consent.TenantId,
-                EventType = "CONSENT_GRANTED",
-                ActorSid = consent.CreatedBySid ?? new Sid("SYSTEM"),
-                TargetTable = consent.TableIdentifier.ToString(),
-                Decision = "GRANTED",
-                TraceId = Guid.NewGuid().ToString("N"),
-                DetailsJson = JsonSerializer.Serialize(new
-                {
-                    ConsentId = consent.Id,
-                    GranteeType = consent.GranteeType.ToString(),
-                    GranteeSid = consent.GranteeSid?.Value,
-                    ValidFrom = consent.ValidFrom,
-                    ValidTo = consent.ValidTo
-                })
-            };
-            await RecordAuditEventInternalAsync(conn, auditEntry, ct, tx);
+            await InsertConsentCoreAsync(conn, tx, consent, ct);
 
             await IncrementTableEpochInternalAsync(conn, consent.TableIdentifier, tx, ct);
             await tx.CommitAsync(ct);
@@ -1388,6 +1295,105 @@ public partial class SqliteGovernanceRepository
 
             return consent;
         }
+    }
+
+    /// <summary>Inserts the consent row, its column rules and row filters and the grant audit entry inside <paramref name="tx"/>. Neither bumps the epoch nor commits.</summary>
+    private async Task InsertConsentCoreAsync(SqliteConnection conn, SqliteTransaction tx, Consent consent, CancellationToken ct)
+    {
+
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, grantee_sid_norm, role_id, role_name, valid_from, valid_to, is_revoked, tenant_id)
+                            VALUES (@id, @tid, @reqId, @effect, @type, @sid, @sidNorm, @roleId, @roleName, @from, @to, 0, @tenantId)";
+        cmd.Parameters.AddWithValue("@id", consent.Id.ToString());
+        cmd.Parameters.AddWithValue("@tid", consent.TableId.ToString());
+        cmd.Parameters.AddWithValue("@reqId", (object?)consent.ConsentRequestId?.ToString() ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@effect", consent.Effect.ToString());
+        cmd.Parameters.AddWithValue("@type", consent.GranteeType.ToString());
+        cmd.Parameters.AddWithValue("@sid", (object?)consent.GranteeSid?.Value ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@sidNorm", ConsentSubjectFilter.NormalizeParameter((object?)consent.GranteeSid?.Value ?? DBNull.Value));
+        cmd.Parameters.AddWithValue("@roleId", (object?)consent.RoleId?.ToString() ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@roleName", (object?)consent.RoleName ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@from", consent.ValidFrom.ToString("O"));
+        cmd.Parameters.AddWithValue("@to", consent.ValidTo.ToString("O"));
+        cmd.Parameters.AddWithValue("@tenantId", (object?)consent.TenantId.Value ?? TenantId.LegacySingleTenant.Value);
+
+        await cmd.ExecuteNonQueryAsync(ct);
+
+        foreach (var rule in consent.ColumnRules)
+        {
+            using var ruleCmd = conn.CreateCommand();
+            ruleCmd.Transaction = tx;
+            ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level, applicable_scopes)
+                                    VALUES (@id, @cid, @tcid, @col, @lvl, @scopes)";
+            ruleCmd.Parameters.AddWithValue("@id", rule.Id.ToString());
+            ruleCmd.Parameters.AddWithValue("@cid", consent.Id.ToString());
+            ruleCmd.Parameters.AddWithValue("@tcid", rule.TableColumnId.ToString());
+            ruleCmd.Parameters.AddWithValue("@col", rule.ColumnName);
+            ruleCmd.Parameters.AddWithValue("@lvl", (int)rule.AccessLevel);
+            ruleCmd.Parameters.AddWithValue("@scopes", rule.ApplicableScopes != null && rule.ApplicableScopes.Count > 0 ? string.Join(",", rule.ApplicableScopes) : string.Empty);
+            await ruleCmd.ExecuteNonQueryAsync(ct);
+        }
+
+        foreach (var filter in consent.RowFilters)
+        {
+            using var filterCmd = conn.CreateCommand();
+            filterCmd.Transaction = tx;
+            filterCmd.CommandText = @"INSERT INTO CONSENT_ROW_FILTERS (
+                id, consent_id, filter_group, table_column_id, column_name, operator, value_type, value_json, value_source, user_attribute,
+                filter_type, dependent_table, dependent_table_alias, foreign_key_column, primary_key_column,
+                subquery_predicate_json, target_temporal_column, dependent_valid_from_column, dependent_valid_to_column,
+                target_table_alias, additional_hops_json)
+            VALUES (
+                @id, @cid, @grp, @tcid, @col, @op, @type, @json, @src, @attr,
+                @ftype, @deptbl, @depalias, @fkcol, @pkcol,
+                @subpred, @ttemp, @dvfrom, @dvto,
+                @talias, @hops)";
+            filterCmd.Parameters.AddWithValue("@id", filter.Id.ToString());
+            filterCmd.Parameters.AddWithValue("@cid", consent.Id.ToString());
+            filterCmd.Parameters.AddWithValue("@grp", filter.FilterGroup);
+            filterCmd.Parameters.AddWithValue("@tcid", filter.TableColumnId.ToString());
+            filterCmd.Parameters.AddWithValue("@col", filter.ColumnName);
+            filterCmd.Parameters.AddWithValue("@op", filter.Operator);
+            filterCmd.Parameters.AddWithValue("@type", filter.ValueType);
+            filterCmd.Parameters.AddWithValue("@json", filter.ValueJson);
+            filterCmd.Parameters.AddWithValue("@src", filter.ValueSource);
+            filterCmd.Parameters.AddWithValue("@attr", (object?)filter.UserAttribute ?? DBNull.Value);
+
+            filterCmd.Parameters.AddWithValue("@ftype", (int)filter.FilterType);
+            filterCmd.Parameters.AddWithValue("@deptbl", filter.DependentTable.HasValue ? (object)filter.DependentTable.Value.ToString() : DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@depalias", (object?)filter.DependentTableAlias ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@fkcol", (object?)filter.ForeignKeyColumn ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@pkcol", (object?)filter.PrimaryKeyColumn ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@subpred", (object?)filter.SubqueryFilterPredicateJson ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@ttemp", (object?)filter.TargetTemporalColumn ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@dvfrom", (object?)filter.DependentValidFromColumn ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@dvto", (object?)filter.DependentValidToColumn ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@talias", (object?)filter.TargetTableAlias ?? DBNull.Value);
+            var hopsJson = filter.AdditionalHops != null ? System.Text.Json.JsonSerializer.Serialize(filter.AdditionalHops) : null;
+            filterCmd.Parameters.AddWithValue("@hops", (object?)hopsJson ?? DBNull.Value);
+
+            await filterCmd.ExecuteNonQueryAsync(ct);
+        }
+
+        var auditEntry = new AuditLogEntry
+        {
+            TenantId = consent.TenantId,
+            EventType = "CONSENT_GRANTED",
+            ActorSid = consent.CreatedBySid ?? new Sid("SYSTEM"),
+            TargetTable = consent.TableIdentifier.ToString(),
+            Decision = "GRANTED",
+            TraceId = Guid.NewGuid().ToString("N"),
+            DetailsJson = JsonSerializer.Serialize(new
+            {
+                ConsentId = consent.Id,
+                GranteeType = consent.GranteeType.ToString(),
+                GranteeSid = consent.GranteeSid?.Value,
+                ValidFrom = consent.ValidFrom,
+                ValidTo = consent.ValidTo
+            })
+        };
+        await RecordAuditEventInternalAsync(conn, auditEntry, ct, tx);
     }
 
     public async Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default)

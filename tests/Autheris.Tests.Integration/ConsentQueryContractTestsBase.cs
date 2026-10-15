@@ -203,4 +203,79 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         result.ShouldContain(c => c.TableId == seed.TableId && c.GranteeType == GranteeType.Role);
         result.ShouldNotContain(c => c.GranteeType != GranteeType.Role);
     }
+
+    // ---- WP-SC-02 / SEC-SC-03: role lookup and atomic replace ----
+
+    private static Consent NewConsent(Seed seed, GranteeType type, string? sid, string? role, TenantId tenant) => new()
+    {
+        TableId = seed.TableId, TableIdentifier = seed.Table, TenantId = tenant, GranteeType = type,
+        GranteeSid = sid == null ? (Sid?)null : new Sid(sid), RoleName = role,
+        ValidFrom = seed.Now.AddDays(-1), ValidTo = seed.Now.AddDays(30), CreatedBySid = new Sid("SYSTEM")
+    };
+
+    [Fact]
+    public async Task SEC_SC_03_GetActiveRoleConsents_MatchesRoleTenantAndTableOnly()
+    {
+        if (!Available) return;
+        var seed = await SeedAsync();
+        var expected = seed.Consents.Where(c => c.GranteeType == GranteeType.Role && c.TenantId == TenantA).Select(c => c.Id).ToList();
+
+        var result = await Repo.GetActiveRoleConsentsAsync(seed.Table, "ANALYST", TenantA, seed.Now);
+
+        result.Select(c => c.Id).ShouldBe(expected, ignoreOrder: true);
+        (await Repo.GetActiveRoleConsentsAsync(seed.Table, "nobody", TenantA, seed.Now)).ShouldBeEmpty();
+        (await Repo.GetActiveRoleConsentsAsync(seed.Other, "analyst", TenantA, seed.Now)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task SEC_SC_03_Replace_IsAtomic_AndBumpsTheEpochOnce()
+    {
+        if (!Available) return;
+        var seed = await SeedAsync();
+        var alice = new Sid("S-1-5-21-Alice");
+        var old = seed.Consents.First(c => c.TenantId == TenantA && c.GranteeSid?.Value == "S-1-5-21-Alice" && c.Effect == ConsentEffect.Allow && c.ValidFrom < seed.Now && c.ValidTo > seed.Now);
+        var before = await Repo.GetTableEpochAsync(seed.Table);
+
+        await Repo.ReplaceConsentsAsync([old.Id], [NewConsent(seed, GranteeType.User, "S-1-5-21-Dave", null, TenantA), NewConsent(seed, GranteeType.User, "S-1-5-21-Erin", null, TenantA)], alice, "apply");
+
+        (await Repo.GetConsentByIdAsync(old.Id))!.IsRevoked.ShouldBeTrue();
+        (await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Dave"), new Sid("S-1-5-21-Erin")], seed.Table, seed.Now, TenantA)).Count(c => c.GranteeType != GranteeType.Role).ShouldBe(2);
+        (await Repo.GetTableEpochAsync(seed.Table)).ShouldBe(before + 1);
+    }
+
+    [Fact]
+    public async Task SEC_SC_03_Replace_FaultAfterRevoke_RollsBackEverything()
+    {
+        if (!Available) return;
+        var seed = await SeedAsync();
+        var old = seed.Consents.First(c => c.TenantId == TenantA && c.GranteeSid?.Value == "S-1-5-21-Alice" && c.Effect == ConsentEffect.Allow && c.ValidFrom < seed.Now && c.ValidTo > seed.Now);
+        var before = await Repo.GetTableEpochAsync(seed.Table);
+        var clash = new Consent
+        {
+            Id = old.Id, TableId = seed.TableId, TableIdentifier = seed.Table, TenantId = TenantA, GranteeType = GranteeType.User,
+            GranteeSid = new Sid("S-1-5-21-Frank"), ValidFrom = seed.Now.AddDays(-1), ValidTo = seed.Now.AddDays(3)
+        };
+
+        await Should.ThrowAsync<Exception>(() => Repo.ReplaceConsentsAsync([old.Id], [clash], new Sid("S-1-5-21-Alice"), "apply"));
+
+        (await Repo.GetConsentByIdAsync(old.Id))!.IsRevoked.ShouldBeFalse();
+        (await Repo.GetTableEpochAsync(seed.Table)).ShouldBe(before);
+        (await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Frank")], seed.Table, seed.Now, TenantA)).ShouldNotContain(c => c.GranteeType != GranteeType.Role);
+    }
+
+    [Fact]
+    public async Task SEC_SC_03_Replace_UnauthorizedActorOrUnknownId_ChangesNothing()
+    {
+        if (!Available) return;
+        var seed = await SeedAsync();
+        var old = seed.Consents.First(c => c.TenantId == TenantA && c.GranteeSid?.Value == "S-1-5-21-Alice" && c.Effect == ConsentEffect.Allow && c.ValidFrom < seed.Now && c.ValidTo > seed.Now);
+
+        await Should.ThrowAsync<UnauthorizedAccessException>(() =>
+            Repo.ReplaceConsentsAsync([old.Id], [NewConsent(seed, GranteeType.User, "S-1-5-21-Gina", null, TenantA)], new Sid("S-1-5-21-STRANGER"), "x"));
+        await Should.ThrowAsync<KeyNotFoundException>(() =>
+            Repo.ReplaceConsentsAsync([Guid.NewGuid()], [NewConsent(seed, GranteeType.User, "S-1-5-21-Gina", null, TenantA)], new Sid("S-1-5-21-Alice"), "x"));
+
+        (await Repo.GetConsentByIdAsync(old.Id))!.IsRevoked.ShouldBeFalse();
+        (await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Gina")], seed.Table, seed.Now, TenantA)).ShouldNotContain(c => c.GranteeType != GranteeType.Role);
+    }
 }

@@ -64,6 +64,25 @@ public interface IConsentRepository
     Task ExtendConsentExpiryAsync(Guid consentId, DateTimeOffset newValidTo, CancellationToken ct = default);
 
     /// <summary>
+    /// WP-SC-02: the active (not revoked, valid at <paramref name="atTime"/>) consents whose grantee is the role
+    /// <paramref name="roleName"/> (case-insensitive) on <paramref name="table"/> in <paramref name="tenantId"/>. Role consents are matched by
+    /// role name only; the subject-based queries cannot find them without a subject. There is no safe default: it fails closed.
+    /// </summary>
+    Task<IReadOnlyList<Consent>> GetActiveRoleConsentsAsync(TableIdentifier table, string roleName, TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default)
+        => throw new NotSupportedException(
+            $"{GetType().Name} does not implement the role-grantee consent lookup; refusing to fall back to a subject-based lookup.");
+
+    /// <summary>
+    /// WP-SC-02: revokes <paramref name="revokeIds"/> and creates <paramref name="create"/> in ONE transaction with ONE epoch bump per affected
+    /// table. Every revocation is authorised exactly like <see cref="RevokeConsentAsync"/> (beneficiary, data owner, delegate or admin) and
+    /// every created consent is validated like <see cref="CreateConsentAsync"/>. Any failure rolls back everything (no partial apply).
+    /// There is no safe default: it fails closed.
+    /// </summary>
+    Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeIds, IReadOnlyList<Consent> create, Sid actor, string reason, CancellationToken ct = default)
+        => throw new NotSupportedException(
+            $"{GetType().Name} does not implement the atomic consent replacement; refusing to fall back to separate revoke and create calls.");
+
+    /// <summary>
     /// SEC E-05 / EX-02: All non-revoked, not yet expired consents carrying <paramref name="consentRequestId"/>
     /// (e.g. the OpenMetadata sync marker) – without any subject, role, table or tenant filter (used for reconcile).
     /// </summary>
