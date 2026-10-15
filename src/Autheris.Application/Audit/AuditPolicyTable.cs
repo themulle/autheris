@@ -78,6 +78,8 @@ public static class AuditPolicyTable
         [AuditEventTypes.MetricQuery] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.MetadataSyntheticSample] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.QueryAnalysisEvaluated] = AuditFailurePolicy.BestEffort,
+        [AuditEventTypes.RowFilterEvaluationChanged] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.TableRowFilterStrategyChanged] = AuditFailurePolicy.FailClosed,
     };
 
     public static IReadOnlyDictionary<string, AuditFailurePolicy> All => Table;

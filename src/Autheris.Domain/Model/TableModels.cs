@@ -150,6 +150,9 @@ public sealed record TableMetadata
     /// <summary>Declared secondary and unique indexes (used for default ordering). Empty when none was declared.</summary>
     public IReadOnlyList<TableIndexDefinition> Indexes { get; init; } = Array.Empty<TableIndexDefinition>();
 
+    /// <summary>Issue #107: object-level row filter evaluation settings (loaded from TABLE_ROW_FILTER_STRATEGIES, never written by the metadata upsert). Null = inherit global.</summary>
+    public RowFilterEvaluationSettings? RowFilterEvaluation { get; init; }
+
     /// <summary>Write intent: the upsert replaces the stored key/index definition only when true; otherwise it keeps it.</summary>
     public bool ReplaceKeyDefinition { get; init; }
 
