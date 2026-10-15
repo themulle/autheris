@@ -53,6 +53,7 @@ public sealed class CdcWebhookDeliveryService : BackgroundService
     private readonly IOptions<GatewayOptions> _gatewayOptions;
     private readonly TimeProvider _time;
     private readonly ILogger<CdcWebhookDeliveryService> _logger;
+    private readonly CdcStreamCompatFeed? _compatFeed;
 
     private readonly ConcurrentDictionary<string, CacheEntry> _cache = new(StringComparer.Ordinal);
     private readonly Dictionary<(string Tenant, string Subscription), AuditBatch> _batches = [];
@@ -68,8 +69,10 @@ public sealed class CdcWebhookDeliveryService : BackgroundService
         IOptionsMonitor<CdcWebhooksOptions> options,
         IOptions<GatewayOptions> gatewayOptions,
         TimeProvider time,
-        ILogger<CdcWebhookDeliveryService> logger)
+        ILogger<CdcWebhookDeliveryService> logger,
+        CdcStreamCompatFeed? compatFeed = null)
     {
+        _compatFeed = compatFeed;
         _channel = channel;
         _store = store;
         _scopeFactory = scopeFactory;
@@ -103,6 +106,8 @@ public sealed class CdcWebhookDeliveryService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var flusher = FlushLoopAsync(stoppingToken);
+        // I1 compatibility feed (D-A13): MSSQL-tracked tables come from the durable stream, everything else from the channel.
+        var compat = _compatFeed is null ? Task.CompletedTask : _compatFeed.RunAsync(ProcessStreamEventAsync, stoppingToken);
         try
         {
             await ConsumeLoopAsync(stoppingToken).ConfigureAwait(false);
@@ -110,6 +115,7 @@ public sealed class CdcWebhookDeliveryService : BackgroundService
         finally
         {
             await flusher.ConfigureAwait(false);
+            await compat.ConfigureAwait(false);
         }
     }
 
@@ -182,12 +188,17 @@ public sealed class CdcWebhookDeliveryService : BackgroundService
         }
     }
 
+    /// <summary>Processes one event of the durable stream; its opaque stream event id is used as the CloudEvent id (D-A10).</summary>
+    internal Task ProcessStreamEventAsync(CdcEvent cdcEvent, CancellationToken ct) => ProcessEventAsync(cdcEvent, fromStream: true, ct);
+
     /// <summary>Processes one event: never throws for per-event failures (the stream must keep flowing).</summary>
-    internal async Task ProcessEventAsync(CdcEvent cdcEvent, CancellationToken ct)
+    internal Task ProcessEventAsync(CdcEvent cdcEvent, CancellationToken ct) => ProcessEventAsync(cdcEvent, fromStream: false, ct);
+
+    private async Task ProcessEventAsync(CdcEvent cdcEvent, bool fromStream, CancellationToken ct)
     {
         try
         {
-            await ProcessCoreAsync(cdcEvent, ct).ConfigureAwait(false);
+            await ProcessCoreAsync(cdcEvent, fromStream, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -200,7 +211,7 @@ public sealed class CdcWebhookDeliveryService : BackgroundService
         }
     }
 
-    private async Task ProcessCoreAsync(CdcEvent cdcEvent, CancellationToken ct)
+    private async Task ProcessCoreAsync(CdcEvent cdcEvent, bool fromStream, CancellationToken ct)
     {
         // Never fan out an untenanted event.
         if (string.IsNullOrWhiteSpace(cdcEvent.TenantId))
@@ -250,7 +261,7 @@ public sealed class CdcWebhookDeliveryService : BackgroundService
                 continue;
             }
 
-            var envelope = _transformer.Transform(cdcEvent, decision.MaskedPayload) with { Id = CdcWebhookEventId.From(cdcEvent) };
+            var envelope = _transformer.Transform(cdcEvent, decision.MaskedPayload) with { Id = fromStream ? cdcEvent.EventId : CdcWebhookEventId.From(cdcEvent) };
 
             WebhookOutboxMessage message;
             try
