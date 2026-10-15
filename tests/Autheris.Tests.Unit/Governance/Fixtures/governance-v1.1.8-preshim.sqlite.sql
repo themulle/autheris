@@ -1,0 +1,299 @@
+-- Governance SQLite schema as created by Autheris v1.1.8 (git show v1.1.8:src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Schema.cs, InitializeDatabase).
+-- The ALTER TABLE shim columns that v1.1.8 added for even older databases are not part of this DDL; the tables and columns that were introduced later are absent.
+CREATE TABLE IF NOT EXISTS TABLES (
+    id TEXT PRIMARY KEY,
+    source_type TEXT NOT NULL,
+    source_name TEXT NOT NULL,
+    schema_name TEXT NOT NULL,
+    table_name TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    description TEXT,
+    long_description TEXT,
+    doc_source TEXT,
+    sensitivity TEXT NOT NULL,
+    requires_four_eyes INTEGER NOT NULL,
+    is_active INTEGER NOT NULL,
+    data_source_type INTEGER NOT NULL DEFAULT 0,
+    http_endpoint_json TEXT,
+    plugin_name TEXT
+);
+
+CREATE TABLE IF NOT EXISTS TABLE_COLUMNS (
+    id TEXT PRIMARY KEY,
+    table_id TEXT NOT NULL,
+    column_name TEXT NOT NULL,
+    data_type TEXT NOT NULL,
+    is_sensitive INTEGER NOT NULL,
+    description TEXT,
+    long_description TEXT,
+    doc_source TEXT,
+    meta_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS COLUMN_MASKING_RULES (
+    id TEXT PRIMARY KEY,
+    table_column_id TEXT NOT NULL,
+    rule_type TEXT NOT NULL,
+    pattern_or_format TEXT,
+    replacement TEXT,
+    hmac_key_id TEXT
+);
+
+CREATE TABLE IF NOT EXISTS DATA_OWNERS (
+    id TEXT PRIMARY KEY,
+    ad_sid TEXT NOT NULL,
+    ad_account TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    email TEXT NOT NULL,
+    is_active INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS TABLE_OWNERS (
+    id TEXT PRIMARY KEY,
+    table_id TEXT NOT NULL,
+    data_owner_id TEXT NOT NULL,
+    owner_role TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS DATA_OWNER_DELEGATIONS (
+    id TEXT PRIMARY KEY,
+    data_owner_id TEXT NOT NULL,
+    delegate_sid TEXT NOT NULL,
+    valid_from TEXT NOT NULL,
+    valid_to TEXT NOT NULL,
+    reason TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ROLES (
+    id TEXT PRIMARY KEY,
+    role_name TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ROLE_MEMBERS (
+    id TEXT PRIMARY KEY,
+    role_id TEXT NOT NULL,
+    member_type TEXT NOT NULL,
+    member_sid TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS CONSENTS (
+    id TEXT PRIMARY KEY,
+    table_id TEXT NOT NULL,
+    consent_request_id TEXT,
+    effect TEXT NOT NULL,
+    grantee_type TEXT NOT NULL,
+    grantee_sid TEXT,
+    role_id TEXT,
+    role_name TEXT,
+    valid_from TEXT NOT NULL,
+    valid_to TEXT NOT NULL,
+    is_revoked INTEGER NOT NULL,
+    revoked_by_sid TEXT,
+    revoked_at TEXT,
+    revoke_reason TEXT,
+    tenant_id TEXT NOT NULL DEFAULT 'legacy-single-tenant'
+);
+
+CREATE TABLE IF NOT EXISTS CONSENT_COLUMN_RULES (
+    id TEXT PRIMARY KEY,
+    consent_id TEXT NOT NULL,
+    table_column_id TEXT NOT NULL,
+    column_name TEXT NOT NULL,
+    access_level INTEGER NOT NULL,
+    applicable_scopes TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS CONSENT_ROW_FILTERS (
+    id TEXT PRIMARY KEY,
+    consent_id TEXT NOT NULL,
+    filter_group INTEGER NOT NULL,
+    table_column_id TEXT NOT NULL,
+    column_name TEXT NOT NULL,
+    operator TEXT NOT NULL,
+    value_type TEXT NOT NULL,
+    value_json TEXT NOT NULL,
+    value_source TEXT NOT NULL,
+    user_attribute TEXT,
+    filter_type INTEGER NOT NULL DEFAULT 0,
+    dependent_table TEXT,
+    dependent_table_alias TEXT,
+    foreign_key_column TEXT,
+    primary_key_column TEXT,
+    subquery_predicate_json TEXT,
+    target_temporal_column TEXT,
+    dependent_valid_from_column TEXT,
+    dependent_valid_to_column TEXT,
+    target_table_alias TEXT,
+    additional_hops_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS POLICY_EPOCHS (
+    table_id TEXT PRIMARY KEY,
+    domain TEXT NOT NULL,
+    schema_name TEXT NOT NULL,
+    table_name TEXT NOT NULL,
+    epoch INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS AUDIT_LOG_ENTRIES (
+    id TEXT PRIMARY KEY,
+    occurred_at TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    actor_sid TEXT NOT NULL,
+    target_table TEXT NOT NULL,
+    target_column TEXT,
+    decision TEXT NOT NULL,
+    trace_id TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    prev_hash TEXT NOT NULL,
+    entry_hash TEXT NOT NULL,
+    tenant_id TEXT NOT NULL DEFAULT 'legacy-single-tenant'
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_target_table ON AUDIT_LOG_ENTRIES (target_table, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_audit_actor_sid ON AUDIT_LOG_ENTRIES (actor_sid, occurred_at);
+
+-- AU-05: Dead-letter queue for failed audit batches
+CREATE TABLE IF NOT EXISTS AUDIT_DEAD_LETTER (
+    id TEXT PRIMARY KEY,
+    batch_json TEXT NOT NULL,
+    error_message TEXT NOT NULL,
+    failed_at TEXT NOT NULL,
+    tenant_id TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS CONSENT_REQUESTS (
+    id TEXT PRIMARY KEY,
+    table_id TEXT NOT NULL,
+    requester_sid TEXT NOT NULL,
+    requested_grantee_type TEXT NOT NULL,
+    requested_grantee_ref TEXT NOT NULL,
+    business_justification TEXT NOT NULL,
+    status TEXT NOT NULL,
+    requested_at TEXT NOT NULL,
+    requested_valid_to TEXT NOT NULL,
+    itsm_ticket_id TEXT,
+    tenant_id TEXT,
+    requester_identifiers_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS APPROVAL_STEPS (
+    id TEXT PRIMARY KEY,
+    consent_request_id TEXT NOT NULL,
+    step_number INTEGER NOT NULL,
+    approver_sid TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    rejection_reason TEXT,
+    decided_at TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS UX_APPROVAL_STEPS_REQ_STEP
+    ON APPROVAL_STEPS (consent_request_id, step_number);
+
+CREATE UNIQUE INDEX IF NOT EXISTS UX_TABLES_NATURAL
+    ON TABLES (source_name, schema_name, table_name);
+
+CREATE UNIQUE INDEX IF NOT EXISTS UX_TABLE_COLUMNS_NATURAL
+    ON TABLE_COLUMNS (table_id, column_name);
+
+CREATE UNIQUE INDEX IF NOT EXISTS UX_DATA_OWNERS_SID
+    ON DATA_OWNERS (ad_sid);
+
+CREATE UNIQUE INDEX IF NOT EXISTS UX_TABLE_OWNERS_NATURAL
+    ON TABLE_OWNERS (table_id, data_owner_id, owner_role);
+
+CREATE UNIQUE INDEX IF NOT EXISTS UX_POLICY_EPOCHS_NATURAL
+    ON POLICY_EPOCHS (domain, schema_name, table_name);
+
+CREATE TABLE IF NOT EXISTS TABLE_RELATIONS (
+    id TEXT PRIMARY KEY,
+    parent_table_id TEXT NOT NULL,
+    child_table_id TEXT NOT NULL,
+    relation_name TEXT NOT NULL,
+    join_key_parent TEXT NOT NULL,
+    join_key_child TEXT NOT NULL,
+    cardinality TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ITSM_OUTBOX (
+    id TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    preferred_system TEXT NOT NULL,
+    status INTEGER NOT NULL,
+    retry_count INTEGER NOT NULL,
+    max_retries INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    next_retry_at TEXT,
+    last_error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_itsm_outbox_status_retry
+    ON ITSM_OUTBOX (status, next_retry_at);
+
+-- Virtual filters (docs/plans/2026-10-08-umsetzungsplan-virtuelle-filter.md, phase 2)
+CREATE TABLE IF NOT EXISTS VIRTUAL_FILTERS (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    source TEXT NOT NULL,
+    definition_json TEXT NOT NULL,
+    definition_hash TEXT NOT NULL,
+    managed_path TEXT,
+    managed_commit TEXT,
+    updated_by TEXT,
+    updated_at TEXT NOT NULL,
+    UNIQUE (tenant_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS VIRTUAL_FILTER_ACCESS_PROFILES (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    definition_json TEXT NOT NULL,
+    definition_hash TEXT NOT NULL,
+    managed_path TEXT,
+    managed_commit TEXT,
+    updated_by TEXT,
+    updated_at TEXT NOT NULL,
+    UNIQUE (tenant_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS ACCESS_PROFILES (
+    profile_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    masking_mode TEXT NOT NULL DEFAULT 'Default',
+    target_tables TEXT NOT NULL DEFAULT '["*.*"]',
+    row_filter_predicate TEXT,
+    justification TEXT,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    valid_to TEXT,
+    PRIMARY KEY (tenant_id, profile_id)
+);
+
+CREATE TABLE IF NOT EXISTS ACCESS_PROFILE_ASSIGNMENTS (
+    profile_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    subject_type TEXT NOT NULL DEFAULT 'User',
+    assigned_at TEXT NOT NULL,
+    expires_at TEXT,
+    PRIMARY KEY (tenant_id, profile_id, subject),
+    FOREIGN KEY (tenant_id, profile_id) REFERENCES ACCESS_PROFILES (tenant_id, profile_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS IX_ACCESS_PROFILE_ASSIGNMENTS_SUBJECT 
+    ON ACCESS_PROFILE_ASSIGNMENTS(tenant_id, subject);
+
+CREATE TABLE IF NOT EXISTS VIRTUAL_FILTER_GENERATION (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    generation BIGINT NOT NULL
+);
+
+INSERT INTO VIRTUAL_FILTER_GENERATION (id, generation) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
