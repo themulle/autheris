@@ -164,6 +164,27 @@ curl -X POST http://localhost:8080/api/v1/sql \
 
 ---
 
+### 4.4 Execution Timeouts
+
+A statement that exceeds `WebSql:ExecutionTimeoutSeconds` is answered with `504 Gateway Timeout` as RFC 9457 problem details (`Content-Type: application/problem+json`):
+
+```json
+{
+  "type": "urn:autheris:problem:websql-execution-timeout",
+  "title": "Gateway Timeout",
+  "status": 504,
+  "detail": "The SQL statement exceeded the execution time limit. Narrow the query (filter, fewer columns, LIMIT) or contact support with the trace id.",
+  "code": "SQL_TIMEOUT",
+  "traceId": "0HN..."
+}
+```
+
+The body is written explicitly and never contains the SQL text, an `instance` with the query, the exception type or a stack trace. `code` is the stable error code.
+
+WebSQL adds no ordering of its own. A user `ORDER BY` on a column without an index sorts the whole table in the source and can hit the timeout on large tables; this is by design. Remedy: add an index on the ordering column in the source, narrow the query, or raise `WebSql:ExecutionTimeoutSeconds`.
+
+---
+
 ## 5. Configuration Example
 
 ```json

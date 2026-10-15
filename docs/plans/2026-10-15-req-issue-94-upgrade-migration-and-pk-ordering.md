@@ -2,7 +2,7 @@
 
 **Document ID:** `REQ-GOV-94`
 **Date:** 2026-10-15
-**Status:** APPROVED, amended by owner decision 2026-10-15 (Phase 2 plan: [2026-10-15-plan-issue-94-upgrade-migration-and-pk-ordering.md](2026-10-15-plan-issue-94-upgrade-migration-and-pk-ordering.md))
+**Status:** IMPLEMENTED (PR pending); APPROVED, amended by owner decision 2026-10-15 (Phase 2 plan: [2026-10-15-plan-issue-94-upgrade-migration-and-pk-ordering.md](2026-10-15-plan-issue-94-upgrade-migration-and-pk-ordering.md))
 **Author:** Enterprise Product Manager
 **Source:** GitHub issue #94 ("Update from v1.1.8 to v1.1.10: migration does not add columns, and tables without a primary key fail on ORDER BY id")
 **Branch:** `fix/issue-94-upgrade-migration-pk` (base `main` `574c82f1`)

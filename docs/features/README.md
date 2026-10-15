@@ -62,13 +62,14 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-GOV-08** | Dynamic Schema Contracts & Tag-Based Projection (@tag) | [f-gov-08-schema-contracts-tag-projection.md](f-gov-08-schema-contracts-tag-projection.md) |
 | **F-GOV-09** | Virtual Filters (Relation-Scoped Cross-Channel Mandatory Row Filtering) | [f-gov-09-virtual-filters.md](f-gov-09-virtual-filters.md) |
 | **F-GOV-11** | Declarative Access Profiles & Person-Based Plaintext Exceptions (R-52) | [f-gov-11-declarative-access-profiles.md](f-gov-11-declarative-access-profiles.md) |
-| **F-GOV-12** | Multi-Engine Governance Database Storage (MSSQL, PostgreSQL, SQLite) | [f-gov-12-multi-engine-governance-storage.md](f-gov-12-multi-engine-governance-storage.md) |
+| **F-GOV-12** | Multi-Engine Governance Database Storage (MSSQL, PostgreSQL, SQLite) & Schema Shape Verification | [f-gov-12-multi-engine-governance-storage.md](f-gov-12-multi-engine-governance-storage.md) |
 | **F-GOV-13** | Enterprise Data Classification, PII Tagging & Sensitivity Governance Engine | [f-gov-13-data-classification-and-pii-governance.md](f-gov-13-data-classification-and-pii-governance.md) |
 | **F-GOV-14** | Federated Virtual Filters on Web-APIs (gateway semi-join, point-lookup short-circuit, key pushdown; fail-closed) | [f-gov-14-federated-virtual-filters.md](f-gov-14-federated-virtual-filters.md) |
 | **F-GOV-15** | Declarative Consent GitOps, Effective Access Introspection & Scope Governance | [f-gov-15-declarative-consents-scopes.md](f-gov-15-declarative-consents-scopes.md) |
 | **F-GOV-16** | Catalog Discovery Transparency, Data Ownership & Response Masking Metadata | [f-gov-16-catalog-ownership-transparency.md](f-gov-16-catalog-ownership-transparency.md) |
 | **F-GOV-17** | GraphQL Cursor Pagination, Temporal Types & dbt Column Semantics | [f-gov-17-graphql-temporal-dbt-semantics.md](f-gov-17-graphql-temporal-dbt-semantics.md) |
 | **F-GOV-18** | Dual-Mode DataHub Integration, Declarative Contracts & SLA Circuit Breakers | [f-gov-18-datahub-integration-contracts.md](f-gov-18-datahub-integration-contracts.md) |
+| **F-GOV-19** | Declared Table Keys & Indexes, Deterministic Read Ordering & Least-Privilege Grants | [f-gov-19-declared-table-keys-and-read-ordering.md](f-gov-19-declared-table-keys-and-read-ordering.md) |
 | **F-INT-01** | Spotify Backstage Software Catalog Integration | [f-int-01-backstage-software-catalog.md](f-int-01-backstage-software-catalog.md) |
 | **F-MASK-02** | Extended Column Masking Engine (GEO_JITTER, PARTIAL_MASK, TOKENIZATION) | [f-mask-02-extended-masking-engine.md](f-mask-02-extended-masking-engine.md) |
 | **F-OPEN-01** | OpenSchema Mode, Multi-File OpenAPI & Catalog Slicing | [f-open-01-openschema-catalog-slicing.md](f-open-01-openschema-catalog-slicing.md) |
