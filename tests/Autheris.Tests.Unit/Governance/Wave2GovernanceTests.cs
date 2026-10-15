@@ -65,7 +65,8 @@ public sealed class Wave2GovernanceTests
                     "S-1-5-21-USER1",
                     "Allow",
                     ColumnRules: [new DeclarativeColumnRule("secret_notes", "Mask", ["Agent.Read"])],
-                    RowFilters: [new DeclarativeRowFilter("tenant_id", "EQ", "string", "[\"tenant_test\"]")]
+                    RowFilters: [new DeclarativeRowFilter("tenant_id", "EQ", "string", "[\"tenant_test\"]")],
+                    ValidUntil: DateTimeOffset.UtcNow.AddDays(30)
                 )
             ]);
 
@@ -132,10 +133,15 @@ public sealed class Wave2GovernanceTests
         result.Applied.ShouldBe(1);
 
         // Verify create and audit were called
-        await consentRepo.Received(1).CreateConsentAsync(Arg.Is<Consent>(c =>
-            c.RoleName == "DataScientist" &&
-            c.GranteeType == GranteeType.Role &&
-            c.Effect == ConsentEffect.Allow));
+        await consentRepo.Received(1).ReplaceConsentsAsync(
+            Arg.Any<IReadOnlyList<Guid>>(),
+            Arg.Is<IReadOnlyList<Consent>>(l => l.Count == 1 &&
+                l[0].RoleName == "DataScientist" &&
+                l[0].GranteeType == GranteeType.Role &&
+                l[0].Effect == ConsentEffect.Allow),
+            Arg.Any<Sid>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
 
         await auditRepo.Received(1).RecordAuditEventAsync(Arg.Is<AuditLogEntry>(a =>
             a.EventType == "GITOPS_CONSENT_APPLY"));

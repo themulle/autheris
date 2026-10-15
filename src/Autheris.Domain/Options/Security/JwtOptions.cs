@@ -90,6 +90,13 @@ public sealed class BasicAuthOptions
     /// <summary>RR-L2-03: Lifetime of a verified-credential cache entry in seconds (0 disables the cache).</summary>
     public int SuccessCacheSeconds { get; init; } = 30;
 
+    /// <summary>
+    /// WP-PF-08: secret reference (resolved through <c>IKeyVaultSecretProvider</c>) of the key that signs the cluster-shared verified-credential
+    /// marker. When set and a distributed cache is registered, replicas share the marker (keyed HMAC bound to a credential version) so a client
+    /// pays the password hash once per cluster instead of once per replica. Unset: the marker stays per process.
+    /// </summary>
+    public string? MarkerKeyRef { get; init; }
+
     /// <summary>DoS protection: Maximum concurrent password hash computations (Argon2id/PBKDF2).</summary>
     public int MaxConcurrentPasswordHashes { get; init; } = Environment.ProcessorCount;
 

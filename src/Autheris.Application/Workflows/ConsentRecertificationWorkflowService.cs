@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Governance.Grants;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -28,14 +29,20 @@ public sealed class ConsentRecertificationWorkflowService : IConsentRecertificat
     private readonly ILogger<ConsentRecertificationWorkflowService> _logger;
 
     private readonly ConcurrentDictionary<Guid, DateTimeOffset> _recentlyTriggered = new();
+    private readonly IGrantPolicy _grantPolicy;
+    private readonly ITableMetadataRepository? _metadataRepo;
 
     public ConsentRecertificationWorkflowService(
         IConsentRepository consentRepo,
         IItsmOutboxRepository outboxRepo,
         IOptions<GatewayOptions> options,
         ILogger<ConsentRecertificationWorkflowService> logger,
-        IAuditLogRepository auditRepo)
+        IAuditLogRepository auditRepo,
+        IGrantPolicy? grantPolicy = null,
+        ITableMetadataRepository? metadataRepo = null)
     {
+        _grantPolicy = grantPolicy ?? new GrantPolicy();
+        _metadataRepo = metadataRepo;
         _consentRepo = consentRepo ?? throw new ArgumentNullException(nameof(consentRepo));
         _outboxRepo = outboxRepo ?? throw new ArgumentNullException(nameof(outboxRepo));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -163,7 +170,33 @@ public sealed class ConsentRecertificationWorkflowService : IConsentRecertificat
             throw new InvalidOperationException($"Cannot extend revoked consent '{consentId}'.");
         }
 
-        var newValidTo = (consent.ValidTo > DateTimeOffset.UtcNow ? consent.ValidTo : DateTimeOffset.UtcNow).Add(extensionDuration);
+        var now = DateTimeOffset.UtcNow;
+        var newValidTo = (consent.ValidTo > now ? consent.ValidTo : now).Add(extensionDuration);
+
+        // WP-SC-16 rule 3: an extension of an individual grant is a new approval by someone other than the grantee, capped by the
+        // class maximum (now + max), with a role-conversion hint after repeated renewals and a campaign decision from the 4th.
+        var sensitivity = GrantSensitivity.Sensitive; // fail closed when the table cannot be classified
+        if (_metadataRepo != null)
+        {
+            var meta = await _metadataRepo.GetTableMetadataAsync(consent.TableIdentifier, ct).ConfigureAwait(false);
+            if (meta != null)
+            {
+                sensitivity = GrantClassifier.Classify([meta]);
+            }
+        }
+
+        var granteeRef = consent.GranteeSid?.Value ?? consent.RoleName ?? string.Empty;
+        var renewal = new GrantRequest(
+            consent.GranteeType, granteeRef, GrantKind.Renewal, newValidTo, now, sensitivity,
+            Renewer: approverSid.Value, RenewalCount: consent.RenewalCount, Justification: justification);
+        var decision = _grantPolicy.Evaluate(renewal);
+        if (!decision.Allowed && decision.ErrorCode == GrantErrorCodes.ExceedsMaximum && decision.MaxValidTo is { } cap)
+        {
+            newValidTo = cap;
+            decision = _grantPolicy.Evaluate(renewal with { ValidTo = newValidTo });
+        }
+
+        GrantPolicyViolationException.ThrowIfDenied(decision);
         await _consentRepo.ExtendConsentExpiryAsync(consentId, newValidTo, ct).ConfigureAwait(false);
 
         _logger.LogInformation(
@@ -184,6 +217,8 @@ public sealed class ConsentRecertificationWorkflowService : IConsentRecertificat
                 OldValidTo = consent.ValidTo,
                 NewValidTo = newValidTo,
                 ExtensionDays = extensionDuration.TotalDays,
+                RenewalCount = consent.RenewalCount + 1,
+                SuggestRoleConversion = decision.SuggestRoleConversion,
                 Justification = justification
             })
         };

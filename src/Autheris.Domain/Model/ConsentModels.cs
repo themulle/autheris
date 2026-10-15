@@ -94,11 +94,14 @@ public sealed class Consent
     public IReadOnlyList<ConsentRowFilter> RowFilters { get; set; } = Array.Empty<ConsentRowFilter>();
     public string? RowFilterCondition { get; init; }
 
+    /// <summary>WP-SC-16: expiry after the read-time clamp of legacy individual grants (never later than <see cref="ValidTo"/>).</summary>
+    public DateTimeOffset EffectiveValidTo => IndividualGrantLimits.EffectiveConsentValidTo(GranteeType, ValidFrom, ValidTo);
+
     public bool IsActive(DateTimeOffset atTime)
     {
         if (IsRevoked) return false;
         if (ValidFrom > atTime) return false;
-        if (atTime >= ValidTo) return false;
+        if (atTime >= EffectiveValidTo) return false;
         return true;
     }
 

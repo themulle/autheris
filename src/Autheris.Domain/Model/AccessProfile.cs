@@ -20,8 +20,14 @@ public sealed class AccessProfile
     public string? Justification { get; init; }
     public string? CreatedBy { get; init; }
 
-    public bool IsActive(DateTimeOffset at) =>
-        ValidTo == null || ValidTo.Value > at;
+    /// <summary>WP-SC-16: expiry after the read-time clamp of legacy permanent Unmasked profiles.</summary>
+    public DateTimeOffset? EffectiveValidTo => IndividualGrantLimits.EffectiveProfileValidTo(MaskingMode, CreatedAt, ValidTo);
+
+    public bool IsActive(DateTimeOffset at)
+    {
+        var effective = EffectiveValidTo;
+        return effective == null || effective.Value > at;
+    }
 
     public bool MatchesTable(TableIdentifier table)
     {

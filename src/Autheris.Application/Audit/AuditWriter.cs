@@ -1,3 +1,4 @@
+using Autheris.Application.Auditing;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
@@ -10,13 +11,29 @@ public sealed class AuditWriter : IAuditWriter
 {
     private readonly IAuditLogRepository _repository;
     private readonly ILogger<AuditWriter> _logger;
+    private readonly AuditGroupCommitSink? _groupCommitSink;
+    private readonly ICallerContextProvider? _callerContextProvider;
 
-    public AuditWriter(IAuditLogRepository repository, ILogger<AuditWriter> logger)
+    /// <param name="groupCommitSink">
+    /// WP-PF-04: when present, fail-closed (required / Tier-A) writes of concurrent requests are coalesced into one transaction, one
+    /// chain-tail read and one anchor per batch. Every caller still awaits the durable commit and anchor of its own batch.
+    /// </param>
+    /// <param name="callerContextProvider">
+    /// Resolves the ambient caller context on the REQUEST thread before the entry is handed to the sink's drain loop (the ambient
+    /// context is not available there). Only used together with <paramref name="groupCommitSink"/>.
+    /// </param>
+    public AuditWriter(
+        IAuditLogRepository repository,
+        ILogger<AuditWriter> logger,
+        AuditGroupCommitSink? groupCommitSink = null,
+        ICallerContextProvider? callerContextProvider = null)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(logger);
         _repository = repository;
         _logger = logger;
+        _groupCommitSink = groupCommitSink;
+        _callerContextProvider = callerContextProvider;
     }
 
     public async Task RecordRequiredAsync(AuditLogEntry entry, CancellationToken ct = default)
@@ -24,7 +41,19 @@ public sealed class AuditWriter : IAuditWriter
         ArgumentNullException.ThrowIfNull(entry);
         try
         {
-            await _repository.RecordAuditEventAsync(entry, ct).ConfigureAwait(false);
+            if (_groupCommitSink != null)
+            {
+                if (entry.Caller == null && _callerContextProvider != null)
+                {
+                    entry.Caller = _callerContextProvider.ResolveCallerContext();
+                }
+
+                await _groupCommitSink.RecordAuditEventAsync(entry, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                await _repository.RecordAuditEventAsync(entry, ct).ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

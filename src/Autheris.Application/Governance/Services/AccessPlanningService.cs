@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Events;
 using Autheris.Application.Governance.Interfaces;
+using Autheris.Application.Governance.Grants;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Application.Security.Rebac.Interfaces;
@@ -53,6 +54,29 @@ public class AccessPlanningService : IAccessPlanningService
     private readonly AccessPlanOptions _planOptions;
     private readonly TimeProvider _time;
     private readonly bool _allowDemoDirectory;
+    private readonly IGrantPolicy _grantPolicy;
+
+    private void EnsureGrantsAllowed(AdminPlanAccessRequest request, TableMetadata? meta, IReadOnlyList<AccessPlanDiffItem> diffs, DateTimeOffset now)
+    {
+        foreach (var grant in request.Grants)
+        {
+            var clearPii = diffs.Any(d => d.IsPii
+                && string.Equals(d.Principal, grant.Principal, StringComparison.Ordinal)
+                && string.Equals(d.AfterState, "clear", StringComparison.OrdinalIgnoreCase));
+            var sensitivity = clearPii || meta is null
+                ? GrantSensitivity.Sensitive
+                : GrantClassifier.Classify([meta]);
+            var decision = _grantPolicy.Evaluate(new GrantRequest(
+                GranteeType.User,
+                grant.Principal,
+                GrantKind.McpAdminGrant,
+                grant.ValidUntil,
+                now,
+                sensitivity,
+                Justification: request.Reason));
+            GrantPolicyViolationException.ThrowIfDenied(decision);
+        }
+    }
 
     private static string? NormalizeTenant(string? tenantId)
         => string.IsNullOrWhiteSpace(tenantId) ? null : tenantId;
@@ -91,8 +115,10 @@ public class AccessPlanningService : IAccessPlanningService
         IHostEnvironment? hostEnvironment = null,
         TimeProvider? timeProvider = null,
         IAccessPlanStore? accessPlanStore = null,
-        IClusterStateTopology? clusterTopology = null)
+        IClusterStateTopology? clusterTopology = null,
+        IGrantPolicy? grantPolicy = null)
     {
+        _grantPolicy = grantPolicy ?? new GrantPolicy();
         _auditRepo = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
         _tableRepo = tableMetadataRepository ?? new NullTableMetadataRepository();
         _rebacStore = rebacStore ?? new NullRebacStore();
@@ -158,6 +184,10 @@ public class AccessPlanningService : IAccessPlanningService
         }
 
         var now = _time.GetUtcNow();
+
+        // WP-SC-16: every individual (user) principal needs a mandatory, class-bounded validUntil already at planning time.
+        EnsureGrantsAllowed(request, meta, diffs, now);
+
         var planId = $"plan_{Guid.NewGuid():N}";
         var planTtl = TimeSpan.FromMinutes(_planOptions.PlanTtlMinutes);
         var expiresAt = now.Add(planTtl);
@@ -303,17 +333,22 @@ public class AccessPlanningService : IAccessPlanningService
         }
 
         var tableId = ParseTableIdentifier(stored.Request.DatasetId);
+
+        // WP-SC-16: re-evaluated at apply time (the plan may have been stored with a validUntil that has meanwhile lapsed).
+        var applyMeta = await _tableRepo.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
+        EnsureGrantsAllowed(stored.Request, applyMeta, stored.Result.Diffs, _time.GetUtcNow());
+
         // SR-H-02: the caller's tenant scopes the ReBAC tuples and audit; the dataset domain is only the legacy fallback.
         var effectiveTenantId = !string.IsNullOrWhiteSpace(tenantId) ? tenantId : !string.IsNullOrWhiteSpace(tableId.Domain) ? tableId.Domain : "default";
         var tuples = new List<RebacTuple>();
 
         foreach (var grant in stored.Request.Grants)
         {
-            tuples.Add(new RebacTuple(effectiveTenantId, $"user:{grant.Principal}", "can_query", $"table:{stored.Request.DatasetId}"));
+            tuples.Add(new RebacTuple(effectiveTenantId, $"user:{grant.Principal}", "can_query", $"table:{stored.Request.DatasetId}") { ExpiresAt = grant.ValidUntil });
 
             foreach (var (column, access) in grant.Columns)
             {
-                tuples.Add(new RebacTuple(effectiveTenantId, $"user:{grant.Principal}", $"access:{access}", $"column:{stored.Request.DatasetId}.{column}"));
+                tuples.Add(new RebacTuple(effectiveTenantId, $"user:{grant.Principal}", $"access:{access}", $"column:{stored.Request.DatasetId}.{column}") { ExpiresAt = grant.ValidUntil });
             }
         }
 
