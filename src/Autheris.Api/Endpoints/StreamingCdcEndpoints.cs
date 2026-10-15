@@ -98,8 +98,8 @@ public static class StreamingCdcEndpoints
           .WithRequestBodyLimit(10 * 1024 * 1024) // SEC M-01: explicit large-body exception to the global Kestrel limit
           .WithAudit(AuditLevel.Full, AuditEventTypes.StreamSubscribe);
 
-        // F-EVT-01: CloudEvents Outbound Webhook Subscriptions (interim guard WP-ARC-A-01: 501 unless
-        // Gateway:CdcWebhooks:Enabled is true; the subscription store is not registered while disabled).
+        // F-EVT-01: CloudEvents Outbound Webhook Subscriptions (answer 501 when Gateway:CdcWebhooks:Enabled is false;
+        // the subscription store and the delivery service are not registered while disabled).
         app.MapGet("/api/v1/cdc/subscriptions", (Delegate)ListSubscriptionsAsync)
             .RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
@@ -176,7 +176,7 @@ public static class StreamingCdcEndpoints
 
         return Results.Problem(
             title: "CDC webhook subscriptions are not enabled",
-            detail: "Outbound CDC webhook delivery is not available. Set Gateway:CdcWebhooks:Enabled to true once delivery is supported.",
+            detail: "Outbound CDC webhook delivery is disabled. Set Gateway:CdcWebhooks:Enabled to true to enable it.",
             statusCode: StatusCodes.Status501NotImplemented);
     }
 

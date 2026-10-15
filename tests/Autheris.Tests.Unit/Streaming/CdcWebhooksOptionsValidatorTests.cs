@@ -14,6 +14,7 @@ public sealed class CdcWebhooksOptionsValidatorTests
     {
         var o = new CdcWebhooksOptions();
         _validator.Validate(null, o).Succeeded.ShouldBeTrue();
+        o.Enabled.ShouldBeTrue(); // G-2: enabled by default
         o.MaxSubscriptionsPerTenant.ShouldBe(100);
         o.CreatorSnapshotMaxAgeDays.ShouldBe(90);
         o.MaxSnapshotGroups.ShouldBe(256);

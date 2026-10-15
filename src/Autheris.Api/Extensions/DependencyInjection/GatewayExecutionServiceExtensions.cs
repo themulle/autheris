@@ -131,7 +131,7 @@ public static class GatewayExecutionServiceExtensions
         }
 
         // F-EVT-01: CloudEvents v1.0 Outbound Webhook Subscriptions
-        // Interim guard (WP-ARC-A-01): disabled by default; nothing is registered (no store, no egress client).
+        // Enabled by default (G-2); while disabled nothing is registered (no store, no delivery service, no secret protector).
         services.AddOptions<Autheris.Domain.Options.CdcWebhooksOptions>()
             .BindConfiguration(Autheris.Domain.Options.CdcWebhooksOptions.SectionName);
         var cdcWebhooksEnabled = CdcWebhooksFeature.IsEnabled(services);

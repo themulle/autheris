@@ -94,6 +94,22 @@ public sealed class CdcWebhookRegistrationTests
     }
 
     [Fact]
+    public void DefaultConfiguration_RegistersCdcWebhookService()
+    {
+        // G-2: with no Gateway:CdcWebhooks section at all the feature is on (the default of the options class), at BOTH registration read sites.
+        var services = Register(null);
+
+        new CdcWebhooksOptions().Enabled.ShouldBeTrue();
+        HasHostedService(services).ShouldBeTrue();
+        services.Any(d => d.ServiceType == typeof(ICloudEventSubscriptionStore)).ShouldBeTrue();
+        services.Any(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(WebhookDeliveryHostedService)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void ExplicitlyDisabled_StillRegistersNothing_AfterTheDefaultFlip() =>
+        HasHostedService(Register(false)).ShouldBeFalse();
+
+    [Fact]
     public void Enabled_RegistersOutboxDeliveryWorker_EvenWhenConfiguredWebhooksAreOff()
     {
         var services = Register(true);

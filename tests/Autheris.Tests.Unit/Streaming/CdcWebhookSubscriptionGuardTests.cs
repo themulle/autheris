@@ -54,6 +54,18 @@ public sealed class CdcWebhookSubscriptionGuardTests
     }
 
     [Fact]
+    public async Task Disabled_Response_ExplainsHowToEnable_WithoutPromisingFutureSupport()
+    {
+        var result = await StreamingCdcEndpoints.ListSubscriptionsAsync(Ctx(false, ["GovernanceAdmin"]));
+
+        var detail = result.ShouldBeOfType<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().ProblemDetails.Detail;
+        detail.ShouldNotBeNull();
+        detail.ShouldContain("Gateway:CdcWebhooks:Enabled");
+        detail.ShouldContain("disabled");
+        detail.ShouldNotContain("once delivery is supported");
+    }
+
+    [Fact]
     public async Task Get_WhenDisabled_Returns501_WithoutStoreRegistered()
     {
         var ctx = Ctx(false, ["GovernanceAdmin"]);
