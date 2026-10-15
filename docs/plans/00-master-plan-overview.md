@@ -35,6 +35,7 @@
 | [`implementation/impl-test-suite-speedup.md`](implementation/impl-test-suite-speedup.md)<br/>`IMPL-TEST-SPEEDUP-2026-10-14` | **Test Suite Speed-Up** | `WP-TS-00` (TRX artifacts), `WP-TS-01` (shared DB servers), `WP-TS-02` (CI shards), `WP-TS-03` (parallel Spark job), `WP-TS-04` (Cecil module & call-graph cache), `WP-TS-05` (`SerialIntegrationCollection` isolating `ItsmIntegrationTests`), and `WP-TS-06` (parallel SQL compiler gate) delivered and verified. | **COMPLETED & VERIFIED ✅** | Refresh CI shard weights periodically. |
 | [`2026-10-15-req-issue-94-upgrade-migration-and-pk-ordering.md`](2026-10-15-req-issue-94-upgrade-migration-and-pk-ordering.md)<br/>`REQ-GOV-94`<br/>Plan: [`2026-10-15-plan-issue-94-upgrade-migration-and-pk-ordering.md`](2026-10-15-plan-issue-94-upgrade-migration-and-pk-ordering.md) | **Bug #94 & #102: Schema Shape Verification, Declared Keys/Indexes & Key-Based Read Ordering** | Regression v1.1.8 → v1.1.9/v1.1.10. Owner decisions 2026-10-15: no upgrade/repair migrations; read-only, fail-closed shape verification before the version is recorded; declared composite primary keys and indexes persisted in the extended baseline (`0001` checksum unchanged), validated fail-closed; no source catalog queries for keys (least privilege); ordering PK → unique index → clear-text composite → 400; WebSQL 504 by design (problem details). | **COMPLETED ✅ – merged (PR #105)** | Phases 1–6 done on `fix/issue-94-upgrade-migration-pk`: streams A (DDL + shape verifier + least-privilege tests), B (definition + persistence + keys endpoint + ingestion entry points), C (ordering + consumers incl. GraphQL tree compiler, WebSQL 504 problem details). Feature docs: [F-GOV-21](../features/f-gov-21-declared-table-keys-and-read-ordering.md), [F-GOV-12 schema shape verification](../features/f-gov-12-multi-engine-governance-storage.md#schema-shape-verification). PR #105. SQL Server Windows Auth (#102) delivered separately (`F-AUTH-04`). |
 | [`2026-10-15-plan-sqlgate-cutover-and-accepted-differences.md`](2026-10-15-plan-sqlgate-cutover-and-accepted-differences.md)<br/>`PLAN-SQLGATE-CUTOVER-03` | **SqlGate Differences Sign-Off & Cutover** | All 18 triage entries (57 unique statements) in `accepted-differences.json` audited, documented with concrete security justifications, and signed off (`approved`). Cutover precondition verified. | **COMPLETED & VERIFIED ✅** | Maintain G4 differential gate regression protection. |
+| [`2026-10-16-backlog-intake.md`](2026-10-16-backlog-intake.md)<br/>`BACKLOG-2026-10-16` | **Owner Backlog Intake 2026-10-16** | BL-01 CDC fan-out (#99), BL-02 row filter key-set cache (#107), BL-03 scale to 5,000 users (analysis), BL-04 table cache (CT/CDC/periodic/TTL refresh, transparent joins, disk persistence), BL-05 per-data-source configuration (cost, logging, …), BL-06 tracing and logging via open standards. | **INTAKE 📥** | BL-06 → BL-05 → BL-04 refined sequentially by the product manager. |
 | [`README.md`](README.md)<br/>`PLAN-AGENT-GOV-DOCS-01` | **Agent Governance & English Documentation Standards** | Project-wide English documentation policy; `docs/plans/` as the plan repository; agent refinement lifecycle rules; root `AGENTS.md` & `CLAUDE.md`. | **COMPLETED & VERIFIED ✅** | Ongoing enforcement. |
 
 ---
@@ -55,6 +56,7 @@ flowchart TD
 
     TS["implementation/impl-test-suite-speedup.md"]
     B94["2026-10-15-req-issue-94-...md<br/>Bug #94 upgrade & PK ordering"]
+    BL["2026-10-16-backlog-intake.md<br/>BL-01..BL-06 owner requests"]
 
     MP --> AG
     MP --> SR
@@ -62,6 +64,7 @@ flowchart TD
     MP --> FT
     MP --> TS
     MP --> B94
+    MP --> BL
     SR --> IR
     AR --> IR
     FT --> IR
