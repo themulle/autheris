@@ -15,6 +15,7 @@
 | BL-05 | Granular configuration per data source | See section 2.2. | to be created | Intake |
 | BL-06 | Tracing and logging via open standards | See section 2.3. | `feat/bl-06-open-telemetry` | Phase 2/3 |
 | BL-07 | PostgreSQL wire protocol endpoint | PG-compatible endpoint for BI tools; PRD `2026-10-16-req-postgres-wire-protocol-endpoint.md` on `feat/scale-5000-users`: conditional go, first verify BI tools via the existing Trino protocol. | `feat/scale-5000-users` (PRD) | PRD ready, decision pending |
+| BL-08 | C# DLL extension points for authentication and authorization | A C# DLL API callback must again be possible for special cases in authentication and authorization, so that custom checks (for example local AD groups) can be plugged in. Related: BL-03 Role-Resolver providers (WP-SC-05/13) and BL-01 I3 trust-listed plugin loading. | to be created | Intake |
 
 ## 2. Item Details (owner requirements, not yet refined)
 
@@ -41,9 +42,17 @@
 - Traces, metrics and logs use open standards (for example OpenTelemetry with OTLP export and W3C Trace Context propagation), so that any compatible backend can be used.
 - Correlation across gateway, governance store and source queries; no sensitive values in telemetry.
 
-### 2.4 Cross-cutting: open-source assessment
+### 2.4 BL-08 C# DLL extension points for authentication and authorization
 
-Every new topic (BL-01 to BL-07) gets an open-source assessment in its analysis or PRD: candidate libraries or services, licence
+- Operators can plug in custom C# DLLs for special cases in authentication and authorization (for example resolving local AD
+  groups, custom attribute or role checks).
+- Reuse the trust-listed, SHA-256-pinned plugin loading of BL-01 I3 and expose the extension point as a Role-Resolver provider
+  of BL-03 (WP-SC-05/13) and as an additional authorization check; a plugin may only restrict or add roles through the governed
+  model, never bypass enforcement (fail closed on plugin errors and timeouts).
+
+### 2.5 Cross-cutting: open-source assessment
+
+Every new topic (BL-01 to BL-08) gets an open-source assessment in its analysis or PRD: candidate libraries or services, licence
 compatibility with the Autheris licence (BSL 1.1; GPL, AGPL and third-party BSL code must not be copied), maturity, fit, and a
 build-versus-adopt recommendation.
 
