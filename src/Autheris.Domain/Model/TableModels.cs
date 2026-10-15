@@ -21,6 +21,16 @@ public enum DatasetVisibility
     Full = 2
 }
 
+/// <summary>
+/// Strategy applied when an aggregation group has fewer rows than the minimum group size threshold (#37).
+/// </summary>
+public enum SmallGroupStrategy
+{
+    Suppress = 0,
+    MergeIntoOther = 1,
+    MergeToOther = 2
+}
+
 public sealed record Table
 {
     public Guid Id { get; init; } = Guid.NewGuid();
@@ -42,6 +52,9 @@ public sealed record Table
     public string? PluginName { get; init; }
     public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
     public DatasetVisibility Visibility { get; init; } = DatasetVisibility.Hidden;
+    public string? RlsExpression { get; init; }
+    public int? MinGroupSize { get; init; }
+    public SmallGroupStrategy? SmallGroupStrategy { get; init; }
 
     /// <summary>Rank of a sensitivity class; unknown classes rank like HIGH (fail-closed). Empty means NORMAL.</summary>
     public static int SensitivityRank(string? sensitivity)
@@ -114,6 +127,16 @@ public sealed record TableKeyDefinition(IReadOnlyList<string> PrimaryKey, IReadO
 /// <summary>Result of a narrow key definition replacement (audit before/after). <c>BeforeUnavailable</c>: the stored definition was invalid and is not reported.</summary>
 public sealed record TableKeyDefinitionChange(TableKeyDefinition Before, TableKeyDefinition After, bool BeforeUnavailable = false);
 
+/// <summary>Issue #80: Controls how much of a column's value profile is published when active row filters apply to a table.</summary>
+public enum DatasetProfilePublicationPolicy
+{
+    /// <summary>Default when row filters apply: exposes only FormatPattern, TypicalLength and coarsened EmptyShare.</summary>
+    FormatAndEmptyShareOnly = 0,
+
+    /// <summary>Data owner opt-in: exposes the full coarsened value profile even when row filters apply.</summary>
+    FullCoarsenedProfile = 1
+}
+
 public sealed record TableMetadata
 {
     public Table Table { get; init; } = new();
@@ -129,6 +152,24 @@ public sealed record TableMetadata
 
     /// <summary>Write intent: the upsert replaces the stored key/index definition only when true; otherwise it keeps it.</summary>
     public bool ReplaceKeyDefinition { get; init; }
+
+    /// <summary>Issue #80: When true, callers with Summary or Full catalog visibility may view coarsened value profiles and request synthetic sample rows without an active table consent.</summary>
+    public bool ReleaseProfileToCatalogViewers { get; init; }
+
+    /// <summary>Issue #80: Controls whether full coarsened ranges/distinct counts or only format + empty share are published when row filters apply.</summary>
+    public DatasetProfilePublicationPolicy ProfilePublicationPolicy { get; init; } = DatasetProfilePublicationPolicy.FormatAndEmptyShareOnly;
+
+    /// <summary>Issue #80: Optional estimated row count of the table used for small-table privacy coarsening.</summary>
+    public long? EstimatedRowCount { get; init; }
+
+    /// <summary>Per-table minimum group size override for governed aggregations (#37). Falls back to <see cref="Table.MinGroupSize"/>.</summary>
+    public int? MinGroupSize { get; init; }
+
+    /// <summary>Per-table small group handling strategy override (#37). Falls back to <see cref="Table.SmallGroupStrategy"/>.</summary>
+    public SmallGroupStrategy? SmallGroupStrategy { get; init; }
+
+    public int? EffectiveMinGroupSize => MinGroupSize ?? Table.MinGroupSize;
+    public SmallGroupStrategy? EffectiveSmallGroupStrategy => SmallGroupStrategy ?? Table.SmallGroupStrategy;
 
     public bool IsCompositePrimaryKey => PrimaryKeyColumns.Count > 1;
 
@@ -196,6 +237,21 @@ public sealed record TableMetadata
 
     public TableColumn? GetColumn(string columnName) =>
         Columns.FirstOrDefault(c => string.Equals(c.ColumnName, columnName, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Issue #77: Controls whether changesSince discloses all deleted keys or only caller-known keys under RLS.</summary>
+    public DeletedKeyPolicy DeletedKeyPolicy { get; init; } = DeletedKeyPolicy.KnownKeysOnly;
+}
+
+/// <summary>
+/// Issue #77: Policy controlling disclosure of physically deleted primary keys in <c>changesSince</c> responses when RLS applies.
+/// </summary>
+public enum DeletedKeyPolicy
+{
+    /// <summary>Default (fail-closed): only deleted keys present in the caller's <c>KnownKeys</c> or proven via pre-image RLS evaluation are disclosed.</summary>
+    KnownKeysOnly = 0,
+
+    /// <summary>Opt-in: all deleted primary keys are returned when the caller has Clear access to every primary key column.</summary>
+    AllDeletedKeys = 1
 }
 
 public enum RelationCardinality
@@ -229,4 +285,7 @@ public sealed class TableRelation
     }
 
     public RelationCardinality Cardinality { get; init; } = RelationCardinality.OneToMany;
+
+    /// <summary>Issue #75: Explicitly enables resolving this relation across distinct data sources via gateway-level batched key lookup.</summary>
+    public bool AllowCrossDataSource { get; init; }
 }

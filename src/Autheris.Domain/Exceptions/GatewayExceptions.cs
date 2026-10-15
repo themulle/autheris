@@ -51,13 +51,20 @@ public class TableNotFoundException : GatewaySecurityException
 /// Unknown and denied columns produce the same message, so the error is not an existence oracle.
 /// Not a <see cref="GatewaySecurityException"/>: it is a client error (400), not an access decision.
 /// </summary>
-public sealed class GatewayInvalidQueryException : Exception
+public class GatewayInvalidQueryException : Exception
 {
-    public string ErrorCode => "INVALID_QUERY_OPTION";
+    public string ErrorCode { get; }
 
-    public GatewayInvalidQueryException(string message)
+    public GatewayInvalidQueryException(string message, string errorCode = "INVALID_QUERY_OPTION")
         : base(message)
     {
+        ErrorCode = errorCode;
+    }
+
+    public GatewayInvalidQueryException(string message, string errorCode, Exception? innerException)
+        : base(message, innerException)
+    {
+        ErrorCode = errorCode;
     }
 }
 

@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using Autheris.Application.Analytics;
 using Autheris.Application.Data.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Interfaces;
@@ -36,6 +37,9 @@ public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
 {
     /// <summary>Alias of the single column of <see cref="PlanCount"/>.</summary>
     public const string CountColumnAlias = "total_count";
+
+    /// <summary>Mandatory per-group row count alias emitted by <see cref="PlanAggregate"/> for minimum group size guarding (#37).</summary>
+    public const string GroupCountColumnAlias = "__n";
 
     public string BuildFullTableSelect(TableIdentifier table) => $"SELECT * FROM {table.ToQualifiedName()}";
 
@@ -100,6 +104,235 @@ public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
         }
 
         return new PlannedTableRead(sb.ToString(), ClientParameters(intent), Array.Empty<string>());
+    }
+
+    public PlannedTableAggregate PlanAggregate(TableAggregateIntent intent, TableMetadata metadata, TableAccessDecision decision)
+    {
+        ArgumentNullException.ThrowIfNull(intent);
+        ArgumentNullException.ThrowIfNull(metadata);
+        ArgumentNullException.ThrowIfNull(decision);
+        if (intent.Limit <= 0)
+        {
+            throw new ArgumentException("The aggregate group limit must be positive.", nameof(intent));
+        }
+
+        if (!decision.IsAllowed)
+        {
+            var reasons = decision.DeniedReasons.Count > 0 ? string.Join("; ", decision.DeniedReasons) : "Access denied by governance policy.";
+            throw new UnauthorizedAccessException($"Access to table '{intent.Table.ToQualifiedName()}' is forbidden: {reasons}");
+        }
+
+        var groupByCols = new List<string>();
+        if (intent.GroupBy is { Count: > 0 })
+        {
+            foreach (var rawCol in intent.GroupBy)
+            {
+                var colMeta = metadata.GetColumn(rawCol)
+                    ?? throw UnknownColumn(rawCol, intent);
+
+                var access = decision.GetEffectiveColumnAccess(colMeta.ColumnName, metadata);
+                if (access == ColumnAccessLevel.Mask)
+                {
+                    throw new MaskedAggregationException(colMeta.ColumnName);
+                }
+
+                if (access != ColumnAccessLevel.Clear)
+                {
+                    throw UnknownColumn(rawCol, intent);
+                }
+
+                if (!DefaultReadOrdering.IsOrderableType(colMeta.DataType, metadata.Dialect))
+                {
+                    throw new ArgumentException($"Column '{rawCol}' has non-groupable type '{colMeta.DataType}'.", nameof(intent));
+                }
+
+                if (!groupByCols.Contains(colMeta.ColumnName, StringComparer.OrdinalIgnoreCase))
+                {
+                    groupByCols.Add(colMeta.ColumnName);
+                }
+            }
+        }
+
+        var resolvedAggregates = new List<AggregateSelection>();
+        var selectItems = new List<string>();
+        foreach (var gCol in groupByCols)
+        {
+            selectItems.Add(DataApiFilterTranslator.QuoteIdentifier(gCol));
+        }
+
+        selectItems.Add($"COUNT(*) AS {DataApiFilterTranslator.QuoteIdentifier(GroupCountColumnAlias)}");
+
+        if (intent.Aggregates is { Count: > 0 })
+        {
+            foreach (var agg in intent.Aggregates)
+            {
+                if (agg.Column is null)
+                {
+                    if (agg.Function != AggregateFunction.Count)
+                    {
+                        throw new ArgumentException($"Aggregate function '{agg.Function}' requires a target column.", nameof(intent));
+                    }
+
+                    var countSelection = new AggregateSelection(AggregateFunction.Count, null, agg.EffectiveAlias);
+                    resolvedAggregates.Add(countSelection);
+                    selectItems.Add($"COUNT(*) AS {DataApiFilterTranslator.QuoteIdentifier(countSelection.EffectiveAlias)}");
+                    continue;
+                }
+
+                var colMeta = metadata.GetColumn(agg.Column)
+                    ?? throw UnknownColumn(agg.Column, intent);
+
+                var access = decision.GetEffectiveColumnAccess(colMeta.ColumnName, metadata);
+                if (access == ColumnAccessLevel.Mask)
+                {
+                    throw new MaskedAggregationException(colMeta.ColumnName);
+                }
+
+                if (access != ColumnAccessLevel.Clear)
+                {
+                    throw UnknownColumn(agg.Column, intent);
+                }
+
+                if (agg.Function is AggregateFunction.Sum or AggregateFunction.Avg && !IsNumericDataType(colMeta.DataType))
+                {
+                    throw new ArgumentException(
+                        $"Aggregate function '{agg.Function}' requires a numeric column, but '{colMeta.ColumnName}' has type '{colMeta.DataType}'.",
+                        nameof(intent));
+                }
+
+                var normalized = new AggregateSelection(agg.Function, colMeta.ColumnName, agg.EffectiveAlias);
+                resolvedAggregates.Add(normalized);
+
+                var quotedCol = DataApiFilterTranslator.QuoteIdentifier(colMeta.ColumnName);
+                var quotedAlias = DataApiFilterTranslator.QuoteIdentifier(normalized.EffectiveAlias);
+                var sqlExpr = agg.Function switch
+                {
+                    AggregateFunction.Count => $"COUNT({quotedCol}) AS {quotedAlias}",
+                    AggregateFunction.CountDistinct => $"COUNT(DISTINCT {quotedCol}) AS {quotedAlias}",
+                    AggregateFunction.Sum => $"SUM({quotedCol}) AS {quotedAlias}",
+                    AggregateFunction.Avg => $"AVG({quotedCol}) AS {quotedAlias}",
+                    AggregateFunction.Min => $"MIN({quotedCol}) AS {quotedAlias}",
+                    AggregateFunction.Max => $"MAX({quotedCol}) AS {quotedAlias}",
+                    _ => throw new ArgumentOutOfRangeException(nameof(intent), $"Unsupported aggregate function '{agg.Function}'.")
+                };
+                selectItems.Add(sqlExpr);
+            }
+        }
+
+        string? predicate = null;
+        if (intent.Filter != null)
+        {
+            foreach (var col in intent.Filter.ReferencedColumns)
+            {
+                var colMeta = metadata.GetColumn(col);
+                var access = colMeta == null ? ColumnAccessLevel.Deny : decision.GetEffectiveColumnAccess(colMeta.ColumnName, metadata);
+                if (colMeta == null || access == ColumnAccessLevel.Deny)
+                {
+                    throw UnknownColumn(col, intent);
+                }
+
+                if (access == ColumnAccessLevel.Mask)
+                {
+                    throw new MaskedAggregationException(colMeta.ColumnName, $"Filtering on masked column '{col}' in an aggregation query is forbidden.");
+                }
+
+                if (access != ColumnAccessLevel.Clear)
+                {
+                    throw new ArgumentException(
+                        $"Filtering on masked or denied column '{col}' is rejected to prevent oracle inference attacks.",
+                        nameof(intent));
+                }
+            }
+
+            var rendered = intent.Filter.GetTrinoPredicate(name => metadata.GetColumn(name)?.ColumnName ?? name);
+            predicate = string.IsNullOrWhiteSpace(rendered) ? null : rendered;
+        }
+
+        var orderByItems = new List<string>();
+        if (intent.OrderBy is { Count: > 0 })
+        {
+            foreach (var item in intent.OrderBy)
+            {
+                if (groupByCols.Any(g => string.Equals(g, item.Column, StringComparison.OrdinalIgnoreCase)))
+                {
+                    var canonical = groupByCols.First(g => string.Equals(g, item.Column, StringComparison.OrdinalIgnoreCase));
+                    var quoted = DataApiFilterTranslator.QuoteIdentifier(canonical);
+                    orderByItems.Add(item.Descending ? quoted + " DESC" : quoted);
+                }
+                else if (resolvedAggregates.Any(a => string.Equals(a.EffectiveAlias, item.Column, StringComparison.OrdinalIgnoreCase)))
+                {
+                    var canonical = resolvedAggregates.First(a => string.Equals(a.EffectiveAlias, item.Column, StringComparison.OrdinalIgnoreCase)).EffectiveAlias;
+                    var quoted = DataApiFilterTranslator.QuoteIdentifier(canonical);
+                    orderByItems.Add(item.Descending ? quoted + " DESC" : quoted);
+                }
+                else if (string.Equals(item.Column, "count", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(item.Column, GroupCountColumnAlias, StringComparison.OrdinalIgnoreCase))
+                {
+                    var quoted = DataApiFilterTranslator.QuoteIdentifier(GroupCountColumnAlias);
+                    orderByItems.Add(item.Descending ? quoted + " DESC" : quoted);
+                }
+                else
+                {
+                    throw new ArgumentException(
+                        $"Aggregate ORDER BY column '{item.Column}' must be one of the GROUP BY columns or aggregate aliases.",
+                        nameof(intent));
+                }
+            }
+        }
+        else if (groupByCols.Count > 0)
+        {
+            orderByItems.AddRange(groupByCols.Select(DataApiFilterTranslator.QuoteIdentifier));
+        }
+
+        var sb = new StringBuilder();
+        sb.Append("SELECT ")
+          .Append(string.Join(", ", selectItems))
+          .Append(" FROM ")
+          .Append(intent.Table.ToString());
+
+        if (predicate != null)
+        {
+            sb.Append(" WHERE ").Append(predicate);
+        }
+
+        if (groupByCols.Count > 0)
+        {
+            sb.Append(" GROUP BY ")
+              .Append(string.Join(", ", groupByCols.Select(DataApiFilterTranslator.QuoteIdentifier)));
+        }
+
+        if (orderByItems.Count > 0)
+        {
+            sb.Append(" ORDER BY ").Append(string.Join(", ", orderByItems));
+        }
+
+        sb.Append(" LIMIT ").Append(intent.Limit.ToString(CultureInfo.InvariantCulture));
+
+        var parameters = intent.Filter == null || intent.Filter.Parameters.Count == 0
+            ? new Dictionary<string, object?>()
+            : new Dictionary<string, object?>((IEnumerable<KeyValuePair<string, object?>>)intent.Filter.Parameters, StringComparer.Ordinal);
+
+        return new PlannedTableAggregate(sb.ToString(), parameters, groupByCols, resolvedAggregates, GroupCountColumnAlias);
+    }
+
+    private static bool IsNumericDataType(string? dataType)
+    {
+        if (string.IsNullOrWhiteSpace(dataType))
+        {
+            return true;
+        }
+
+        var dt = dataType.Trim().ToLowerInvariant();
+        return dt.Contains("int", StringComparison.Ordinal) ||
+               dt.Contains("numeric", StringComparison.Ordinal) ||
+               dt.Contains("decimal", StringComparison.Ordinal) ||
+               dt.Contains("number", StringComparison.Ordinal) ||
+               dt.Contains("float", StringComparison.Ordinal) ||
+               dt.Contains("double", StringComparison.Ordinal) ||
+               dt.Contains("real", StringComparison.Ordinal) ||
+               dt.Contains("money", StringComparison.Ordinal) ||
+               dt.Contains("serial", StringComparison.Ordinal) ||
+               dt.Contains("hugeint", StringComparison.Ordinal);
     }
 
     private static void EnsureAllowed(TableReadIntent intent, TableAccessDecision decision)
@@ -225,6 +458,9 @@ public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
 
     /// <summary>One text for an unknown column and for a column the caller may not see, so the message is no existence oracle.</summary>
     private static ArgumentException UnknownColumn(string column, TableReadIntent intent) =>
+        new($"Column '{column}' does not exist on table '{intent.Table.ToQualifiedName()}'.", nameof(intent));
+
+    private static ArgumentException UnknownColumn(string column, TableAggregateIntent intent) =>
         new($"Column '{column}' does not exist on table '{intent.Table.ToQualifiedName()}'.", nameof(intent));
 
     private static IReadOnlyDictionary<string, object?> ClientParameters(TableReadIntent intent) =>

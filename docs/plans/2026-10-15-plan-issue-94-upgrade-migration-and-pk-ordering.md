@@ -5,7 +5,7 @@
 **Input:** [PRD REQ-GOV-94](2026-10-15-req-issue-94-upgrade-migration-and-pk-ordering.md), sections 0, 0.1 and 0.2 (owner decisions of 2026-10-15)
 **Branch:** `fix/issue-94-upgrade-migration-pk`
 **Parent Plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
-**Status:** IMPLEMENTED (Phases 1–6 complete; PR pending). Feature docs: [F-GOV-19](../features/f-gov-19-declared-table-keys-and-read-ordering.md), [F-GOV-12](../features/f-gov-12-multi-engine-governance-storage.md#schema-shape-verification)
+**Status:** IMPLEMENTED (Phases 1–6 complete; PR #105). Feature docs: [F-GOV-21](../features/f-gov-21-declared-table-keys-and-read-ordering.md), [F-GOV-12](../features/f-gov-12-multi-engine-governance-storage.md#schema-shape-verification)
 
 ---
 

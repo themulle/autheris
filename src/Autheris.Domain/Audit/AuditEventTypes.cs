@@ -88,4 +88,14 @@ public static class AuditEventTypes
     public const string RebacTupleRemoved = "REBAC_TUPLE_REMOVED";
     public const string RebacInvalidationFailed = "REBAC_INVALIDATION_FAILED";
     public const string RebacTupleSeed = "REBAC_TUPLE_SEED";
+
+    // Governed Aggregation & Semantic Layer Metrics (#28, #37, #38)
+    public const string AggregateQuery = "AGGREGATE_QUERY";
+    public const string GovernedAggregation = AggregateQuery;
+    public const string MetricQuery = "METRIC_QUERY";
+
+    // Zero-Read Query Analysis & Metadata Synthetic Sample (#79, #80)
+    public const string MetadataSyntheticSample = "METADATA_SYNTHETIC_SAMPLE";
+    public const string QueryAnalysisEvaluated = "QUERY_ANALYSIS_EVALUATED";
 }
+

@@ -81,13 +81,13 @@ The database label is the SQLite file name or the PostgreSQL / SQL Server databa
 
 ## Declared Table Keys and Indexes
 
-The catalog stores declared primary keys and indexes of governed tables in `TABLE_PRIMARY_KEY_COLUMNS`, `TABLE_INDEXES` and `TABLE_INDEX_COLUMNS`. Their structure, validation and the fail-closed handling of invalid rows are described in [F-GOV-19](f-gov-19-declared-table-keys-and-read-ordering.md#3-persistence).
+The catalog stores declared primary keys and indexes of governed tables in `TABLE_PRIMARY_KEY_COLUMNS`, `TABLE_INDEXES` and `TABLE_INDEX_COLUMNS`. Their structure, validation and the fail-closed handling of invalid rows are described in [F-GOV-21](f-gov-21-declared-table-keys-and-read-ordering.md#3-persistence).
 
 ---
 
 ## Least-Privilege Logins
 
-Run the application with a runtime login in `Mode=Verify` and apply the schema with a separate DDL-capable login (`MigrationConnectionString` or a `--migrate-governance` job in `Mode=Apply`). The grants per engine are listed in [F-GOV-19, section 6.2](f-gov-19-declared-table-keys-and-read-ordering.md#62-governance-database). The runtime login must not own the governance objects or hold DDL rights, because an owner can disable the append-only audit trigger and the truncate guard.
+Run the application with a runtime login in `Mode=Verify` and apply the schema with a separate DDL-capable login (`MigrationConnectionString` or a `--migrate-governance` job in `Mode=Apply`). The grants per engine are listed in [F-GOV-21, section 6.2](f-gov-21-declared-table-keys-and-read-ordering.md#62-governance-database). The runtime login must not own the governance objects or hold DDL rights, because an owner can disable the append-only audit trigger and the truncate guard.
 
 ---
 

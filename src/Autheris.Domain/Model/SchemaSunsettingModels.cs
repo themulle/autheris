@@ -11,6 +11,11 @@ public enum SunsettingPhase
     HardSunset = 3
 }
 
+public sealed class FieldSunsettingOptions
+{
+    public List<FieldSunsettingRule> Rules { get; init; } = [];
+}
+
 public sealed record FieldSunsettingRule(
     Guid Id,
     string TargetTable,
@@ -26,6 +31,11 @@ public sealed record FieldSunsettingRule(
     bool IsActive = true
 )
 {
+    public string TableName => TargetTable;
+    public DateTimeOffset DeprecatedSince => DeprecatedAt;
+    public DateTimeOffset SunsetDate => SunsetAt;
+    public string? Reason => DeprecationReason;
+    public int WarningWindowDays => (int)Math.Max(1, (SunsetAt - DeprecatedAt).TotalDays);
     public TimeSpan EffectiveBrownoutWindow => BrownoutWindow ?? TimeSpan.FromDays(14);
 
     public SunsettingPhase DeterminePhase(DateTimeOffset now)

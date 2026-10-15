@@ -1,4 +1,4 @@
-# F-GOV-19: Declared Table Keys, Indexes & Deterministic Read Ordering
+# F-GOV-21: Declared Table Keys, Indexes & Deterministic Read Ordering
 
 ## 1. Overview
 

@@ -1,6 +1,7 @@
 namespace Autheris.Application.Data.Interfaces;
 
 using System.Collections.Generic;
+using Autheris.Application.Analytics;
 using Autheris.Application.Data.Services;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
@@ -39,6 +40,28 @@ public sealed record PlannedTableRead(
     DefaultOrderingKind Ordering = DefaultOrderingKind.Explicit);
 
 /// <summary>
+/// Transport-neutral governed aggregation intent (#28, #37).
+/// </summary>
+public sealed record TableAggregateIntent(
+    TableIdentifier Table,
+    IReadOnlyList<string>? GroupBy,
+    IReadOnlyList<AggregateSelection>? Aggregates,
+    TableFilterClause? Filter,
+    IReadOnlyList<TableOrderBy>? OrderBy,
+    int Limit,
+    string? Transport = null);
+
+/// <summary>
+/// Planned Trino SQL statement for a governed aggregation query (#28, #37).
+/// </summary>
+public sealed record PlannedTableAggregate(
+    string Sql,
+    IReadOnlyDictionary<string, object?> Parameters,
+    IReadOnlyList<string> GroupByColumns,
+    IReadOnlyList<AggregateSelection> Aggregates,
+    string CountColumnAlias);
+
+/// <summary>
 /// WP-ARC-B-01: shared governed table-read planner. Authorizes columns against the <see cref="TableAccessDecision"/>, guards
 /// filter and order columns against oracle inference, and formulates the SQL. Fail-closed: an unknown column, a denied or
 /// masked filter/order column or an unsupported filter throws; no best-effort text is ever produced.
@@ -57,8 +80,15 @@ public interface IGovernedTableReadPlanner
     PlannedTableRead PlanCount(TableReadIntent intent, TableMetadata metadata, TableAccessDecision decision);
 
     /// <summary>
+    /// Plans a governed <c>SELECT ... GROUP BY ...</c> statement with mandatory per-group <c>COUNT(*)</c> for minimum group size guarding (#28, #37).
+    /// Rejects any masked or denied column in <c>GROUP BY</c>, aggregate arguments, filter, or order clauses.
+    /// </summary>
+    PlannedTableAggregate PlanAggregate(TableAggregateIntent intent, TableMetadata metadata, TableAccessDecision decision);
+
+    /// <summary>
     /// The text of an unfiltered, unpaged <c>SELECT *</c> over the table (Arrow export of a whole table). Like every planner text it is
     /// Trino text for the governed compile path, which applies the policy.
     /// </summary>
     string BuildFullTableSelect(TableIdentifier table);
 }
+

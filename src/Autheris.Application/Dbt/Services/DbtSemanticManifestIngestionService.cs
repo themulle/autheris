@@ -61,7 +61,9 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
                         var agg = ms.TryGetProperty("agg", out var ag) ? ag.GetString() ?? "sum" : "sum";
                         var expr = ms.TryGetProperty("expr", out var ex) ? ex.GetString() : null;
                         var msDesc = ms.TryGetProperty("description", out var msd) ? msd.GetString() : null;
-                        measures.Add(new DbtMeasure(msName, agg, expr, msDesc));
+                        string? msUnit = ms.TryGetProperty("unit", out var msu) && msu.ValueKind == JsonValueKind.String ? msu.GetString() : null;
+                        int? msMinGroupSize = ms.TryGetProperty("min_group_size", out var msmg) && msmg.TryGetInt32(out var msmgVal) ? msmgVal : null;
+                        measures.Add(new DbtMeasure(msName, agg, expr, msDesc, msUnit, msMinGroupSize));
                     }
                 }
 
@@ -74,12 +76,29 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
                         var dimType = dim.TryGetProperty("type", out var dt) ? dt.GetString() ?? "categorical" : "categorical";
                         var dimDesc = dim.TryGetProperty("description", out var dd) ? dd.GetString() : null;
                         var isPart = dim.TryGetProperty("is_partition", out var ip) && ip.GetBoolean();
-                        dimensions.Add(new DbtDimension(dimName, dimType, dimDesc, isPart));
+                        string? dimTimeGranularity = null;
+                        if (dim.TryGetProperty("type_params", out var dtp) && dtp.ValueKind == JsonValueKind.Object &&
+                            dtp.TryGetProperty("time_granularity", out var dtg) && dtg.ValueKind == JsonValueKind.String)
+                        {
+                            dimTimeGranularity = dtg.GetString();
+                        }
+                        dimensions.Add(new DbtDimension(dimName, dimType, dimDesc, isPart, TimeGranularity: dimTimeGranularity));
                     }
                 }
 
                 semanticModels.Add(new DbtSemanticModel(name, desc, nodeRel, entities, measures, dimensions));
             }
+        }
+
+        string manifestVersion = "1.0";
+        if (root.TryGetProperty("version", out var vElem) && vElem.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(vElem.GetString()))
+        {
+            manifestVersion = vElem.GetString()!;
+        }
+        else if (root.TryGetProperty("project_configuration", out var pcElem) && pcElem.ValueKind == JsonValueKind.Object &&
+                 pcElem.TryGetProperty("version", out var pcvElem) && pcvElem.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(pcvElem.GetString()))
+        {
+            manifestVersion = pcvElem.GetString()!;
         }
 
         var metrics = new List<DbtMetric>();
@@ -91,7 +110,9 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
                 var type = mt.TryGetProperty("type", out var ty) ? ty.GetString() ?? "simple" : "simple";
                 var desc = mt.TryGetProperty("description", out var md) ? md.GetString() : null;
                 var label = mt.TryGetProperty("label", out var ml) ? ml.GetString() : null;
-                var filter = mt.TryGetProperty("filter", out var mf) ? mf.GetString() : null;
+                var filter = mt.TryGetProperty("filter", out var mf)
+                    ? (mf.ValueKind == JsonValueKind.String ? mf.GetString() : mf.ToString())
+                    : null;
 
                 var dims = new List<string>();
                 if (mt.TryGetProperty("dimensions", out var de) && de.ValueKind == JsonValueKind.Array)
@@ -102,36 +123,120 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
                     }
                 }
 
+                string? typeParamsExpr = null;
                 var measures = new List<string>();
-                if (mt.TryGetProperty("type_params", out var tp))
+                if (mt.TryGetProperty("type_params", out var tp) && tp.ValueKind == JsonValueKind.Object)
                 {
+                    if (tp.TryGetProperty("expr", out var tpExpr) && tpExpr.ValueKind == JsonValueKind.String)
+                    {
+                        typeParamsExpr = tpExpr.GetString();
+                    }
+
                     if (tp.TryGetProperty("measure", out var meas))
                     {
                         if (meas.ValueKind == JsonValueKind.String && meas.GetString() is { } msStr)
                         {
                             measures.Add(msStr);
                         }
-                        else if (meas.TryGetProperty("name", out var mnProp) && mnProp.GetString() is { } mnpStr)
+                        else if (meas.ValueKind == JsonValueKind.Object && meas.TryGetProperty("name", out var mnProp) && mnProp.GetString() is { } mnpStr)
                         {
                             measures.Add(mnpStr);
                         }
                     }
+
+                    if (tp.TryGetProperty("measures", out var measArr) && measArr.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var mItem in measArr.EnumerateArray())
+                        {
+                            if (mItem.ValueKind == JsonValueKind.String && mItem.GetString() is { } mStr)
+                            {
+                                measures.Add(mStr);
+                            }
+                            else if (mItem.ValueKind == JsonValueKind.Object && mItem.TryGetProperty("name", out var mName) && mName.GetString() is { } mnStr)
+                            {
+                                measures.Add(mnStr);
+                            }
+                        }
+                    }
+
+                    if (tp.TryGetProperty("numerator", out var numProp))
+                    {
+                        var numName = numProp.ValueKind == JsonValueKind.String
+                            ? numProp.GetString()
+                            : numProp.ValueKind == JsonValueKind.Object && numProp.TryGetProperty("name", out var nn) ? nn.GetString() : null;
+                        if (!string.IsNullOrWhiteSpace(numName))
+                        {
+                            measures.Add(numName!);
+                        }
+                    }
+
+                    if (tp.TryGetProperty("denominator", out var denProp))
+                    {
+                        var denName = denProp.ValueKind == JsonValueKind.String
+                            ? denProp.GetString()
+                            : denProp.ValueKind == JsonValueKind.Object && denProp.TryGetProperty("name", out var dn) ? dn.GetString() : null;
+                        if (!string.IsNullOrWhiteSpace(denName))
+                        {
+                            measures.Add(denName!);
+                        }
+                    }
                 }
 
-                var meta = new Dictionary<string, string>();
+                var meta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 if (mt.TryGetProperty("meta", out var metaElem) && metaElem.ValueKind == JsonValueKind.Object)
                 {
                     foreach (var prop in metaElem.EnumerateObject())
                     {
-                        meta[prop.Name] = prop.Value.ToString();
+                        meta[prop.Name] = prop.Value.ValueKind == JsonValueKind.String ? prop.Value.GetString() ?? "" : prop.Value.ToString();
                     }
                 }
 
-                metrics.Add(new DbtMetric(name, type, desc, label, filter, null, dims, measures, meta));
+                int? metricMinGroupSize = null;
+                if (mt.TryGetProperty("min_group_size", out var mgProp) && mgProp.TryGetInt32(out var mgVal))
+                {
+                    metricMinGroupSize = mgVal;
+                }
+                else if (meta.TryGetValue("min_group_size", out var metaMg) && int.TryParse(metaMg, out var metaMgVal))
+                {
+                    metricMinGroupSize = metaMgVal;
+                }
+
+                IReadOnlyList<string>? allowedGranularities = null;
+                if (mt.TryGetProperty("allowed_time_granularities", out var atgProp) && atgProp.ValueKind == JsonValueKind.Array)
+                {
+                    var list = new List<string>();
+                    foreach (var g in atgProp.EnumerateArray())
+                    {
+                        if (g.ValueKind == JsonValueKind.String && g.GetString() is { } gs)
+                        {
+                            list.Add(gs);
+                        }
+                    }
+                    allowedGranularities = list;
+                }
+
+                var unit = mt.TryGetProperty("unit", out var uProp) && uProp.ValueKind == JsonValueKind.String
+                    ? uProp.GetString()
+                    : meta.TryGetValue("unit", out var metaUnit) ? metaUnit : null;
+
+                metrics.Add(new DbtMetric(
+                    name,
+                    type,
+                    desc,
+                    label,
+                    filter,
+                    typeParamsExpr,
+                    dims,
+                    measures,
+                    meta,
+                    Unit: unit,
+                    MinGroupSize: metricMinGroupSize,
+                    AllowedTimeGranularities: allowedGranularities,
+                    Version: manifestVersion));
             }
         }
 
-        var manifest = new DbtSemanticManifest(semanticModels, metrics);
+        var manifest = new DbtSemanticManifest(semanticModels, metrics, manifestVersion);
         await _catalogService.RegisterManifestAsync(manifest, cancellationToken);
         _logger.LogInformation("Successfully ingested dbt semantic manifest with {ModelCount} models and {MetricCount} metrics",
             semanticModels.Count, metrics.Count);

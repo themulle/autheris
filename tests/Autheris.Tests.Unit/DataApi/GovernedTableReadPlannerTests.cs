@@ -3,6 +3,7 @@ namespace Autheris.Tests.Unit.DataApi;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Autheris.Application.Analytics;
 using Autheris.Application.Data.Interfaces;
 using Autheris.Application.Data.Services;
 using Autheris.Application.Interfaces;
@@ -395,6 +396,27 @@ public sealed class GovernedTableReadPlannerTests
             Intent(filter: TableFilterClause.FromTrinoText("\"secret\" = 'x'", new[] { "secret" })), Metadata(), Decision()));
         var unknown = Should.Throw<ArgumentException>(() => _planner.Plan(
             Intent(filter: TableFilterClause.FromTrinoText("\"nope\" = 'x'", new[] { "nope" })), Metadata(), Decision()));
+
+        denied.Message.Replace("'secret'", "'X'").ShouldBe(unknown.Message.Replace("'nope'", "'X'"));
+    }
+
+    [Theory]
+    [InlineData("groupBy")]
+    [InlineData("aggregate")]
+    [InlineData("filter")]
+    public void AggregateOnDeniedColumn_MessageEqualsUnknownColumn(string clause)
+    {
+        TableAggregateIntent Build(string column) => clause switch
+        {
+            "groupBy" => new TableAggregateIntent(Customers, [column], [new AggregateSelection(AggregateFunction.Count)], null, null, 10),
+            "aggregate" => new TableAggregateIntent(Customers, null, [new AggregateSelection(AggregateFunction.Max, column, "m")], null, null, 10),
+            _ => new TableAggregateIntent(
+                Customers, null, [new AggregateSelection(AggregateFunction.Count)],
+                TableFilterClause.FromTrinoText($"\"{column}\" = 'x'", new[] { column }), null, 10)
+        };
+
+        var denied = Should.Throw<ArgumentException>(() => _planner.PlanAggregate(Build("secret"), Metadata(), Decision()));
+        var unknown = Should.Throw<ArgumentException>(() => _planner.PlanAggregate(Build("nope"), Metadata(), Decision()));
 
         denied.Message.Replace("'secret'", "'X'").ShouldBe(unknown.Message.Replace("'nope'", "'X'"));
     }

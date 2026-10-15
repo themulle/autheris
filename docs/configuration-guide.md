@@ -193,7 +193,7 @@ Speicherort für Metadaten, Freigaben, Delegationen, Vier-Augen-Genehmigungen un
 - `Apply` (default): applies pending migrations.
 - `Verify`: changes nothing (no DDL, no write) and fails startup while migrations are pending or when the schema shape or the audit trigger post-conditions do not match the build. Use it for replicas whose schema is migrated by a separate pipeline or init job, and for least-privilege runtime logins.
 
-In `Apply` and `Verify` mode the actual schema is compared with the shape that the build expects; a deviation fails startup with a drift report. Autheris does not upgrade older governance schemas: supply the governance database in the newest schema. See [F-GOV-12, Schema Shape Verification](features/f-gov-12-multi-engine-governance-storage.md#schema-shape-verification) and the grants in [F-GOV-19](features/f-gov-19-declared-table-keys-and-read-ordering.md#62-governance-database).
+In `Apply` and `Verify` mode the actual schema is compared with the shape that the build expects; a deviation fails startup with a drift report. Autheris does not upgrade older governance schemas: supply the governance database in the newest schema. See [F-GOV-12, Schema Shape Verification](features/f-gov-12-multi-engine-governance-storage.md#schema-shape-verification) and the grants in [F-GOV-21](features/f-gov-21-declared-table-keys-and-read-ordering.md#62-governance-database).
 - `Skip`: neither inspects nor changes the schema (Development only).
 
 Run the migrations as a one-off job with `Autheris.Api --migrate-governance`: it applies (or verifies, per `Migrations:Mode`) the migrations and exits with code `0` on success and `1` on failure, without serving requests.

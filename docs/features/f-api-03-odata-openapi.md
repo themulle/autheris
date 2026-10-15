@@ -21,14 +21,14 @@ Modern frontend web applications demand GraphQL, whereas enterprise BI tools (su
 ## 3. Architecture & Capabilities
 
 - Dynamic generation of OData v4 CSDL XML metadata (`$metadata`) reflecting live governance schemas.
-  - Entity `<Key>`: the row identity of the columns visible to the caller (declared primary key, else the smallest declared unique index, else a column `Meta` marker key, else `(client_id, ts)`), always complete; without one, all visible properties form a composite key. No `id` key is guessed, and a key that touches a hidden column is never emitted, not even partially (see [F-GOV-19](f-gov-19-declared-table-keys-and-read-ordering.md#51-row-identity-for-catalog-consumers)).
+  - Entity `<Key>`: the row identity of the columns visible to the caller (declared primary key, else the smallest declared unique index, else a column `Meta` marker key, else `(client_id, ts)`), always complete; without one, all visible properties form a composite key. No `id` key is guessed, and a key that touches a hidden column is never emitted, not even partially (see [F-GOV-21](f-gov-21-declared-table-keys-and-read-ordering.md#51-row-identity-for-catalog-consumers)).
   - Character entity escaping (`&#10;`, `&#13;`, `&#9;`) for multi-line and tabbed descriptions to guarantee compatibility with strict XML parsers such as Microsoft Excel's OData connector.
 - Full support for standard OData query options:
   - `$select`: Projects requested columns while strictly enforcing column masking rules.
   - `$filter`: SQL-level pushdown supporting equality, inequality, comparison, logical conjunctions, substring/string functions, and collection operators.
   - `$orderby`: Multi-column sorting (`?$orderby=orderDate desc, totalAmount asc`).
   - `$top` and `$skip`: Server-side pagination bounded by `MaxPageSize` (default 1000) and `MaxSkip` (100,000).
-  - Default ordering and `$orderby` tiebreaker follow [F-GOV-19](f-gov-19-declared-table-keys-and-read-ordering.md#52-default-read-ordering). Without any orderable column readable in clear text, `$skip > 0` (or a first page with more rows) is answered with `400 InvalidQueryOption` instead of an unstable page.
+  - Default ordering and `$orderby` tiebreaker follow [F-GOV-21](f-gov-21-declared-table-keys-and-read-ordering.md#52-default-read-ordering). Without any orderable column readable in clear text, `$skip > 0` (or a first page with more rows) is answered with `400 InvalidQueryOption` instead of an unstable page.
   - `@odata.nextLink` is emitted whenever more rows exist, for keyed and unkeyed tables; its path segments are URI-escaped and it carries only the client's own query options.
   - `$count`: Total matching row count projection (`?$count=true` returning `@odata.count`, or `/table/$count` scalar endpoint).
   - `$format`: Content negotiation supporting JSON and Apache Parquet.

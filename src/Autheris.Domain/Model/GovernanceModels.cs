@@ -78,6 +78,7 @@ public sealed class AuditLogEntry
     public Sid ActorSid { get; init; }
     public string TargetTable { get; init; } = string.Empty;
     public string? TargetColumn { get; init; }
+    public string? Query { get; init; }
     public string Decision { get; init; } = "ALLOW"; // ALLOW, DENY
     public string TraceId { get; init; } = string.Empty;
 

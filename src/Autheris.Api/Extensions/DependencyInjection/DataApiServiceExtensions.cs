@@ -20,12 +20,12 @@ public static class DataApiServiceExtensions
 {
     public static IServiceCollection AddAutherisDataApi(this IServiceCollection services)
     {
-        services.AddOptions<AnalyticsOptions>()
-            .Configure<Microsoft.Extensions.Configuration.IConfiguration>((o, cfg) => cfg.GetSection(AnalyticsOptions.SectionName).Bind(o))
-            .ValidateOnStart();
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<Microsoft.Extensions.Options.IValidateOptions<AnalyticsOptions>, AnalyticsOptionsValidator>());
-        services.TryAddSingleton<IGovernedTableReadPlanner, GovernedTableReadPlanner>();
+        services.AddGatewayAnalyticsServices();
         services.AddScoped<IGovernedDataQueryService, GovernedDataQueryService>();
+        services.TryAddSingleton<Autheris.Application.Data.Relations.ICrossSourceRowReader, Autheris.Application.Data.Relations.InMemoryCrossSourceRowReader>();
+        services.TryAddScoped<Autheris.Application.Data.Relations.ICrossSourceRelationResolver, Autheris.Application.Data.Relations.CrossSourceRelationResolver>();
+        services.TryAddSingleton<Autheris.Application.Data.Changes.IChangeVersionProvider, Autheris.Application.Data.Changes.InMemoryChangeVersionStore>();
+        services.TryAddScoped<Autheris.Application.Data.Changes.IGovernedChangeDetectionService, Autheris.Application.Data.Changes.GovernedChangeDetectionService>();
         services.AddHostedService<VirtualSystemTablesHostedService>();
         return services;
     }
