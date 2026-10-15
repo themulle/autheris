@@ -342,6 +342,10 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 MaskingDisabled: _options?.IsColumnMaskingDisabled == true,
                 MaxBytes: maxBytes));
 
+        // Issue #94: the transport must not offer a continuation when no deterministic order was possible.
+        var unordered = pageItems.TryGetValue(TableQueryItems.Ordering, out var orderingKind) &&
+            string.Equals(orderingKind as string, nameof(Autheris.Application.Data.Services.DefaultOrderingKind.None), StringComparison.Ordinal);
+
         long? totalCount = null;
         if (countTotal)
         {
@@ -355,7 +359,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             totalCount = count;
         }
 
-        return new TableQueryPage(processedRows, decision, totalCount);
+        return new TableQueryPage(processedRows, decision, totalCount, unordered);
     }
 
     /// <summary>
