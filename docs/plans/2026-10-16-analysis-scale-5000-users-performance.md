@@ -383,3 +383,43 @@ Effort: **S** ≤ 2 days, **M** ≤ 1 week, **L** > 1 week.
 | 14 | M-2 end-to-end streaming on the remaining egress paths | M–L | Memory bounded per request |
 
 Items 1 to 8 are each small, and together they make 5,000 users with about 600 rps peak achievable on 3 × 4 vCPU replicas. Items 9 to 14 provide headroom and keep the system flat as the numbers of users and tables keep growing. Every item follows the 6-phase lifecycle (PRD/plan, then security review, then TDD), and the fail-closed semantics must stay unchanged.
+
+---
+
+## 8. Open-Source Alternatives: Integrate, Borrow, or Build (owner request 2026-10-16)
+
+For each change above, the owner asked which open-source alternatives exist, and whether to:
+- **(A)** integrate them as a dependency or sidecar,
+- **(B)** copy parts into the codebase (borrow), or
+- **(C)** use an existing .NET variant.
+
+The fallback is to build natively.
+
+**License rule.** Autheris is licensed under **BSL 1.1** (`LICENSE`).
+- NuGet dependencies and code copied under **MIT, Apache-2.0 or BSD** are acceptable. Copied code must keep its NOTICE/attribution.
+- **GPL, AGPL, SSPL or third-party BSL** code must not be copied or linked.
+- AGPL tools that only run *outside* the product, such as the k6 load generator, are acceptable.
+
+| Topic (ref.) | OSS candidates (license) | Fit for Autheris | Decision |
+|---|---|---|---|
+| Compiled `sub_rule` evaluation (H-1.1) | **DynamicExpresso** (MIT, already referenced): `Interpreter.ParseAsDelegate`/`Lambda`. **Casbin.NET** (Apache-2.0, already `2.21.3`): its matcher is compiled once per model and cached. | The fix needs no new dependency. Routing decisions back through `Casbin.NET` `Enforce` would lose the custom deny/allow, column and mask semantics of `CasbinEnforcementService.Columns.cs`. | **C/native:** cache DynamicExpresso lambdas on the `PolicySnapshot`. Do not switch the decision engine. |
+| External policy engine instead of the in-process scan (H-1) | **OPA** (Apache-2.0, Go, sidecar/WASM). **Cerbos** (Apache-2.0, Go, has a .NET SDK). **Topaz** (Apache-2.0). | Each adds a network or WASM hop per decision (≥ 0.3 to 1 ms) and a second policy language. The consent, mask and row-filter semantics would have to be ported. This is a security re-certification effort. | **Reject for now.** It does not solve the bottleneck: decision CPU drops to nanoseconds once delegates are compiled. |
+| Decision cache with a sharded LRU (H-1.4) | **BitFaster.Caching** (MIT): `ConcurrentLru` and `ConcurrentLfu`, lock-free, with stampede-safe `GetOrAddAsync`. | A drop-in replacement for the global-lock `LinkedList` LRU, and used in production by large .NET services. | **A:** add the NuGet package for the decision cache, the VF memo, the ReBAC decision cache and the template cache (H-3, M-1). |
+| Consent L1/L2 cache, stampede protection, backplane (H-2.3, M-3) | **Microsoft.Extensions.Caching.Hybrid** `HybridCache` (MIT, .NET 9+): L1+L2, stampede protection, tag invalidation. **FusionCache** (MIT): L1+L2, fail-safe, eager refresh, Redis backplane. | Both replace much of the hand-written `ConsentCacheService`, which is about 500 lines with index locks. `HybridCache` is first-party and has no extra transitive dependencies. FusionCache adds a ready-made Redis **backplane** and soft/hard timeouts. Both still need the epoch check as a custom validation step. | **A:** pilot `HybridCache` first, because it is first-party. Choose FusionCache if backplane and fail-safe semantics are needed. Keep the epoch logic and fail-closed checks native. |
+| Batched audit writes (B-1.1) | **Npgsql** binary `COPY` (already referenced). **SqlBulkCopy** / TVPs (Microsoft.Data.SqlClient, already referenced). | Covered by existing dependencies. | **C/native.** |
+| Tamper-evident audit store (B-1.4) | **Trillian** (Apache-2.0, Go service, RFC 6962 Merkle log). **immudb** (Apache-2.0, Go DB, has a .NET SDK). **SQL Server Ledger tables** (built into SQL Server 2022 and Azure SQL). **pgaudit** (PostgreSQL License; logs only, no chain). | Trillian and immudb add a new stateful service with its own HA and backup. SQL Server Ledger is native for SQL Server governance stores only. | **B:** borrow the *concepts*, Merkle checkpoints and signed tree heads per RFC 6962, to implement partitioned chains natively. Treat SQL Server Ledger as an optional backend for SQL Server deployments. Do not run Trillian or immudb as a dependency. |
+| ReBAC tuple store (H-4) | **OpenFGA** (Apache-2.0, Go, CNCF; official .NET SDK). **SpiceDB** (Apache-2.0, Go; gRPC .NET client). **Ory Keto** (Apache-2.0). | All three are mature Zanzibar implementations with indexed checks, `ListObjects` and caching. Each costs a network hop per check (about 1 to 5 ms; batch-check exists) and one more stateful service. Tuples would move out of the governance store, which affects the WORM audit of changes. | **Decide by ReBAC usage.** If ReBAC stays secondary, **B:** copy the Zanzibar data model (per `object#relation` sets, userset rewrites) into an indexed Redis/in-memory store (M). If relationship-based sharing becomes a primary access path for 5,000 users, **A:** use OpenFGA as a sidecar behind `IRebacStore`, and benchmark it in LT-1. |
+| Rate limiting (H-6, M-3) | **System.Threading.RateLimiting** (built-in). **RedisRateLimiting** (MIT, `cristipufu/aspnetcore-redis-rate-limiting`). | The existing Lua token buckets already work. The library would mainly make the middleware standard, but it would not fuse the rate-limit and quota calls. | **Native:** fuse the Lua scripts. Optionally adopt the `RateLimiter` abstractions later. |
+| Basic-auth replacement (H-6) | **Keycloak** (Apache-2.0) or the existing ADFS/Entra for OIDC. Personal access tokens are a native pattern (GitHub-style, SHA-256 lookup). | For BI tools, most drivers support OAuth or tokens-as-password. | **Native PATs** plus the existing OIDC. No new IdP component. |
+| Catalog snapshot (H-5) | — (domain-specific) | — | **Native.** |
+| Async parse path (M-1) | ANTLR4 runtime (BSD-3, already used) | The issue is threading, not the parser. | **Native.** |
+| End-to-end streaming (M-2) | **Apache.Arrow** (Apache-2.0, already referenced) as the internal columnar batch format. **System.IO.Pipelines** (built-in). | Arrow `RecordBatch` streaming would serve Flight SQL, exports and the Trino protocol with one representation, and remove the per-row `Dictionary`. | **C:** standardize the internal row pipeline on Arrow record batches. |
+| Load testing (section 6) | **k6** (AGPL-3.0; external tool only, already used in `benchmarks/load`). **Gatling** (Apache-2.0). **NBomber** (.NET; **commercial license required for organizational use**). | k6 already exists in the repository. NBomber's licensing makes it unsuitable. | **Keep k6.** |
+| Observability for the load test | **OpenTelemetry .NET** (Apache-2.0, already referenced). **dotnet-counters** / **dotnet-trace** (MIT). | Present. Only cache hit/miss counters need to be added. | **Native counters** through the existing OTel meter. |
+
+**Net result:**
+- Two new dependencies are recommended: **BitFaster.Caching**, and **HybridCache** or **FusionCache**.
+- One alternative is conditional: **OpenFGA** for ReBAC, if ReBAC becomes primary.
+- Everything else is best solved with dependencies already in the solution, or natively by borrowing concepts (Zanzibar, RFC 6962).
+
+Each new dependency goes through the Phase-3 security review: supply chain, pinned versions in `packages.lock.json`, and fail-closed behavior when the cache or backplane is unavailable.
