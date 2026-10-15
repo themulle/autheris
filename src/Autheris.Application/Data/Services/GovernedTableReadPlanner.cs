@@ -218,7 +218,7 @@ public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
     /// 3. Column <c>Meta</c> primary key markers (<c>primary_key_ordinal</c>, <c>is_primary_key=true</c>, <c>role=primary_key</c>) when all marked columns are Clear.
     /// 4. Conventional <c>(client_id, ts)</c> or <c>client_id</c> key columns when <see cref="TableMetadata.PrimaryKeyColumns"/> is empty and those columns exist and are Clear.
     /// </summary>
-    internal static bool TryResolveClearKey(TableMetadata metadata, TableAccessDecision decision, out List<string> key)
+    public static bool TryResolveClearKey(TableMetadata metadata, TableAccessDecision decision, out List<string> key)
     {
         if (metadata.PrimaryKeyColumns.Count > 0 &&
             TryResolveAllClearColumns(metadata.PrimaryKeyColumns, metadata, decision, out key))
@@ -299,7 +299,7 @@ public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
         return key.Count > 0;
     }
 
-    internal static IReadOnlyList<string> ExtractMetaPrimaryKeyColumns(IReadOnlyList<TableColumn> columns)
+    public static IReadOnlyList<string> ExtractMetaPrimaryKeyColumns(IReadOnlyList<TableColumn> columns)
     {
         if (columns == null || columns.Count == 0)
         {
