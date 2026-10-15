@@ -88,6 +88,7 @@ public static class GatewayServiceCollectionExtensions
         IConfiguration configuration,
         IHostEnvironment environment)
     {
+        Autheris.Api.Extensions.DependencyInjection.CdcWebhooksFeature.Capture(services, configuration);
         services.AddOptions<GatewayOptions>()
             .Bind(configuration.GetSection(GatewayOptions.SectionName))
             .ValidateDataAnnotations()

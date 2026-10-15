@@ -71,6 +71,29 @@ public sealed class CdcWebhookRegistrationTests
     }
 
     [Fact]
+    public void Enabled_IsDetected_WhenConfigurationIsRegisteredThroughAFactory_LikeTheRealHostBuilder()
+    {
+        // The real host builder registers IConfiguration with a factory (no ImplementationInstance); the flag must still be honoured.
+        var services = new ServiceCollection();
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns(Environments.Development);
+        services.AddSingleton(env);
+        var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:CdcWebhooks:Enabled"] = "true", ["Gateway:GovernanceDb:Provider"] = "Sqlite" }).Build();
+        services.AddSingleton<IConfiguration>(_ => cfg);
+        services.AddLogging();
+        var options = services.AddGatewayOptions(cfg, env);
+        services.AddAutherisStorage(options, env);
+        services.AddAutherisGovernance(options);
+        services.AddAutherisSecurity(options, env);
+        services.AddAutherisSqlEngine(options);
+        services.AddAutherisExecution(options, env);
+        services.AddAutherisEvents(options);
+
+        HasHostedService(services).ShouldBeTrue();
+        services.Any(d => d.ServiceType == typeof(ICloudEventSubscriptionStore)).ShouldBeTrue();
+    }
+
+    [Fact]
     public void Enabled_RegistersOutboxDeliveryWorker_EvenWhenConfiguredWebhooksAreOff()
     {
         var services = Register(true);
