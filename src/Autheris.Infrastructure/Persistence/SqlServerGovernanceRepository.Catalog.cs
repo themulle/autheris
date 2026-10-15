@@ -1,225 +1,22 @@
 using System.Data;
 using System.Text.Json;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
+using Microsoft.Extensions.Logging;
 using Microsoft.Data.SqlClient;
 
 namespace Autheris.Infrastructure.Persistence;
 
 public partial class SqlServerGovernanceRepository
 {
-    private static async Task<bool> SqlServerTableExistsAsync(SqlConnection conn, SqlTransaction? tx, string tableName, CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        if (tx != null) cmd.Transaction = tx;
-        cmd.CommandText = "SELECT CASE WHEN OBJECT_ID(@name, N'U') IS NOT NULL THEN 1 ELSE 0 END";
-        cmd.Parameters.AddWithValue("@name", "dbo." + tableName);
-        var res = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-        return res is int i && i == 1;
-    }
+    public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) =>
+        GetTableMetadataCoreAsync(table, null, ct);
 
-    private static async Task<(IReadOnlyList<string> PrimaryKeyColumns, IReadOnlyList<TableIndexDefinition> Indexes)> ReadTableKeysAndIndexesAsync(
-        SqlConnection conn,
-        Guid tableId,
-        IReadOnlyList<TableColumn> columns,
+    private async Task<TableMetadata?> GetTableMetadataCoreAsync(
+        TableIdentifier table,
+        IReadOnlyDictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? prefetchedKeys,
         CancellationToken ct)
-    {
-        var colNameById = new Dictionary<Guid, string>();
-        foreach (var col in columns)
-        {
-            colNameById[col.Id] = col.ColumnName;
-        }
-
-        var pkColumns = new List<string>();
-        if (await SqlServerTableExistsAsync(conn, null, "TABLE_PRIMARY_KEY_COLUMNS", ct).ConfigureAwait(false))
-        {
-            await using var pkCmd = conn.CreateCommand();
-            pkCmd.CommandText = @"SELECT table_column_id FROM dbo.TABLE_PRIMARY_KEY_COLUMNS
-                                  WHERE table_id = @tid
-                                  ORDER BY key_ordinal ASC";
-            pkCmd.Parameters.AddWithValue("@tid", tableId.ToString());
-            await using var reader = await pkCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                if (Guid.TryParse(reader.GetString(0), out var colId) &&
-                    colNameById.TryGetValue(colId, out var colName) &&
-                    !pkColumns.Contains(colName, StringComparer.OrdinalIgnoreCase))
-                {
-                    pkColumns.Add(colName);
-                }
-            }
-        }
-
-        var resolvedPks = pkColumns.Count > 0
-            ? (IReadOnlyList<string>)pkColumns
-            : SqliteGovernanceRepository.ExtractPrimaryKeyFromColumnMeta(columns);
-
-        var indexes = new List<TableIndexDefinition>();
-        if (await SqlServerTableExistsAsync(conn, null, "TABLE_INDEXES", ct).ConfigureAwait(false) &&
-            await SqlServerTableExistsAsync(conn, null, "TABLE_INDEX_COLUMNS", ct).ConfigureAwait(false))
-        {
-            await using var idxCmd = conn.CreateCommand();
-            idxCmd.CommandText = @"SELECT i.id, i.index_name, i.is_unique, ic.table_column_id
-                                   FROM dbo.TABLE_INDEXES i
-                                   JOIN dbo.TABLE_INDEX_COLUMNS ic ON i.id = ic.index_id
-                                   WHERE i.table_id = @tid
-                                   ORDER BY i.index_name ASC, ic.column_ordinal ASC";
-            idxCmd.Parameters.AddWithValue("@tid", tableId.ToString());
-            await using var reader = await idxCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-
-            var indexMap = new Dictionary<string, (string Name, bool IsUnique, List<string> Columns)>(StringComparer.OrdinalIgnoreCase);
-            var indexOrder = new List<string>();
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                var idxId = reader.GetString(0);
-                var idxName = reader.GetString(1);
-                var isUnique = reader.GetBoolean(2);
-                var colIdStr = reader.GetString(3);
-                if (!Guid.TryParse(colIdStr, out var colId) || !colNameById.TryGetValue(colId, out var colName))
-                {
-                    continue;
-                }
-
-                if (!indexMap.TryGetValue(idxId, out var entry))
-                {
-                    entry = (idxName, isUnique, new List<string>());
-                    indexMap[idxId] = entry;
-                    indexOrder.Add(idxId);
-                }
-
-                if (!entry.Columns.Contains(colName, StringComparer.OrdinalIgnoreCase))
-                {
-                    entry.Columns.Add(colName);
-                }
-            }
-
-            foreach (var idxId in indexOrder)
-            {
-                var entry = indexMap[idxId];
-                if (entry.Columns.Count > 0)
-                {
-                    indexes.Add(new TableIndexDefinition(entry.Name, entry.Columns, entry.IsUnique));
-                }
-            }
-        }
-
-        return (resolvedPks, indexes);
-    }
-
-    private static async Task PersistTableKeysAndIndexesAsync(
-        SqlConnection conn,
-        SqlTransaction tx,
-        Guid tableId,
-        TableMetadata metadata,
-        IReadOnlyDictionary<string, Guid> colIdByName,
-        CancellationToken ct)
-    {
-        if ((metadata.ReplaceKeyDefinition || metadata.PrimaryKeyColumns.Count > 0) &&
-            await SqlServerTableExistsAsync(conn, tx, "TABLE_PRIMARY_KEY_COLUMNS", ct).ConfigureAwait(false))
-        {
-            await using (var delPkCmd = conn.CreateCommand())
-            {
-                delPkCmd.Transaction = tx;
-                delPkCmd.CommandText = "DELETE FROM dbo.TABLE_PRIMARY_KEY_COLUMNS WHERE table_id = @tid";
-                delPkCmd.Parameters.AddWithValue("@tid", tableId.ToString());
-                await delPkCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
-
-            int ordinal = 1;
-            var seenPk = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var pkCol in metadata.PrimaryKeyColumns)
-            {
-                if (!seenPk.Add(pkCol) || !colIdByName.TryGetValue(pkCol, out var colId))
-                {
-                    continue;
-                }
-
-                await using var insPkCmd = conn.CreateCommand();
-                insPkCmd.Transaction = tx;
-                insPkCmd.CommandText = @"INSERT INTO dbo.TABLE_PRIMARY_KEY_COLUMNS (table_id, key_ordinal, table_column_id)
-                                         VALUES (@tid, @ord, @cid)";
-                insPkCmd.Parameters.AddWithValue("@tid", tableId.ToString());
-                insPkCmd.Parameters.AddWithValue("@ord", ordinal++);
-                insPkCmd.Parameters.AddWithValue("@cid", colId.ToString());
-                await insPkCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
-        }
-
-        if ((metadata.ReplaceKeyDefinition || metadata.Indexes.Count > 0) &&
-            await SqlServerTableExistsAsync(conn, tx, "TABLE_INDEXES", ct).ConfigureAwait(false) &&
-            await SqlServerTableExistsAsync(conn, tx, "TABLE_INDEX_COLUMNS", ct).ConfigureAwait(false))
-        {
-            await using (var delIdxColsCmd = conn.CreateCommand())
-            {
-                delIdxColsCmd.Transaction = tx;
-                delIdxColsCmd.CommandText = "DELETE FROM dbo.TABLE_INDEX_COLUMNS WHERE index_id IN (SELECT id FROM dbo.TABLE_INDEXES WHERE table_id = @tid)";
-                delIdxColsCmd.Parameters.AddWithValue("@tid", tableId.ToString());
-                await delIdxColsCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
-
-            await using (var delIdxCmd = conn.CreateCommand())
-            {
-                delIdxCmd.Transaction = tx;
-                delIdxCmd.CommandText = "DELETE FROM dbo.TABLE_INDEXES WHERE table_id = @tid";
-                delIdxCmd.Parameters.AddWithValue("@tid", tableId.ToString());
-                await delIdxCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
-
-            var seenIndexNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var idx in metadata.Indexes)
-            {
-                if (string.IsNullOrWhiteSpace(idx.Name) || !seenIndexNames.Add(idx.Name) || idx.Columns.Count == 0)
-                {
-                    continue;
-                }
-
-                var resolvedCols = new List<Guid>(idx.Columns.Count);
-                var seenCols = new HashSet<Guid>();
-                bool allResolved = true;
-                foreach (var cName in idx.Columns)
-                {
-                    if (!colIdByName.TryGetValue(cName, out var cId) || !seenCols.Add(cId))
-                    {
-                        allResolved = false;
-                        break;
-                    }
-                    resolvedCols.Add(cId);
-                }
-
-                if (!allResolved || resolvedCols.Count == 0)
-                {
-                    continue;
-                }
-
-                var indexId = Guid.NewGuid().ToString();
-                await using (var insIdxCmd = conn.CreateCommand())
-                {
-                    insIdxCmd.Transaction = tx;
-                    insIdxCmd.CommandText = @"INSERT INTO dbo.TABLE_INDEXES (id, table_id, index_name, is_unique)
-                                              VALUES (@id, @tid, @name, @unique)";
-                    insIdxCmd.Parameters.AddWithValue("@id", indexId);
-                    insIdxCmd.Parameters.AddWithValue("@tid", tableId.ToString());
-                    insIdxCmd.Parameters.AddWithValue("@name", idx.Name);
-                    insIdxCmd.Parameters.AddWithValue("@unique", idx.IsUnique);
-                    await insIdxCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                }
-
-                for (int i = 0; i < resolvedCols.Count; i++)
-                {
-                    await using var insIdxColCmd = conn.CreateCommand();
-                    insIdxColCmd.Transaction = tx;
-                    insIdxColCmd.CommandText = @"INSERT INTO dbo.TABLE_INDEX_COLUMNS (index_id, column_ordinal, table_column_id)
-                                                 VALUES (@idxId, @ord, @cid)";
-                    insIdxColCmd.Parameters.AddWithValue("@idxId", indexId);
-                    insIdxColCmd.Parameters.AddWithValue("@ord", i + 1);
-                    insIdxColCmd.Parameters.AddWithValue("@cid", resolvedCols[i].ToString());
-                    await insIdxColCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                }
-            }
-        }
-    }
-
-    public async Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
     {
         var cacheKey = table.ToString().ToLowerInvariant();
         var nowTicks = DateTime.UtcNow.Ticks;
@@ -332,7 +129,19 @@ public partial class SqlServerGovernanceRepository
                 }
             }
 
-            var (pkColumns, indexes) = await ReadTableKeysAndIndexesAsync(conn, tableId.Value, columns, ct).ConfigureAwait(false);
+            IReadOnlyList<string> pkColumns;
+            IReadOnlyList<TableIndexDefinition> indexes;
+            try
+            {
+                (pkColumns, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
+                    conn, null, CatalogKeyDefinitionStore.SqlServer, table, tableId.Value, columns, ct,
+                    _keyTables, prefetchedKeys is not null && prefetchedKeys.TryGetValue(tableId.Value, out var keyRows) ? keyRows : null).ConfigureAwait(false);
+            }
+            catch (TableMetadataUnavailableException)
+            {
+                _logger?.LogWarning("Metadata of table {Table} is unavailable: its declared key or index definition is invalid.", table);
+                throw;
+            }
 
             var result = new TableMetadata
             {
@@ -351,28 +160,51 @@ public partial class SqlServerGovernanceRepository
 
     public async Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
     {
-        var tables = new List<TableIdentifier>();
+        var tables = new List<(Guid Id, TableIdentifier Identifier)>();
 
         await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
         {
             await using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "SELECT source_name, schema_name, table_name FROM TABLES WHERE is_active = 1";
+                cmd.CommandText = "SELECT id, source_name, schema_name, table_name FROM TABLES WHERE is_active = 1";
                 await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
                 while (await reader.ReadAsync(ct).ConfigureAwait(false))
                 {
-                    tables.Add(new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2)));
+                    tables.Add((Guid.Parse(reader.GetString(0)), new TableIdentifier(reader.GetString(1), reader.GetString(2), reader.GetString(3))));
                 }
             }
         }
 
-        var result = new List<TableMetadata>();
-        foreach (var t in tables)
+        // M4: the key rows of every table that is not cached are read with one query each (chunked), not per table.
+        Dictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? prefetched = null;
+        var uncached = tables
+            .Where(t => !(_metadataCache.TryGetValue(t.Identifier.ToString().ToLowerInvariant(), out var cached) &&
+                          DateTime.UtcNow.Ticks - cached.CachedAtTicks < MetadataCacheTtlTicks))
+            .Select(t => t.Id)
+            .ToList();
+        if (uncached.Count > 1)
         {
-            var meta = await GetTableMetadataAsync(t, ct).ConfigureAwait(false);
-            if (meta != null)
+            await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+            if (await CatalogKeyDefinitionStore.TablesExistAsync(conn, null, CatalogKeyDefinitionStore.SqlServer, ct, _keyTables).ConfigureAwait(false))
             {
-                result.Add(meta);
+                prefetched = await CatalogKeyDefinitionStore.ReadBatchAsync(conn, null, CatalogKeyDefinitionStore.SqlServer, uncached, ct).ConfigureAwait(false);
+            }
+        }
+
+        var result = new List<TableMetadata>();
+        foreach (var (_, t) in tables)
+        {
+            try
+            {
+                var meta = await GetTableMetadataCoreAsync(t, prefetched, ct).ConfigureAwait(false);
+                if (meta != null)
+                {
+                    result.Add(meta);
+                }
+            }
+            catch (TableMetadataUnavailableException)
+            {
+                // Fail closed: already logged by GetTableMetadataAsync; the table is not offered.
             }
         }
 
@@ -381,6 +213,12 @@ public partial class SqlServerGovernanceRepository
 
     public async Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
     {
+        // Only a replacing write validates (and later persists) the definition; any other upsert never reads or rewrites it (SEC-94-01).
+        if (metadata.ReplaceKeyDefinition)
+        {
+            metadata = TableKeyDefinitionValidator.Validate(metadata);
+        }
+
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
@@ -473,11 +311,13 @@ public partial class SqlServerGovernanceRepository
                     colId = existingColId;
                 }
 
-                var effectiveMeta = SqliteGovernanceRepository.WithPrimaryKeyOrdinalMeta(
-                    col.Meta, col.ColumnName, metadata.PrimaryKeyColumns, metadata.ReplaceKeyDefinition);
+                IReadOnlyDictionary<string, string> effectiveMeta = metadata.ReplaceKeyDefinition
+                    ? CatalogKeyDefinitionStore.WithKeyMarkers(col.Meta, col.ColumnName, metadata.PrimaryKeyColumns)
+                    : col.Meta ?? new Dictionary<string, string>();
+                // A replacing write must overwrite stale key markers even when no other meta remains (the upsert coalesces NULL).
                 var metaJson = effectiveMeta.Count > 0
                     ? JsonSerializer.Serialize(effectiveMeta)
-                    : null;
+                    : metadata.ReplaceKeyDefinition ? "{}" : null;
 
                 await using (var insertColCmd = conn.CreateCommand())
                 {
@@ -535,9 +375,9 @@ public partial class SqlServerGovernanceRepository
                 }
             }
 
-            if (metadata.ReplaceKeyDefinition || metadata.PrimaryKeyColumns.Count > 0 || metadata.Indexes.Count > 0)
+            if (metadata.ReplaceKeyDefinition)
             {
-                await PersistTableKeysAndIndexesAsync(conn, tx, tableId, metadata, colIdByName, ct).ConfigureAwait(false);
+                await CatalogKeyDefinitionStore.ReplaceAsync(conn, tx, CatalogKeyDefinitionStore.SqlServer, tableId, metadata, colIdByName, ct).ConfigureAwait(false);
             }
 
             await IncrementTableEpochInternalAsync(conn, tx, metadata.Identifier, ct).ConfigureAwait(false);
@@ -552,7 +392,96 @@ public partial class SqlServerGovernanceRepository
         _metadataCache.TryRemove(metadata.Identifier.ToString().ToLowerInvariant(), out _);
         await _epochValidationService.InvalidateEpochAsync(metadata.Identifier, ct).ConfigureAwait(false);
 
-        return await GetTableMetadataAsync(metadata.Identifier, ct).ConfigureAwait(false) ?? metadata;
+        try
+        {
+            return await GetTableMetadataAsync(metadata.Identifier, ct).ConfigureAwait(false) ?? metadata;
+        }
+        catch (TableMetadataUnavailableException)
+        {
+            // The stored definition is invalid and this write did not replace it: the upsert itself succeeded and stays untouched by it.
+            return metadata;
+        }
+    }
+
+    public async Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+        TableIdentifier table,
+        IReadOnlyList<string> primaryKey,
+        IReadOnlyList<TableIndexDefinition> indexes,
+        CancellationToken ct = default)
+    {
+        TableKeyDefinitionChange? change;
+        await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
+        {
+            await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
+            {
+                change = await CatalogKeyDefinitionStore.ReplaceNarrowAsync(
+                    conn, tx, CatalogKeyDefinitionStore.SqlServer, table, primaryKey, indexes,
+                    () => IncrementTableEpochInternalAsync(conn, tx, table, ct), ct).ConfigureAwait(false);
+                if (change is null)
+                {
+                    await tx.RollbackAsync(ct).ConfigureAwait(false);
+                    return null;
+                }
+
+                await tx.CommitAsync(ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                await tx.RollbackAsync(ct).ConfigureAwait(false);
+                throw;
+            }
+        }
+
+        _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
+        await _epochValidationService.InvalidateEpochAsync(table, ct).ConfigureAwait(false);
+        return change;
+    }
+
+    public async Task<TableIdentifier?> GetActiveTableIdentifierAsync(TableIdentifier table, CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT source_name, schema_name, table_name FROM TABLES WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table) AND is_active = 1";
+        cmd.Parameters.AddWithValue("@domain", table.Domain);
+        cmd.Parameters.AddWithValue("@schema", table.Schema);
+        cmd.Parameters.AddWithValue("@table", table.TableName);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        try
+        {
+            return new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    public async Task<TableIdentifier?> GetActiveTableIdentifierByIdAsync(Guid tableId, CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT source_name, schema_name, table_name FROM TABLES WHERE id = @id AND is_active = 1";
+        cmd.Parameters.AddWithValue("@id", tableId.ToString());
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        try
+        {
+            return new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
     }
 
     public async Task<long> GetTableEpochAsync(TableIdentifier table, CancellationToken ct = default)

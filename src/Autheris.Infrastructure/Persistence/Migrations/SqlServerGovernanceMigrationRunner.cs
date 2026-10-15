@@ -1,6 +1,7 @@
 using System.Data.Common;
 using System.Globalization;
 using Autheris.Domain.Options;
+using Autheris.Infrastructure.Persistence.Migrations.Shape;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -26,6 +27,8 @@ public sealed class SqlServerGovernanceMigrationRunner : GovernanceMigrationRunn
             })
     ];
 
+    private static readonly GovernanceSchemaShapeVerifier Verifier = new("sqlserver", new SqlServerSchemaCatalogReader());
+
     private readonly SqlServerGovernanceRepository _repository;
 
     public SqlServerGovernanceMigrationRunner(
@@ -40,6 +43,10 @@ public sealed class SqlServerGovernanceMigrationRunner : GovernanceMigrationRunn
 
     public override IReadOnlyList<MigrationStep> Steps => Catalogue;
 
+    internal override GovernanceSchemaShapeVerifier ShapeVerifier => Verifier;
+
+    protected override string EngineDisplayName => "SQL Server";
+
     protected override string CreateVersionTableSql =>
         "IF OBJECT_ID(N'dbo.autheris_schema_migrations', N'U') IS NULL CREATE TABLE dbo.autheris_schema_migrations (version INT NOT NULL PRIMARY KEY, name NVARCHAR(256) NOT NULL, checksum NVARCHAR(128) NOT NULL, applied_at NVARCHAR(64) NOT NULL, applied_by NVARCHAR(256) NOT NULL)";
 
@@ -50,7 +57,8 @@ public sealed class SqlServerGovernanceMigrationRunner : GovernanceMigrationRunn
 
     protected override async Task<DbConnection> OpenConnectionAsync(CancellationToken ct)
     {
-        var connectionString = string.IsNullOrWhiteSpace(_repository.MigrationConnectionString)
+        // Mode=Verify only reads: it runs with the runtime login, never with the DDL login (least privilege, plan D-12).
+        var connectionString = Mode == GovernanceMigrationMode.Verify || string.IsNullOrWhiteSpace(_repository.MigrationConnectionString)
             ? _repository.ConnectionString
             : _repository.MigrationConnectionString;
         var conn = new SqlConnection(connectionString);
@@ -92,17 +100,29 @@ public sealed class SqlServerGovernanceMigrationRunner : GovernanceMigrationRunn
         await unlockCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
+    /// <summary>SEC-94-09: the INSTEAD OF UPDATE/DELETE trigger exists, is enabled and covers both events.</summary>
+    internal const string AuditTriggerPostConditionSql =
+        "SELECT COUNT(*) FROM sys.triggers tr WHERE tr.name = N'trg_audit_append_only' AND tr.parent_id = OBJECT_ID(N'dbo.AUDIT_LOG_ENTRIES') " +
+        "AND tr.is_disabled = 0 AND tr.is_instead_of_trigger = 1 " +
+        "AND (SELECT COUNT(DISTINCT te.type) FROM sys.trigger_events te WHERE te.object_id = tr.object_id AND te.type IN (2, 3)) = 2";
+
+    /// <summary>SEC-94-09: the foreign key of the truncate guard table (it blocks TRUNCATE of the audit table) exists and is enabled.</summary>
+    internal const string TruncateGuardPostConditionSql =
+        "SELECT COUNT(*) FROM sys.foreign_keys fk WHERE fk.name = N'fk_audit_truncate_guard' " +
+        "AND fk.parent_object_id = OBJECT_ID(N'dbo.AUDIT_LOG_TRUNCATE_GUARD') AND fk.referenced_object_id = OBJECT_ID(N'dbo.AUDIT_LOG_ENTRIES') AND fk.is_disabled = 0";
+
     protected override async Task VerifyPostConditionsAsync(DbConnection connection, CancellationToken ct)
     {
-        var count = Convert.ToInt64(
-            await ScalarAsync(
-                connection,
-                "SELECT COUNT(*) FROM sys.triggers WHERE name = N'trg_audit_append_only' AND parent_id = OBJECT_ID(N'dbo.AUDIT_LOG_ENTRIES')",
-                ct).ConfigureAwait(false),
-            CultureInfo.InvariantCulture);
-        if (count != 1)
+        var trigger = Convert.ToInt64(await ScalarAsync(connection, AuditTriggerPostConditionSql, ct).ConfigureAwait(false), CultureInfo.InvariantCulture);
+        if (trigger != 1)
         {
-            throw new GovernanceSchemaDriftException("The append-only audit trigger on AUDIT_LOG_ENTRIES is missing after the governance migration.");
+            throw new GovernanceSchemaDriftException("The append-only audit trigger on AUDIT_LOG_ENTRIES is missing or disabled (fail closed).");
+        }
+
+        var guard = Convert.ToInt64(await ScalarAsync(connection, TruncateGuardPostConditionSql, ct).ConfigureAwait(false), CultureInfo.InvariantCulture);
+        if (guard != 1)
+        {
+            throw new GovernanceSchemaDriftException("The truncate guard of AUDIT_LOG_ENTRIES (fk_audit_truncate_guard) is missing or disabled (fail closed).");
         }
     }
 }

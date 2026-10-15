@@ -1,9 +1,11 @@
+using Autheris.Application.DataCatalog.Services;
 using Autheris.Domain.Common;
 namespace Autheris.Extensions.Dbt;
 
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -25,6 +27,8 @@ public static class DbtArtifactStreamingParser
 
         var models = new List<DbtModelDefinition>();
         var relationships = new List<DbtRelationshipDefinition>();
+        // Issue #94 (D-8): declared keys per model unique id (constraints and unique tests may arrive in any node order).
+        var keyBuilders = new Dictionary<string, CatalogKeyDefinitionImport.Collector>(StringComparer.OrdinalIgnoreCase);
 
         // Parse JsonDocument asynchronously using streaming options
         var jsonDocOptions = new JsonDocumentOptions
@@ -98,6 +102,8 @@ public static class DbtArtifactStreamingParser
                             }
                         }
                     }
+
+                    CollectUniqueTest(node, keyBuilders);
                     continue;
                 }
 
@@ -155,11 +161,13 @@ public static class DbtArtifactStreamingParser
                     }
                 }
 
-                // R-31: Model-level constraints (foreign_key)
+                // R-31: Model-level constraints (foreign_key); issue #94: primary_key and unique
+                var modelKeys = GetBuilder(keyBuilders, uniqueId);
                 if (node.TryGetProperty("constraints", out var modelConsProp) && modelConsProp.ValueKind == JsonValueKind.Array)
                 {
                     foreach (var con in modelConsProp.EnumerateArray())
                     {
+                        CollectKeyConstraint(modelKeys, con, columnName: null);
                         if (con.TryGetProperty("type", out var typeProp) &&
                             string.Equals(typeProp.GetString(), "foreign_key", StringComparison.OrdinalIgnoreCase))
                         {
@@ -186,6 +194,7 @@ public static class DbtArtifactStreamingParser
 
                 // Columns
                 var columns = new Dictionary<string, DbtColumnDefinition>(StringComparer.OrdinalIgnoreCase);
+                var columnLevelPrimaryKey = new List<string>();
                 if (node.TryGetProperty("columns", out var colsProp) && colsProp.ValueKind == JsonValueKind.Object)
                 {
                     foreach (var colProp in colsProp.EnumerateObject())
@@ -219,6 +228,7 @@ public static class DbtArtifactStreamingParser
                         {
                             foreach (var con in colConsProp.EnumerateArray())
                             {
+                                CollectKeyConstraint(modelKeys, con, columnName: colName, columnLevelPrimaryKey);
                                 if (con.TryGetProperty("type", out var typeProp) &&
                                     string.Equals(typeProp.GetString(), "foreign_key", StringComparison.OrdinalIgnoreCase))
                                 {
@@ -243,6 +253,11 @@ public static class DbtArtifactStreamingParser
 
                         columns[colName] = new DbtColumnDefinition(colName, colType, colDesc, colTags, colMeta);
                     }
+                }
+
+                if (columnLevelPrimaryKey.Count > 0)
+                {
+                    modelKeys.AddPrimaryKey(columnLevelPrimaryKey);
                 }
 
                 // Depends On
@@ -345,8 +360,157 @@ public static class DbtArtifactStreamingParser
             }
         }
 
+        for (var i = 0; i < models.Count; i++)
+        {
+            if (keyBuilders.TryGetValue(models[i].UniqueId, out var builder) && ToDeclaredKeys(builder) is { } keys)
+            {
+                models[i] = models[i] with { DeclaredKeys = keys };
+            }
+        }
+
         return (models, relationships);
     }
+
+    private static CatalogKeyDefinitionImport.Collector GetBuilder(Dictionary<string, CatalogKeyDefinitionImport.Collector> builders, string uniqueId)
+    {
+        if (!builders.TryGetValue(uniqueId, out var builder))
+        {
+            builder = new CatalogKeyDefinitionImport.Collector();
+            builders[uniqueId] = builder;
+        }
+
+        return builder;
+    }
+
+    /// <summary>Reads a string array of at most the key limit; null (invalid) for any other shape. The length is checked before enumerating.</summary>
+    private static List<string>? ReadColumnArray(JsonElement owner, string property)
+    {
+        if (!owner.TryGetProperty(property, out var array) || array.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var length = array.GetArrayLength();
+        if (length is 0 or > TableKeyDefinitionValidator.MaxColumnsPerKey)
+        {
+            return null;
+        }
+
+        var result = new List<string>(length);
+        foreach (var item in array.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(item.GetString()))
+            {
+                return null;
+            }
+
+            result.Add(item.GetString()!);
+        }
+
+        return result;
+    }
+
+    /// <summary>A model-level (<paramref name="columnName"/> null) or column-level dbt constraint of type primary_key or unique.</summary>
+    private static void CollectKeyConstraint(CatalogKeyDefinitionImport.Collector builder, JsonElement constraint, string? columnName, List<string>? columnLevelPrimaryKey = null)
+    {
+        if (constraint.ValueKind != JsonValueKind.Object ||
+            !constraint.TryGetProperty("type", out var typeProp) ||
+            typeProp.ValueKind != JsonValueKind.String)
+        {
+            return;
+        }
+
+        var type = typeProp.GetString();
+        var isPrimaryKey = string.Equals(type, "primary_key", StringComparison.OrdinalIgnoreCase);
+        var isUnique = string.Equals(type, "unique", StringComparison.OrdinalIgnoreCase);
+        if (!isPrimaryKey && !isUnique)
+        {
+            return;
+        }
+
+        if (columnName is not null)
+        {
+            if (isPrimaryKey)
+            {
+                columnLevelPrimaryKey?.Add(columnName);
+            }
+            else
+            {
+                builder.AddUnique([columnName]);
+            }
+
+            return;
+        }
+
+        var columns = ReadColumnArray(constraint, "columns");
+        if (isPrimaryKey)
+        {
+            builder.AddPrimaryKey(columns);
+        }
+        else
+        {
+            builder.AddUnique(columns);
+        }
+    }
+
+    /// <summary>dbt <c>unique</c> and <c>unique_combination_of_columns</c> tests declare a unique constraint on the attached model.</summary>
+    private static void CollectUniqueTest(JsonElement node, Dictionary<string, CatalogKeyDefinitionImport.Collector> builders)
+    {
+        if (!node.TryGetProperty("test_metadata", out var testMetadata) ||
+            !testMetadata.TryGetProperty("name", out var nameProp) ||
+            nameProp.ValueKind != JsonValueKind.String)
+        {
+            return;
+        }
+
+        var testName = nameProp.GetString();
+        var isUnique = string.Equals(testName, "unique", StringComparison.OrdinalIgnoreCase);
+        var isCombination = string.Equals(testName, "unique_combination_of_columns", StringComparison.OrdinalIgnoreCase);
+        if (!isUnique && !isCombination)
+        {
+            return;
+        }
+
+        string? attached = node.TryGetProperty("attached_node", out var attachedProp) && attachedProp.ValueKind == JsonValueKind.String
+            ? attachedProp.GetString()
+            : null;
+        if (string.IsNullOrWhiteSpace(attached) &&
+            node.TryGetProperty("depends_on", out var depends) &&
+            depends.TryGetProperty("nodes", out var depNodes) &&
+            depNodes.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var dep in depNodes.EnumerateArray())
+            {
+                var depId = dep.ValueKind == JsonValueKind.String ? dep.GetString() : null;
+                if (depId is not null && depId.StartsWith("model.", StringComparison.OrdinalIgnoreCase))
+                {
+                    attached = depId;
+                    break;
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(attached) || !testMetadata.TryGetProperty("kwargs", out var kwargs) || kwargs.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        var builder = GetBuilder(builders, attached!);
+        if (isCombination)
+        {
+            builder.AddUnique(ReadColumnArray(kwargs, "combination_of_columns"));
+        }
+        else if (kwargs.TryGetProperty("column_name", out var columnProp) && columnProp.ValueKind == JsonValueKind.String &&
+                 !string.IsNullOrWhiteSpace(columnProp.GetString()))
+        {
+            builder.AddUnique([columnProp.GetString()!]);
+        }
+    }
+
+    private static DbtDeclaredKeys? ToDeclaredKeys(CatalogKeyDefinitionImport.Collector collector) =>
+        collector.Invalid ? new DbtDeclaredKeys(null, [], true)
+        : !collector.HasDeclaration ? null
+        : new DbtDeclaredKeys(collector.PrimaryKey, collector.Indexes!.Select(i => i.Columns).ToList(), false);
 
     public static string ExtractModelName(string raw)
     {

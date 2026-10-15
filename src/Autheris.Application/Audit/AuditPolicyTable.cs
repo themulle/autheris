@@ -41,6 +41,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.AuditConfigChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.AuditPipelineFault] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.AuditRetentionPurge] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.CatalogKeyDefinitionChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ServiceStarted] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.ServiceStopped] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.ConsentRequested] = AuditFailurePolicy.FailClosed,

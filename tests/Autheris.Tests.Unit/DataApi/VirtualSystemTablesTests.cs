@@ -75,6 +75,18 @@ public sealed class VirtualSystemTablesTests
     }
 
     [Fact]
+    public async Task RegisterSystemTablesAsync_ReplacesTheInCodeKeyDefinition()
+    {
+        var repo = Substitute.For<ITableMetadataRepository>();
+
+        await VirtualSystemTables.RegisterSystemTablesAsync(repo, CancellationToken.None);
+
+        await repo.Received(5).UpsertTableMetadataAsync(
+            Arg.Is<TableMetadata>(m => m.ReplaceKeyDefinition && m.PrimaryKeyColumns.Count > 0),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public void IsSystemTable_DetectsGovernanceSystemDomain()
     {
         VirtualSystemTables.IsSystemTable(new TableIdentifier("governance", "system", "datasources")).ShouldBeTrue();

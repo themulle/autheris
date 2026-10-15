@@ -97,8 +97,9 @@ public static class CatalogGovernanceRatchet
             }
         }
 
-        var useIncomingKeys = incoming.ReplaceKeyDefinition || incoming.PrimaryKeyColumns.Count > 0;
-        var useIncomingIndexes = incoming.ReplaceKeyDefinition || incoming.Indexes.Count > 0;
+        // SEC-94-11: the incoming definition (and the replace intent) is carried only when it asks to replace; otherwise the stored
+        // definition is kept and the result stays unflagged, so a round trip can never wipe it.
+        var replace = incoming.ReplaceKeyDefinition;
 
         return new TableMetadata
         {
@@ -106,9 +107,9 @@ public static class CatalogGovernanceRatchet
             Identifier = incoming.Identifier,
             Columns = mergedColumns,
             ColumnMaskingRules = mergedRules,
-            PrimaryKeyColumns = useIncomingKeys ? incoming.PrimaryKeyColumns : existing.PrimaryKeyColumns,
-            Indexes = useIncomingIndexes ? incoming.Indexes : existing.Indexes,
-            ReplaceKeyDefinition = incoming.ReplaceKeyDefinition
+            PrimaryKeyColumns = replace ? incoming.PrimaryKeyColumns : existing.PrimaryKeyColumns,
+            Indexes = replace ? incoming.Indexes : existing.Indexes,
+            ReplaceKeyDefinition = replace
         };
     }
 

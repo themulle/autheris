@@ -148,6 +148,10 @@ public class RedTeamPromptInjectionTests
             return Task.FromResult<IReadOnlyList<TableMetadata>>(Array.Empty<TableMetadata>());
         }
 
+        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+            TableIdentifier table, System.Collections.Generic.IReadOnlyList<string> primaryKey, System.Collections.Generic.IReadOnlyList<TableIndexDefinition> indexes, System.Threading.CancellationToken ct = default) =>
+            Task.FromResult<TableKeyDefinitionChange?>(null);
+
         public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, System.Threading.CancellationToken ct = default)
         {
             return Task.FromResult(metadata);

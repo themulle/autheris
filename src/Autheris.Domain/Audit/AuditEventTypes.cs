@@ -42,6 +42,9 @@ public static class AuditEventTypes
     public const string AuditPipelineFault = "AUDIT_PIPELINE_FAULT";
     public const string AuditRetentionPurge = "AUDIT_RETENTION_PURGE";
 
+    // Catalog definition changes (Tier A, issue #94 SEC-94-06): declared primary key / index replacement with before and after.
+    public const string CatalogKeyDefinitionChanged = "CATALOG_KEY_DEFINITION_CHANGED";
+
     // System Lifecycle
     public const string ServiceStarted = "SERVICE_STARTED";
     public const string ServiceStopped = "SERVICE_STOPPED";

@@ -12,6 +12,7 @@ using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -76,10 +77,20 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
 
         foreach (var tableAsset in tables)
         {
+            TableMetadata? existing;
+            try
+            {
+                existing = await _metadataRepo.GetTableMetadataAsync(tableAsset.Identifier, ct).ConfigureAwait(false);
+            }
+            catch (TableMetadataUnavailableException)
+            {
+                // SEC-94-01: an unavailable table is never ingested as a new one (its stored masking rules would be lost).
+                warnings.Add($"Table '{tableAsset.Identifier}': skipped, its stored metadata is unavailable (invalid key or index definition).");
+                continue;
+            }
+
             syncedTables++;
             affectedTables.Add(tableAsset.Identifier);
-
-            var existing = await _metadataRepo.GetTableMetadataAsync(tableAsset.Identifier, ct).ConfigureAwait(false);
 
             bool isArt9 = tableAsset.Tags.Any(t => catalogOpts.GdprArticle9Tags.Contains(t, StringComparer.OrdinalIgnoreCase)) ||
                           tableAsset.Classifications.Any(c => catalogOpts.GdprArticle9Tags.Contains(c, StringComparer.OrdinalIgnoreCase));
@@ -195,6 +206,13 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
                 Columns = tableColumns,
                 ColumnMaskingRules = maskingRules
             };
+
+            // Issue #94 (D-8): a declared primary key / indexes of the asset, else the IsPrimaryKey column flags (column order),
+            // replace the stored definition; an asset that declares nothing leaves it untouched.
+            IReadOnlyList<string> declaredPrimaryKey = tableAsset.PrimaryKeyColumns.Count > 0
+                ? tableAsset.PrimaryKeyColumns
+                : tableAsset.Columns.Where(c => c.IsPrimaryKey).Select(c => c.ColumnName).Take(TableKeyDefinitionValidator.MaxColumnsPerKey + 1).ToList();
+            metadata = CatalogKeyDefinitionImport.Apply(metadata, declaredPrimaryKey, tableAsset.Indexes, _logger, "DataCatalog");
 
             // SEC M-32: merge with the persisted state – security flags can only be tightened by a catalog sync.
             metadata = CatalogGovernanceRatchet.Merge(metadata, existing);

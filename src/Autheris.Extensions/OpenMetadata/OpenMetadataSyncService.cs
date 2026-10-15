@@ -147,6 +147,13 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
                         await _metadataRepo.UpsertTableMetadataAsync(merged, ct);
                     }
                 }
+                catch (Autheris.Domain.Exceptions.TableMetadataUnavailableException)
+                {
+                    // SEC-94-01: never upserted as a new table; its stored masking rules stay untouched.
+                    var warning = $"Skipped OpenMetadata table {omTable.FullyQualifiedName}: its stored metadata is unavailable (invalid key or index definition).";
+                    _logger.LogWarning("{Warning}", warning);
+                    warnings.Add(warning);
+                }
                 catch (Exception ex)
                 {
                     var warning = $"Failed to map or upsert table {omTable.FullyQualifiedName}: {ex.Message}";
@@ -664,7 +671,18 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
 
                 var tableId = resolved.Identifier;
                 // SEC M-32: webhook-triggered updates use the same tighten-only merge.
-                var existing = await _metadataRepo.GetTableMetadataAsync(tableId, ct);
+                TableMetadata? existing;
+                try
+                {
+                    existing = await _metadataRepo.GetTableMetadataAsync(tableId, ct);
+                }
+                catch (Autheris.Domain.Exceptions.TableMetadataUnavailableException)
+                {
+                    // SEC-94-01: the webhook never upserts an unavailable table as a new one.
+                    _logger.LogWarning("Ignoring OpenMetadata webhook table event for {Fqn}: the stored table metadata is unavailable.", omTable.FullyQualifiedName);
+                    return false;
+                }
+
                 var (tableMeta, _) = MapToTableMetadata(omTable, tableId, omOptions, isNewTable: existing == null, existingSourceType: existing?.Table.SourceType, existingSourceName: existing?.Table.SourceName);
                 var merged = Autheris.Application.DataCatalog.Services.CatalogGovernanceRatchet.Merge(tableMeta, existing);
                 await _metadataRepo.UpsertTableMetadataAsync(merged, ct);
@@ -816,6 +834,30 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
             Columns = columns,
             ColumnMaskingRules = maskingRules
         };
+
+        // Issue #94 (D-8): PRIMARY_KEY and UNIQUE table constraints are the declared definition; replaced only when present and valid.
+        if (omTable.TableConstraints is { Count: > 0 } constraints)
+        {
+            var collector = new Autheris.Application.DataCatalog.Services.CatalogKeyDefinitionImport.Collector();
+            foreach (var constraint in constraints)
+            {
+                if (constraint is null)
+                {
+                    continue;
+                }
+
+                if (string.Equals(constraint.ConstraintType, "PRIMARY_KEY", StringComparison.OrdinalIgnoreCase))
+                {
+                    collector.AddPrimaryKey(constraint.Columns);
+                }
+                else if (string.Equals(constraint.ConstraintType, "UNIQUE", StringComparison.OrdinalIgnoreCase))
+                {
+                    collector.AddUnique(constraint.Columns);
+                }
+            }
+
+            metadata = Autheris.Application.DataCatalog.Services.CatalogKeyDefinitionImport.Apply(metadata, collector, _logger, "OpenMetadata");
+        }
 
         return (metadata, maskingRules.Count);
     }

@@ -1,6 +1,7 @@
 using System.Data.Common;
 using System.Security.Cryptography;
 using System.Text;
+using Autheris.Infrastructure.Persistence.Migrations.Shape;
 using Microsoft.Extensions.Logging;
 
 namespace Autheris.Infrastructure.Persistence.Migrations;
@@ -23,8 +24,10 @@ public sealed record MigrationContext(DbConnection Connection, DbTransaction? Tr
 
 /// <summary>
 /// One ordered schema migration. The <see cref="Checksum"/> is a declared identity token of the step content; it is stored with the
-/// applied version and a mismatch on a later start is treated as schema drift (startup fails). Change the token deliberately when a
-/// released step is edited (which should not happen: add a new, higher version instead).
+/// applied version and a mismatch on a later start is treated as schema drift (startup fails).
+/// While no installation is in production, the baseline step 0001 is extended in place and keeps its identity token (owner decision,
+/// no upgrade or repair migrations); an existing database that does not match the extended baseline is detected by the read-only
+/// schema shape verifier instead of being altered. Once an installation is in production, add a new, higher version instead.
 /// </summary>
 public sealed record MigrationStep(int Version, string Name, string Checksum, Func<MigrationContext, Task> Apply, bool Transactional = false)
 {
@@ -35,12 +38,27 @@ public sealed record MigrationStep(int Version, string Name, string Checksum, Fu
     }
 }
 
-/// <summary>The applied schema differs from what this binary expects (checksum mismatch, newer database, or pending steps in Verify mode).</summary>
+/// <summary>
+/// The applied schema differs from what this binary expects (checksum mismatch, newer database, pending steps in Verify mode, or a
+/// schema shape that does not match the baseline). <see cref="Deviations"/> lists the shape differences (identifiers only).
+/// </summary>
 public sealed class GovernanceSchemaDriftException : InvalidOperationException
 {
-    public GovernanceSchemaDriftException(string message) : base(message) { }
+    private static readonly IReadOnlyList<SchemaDeviation> NoDeviations = [];
 
-    public GovernanceSchemaDriftException(string message, Exception innerException) : base(message, innerException) { }
+    public GovernanceSchemaDriftException(string message) : base(message) { Deviations = NoDeviations; }
+
+    public GovernanceSchemaDriftException(string message, Exception innerException) : base(message, innerException) { Deviations = NoDeviations; }
+
+    public GovernanceSchemaDriftException(string message, IReadOnlyList<SchemaDeviation> deviations, Exception? innerException = null)
+        : base(message, innerException)
+    {
+        ArgumentNullException.ThrowIfNull(deviations);
+        Deviations = deviations;
+    }
+
+    /// <summary>The differences between the expected and the actual schema shape; empty for checksum or version drift.</summary>
+    public IReadOnlyList<SchemaDeviation> Deviations { get; }
 }
 
 /// <summary>

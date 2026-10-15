@@ -290,6 +290,7 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
             entitySchema["x-long-description"] = table.Table.LongDescription;
         }
 
+        var keyView = Autheris.Application.Data.Services.TableKeyVisibility.Restrict(table, table.Columns);
         var properties = new JsonObject();
         var requiredCols = new JsonArray();
 
@@ -298,10 +299,27 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
             var colProp = MapColumnToJsonSchema(col);
             properties[col.ColumnName] = colProp;
 
-            if (table.PrimaryKeyColumns.Contains(col.ColumnName, StringComparer.OrdinalIgnoreCase))
+            if (keyView.PrimaryKeyColumns.Contains(col.ColumnName, StringComparer.OrdinalIgnoreCase))
             {
                 requiredCols.Add(col.ColumnName);
             }
+        }
+
+        if (keyView.Indexes.Count > 0)
+        {
+            var indexes = new JsonArray();
+            foreach (var index in keyView.Indexes)
+            {
+                var cols = new JsonArray();
+                foreach (var c in index.Columns)
+                {
+                    cols.Add(c);
+                }
+
+                indexes.Add(new JsonObject { ["name"] = index.Name, ["unique"] = index.IsUnique, ["columns"] = cols });
+            }
+
+            entitySchema["x-autheris-indexes"] = indexes;
         }
 
         entitySchema["properties"] = properties;

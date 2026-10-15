@@ -611,6 +611,10 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
         public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<TableMetadata>>(_tables.Values.ToList());
 
+        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+            TableIdentifier table, IReadOnlyList<string> primaryKey, IReadOnlyList<TableIndexDefinition> indexes, CancellationToken ct = default) =>
+            Task.FromResult<TableKeyDefinitionChange?>(null);
+
         public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
         {
             _tables[metadata.Identifier] = metadata;

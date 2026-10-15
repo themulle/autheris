@@ -121,6 +121,12 @@ public sealed class TableColumn
 /// <summary>A declared index: ordered columns and the unique flag.</summary>
 public sealed record TableIndexDefinition(string Name, IReadOnlyList<string> Columns, bool IsUnique);
 
+/// <summary>The declared key definition of a table: ordered primary key and indexes (identifiers only, no data).</summary>
+public sealed record TableKeyDefinition(IReadOnlyList<string> PrimaryKey, IReadOnlyList<TableIndexDefinition> Indexes);
+
+/// <summary>Result of a narrow key definition replacement (audit before/after). <c>BeforeUnavailable</c>: the stored definition was invalid and is not reported.</summary>
+public sealed record TableKeyDefinitionChange(TableKeyDefinition Before, TableKeyDefinition After, bool BeforeUnavailable = false);
+
 /// <summary>Issue #80: Controls how much of a column's value profile is published when active row filters apply to a table.</summary>
 public enum DatasetProfilePublicationPolicy
 {

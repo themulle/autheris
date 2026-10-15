@@ -326,6 +326,18 @@ p, auditor, *, {table}, read, true, allow
             return Task.FromResult(metadata);
         }
 
+        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+            TableIdentifier table, IReadOnlyList<string> primaryKey, IReadOnlyList<TableIndexDefinition> indexes, CancellationToken ct = default)
+        {
+            var existing = _tables.FirstOrDefault(t => t.Identifier.Equals(table));
+            if (existing == null) return Task.FromResult<TableKeyDefinitionChange?>(null);
+            var validated = TableKeyDefinitionValidator.Validate(existing with { PrimaryKeyColumns = primaryKey, Indexes = indexes });
+            var before = new TableKeyDefinition(existing.PrimaryKeyColumns, existing.Indexes);
+            _tables.RemoveAll(t => t.Identifier.Equals(table));
+            _tables.Add(validated with { ReplaceKeyDefinition = false });
+            return Task.FromResult<TableKeyDefinitionChange?>(new TableKeyDefinitionChange(before, new TableKeyDefinition(validated.PrimaryKeyColumns, validated.Indexes)));
+        }
+
         public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) =>
             Task.FromResult(_tables.FirstOrDefault(t => t.Identifier.Equals(table)));
 

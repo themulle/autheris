@@ -1,5 +1,7 @@
 using System.Data.Common;
+using System.Diagnostics;
 using System.Globalization;
+using Autheris.Infrastructure.Persistence.Migrations.Shape;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 
@@ -41,7 +43,33 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
     /// <summary>Releases the schema lock; <paramref name="success"/> tells a transaction-based lock whether to commit.</summary>
     protected abstract Task ReleaseLockAsync(DbConnection connection, bool success, CancellationToken ct);
 
-    /// <summary>Verifies dialect-specific post-conditions (e.g. the append-only audit trigger exists). Throws when violated.</summary>
+    /// <summary>The read-only shape verifier of the engine (plan D-1). Runs in Apply and Verify mode, under the schema lock.</summary>
+    internal abstract GovernanceSchemaShapeVerifier ShapeVerifier { get; }
+
+    /// <summary>Engine name used in the drift message.</summary>
+    protected abstract string EngineDisplayName { get; }
+
+    /// <summary>The configured migration mode.</summary>
+    protected GovernanceMigrationMode Mode => _options.Mode;
+
+    /// <summary>
+    /// Label of the database for the drift message (SEC-94-08g): the SQLite file name or the database name, never a connection
+    /// string, host, user or directory path.
+    /// </summary>
+    protected virtual string DatabaseLabel(DbConnection connection) => SanitizeLabel(connection.Database);
+
+    internal static string SanitizeLabel(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return "?";
+        }
+
+        var chars = value.Take(64).Select(c => char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or '$' or ' ' ? c : '?').ToArray();
+        return new string(chars);
+    }
+
+    /// <summary>Verifies dialect-specific post-conditions (e.g. the append-only audit trigger exists and is enabled). Runs in Apply and Verify mode and must only read. Throws when violated.</summary>
     protected virtual Task VerifyPostConditionsAsync(DbConnection connection, CancellationToken ct) => Task.CompletedTask;
 
     /// <summary>False when the whole run is already one transaction (SQLite), so steps must not open their own.</summary>
@@ -127,24 +155,92 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
                 throw new GovernanceSchemaDriftException(
                     $"Governance schema is not up to date (Mode = Verify): pending migrations {string.Join(", ", pending.Select(p => p.Version.ToString("D4", CultureInfo.InvariantCulture)))}.");
             }
+
+            await VerifyShapeAsync(connection, applied, steps, ct).ConfigureAwait(false);
         }
         else
         {
-            foreach (var step in pending)
+            for (var i = 0; i < pending.Length; i++)
             {
+                var step = pending[i];
                 ct.ThrowIfCancellationRequested();
                 _logger?.LogInformation("Applying governance migration {Version} '{Name}'.", step.Version, step.Name);
-                await ApplyStepAsync(connection, step, ct).ConfigureAwait(false);
+                // The shape is verified after the last pending step and before its version row is recorded (plan D-1).
+                Func<DbTransaction?, Task>? beforeRecord = i == pending.Length - 1 ? stepTx => VerifyShapeAsync(connection, applied, steps, ct, stepTx) : null;
+                try
+                {
+                    await ApplyStepAsync(connection, step, beforeRecord, ct).ConfigureAwait(false);
+                }
+                catch (DbException ex)
+                {
+                    // Plan D-4: a failed step on a drifted database is reported with the list of deviations.
+                    var drift = await TryDiagnoseAsync(connection, applied, steps, ex, ct).ConfigureAwait(false);
+                    if (drift is null)
+                    {
+                        throw;
+                    }
+
+                    throw drift;
+                }
+            }
+
+            if (pending.Length == 0)
+            {
+                await VerifyShapeAsync(connection, applied, steps, ct).ConfigureAwait(false);
             }
         }
 
-        if (!verifyOnly)
+        await VerifyPostConditionsAsync(connection, ct).ConfigureAwait(false);
+    }
+
+    private async Task VerifyShapeAsync(DbConnection connection, Dictionary<int, string> applied, MigrationStep[] steps, CancellationToken ct, DbTransaction? transaction = null)
+    {
+        var result = await ShapeVerifier.VerifyAsync(connection, ct, transaction).ConfigureAwait(false);
+        if (result.ExtraTables.Count > 0)
         {
-            await VerifyPostConditionsAsync(connection, ct).ConfigureAwait(false);
+            _logger?.LogInformation(
+                "The governance database contains {Count} table(s) that this build does not know: {Tables}. They are tolerated.",
+                result.ExtraTables.Count,
+                string.Join(", ", result.ExtraTables.Take(20)));
+        }
+
+        if (result.Deviations.Count > 0)
+        {
+            throw BuildDrift(connection, applied, steps, result.Deviations, null);
         }
     }
 
-    private async Task ApplyStepAsync(DbConnection connection, MigrationStep step, CancellationToken ct)
+    private async Task<GovernanceSchemaDriftException?> TryDiagnoseAsync(
+        DbConnection connection, Dictionary<int, string> applied, MigrationStep[] steps, DbException failure, CancellationToken ct)
+    {
+        try
+        {
+            var result = await ShapeVerifier.VerifyAsync(connection, ct).ConfigureAwait(false);
+            return result.Deviations.Count == 0 ? null : BuildDrift(connection, applied, steps, result.Deviations, failure);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The diagnosis is best effort: the original failure stays the reported one.
+            _logger?.LogDebug(ex, "The schema shape diagnosis after a failed governance migration step did not complete.");
+            return null;
+        }
+    }
+
+    private GovernanceSchemaDriftException BuildDrift(
+        DbConnection connection, Dictionary<int, string> applied, MigrationStep[] steps, IReadOnlyList<SchemaDeviation> deviations, Exception? inner)
+    {
+        var message = GovernanceSchemaShapeComparer.FormatMessage(
+            EngineDisplayName,
+            DatabaseLabel(connection),
+            applied.Keys.ToArray(),
+            steps.Where(s => !applied.ContainsKey(s.Version)).Select(s => s.Version).ToArray(),
+            deviations);
+        _logger?.LogError("{DriftMessage}", message);
+        Activity.Current?.SetTag("autheris.governance.schema.deviations", deviations.Count);
+        return new GovernanceSchemaDriftException(message, deviations, inner);
+    }
+
+    private async Task ApplyStepAsync(DbConnection connection, MigrationStep step, Func<DbTransaction?, Task>? beforeRecord, CancellationToken ct)
     {
         DbTransaction? tx = null;
         if (step.Transactional && UseStepTransactions)
@@ -155,6 +251,11 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
         try
         {
             await step.Apply(new MigrationContext(connection, tx, _logger, ct)).ConfigureAwait(false);
+            if (beforeRecord != null)
+            {
+                await beforeRecord(tx).ConfigureAwait(false);
+            }
+
             await RecordAsync(connection, tx, step, ct).ConfigureAwait(false);
             if (tx != null)
             {

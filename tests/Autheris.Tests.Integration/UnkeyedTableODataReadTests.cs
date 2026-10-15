@@ -115,6 +115,29 @@ public abstract class UnkeyedTableODataReadBase : IDisposable
     }
 
     [Fact]
+    public async Task FollowingTheNextLink_WithoutKey_VisitsEveryRowExactlyOnce()
+    {
+        if (!IsAvailable) { return; }
+        var client = await ClientAsync();
+
+        var seen = new System.Collections.Generic.List<string>();
+        string? url = $"/odata/v4/{Source}/{Schema}/air1?$top=5";
+        for (var guard = 0; url != null && guard < 10; guard++)
+        {
+            var response = await client.GetAsync(url);
+            response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            seen.AddRange(doc.RootElement.GetProperty("value").EnumerateArray().Select(r => r.GetProperty("seq").GetRawText()));
+            url = doc.RootElement.TryGetProperty("@odata.nextLink", out var next)
+                ? new Uri(next.GetString()!).PathAndQuery
+                : null;
+        }
+
+        seen.Count.ShouldBe(12);
+        seen.Distinct().Count().ShouldBe(12);
+    }
+
+    [Fact]
     public async Task Metadata_ForUnkeyedTable_IsServed()
     {
         if (!IsAvailable) { return; }

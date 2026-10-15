@@ -1,6 +1,7 @@
 using System.Data.Common;
 using System.Globalization;
 using Autheris.Domain.Options;
+using Autheris.Infrastructure.Persistence.Migrations.Shape;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Npgsql;
@@ -26,6 +27,8 @@ public sealed class PostgreSqlGovernanceMigrationRunner : GovernanceMigrationRun
             })
     ];
 
+    private static readonly GovernanceSchemaShapeVerifier Verifier = new("postgresql", new PostgreSqlSchemaCatalogReader());
+
     private readonly PostgreSqlGovernanceRepository _repository;
 
     public PostgreSqlGovernanceMigrationRunner(
@@ -40,6 +43,10 @@ public sealed class PostgreSqlGovernanceMigrationRunner : GovernanceMigrationRun
 
     public override IReadOnlyList<MigrationStep> Steps => Catalogue;
 
+    internal override GovernanceSchemaShapeVerifier ShapeVerifier => Verifier;
+
+    protected override string EngineDisplayName => "PostgreSQL";
+
     protected override string CreateVersionTableSql =>
         "CREATE TABLE IF NOT EXISTS autheris_schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, checksum TEXT NOT NULL, applied_at TEXT NOT NULL, applied_by TEXT NOT NULL)";
 
@@ -50,7 +57,8 @@ public sealed class PostgreSqlGovernanceMigrationRunner : GovernanceMigrationRun
 
     protected override async Task<DbConnection> OpenConnectionAsync(CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(_repository.MigrationConnectionString))
+        // Mode=Verify only reads: it runs with the runtime login, never with the DDL login (least privilege, plan D-12).
+        if (Mode == GovernanceMigrationMode.Verify || string.IsNullOrWhiteSpace(_repository.MigrationConnectionString))
         {
             return await _repository.DataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
         }
@@ -75,17 +83,25 @@ public sealed class PostgreSqlGovernanceMigrationRunner : GovernanceMigrationRun
     protected override Task ReleaseLockAsync(DbConnection connection, bool success, CancellationToken ct) =>
         ExecuteAsync(connection, null, "SELECT pg_advisory_unlock(" + SchemaAdvisoryLockKey.ToString(CultureInfo.InvariantCulture) + ")", ct);
 
+    /// <summary>
+    /// SEC-94-09: both append-only triggers must sit on <c>audit_log_entries</c> as resolved through the <c>search_path</c>, call
+    /// <c>autheris_audit_append_only</c>, have the expected timing and events and must not be disabled (or replica-only).
+    /// </summary>
+    internal const string AuditTriggerPostConditionSql =
+        "SELECT COUNT(*) FROM pg_trigger t WHERE NOT t.tgisinternal " +
+        "AND t.tgrelid = to_regclass('audit_log_entries') " +
+        "AND t.tgenabled IN ('O', 'A') " +
+        "AND t.tgfoid = to_regproc('autheris_audit_append_only') " +
+        "AND ((t.tgname = 'trg_audit_append_only_row' AND (t.tgtype & 1) = 1 AND (t.tgtype & 2) = 2 AND (t.tgtype & 8) = 8 AND (t.tgtype & 16) = 16 AND (t.tgtype & 32) = 0) " +
+        "OR (t.tgname = 'trg_audit_append_only_trunc' AND (t.tgtype & 1) = 0 AND (t.tgtype & 2) = 2 AND (t.tgtype & 32) = 32 AND (t.tgtype & 8) = 0 AND (t.tgtype & 16) = 0))";
+
     protected override async Task VerifyPostConditionsAsync(DbConnection connection, CancellationToken ct)
     {
-        var count = Convert.ToInt64(
-            await ScalarAsync(
-                connection,
-                "SELECT COUNT(*) FROM pg_trigger WHERE NOT tgisinternal AND tgname IN ('trg_audit_append_only_row', 'trg_audit_append_only_trunc')",
-                ct).ConfigureAwait(false),
-            CultureInfo.InvariantCulture);
+        var count = Convert.ToInt64(await ScalarAsync(connection, AuditTriggerPostConditionSql, ct).ConfigureAwait(false), CultureInfo.InvariantCulture);
         if (count != 2)
         {
-            throw new GovernanceSchemaDriftException("The append-only audit triggers on AUDIT_LOG_ENTRIES are missing after the governance migration.");
+            throw new GovernanceSchemaDriftException(
+                "The append-only audit triggers on AUDIT_LOG_ENTRIES are missing, disabled or misplaced (fail closed).");
         }
     }
 }

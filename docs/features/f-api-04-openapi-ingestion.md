@@ -34,6 +34,8 @@ Enterprises possess hundreds of internal REST microservices described by OpenAPI
 4. **Ingestion:** `IOpenApiIngestionService` parses and registers the specification; `baseUrl` (query parameter) overrides the upstream base URL. A rejected specification answers `400` with the ingestion result.
 5. **Audit:** a successful ingestion is recorded as `OPENAPI_CATALOG_INGESTED` through `IAuditWriter.RecordRequiredAsync`; an unavailable audit store fails the request with `503`.
 
+**Keys.** Primary keys and indexes are taken only from the vendor extensions `x-autheris-primary-key` (string array) and `x-autheris-indexes` (array of `{ "name", "columns", "unique" }`) on the schema object; nothing is guessed from `required`, `id`, `*_id` or the first property. A malformed or invalid declaration is dropped as a whole (the table is still ingested and its stored definition kept), and a table whose stored definition is unavailable is skipped. See [F-GOV-21](f-gov-21-declared-table-keys-and-read-ordering.md#42-ingestion-entry-points).
+
 ---
 
 ## 4. Usage Example

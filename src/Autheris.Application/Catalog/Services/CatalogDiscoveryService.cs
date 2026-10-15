@@ -137,7 +137,9 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             }
         }
 
-        var pkSet = new HashSet<string>(metadata.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
+        // SD-4: declared keys and indexes are reported only as a whole and only over the columns this response lists.
+        var keys = Autheris.Application.Data.Services.TableKeyVisibility.Restrict(metadata, metadata.Columns);
+        var pkSet = new HashSet<string>(keys.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
 
         var columnDetails = metadata.Columns.Select(c =>
         {
@@ -168,9 +170,10 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             Schema: metadata.Identifier.Schema,
             Table: metadata.Identifier.TableName,
             Columns: columnDetails,
-            PrimaryKeys: metadata.PrimaryKeyColumns,
+            PrimaryKeys: keys.PrimaryKeyColumns,
             Sensitivity: metadata.Table.Sensitivity.ToString(),
-            IsActive: metadata.Table.IsActive
+            IsActive: metadata.Table.IsActive,
+            Indexes: keys.Indexes
         );
     }
 

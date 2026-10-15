@@ -182,7 +182,8 @@ public static class VirtualSystemTables
         ArgumentNullException.ThrowIfNull(repository);
         foreach (var table in All)
         {
-            await repository.UpsertTableMetadataAsync(table, ct).ConfigureAwait(false);
+            // The in-code keys are the declared definition of the system tables: they are written (replaced) on every registration.
+            await repository.UpsertTableMetadataAsync(table with { ReplaceKeyDefinition = true }, ct).ConfigureAwait(false);
         }
     }
 }
