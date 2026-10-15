@@ -30,7 +30,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 {
     private readonly AstSecurityVisitorOptions _options;
     private readonly Stack<HashSet<string>> _cteScopeStack = new();
-    private readonly PolicyFilterCteGuard _cteFilterGuard = new();
+    private readonly Stack<Dictionary<string, HashSet<string>>> _cteMaskedColumns = new();
 
     /// <summary>CTE names are compared by ordinal bytes: a delimited physical name that differs in case is not the CTE (INV-11).</summary>
     private static StringComparer CteScopeComparer =>
@@ -56,6 +56,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         _options = options;
         _typed = typedPolicy;
         _cteScopeStack.Push(new HashSet<string>(CteScopeComparer));
+        _cteMaskedColumns.Push(new Dictionary<string, HashSet<string>>(CteScopeComparer));
     }
 
     private SecurityScope CurrentScope =>
@@ -105,19 +106,21 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         if (node.With != null)
         {
             _cteScopeStack.Push(new HashSet<string>(_cteScopeStack.Peek(), CteScopeComparer));
+            _cteMaskedColumns.Push(new Dictionary<string, HashSet<string>>(_cteMaskedColumns.Peek(), CteScopeComparer));
             var ctes = new List<CommonTableExpression>();
             foreach (var cte in node.With.Ctes)
             {
                 string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(cte.Name);
                 EnsureCteNameIsUnambiguous(cteKey);
-                // SR-M-25: a user CTE must not share its name with a table referenced by an injected policy predicate.
-                _cteFilterGuard.RegisterCte(cte.Name.Value);
+                var cteMaskedCols = CollectMaskedOutputColumns(cte.Query, cte.ColumnAliases);
                 if (node.With.IsRecursive)
                 {
                     // CR-ADG-29: a recursive CTE sees its own name in its body (self-reference); the base tables of the anchor
                     // and recursive members are still secured. A name that is also a catalog table is ambiguous and rejected.
                     EnsureRecursiveCteIsNotACatalogTable(cte.Name);
                     _cteScopeStack.Peek().Add(cteKey);
+                    if (cteMaskedCols.Count > 0)
+                        _cteMaskedColumns.Peek()[cteKey] = cteMaskedCols;
                 }
 
                 // Non-recursive: visit the CTE body BEFORE adding the name to the scope (Exit-timing, SEC-CTE & SEC C-02)
@@ -132,6 +135,8 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                     if (!node.With.IsRecursive) _definingNonRecursiveCtes.RemoveAt(_definingNonRecursiveCtes.Count - 1);
                 }
                 _cteScopeStack.Peek().Add(cteKey);
+                if (cteMaskedCols.Count > 0)
+                    _cteMaskedColumns.Peek()[cteKey] = cteMaskedCols;
 
                 // CR-ADG-01 / INV-11: on the typed path the definition is emitted as the delimited scope key, so the gateway's
                 // CTE decision and the database's name binding cannot diverge (Oracle upper-cases unquoted names, SQL Server
@@ -150,6 +155,9 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             {
                 EnsureNoMaskedColumnReferencesInPredicate(tbl, alias, node.OrderBy, "ORDER BY");
             }
+            var derived = new List<(string SourceName, string? Alias, HashSet<string> MaskedColumns)>();
+            CollectDerivedMaskedSources(node.Body, derived);
+            EnsureNoDerivedMaskedColumnReferencesInPredicate(derived, node.OrderBy, "ORDER BY");
         }
 
         var body = (QueryBody)Visit(node.Body);
@@ -174,6 +182,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         if (node.With != null)
         {
             _cteScopeStack.Pop();
+            _cteMaskedColumns.Pop();
         }
 
         _subqueryDepth--;
@@ -191,6 +200,8 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         {
             var tables = new List<(string TableName, string? Alias)>();
             CollectTableSources(node.From, tables);
+            var derived = new List<(string SourceName, string? Alias, HashSet<string> MaskedColumns)>();
+            CollectDerivedMaskedSources(node.From, derived);
 
             if (node.Where != null)
             {
@@ -198,6 +209,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 {
                     EnsureNoMaskedColumnReferencesInPredicate(tbl, alias, node.Where, "WHERE");
                 }
+                EnsureNoDerivedMaskedColumnReferencesInPredicate(derived, node.Where, "WHERE");
             }
 
             if (node.Having != null)
@@ -206,9 +218,11 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 {
                     EnsureNoMaskedColumnReferencesInPredicate(tbl, alias, node.Having, "HAVING");
                 }
+                EnsureNoDerivedMaskedColumnReferencesInPredicate(derived, node.Having, "HAVING");
             }
 
             CheckJoinConditions(node.From, tables);
+            CheckDerivedJoinConditions(node.From, derived);
         }
 
         EnsureNoMaskedColumnsInAggregatesAndGrouping(node);

@@ -7496,7 +7496,7 @@
       "Group": "ast",
       "Sql": "@mask-partial",
       "Outcome": "ok",
-      "Expected": "SELECT CASE WHEN [email] IS NULL THEN NULL WHEN LEN([email]) <= (@p0 + @p1) THEN REPLICATE(@p2, 5) ELSE CONCAT(LEFT([email], @p0), REPLICATE(@p2, CASE WHEN LEN([email]) > (@p0 + @p1) THEN LEN([email]) - (@p0 + @p1) ELSE 5 END), RIGHT([email], @p1)) END AS [r] FROM [s].[t]",
+      "Expected": "SELECT CASE WHEN [email] IS NULL THEN NULL WHEN LEN([email]) <= (GREATEST(CAST(@p0 AS int), 0) + GREATEST(CAST(@p1 AS int), 0)) THEN REPLICATE(@p2, 5) ELSE CONCAT(LEFT([email], GREATEST(CAST(@p0 AS int), 0)), REPLICATE(@p2, CASE WHEN LEN([email]) > (GREATEST(CAST(@p0 AS int), 0) + GREATEST(CAST(@p1 AS int), 0)) THEN LEN([email]) - (GREATEST(CAST(@p0 AS int), 0) + GREATEST(CAST(@p1 AS int), 0)) ELSE 5 END), RIGHT([email], GREATEST(CAST(@p1 AS int), 0))) END AS [r] FROM [s].[t]",
       "Parameters": [
         {
           "Marker": "@p0",
