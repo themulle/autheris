@@ -51,8 +51,21 @@ The audit subsystem decouples in-memory high-throughput hash chaining from asymm
   - `RecordRequiredAsync` throws `AuditUnavailableException` when the record cannot be written ("no audit, no data"); the API maps it to `503` with `Retry-After`. Used for ALLOW records and administrative changes.
   - `RecordBestEffortAsync` logs and counts (`autheris_audit_write_failed_total{tier}`) but never throws. Used where a failing sink must not change the outcome (for example tenant-collision denials).
   - `RecordAsync` dispatches through `AuditPolicyTable`, which assigns an explicit `AuditFailurePolicy` (`FailClosed` or `BestEffort`) to every `AuditEventTypes` entry; unknown types are `FailClosed`.
-- A denial is never turned into an allow by an audit failure.
-- The ReBAC table gate keeps denying when its dependency fails, now records `authz_dependency_failure_total`, and lets cancellation propagate.
+- Api endpoints, `AccessAuditMiddleware`, the ReBAC seed service and `GovernedSqlExecutor` write only through `IAuditWriter`; an architecture rule rejects direct `IAuditLogRepository` writes in the Api layer.
+- Required records written after a committed change (ReBAC tuple changes, token revocation, tenant collision resolution) use a non-cancelable token, so a client disconnect cannot drop the record. `RecordAsync`/`RecordRequiredAsync` rethrow `OperationCanceledException` only when the caller's own token was cancelled.
+- ReBAC administration has explicit event types and policies:
+
+  | Event type | Policy |
+  | :--- | :--- |
+  | `REBAC_TUPLE_ADDED` | `FailClosed` |
+  | `REBAC_TUPLE_REMOVED` | `FailClosed` |
+  | `REBAC_INVALIDATION_FAILED` | `FailClosed` |
+  | `REBAC_TUPLE_SEED` | `BestEffort` (startup seed) |
+  | `WEBSQL_DML_FAILED` | `FailClosed` (a DML statement that failed during execution; `WEBSQL_DML_REJECTED` is used for rejections) |
+
+- When the audit store is unavailable, `POST`/`DELETE /api/v1/rebac/tuples`, `POST /api/admin/tokens/revoke` and `POST /api/admin/tenant-registry/{tenantId}/resolve-collision` answer `503` with `Retry-After: 5` (`AuditUnavailableException`); the change itself may already be committed, so clients retry idempotently.
+- A denial never depends on the audit outcome: `AccessAuditMiddleware` writes `DENY` records best-effort and every other decision as a required record (an unavailable store fails the request closed). A denial is never turned into an allow by an audit failure.
+- The ReBAC table gate keeps denying when its dependency fails, records `authz_dependency_failure_total`, and lets cancellation propagate.
 
 ---
 

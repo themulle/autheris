@@ -1,6 +1,5 @@
 # F-SEC-04: Relationship-Based Access Control (ReBAC via OpenFGA / Zanzibar)
 
-**Status:** [Done] (100% GA – Next-Gen)  
 **Components:** [`RebacEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/RebacEndpoints.cs), [`IRebacAuthorizationService.cs`](file:///root/autheris/src/Autheris.Application/Security/IRebacAuthorizationService.cs), [`OpenFgaRebacClient.cs`](file:///root/autheris/src/Autheris.Infrastructure/Security/OpenFgaRebacClient.cs)
 
 ---
@@ -44,6 +43,10 @@ evaluator denies a table for which no tuple grants the relation. All paths take 
 
 Enable `EnforceOnQueryPaths` only once `can_query` tuples are maintained for every table; otherwise every query on
 these paths is denied. Consent, Casbin and row filters apply in addition, ReBAC only ever restricts.
+
+### Relationship administration and audit
+
+`POST /api/v1/rebac/tuples` (list of tuples) and `DELETE /api/v1/rebac/tuples` (one tuple) require `GovernanceAdmin` or `ClusterAdmin`; a non-ClusterAdmin may only change tuples of its own tenant. After each change the tenant's ReBAC cache is invalidated and the change is audited through `IAuditWriter` with `REBAC_TUPLE_ADDED` (`ALLOW`) or `REBAC_TUPLE_REMOVED` (`REVOKED` or `NOOP`). These records are required (`FailClosed`) and written with a non-cancelable token: when the audit store is unavailable the request answers `503` with `Retry-After: 5`, although the tuple change is already committed, so clients retry idempotently. A failed cache invalidation is audited as `REBAC_INVALIDATION_FAILED` (`DENY`) and answered with `503`. Tuples seeded at startup are audited best-effort as `REBAC_TUPLE_SEED`. See [F-AUDIT-01](f-audit-01-hardened-cryptographic-audit.md#9-unified-audit-contract-iauditwriter).
 
 ---
 

@@ -1,7 +1,6 @@
 # F-GOV-09: Virtual Filters (Relation-Scoped Cross-Channel Mandatory Row Filtering)
 
-**Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`VirtualFilterEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/VirtualFilterEndpoints.cs), [`MandatoryRowFilterResolver.cs`](file:///root/autheris/src/Autheris.Application/VirtualFilters/MandatoryRowFilterResolver.cs), [`StructuredFilterSqlBuilder.cs`](file:///root/autheris/src/Autheris.Application/VirtualFilters/StructuredFilterSqlBuilder.cs), [`SqlFilterCompiler.cs`](file:///root/autheris/src/Autheris.Application/VirtualFilters/SqlFilterCompiler.cs), [`VirtualFilterAdministrationService.cs`](file:///root/autheris/src/Autheris.Application/VirtualFilters/VirtualFilterAdministrationService.cs), [`VirtualFilterSnapshotProvider.cs`](file:///root/autheris/src/Autheris.Application/VirtualFilters/VirtualFilterSnapshotProvider.cs), [`TableAccessPolicy.cs`](file:///root/autheris/src/Autheris.Application/Policy/TableAccessPolicy.cs)
+**Components:** [`VirtualFilterEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/VirtualFilterEndpoints.cs), [`EffectiveFilterInspector.cs`](file:///root/autheris/src/Autheris.Application/VirtualFilters/EffectiveFilterInspector.cs), [`MandatoryRowFilterResolver.cs`](file:///root/autheris/src/Autheris.Application/VirtualFilters/MandatoryRowFilterResolver.cs), [`StructuredFilterSqlBuilder.cs`](file:///root/autheris/src/Autheris.Application/VirtualFilters/StructuredFilterSqlBuilder.cs), [`SqlFilterCompiler.cs`](file:///root/autheris/src/Autheris.Application/VirtualFilters/SqlFilterCompiler.cs), [`VirtualFilterAdministrationService.cs`](file:///root/autheris/src/Autheris.Application/VirtualFilters/VirtualFilterAdministrationService.cs), [`VirtualFilterSnapshotProvider.cs`](file:///root/autheris/src/Autheris.Application/VirtualFilters/VirtualFilterSnapshotProvider.cs), [`TableAccessPolicy.cs`](file:///root/autheris/src/Autheris.Application/Policy/TableAccessPolicy.cs)
 
 ---
 
@@ -183,20 +182,30 @@ For GitOps pipelines (Talos), Autheris provides atomic sync endpoints:
 Auditors and security engineers can inspect effective filters for any user:
 
 ```http
-GET /api/v1/governance/effective-filters?user=S-1-5-21-12345678-500&table=sales.dbo.orders
+GET /api/v1/governance/effective-filters?user=S-1-5-21-12345678-500&groups=S-1-5-21-12345678-1201&table=sales.dbo.orders
 Authorization: Bearer <token>
 ```
 
-**Response:**
+**Response (single table, abbreviated):**
 ```json
 {
   "user": "S-1-5-21-12345678-500",
   "table": "sales.dbo.orders",
-  "decision": "Permit",
-  "appliedFilters": [ "active_client_only" ],
-  "effectiveSql": "EXISTS (SELECT 1 FROM sales.dbo.clients c WHERE c.id = autheris_target.client_id AND c.status = 'ACTIVE')"
+  "dialect": "SqlServer",
+  "generation": 42,
+  "decision": "allow",
+  "reason": null,
+  "sql": "EXISTS (SELECT 1 FROM sales.dbo.clients c WHERE c.id = autheris_target.client_id AND c.status = 'ACTIVE')",
+  "applied_filters": [ "active_client_only" ],
+  "profiles": [
+    { "profile": "sales-reps", "scope": "...", "in_scope": true, "uncovered": null, "bindings": [ { "filter": "active_client_only", "pattern": "sales.dbo.*", "applies": true, "reason": null, "missing_columns": [], "superseded_by": null } ] }
+  ]
 }
 ```
+
+- `decision` is `allow` (no or applying filters), `deny` (an evaluation error) or `unmatched-deny` (the object is not covered by an in-scope profile).
+- Query parameters: `user` (SID, required), `groups` and `roles` (comma-separated), `tenant` (another tenant only for a canonical `ClusterAdmin`), `table` (`domain.schema.table`). Without `table` the endpoint lists all catalog tables page by page (`page`, `pageSize` 1..500, default 100) and answers `{ user, page, page_size, total, objects: [ { table, decision, applied_filters, reason } ] }`.
+- The endpoint delegates authorization, audit and resolution to `IEffectiveFilterInspector` (Application layer). It requires `FilterAdmin`, `GovernanceAdmin` or `SecurityAuditor`; a missing role is audited as `VIRTUAL_FILTER_ADMIN_DENIED` and answered with `403`. Every successful inspection is audited as `VIRTUAL_FILTER_EFFECTIVE_INSPECTED`. Both records are required: an unavailable audit store fails the request closed (`503`). An architecture test forbids repository dependencies in `VirtualFilterEndpoints`.
 
 ---
 
