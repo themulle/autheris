@@ -58,6 +58,7 @@ public sealed class GatewayOptions
     [Required] public TenantIsolationOptions TenantIsolation { get; init; } = new();
     [Required] public ODataOptions OData { get; init; } = new();
     [Required] public WebhooksOptions Webhooks { get; init; } = new();
+    [Required] public FieldSunsettingOptions FieldSunsetting { get; init; } = new();
 
     /// <summary>
     /// Getting Started Preset Profile: "Strict" (Default) or "Quickstart".

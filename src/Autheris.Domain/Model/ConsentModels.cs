@@ -89,6 +89,7 @@ public sealed class Consent
 
     public IReadOnlyList<ConsentColumnRule> ColumnRules { get; set; } = Array.Empty<ConsentColumnRule>();
     public IReadOnlyList<ConsentRowFilter> RowFilters { get; set; } = Array.Empty<ConsentRowFilter>();
+    public string? RowFilterCondition { get; init; }
 
     public bool IsActive(DateTimeOffset atTime)
     {

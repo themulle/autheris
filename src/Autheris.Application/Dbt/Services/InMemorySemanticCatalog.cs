@@ -13,10 +13,18 @@ public sealed class InMemorySemanticCatalog : ISemanticCatalogService
 {
     private readonly ConcurrentDictionary<string, DbtMetric> _metrics = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, DbtSemanticModel> _models = new(StringComparer.OrdinalIgnoreCase);
+    private volatile string _manifestVersion = "1.0";
+
+    public string ManifestVersion => _manifestVersion;
 
     public Task RegisterManifestAsync(DbtSemanticManifest manifest, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(manifest);
+
+        if (!string.IsNullOrWhiteSpace(manifest.Version))
+        {
+            _manifestVersion = manifest.Version;
+        }
 
         foreach (var model in manifest.SemanticModels)
         {
@@ -25,7 +33,9 @@ public sealed class InMemorySemanticCatalog : ISemanticCatalogService
 
         foreach (var metric in manifest.Metrics)
         {
-            _metrics[metric.Name] = metric;
+            _metrics[metric.Name] = string.IsNullOrWhiteSpace(metric.Version) && !string.IsNullOrWhiteSpace(manifest.Version)
+                ? metric with { Version = manifest.Version }
+                : metric;
         }
 
         return Task.CompletedTask;

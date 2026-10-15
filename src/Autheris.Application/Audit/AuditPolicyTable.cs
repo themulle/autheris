@@ -73,6 +73,10 @@ public static class AuditPolicyTable
         [AuditEventTypes.RebacTupleRemoved] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.RebacInvalidationFailed] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.RebacTupleSeed] = AuditFailurePolicy.BestEffort,
+        [AuditEventTypes.AggregateQuery] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.MetricQuery] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.MetadataSyntheticSample] = AuditFailurePolicy.BestEffort,
+        [AuditEventTypes.QueryAnalysisEvaluated] = AuditFailurePolicy.BestEffort,
     };
 
     public static IReadOnlyDictionary<string, AuditFailurePolicy> All => Table;
