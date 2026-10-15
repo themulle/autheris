@@ -1,0 +1,1713 @@
+{
+  "engine": "postgresql",
+  "tables": [
+    {
+      "name": "access_profile_assignments",
+      "columns": [
+        {
+          "name": "profile_id",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "subject",
+          "type": "CHARACTER VARYING(256)",
+          "family": "string"
+        },
+        {
+          "name": "subject_type",
+          "type": "CHARACTER VARYING(32)",
+          "family": "string"
+        },
+        {
+          "name": "assigned_at",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "family": "datetime"
+        },
+        {
+          "name": "expires_at",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "family": "datetime"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "profile_id",
+        "subject"
+      ],
+      "indexes": [
+        {
+          "name": "ix_access_profile_assignments_subject",
+          "unique": false,
+          "columns": [
+            "tenant_id",
+            "subject"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "access_profiles",
+      "columns": [
+        {
+          "name": "profile_id",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "name",
+          "type": "CHARACTER VARYING(256)",
+          "family": "string"
+        },
+        {
+          "name": "masking_mode",
+          "type": "CHARACTER VARYING(32)",
+          "family": "string"
+        },
+        {
+          "name": "target_tables",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "row_filter_predicate",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "justification",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_by",
+          "type": "CHARACTER VARYING(256)",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "family": "datetime"
+        },
+        {
+          "name": "valid_to",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "family": "datetime"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "profile_id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "approval_steps",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "consent_request_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "step_number",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "approver_sid",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "decision",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "rejection_reason",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "decided_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "ux_approval_steps_req_step",
+          "unique": true,
+          "columns": [
+            "consent_request_id",
+            "step_number"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "audit_dead_letter",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "batch_json",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "error_message",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "failed_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "audit_log_entries",
+      "columns": [
+        {
+          "name": "rowid",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "occurred_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "event_type",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "actor_sid",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "target_table",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "target_column",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "decision",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "trace_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "details_json",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "prev_hash",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "entry_hash",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "seq",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "rowid"
+      ],
+      "indexes": [
+        {
+          "name": "idx_audit_actor_sid",
+          "unique": false,
+          "columns": [
+            "actor_sid",
+            "occurred_at"
+          ]
+        },
+        {
+          "name": "idx_audit_seq",
+          "unique": true,
+          "columns": [
+            "seq"
+          ]
+        },
+        {
+          "name": "idx_audit_target_table",
+          "unique": false,
+          "columns": [
+            "target_table",
+            "occurred_at"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "autheris_cdc_watermarks",
+      "columns": [
+        {
+          "name": "source",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "domain_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "schema_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "table_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "watermark",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "fencing_token",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "updated_by",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "source",
+        "domain_name",
+        "schema_name",
+        "table_name"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "cloudevent_subscriptions",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "target_url",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "filter_table",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "filter_operations",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "hmac_secret_protected",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "is_enabled",
+          "type": "BOOLEAN",
+          "family": "boolean"
+        },
+        {
+          "name": "custom_headers_json",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_by_sid",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_by_groups_json",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_by_roles_json",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_ms",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "ix_cloudevent_subs_tenant",
+          "unique": false,
+          "columns": [
+            "tenant_id",
+            "is_enabled"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "column_masking_rules",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "table_column_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "rule_type",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "pattern_or_format",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "replacement",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "hmac_key_id",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "consent_column_rules",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "consent_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "table_column_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "column_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "access_level",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "applicable_scopes",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "consent_requests",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "table_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "requester_sid",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "requested_grantee_type",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "requested_grantee_ref",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "business_justification",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "requested_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "requested_valid_to",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "itsm_ticket_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "requester_identifiers_json",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "ux_consent_requests_ticket",
+          "unique": true,
+          "columns": [
+            "(expression)",
+            "itsm_ticket_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "consent_row_filters",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "consent_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "filter_group",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "table_column_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "column_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "operator",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "value_type",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "value_json",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "value_source",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "user_attribute",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "filter_type",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "dependent_table",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "dependent_table_alias",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "foreign_key_column",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "primary_key_column",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "subquery_predicate_json",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "target_temporal_column",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "dependent_valid_from_column",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "dependent_valid_to_column",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "target_table_alias",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "additional_hops_json",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "consents",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "table_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "consent_request_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "effect",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "grantee_type",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "grantee_sid",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "role_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "role_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "valid_from",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "valid_to",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "is_revoked",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "revoked_by_sid",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "revoked_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "revoke_reason",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "ux_consents_request",
+          "unique": true,
+          "columns": [
+            "consent_request_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "data_owner_delegations",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "data_owner_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "delegate_sid",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "valid_from",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "valid_to",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "reason",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "data_owners",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "ad_sid",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "ad_account",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "display_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "email",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "is_active",
+          "type": "INTEGER",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "ux_data_owners_sid",
+          "unique": true,
+          "columns": [
+            "ad_sid"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "itsm_outbox",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "request_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "event_type",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "payload_json",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "preferred_system",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "status",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "retry_count",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "max_retries",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "next_retry_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "last_error",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_itsm_outbox_status_retry",
+          "unique": false,
+          "columns": [
+            "status",
+            "next_retry_at"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "policy_epochs",
+      "columns": [
+        {
+          "name": "table_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "domain",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "schema_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "table_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "epoch",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "table_id"
+      ],
+      "indexes": [
+        {
+          "name": "ux_policy_epochs_natural",
+          "unique": true,
+          "columns": [
+            "domain",
+            "schema_name",
+            "table_name"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "role_members",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "role_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "member_type",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "member_sid",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "roles",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "role_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "table_columns",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "table_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "column_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "data_type",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "is_sensitive",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "long_description",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "doc_source",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "meta_json",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "ux_table_columns_natural",
+          "unique": true,
+          "columns": [
+            "table_id",
+            "column_name"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "table_index_columns",
+      "columns": [
+        {
+          "name": "index_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "column_ordinal",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "table_column_id",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "index_id",
+        "column_ordinal"
+      ],
+      "indexes": [
+        {
+          "name": "ux_table_index_columns_column",
+          "unique": true,
+          "columns": [
+            "index_id",
+            "table_column_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "table_indexes",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "table_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "index_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "is_unique",
+          "type": "BOOLEAN",
+          "family": "boolean"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "ux_table_indexes_name",
+          "unique": true,
+          "columns": [
+            "table_id",
+            "index_name"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "table_owners",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "table_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "data_owner_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "owner_role",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "ux_table_owners_natural",
+          "unique": true,
+          "columns": [
+            "table_id",
+            "data_owner_id",
+            "owner_role"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "table_primary_key_columns",
+      "columns": [
+        {
+          "name": "table_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "key_ordinal",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "table_column_id",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "table_id",
+        "key_ordinal"
+      ],
+      "indexes": [
+        {
+          "name": "ux_table_pk_columns_column",
+          "unique": true,
+          "columns": [
+            "table_id",
+            "table_column_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "table_relations",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "parent_table_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "child_table_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "relation_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "join_key_parent",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "join_key_child",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "cardinality",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "tables",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "source_type",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "source_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "schema_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "table_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "display_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "long_description",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "doc_source",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "sensitivity",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "requires_four_eyes",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "is_active",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "data_source_type",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "http_endpoint_json",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "plugin_name",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "ux_tables_natural",
+          "unique": true,
+          "columns": [
+            "source_name",
+            "schema_name",
+            "table_name"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "tenant_registry",
+      "columns": [
+        {
+          "name": "normalized_key",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "collided",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "first_seen_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "normalized_key"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "virtual_filter_access_profiles",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "definition_json",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "definition_hash",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "managed_path",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "managed_commit",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "updated_by",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "virtual_filter_generation",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "generation",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "virtual_filters",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "definition_json",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "definition_hash",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "managed_path",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "managed_commit",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "updated_by",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "webhook_outbox",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "source",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "subscription_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "owner_tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "event_tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "event_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "event_type",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "event_source",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "event_time_ms",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "payload_json",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "attempt",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "max_attempts",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "state",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "next_attempt_ms",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "lease_until_ms",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "lease_owner",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "last_status_code",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "last_error_code",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_ms",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "updated_ms",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "ix_webhook_outbox_due",
+          "unique": false,
+          "columns": [
+            "state",
+            "next_attempt_ms"
+          ]
+        },
+        {
+          "name": "ix_webhook_outbox_lease",
+          "unique": false,
+          "columns": [
+            "state",
+            "lease_until_ms"
+          ]
+        },
+        {
+          "name": "ix_webhook_outbox_owner",
+          "unique": false,
+          "columns": [
+            "owner_tenant_id",
+            "state"
+          ]
+        },
+        {
+          "name": "ux_webhook_outbox_dedupe",
+          "unique": true,
+          "columns": [
+            "source",
+            "subscription_id",
+            "event_id"
+          ]
+        }
+      ]
+    }
+  ]
+}

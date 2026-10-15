@@ -8,8 +8,34 @@ public static partial class TableKeyDefinitionValidator
     public const int MaxColumnsPerKey = 32;
     public const int MaxIndexesPerTable = 64;
 
-    [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
+    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]{0,127}\z")]
     private static partial Regex IndexNameRegex();
+
+    private const int MaxEchoedNameLength = 64;
+
+    /// <summary>Bounded, markup-free rendering of caller-supplied names for exception messages (no log/HTML/prompt injection).</summary>
+    private static string Safe(string? value)
+    {
+        if (value is null)
+        {
+            return string.Empty;
+        }
+
+        var length = Math.Min(value.Length, MaxEchoedNameLength);
+        var chars = new char[length + (value.Length > length ? 3 : 0)];
+        for (var i = 0; i < length; i++)
+        {
+            var c = value[i];
+            chars[i] = char.IsAsciiLetterOrDigit(c) || c is '_' or '.' or ' ' ? c : '?';
+        }
+
+        if (value.Length > length)
+        {
+            chars[length] = chars[length + 1] = chars[length + 2] = '.';
+        }
+
+        return new string(chars);
+    }
 
     /// <summary>Returns metadata with the definition in catalog spelling; throws <see cref="TableDefinitionException"/>.</summary>
     public static TableMetadata Validate(TableMetadata metadata)
@@ -35,7 +61,7 @@ public static partial class TableKeyDefinitionValidator
 
                 var col = metadata.GetColumn(colName.Trim())
                     ?? throw new TableDefinitionException(
-                        $"Primary key column '{colName}' does not exist in table '{metadata.Identifier}'.");
+                        $"Primary key column '{Safe(colName)}' does not exist in table '{metadata.Identifier}'.");
 
                 if (!seenPk.Add(col.ColumnName))
                 {
@@ -62,19 +88,19 @@ public static partial class TableKeyDefinitionValidator
                 if (index == null || string.IsNullOrWhiteSpace(index.Name) || !IndexNameRegex().IsMatch(index.Name))
                 {
                     throw new TableDefinitionException(
-                        $"Index name '{index?.Name}' on table '{metadata.Identifier}' is invalid.");
+                        $"Index name '{Safe(index?.Name)}' on table '{metadata.Identifier}' is invalid.");
                 }
 
                 if (!seenIndexNames.Add(index.Name))
                 {
                     throw new TableDefinitionException(
-                        $"Index name '{index.Name}' is declared more than once on table '{metadata.Identifier}'.");
+                        $"Index name '{Safe(index.Name)}' is declared more than once on table '{metadata.Identifier}'.");
                 }
 
                 if (index.Columns == null || index.Columns.Count == 0 || index.Columns.Count > MaxColumnsPerKey)
                 {
                     throw new TableDefinitionException(
-                        $"Index '{index.Name}' on table '{metadata.Identifier}' must have between 1 and {MaxColumnsPerKey} columns.");
+                        $"Index '{Safe(index.Name)}' on table '{metadata.Identifier}' must have between 1 and {MaxColumnsPerKey} columns.");
                 }
 
                 var normalizedCols = new List<string>(index.Columns.Count);
@@ -84,17 +110,17 @@ public static partial class TableKeyDefinitionValidator
                     if (string.IsNullOrWhiteSpace(colName))
                     {
                         throw new TableDefinitionException(
-                            $"Index '{index.Name}' on table '{metadata.Identifier}' contains an empty column name.");
+                            $"Index '{Safe(index.Name)}' on table '{metadata.Identifier}' contains an empty column name.");
                     }
 
                     var col = metadata.GetColumn(colName.Trim())
                         ?? throw new TableDefinitionException(
-                            $"Index '{index.Name}' references unknown column '{colName}' on table '{metadata.Identifier}'.");
+                            $"Index '{Safe(index.Name)}' references unknown column '{Safe(colName)}' on table '{metadata.Identifier}'.");
 
                     if (!seenCols.Add(col.ColumnName))
                     {
                         throw new TableDefinitionException(
-                            $"Index '{index.Name}' on table '{metadata.Identifier}' lists column '{col.ColumnName}' more than once.");
+                            $"Index '{Safe(index.Name)}' on table '{metadata.Identifier}' lists column '{col.ColumnName}' more than once.");
                     }
 
                     normalizedCols.Add(col.ColumnName);

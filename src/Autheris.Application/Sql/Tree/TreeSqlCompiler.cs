@@ -282,18 +282,31 @@ public static partial class TreeSqlCompiler
             order.Add((column, term.Descending));
             Need(column);
         }
-        if (order.Count == 0 &&
-            Autheris.Application.Data.Services.GovernedTableReadPlanner.TryResolveClearKey(metadata, tableAccess.Decision, out var clearKey))
+        if (order.Count == 0)
         {
-            foreach (var column in clearKey)
+            // SD-2: the same default ordering as every other read path. The composite fallback sorts every clear column, so
+            // nested relation lists stop after the key rules to bound the cost.
+            var defaultOrdering = Autheris.Application.Data.Services.DefaultReadOrdering.Resolve(metadata, tableAccess.Decision);
+            var useDefault = defaultOrdering.Kind != Autheris.Application.Data.Services.DefaultOrderingKind.None &&
+                (path.Count == 0 || defaultOrdering.Kind != Autheris.Application.Data.Services.DefaultOrderingKind.ClearColumnComposite);
+            if (useDefault)
             {
-                if (!SafeNameRegex().IsMatch(column))
+                if (!defaultOrdering.Columns.All(c => SafeNameRegex().IsMatch(c)))
                 {
-                    order.Clear();
-                    break;
+                    // Fail closed (like the table-read planner): never silently drop the ORDER BY, which would make paging unstable.
+                    throw new GatewayInvalidQueryException("The table cannot be read in a stable order.");
                 }
-                order.Add((column, false));
-                Need(column);
+
+                foreach (var column in defaultOrdering.Columns)
+                {
+                    order.Add((column, false));
+                    Need(column);
+                }
+            }
+            else if (defaultOrdering.Kind == Autheris.Application.Data.Services.DefaultOrderingKind.None && path.Count == 0 && node.Offset > 0)
+            {
+                // No clear orderable column: paging beyond the first page would be unstable (same refusal and text as the planner).
+                throw new GatewayInvalidQueryException(Autheris.Application.Data.Services.GovernedTableReadPlanner.NoOrderableColumnMessage);
             }
         }
 

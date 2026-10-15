@@ -77,8 +77,17 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
         ArgumentNullException.ThrowIfNull(context);
 
         // 1. Resolve table metadata from repository or virtual system tables
-        var metadata = await _metadataRepository.GetTableMetadataAsync(request.Table, ct).ConfigureAwait(false)
-            ?? VirtualSystemTables.Get(request.Table);
+        TableMetadata? metadata;
+        try
+        {
+            metadata = await _metadataRepository.GetTableMetadataAsync(request.Table, ct).ConfigureAwait(false)
+                ?? VirtualSystemTables.Get(request.Table);
+        }
+        catch (TableMetadataUnavailableException)
+        {
+            // Invalid persisted definition: unavailable, never "absent" and never served partially (SD-3).
+            throw new TableNotFoundException(request.Table);
+        }
 
         if (metadata == null)
         {
@@ -171,6 +180,15 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             decision);
         var columnsToSelect = planned.ColumnsToSelect;
 
+        // Issue #94 (D-10): without any orderable clear column a later page cannot be positioned deterministically. The
+        // cross-source path plans offset 0 (the skip is in memory), so the offset is checked here for both paths. The text
+        // names no column.
+        bool unordered = planned.Ordering == DefaultOrderingKind.None;
+        if (unordered && offset > 0)
+        {
+            throw new UnorderedPagingException(nameof(request));
+        }
+
         // 6. Execution & Routing
         var queryRequest = new GovernedSqlQueryRequest(planned.Sql, planned.Parameters.Count > 0 ? planned.Parameters : null, Transport: request.Transport);
         GovernedSqlResult sqlResult;
@@ -217,6 +235,12 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
         int skip = isCrossSource ? offset : 0;
         int available = Math.Max(0, sourceRows.Count - skip);
         bool hasMore = available > limit;
+        if (unordered && hasMore)
+        {
+            // Refuse rather than return a first page that the next page may duplicate or skip.
+            throw new UnorderedPagingException(nameof(request));
+        }
+
         int pageCount = Math.Min(limit, available);
         var pagedRows = new List<IReadOnlyDictionary<string, object?>>(pageCount);
         for (int i = 0; i < pageCount; i++)

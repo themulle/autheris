@@ -245,7 +245,8 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
         // a1 runs, a2 and a3 are over the tenant cap and wait without holding a global slot: b and c still run.
         foreach (var t in new[] { "a", "a", "a", "b", "c" }) channel.Writer.TryWrite(Item(t));
 
-        await WaitUntilAsync(() => started.Contains("b") && started.Contains("c"));
+        // a1 is dispatched first, but its delegate may start after b and c on a busy runner: wait for all three.
+        await WaitUntilAsync(() => started.Contains("a") && started.Contains("b") && started.Contains("c"));
         started.Count(t => t == "a").ShouldBe(1);
 
         gateA.SetResult();

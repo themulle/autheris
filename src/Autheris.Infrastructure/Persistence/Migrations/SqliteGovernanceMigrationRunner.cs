@@ -1,5 +1,6 @@
 using System.Data.Common;
 using Autheris.Domain.Options;
+using Autheris.Infrastructure.Persistence.Migrations.Shape;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -22,6 +23,8 @@ public sealed class SqliteGovernanceMigrationRunner : GovernanceMigrationRunnerB
             })
     ];
 
+    private static readonly GovernanceSchemaShapeVerifier Verifier = new("sqlite", new SqliteSchemaCatalogReader());
+
     private readonly SqliteGovernanceRepository _repository;
 
     public SqliteGovernanceMigrationRunner(
@@ -35,6 +38,12 @@ public sealed class SqliteGovernanceMigrationRunner : GovernanceMigrationRunnerB
     }
 
     public override IReadOnlyList<MigrationStep> Steps => Catalogue;
+
+    internal override GovernanceSchemaShapeVerifier ShapeVerifier => Verifier;
+
+    protected override string EngineDisplayName => "SQLite";
+
+    protected override string DatabaseLabel(DbConnection connection) => SanitizeLabel(Path.GetFileName(connection.DataSource));
 
     protected override string CreateVersionTableSql =>
         "CREATE TABLE IF NOT EXISTS autheris_schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, checksum TEXT NOT NULL, applied_at TEXT NOT NULL, applied_by TEXT NOT NULL);";

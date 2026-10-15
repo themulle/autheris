@@ -1,0 +1,1732 @@
+{
+  "engine": "sqlserver",
+  "tables": [
+    {
+      "name": "ACCESS_PROFILE_ASSIGNMENTS",
+      "columns": [
+        {
+          "name": "profile_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "subject",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "subject_type",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "assigned_at",
+          "type": "DATETIMEOFFSET",
+          "family": "datetime"
+        },
+        {
+          "name": "expires_at",
+          "type": "DATETIMEOFFSET",
+          "family": "datetime"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "profile_id",
+        "subject"
+      ],
+      "indexes": [
+        {
+          "name": "IX_ACCESS_PROFILE_ASSIGNMENTS_SUBJECT",
+          "unique": false,
+          "columns": [
+            "tenant_id",
+            "subject"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ACCESS_PROFILES",
+      "columns": [
+        {
+          "name": "profile_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "masking_mode",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "target_tables",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "row_filter_predicate",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "justification",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_by",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIMEOFFSET",
+          "family": "datetime"
+        },
+        {
+          "name": "valid_to",
+          "type": "DATETIMEOFFSET",
+          "family": "datetime"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "profile_id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "APPROVAL_STEPS",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "consent_request_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "step_number",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "approver_sid",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "decision",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "rejection_reason",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "decided_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "ux_approval_steps_req_step",
+          "unique": true,
+          "columns": [
+            "consent_request_id",
+            "step_number"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "AUDIT_DEAD_LETTER",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "batch_json",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "error_message",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "failed_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "AUDIT_LOG_ENTRIES",
+      "columns": [
+        {
+          "name": "rowid",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "occurred_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "event_type",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "actor_sid",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "target_table",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "target_column",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "decision",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "trace_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "details_json",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "prev_hash",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "entry_hash",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "seq",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "rowid"
+      ],
+      "indexes": [
+        {
+          "name": "idx_audit_actor_sid",
+          "unique": false,
+          "columns": [
+            "actor_sid",
+            "occurred_at"
+          ]
+        },
+        {
+          "name": "idx_audit_seq",
+          "unique": true,
+          "columns": [
+            "seq"
+          ]
+        },
+        {
+          "name": "idx_audit_target_table",
+          "unique": false,
+          "columns": [
+            "target_table",
+            "occurred_at"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "AUDIT_LOG_TRUNCATE_GUARD",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "seq",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "autheris_cdc_watermarks",
+      "columns": [
+        {
+          "name": "source",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "domain_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "schema_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "table_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "watermark",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "fencing_token",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "updated_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "updated_by",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "source",
+        "domain_name",
+        "schema_name",
+        "table_name"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "CLOUDEVENT_SUBSCRIPTIONS",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "target_url",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "filter_table",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "filter_operations",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "hmac_secret_protected",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "is_enabled",
+          "type": "BIT",
+          "family": "boolean"
+        },
+        {
+          "name": "custom_headers_json",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_by_sid",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_by_groups_json",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_by_roles_json",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_ms",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "ix_cloudevent_subs_tenant",
+          "unique": false,
+          "columns": [
+            "tenant_id",
+            "is_enabled"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "COLUMN_MASKING_RULES",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "table_column_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "rule_type",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "pattern_or_format",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "replacement",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "hmac_key_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "CONSENT_COLUMN_RULES",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "consent_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "table_column_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "column_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "access_level",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "applicable_scopes",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "CONSENT_REQUESTS",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "table_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "requester_sid",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "requested_grantee_type",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "requested_grantee_ref",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "business_justification",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "status",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "requested_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "requested_valid_to",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "itsm_ticket_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "requester_identifiers_json",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "ux_consent_requests_ticket",
+          "unique": true,
+          "columns": [
+            "tenant_id",
+            "itsm_ticket_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "CONSENT_ROW_FILTERS",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "consent_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "filter_group",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "table_column_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "column_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "operator",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "value_type",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "value_json",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "value_source",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "user_attribute",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "filter_type",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "dependent_table",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "dependent_table_alias",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "foreign_key_column",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "primary_key_column",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "subquery_predicate_json",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "target_temporal_column",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "dependent_valid_from_column",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "dependent_valid_to_column",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "target_table_alias",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "additional_hops_json",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "CONSENTS",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "table_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "consent_request_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "effect",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "grantee_type",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "grantee_sid",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "role_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "role_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "valid_from",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "valid_to",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "is_revoked",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "revoked_by_sid",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "revoked_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "revoke_reason",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "ux_consents_request",
+          "unique": true,
+          "columns": [
+            "consent_request_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "DATA_OWNER_DELEGATIONS",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "data_owner_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "delegate_sid",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "valid_from",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "valid_to",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "reason",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "DATA_OWNERS",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "ad_sid",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "ad_account",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "display_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "email",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "is_active",
+          "type": "INT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "ux_data_owners_sid",
+          "unique": true,
+          "columns": [
+            "ad_sid"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ITSM_OUTBOX",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "request_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "event_type",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "payload_json",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "preferred_system",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "status",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "retry_count",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "max_retries",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "created_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "next_retry_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "last_error",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_itsm_outbox_status_retry",
+          "unique": false,
+          "columns": [
+            "status",
+            "next_retry_at"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "POLICY_EPOCHS",
+      "columns": [
+        {
+          "name": "table_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "domain",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "schema_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "table_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "epoch",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "updated_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "table_id"
+      ],
+      "indexes": [
+        {
+          "name": "ux_policy_epochs_natural",
+          "unique": true,
+          "columns": [
+            "domain",
+            "schema_name",
+            "table_name"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ROLE_MEMBERS",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "role_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "member_type",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "member_sid",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "ROLES",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "role_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "description",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "TABLE_COLUMNS",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "table_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "column_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "data_type",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "is_sensitive",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "description",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "long_description",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "doc_source",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "meta_json",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "ux_table_columns_natural",
+          "unique": true,
+          "columns": [
+            "table_id",
+            "column_name"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "TABLE_INDEX_COLUMNS",
+      "columns": [
+        {
+          "name": "index_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "column_ordinal",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "table_column_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "index_id",
+        "column_ordinal"
+      ],
+      "indexes": [
+        {
+          "name": "UX_TABLE_INDEX_COLUMNS_COLUMN",
+          "unique": true,
+          "columns": [
+            "index_id",
+            "table_column_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "TABLE_INDEXES",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "table_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "index_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "is_unique",
+          "type": "BIT",
+          "family": "boolean"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "UX_TABLE_INDEXES_NAME",
+          "unique": true,
+          "columns": [
+            "table_id",
+            "index_name"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "TABLE_OWNERS",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "table_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "data_owner_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "owner_role",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "ux_table_owners_natural",
+          "unique": true,
+          "columns": [
+            "table_id",
+            "data_owner_id",
+            "owner_role"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "TABLE_PRIMARY_KEY_COLUMNS",
+      "columns": [
+        {
+          "name": "table_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "key_ordinal",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "table_column_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "table_id",
+        "key_ordinal"
+      ],
+      "indexes": [
+        {
+          "name": "UX_TABLE_PK_COLUMNS_COLUMN",
+          "unique": true,
+          "columns": [
+            "table_id",
+            "table_column_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "TABLE_RELATIONS",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "parent_table_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "child_table_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "relation_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "join_key_parent",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "join_key_child",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "cardinality",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "TABLES",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "source_type",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "source_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "schema_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "table_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "display_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "description",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "long_description",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "doc_source",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "sensitivity",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "requires_four_eyes",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "is_active",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "data_source_type",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "http_endpoint_json",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "plugin_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "ux_tables_natural",
+          "unique": true,
+          "columns": [
+            "source_name",
+            "schema_name",
+            "table_name"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "TENANT_REGISTRY",
+      "columns": [
+        {
+          "name": "normalized_key",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "collided",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "first_seen_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "normalized_key"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "VIRTUAL_FILTER_ACCESS_PROFILES",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "definition_json",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "definition_hash",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "managed_path",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "managed_commit",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "updated_by",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "VIRTUAL_FILTER_GENERATION",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "generation",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "VIRTUAL_FILTERS",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "source",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "definition_json",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "definition_hash",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "managed_path",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "managed_commit",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "updated_by",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "WEBHOOK_OUTBOX",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "source",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "subscription_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "owner_tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "event_tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "event_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "event_type",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "event_source",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "event_time_ms",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "payload_json",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "attempt",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "max_attempts",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "state",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "next_attempt_ms",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "lease_until_ms",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "lease_owner",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "last_status_code",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "last_error_code",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_ms",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "updated_ms",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "ix_webhook_outbox_due",
+          "unique": false,
+          "columns": [
+            "state",
+            "next_attempt_ms"
+          ]
+        },
+        {
+          "name": "ix_webhook_outbox_lease",
+          "unique": false,
+          "columns": [
+            "state",
+            "lease_until_ms"
+          ]
+        },
+        {
+          "name": "ix_webhook_outbox_owner",
+          "unique": false,
+          "columns": [
+            "owner_tenant_id",
+            "state"
+          ]
+        },
+        {
+          "name": "ux_webhook_outbox_dedupe",
+          "unique": true,
+          "columns": [
+            "source",
+            "subscription_id",
+            "event_id"
+          ]
+        }
+      ]
+    }
+  ]
+}

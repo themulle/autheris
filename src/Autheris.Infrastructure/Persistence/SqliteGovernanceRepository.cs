@@ -46,6 +46,14 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
 
     private void QueueMetadataInvalidation(TableIdentifier table) => _pendingMetadataInvalidations.Add(table.ToString().ToLowerInvariant());
 
+    /// <summary>Test seam: drops cached metadata after a test changed rows behind the repository.</summary>
+    private readonly CatalogKeyDefinitionStore.KeyTableProbe _keyTables = new();
+
+    /// <summary>Models a fresh repository instance for tests that drop the key tables after the probe was cached.</summary>
+    internal void ResetKeyTableProbeForTesting() => _keyTables.Reset();
+
+    internal void InvalidateMetadataCacheForTesting() => _metadataCache.Clear();
+
     private void ApplyMetadataInvalidations()
     {
         if (_pendingMetadataInvalidations.Count == 0)

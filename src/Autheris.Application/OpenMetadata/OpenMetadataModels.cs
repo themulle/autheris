@@ -65,6 +65,16 @@ public sealed record OpenMetadataColumn
     public List<OpenMetadataColumn>? Children { get; init; }
 }
 
+/// <summary>OpenMetadata <c>tableConstraints</c> entry (PRIMARY_KEY, UNIQUE, FOREIGN_KEY, ...). Untrusted input.</summary>
+public sealed record OpenMetadataTableConstraint
+{
+    [JsonPropertyName("constraintType")]
+    public string? ConstraintType { get; init; }
+
+    [JsonPropertyName("columns")]
+    public List<string>? Columns { get; init; }
+}
+
 public sealed record OpenMetadataTable
 {
     [JsonPropertyName("id")]
@@ -102,6 +112,9 @@ public sealed record OpenMetadataTable
 
     [JsonPropertyName("serviceType")]
     public string? ServiceType { get; init; }
+
+    [JsonPropertyName("tableConstraints")]
+    public List<OpenMetadataTableConstraint>? TableConstraints { get; init; }
 }
 
 public sealed record OpenMetadataRule

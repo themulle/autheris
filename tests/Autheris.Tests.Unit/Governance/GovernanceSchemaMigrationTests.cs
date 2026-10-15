@@ -56,6 +56,45 @@ public sealed class GovernanceSchemaMigrationTests
     }
 
     [Fact]
+    public async Task Run_OnFreshDatabase_CreatesKeyAndIndexDefinitionTables()
+    {
+        var cs = NewConnectionString();
+        using var repository = NewRawRepository(cs);
+
+        await NewRunner(repository, cs).RunAsync();
+
+        Scalar(repository, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('TABLE_PRIMARY_KEY_COLUMNS', 'TABLE_INDEXES', 'TABLE_INDEX_COLUMNS')").ShouldBe(3);
+        Scalar(repository, "SELECT COUNT(*) FROM pragma_table_info('TABLE_PRIMARY_KEY_COLUMNS') WHERE name IN ('table_id','key_ordinal','table_column_id')").ShouldBe(3);
+        Scalar(repository, "SELECT COUNT(*) FROM pragma_table_info('TABLE_PRIMARY_KEY_COLUMNS') WHERE pk > 0").ShouldBe(2);
+        Scalar(repository, "SELECT COUNT(*) FROM pragma_table_info('TABLE_INDEXES') WHERE name IN ('id','table_id','index_name','is_unique')").ShouldBe(4);
+        Scalar(repository, "SELECT COUNT(*) FROM pragma_table_info('TABLE_INDEXES') WHERE name = 'id' AND pk = 1").ShouldBe(1);
+        Scalar(repository, "SELECT COUNT(*) FROM pragma_table_info('TABLE_INDEX_COLUMNS') WHERE name IN ('index_id','column_ordinal','table_column_id')").ShouldBe(3);
+        Scalar(repository, "SELECT COUNT(*) FROM pragma_table_info('TABLE_INDEX_COLUMNS') WHERE pk > 0").ShouldBe(2);
+        Scalar(repository, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name IN ('UX_TABLE_PK_COLUMNS_COLUMN','UX_TABLE_INDEXES_NAME','UX_TABLE_INDEX_COLUMNS_COLUMN') AND sql LIKE 'CREATE UNIQUE INDEX%'").ShouldBe(3);
+    }
+
+    [Fact]
+    public void BaselineMigrationChecksums_AreUnchanged()
+    {
+        static string Expected(string engine) => MigrationStep.ComputeChecksum(engine + ":0001:baseline_governance_schema:v1");
+
+        new SqliteGovernanceMigrationRunner(NewRawRepository(NewConnectionString()), Options.Create(Gateway(NewConnectionString())))
+            .Steps[0].Checksum.ShouldBe(Expected("sqlite"));
+        // Pinned literal values guard against accidental changes to the identity string.
+        Expected("sqlite").ShouldBe(PinnedChecksum("sqlite"));
+        Expected("postgresql").ShouldBe(PinnedChecksum("postgresql"));
+        Expected("sqlserver").ShouldBe(PinnedChecksum("sqlserver"));
+    }
+
+    private static string PinnedChecksum(string engine) => engine switch
+    {
+        "sqlite" => "5B2722FAAB8D29BE6B490F9A1B18BA3BEF882260EBF6225706E55349647575AA",
+        "postgresql" => "486B0B352CCA7CEF31BC3EEF6693D89CAB858D47DB6A593F2C47F61F51FE1815",
+        "sqlserver" => "28F8528ACFAB5F5463B761C2F23F5BC1F29079F701D78F1665D74EA4A02D05B9",
+        _ => throw new ArgumentOutOfRangeException(nameof(engine))
+    };
+
+    [Fact]
     public void Constructor_RunsNoDdl()
     {
         using var repository = NewRawRepository(NewConnectionString());

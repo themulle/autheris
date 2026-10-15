@@ -419,8 +419,20 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
                 continue;
             }
 
-            var meta = await _tableMetadataRepository.GetTableMetadataAsync(resolvedTable.Value, cancellationToken).ConfigureAwait(false);
-            if (meta != null && !meta.Table.IsActive)
+            TableMetadata? meta;
+            var unavailable = false;
+            try
+            {
+                meta = await _tableMetadataRepository.GetTableMetadataAsync(resolvedTable.Value, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Autheris.Domain.Exceptions.TableNotFoundException)
+            {
+                // Issue #94 (M3): unavailable metadata is handled like an inactive table (fail closed, same answer).
+                meta = null;
+                unavailable = true;
+            }
+
+            if (unavailable || (meta != null && !meta.Table.IsActive))
             {
                 activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
                 McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);

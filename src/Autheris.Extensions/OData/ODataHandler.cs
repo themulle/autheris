@@ -173,23 +173,8 @@ public sealed partial class ODataHandler(
                     continue;
                 }
 
-                var allowedColumnNames = new HashSet<string>(allowedColumns.Select(c => c.ColumnName), StringComparer.OrdinalIgnoreCase);
-                var filteredPk = tableMeta.PrimaryKeyColumns.Count > 0 && tableMeta.PrimaryKeyColumns.All(allowedColumnNames.Contains)
-                    ? tableMeta.PrimaryKeyColumns
-                    : Array.Empty<string>();
-                var filteredIndexes = tableMeta.Indexes.Count > 0
-                    ? tableMeta.Indexes.Where(idx => idx.Columns.Count > 0 && idx.Columns.All(allowedColumnNames.Contains)).ToList()
-                    : (IReadOnlyList<Autheris.Domain.Model.TableIndexDefinition>)Array.Empty<Autheris.Domain.Model.TableIndexDefinition>();
-
-                var filteredMeta = new Autheris.Domain.Model.TableMetadata
-                {
-                    Identifier = tableMeta.Identifier,
-                    Table = tableMeta.Table,
-                    PrimaryKeyColumns = filteredPk,
-                    Indexes = filteredIndexes,
-                    Columns = allowedColumns,
-                    ColumnMaskingRules = tableMeta.ColumnMaskingRules
-                };
+                // SD-4 / SEC-94-03: keys, indexes and Meta marker keys that touch a hidden column are dropped as a whole.
+                var filteredMeta = Autheris.Application.Data.Services.TableKeyVisibility.Restrict(tableMeta, allowedColumns);
 
                 authorizedTables.Add(filteredMeta);
             }
@@ -330,6 +315,7 @@ public sealed partial class ODataHandler(
         IReadOnlyList<IReadOnlyDictionary<string, object?>> rows;
         TableAccessDecision decision;
         long? totalCount;
+        var unordered = false;
 
         try
         {
@@ -348,6 +334,7 @@ public sealed partial class ODataHandler(
                     RequestHeaders: headers),
                 ct).ConfigureAwait(false);
             (rows, decision, totalCount) = (page.Rows, page.Decision, page.TotalCount);
+            unordered = page.Unordered;
             if (includeCount && totalCount == null && decision.IsAllowed)
             {
                 return Error(501, "NotImplemented", "The total row count cannot be determined for this data source.");
@@ -471,6 +458,13 @@ public sealed partial class ODataHandler(
         }
 
         string? nextLink = null;
+        if (unordered && rows.Count > effectiveTop)
+        {
+            // Issue #94 (D-10): without an orderable clear column the pages cannot be positioned deterministically. Refuse
+            // instead of returning a page that the next one may duplicate or skip. The text names no column.
+            return Error(400, "InvalidQueryOption", Autheris.Application.Data.Services.GovernedTableReadPlanner.NoOrderableColumnMessage);
+        }
+
         if (rows.Count > effectiveTop)
         {
             nextLink = BuildNextLink(serviceRootUrl, table, effectiveSkip + effectiveTop, top, select, orderBy, filter, includeCount);
@@ -490,7 +484,11 @@ public sealed partial class ODataHandler(
     {
         var cleanRoot = serviceRootUrl.TrimEnd('/');
         var sb = new System.Text.StringBuilder();
-        sb.Append(cleanRoot).Append('/').Append(table.Domain).Append('/').Append(table.Schema).Append('/').Append(table.TableName);
+        // SEC-94-14: every path segment is escaped, so a name with '/', '?' or '#' cannot alter the link structure.
+        sb.Append(cleanRoot).Append('/')
+          .Append(Uri.EscapeDataString(table.Domain)).Append('/')
+          .Append(Uri.EscapeDataString(table.Schema)).Append('/')
+          .Append(Uri.EscapeDataString(table.TableName));
         sb.Append("?$skip=").Append(nextSkip);
         if (top.HasValue)
         {

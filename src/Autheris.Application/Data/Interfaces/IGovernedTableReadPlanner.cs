@@ -2,6 +2,7 @@ namespace Autheris.Application.Data.Interfaces;
 
 using System.Collections.Generic;
 using Autheris.Application.Analytics;
+using Autheris.Application.Data.Services;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -30,12 +31,13 @@ public sealed record TableReadIntent(
 
 /// <summary>
 /// The planned statement: Trino text, the client parameters its markers name, and the columns the statement selects (in
-/// the spelling the caller requested).
+/// the spelling the caller requested). <paramref name="Ordering"/> is the rule behind the ORDER BY (internal; never serialized to a caller).
 /// </summary>
 public sealed record PlannedTableRead(
     string Sql,
     IReadOnlyDictionary<string, object?> Parameters,
-    IReadOnlyList<string> ColumnsToSelect);
+    IReadOnlyList<string> ColumnsToSelect,
+    DefaultOrderingKind Ordering = DefaultOrderingKind.Explicit);
 
 /// <summary>
 /// Transport-neutral governed aggregation intent (#28, #37).

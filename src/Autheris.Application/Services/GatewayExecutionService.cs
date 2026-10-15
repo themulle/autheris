@@ -342,6 +342,10 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 MaskingDisabled: _options?.IsColumnMaskingDisabled == true,
                 MaxBytes: maxBytes));
 
+        // Issue #94: the transport must not offer a continuation when no deterministic order was possible.
+        var unordered = pageItems.TryGetValue(TableQueryItems.Ordering, out var orderingKind) &&
+            string.Equals(orderingKind as string, nameof(Autheris.Application.Data.Services.DefaultOrderingKind.None), StringComparison.Ordinal);
+
         long? totalCount = null;
         if (countTotal)
         {
@@ -355,7 +359,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             totalCount = count;
         }
 
-        return new TableQueryPage(processedRows, decision, totalCount);
+        return new TableQueryPage(processedRows, decision, totalCount, unordered);
     }
 
     /// <summary>
@@ -453,7 +457,16 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         }
 
         // Verify table existence in metadata catalog (SG-12: inactive tables treated as not found)
-        var metadata = await _metadataRepository.GetTableMetadataAsync(table, ct);
+        TableMetadata? metadata;
+        try
+        {
+            metadata = await _metadataRepository.GetTableMetadataAsync(table, ct);
+        }
+        catch (TableMetadataUnavailableException)
+        {
+            throw new TableNotFoundException(table);
+        }
+
         if (metadata == null || !metadata.Table.IsActive)
         {
             throw new TableNotFoundException(table);
@@ -584,7 +597,16 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         TableIdentifier table,
         CancellationToken ct = default)
     {
-        var metadata = await _metadataRepository.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
+        TableMetadata? metadata;
+        try
+        {
+            metadata = await _metadataRepository.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
+        }
+        catch (TableMetadataUnavailableException)
+        {
+            metadata = null;
+        }
+
         if (metadata == null || !metadata.Table.IsActive)
         {
             return TableAccessDecision.Denied(table, $"Table '{table}' not found in metadata catalog.");

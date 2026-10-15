@@ -12,6 +12,7 @@ using Autheris.Application.DataCatalog.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -263,7 +264,6 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                 var schemaLongDesc = schemaObj.TryGetProperty("x-long-description", out var longDescProp) ? longDescProp.GetString() : null;
 
                 var columns = new List<TableColumn>();
-                var primaryKeys = new List<string>();
 
                 if (schemaObj.TryGetProperty("properties", out var props) && props.ValueKind == JsonValueKind.Object)
                 {
@@ -310,33 +310,6 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                     continue;
                 }
 
-                // Primary Key Detection
-                if (schemaObj.TryGetProperty("required", out var reqArray) && reqArray.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var req in reqArray.EnumerateArray())
-                    {
-                        var rName = req.GetString();
-                        if (rName != null && columns.Any(c => string.Equals(c.ColumnName, rName, StringComparison.OrdinalIgnoreCase)))
-                        {
-                            primaryKeys.Add(rName);
-                        }
-                    }
-                }
-
-                if (primaryKeys.Count == 0)
-                {
-                    var idCol = columns.FirstOrDefault(c => string.Equals(c.ColumnName, "id", StringComparison.OrdinalIgnoreCase) ||
-                                                           c.ColumnName.EndsWith("_id", StringComparison.OrdinalIgnoreCase));
-                    if (idCol != null)
-                    {
-                        primaryKeys.Add(idCol.ColumnName);
-                    }
-                    else
-                    {
-                        primaryKeys.Add(columns[0].ColumnName);
-                    }
-                }
-
                 // Path resolution
                 var resolvedPath = pathMap.TryGetValue(schemaName, out var pMatch)
                     ? pMatch
@@ -346,7 +319,18 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                 var tableId = new TableIdentifier(domain, "api", tableName);
 
                 // SEC M-30 / SG-11: New tables are created with IsActive = false so they must be reviewed/activated.
-                var existing = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
+                TableMetadata? existing;
+                try
+                {
+                    existing = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
+                }
+                catch (TableMetadataUnavailableException)
+                {
+                    // SEC-94-01: an unavailable table is never ingested as a new one (its stored masking rules would be lost).
+                    warnings.Add($"Schema '{schemaName}': skipped, the stored metadata of table '{tableId}' is unavailable (invalid key or index definition).");
+                    continue;
+                }
+
                 var effectiveColumns = columns;
                 var isActive = false;
 
@@ -386,9 +370,12 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                             ApiKeySecretName = apiKeySecretName
                         }
                     },
-                    Columns = effectiveColumns,
-                    PrimaryKeyColumns = primaryKeys
+                    Columns = effectiveColumns
                 };
+
+                // Issue #94 (D-8): keys come only from x-autheris-primary-key / x-autheris-indexes; nothing is guessed.
+                // The definition is validated against the columns that are actually ingested; an invalid one is dropped as a whole.
+                tableMetadata = ApplyKeyExtensions(tableMetadata, schemaObj);
 
                 // SEC M-30: an OpenAPI (re-)ingestion must never weaken governance of an existing table
                 // (RequiresFourEyes, Sensitivity, IsActive, column IsSensitive, masking rules) nor re-route it
@@ -428,5 +415,102 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
             Warnings: warnings,
             SkippedTableNames: skippedTableNames
         );
+    }
+
+    /// <summary>
+    /// Reads <c>x-autheris-primary-key</c> (string array) and <c>x-autheris-indexes</c> (objects with name, columns, optional boolean unique).
+    /// The caps are applied on the JSON lengths before anything is copied; a malformed extension drops the whole definition.
+    /// </summary>
+    private TableMetadata ApplyKeyExtensions(TableMetadata metadata, JsonElement schemaObj)
+    {
+        var hasKey = schemaObj.TryGetProperty("x-autheris-primary-key", out var keyElement);
+        var hasIndexes = schemaObj.TryGetProperty("x-autheris-indexes", out var indexElement);
+        if (!hasKey && !hasIndexes)
+        {
+            return metadata;
+        }
+
+        List<string>? primaryKey = null;
+        var indexes = new List<TableIndexDefinition>();
+        var valid = true;
+
+        if (hasKey)
+        {
+            valid = TryReadColumns(keyElement, out primaryKey);
+        }
+
+        if (valid && hasIndexes)
+        {
+            if (indexElement.ValueKind != JsonValueKind.Array || indexElement.GetArrayLength() > TableKeyDefinitionValidator.MaxIndexesPerTable)
+            {
+                valid = false;
+            }
+            else
+            {
+                foreach (var item in indexElement.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.Object ||
+                        !item.TryGetProperty("name", out var nameProp) || nameProp.ValueKind != JsonValueKind.String ||
+                        !item.TryGetProperty("columns", out var columnsProp) || !TryReadColumns(columnsProp, out var indexColumns))
+                    {
+                        valid = false;
+                        break;
+                    }
+
+                    var unique = false;
+                    if (item.TryGetProperty("unique", out var uniqueProp))
+                    {
+                        if (uniqueProp.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                        {
+                            valid = false;
+                            break;
+                        }
+
+                        unique = uniqueProp.GetBoolean();
+                    }
+
+                    indexes.Add(new TableIndexDefinition(nameProp.GetString()!, indexColumns!, unique));
+                }
+            }
+        }
+
+        if (!valid)
+        {
+            _logger.LogWarning(
+                "OpenAPI schema of table {Table} declares a malformed key definition; the definition was dropped and the stored one kept.",
+                metadata.Identifier);
+            return metadata;
+        }
+
+        return CatalogKeyDefinitionImport.Apply(metadata, primaryKey, indexes, _logger, "OpenAPI");
+    }
+
+    private static bool TryReadColumns(JsonElement element, out List<string>? columns)
+    {
+        columns = null;
+        if (element.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        var length = element.GetArrayLength();
+        if (length is 0 or > TableKeyDefinitionValidator.MaxColumnsPerKey)
+        {
+            return false;
+        }
+
+        var result = new List<string>(length);
+        foreach (var item in element.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(item.GetString()))
+            {
+                return false;
+            }
+
+            result.Add(item.GetString()!);
+        }
+
+        columns = result;
+        return true;
     }
 }

@@ -94,7 +94,8 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
             Math.Max(0, context.Offset),
             SqlTransports.Rest);
 
-        var planned = _planner.Plan(intent, metadata, decision);
+        var planned = PlanOrThrow(intent, metadata, decision);
+        context.Items[TableQueryItems.Ordering] = planned.Ordering.ToString();
         var service = _executionService();
 
         var result = await service.ExecuteQueryBufferedAsync(
@@ -168,7 +169,8 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
             Math.Max(0, context.Offset),
             SqlTransports.Rest);
 
-        var planned = _planner.Plan(intent, metadata, decision);
+        var planned = PlanOrThrow(intent, metadata, decision);
+        context.Items[TableQueryItems.Ordering] = planned.Ordering.ToString();
         var service = _executionService();
 
         context.Items[RlsPushdownExecutedKey] = true;
@@ -194,6 +196,19 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
             }
 
             yield return row;
+        }
+    }
+
+    /// <summary>A paged read without any possible order is a client error (400), not a server fault.</summary>
+    private PlannedTableRead PlanOrThrow(TableReadIntent intent, TableMetadata metadata, TableAccessDecision decision)
+    {
+        try
+        {
+            return _planner.Plan(intent, metadata, decision);
+        }
+        catch (UnorderedPagingException ex)
+        {
+            throw new GatewayInvalidQueryException(ex.Message);
         }
     }
 

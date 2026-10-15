@@ -152,7 +152,7 @@ public sealed class ODataTests
     }
 
     [Fact]
-    public void ODataCsdlGenerator_WhenPrimaryKeyColumnDoesNotExistInTable_FallsBackSafelyToIdOrAllColumns()
+    public void ODataCsdlGenerator_WhenPrimaryKeyColumnDoesNotExistInTable_FallsBackToAllColumnsAsCompositeKey()
     {
         var table = new TableMetadata
         {
@@ -169,9 +169,11 @@ public sealed class ODataTests
         var xml = ODataCsdlGenerator.GenerateMetadataXml([table]);
 
         xml.ShouldNotContain("<PropertyRef Name=\"ghost_col\" />");
+        // Issue #94: no subset and no `id` guess; without a resolvable full key every property forms the key.
         xml.ShouldContain("<PropertyRef Name=\"id\" />");
+        xml.ShouldContain("<PropertyRef Name=\"name\" />");
         xml.ShouldContain("<Property Name=\"id\" Type=\"Edm.Int32\" Nullable=\"false\" />");
-        xml.ShouldContain("<Property Name=\"name\" Type=\"Edm.String\" />");
+        xml.ShouldContain("<Property Name=\"name\" Type=\"Edm.String\" Nullable=\"false\" />");
     }
 
     [Fact]
