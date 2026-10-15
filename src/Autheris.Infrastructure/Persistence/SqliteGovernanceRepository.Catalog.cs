@@ -353,12 +353,12 @@ public partial class SqliteGovernanceRepository
         var conn = scope.Connection;
         {
             Guid tableId;
+            string? targetDesc = metadata.Table.Description;
+            string? targetLongDesc = metadata.Table.LongDescription;
+            string? targetDocSource = metadata.Table.DocumentationSource;
             using var tx = conn.BeginTransaction();
             try
             {
-                string? targetDesc = metadata.Table.Description;
-                string? targetLongDesc = metadata.Table.LongDescription;
-                string? targetDocSource = metadata.Table.DocumentationSource;
                 using (var selectCmd = conn.CreateCommand())
                 {
                     selectCmd.Transaction = tx;
