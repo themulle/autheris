@@ -66,7 +66,14 @@ public sealed partial class WorkflowPolicyTests
         var job = Jobs(ci.Lines)["sql-compiler-gate"];
         job.ShouldContain(l => l.Contains("SQLGATE_PROFILE: pr", StringComparison.Ordinal));
         job.ShouldContain(l => l.Contains("-c Debug", StringComparison.Ordinal) && l.Contains("Category=SqlGate", StringComparison.Ordinal), "the security mutants run only in Debug");
-        job.ShouldContain(l => l.Contains("-c Release", StringComparison.Ordinal) && l.Contains("Category=SqlGate", StringComparison.Ordinal), "the Release run proves the mutant hooks are absent");
+
+        // The Release run of the gate tests (it proves the mutant hooks are absent from shipped code) is part of the build-and-test job,
+        // which runs the whole solution in Release; its filter must not exclude the gate tests or the engine test assembly.
+        var buildAndTest = Jobs(ci.Lines)["build-and-test"];
+        var releaseRun = buildAndTest.SingleOrDefault(l => l.Contains("dotnet test Autheris.sln", StringComparison.Ordinal) && l.Contains("-c Release", StringComparison.Ordinal));
+        releaseRun.ShouldNotBeNull("build-and-test must run the solution tests in Release");
+        releaseRun.ShouldNotContain("SqlGate", Case.Insensitive, "the Release run must not filter out the gate tests");
+        releaseRun.ShouldNotContain("TrinoSqlEngine", Case.Insensitive, "the Release run must not filter out the engine tests");
         // The default checkout of a pull_request run is the merge ref; an explicit ref would test the PR head instead.
         job.ShouldNotContain(l => Regex.IsMatch(l, @"^\s*ref:\s"), "the gate must test the merge result, not the PR head");
         job.ShouldNotContain(l => l.Contains("retry", StringComparison.OrdinalIgnoreCase));
