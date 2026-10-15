@@ -79,9 +79,9 @@ CI gain. Re-baseline the table above with the result.
 
 | Work package | Status |
 |---|---|
-| CI check of WP-TS-01 | Open: GitHub `Build & Test` 23:14 (`f396e742`) vs 20:18 before; inspect TRX artifacts from WP-TS-00. |
+| CI check of WP-TS-01 | Resolved 2026-10-15: on `a2e4e4ee` the job took 23:09, of which `Autheris.Tests.Integration` took 17:51 (serial in-process, ~1071 s of class wall time over 93 classes, ~600 s of it fixture start-up). The integration assembly, not the database containers, is the critical path; addressed by WP-TS-02. |
 | WP-TS-00 | Implemented (`--logger trx` + `test-results-*` artifacts in `ci.yml`) |
-| WP-TS-02 | Planned |
+| WP-TS-02 | Implemented 2026-10-15: `integration-tests` matrix job (4 shards) in `ci.yml`; `.github/scripts/integration-shard-filter.py` assigns classes greedily by the measured wall times in `tests/Autheris.Tests.Integration/ci-shard-weights.json` (unknown classes: 10 s); the last shard is the exact complement (verified: 768 discovered tests, 768 unique across the 4 shards). Each shard builds itself (no artifact hand-off; build ≈ 3 min). The main job excludes `Autheris.Tests.Integration.`. Estimated shard load ≈ 4.5 min each. Also added `concurrency` with `cancel-in-progress` for pull requests in `ci.yml` and `codeql.yml`. Refresh the weights file from a CI log when shards drift apart. |
 | WP-TS-03 | Implemented (`Category=Spark` trait on Spark execution tests + parallel `spark-integration-tests` job in `ci.yml`) |
 | WP-TS-04 | Implemented (`CecilModuleCache` + cached production types and call graph in `Autheris.Tests.Architecture`) |
 | WP-TS-05 | Planned |
