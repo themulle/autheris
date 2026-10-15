@@ -305,108 +305,53 @@ end";
         {
             var db = _multiplexer.GetDatabase();
 
-            if (_options.PipelinedMGetEnabled)
+            // SEC-SC-05 / WP-PF-01: single-key GETs only. A multi-key MGET raises CROSSSLOT on Redis Cluster,
+            // which would invalidate every multi-table decision. The multiplexer pipelines concurrent single-key
+            // commands over one connection per node, so this costs no extra round trips. Any failure fails closed.
+            var redisKeys = new RedisKey[pendingRedisChecks.Count];
+            for (int i = 0; i < redisKeys.Length; i++)
             {
-                var redisKeys = pendingRedisChecks
-                    .Select(c => (RedisKey)$"{_redisPrefix}epoch:{c.Table.ToString().ToLowerInvariant()}")
-                    .ToArray();
+                redisKeys[i] = $"{_redisPrefix}epoch:{pendingRedisChecks[i].Table.ToString().ToLowerInvariant()}";
+            }
 
-                var values = await db.StringGetAsync(redisKeys).ConfigureAwait(false);
-
-                for (int i = 0; i < pendingRedisChecks.Count; i++)
+            var values = new RedisValue[redisKeys.Length];
+            if (_options.PipelinedMGetEnabled && redisKeys.Length > 1)
+            {
+                var reads = new Task<RedisValue>[redisKeys.Length];
+                for (int i = 0; i < reads.Length; i++)
                 {
-                    var check = pendingRedisChecks[i];
-                    var key = check.Table.ToString().ToLowerInvariant();
-                    var redisKey = redisKeys[i];
-                    var val = values[i];
+                    reads[i] = db.StringGetAsync(redisKeys[i]);
+                }
 
-                    long authoritativeEpoch;
-                    _highestSeenRedisEpoch.TryGetValue(key, out var highestSeen);
-
-                    long parsed = val.HasValue && long.TryParse(val.ToString(), out var p) ? p : 0;
-                    if (parsed <= 0 || parsed < highestSeen)
-                    {
-                        var minRequired = highestSeen > 0 ? highestSeen + 1 : 1;
-                        var evalResult = await db.ScriptEvaluateAsync(
-                            RollbackLuaScript,
-                            [redisKey],
-                            [(RedisValue)minRequired.ToString()]).ConfigureAwait(false);
-
-                        if (evalResult is not null && !evalResult.IsNull && long.TryParse(evalResult.ToString(), out var scriptVal))
-                        {
-                            authoritativeEpoch = scriptVal;
-                        }
-                        else
-                        {
-                            authoritativeEpoch = minRequired;
-                        }
-
-                        _highestSeenRedisEpoch.AddOrUpdate(key, authoritativeEpoch, (_, old) => Math.Max(old, authoritativeEpoch));
-                    }
-                    else
-                    {
-                        authoritativeEpoch = parsed;
-                        _highestSeenRedisEpoch.AddOrUpdate(key, authoritativeEpoch, (_, old) => Math.Max(old, authoritativeEpoch));
-                    }
-
-                    _epochs[key] = authoritativeEpoch;
-                    _lastEpochRefresh[key] = DateTimeOffset.UtcNow;
-
-                    if (budgetMs > 0 && _microCache.Count < _options.MaxLocalEpochEntries)
-                    {
-                        _microCache[key] = new LocalEpochEntry(authoritativeEpoch, DateTimeOffset.UtcNow);
-                    }
-
-                    results[check.Table] = authoritativeEpoch == check.CachedEpoch;
+                await Task.WhenAll(reads).ConfigureAwait(false);
+                for (int i = 0; i < reads.Length; i++)
+                {
+                    values[i] = reads[i].Result;
                 }
             }
             else
             {
-                foreach (var check in pendingRedisChecks)
+                for (int i = 0; i < redisKeys.Length; i++)
                 {
-                    var key = check.Table.ToString().ToLowerInvariant();
-                    var redisKey = (RedisKey)$"{_redisPrefix}epoch:{key}";
-                    var val = await db.StringGetAsync(redisKey).ConfigureAwait(false);
-
-                    long authoritativeEpoch;
-                    _highestSeenRedisEpoch.TryGetValue(key, out var highestSeen);
-
-                    long parsed = val.HasValue && long.TryParse(val.ToString(), out var p) ? p : 0;
-                    if (parsed <= 0 || parsed < highestSeen)
-                    {
-                        var minRequired = highestSeen > 0 ? highestSeen + 1 : 1;
-                        var evalResult = await db.ScriptEvaluateAsync(
-                            RollbackLuaScript,
-                            [redisKey],
-                            [(RedisValue)minRequired.ToString()]).ConfigureAwait(false);
-
-                        if (evalResult is not null && !evalResult.IsNull && long.TryParse(evalResult.ToString(), out var scriptVal))
-                        {
-                            authoritativeEpoch = scriptVal;
-                        }
-                        else
-                        {
-                            authoritativeEpoch = minRequired;
-                        }
-
-                        _highestSeenRedisEpoch.AddOrUpdate(key, authoritativeEpoch, (_, old) => Math.Max(old, authoritativeEpoch));
-                    }
-                    else
-                    {
-                        authoritativeEpoch = parsed;
-                        _highestSeenRedisEpoch.AddOrUpdate(key, authoritativeEpoch, (_, old) => Math.Max(old, authoritativeEpoch));
-                    }
-
-                    _epochs[key] = authoritativeEpoch;
-                    _lastEpochRefresh[key] = DateTimeOffset.UtcNow;
-
-                    if (budgetMs > 0 && _microCache.Count < _options.MaxLocalEpochEntries)
-                    {
-                        _microCache[key] = new LocalEpochEntry(authoritativeEpoch, DateTimeOffset.UtcNow);
-                    }
-
-                    results[check.Table] = authoritativeEpoch == check.CachedEpoch;
+                    values[i] = await db.StringGetAsync(redisKeys[i]).ConfigureAwait(false);
                 }
+            }
+
+            for (int i = 0; i < pendingRedisChecks.Count; i++)
+            {
+                var check = pendingRedisChecks[i];
+                var key = check.Table.ToString().ToLowerInvariant();
+                var authoritativeEpoch = await ReconcileEpochAsync(db, key, redisKeys[i], values[i]).ConfigureAwait(false);
+
+                _epochs[key] = authoritativeEpoch;
+                _lastEpochRefresh[key] = DateTimeOffset.UtcNow;
+
+                if (budgetMs > 0 && _microCache.Count < _options.MaxLocalEpochEntries)
+                {
+                    _microCache[key] = new LocalEpochEntry(authoritativeEpoch, DateTimeOffset.UtcNow);
+                }
+
+                results[check.Table] = authoritativeEpoch == check.CachedEpoch;
             }
         }
         catch (Exception ex)
@@ -419,6 +364,31 @@ end";
         }
 
         return results;
+    }
+
+    private async Task<long> ReconcileEpochAsync(IDatabase db, string key, RedisKey redisKey, RedisValue val)
+    {
+        _highestSeenRedisEpoch.TryGetValue(key, out var highestSeen);
+        long parsed = val.HasValue && long.TryParse(val.ToString(), out var p) ? p : 0;
+        long authoritativeEpoch;
+        if (parsed <= 0 || parsed < highestSeen)
+        {
+            var minRequired = highestSeen > 0 ? highestSeen + 1 : 1;
+            var evalResult = await db.ScriptEvaluateAsync(
+                RollbackLuaScript,
+                [redisKey],
+                [(RedisValue)minRequired.ToString()]).ConfigureAwait(false);
+            authoritativeEpoch = evalResult is not null && !evalResult.IsNull && long.TryParse(evalResult.ToString(), out var scriptVal)
+                ? scriptVal
+                : minRequired;
+        }
+        else
+        {
+            authoritativeEpoch = parsed;
+        }
+
+        _highestSeenRedisEpoch.AddOrUpdate(key, authoritativeEpoch, (_, old) => Math.Max(old, authoritativeEpoch));
+        return authoritativeEpoch;
     }
 
     public async Task<bool> IsEpochValidAsync(TableIdentifier table, long cachedEpoch, CancellationToken ct = default)
