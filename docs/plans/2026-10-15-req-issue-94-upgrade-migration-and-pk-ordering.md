@@ -1,13 +1,29 @@
-# PRD: REQ-GOV-94 - Governance Schema Upgrade Reconciliation and Key-Based Read Ordering
+# PRD: REQ-GOV-94 - Governance Schema Shape Verification and Key-Based Read Ordering
 
 **Document ID:** `REQ-GOV-94`
 **Date:** 2026-10-15
-**Status:** APPROVED (Phase 1 complete, Phase 2 next)
+**Status:** APPROVED, amended by owner decision 2026-10-15 (Phase 2 plan: [2026-10-15-plan-issue-94-upgrade-migration-and-pk-ordering.md](2026-10-15-plan-issue-94-upgrade-migration-and-pk-ordering.md))
 **Author:** Enterprise Product Manager
 **Source:** GitHub issue #94 ("Update from v1.1.8 to v1.1.10: migration does not add columns, and tables without a primary key fail on ORDER BY id")
 **Branch:** `fix/issue-94-upgrade-migration-pk` (base `main` `574c82f1`)
 **Parent Plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
 **Related feature docs (read-only references):** [F-GOV-12 multi-engine governance storage](../features/f-gov-12-multi-engine-governance-storage.md)
+
+---
+
+## 0. Owner Decision 2026-10-15 (binding, supersedes conflicting text below)
+
+Autheris does **not** ship upgrade or repair migrations. There is no migration `0002`, no `ALTER TABLE`, no rename and no backfill for older governance shapes on any engine. A client that loads governance data from an older installation (the PoC client "Talos") is responsible for providing it in the newest schema. Consequences:
+
+- **Removed:** US-A1 and all of AC-A1.1 to AC-A1.8 (automatic upgrade of legacy shapes). Reason: owner decision; Autheris has no production deployment and keeps a single baseline (`0001`).
+- **Kept:** US-A2 (read-only shape verification that fails closed). AC-A2.3 is restated: the migration version is not recorded when the shape is wrong.
+- **Moot:** Q1 (PoC schema) and Q3 (duplicate `DATA_OWNERS.ad_sid`): no upgrade handling, no merge.
+- **Changed by consequence:** migration `0001` and its checksum stay unchanged, so no key column can be added. AC-B1.2 and AC-B1.3 (persisted keys) are replaced: keys are not persisted; SQL source keys are discovered at runtime from source metadata and cached (AC-B1.4). The architecture decision is recorded in the Phase-2 plan.
+- **Unchanged:** US-B1 (except the persistence ACs above), US-B2 and item 3 (triage), with the best-practice resolutions below.
+- **Open questions resolved by best practice (owner instruction, 2026-10-15):**
+  - Q1: the expected shape is generated from the current baseline (snapshot of a freshly migrated database per engine, strict-equality test), compares tables, columns (name and type family), primary keys and named indexes, reports all deviations at once in a deterministic message and tolerates extra objects. Tested with a synthetic old-shape database built from the v1.1.8 DDL.
+  - Q2: deterministic total order with a unique tiebreaker (primary key, then a NOT NULL unique index, then all orderable clear-text columns); an explicit order gets the default ordering columns appended as tiebreaker (AC-B2.7 amended); `@odata.nextLink` whenever more rows exist; WebSQL timeouts return 504 as RFC 9457 problem details; a genuine slow sort on an unindexed column is expected behaviour (index recommended, no workaround).
+  - Decisions and rationale: [Phase-2 plan](2026-10-15-plan-issue-94-upgrade-migration-and-pk-ordering.md), sections 0 and 2.
 
 ---
 
@@ -85,7 +101,7 @@ Competitors: Hasura refuses to track tables without a primary key for some featu
 ## 3. Scope
 
 ### 3.1 In scope
-- **A. Governance schema upgrade reconciliation** for SQLite, PostgreSQL and SQL Server.
+- **A. Governance schema shape verification** (read-only, fail closed) for SQLite, PostgreSQL and SQL Server. ~~Upgrade reconciliation~~ removed by owner decision 2026-10-15 (section 0).
 - **B. Primary key truth and ordering** for governed table reads (OData, REST data API, GraphQL table reads, MCP dataset reads that use `GovernedTableReadPlanner`/`GovernedDataQueryService`) and catalog/key reporting (CSDL, OpenAPI, catalog discovery, MCP catalog).
 - **C. Item 3 triage** (time-boxed, see section 6).
 
@@ -102,7 +118,9 @@ Competitors: Hasura refuses to track tables without a primary key for some featu
 
 ## 4. User Stories & Acceptance Criteria
 
-### US-A1: Automatic upgrade of known legacy governance shapes
+### US-A1: Automatic upgrade of known legacy governance shapes - REMOVED (owner decision 2026-10-15)
+
+> **Removed.** Autheris ships no upgrade/repair migrations; the client supplies governance data in the newest schema (section 0). AC-A1.1 to AC-A1.8 below are kept for traceability only and are not implemented.
 *As an operator, I want an upgrade from any Autheris version up to v1.1.8 (and from a v1.1.9/v1.1.10 database that recorded `0001` on an old shape) to complete automatically, so that I do not need manual SQL patches.*
 
 - **AC-A1.1** A new migration `0002` (name proposed: `reconcile_legacy_governance_shape`) exists for all three engines. It applies, idempotently and guarded by existence checks (`PRAGMA table_info` / `information_schema` / `COL_LENGTH`), every column, index and rename the v1.1.8 shims performed (table in section 1.2), with the same types and defaults as the current baseline. Migration `0001` and its checksum stay unchanged.
@@ -119,7 +137,7 @@ Competitors: Hasura refuses to track tables without a primary key for some featu
 
 - **AC-A2.1** After all pending migrations (and in `Mode=Verify` instead of applying), the runner verifies the expected shape: every table, column and index that the build's repositories reference exists. The expected model is derived from one source of truth per engine (the baseline plus later migrations), not a hand-maintained second list that can diverge; a unit test proves the verification model and the baseline DDL agree (a fresh database passes, a database with any single expected column dropped fails).
 - **AC-A2.2** On a mismatch, startup fails with `GovernanceSchemaDriftException` and a single actionable message: engine, database, the list of missing objects (`TABLE.column`, index names), the applied migration versions, and the remediation (restore from backup or contact support; a link to the runbook section). No secret or connection string is logged.
-- **AC-A2.3** A migration step that runs but leaves the shape incomplete is not recorded as applied (SQLite: whole run rolls back; PostgreSQL/SQL Server: the verification runs inside the run's lock and a failure aborts before the version insert of the last step, or the architect documents an equivalent guarantee).
+- **AC-A2.3** (restated 2026-10-15) When the shape is wrong, the migration version is not recorded: the verification runs inside the run's lock after the last pending step and before its version insert (SQLite: the whole run rolls back). A database that already records `0001` but has a wrong shape fails startup on every start. The verification is read-only: no DDL and no data change.
 - **AC-A2.4** Extra, unknown tables or columns do not fail verification (they are tolerated and logged once at Information level); only missing or type-incompatible expected objects fail.
 - **AC-A2.5** `Mode=Skip` keeps skipping (operator responsibility, already logged as a warning).
 
@@ -127,9 +145,9 @@ Competitors: Hasura refuses to track tables without a primary key for some featu
 *As a data consumer, I want the catalog to report the real key of a table, or none, never a guessed `id`.*
 
 - **AC-B1.1** `TableMetadata.PrimaryKeyColumns` defaults to an empty list. No repository or service substitutes `["id"]` (architecture test or grep-based test forbids the literal default in `TableModels.cs` and the three `*GovernanceRepository.Catalog.cs` files). Virtual system tables keep their explicit keys.
-- **AC-B1.2** Key membership is persisted per column (proposed: nullable `TABLE_COLUMNS.key_ordinal`, added by a migration on all three engines) and round-trips through `UpsertTableMetadataAsync`/`GetTableMetadataAsync` on all three engines; contract test per engine.
-- **AC-B1.3** Keys supplied by catalog ingestion (OpenAPI ingestion, OpenMetadata `tableConstraints` of type `PRIMARY_KEY` when present, dbt where a primary key constraint is declared, admin catalog APIs) are persisted. Ingestion paths that today copy `existingMeta.PrimaryKeyColumns` keep doing so.
-- **AC-B1.4** SQL sources: primary key columns are discovered from the live source metadata where the dialect exposes them (SQL Server `sys.indexes.is_primary_key`, PostgreSQL `pg_index.indisprimary`, Oracle `ALL_CONSTRAINTS` type `P`, SQLite `pragma table_info.pk`, DuckDB constraints; Databricks informational constraints if available, otherwise none). Discovery results are cached with the existing `GovernedCatalogProvider` TTL. The architect defines the precedence between a persisted key and a discovered key; the PM default is: persisted declared key if all its columns exist in the source, else discovered key, else none.
+- **AC-B1.2** ~~REPLACED 2026-10-15~~ (no schema change allowed; keys are not persisted, see AC-B1.4). Original text: Key membership is persisted per column (proposed: nullable `TABLE_COLUMNS.key_ordinal`, added by a migration on all three engines) and round-trips through `UpsertTableMetadataAsync`/`GetTableMetadataAsync` on all three engines; contract test per engine.
+- **AC-B1.3** ~~REPLACED 2026-10-15~~ (ingestion keys are not persisted; existing in-memory pass-through is unchanged). Original text: Keys supplied by catalog ingestion (OpenAPI ingestion, OpenMetadata `tableConstraints` of type `PRIMARY_KEY` when present, dbt where a primary key constraint is declared, admin catalog APIs) are persisted. Ingestion paths that today copy `existingMeta.PrimaryKeyColumns` keep doing so.
+- **AC-B1.4** SQL sources (amended 2026-10-15: primary key, else a NOT NULL unique index): primary key columns are discovered from the live source metadata where the dialect exposes them (SQL Server `sys.indexes.is_primary_key`, PostgreSQL `pg_index.indisprimary`, Oracle `ALL_CONSTRAINTS` type `P`, SQLite `pragma table_info.pk`, DuckDB constraints; Databricks informational constraints if available, otherwise none). Discovery results are cached with the existing `GovernedCatalogProvider` TTL. Precedence (amended 2026-10-15): an in-memory declared key (virtual system tables) if all its columns are governed columns, else the discovered key if all its columns are governed columns, else none.
 - **AC-B1.5** CSDL `<Key>`, OpenAPI, catalog discovery (`PrimaryKeys`), catalog search and MCP dataset catalog all use one shared key resolver; for a table without a resolvable key they report no key (or, for CSDL only, the documented existing composite fallback, because OData entity types require a key).
 
 ### US-B2: Deterministic, policy-safe ordering without a key
@@ -144,7 +162,7 @@ Competitors: Hasura refuses to track tables without a primary key for some featu
 - **AC-B2.4** `GovernedDataQueryService` offset-paging validation uses the same resolver as the planner (no contradiction between "needs a primary key" and the fallback).
 - **AC-B2.5** Paging stability test: for an unkeyed table with distinct rows, reading all pages via `nextLink` returns every row exactly once; for duplicate rows, the multiset of returned rows equals the table contents.
 - **AC-B2.6** `@odata.nextLink` is present when more rows exist than the page size, for keyed and unkeyed tables (OData handler test).
-- **AC-B2.7** Explicit `$orderby`/`orderBy` behaviour is unchanged (existing tests stay green), including the masked-column rejection.
+- **AC-B2.7** (amended 2026-10-15) Explicit `$orderby`/`orderBy` keeps its validation, including the masked-column rejection; the default ordering columns that are not already named (clear-text only) are appended as tiebreaker so page boundaries are deterministic.
 - **AC-B2.8** The fallback is documented in the data API and OData reference docs (Phase 6), including the performance note in section 7.
 
 ---
@@ -208,3 +226,11 @@ Competitors: Hasura refuses to track tables without a primary key for some featu
 | 4 | `csharp-tdd-developer` | Red tests first: AC-A1.2, AC-A1.3, AC-B2.1. |
 | 5 | `csharp-code-reviewer` | Review. |
 | 6 | `documentation-expert` | F-GOV-12, data API/OData reference, runbook, master plan. |
+
+## 11. Changelog
+
+| Date | Change |
+|---|---|
+| 2026-10-15 | Initial PRD (Phase 1). |
+| 2026-10-15 | Owner instruction: open questions resolved by best practice (Q1 shape derivation, Q2 paging/tiebreaker/problem details); AC-B1.4 adds the unique-index step; AC-B2.7 amended. |
+| 2026-10-15 | Owner decision: no upgrade/repair migrations (US-A1 / AC-A1.x removed), shape verification kept (AC-A2.3 restated), Q1/Q3 moot, key persistence (AC-B1.2/B1.3) replaced by runtime discovery because `0001` must stay unchanged. Title changed accordingly. |
