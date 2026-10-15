@@ -41,10 +41,12 @@ A persisted definition is validated again when it is read, with the full rule se
 
 - `GetTableMetadataAsync` throws `TableMetadataUnavailableException` (the message contains only the table id). The table is **unavailable**, never treated as absent and never served with a partial key.
 - `GetAllTablesAsync` leaves the table out and logs a Warning with the table id and the rule (no values).
-- Read paths answer as for an unknown table (404 or deny).
+- Read paths answer as for an unknown table on every transport: `TableMetadataUnavailableException` is a `TableNotFoundException`, so REST, WebSQL, OData, GraphQL, MCP and CDC give the same status, body and message as for a table that does not exist (no distinguishing detail).
 - Write and ingestion paths (data catalog sync, OpenMetadata sync and webhook, dbt ingestion, OpenAPI ingestion) skip that table with a warning and never upsert it as a new table, so stored masking rules are preserved.
 
-To repair such a table, correct or delete the rows in the three definition tables (section 3), or replace the definition with the admin endpoint once the rows are readable again.
+To repair such a table, replace the definition with the admin endpoint (section 4.1): it resolves the dataset from its catalog row without loading the stored definition, so an invalid stored definition does not block the repair. Alternatively correct or delete the rows in the three definition tables (section 3).
+
+The key tables are probed once per repository instance (a positive result is cached; a missing table is re-probed and always means unavailable). `GetAllTablesAsync` reads the primary key and index rows of all tables with one query each (chunked), keeping the per-table validation.
 
 ### 2.3 Keep unless replaced
 
@@ -106,29 +108,31 @@ Content-Type: application/json
 {
   "primaryKey": ["order_id", "line_no"],
   "indexes": [
-    { "name": "ux_order_lines_sku", "columns": ["order_id", "sku"], "isUnique": true },
+    { "name": "ux_order_lines_sku", "columns": ["order_id", "sku"], "unique": true },
     { "name": "ix_order_lines_ts",  "columns": ["created_at"] }
   ]
 }
 ```
 
-`primaryKeyColumns` is accepted as an alias of `primaryKey`. Omitted lists are treated as empty, so `{}` clears the definition.
+`primaryKeyColumns` is accepted as an alias of `primaryKey`. On an index, `unique` is the canonical flag (as in the OpenAPI extension) and `isUnique` is accepted as an alias; if both are given and disagree the request is rejected with `400`. Omitted lists are treated as empty, so `{}` clears the definition.
 
 | Status | When | Body |
 | :--- | :--- | :--- |
 | `200` | Definition replaced. | `{ "datasetId", "primaryKey", "indexes" }` in catalog spelling. |
 | `400` | Missing body, or a validation rule of section 2.1 failed. | `{ "error": "..." }` without stack trace or values. |
-| `404` | The dataset is unknown, inactive or unavailable (section 2.2). | The same fixed body `{ "error": "Dataset was not found." }` for all three cases; the id is not echoed. |
+| `404` | The dataset is unknown or inactive. | The same fixed body `{ "error": "Dataset was not found." }` for both cases; the id is not echoed. A dataset whose stored definition is invalid (section 2.2) is **not** a 404: it can be repaired by this endpoint. |
 
 The endpoint writes narrowly: `IGovernanceRepository.ReplaceTableKeyDefinitionAsync` reads the stored columns, validates against them, replaces only the three definition tables and bumps the epoch once, all in one transaction. Columns and masking rules are not rewritten, so a concurrent masking change is preserved.
 
-**Audit.** Every successful replacement writes an audit entry `CATALOG_KEY_DEFINITION_CHANGED` through the HMAC-chained audit writer, with actor SID, request tenant, dataset id and the definition before and after (identifiers only, no data). An unavailable audit store fails the request with `503`.
+**Audit.** Every successful replacement writes an audit entry `CATALOG_KEY_DEFINITION_CHANGED` through the HMAC-chained audit writer, with actor SID, request tenant, dataset id and the definition before and after (identifiers only, no data). When the stored definition was invalid, "before" is recorded as `{ "unavailable": true }` (no partial data). The entry is written **after** the commit: if the audit store is unavailable the caller receives `503`, but the definition change persists (the request can be repeated; replacing is idempotent).
 
 The catalog is global (the `TABLES` table has no tenant column); a definition does not change authorization, so no four-eyes approval is required.
 
 ### 4.2 Ingestion entry points
 
 Every ingestion path treats the source as untrusted. It replaces the stored definition **only when the source declares keys** (primary key and/or unique constraints) and the declaration is valid. A source that declares nothing leaves the stored definition untouched. An invalid declaration (unknown column, size limit, duplicate primary key, malformed shape) is dropped as a whole with a Warning (table id and rule, no values); the table itself is still ingested and the stored definition kept. A replacement logs one Information line (source, table id, column counts).
+
+An ingested declaration replaces the **whole** definition (primary key and indexes). A source that declares only unique constraints therefore clears a primary key that an administrator declared before; declare the primary key at the source as well, or re-apply it with the admin endpoint afterwards.
 
 | Source | Declaration read | Mapping |
 | :--- | :--- | :--- |
@@ -159,7 +163,7 @@ components:
 
 Two further key sources are recognized after the declared definition:
 
-- **Column `Meta` markers** (a declaration channel for metadata that only carries column attributes): `primary_key_ordinal` (1-based integer), or `is_primary_key = "true"`, or `role = "primary_key"`. Ordinals win over flags. The marker key is validated fail-closed: a non-numeric or non-positive ordinal, a duplicate or a gap invalidates the whole marker key. Markers are used only when no declared primary key or usable declared unique index applies.
+- **Column `Meta` markers** (a declaration channel for metadata that only carries column attributes): `primary_key_ordinal` (1-based integer), or `is_primary_key = "true"`, or `role = "primary_key"`. Ordinals win over flags. The marker key is validated fail-closed by one shared parser (`TableKeyMarkers`, used by the repositories and every read path): a non-numeric or non-positive ordinal, a duplicate, a gap or two marker kinds that name different columns invalidate the whole marker key. Markers are a declaration channel only when **no declared primary key rows exist**; declared rows always win, so a stale marker can never produce a subset key. A replacing write rewrites the markers of all stored columns of the table.
 - **The `(client_id, ts)` convention:** a table that has both columns uses `(client_id, ts)` as its row identity. `client_id` alone is never used as a key.
 
 ### 4.4 System tables
@@ -212,7 +216,7 @@ Precedence:
 - A first page (offset 0) is read without `ORDER BY`. If the look-ahead row shows that more rows exist, the request is rejected with the same `400`, instead of returning a page that the next page could duplicate or skip. A result that fits into one page is returned normally.
 - The cross-source path applies the same checks.
 
-**GraphQL.** The root list uses the full precedence; nested relation lists stop after rule 4 (no clear-column composite) to bound sort cost.
+**GraphQL.** The root list uses the full precedence; nested relation lists stop after rule 4 (no clear-column composite) to bound sort cost. When the default ordering has a column whose name the compiler cannot emit safely, the query is refused (it never runs without an ORDER BY), and a root page beyond the first (`offset > 0`) is refused when no clear orderable column exists, with the same text as the REST planner.
 
 **Limitations.**
 
@@ -279,7 +283,7 @@ Compared with earlier builds:
 
 | Layer | Component |
 | :--- | :--- |
-| Domain | `TableMetadata.PrimaryKeyColumns`, `Indexes`, `ReplaceKeyDefinition`; `TableIndexDefinition`; `TableKeyDefinitionValidator`, `TableDefinitionException`; `TableMetadataUnavailableException`; `AuditEventTypes.CatalogKeyDefinitionChanged`. |
-| Application | `DefaultReadOrdering`, `TableRowIdentity`, `TableKeyVisibility`; `GovernedTableReadPlanner`, `GovernedDataQueryService`; `CatalogKeyDefinitionImport` (shared ingestion import); `OpenApiIngestionService`; `CatalogGovernanceRatchet`. |
+| Domain | `TableMetadata.PrimaryKeyColumns`, `Indexes`, `ReplaceKeyDefinition`; `TableIndexDefinition`; `TableKeyDefinitionValidator`, `TableKeyMarkers`, `TableDefinitionException`; `TableMetadataUnavailableException`; `AuditEventTypes.CatalogKeyDefinitionChanged`. |
+| Application | `DefaultReadOrdering`, `TableRowIdentity`, `TableKeyVisibility` (both use the Domain `TableKeyMarkers` parser); `GovernedTableReadPlanner`, `GovernedDataQueryService`; `CatalogKeyDefinitionImport` (shared ingestion import); `OpenApiIngestionService`; `CatalogGovernanceRatchet`. |
 | Infrastructure | `CatalogKeyDefinitionStore` and the `*GovernanceRepository.Catalog.cs` repositories (read, validate, replace); baseline DDL of the three tables. |
 | Api / Extensions | `CatalogApiEndpoints` (`PUT .../keys`); `DataCatalogSyncService`, `OpenMetadataSyncService`, `DbtArtifactStreamingParser` / `DbtMetadataIngestionService`; `ODataHandler`, `ODataCsdlGenerator`; `TreeSqlCompiler` (GraphQL). |
