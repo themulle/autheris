@@ -138,6 +138,29 @@ public sealed class PostgreSqlGovernanceContractTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WP_SC_10_AuditCursor_WalksTheChainOnceInSequenceOrder()
+    {
+        if (!_available) return;
+
+        await using var repo = NewRepository();
+        await repo.RecordAuditEventsAsync(Enumerable.Range(0, 35).Select(i => Entry("TEST_EVENT", "S-1-" + i)).ToList());
+
+        var seen = new List<long>();
+        long? before = null;
+        do
+        {
+            var page = await repo.QueryAuditLogPageAsync(new Autheris.Application.Governance.Paging.AuditLogPageQuery(null, BeforeSequence: before, PageSize: 10));
+            seen.AddRange(page.Items.Select(e => e.ChainSequence!.Value));
+            before = page.NextBeforeSequence;
+        }
+        while (before != null);
+
+        seen.Count.ShouldBeGreaterThanOrEqualTo(35);
+        seen.Distinct().Count().ShouldBe(seen.Count);
+        seen.ShouldBe(seen.OrderByDescending(s => s).ToList());
+    }
+
+    [Fact]
     public async Task AuditTable_RejectsUpdateDeleteAndTruncate()
     {
         if (!_available) return;

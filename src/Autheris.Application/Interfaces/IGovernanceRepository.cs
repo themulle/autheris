@@ -104,6 +104,16 @@ public interface IConsentRepository
     }
 
     /// <summary>
+    /// WP-SC-10: one keyset page of the consents of a tenant (ordered by id), including role and group grants, optionally filtered by
+    /// table and grantee. The tenant predicate is mandatory. Persistence implements it with an indexed query; the default fails closed
+    /// instead of loading every consent into memory.
+    /// </summary>
+    Task<Autheris.Application.Governance.Paging.ConsentPage> GetConsentPageAsync(
+        Autheris.Application.Governance.Paging.ConsentPageQuery query, CancellationToken ct = default)
+        => throw new NotSupportedException(
+            $"{GetType().Name} does not implement paged consent listing; refusing an unbounded listing.");
+
+    /// <summary>
     /// WP-SC-02: atomically revokes <paramref name="revokeConsentIds"/> and creates <paramref name="create"/> in ONE transaction
     /// with ONE epoch bump per affected table. Either every change is applied or none. There is no non-atomic fallback: the default
     /// fails closed so that a provider without a transactional implementation can never apply a partial manifest.
@@ -140,6 +150,15 @@ public interface IAuditLogRepository
         TenantId? tenantId = null,
         CancellationToken ct = default);
     Task<bool> VerifyAuditHashChainAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// WP-SC-10: one keyset page over the audit chain (newest first, by chain sequence). Rows without a sequence number are never
+    /// listed. The default fails closed; every governance repository overrides it.
+    /// </summary>
+    Task<Autheris.Application.Governance.Paging.AuditLogPage> QueryAuditLogPageAsync(
+        Autheris.Application.Governance.Paging.AuditLogPageQuery query, CancellationToken ct = default)
+        => throw new NotSupportedException(
+            $"{GetType().Name} does not implement the audit cursor query; refusing an unbounded listing.");
 }
 
 public interface IPolicyEpochRepository

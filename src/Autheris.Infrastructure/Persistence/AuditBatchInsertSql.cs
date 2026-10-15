@@ -63,3 +63,18 @@ internal readonly record struct AuditInsertRow(
     string EntryHash,
     string TenantId,
     long Seq);
+
+/// <summary>Turns the (size + 1) rows read for a keyset page into the page and its continuation sequence.</summary>
+internal static class AuditPageSlicer
+{
+    internal static Autheris.Application.Governance.Paging.AuditLogPage Slice(List<Autheris.Domain.Model.AuditLogEntry> rows, int size)
+    {
+        if (rows.Count <= size)
+        {
+            return new Autheris.Application.Governance.Paging.AuditLogPage(rows, null);
+        }
+
+        var page = rows.GetRange(0, size);
+        return new Autheris.Application.Governance.Paging.AuditLogPage(page, page[^1].ChainSequence);
+    }
+}

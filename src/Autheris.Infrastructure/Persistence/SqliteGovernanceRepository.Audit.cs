@@ -732,6 +732,77 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         }
     }
 
+    public async Task<Autheris.Application.Governance.Paging.AuditLogPage> QueryAuditLogPageAsync(
+        Autheris.Application.Governance.Paging.AuditLogPageQuery query, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        await FlushAuditChannelAsync(ct).ConfigureAwait(false);
+        var size = query.EffectivePageSize;
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        using var cmd = scope.Connection.CreateCommand();
+        var sql = new StringBuilder(@"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column,
+                                             decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq
+                                      FROM AUDIT_LOG_ENTRIES
+                                      WHERE seq IS NOT NULL");
+        if (query.Tenant is { } tenant)
+        {
+            sql.Append(" AND tenant_id = @tenantId");
+            cmd.Parameters.AddWithValue("@tenantId", tenant.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.TargetTable))
+        {
+            sql.Append(" AND LOWER(target_table) = LOWER(@targetTable)");
+            cmd.Parameters.AddWithValue("@targetTable", query.TargetTable);
+        }
+
+        if (query.Actor is { } actor && !string.IsNullOrWhiteSpace(actor.Value))
+        {
+            sql.Append(" AND actor_sid = @actorSid");
+            cmd.Parameters.AddWithValue("@actorSid", actor.Value);
+        }
+
+        if (query.Since is { } since)
+        {
+            sql.Append(" AND occurred_at >= @since");
+            cmd.Parameters.AddWithValue("@since", since.ToString("O"));
+        }
+
+        if (query.BeforeSequence is { } before)
+        {
+            sql.Append(" AND seq < @before");
+            cmd.Parameters.AddWithValue("@before", before);
+        }
+
+        sql.Append(" ORDER BY seq DESC LIMIT @lim");
+        cmd.Parameters.AddWithValue("@lim", size + 1);
+        cmd.CommandText = sql.ToString();
+
+        var items = new List<AuditLogEntry>(size + 1);
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            items.Add(new AuditLogEntry
+            {
+                Id = Guid.Parse(reader.GetString(0)),
+                OccurredAt = DateTimeOffset.Parse(reader.GetString(1)),
+                EventType = reader.GetString(2),
+                ActorSid = new Sid(reader.GetString(3)),
+                TargetTable = reader.GetString(4),
+                TargetColumn = reader.IsDBNull(5) ? null : reader.GetString(5),
+                Decision = reader.GetString(6),
+                TraceId = reader.GetString(7),
+                DetailsJson = reader.GetString(8),
+                PrevHash = reader.GetString(9),
+                EntryHash = reader.GetString(10),
+                TenantId = reader.IsDBNull(11) ? TenantId.LegacySingleTenant : (TenantId.TryParse(reader.GetString(11), out var tid) ? tid : TenantId.LegacySingleTenant),
+                ChainSequence = reader.GetInt64(12)
+            });
+        }
+
+        return AuditPageSlicer.Slice(items, size);
+    }
+
     public async Task<bool> VerifyAuditHashChainAsync(CancellationToken ct = default)
     {
         await FlushAuditChannelAsync(ct).ConfigureAwait(false);

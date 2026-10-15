@@ -786,6 +786,64 @@ public partial class SqlServerGovernanceRepository
         };
     }
 
+    public async Task<Autheris.Application.Governance.Paging.AuditLogPage> QueryAuditLogPageAsync(
+        Autheris.Application.Governance.Paging.AuditLogPageQuery query, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        await FlushAuditChannelAsync(ct).ConfigureAwait(false);
+        var size = query.EffectivePageSize;
+
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        var where = new List<string> { "seq IS NOT NULL" };
+        if (query.Tenant is { } tenant)
+        {
+            where.Add("tenant_id = @tenantId");
+            cmd.Parameters.Add("@tenantId", SqlDbType.NVarChar, 128).Value = tenant.Value;
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.TargetTable))
+        {
+            where.Add("LOWER(target_table) = LOWER(@targetTable)");
+            cmd.Parameters.Add("@targetTable", SqlDbType.NVarChar, 512).Value = query.TargetTable;
+        }
+
+        if (query.Actor is { } actor && !string.IsNullOrWhiteSpace(actor.Value))
+        {
+            where.Add("actor_sid = @actorSid");
+            cmd.Parameters.Add("@actorSid", SqlDbType.NVarChar, 256).Value = actor.Value;
+        }
+
+        if (query.Since is { } since)
+        {
+            where.Add("occurred_at >= @since");
+            cmd.Parameters.Add("@since", SqlDbType.NVarChar, 64).Value = since.ToString("O");
+        }
+
+        if (query.BeforeSequence is { } before)
+        {
+            where.Add("seq < @before");
+            cmd.Parameters.Add("@before", SqlDbType.BigInt).Value = before;
+        }
+
+        cmd.CommandText = $@"SELECT TOP (@lim) id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq
+                            FROM AUDIT_LOG_ENTRIES
+                            WHERE {string.Join(" AND ", where)}
+                            ORDER BY seq DESC";
+        cmd.Parameters.Add("@lim", SqlDbType.Int).Value = size + 1;
+
+        var items = new List<AuditLogEntry>(size + 1);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var entry = ReadAuditEntry(reader);
+            entry.ChainSequence = reader.GetInt64(12);
+            items.Add(entry);
+        }
+
+        return AuditPageSlicer.Slice(items, size);
+    }
+
     public async Task<bool> VerifyAuditHashChainAsync(CancellationToken ct = default)
     {
         await FlushAuditChannelAsync(ct).ConfigureAwait(false);
