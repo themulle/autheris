@@ -1,7 +1,7 @@
 # Plan: Scale to 5,000 Users (Governance + Performance + Identity), Phase 2 and Phase 3
 
 **Document ID:** `PLAN-SCALE-5000`
-**Date:** 2026-10-16 (rev. 2: owner decisions and multi-issuer identity incorporated)
+**Date:** 2026-10-16 (rev. 3: Q4 corrected to time-bound individual grants; connector-agnostic delegation incl. SQL Server)
 **Status:** PROPOSED. Wave 1 is ready for Phase 4 once the owner approves the LOC estimates (section 9). Wave 2 is defined by
 the owner decisions. Two packages need a dedicated Phase-3 re-review before Phase 4 (section 8.3).
 **Author:** Solution Architect (Phase 2), Security Expert (Phase 3, section 8)
@@ -38,9 +38,9 @@ the owner decisions. Two packages need a dedicated Phase-3 re-review before Phas
 | Q1 IdP | **Microsoft Entra ID** (OIDC / SAML 2.0) for authentication, MFA and Conditional Access. Tokens carry **identity claims only** (UPN, mail, object id). They carry no groups, so the group-overage problem disappears. | Group and role information no longer comes from the token. A **Role-Resolver** supplies it (`WP-SC-05`, redefined). Overage handling is dropped. |
 | Q2 SCIM | **Yes, as core standard, per mode.** Entra → Databricks: full SCIM (users and groups) for Unity Catalog. Entra → Autheris: **user** provisioning on. **Group** provisioning is off in mode *Hybrid* and on in mode *Pure Entra ID*. | New SCIM 2.0 receiver (`WP-SC-07`, redefined), with Users always and Groups per realm. Deprovisioning triggers an **immediate lock**. |
 | Q3 Attributes | **3-layer model.** (1) Identity: Entra ID (name, UPN, mail). (2) App function rights: on-prem AD DS / LDAP (Hybrid) or Entra App Roles (Cloud). (3) Data access rights: **Databricks Unity Catalog** (RLS mapping tables). | Autheris resolves layer 2 only, through the Role-Resolver. For Databricks, layer 3 is enforced **in Databricks** through OBO (`WP-SC-15`, new). `WP-SC-04` (`USER_ATTRIBUTE`) becomes necessary only for Autheris-enforced sources (SQL Server/PG/Oracle/customers). |
-| Q4 Per-user grants | **Strict prohibition (strict RBAC).** No grants at user-id level. Permissions are based on roles and groups. Databricks RLS uses dynamic filters (`current_user()`, mapping tables). | New `WP-SC-16`: write paths reject `GranteeType.User` (consents, access profiles, manifests, bulk, MCP admin, virtual-filter profiles). Request/approval flows grant to roles or groups. Conflict with `SEC-SC-04` is resolved in 1.4. |
+| Q4 Per-user grants | **Corrected 2026-10-16 (§1.5):** individual per-user grants **remain possible, but only time-bound**. There are no standing or permanent per-user grants. Standing access is based on roles and groups. Databricks RLS uses dynamic filters (`current_user()`, mapping tables). | `WP-SC-16` is reworked into a **time-bound individual grant policy**: a mandatory expiry on every per-user grant on every grant path, with maximum durations per realm and sensitivity, renewal rules, four-eyes approval where it applies, auto-expiry, audit, and inclusion in campaigns. C1 is revisited. |
 | Q5 Recertification | **Risk-based.** Every 90 days: privileged roles, admin rights, sensitive RLS assignments. Every 365 days: regular business roles. **Event-driven:** immediate lock trigger via SCIM when a user leaves. | `WP-SC-08` gets fixed defaults. The SCIM lock lives in `WP-SC-07`. Scope split in 1.4 (Autheris recertifies its *mappings*; membership is recertified at the IdP/AD). |
-| Q6 ReBAC | Not addressed by the owner. | Recommendation unchanged: native indexed store (`WP-PF-11`). OpenFGA only if ReBAC becomes a primary grant path. Strict RBAC makes this less likely. |
+| Q6 ReBAC | Not addressed by the owner. | Recommendation unchanged: native indexed store (`WP-PF-11`). OpenFGA only if ReBAC becomes a primary grant path. Role-based standing access makes this less likely. |
 
 **Data flow (owner):**
 1. Login at Entra ID (identity claims only).
@@ -76,14 +76,34 @@ identity directory. Most likely this is **Entra External ID** (a customer tenant
 
 | # | Conflict | Resolution (binding for the packages) |
 | :--- | :--- | :--- |
-| C1 | `SEC-SC-04` (rev. 1) allowed `Unmasked` access profiles **only by direct, four-eyes-approved user assignment**; strict RBAC forbids user-level grants. | `Unmasked` is assigned to a **dedicated privileged role or group** (for example `AUT-Unmask-<domain>`), and the profile ↔ group mapping needs four-eyes approval. The role is recertified every **90 days** (privileged). For one-off incidents there is a **time-bound break-glass exception** (max 72 h, four-eyes, Tier-A audit). It is not a standing grant, so it is allowed under strict RBAC. `SEC-SC-04` is rewritten accordingly. |
-| C2 | Autheris' own consent, row-filter and masking enforcement versus Databricks-native RLS and masking on OBO sources: defence in depth vs double filtering. | New per-source `EnforcementMode`: `AutherisEnforced` (default, today's behaviour, service principal), `Delegated` (OBO; Autheris enforces the **coarse gate**: table visibility and allow/deny by role-based policy, ReBAC, Casbin deny, purpose and contracts; it adds **no** consent row filters and **no** Autheris column masks, because the source is authoritative for rows and masks), and `DelegatedDefenceInDepth` (OBO **plus** Autheris row filters and masks, AND-combined; for sources whose UC policies are not yet complete). Double masking is harmless (masking a masked value). Double row filtering is an intersection and is documented as such. A filter on an Autheris-masked column stays rejected. Mode changes are Tier-A audited and four-eyes approved. |
+| C1 **(rev. 3)** | Clear-text (`Unmasked`) access: rev. 1 allowed only direct user assignment; rev. 2 allowed only privileged groups plus break-glass; the owner correction (§1.5) re-allows time-bound individual grants. | `Unmasked` takes effect through exactly three routes: **(a)** a **privileged role/group** mapping (for example `AUT-Unmask-<domain>`), four-eyes approved and recertified every 90 days; **(b)** a **time-bound individual `Unmasked` grant**: four-eyes (approver ≠ requester ≠ grantee, data owner of every matched table or a delegate), mandatory justification and purpose, max **30 days** (default 7), no self-renewal, Tier-A audit, listed in the next campaign; **(c)** a **break-glass** exception (max 72 h, four-eyes, possibly approved after the fact within 24 h, Tier-A audit). Customer realms: route (b) is disabled by default. `SEC-SC-04` is rewritten accordingly. |
+| C2 | Autheris' own consent, row-filter and masking enforcement versus source-native RLS and masking on delegated sources (Databricks UC; SQL Server security policies): defence in depth vs double filtering. | New per-source `EnforcementMode`: `AutherisEnforced` (default, today's behaviour, service principal), `Delegated` (OBO; Autheris enforces the **coarse gate**: table visibility and allow/deny by role-based policy, ReBAC, Casbin deny, purpose and contracts; it adds **no** consent row filters and **no** Autheris column masks, because the source is authoritative for rows and masks), and `DelegatedDefenceInDepth` (delegation **plus** Autheris row filters and masks, AND-combined; for sources whose native policies are not yet complete). Double masking is harmless (masking a masked value). Double row filtering is an intersection and is documented as such. A filter on an Autheris-masked column stays rejected. Mode changes are Tier-A audited and four-eyes approved. |
 | C3 | Caching on OBO sources: results depend on `current_user()` at the source, so any cross-user reuse leaks rows. | On `Delegated*` sources: (a) the decision-cache shape always includes the **user key** (`WP-PF-09` sharing disabled); (b) **every result-bearing cache** (semantic cache F-AI-10, change-detection ETags F-DATA-09, governed aggregation caches F-DATA-08, async job results, column value profiles and synthetic samples F-AI-17, catalog value profiling) is keyed by user or disabled. Profiling jobs never run with the service principal against an OBO source. (c) The issue-107 key-set cache: `KeySetCacheAllowed` **must stay `false`** for `Delegated*` sources, and the options validator **rejects** `true` at startup (fail closed). |
 | C4 | Identity-only tokens versus today's group-claim-based checks (`GranteeMatcher`, consent cache context hash, virtual-filter profiles, Casbin groups, ForwardAuth). | The Role-Resolver runs in the authentication pipeline (after token validation and before `ClaimsNormalizer`) and injects **resolved** groups and roles as claims with a provenance marker. Token-borne `groups`/`roles` claims are **ignored** for realms whose `GroupSource` is not `Token`, so there is exactly one authoritative source per realm. Resolved identifiers are **realm-namespaced** (`<realm>|<group-id>`). The default workforce realm keeps un-namespaced legacy SIDs for compatibility. Downstream matchers stay unchanged. |
 | C5 | OBO needs a real Entra user assertion; Basic, PAT, Kerberos, ForwardAuth and customer-realm users have none. | `Delegated*` sources deny requests without a delegable assertion from a trusted realm. There is **no fallback to the service principal** (fail closed). BI tools on Databricks data use OAuth (Entra) or the Autheris-enforced path on non-delegated sources. |
 | C6 | Long-running work (async jobs, CDC subscriptions, scheduled exports) on OBO sources outlives the user token. | Default: rejected for `Delegated*` sources if the job cannot finish within the remaining assertion lifetime. MSAL long-running OBO (refresh tokens held by Autheris) is **disabled by default** and allowed only per source with Phase-3 sign-off. |
 | C7 | Recertification at 90/365 days, versus group membership living in AD/Entra. | Autheris recertifies **its own artefacts**: group/role → functional-right mappings, group/role → Access Policy, access-profile ↔ group mappings, break-glass usage, data-source enforcement mode. **Membership** is recertified at the source of truth (Entra Access Reviews / AD tooling). Unity Catalog mapping tables are recertified by the data owners in Databricks. Autheris exports the entitlement report (`WP-SC-10`) as evidence for both. |
-| C8 | Strict RBAC versus service principals and technical accounts. | Service principals are not users. They may be grantees only through an **app role or group** as well. A direct `ServicePrincipal` grantee is allowed only when the realm profile permits it, and is classified privileged (90-day recertification). |
+| C8 | Role-based standing access versus service principals and technical accounts. | Service principals are not users. Their standing access goes through an **app role or group**. A direct `ServicePrincipal` grantee is allowed only when the realm profile permits it. It is then time-bound (max 365 days, `WP-SC-16`) and classified privileged (90-day recertification). |
+
+---
+
+### 1.5 Owner Correction to Q4: Time-Bound Individual Grants (2026-10-16)
+
+German original (Appendix A): "einzelrechte müssen möglich sein - aber eben nur zeitlich beschränkt".
+Binding: per-user grants are allowed on every grant path, **always with an expiry**. Permanent per-user grants are not allowed. The
+earlier strict-RBAC rejection guard is withdrawn. Standing access stays role/group based (C7, C8 unchanged).
+
+### 1.6 Owner Input: Delegation Primarily to Databricks, also to SQL Server (2026-10-16)
+
+German original (Appendix A): "rechte/obo primär bei databricks - jedoch auch richtung sql server denkbar".
+Binding: source-side enforcement through delegated identity is a **connector capability**, not a Databricks special case. Databricks is
+the first implementation (`WP-SC-15`). SQL Server is the planned second (`WP-SC-17`, new):
+- Entra token authentication to Azure SQL / SQL Server 2022+ (Entra-enabled) via an OBO access token on `SqlConnection`.
+- Alternatively, on-prem Kerberos constrained delegation.
+- Or an Autheris-asserted identity read by native security policies.
+
+Capabilities are **declared** per data source in configuration, never discovered at runtime (consistent with the "no source catalog
+queries" rule of issue #94).
 
 ---
 
@@ -107,9 +127,9 @@ identity directory. Most likely this is **Entra External ID** (a customer tenant
 | 2 | `WP-PF-01` | Perf B-2 | Epoch reads safe on Redis Cluster | S | B |
 | 3 | `WP-SC-02` | Gov H4 (bug) | Manifest role-grantee idempotency + transactional apply | S | C |
 | 4 | `WP-PF-03` | Perf H-1.1/1.2 | Compiled `sub_rule` delegates + precompiled object patterns | S | B |
-| 5 | `WP-SC-16` **new** | Owner Q4 | Strict-RBAC guard on all grant write paths (global switch now, per-realm profile after `WP-SC-13`) | S | C |
+| 5 | `WP-SC-16` **reworked (rev. 3)** | Owner Q4 (corrected) | **Time-bound individual grant policy** on all grant paths: mandatory expiry, max durations per realm and sensitivity, renewal rules, four-eyes, read-time clamp of legacy permanent grants | S–M | C |
 | 6 | `WP-PF-04` | Perf B-1.1–1.3, 1.5 | Batched audit insert, async tail/anchor, group commit, one event per request | S–M | C |
-| 7 | `WP-SC-03` | Gov B3 + C1 | Persisted access profiles on PG/SQL Server, **group/role assignment only**, deterministic precedence, break-glass exception | M | A |
+| 7 | `WP-SC-03` | Gov B3 + C1 | Persisted access profiles on PG/SQL Server, group/role assignments plus **time-bound** user assignments, deterministic precedence, break-glass exception | M | A |
 | 8 | `WP-PF-06` | Perf H-3 | Bounded caches + correct `Size` units | S | B |
 | 9 | `WP-PF-02` | Perf B-3 | CDC subscription counter per subject + per-tenant cap (after issue-99) | S | C |
 | 10 | `WP-PF-05` | Perf H-2.2 | Pipelined L2 consent reads | S | B |
@@ -124,7 +144,8 @@ identity directory. Most likely this is **Entra External ID** (a customer tenant
 | 14 | `WP-SC-05` **redefined** | Owner Q1/Q3, Gov H2 | **Role-Resolver** abstraction + providers: LDAPS (AD DS), Entra App Roles (token), Graph (groups/app roles/attributes, also for customer directories), SCIM-provisioned store, static mapping; resolver chain per realm; bounded caching | M–L | C | no (conditions) |
 | 15 | `WP-SC-07` **redefined** | Owner Q2/Q5, Gov H1/H6 | **SCIM 2.0 receiver** per realm (Users always, Groups per realm), **deprovisioning lock** (immediate), JIT provisioning for realms without SCIM, `revoke-all`/`transfer`, group owners with inheritance | M | A + C | no (conditions) |
 | 16 | `WP-SC-14` **new** | Owner Q3 (layer 2) | **Functional-rights mapping**: resolved groups/app roles → Autheris functional rights (`GatewayRole` + feature rights such as `Export`, `Mcp.Admin`) and → grantees of Access Policies; four-eyes, audited, recertified | M | B | no (conditions) |
-| 17 | `WP-SC-15` **new** | Owner Q3 (layer 3), C2/C3/C5/C6 | **OBO delegation** as a per-source enforcement mode (Databricks first): MSAL OBO, trusted realms, coarse gate, cache rules, 107 cross-validation | M–L | B | **yes** |
+| 17 | `WP-SC-15` **(rev. 3)** | Owner Q3 (layer 3), §1.6, C2/C3/C5/C6 | **Connector-agnostic delegated enforcement** (`IDelegationCapability` per connector, declared capabilities, coarse gate, cache rules, 107 cross-validation) + **Databricks OBO** as first implementation | M–L | B | **yes** |
+| 17a | `WP-SC-17` **new (rev. 3)** | §1.6 | **SQL Server delegation**: Entra OBO access token (Azure SQL / SQL Server 2022+), Autheris-asserted `SESSION_CONTEXT` mode, per-user pool partitioning, connection lifetime ≤ token expiry; Kerberos constrained delegation as an optional spike | M | B | **yes** (with SC-15) |
 | 18 | `WP-PF-09` (absorbs `WP-SC-11`) | Perf H-1.3–1.5, H-2.3; Gov M1 | Policy-fingerprint keys (disabled on `Delegated*`), sharded LRU, single-flight, table consent snapshot | M | B | no |
 | 19 | `WP-SC-06` | Gov B1, M5 | Access Policy aggregate (group/role grantees only), selectors by pattern and tag, policy-set epoch; main use on Autheris-enforced sources and as the coarse gate on OBO sources | L | A + B | **yes** (unchanged from rev. 1) |
 | 20 | `WP-SC-08` | Gov H3, M2, owner Q5 | Recertification campaigns 90/365 + event-driven, scope per C7; typed validity timestamps; history archival | M | A | no |
@@ -142,7 +163,8 @@ identity directory. Most likely this is **Entra External ID** (a customer tenant
 **Re-prioritisation compared with rev. 1:**
 - Identity (`SC-13`, `SC-05`, `SC-07`, `SC-14`, `SC-15`) moves ahead of `SC-06`.
 - `SC-04` is reduced in scope, because Databricks RLS moves to the source.
-- `SC-16` is a new Wave-1 quick win.
+- `SC-16` (time-bound individual grants) is a Wave-1 package.
+- `SC-15` becomes connector-agnostic, and `SC-17` (SQL Server delegation) is added.
 - `SC-05`'s overage handling is dropped (identity-only tokens).
 
 ---
@@ -152,7 +174,7 @@ identity directory. Most likely this is **Entra External ID** (a customer tenant
 | Lane | Owns | Wave 1 | Wave 2 |
 | :--- | :--- | :--- | :--- |
 | **A: Persistence and schema** | `Infrastructure/Persistence/Migrations/**` (baselines + shapes), `*GovernanceRepository.Consent.cs`, `*GovernanceRepository.AccessProfiles.cs`, new `*GovernanceRepository.Identity.cs` (SCIM store, locks, realm-scoped mappings), DI line for access profiles | SC-01 → SC-03 | SC-07 (store) → SC-06 (persistence) → SC-08 → SC-10 → SC-12 |
-| **B: Caches, Redis, policy runtime, data-source enforcement** | `Infrastructure/Cache/**`, `Application/Governance/CasbinEnforcementService*.cs`, `Application/Governance/Caching/**`, `RedisOptions.cs`, `Infrastructure/Databricks/**`, data-source options **after issue-107 merges**, new `Application/Security/FunctionalRights/**` | PF-01 → PF-03 → PF-06 → PF-05 → PF-07 | SC-15 → SC-14 → PF-09 → SC-04 → SC-06 (resolver) → PF-11 → PF-12 → PF-14 |
+| **B: Caches, Redis, policy runtime, data-source enforcement** | `Infrastructure/Cache/**`, `Application/Governance/CasbinEnforcementService*.cs`, `Application/Governance/Caching/**`, `RedisOptions.cs`, `Infrastructure/Databricks/**`, `Infrastructure/Persistence/Delegation/**` and the delegation part of `SqlConnectionFactory.cs` (`WP-SC-17`), data-source options **after issue-107 merges**, new `Application/Security/FunctionalRights/**` | PF-01 → PF-03 → PF-06 → PF-05 → PF-07 | SC-15 → SC-17 → SC-14 → PF-09 → SC-04 → SC-06 (resolver) → PF-11 → PF-12 → PF-14 |
 | **C: Audit, CDC, authentication, identity, governance services** | `*GovernanceRepository.Audit.cs`, `Application/Auditing/**`, `CdcSubscriptionGovernor.cs`, `DeclarativeConsentApplyService.cs`, `Api/Security/**` (schemes, claims, Basic), `Api/Extensions/GatewayServiceCollectionExtensions.cs` (auth section), new `Application/Identity/**`, `Infrastructure/Identity/**`, `Api/Endpoints/Scim*.cs`, `Api/Endpoints/Governance*.cs` | SC-02 → SC-16 → PF-04 → PF-02 → PF-08 | SC-13 → SC-05 → SC-07 (endpoints) → PF-10 → SC-09 → PF-15 → PF-13 |
 
 **Synchronisation points:**
@@ -202,13 +224,36 @@ Replace the multi-key `StringGetAsync(RedisKey[])` in `EpochValidationService.cs
 
 **Tests:** equivalence against the old interpreter as oracle; compile-failure polarity; a sandbox test; a benchmark (not in CI).
 
-### WP-SC-16: Strict-RBAC guard (Lane C)
+### WP-SC-16: Time-bound individual grant policy (Lane C, rev. 3)
 
-- **Contract:** `IGrantPolicyGuard.EnsureAllowed(GranteeType, Sid?, string? role, GrantKind, IdentityRealm?)`. `GrantKind` is one of `StandingConsent`, `AccessProfileAssignment`, `VirtualFilterProfile`, `ManifestPolicy`, `BreakGlass`.
-- **Rules:** `Governance:StrictRbac` defaults to `true`. `User` grantees are rejected for every kind except `BreakGlass` (max 72 h, four-eyes). `ServicePrincipal` is allowed only if `AllowServicePrincipalGrantees` is set (default `false`). After `SC-13`, the realm's RBAC profile overrides the global switch, and it can only tighten it.
-- **Call sites:** `CreateConsentAsync` callers (consent request activation, `ApproveConsentRequestStepAsync`), `DeclarativeConsentApplyService`, `/api/v1/consents/bulk`, access-profile assignment, virtual-filter profile CRUD, MCP `admin_plan_access`/`admin_apply_access`, the GraphQL consent mutations, and the bundled consent request.
-- **Consent requests:** a user requests access *for a role or group* (for example "join Controlling-Reader"). With strict RBAC, Autheris does not grant to the user. It forwards the request to the ITSM/IdP group owner (existing ITSM outbox), and membership is changed at the IdP.
-- **Tests:** a unit matrix over kind × grantee type × switch; an architecture test that every `CreateConsentAsync` and assignment call site goes through the guard; break-glass expiry enforcement.
+- **Contract:** `IGrantPolicy.Evaluate(GrantRequest r) → GrantDecision { Allowed, MaxValidTo, RequiresFourEyes, RecertClass, Reason }`.
+  - `GrantRequest` carries the grantee type and id, realm, `GrantKind` (`Consent`, `AccessProfileAssignment`, `VirtualFilterProfile`, `ManifestPolicy`, `McpAdminGrant`, `BulkGrant`, `Renewal`, `BreakGlass`), the requested `ValidTo`, the sensitivity class of the matched tables/columns, the masking mode, the requester and the approvers.
+  - Every grant write path calls it, and an architecture test enforces this.
+- **Rule 1, mandatory expiry:** every grant whose grantee is a `User` (individual grant) must carry an explicit `ValidTo`. A missing, null or "far future" value is rejected with `400 INDIVIDUAL_GRANT_REQUIRES_EXPIRY`. There is no silent default for individual grants (the manifest default of 365 days applies to group/role grants only).
+- **Rule 2, maximum durations** (best-practice defaults; a realm profile can only shorten them):
+
+  | Class | Max duration | Default when requested via UI | Four-eyes | Recert class |
+  | :--- | :--- | :--- | :--- | :--- |
+  | Regular data (no sensitive columns, no PII tag) | 180 days | 90 days | data owner approval (existing) | 365-day campaign + expiry |
+  | Sensitive / PII tables, or `Clear` on a sensitive column | 90 days | 30 days | **yes** (owner + second approver; approver ≠ requester ≠ grantee) | 90-day campaign |
+  | Individual `Unmasked` access profile | 30 days | 7 days | **yes** | 90-day campaign |
+  | Individual privileged functional right (admin, approve, export of sensitive data; `WP-SC-14`) | 7 days (just-in-time elevation) | 1 day | **yes** | 90-day campaign |
+  | Break-glass | 72 h | 24 h | **yes** (may be approved after the fact within 24 h) | listed in the next 90-day campaign |
+  | Service principal (C8) | 365 days | 180 days | yes for sensitive | 90-day campaign |
+  | Customer realm users (`WP-SC-13`) | 90 days regular; `Unmasked` and privileged rights **disabled** by default | 30 days | as above | customer admin attestation |
+
+- **Rule 3, renewal:** an extension is a **new approval** by an owner or delegate, never by the grantee. The new `ValidTo` is at most `now + max` of the class, and four-eyes approval is required when the class requires it. `CONSENTS.renewal_count` and `access_profile_assignments.renewal_count` (new baseline columns) are incremented. After **2 consecutive renewals** the approver is asked to convert the grant into a role/group mapping (a "recurring need → role" hint), and from the **4th** renewal onwards the system **requires** a campaign decision instead of a direct extension. `ExtendConsentExpiryAsync` and the recertification extension path go through `IGrantPolicy` (the current fixed "30 days" suggestion becomes class-dependent).
+- **Rule 4, auto-expiry:** expiry is enforced at read time (`Consent.IsActive`, `AccessProfile.IsActive`, assignment `expires_at`). It is bounded in the decision cache TTL by `ComputeDecisionCacheTtl` (existing). An `INDIVIDUAL_GRANT_EXPIRED` Tier-B audit event is written by the campaign/expiry job. A notification is sent 3 days before expiry (existing recertification window).
+- **Rule 5, legacy permanent grants** (no upgrade migrations, no data rewrite): at **read time** the effective expiry of an individual grant is clamped to `min(ValidTo, ValidFrom + max(class))`. For access profile assignments with `expires_at IS NULL`, it is clamped to `assigned_at + max(class)`. Grants already past the clamped expiry are inactive (fail closed). A startup report (Information log + `GET /api/v1/governance/grants/individual?clamped=true`) lists the clamped grants with a clear message ("individual grant without expiry/over limit, treated as expiring at …"). They are re-approved through the normal renewal path. Nothing is rewritten.
+- **Paths covered:** consent request activation and `ApproveConsentRequestStepAsync`, GraphQL consent mutations, the declarative manifest (an individual grant needs an absolute `validUntil`; re-applying the same manifest never extends it, and a `validUntil` in the past is rejected), `/api/v1/consents/bulk`, access-profile endpoints, virtual-filter profiles, MCP `admin_plan_access`/`admin_apply_access` (`validUntil` is mandatory for user principals), bundled consent requests, `revoke-all` (unaffected) and the extension paths.
+- **Files:** new `Application/Governance/Grants/GrantPolicy.cs`, `GrantClassifier.cs` (sensitivity class from catalog metadata, classification and masking mode), options `Governance:IndividualGrants`; changed: about 10 call sites, `ConsentModels.cs` (`IsActive` honours the clamped expiry; coordinate with issue-107, which also edits this file), `AccessProfile.cs`, the 3 repositories (`renewal_count` read/write), `ConsentRecertificationWorkflowService.cs`, 3 baselines + shapes (Lane A).
+- **Tests:**
+  - A unit matrix over class × realm × duration × four-eyes.
+  - Missing expiry → 400 on every path (parameterised over the path list).
+  - Renewal never by the grantee; renewal cap and campaign hand-off.
+  - Legacy permanent consent or assignment is clamped and becomes inactive after the clamp (SQLite + contract tests).
+  - Manifest re-apply never extends.
+  - Architecture test: every grant writer calls `IGrantPolicy`.
 
 ### WP-PF-04: Batched audit writes (Lane C)
 
@@ -223,9 +268,9 @@ As in rev. 1:
 ### WP-SC-03: Persisted access profiles, group/role assignment (Lane A)
 
 - Implement `IAccessProfileRepository` for PG and SQL Server (the tables exist) and set `useRepositoryAccessProfiles: true`.
-- Assignments are **Group/Role only** (C1, enforced by `WP-SC-16`).
+- Assignments to groups/roles are standing. Assignments to users are **time-bound** individual grants under `WP-SC-16` (`expires_at` is mandatory, and `Unmasked` is at most 30 days with four-eyes approval).
 - New `GetProfilesForSubjectsAsync(tenant, groups, roles)`.
-- Precedence: `Strict` > `Default` > `Unmasked`. `Unmasked` takes effect only through a profile↔group mapping that has `ApprovedBy ≠ CreatedBy`, or through an active break-glass exception. Ties are broken by `profile_id` ordinal.
+- Precedence: `Strict` > `Default` > `Unmasked`. `Unmasked` takes effect only through the three C1 routes: a profile↔group mapping with `ApprovedBy ≠ CreatedBy`, an unexpired four-eyes individual grant, or an active break-glass exception. Ties are broken by `profile_id` ordinal.
 
 **Tests:** contract tests on 3 engines; precedence matrix; unapproved `Unmasked` stays inactive; two-instance consistency; outage → deny.
 
@@ -237,7 +282,7 @@ Unchanged from rev. 1 (performance analysis H-3, B-3, H-2.2, M-3, H-6):
 - Pipelined L2 reads.
 - A staleness budget of 150 ms for non-sensitive tables, 0 for `IsHighlySensitive` **and 0 for `Delegated*` sources**.
 - Basic auth: the HMAC marker (with credential version) is shared through Redis; the IP limiter applies only to failed attempts.
-- **PATs belong to a realm** (`local` or the owning realm). With strict RBAC, a PAT carries the owner's **resolved** roles at use time (re-resolved, never frozen into the token).
+- **PATs belong to a realm** (`local` or the owning realm). A PAT carries the owner's **resolved** roles at use time (re-resolved, never frozen into the token).
 
 ---
 
@@ -309,7 +354,15 @@ Unchanged from rev. 1 (performance analysis H-3, B-3, H-2.2, M-3, H-6):
 - **Rules:** four-eyes approval for mappings to privileged rights (admin, approve, unmask, export of sensitive data). A realm's `AllowedGatewayRoles` caps what can be mapped, so customer realms can never receive admin rights. Mappings are recertified per C7.
 - **Tests:** golden tests that existing role-based endpoint access is unchanged; customer realm cannot map to admin; an unapproved privileged mapping is inactive; per-endpoint right coverage (architecture test: every `Map*` endpoint has a policy).
 
-### WP-SC-15: OBO delegation enforcement mode (Lane B, re-review)
+### WP-SC-15: Connector-agnostic delegated enforcement + Databricks OBO (Lane B, re-review)
+
+- **Connector capability (rev. 3):** `IDelegationCapability` is implemented per connector. Its properties are **declared** in data-source configuration and validated at startup. Autheris never discovers them at runtime and never queries source catalogs (`sys.security_policies` etc.):
+  - `SupportedDelegationKinds` ⊆ {`TokenDelegation` (OBO), `KerberosConstrainedDelegation`, `AssertedIdentity` (service connection + `SESSION_CONTEXT`)}
+  - `SourceEnforcesRowSecurity` and `SourceEnforcesMasking`: the operator attests that native policies cover the source (comparable to issue-107's `KeySetCacheAllowed` attestation)
+  - `SupportsCorrelationTag` (Databricks query tags; SQL Server `SESSION_CONTEXT(N'autheris_correlation_id')` + `Application Name`)
+  - `ConnectionModel` (`Stateless` HTTP for Databricks; `Pooled` for SQL Server)
+- **Contract:** `IDelegatedCredentialProvider.GetAsync(DelegationContext ctx, ct)` returns a connector-specific credential (bearer token, SQL access token, Kerberos context or asserted identity). `EnforcementMode` and `TrustedRealms` are generic data-source options. A connector without the declared capability cannot be set to `Delegated*` (validator).
+
 
 - **Options** (data-source options class shared with issue-107):
   - `EnforcementMode` (`AutherisEnforced` | `Delegated` | `DelegatedDefenceInDepth`, default `AutherisEnforced`)
@@ -341,9 +394,31 @@ Unchanged from rev. 1 (performance analysis H-3, B-3, H-2.2, M-3, H-6):
   - Mode change requires four-eyes.
   - `[Scale]`: a Databricks mock (WireMock-style HttpMessageHandler) asserting the `Authorization` header carries the OBO token, never the service-principal token.
 
+### WP-SC-17: SQL Server delegated enforcement (Lane B, re-review with SC-15; rev. 3)
+
+- **Delegation kinds**, in order of preference:
+  1. **`TokenDelegation`**: an Entra OBO access token for the scope `https://database.windows.net/.default` (Azure SQL and SQL Server 2022+ with Entra authentication via Azure Arc; to be confirmed in Phase 1), set on `SqlConnection.AccessToken` by the data-source connection factory (`SqlConnectionFactory.cs`).
+  2. **`AssertedIdentity`**: the existing service connection, plus `sp_set_session_context` with `autheris_user_key`/`realm`, set **read-only** (`@read_only = 1`), and native security policies (`CREATE SECURITY POLICY` with predicates on `SESSION_CONTEXT`). `DbSessionContextInitializer` already sets a user SID today. This kind trusts Autheris as the identity asserter, so `SEC-SC-25` restricts it to sources whose session context is set read-only and that grant the service login no other path.
+  3. **`KerberosConstrainedDelegation`** (on-prem, optional **spike**): S4U2Self/S4U2Proxy for the AD account mapped from the Entra user key. This builds on the container Windows authentication from #102 / F-AUTH-04 (`UseManagedNtlm`, gss-ntlmssp), but needs gssproxy/MIT krb5 S4U support on Linux and an AD delegation configuration. It is not in the default scope and is estimated separately.
+- **Source-side RLS:** native security policies on `USER_NAME()`/`SUSER_SNAME()`/`ORIGINAL_LOGIN()` (token or Kerberos kinds) or `SESSION_CONTEXT(N'autheris_user_key')` (asserted kind). Dynamic data masking or column permissions per Entra group (Entra groups are SQL principals). Coverage is declared, never discovered (§1.6).
+- **Connection pooling at 5,000 users:**
+  - With `TokenDelegation` or KCD, each identity needs its own physical connection. SqlClient pools by connection string plus credential/access token. This means one pool per user and token, and new pools on every token refresh, which fragments the pools.
+  - Mitigations: a **per-user pool partition** (an explicit partition key in the connection string, never a shared `AccessTokenCallback` pool across users); `Max Pool Size` per partition of 2; `Min Pool Size=0`; an LRU cap on live partitions per replica (default 300) with `SqlConnection.ClearPool` on eviction; a global semaphore on concurrent delegated connections per source (default 100 per replica, sized against the server's max connections divided by the number of replicas).
+  - With `AssertedIdentity`, the shared pool stays (no fragmentation), and the session context is reset on every checkout (as today).
+- **Token lifetime per connection:** SQL Server validates the token **at login only**. A pooled connection therefore stays authenticated after the token expires. The physical connection lifetime is set to at most the token expiry (`Connection Lifetime` / explicit removal), so that no connection outlives its token. A SCIM lock or revocation clears the user's partition (`ClearPool`) through the lock pub/sub (`WP-SC-07`).
+- **Plan cache on the source:** Autheris emits schema-qualified names, so plans are shared across logins. Security-policy predicates are inline TVFs evaluated at run time, so per-user plans are not needed. Risks: per-user default schemas (avoided by qualification) and `SESSION_CONTEXT` values used as literals (avoided: the predicate reads them as functions). Load test LT-9 (new) measures source plan-cache growth and login rate.
+- **Caching and #107:** the same rules as C3 apply. There is no cross-user sharing of decisions or results on delegated sources, including `AssertedIdentity`, because the source filters per session user. `KeySetCacheAllowed=true` is rejected at startup (SEC-RF107-01 (b)/(c)).
+- **Audit correlation:** the correlation id goes into `SESSION_CONTEXT(N'autheris_correlation_id')` (read-only) and `Application Name=Autheris`. SQL Server Audit records the delegated login (token/KCD) or the session context (asserted). Autheris audits the realm, user key, source, kind and correlation id.
+- **Files:** new `Infrastructure/Persistence/Delegation/SqlServerDelegatedCredentialProvider.cs`, `SqlServerPoolPartitioner.cs`, `SqlServerDelegationCapability.cs`; changed `SqlConnectionFactory.cs`, `DbSessionContextInitializer.cs` (read-only session keys for the asserted kind), data-source options validators, `ConnectionCleanupService`/lock subscriber.
+- **Tests:**
+  - Unit: the validator rejects `Delegated*` without the declared capability, `KeySetCacheAllowed=true`, and an empty `TrustedRealms`.
+  - The pool partition key differs per user, never shared; LRU eviction clears the pool; connection lifetime ≤ token expiry; a lock clears the partition.
+  - `[Scale]` SQL Server container: a security policy on `SESSION_CONTEXT` with a read-only key; two users never see each other's rows through pooled connections; an attempt to overwrite a read-only key fails.
+  - An Azure SQL token test only in a manual/nightly lane (requires an Entra tenant).
+
 ### WP-SC-08: Recertification campaigns (Lane A)
 
-- **Cadence (owner Q5):** 90 days for the privileged class (admin and governance rights, `Unmasked`/break-glass usage, sensitive policy mappings, `Delegated*` mode settings, service-principal grantees). 365 days for regular business-role mappings. Event-driven items come from the SCIM lock and from mover events (group change on a privileged mapping).
+- **Cadence (owner Q5):** 90 days for the privileged class (admin and governance rights, `Unmasked`/break-glass usage, individual grants of the sensitive/unmasked/privileged classes, sensitive policy mappings, `Delegated*` mode settings, service-principal grantees). 365 days for regular business-role mappings. Event-driven items come from the SCIM lock and from mover events (group change on a privileged mapping).
 - **Scope:** per C7. Unanswered items are revoked after their deadline (default 14 days, configurable). Nothing is extended automatically.
 - **Customer realm defaults (best practice):** 365-day attestation by the **customer's own administrator** for business roles, and 90 days for any privileged customer role. JIT users inactive for 90 days are deactivated. Customer access ends with the contract (realm disable → lock-all).
 - **Other changes (rev. 1):** typed validity timestamps, `CONSENTS_HISTORY`, `RECERT_CAMPAIGNS`/`RECERT_ITEMS`, and the bounded expiry query.
@@ -351,7 +426,7 @@ Unchanged from rev. 1 (performance analysis H-3, B-3, H-2.2, M-3, H-6):
 ### WP-SC-06, -04, -10, -09, -12 and WP-PF-09..15
 
 - These follow rev. 1, with these changes:
-  - Grantees are group/role only (`WP-SC-16`).
+  - Standing grantees are group/role. Individual grants are time-bound (`WP-SC-16`).
   - Group identifiers are realm-namespaced (C4).
   - On `Delegated*` sources `WP-SC-06` acts as the coarse gate only.
   - `WP-SC-04` applies only to Autheris-enforced sources, and its attributes come from the realm resolver chain.
@@ -384,7 +459,7 @@ Conditions rewritten in rev. 2 are marked **(rev. 2)**. New conditions are **(ne
 | `SEC-SC-01` | SC-01 | The SQL subject filter is semantically identical to the C# filter: case-insensitive SIDs, role and alias consents, future-dated deny consents for the TTL bound. A tenant predicate is mandatory on request paths (architecture test). |
 | `SEC-SC-02` | SC-01/-03/-06/-07/-08/-14 | Schema changes only in the `0001` baselines, with regenerated shape snapshots and no startup rewrites. The verifier fails closed on a missing index, table or column. |
 | `SEC-SC-03` | SC-02, SC-09 | Atomic apply, prune limited to `ManagedBy` and tenant, dry-run default in v2, Tier-A audit, governance-admin caller, no `GITOPS-SYNC` fallback for interactive callers. |
-| `SEC-SC-04` **(rev. 2)** | SC-03, SC-16 | **No user-level `Unmasked`.** `Unmasked` takes effect only through a profile ↔ privileged group/role mapping approved by a second administrator (`ApprovedBy ≠ CreatedBy`, both non-null), or through a **break-glass exception** (user-level, max 72 h, four-eyes, mandatory justification, Tier-A audit, listed in the next 90-day campaign). Group/role profiles other than `Unmasked` can only tighten. Precedence is most-restrictive-wins. A store outage denies. |
+| `SEC-SC-04` **(rev. 3)** | SC-03, SC-16 | `Unmasked` takes effect only through the three C1 routes: (a) a profile ↔ privileged group/role mapping approved by a second administrator (`ApprovedBy ≠ CreatedBy`, both non-null), 90-day recertification; (b) a **time-bound individual grant**, ≤ 30 days, four-eyes (approver ≠ requester ≠ grantee, owner of every matched table or a delegate), justification + purpose, Tier-A audit, never self-renewed; (c) **break-glass**, ≤ 72 h, four-eyes (may be approved after the fact within 24 h), Tier-A audit. Every route appears in the next 90-day campaign. Customer realms: (b) is disabled by default. Profiles other than `Unmasked` can only tighten. Precedence is most-restrictive-wins. A store outage denies. |
 | `SEC-SC-05` | PF-01/-05/-07 | Redis errors or partial results mark decisions stale. Keys include the tenant. The staleness budget is 0 for sensitive tables **and for `Delegated*` sources** and ≤ 250 ms otherwise. Revocations and denies take effect within the budget. |
 | `SEC-SC-06` | PF-02 | Atomic Lua counters, leak-safe heartbeats, Redis down → reject, per-subject cap ≤ tenant cap. |
 | `SEC-SC-07` | PF-03 | Compile failure: allow rule → no match, deny rule → match. Sandboxed interpreter, regex timeouts with the same polarity, atomic snapshot swap. |
@@ -400,10 +475,11 @@ Conditions rewritten in rev. 2 are marked **(rev. 2)**. New conditions are **(ne
 | `SEC-SC-17` | PF-11, SC-12 | Equivalence proof before cut-over. Database-stored Casbin rules are four-eyes and audited. |
 | `SEC-SC-18` | PF-12, PF-14 | Bound array parameters, fingerprint in the template key, masks applied before the first byte leaves, no change to `AstSecurityVisitor.cs`. |
 | `SEC-SC-19` | all | MIT, Apache-2.0 or BSD only, pinned, listed in the notices. Cache, backplane, directory, LDAPS, Graph, SCIM-store or OBO outages never yield Allow. |
-| `SEC-SC-20` **(new)** | SC-16 | Every grant write path calls `IGrantPolicyGuard` (architecture test). User grantees are rejected except break-glass. Break-glass is time-bound (≤ 72 h), auto-expires, needs four-eyes and appears in the next campaign. Realm profiles can only tighten the global switch. Consent requests for users go to group membership at the IdP and never create user-level consents. |
+| `SEC-SC-20` **(rev. 3)** | SC-16 | Every grant write path (list in `WP-SC-16`) calls `IGrantPolicy` (architecture test). Individual grants without an explicit expiry, or beyond the class maximum, are rejected (400) on every path. Realm profiles can only shorten maxima. Renewals are new approvals, never by the grantee, capped per class, with campaign hand-off from the 4th renewal. Legacy grants without an expiry or over the limit are **clamped at read time** (`min(ValidTo, ValidFrom + max)`), never treated as permanent and never rewritten. They are reported at startup. A clamp or classification error denies. Manifests never extend individual grants on re-apply. |
 | `SEC-SC-21` **(new)** | SC-13 | **Cross-issuer confusion:** routing by unverified `iss` selects **one** realm scheme, and that scheme alone validates signature, issuer, audience, lifetime and (for Entra) token type and version. An unknown `iss` is rejected. Audiences are realm-specific, and a token valid for realm A is never accepted by realm B (test). The `autheris:realm` claim is stamped by the server and any token-supplied value is stripped. **Tenant isolation:** the tenant comes from the realm binding only, never from `tid`, headers or ForwardAuth for non-legacy realms. A customer realm can never bind to a workforce tenant (startup validation), and `AllowedGatewayRoles` caps admin rights (customers: none). B2C/External ID metadata must be HTTPS. Legacy implicit realms produce identical principals (golden tests). |
 | `SEC-SC-22` **(new)** | SC-14 | Mappings to privileged rights need four-eyes and 90-day recertification. Customer realms cannot map to admin, governance, unmask or approval rights. Every endpoint has an explicit right or policy (architecture test). An unknown right denies. Re-expressing today's roles as rights leaves existing access unchanged (golden tests). |
-| `SEC-SC-23` **(new)** | SC-15 | **OBO token handling:** the incoming token must be an access token for the Autheris API (`aud`) with a delegated `scp`; ID tokens and app-only tokens (no `scp`) are rejected. Only realms listed in `TrustedRealms` with `Delegable=true` are used. The OBO client authenticates with a certificate (preferred) or a key-vault secret. The MSAL cache is in memory, bounded, partitioned by assertion hash, with TTL ≤ token expiry; it is never written to Redis or disk unless long-running OBO is explicitly signed off. **Tokens, assertions and authorization headers never appear in logs, traces, metrics, audit, exceptions or problem details** (bl-06 redaction plus a test). There is no service-principal fallback for delegated requests. `KeySetCacheAllowed=true` and user-independent result caches are rejected for `Delegated*` sources at startup. Mode changes are four-eyes and Tier-A audited. The Databricks query tag carries only a correlation id. |
+| `SEC-SC-23` **(rev. 3)** | SC-15, SC-17 | **OBO token handling:** the incoming token must be an access token for the Autheris API (`aud`) with a delegated `scp`; ID tokens and app-only tokens (no `scp`) are rejected. Only realms listed in `TrustedRealms` with `Delegable=true` are used. The OBO client authenticates with a certificate (preferred) or a key-vault secret. The MSAL cache is in memory, bounded, partitioned by assertion hash, with TTL ≤ token expiry; it is never written to Redis or disk unless long-running OBO is explicitly signed off. **Tokens, assertions and authorization headers never appear in logs, traces, metrics, audit, exceptions or problem details** (bl-06 redaction plus a test). There is no service-principal fallback for delegated requests. `KeySetCacheAllowed=true` and user-independent result caches are rejected for `Delegated*` sources at startup. Mode changes are four-eyes and Tier-A audited. The correlation tag (Databricks query tag / SQL Server session context) carries only a correlation id. Delegation is allowed only for connectors whose capability is **declared** and validated at startup. A connector without a declared capability cannot be set to `Delegated*`. |
+| `SEC-SC-25` **(new, rev. 3)** | SC-17 | **SQL Server delegation:** (1) pooled connections are partitioned per realm-qualified user key; a physical connection is never reused for another identity, and there is no shared `AccessTokenCallback` pool across users. (2) Connection lifetime ≤ token expiry; a lock or revocation clears the user's partition. (3) `AssertedIdentity` sets session keys with `@read_only = 1`, resets them on every checkout, and is allowed only when the operator declares that the service login has no access path that bypasses the security policy. (4) A global per-source cap on delegated connections; exhaustion → 503, never a fallback to the shared identity. (5) KCD is not enabled without a separate Phase-3 review. (6) `KeySetCacheAllowed=true` is rejected, and user-independent result caches are rejected. |
 | `SEC-SC-24` **(new)** | SC-05, SC-13 (Graph for customers) | **Graph rate limits:** per-directory client with `$batch` (≤ 20), `Retry-After` honoured, exponential backoff, and a circuit breaker (fail closed per `SEC-SC-12`). Lookups are cached per `(realm, userKey)` and stampede-protected (single-flight plus HMAC-framed L2). One customer directory's throttling or outage never affects another realm (isolated clients and breakers). Graph credentials per customer directory are separate (no shared multi-tenant secret across customers unless an explicit multi-tenant app is approved). |
 
 ### 8.2 Mandatory Tests (minimum)
@@ -411,7 +487,8 @@ Conditions rewritten in rev. 2 are marked **(rev. 2)**. New conditions are **(ne
 1. `ConsentQueryEquivalenceTests` on 3 engines (SEC-SC-01).
 2. Shape snapshots regenerated, and the verifier fails on missing objects (SEC-SC-02).
 3. Manifest atomicity fault injection and role idempotency (SEC-SC-03).
-4. Access-profile matrix: an unapproved `Unmasked` group mapping is inactive; break-glass expiry (SEC-SC-04, SEC-SC-20).
+4. Access-profile matrix: an unapproved `Unmasked` group mapping is inactive; an individual `Unmasked` grant without four-eyes or over 30 days is rejected; break-glass expiry (SEC-SC-04).
+4a. **Individual-grant policy:** missing expiry → 400 on every grant path; class maxima; renewal by the grantee rejected; legacy permanent consents and assignments clamped and inactive after the clamp; manifest re-apply never extends (SEC-SC-20).
 5. Redis fault injection for epochs, and a zero budget on `Delegated*` (SEC-SC-05).
 6. Compiled sub_rule polarity and sandbox (SEC-SC-07).
 7. Audit chain after concurrent batched writes, and crash-before-anchor (SEC-SC-08).
@@ -423,13 +500,14 @@ Conditions rewritten in rev. 2 are marked **(rev. 2)**. New conditions are **(ne
 13. **SCIM auth isolation and lock propagation** (user token → 401, cross-realm → 404/403, lock effective on the next request across two simulated replicas, lock-store outage → 503) (SEC-SC-14).
 14. **OBO:** service-principal fallback impossible; non-delegable principal denied; token redaction in logs and spans; startup rejection of `KeySetCacheAllowed=true` on `Delegated*`; per-user result caches on `Delegated*` (SEC-SC-23).
 15. **Graph throttling isolation** between two customer realms (SEC-SC-24).
+16. **SQL Server delegation:** per-user pool partitions, never shared; connection lifetime ≤ token expiry; a lock clears the partition; read-only session context cannot be overwritten; cap exhaustion → 503; validator rejects an undeclared capability and `KeySetCacheAllowed=true` (SEC-SC-25, SEC-SC-23).
 
 ### 8.3 Verdict (rev. 2)
 
-- **Wave 1** (`WP-SC-01..03`, `WP-SC-16`, `WP-PF-01..08`): **APPROVED WITH CONDITIONS** (SEC-SC-01..10, -19, -20; tests 1–8 and 10).
+- **Wave 1** (`WP-SC-01..03`, `WP-SC-16`, `WP-PF-01..08`): **APPROVED WITH CONDITIONS** (SEC-SC-01..10, -19, -20; tests 1–8, 4a and 10).
 - **Wave 2:**
   - `WP-SC-05`, `WP-SC-07`, `WP-SC-08`, `WP-SC-14`, `WP-SC-04`, `WP-SC-10`, `WP-SC-09`, `WP-PF-09..12`, `WP-PF-14`, `WP-PF-15`: approved with conditions; contracts as specified here.
-  - **Dedicated Phase-3 re-review of the detailed package plan before Phase 4:** `WP-SC-13` (realm registry: authentication core change), `WP-SC-15` (OBO: token delegation and new trust boundary to Databricks), `WP-SC-06` (Access Policy: unchanged from rev. 1), `WP-PF-13` (partitioned audit chains).
+  - **Dedicated Phase-3 re-review of the detailed package plan before Phase 4:** `WP-SC-13` (realm registry: authentication core change), `WP-SC-15` + `WP-SC-17` (delegated enforcement: new trust boundaries to Databricks and SQL Server; KCD needs its own review), `WP-SC-06` (Access Policy: unchanged from rev. 1), `WP-PF-13` (partitioned audit chains).
 
 ---
 
@@ -450,15 +528,15 @@ Conditions rewritten in rev. 2 are marked **(rev. 2)**. New conditions are **(ne
 | PF-01 | 60 | 150 | 1 | 1 | |
 | SC-02 | 180 | 250 | 1 | 5 | 3 repository methods + service |
 | PF-03 | 300 | 400 | 3 | 4 | |
-| SC-16 | 250 | 350 | 3 | 9 | guard + ~8 call sites |
+| SC-16 (rev. 3) | 550 | 700 | 4 | 14 | policy + classifier ≈ 250, ~10 call sites, clamp in 3 repos, `renewal_count` |
 | PF-04 | 600 | 700 | 2 | 8 | 3 engines × ≈ 150 |
-| SC-03 | 700 | 850 | 4 | 6 | 2 repositories × ≈ 220, break-glass ≈ 80 |
+| SC-03 | 750 | 900 | 4 | 6 | 2 repositories × ≈ 220, break-glass ≈ 80, time-bound user assignment ≈ 50 |
 | PF-06 | 250 | 300 | 2 | 5 | + BitFaster package |
 | PF-02 | 150 | 200 | 1 | 3 | incl. Lua |
 | PF-05 | 60 | 100 | 1 | 1 | |
 | PF-07 | 150 | 200 | 1 | 4 | |
 | PF-08 | 450 | 600 | 5 | 6 | PAT store ≈ 200 |
-| **Wave 1 total** | **≈ 3,500** | **≈ 4,550** | **26** | **61** | about 8,000 LOC; 3 lanes ≈ 2–3 weeks |
+| **Wave 1 total** | **≈ 3,850** | **≈ 4,950** | **27** | **66** | about 8,800 LOC; 3 lanes ≈ 2–3 weeks |
 
 ### 9.2 Wave 2
 
@@ -468,10 +546,11 @@ Conditions rewritten in rev. 2 are marked **(rev. 2)**. New conditions are **(ne
 | SC-05 Role-Resolver + 5 providers | 1,500 | 1,700 | 16 | 5 | LDAPS ≈ 300, Graph ≈ 350, chain/cache ≈ 300 |
 | SC-07 SCIM + lock + JIT + lifecycle + owners | 1,600 | 1,900 | 14 | 10 | SCIM ≈ 700, store 3 engines ≈ 450, lock ≈ 200 |
 | SC-14 functional rights | 700 | 900 | 7 | 12 | many endpoint policy edits |
-| SC-15 OBO enforcement mode | 950 | 1,200 | 8 | 10 | MSAL ≈ 250, policy branch ≈ 200, cache bypasses ≈ 200 |
+| SC-15 delegated enforcement (connector-agnostic) + Databricks OBO | 1,050 | 1,300 | 10 | 10 | capability layer ≈ 100, MSAL ≈ 250, policy branch ≈ 200, cache bypasses ≈ 200 |
+| SC-17 SQL Server delegation (token + asserted identity) | 800 | 1,000 | 5 | 6 | pool partitioner ≈ 200, credential provider ≈ 200; **KCD spike excluded** (est. 600 / 700 if pursued) |
 | PF-09 fingerprint keys, sharded cache | 700 | 900 | 3 | 6 | |
 | SC-06 Access Policy | 2,500 | 3,000 | 14 | 8 | L |
-| SC-08 recert campaigns + typed timestamps | 1,500 | 1,500 | 8 | 12 | timestamp change touches all consent reads on 3 engines |
+| SC-08 recert campaigns + typed timestamps (+ individual-grant items) | 1,600 | 1,600 | 8 | 12 | timestamp change touches all consent reads on 3 engines |
 | PF-10 CatalogSnapshot | 600 | 700 | 3 | 12 | many call sites |
 | SC-04 attribute row filters | 400 | 600 | 2 | 4 | reduced scope |
 | SC-10 admin query + entitlement report | 900 | 1,000 | 6 | 5 | |
@@ -482,10 +561,10 @@ Conditions rewritten in rev. 2 are marked **(rev. 2)**. New conditions are **(ne
 | SC-12 ABAC in store, roles | 600 | 800 | 4 | 5 | |
 | PF-13 partitioned audit chains | 1,200 | 1,500 | 4 | 6 | after re-review |
 | PF-14 streaming | 1,800 | 2,000 | 6 | 14 | |
-| **Wave 2 total** | **≈ 19,250** | **≈ 23,000** | **117** | **136** | about 42,250 LOC |
-| of which identity (SC-13/05/07/14/15) | 5,950 | 7,300 | 54 | 46 | the owner-driven core |
+| **Wave 2 total** | **≈ 20,250** | **≈ 24,200** | **124** | **142** | about 44,450 LOC |
+| of which identity + delegation (SC-13/05/07/14/15/17) | 6,850 | 8,400 | 61 | 52 | the owner-driven core |
 
-**Overall:** about 22,750 production LOC and about 27,550 test LOC (about 50,300 in total). With three Sonnet lanes, Wave 1 takes about 2–3 weeks and the
+**Overall (rev. 3):** about 24,100 production LOC and about 29,150 test LOC (about 53,250 in total). With three Sonnet lanes, Wave 1 takes about 2–3 weeks and the
 identity core of Wave 2 about 5–6 weeks (including the two re-reviews). The rest of Wave 2 adds about 6–8 weeks and can be cut
 according to measured need (load test LT-1..8).
 
@@ -514,3 +593,7 @@ Modularer Role-Resolver (Product Readiness):
 - Betriebsmodus "Pure Entra ID" (Zukunft / SaaS): Identity Entra ID via SCIM (User + Groups); App-Rollen Entra App Roles oder Entra-Sicherheitsgruppen aus SCIM-Payload bzw. Graph API; Daten-RLS identisch über Entra-Identität in Databricks.
 
 Follow-up (owner, 2026-10-16): "auth ist aber sehr flexibel. wir haben auch oauth für endkunden das jedoch auch wieder irgendwie auf der graph-api basiert".
+
+Correction to Q4 (owner, 2026-10-16): "einzelrechte müssen möglich sein - aber eben nur zeitlich beschränkt".
+
+Delegation scope (owner, 2026-10-16): "rechte/obo primär bei databricks - jedoch auch richtung sql server denkbar".
