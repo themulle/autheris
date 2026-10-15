@@ -24,6 +24,10 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> EventBusHandlerFailedCounter =
         Meter.CreateCounter<long>("autheris_event_bus_handler_failed_total", description: "Redis event bus subscriber handlers that failed");
 
+    /// <summary>A-14: a local policy change could not be propagated to the cluster policy epoch (other nodes converge via cache TTL).</summary>
+    public static readonly Counter<long> PolicyEpochPropagationFailedCounter =
+        Meter.CreateCounter<long>("autheris_policy_epoch_propagation_failed_total", description: "Casbin policy epoch increments that failed or found the cluster state unavailable");
+
     public static readonly Counter<long> UnroutedRequestCounter =
         Meter.CreateCounter<long>("autheris_unrouted_requests_total", description: "Requests answered by the router without a matching endpoint (404/405/400); not written to the audit chain");
 
