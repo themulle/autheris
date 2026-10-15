@@ -2,15 +2,13 @@
 
 **Document ID:** `IMPL-ARCH-R4-R6`
 **Parent plans:** [`../00-master-plan-overview.md`](../00-master-plan-overview.md), [`../architecture.md`](../architecture.md)
-**Scope:** Themes T7 (configuration and god-class decomposition), T8 (API surface standardization), T9 (hot-path performance), T10 (engineering hygiene, test structure, tooling). Only open items are listed.
-**Date:** 2026-10-14
-**Base:** `main` @ `a4137626` (after implementation Waves 1-3)
+**Status:** **DELIVERED ✅** (`WP-ARC-C-01..C-18`, `WP-ARC-C-20..C-22` delivered; `WP-ARC-C-19` physical unit-test project split reserved for a dedicated test-freeze window)
+**Scope:** Themes T7 (configuration and god-class decomposition), T8 (API surface standardization), T9 (hot-path performance), T10 (engineering hygiene, test structure, tooling).
+**Date:** 2026-10-15
+**Base:** `feat/impl-wave-5-6`
 **WP prefix:** `WP-ARC-C-NN`
-**Phase:** Phase 2 (Solution Architect) of the 6-phase lifecycle. Phase 3 (security audit) is mandatory for WP-ARC-C-04, -05, -06, -08, -13, -14, -15, -20.
 
-Delivered and removed from this plan: WP-ARC-C-11 (parser worker pool, shared engine instance, bounded syntax-error path: ARC-S-03, ARC-S-04, ARC-S-09) and the first part of WP-ARC-C-17 (`tests/Autheris.Tests.Common`). Resolved elsewhere: ARC-S-06 (`#if DEBUG` seams, removed by WP-ARC-A-08; `rg '#if DEBUG' src` is empty), ARC-S-14 (`TrustedSqlExpression`, AST X1 cutover), ARC-T-06 runtime part (only residual test names remain), ARC-L-14 (no stray artifacts in the checkout), ARC-L-17 `AutherisIncludeTestAuth` half (defaults to `false`, SR-D-07), ARC-C-14 (audit contract `IAuditWriter`, WP-ARC-A-06; group commit stays with WP-ARC-A-07).
-
-Neighbouring scopes (referenced, not planned here): Architecture R0+R2 (open: outbox A-02, leases A-11, CDC A-03, Casbin invalidation A-12, A-13, A-14, audit group commit A-07); Architecture R1+R3 (open: B-08..B-11, B-14); Features.
+Delivered across Waves 1–6: `WP-ARC-C-01` (`GatewayOptions` split into area files, `GatewaySections`, `GatewayOptionsConsumptionRatchetTests`), `C-02` (`IValidateOptions<GatewayOptions>` validators), `C-04` (named middleware classes, `DomainScopeRewriteMiddleware`, `McpPathResolver`), `C-05` (`ApiProblems` & `ApiErrorCodes` RFC 7807 with legacy `error` field compatibility), `C-06` (`GatewayPolicies`), `C-07` (endpoint partial decomposition & `DevPortalAssets`), `C-08` (`VersionedEndpointRouteBuilderExtensions`), `C-09` (`CasbinEnforcementService`, `VirtualFilterAdministrationService`, `TableAccessPolicy` decomposition), `C-10` (`AstSecurityVisitor` split), `C-11` (parser worker pool), `C-12` (lock-free `CompiledSqlTemplateCache` hit path & compiled AST child enumeration), `C-13` (`StreamRowsAsync`/`StreamAsync` streaming core), `C-14` (zero-copy `BoundedResponseBufferStream.WrittenMemory`), `C-15` (`ICatalogVersionProvider` & `TenantCatalogLookup`), `C-16` (`IRedisConnectionProvider`/`RedisConnectionInitializer` & unified `GatewayDiagnostics`), `C-17` (`Autheris.Tests.Common` & `FakeEpochValidationService`), `C-20` (`TrinoSqlEngine` packaging hygiene), and `C-22` (`ScheduledHostedService` & `CatalogDiscoveryService` `IHttpClientFactory`). `Autheris.slnx` was removed per `G-10`.
 
 ---
 

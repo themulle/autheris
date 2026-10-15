@@ -2,13 +2,14 @@
 
 **Document ID:** `IMPL-ARCH-R1-R3`
 **Parent plans:** [`../00-master-plan-overview.md`](../00-master-plan-overview.md), [`../architecture.md`](../architecture.md) (`PLAN-ARCH-REVIEW`, themes T1, T3, T4, waves R1 and R3)
-**Role:** Solution Architect (Phase 2 of the CLAUDE.md lifecycle). Next phase: Security Expert review (Phase 3), then TDD developers.
-**Date:** 2026-10-14
-**Base:** `main` at a4137626 (Waves 1-3 of the implementation roadmap merged)
+**Status:** **DELIVERED ✅** (`WP-ARC-B-01..B-10`, `WP-ARC-B-12..B-14` delivered; optional folder move `WP-ARC-B-11` deferred to a dedicated freeze window)
+**Role:** Solution Architect
+**Date:** 2026-10-15
+**Base:** `feat/impl-wave-5-6`
 **WP prefix:** `WP-ARC-B-NN`
 **Source of finding IDs:** original review reports, `git show d8db81cc^:docs/plans/2026-10-14-architecture-code-review/0{1..6}-*.md`.
 
-**Delivered and removed from this plan** (see git history of this file and commits on `main`): WP-ARC-B-01 table-read planner, B-02a/b/c governed `SqlTableReadExecutor` (`SqlDataSourceExecutor` deleted), B-03 `GovernedQueryStages` and tree-vs-`Compile` parity guard, B-04 mask/row-filter semantics corpus, B-05 `IConsentRequestService`, B-06 `IMcpResourceProvider`, B-08 capability-driven unbound markers and `DialectRegistryCompletenessTests`, and B-12 versioned migrations (except the remainder below). Decisions D1 (tree exception), D2 (hard cutover) and D6 (fail startup on migration failure) are settled by Gate 0 G-6, G-7 and G-8.
+**Delivered across Waves 1–5:** `WP-ARC-B-01` table-read planner, `B-02a/b/c` governed `SqlTableReadExecutor` (`SqlDataSourceExecutor` deleted), `B-03` `GovernedQueryStages` and tree-vs-`Compile` parity guard, `B-04` mask/row-filter semantics corpus, `B-05` `IConsentRequestService`, `B-06` `IMcpResourceProvider`, `B-07` endpoint use-case services (`EffectiveFilterInspector`, `OlapStagingService`, `OpenApiIngestionUseCase`), `B-08` capability-driven unbound markers and `DialectRegistryCompletenessTests`, `B-09` `ISqlDialectProvider` & `ISqlDialectRegistry`, `B-10` Application package diet (`prometheus-net` removed, `McpStdioRunner` & `FileSystemUniversalDocStore` relocated, `PackageBoundaryArchitectureTests`), `B-12` consolidated baseline governance migration (`0001_baseline_governance_schema`) & constructor purity guards, `B-13` `SqliteGovernanceConnectionProvider` & `ReadinessGatedLock`, and `B-14` shared `AuditChainEngine` & per-aggregate governance store registrations.
 
 ## 0. Scope and non-scope
 
