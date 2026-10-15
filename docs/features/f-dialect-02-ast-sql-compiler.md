@@ -409,6 +409,8 @@ The `sql-compiler-gate` job in `.github/workflows/ci.yml` runs on every pull req
 
 **Frozen legacy results.** The legacy engine no longer exists. Its outcomes were recorded once from the last tree that contained it and are committed as `tests/Autheris.Tests.SqlCompilerGate/golden-results/legacy-<Dialect>.json` (SQLite, PostgreSQL, SQL Server, Oracle; every corpus statement in both scenarios). The files are never regenerated. The differential classifies the live AST outcome against them with unchanged rules (rows, mask and write direction). A corpus statement without a frozen result fails the gate; `FrozenLegacyTests` pins the codec, the coverage and the classification.
 
+**Accepted differences.** Every differential outcome that deviates from the frozen legacy result is recorded in `tests/Autheris.Tests.SqlCompilerGate/Corpus/accepted-differences.json`. `entries` group statements per dialect, class (`ast-stricter`) and reason (for example `SecurityException`, `MaskedAggregationException`, `UnfilteredDmlException`) and carry a concrete `justification`, an `issue`, a `reviewer` and an `approval` of `pending` or `approved`. `legacyDefects` record statements where the legacy result itself was wrong (for example an unexpanded `WITH RECURSIVE` member). `AcceptedDifferencesWriter` proposes new entries as `pending` with a placeholder justification. Under `SQLGATE_PROFILE=cutover`, `CutoverPrecondition_EveryAcceptedDifferenceIsApproved` fails while any entry is `pending`.
+
 ### 8.2 Architecture guards
 
 `tests/Autheris.Tests.Architecture/CutoverArchitectureTests.cs` scans every project under `src` at IL level. Each scan has a positive control.

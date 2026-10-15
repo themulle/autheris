@@ -78,7 +78,7 @@ flowchart TD
 
 ### Cross-cutting open items
 
-- **SQL compiler gate:** 18 entries in `tests/Autheris.Tests.SqlCompilerGate/Corpus/accepted-differences.json` have `"approval": "pending"` (masked-aggregation tightening under `TenantConsentMask` and related differences). They need a security review before the cutover profile passes.
+- ~~**SQL compiler gate:** 18 pending entries in `accepted-differences.json`~~ — resolved 2026-10-15: all 18 entries reviewed and approved, cutover precondition passes ([`PLAN-SQLGATE-CUTOVER-03`](../2026-10-15-plan-sqlgate-cutover-and-accepted-differences.md)).
 - **CI duration:** the CI effect of WP-TS-01 is not confirmed (GitHub `Build & Test` 23:14 for `f396e742` vs 20:18 before). Investigate before WP-TS-02 ([`impl-test-suite-speedup.md`](impl-test-suite-speedup.md)).
 - **Catalog owner tenant (G-11, second half):** `TableMetadata` still has no owner tenant; add it with a versioned migration (B-12 runner).
 

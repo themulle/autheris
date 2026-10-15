@@ -80,3 +80,4 @@ dotnet test tests/Autheris.Tests.Architecture --filter "FullyQualifiedName~Cutov
 
 ## 5. Changelog & Refinement Notes
 - **2026-10-15:** Plan drafted, all 18 entries (57 unique statements) audited and approved in `accepted-differences.json`, and verified under `SQLGATE_PROFILE=cutover`.
+- **2026-10-15:** Finalization: the `sql-compiler-gate` CI job ran for the first time on `feat/impl-wave-4` (previously skipped because of a compile error in `SqliteGovernanceRepository.Catalog.cs`) and passed on `78cf1c19` and `f785c459` (PR #91, full corpus on all four dialects). Re-verified locally: cutover precondition and SQLite differential (29/29), `CutoverArchitectureTests` (23/23). Stale `pending` references removed from `implementation/00-implementation-roadmap.md` and `implementation/impl-features-analytics.md`; the approval model is documented in `docs/features/f-dialect-02-ast-sql-compiler.md` §8.1.

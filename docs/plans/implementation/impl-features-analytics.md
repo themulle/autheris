@@ -174,7 +174,7 @@
 ### On neighbouring scopes
 - **Architecture R1 (T1):** GraphQL root table reads keep `TreeSqlCompiler` (G-6), aggregates use `ISqlEngine.Compile`; the parity test keeps both paths aligned. R3 (dialect ports, WP-ARC-B-09/B-10) moves executors, not the service interfaces named above.
 - **Architecture R4 (T7 options split, WP-ARC-C-01):** if C-01 chooses another section naming scheme, only the binding line of `AnalyticsOptions` changes.
-- **SQL compiler gate:** the masked-aggregation tightening of WP-FEAT-02 is recorded as `pending` entries in `tests/Autheris.Tests.SqlCompilerGate/Corpus/accepted-differences.json`; they need security review before the cutover profile passes (tracked in the roadmap).
+- **SQL compiler gate:** the masked-aggregation tightening of WP-FEAT-02 is recorded as `MaskedAggregationException` entries in `tests/Autheris.Tests.SqlCompilerGate/Corpus/accepted-differences.json`; reviewed and approved on 2026-10-15 ([`PLAN-SQLGATE-CUTOVER-03`](../2026-10-15-plan-sqlgate-cutover-and-accepted-differences.md)).
 - **Security SR-L-12 (subgraph masking):** aggregate fields are not federated in this scope; if Fusion later forwards `<T>_aggregate`, `SubgraphResultMaskingMiddleware` must understand the aggregate result shape.
 - **Persistence:** the persistent semantic catalog (WP-FEAT-06) and future persisted per-dataset thresholds use the versioned governance migrations (WP-ARC-B-12, delivered). DP budgets use `IDistributedClusterStateProvider` with the absent-vs-unavailable semantics of WP-ARC-A-09.
 
