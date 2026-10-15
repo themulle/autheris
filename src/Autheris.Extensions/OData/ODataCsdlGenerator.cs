@@ -171,10 +171,15 @@ public static class ODataCsdlGenerator
     /// </summary>
     public static IReadOnlyList<string> ResolveEntityKeys(TableMetadata table)
     {
-        if (table.PrimaryKeyColumns.Count > 0 &&
-            TryMatchAllColumns(table, table.PrimaryKeyColumns, out var pkKeys))
+        if (table.PrimaryKeyColumns.Count > 0)
         {
-            return pkKeys;
+            var validPkColumns = table.PrimaryKeyColumns
+                .Where(pk => table.Columns.Any(c => string.Equals(c.ColumnName, pk, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+            if (validPkColumns.Count > 0)
+            {
+                return validPkColumns;
+            }
         }
 
         if (table.Indexes.Count > 0)
