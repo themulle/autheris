@@ -13,7 +13,8 @@
 | BL-03 | Scale to 5,000 users with many tables and access rules | Architect and performance expert check whether access can be governed efficiently and performantly at this size, which technical changes are needed, and how system performance and scaling behave. Findings are then implemented. | `feat/scale-5000-users` | Analysis |
 | BL-04 | Table cache: cache tables or parts of tables inside Autheris | See section 2.1. | to be created | Intake |
 | BL-05 | Granular configuration per data source | See section 2.2. | to be created | Intake |
-| BL-06 | Tracing and logging via open standards | See section 2.3. | to be created | Intake |
+| BL-06 | Tracing and logging via open standards | See section 2.3. | `feat/bl-06-open-telemetry` | Phase 2/3 |
+| BL-07 | PostgreSQL wire protocol endpoint | PG-compatible endpoint for BI tools; PRD `2026-10-16-req-postgres-wire-protocol-endpoint.md` on `feat/scale-5000-users`: conditional go, first verify BI tools via the existing Trino protocol. | `feat/scale-5000-users` (PRD) | PRD ready, decision pending |
 
 ## 2. Item Details (owner requirements, not yet refined)
 
@@ -39,6 +40,12 @@
 
 - Traces, metrics and logs use open standards (for example OpenTelemetry with OTLP export and W3C Trace Context propagation), so that any compatible backend can be used.
 - Correlation across gateway, governance store and source queries; no sensitive values in telemetry.
+
+### 2.4 Cross-cutting: open-source assessment
+
+Every new topic (BL-01 to BL-07) gets an open-source assessment in its analysis or PRD: candidate libraries or services, licence
+compatibility with the Autheris licence (BSL 1.1; GPL, AGPL and third-party BSL code must not be copied), maturity, fit, and a
+build-versus-adopt recommendation.
 
 ## 3. Sequence
 
