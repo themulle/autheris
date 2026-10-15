@@ -394,6 +394,8 @@ Removed or inert settings:
 
 The `sql-compiler-gate` job in `.github/workflows/ci.yml` runs on every pull request (`SQLGATE_PROFILE=pr`, no retries). `.github/workflows/sql-compiler-gate-nightly.yml` runs the `nightly` profile, the manual `cutover` profile and the secret-gated live Databricks job (G9); it has no `pull_request` trigger. Making the job a required check is a branch-protection setting of the repository owner.
 
+On a pull request the `sql-compiler-gate` job starts in parallel with the other jobs and runs the gate tests in Debug (security mutant hooks) and the database differential (G4, G6). The Release run of the gate tests and the architecture guards are part of the `build-and-test` job, which runs every test of the solution in Release (`WorkflowPolicyTests` asserts that its filter does not exclude them). The G8 benchmark and the G7 mutation score (Stryker.NET) run in the nightly workflow.
+
 | Gate | Content |
 |---|---|
 | G1 | Build and test suites |
