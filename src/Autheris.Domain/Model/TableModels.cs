@@ -105,6 +105,9 @@ public sealed class TableColumn
 }
 
 
+/// <summary>A declared index: ordered columns and the unique flag.</summary>
+public sealed record TableIndexDefinition(string Name, IReadOnlyList<string> Columns, bool IsUnique);
+
 public sealed record TableMetadata
 {
     public Table Table { get; init; } = new();
@@ -112,7 +115,14 @@ public sealed record TableMetadata
     public string? OwnerTenantId { get; init; }
     public IReadOnlyList<TableColumn> Columns { get; init; } = Array.Empty<TableColumn>();
     public IReadOnlyDictionary<string, MaskingRule> ColumnMaskingRules { get; init; } = new Dictionary<string, MaskingRule>();
+    /// <summary>Declared primary key (ordered). Empty when none was declared; no key is ever inferred.</summary>
     public IReadOnlyList<string> PrimaryKeyColumns { get; init; } = Array.Empty<string>();
+
+    /// <summary>Declared secondary and unique indexes (used for default ordering). Empty when none was declared.</summary>
+    public IReadOnlyList<TableIndexDefinition> Indexes { get; init; } = Array.Empty<TableIndexDefinition>();
+
+    /// <summary>Write intent: the upsert replaces the stored key/index definition only when true; otherwise it keeps it.</summary>
+    public bool ReplaceKeyDefinition { get; init; }
 
     public bool IsCompositePrimaryKey => PrimaryKeyColumns.Count > 1;
 

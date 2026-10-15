@@ -97,13 +97,18 @@ public static class CatalogGovernanceRatchet
             }
         }
 
+        var useIncomingKeys = incoming.ReplaceKeyDefinition || incoming.PrimaryKeyColumns.Count > 0;
+        var useIncomingIndexes = incoming.ReplaceKeyDefinition || incoming.Indexes.Count > 0;
+
         return new TableMetadata
         {
             Table = table,
             Identifier = incoming.Identifier,
             Columns = mergedColumns,
             ColumnMaskingRules = mergedRules,
-            PrimaryKeyColumns = existing.PrimaryKeyColumns
+            PrimaryKeyColumns = useIncomingKeys ? incoming.PrimaryKeyColumns : existing.PrimaryKeyColumns,
+            Indexes = useIncomingIndexes ? incoming.Indexes : existing.Indexes,
+            ReplaceKeyDefinition = incoming.ReplaceKeyDefinition
         };
     }
 

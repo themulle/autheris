@@ -282,12 +282,12 @@ public static partial class TreeSqlCompiler
             order.Add((column, term.Descending));
             Need(column);
         }
-        if (order.Count == 0)
+        if (order.Count == 0 &&
+            Autheris.Application.Data.Services.GovernedTableReadPlanner.TryResolveClearKey(metadata, tableAccess.Decision, out var clearKey))
         {
-            foreach (var pk in metadata.PrimaryKeyColumns)
+            foreach (var column in clearKey)
             {
-                var column = metadata.GetColumn(pk)?.ColumnName;
-                if (column == null || tableAccess.Decision.GetEffectiveColumnAccess(column, metadata) != ColumnAccessLevel.Clear)
+                if (!SafeNameRegex().IsMatch(column))
                 {
                     order.Clear();
                     break;

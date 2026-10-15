@@ -211,27 +211,139 @@ public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
         return items;
     }
 
-    /// <summary>The declared key when it is non-empty and every key column exists and is readable in clear text; a key touching a masked or denied column is skipped as a whole.</summary>
-    private static bool TryResolveClearKey(TableMetadata metadata, TableAccessDecision decision, out List<string> key)
+    /// <summary>
+    /// Resolves a deterministic clear-text ordering key when the caller did not specify an explicit ORDER BY:
+    /// 1. Declared <see cref="TableMetadata.PrimaryKeyColumns"/> when all columns exist and are Clear.
+    /// 2. Declared unique index in <see cref="TableMetadata.Indexes"/> with the fewest columns where all columns exist and are Clear.
+    /// 3. Column <c>Meta</c> primary key markers (<c>primary_key_ordinal</c>, <c>is_primary_key=true</c>, <c>role=primary_key</c>) when all marked columns are Clear.
+    /// 4. Conventional <c>(client_id, ts)</c> or <c>client_id</c> key columns when <see cref="TableMetadata.PrimaryKeyColumns"/> is empty and those columns exist and are Clear.
+    /// </summary>
+    internal static bool TryResolveClearKey(TableMetadata metadata, TableAccessDecision decision, out List<string> key)
     {
-        key = new List<string>();
+        if (metadata.PrimaryKeyColumns.Count > 0 &&
+            TryResolveAllClearColumns(metadata.PrimaryKeyColumns, metadata, decision, out key))
+        {
+            return true;
+        }
+
+        if (metadata.Indexes.Count > 0)
+        {
+            foreach (var index in metadata.Indexes
+                         .Where(i => i is { IsUnique: true, Columns.Count: > 0 })
+                         .OrderBy(i => i.Columns.Count))
+            {
+                if (TryResolveAllClearColumns(index.Columns, metadata, decision, out key))
+                {
+                    return true;
+                }
+            }
+        }
+
+        var metaKeyColumns = ExtractMetaPrimaryKeyColumns(metadata.Columns);
+        if (metaKeyColumns.Count > 0 &&
+            TryResolveAllClearColumns(metaKeyColumns, metadata, decision, out key))
+        {
+            return true;
+        }
+
         if (metadata.PrimaryKeyColumns.Count == 0)
+        {
+            var clientIdCol = metadata.GetColumn("client_id");
+            if (clientIdCol != null &&
+                decision.GetEffectiveColumnAccess(clientIdCol.ColumnName, metadata) == ColumnAccessLevel.Clear)
+            {
+                var tsCol = metadata.GetColumn("ts");
+                if (tsCol != null &&
+                    decision.GetEffectiveColumnAccess(tsCol.ColumnName, metadata) == ColumnAccessLevel.Clear)
+                {
+                    key = [clientIdCol.ColumnName, tsCol.ColumnName];
+                    return true;
+                }
+
+                key = [clientIdCol.ColumnName];
+                return true;
+            }
+        }
+
+        key = new List<string>();
+        return false;
+    }
+
+    private static bool TryResolveAllClearColumns(
+        IReadOnlyList<string> candidateColumns,
+        TableMetadata metadata,
+        TableAccessDecision decision,
+        out List<string> key)
+    {
+        key = new List<string>(candidateColumns.Count);
+        if (candidateColumns.Count == 0)
         {
             return false;
         }
 
-        foreach (var pk in metadata.PrimaryKeyColumns)
+        foreach (var candidate in candidateColumns)
         {
-            var col = metadata.GetColumn(pk);
+            var col = metadata.GetColumn(candidate);
             if (col == null || decision.GetEffectiveColumnAccess(col.ColumnName, metadata) != ColumnAccessLevel.Clear)
             {
+                key.Clear();
                 return false;
             }
 
-            key.Add(col.ColumnName);
+            if (!key.Contains(col.ColumnName, StringComparer.OrdinalIgnoreCase))
+            {
+                key.Add(col.ColumnName);
+            }
         }
 
-        return true;
+        return key.Count > 0;
+    }
+
+    internal static IReadOnlyList<string> ExtractMetaPrimaryKeyColumns(IReadOnlyList<TableColumn> columns)
+    {
+        if (columns == null || columns.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        var ordinalCols = new List<(int Ordinal, int Index, string Name)>();
+        for (int i = 0; i < columns.Count; i++)
+        {
+            var col = columns[i];
+            if (col.Meta != null &&
+                col.Meta.TryGetValue("primary_key_ordinal", out var ordStr) &&
+                int.TryParse(ordStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var ord) &&
+                ord >= 1)
+            {
+                ordinalCols.Add((ord, i, col.ColumnName));
+            }
+        }
+
+        if (ordinalCols.Count > 0)
+        {
+            return ordinalCols
+                .OrderBy(x => x.Ordinal)
+                .ThenBy(x => x.Index)
+                .Select(x => x.Name)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        var flagCols = new List<string>();
+        foreach (var col in columns)
+        {
+            if (col.Meta == null) continue;
+            if ((col.Meta.TryGetValue("is_primary_key", out var isPk) && string.Equals(isPk, "true", StringComparison.OrdinalIgnoreCase)) ||
+                (col.Meta.TryGetValue("role", out var role) && string.Equals(role, "primary_key", StringComparison.OrdinalIgnoreCase)))
+            {
+                if (!flagCols.Contains(col.ColumnName, StringComparer.OrdinalIgnoreCase))
+                {
+                    flagCols.Add(col.ColumnName);
+                }
+            }
+        }
+
+        return flagCols.Count > 0 ? flagCols : Array.Empty<string>();
     }
 
     private static readonly string[] NonOrderableTypeMarkers =

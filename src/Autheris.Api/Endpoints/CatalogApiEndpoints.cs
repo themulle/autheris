@@ -139,7 +139,81 @@ public static class CatalogApiEndpoints
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApplied);
 
+        // Issue #94: PUT /api/v1/catalog/datasets/{id}/keys (and /api/catalog/datasets/{id}/keys)
+        group.MapPut("/datasets/{id}/keys", SetDatasetKeysHandler)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+
+        app.MapPut("/api/catalog/datasets/{id}/keys", SetDatasetKeysHandler)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+
         return app;
+    }
+
+    internal static async Task<IResult> SetDatasetKeysHandler(
+        string id,
+        SetDatasetKeysDto? request,
+        Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
+        CancellationToken ct)
+    {
+        if (request == null)
+        {
+            return Results.BadRequest(new { error = "Key definition payload is required." });
+        }
+
+        TableMetadata? existing = null;
+        if (TableIdentifier.TryParse(id.Replace('/', '.'), out var tableId))
+        {
+            existing = await metadataRepository.GetTableMetadataAsync(tableId, ct);
+        }
+
+        if (existing == null && Guid.TryParse(id, out var tableGuid))
+        {
+            var allTables = await metadataRepository.GetAllTablesAsync(ct);
+            existing = System.Linq.Enumerable.FirstOrDefault(allTables, t => t.Table.Id == tableGuid);
+        }
+
+        if (existing == null)
+        {
+            return Results.NotFound(new { error = $"Dataset '{id}' was not found." });
+        }
+
+        var pkColumns = request.PrimaryKey ?? request.PrimaryKeyColumns ?? Array.Empty<string>();
+        var indexes = request.Indexes != null
+            ? System.Linq.Enumerable.Select(
+                request.Indexes,
+                i => new TableIndexDefinition(
+                    i?.Name ?? string.Empty,
+                    i?.Columns ?? Array.Empty<string>(),
+                    i?.IsUnique ?? false)).ToList()
+            : (System.Collections.Generic.IReadOnlyList<TableIndexDefinition>)Array.Empty<TableIndexDefinition>();
+
+        TableMetadata validated;
+        try
+        {
+            validated = TableKeyDefinitionValidator.Validate(existing with
+            {
+                PrimaryKeyColumns = pkColumns,
+                Indexes = indexes,
+                ReplaceKeyDefinition = true
+            });
+        }
+        catch (TableDefinitionException)
+        {
+            return Results.BadRequest(new { error = "Invalid table key or index definition." });
+        }
+
+        var updated = await metadataRepository.UpsertTableMetadataAsync(
+            validated with { ReplaceKeyDefinition = true },
+            ct);
+
+        return Results.Ok(new
+        {
+            datasetId = updated.Identifier.ToString(),
+            primaryKey = updated.PrimaryKeyColumns,
+            indexes = updated.Indexes
+        });
     }
 
     internal static async Task<IResult> SetDatasetStateHandler(
@@ -198,3 +272,14 @@ public static class CatalogApiEndpoints
 }
 
 public sealed record AdminSetDatasetStateDto(string State, string? Reason = null);
+
+public sealed record DatasetIndexDto(
+    string Name,
+    System.Collections.Generic.IReadOnlyList<string> Columns,
+    bool IsUnique = false);
+
+public sealed record SetDatasetKeysDto(
+    System.Collections.Generic.IReadOnlyList<string>? PrimaryKey = null,
+    System.Collections.Generic.IReadOnlyList<string>? PrimaryKeyColumns = null,
+    System.Collections.Generic.IReadOnlyList<DatasetIndexDto>? Indexes = null);
+

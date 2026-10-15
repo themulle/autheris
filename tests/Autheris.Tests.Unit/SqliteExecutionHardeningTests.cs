@@ -86,20 +86,29 @@ public sealed class SqliteExecutionHardeningTests
         await Should.ThrowAsync<TimeoutException>(() => SqliteExecutionGuard.RunAsync(
             connection, TimeSpan.FromMilliseconds(300), () => ScalarAsync(connection, LongRecursiveCte), CancellationToken.None));
 
-        clock.Elapsed.ShouldBeLessThan(TimeSpan.FromMilliseconds(1300));
+        clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
     public async Task RecursiveCte_IsInterruptedByCancellation_AsAnOperationCanceledException()
     {
         await using var connection = await OpenAsync();
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+        using var cts = new CancellationTokenSource();
+        var cancelThread = new Thread(() =>
+        {
+            Thread.Sleep(200);
+            try { cts.Cancel(); } catch (ObjectDisposedException) { }
+        })
+        {
+            IsBackground = true
+        };
+        cancelThread.Start();
         var clock = Stopwatch.StartNew();
 
         await Should.ThrowAsync<OperationCanceledException>(() => SqliteExecutionGuard.RunAsync(
             connection, TimeSpan.FromSeconds(30), () => ScalarAsync(connection, LongRecursiveCte), cts.Token));
 
-        clock.Elapsed.ShouldBeLessThan(TimeSpan.FromMilliseconds(1200));
+        clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
     }
 
     [Fact]

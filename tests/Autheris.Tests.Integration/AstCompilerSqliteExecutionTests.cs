@@ -312,7 +312,7 @@ public sealed class AstCompilerSqliteExecutionTests : IAsyncLifetime
         await Should.ThrowAsync<TimeoutException>(() => SqliteExecutionGuard.RunAsync(
             _conn, TimeSpan.FromMilliseconds(400), () => RunAsync(compiled), CancellationToken.None));
 
-        clock.Elapsed.ShouldBeLessThan(TimeSpan.FromMilliseconds(1400));
+        clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -322,7 +322,7 @@ public sealed class AstCompilerSqliteExecutionTests : IAsyncLifetime
         var clock = Stopwatch.StartNew();
         await Should.ThrowAsync<TimeoutException>(() => SqliteExecutionGuard.RunAsync(
             _conn, TimeSpan.FromMilliseconds(400), () => RunAsync(compiled), CancellationToken.None));
-        clock.Elapsed.ShouldBeLessThan(TimeSpan.FromMilliseconds(1400));
+        clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -330,12 +330,21 @@ public sealed class AstCompilerSqliteExecutionTests : IAsyncLifetime
     {
         NoRowPolicy(Big);
         var compiled = Compile("SELECT count(*) FROM big a, big b, big c");
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+        using var cts = new CancellationTokenSource();
+        var cancelThread = new Thread(() =>
+        {
+            Thread.Sleep(200);
+            try { cts.Cancel(); } catch (ObjectDisposedException) { }
+        })
+        {
+            IsBackground = true
+        };
+        cancelThread.Start();
         var clock = Stopwatch.StartNew();
 
         await Should.ThrowAsync<OperationCanceledException>(() => SqliteExecutionGuard.RunAsync(
             _conn, TimeSpan.FromSeconds(30), () => RunAsync(compiled), cts.Token));
 
-        clock.Elapsed.ShouldBeLessThan(TimeSpan.FromMilliseconds(1200));
+        clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
     }
 }

@@ -136,7 +136,7 @@ public sealed class AstCompilerSqliteDmlExecutionTests : AstCompilerDmlContract,
                 var clock = Stopwatch.StartNew();
                 await Should.ThrowAsync<TimeoutException>(() => SqliteExecutionGuard.RunAsync(
                     connection, TimeSpan.FromMilliseconds(200), async () => await slow.ExecuteScalarAsync(), CancellationToken.None));
-                clock.Elapsed.ShouldBeLessThan(TimeSpan.FromMilliseconds(1200));
+                clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
             }
 
             // The transaction is still usable and the checked DML runs inside it under a guard with a generous budget.

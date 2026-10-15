@@ -452,6 +452,37 @@ CREATE TABLE dbo.AUDIT_LOG_TRUNCATE_GUARD (
     seq BIGINT NULL,
     CONSTRAINT fk_audit_truncate_guard FOREIGN KEY (seq) REFERENCES dbo.AUDIT_LOG_ENTRIES (seq)
 );
+
+-- Issue #94: declared primary keys and indexes (composite, ordered, unique flag); columns referenced by TABLE_COLUMNS.id
+IF OBJECT_ID(N'dbo.TABLE_PRIMARY_KEY_COLUMNS', N'U') IS NULL
+CREATE TABLE dbo.TABLE_PRIMARY_KEY_COLUMNS (
+    table_id NVARCHAR(128) NOT NULL,
+    key_ordinal INT NOT NULL CONSTRAINT CK_TABLE_PK_COLUMNS_ordinal CHECK (key_ordinal >= 1),
+    table_column_id NVARCHAR(128) NOT NULL,
+    CONSTRAINT PK_TABLE_PRIMARY_KEY_COLUMNS PRIMARY KEY (table_id, key_ordinal)
+);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_TABLE_PK_COLUMNS_COLUMN' AND object_id = OBJECT_ID(N'dbo.TABLE_PRIMARY_KEY_COLUMNS'))
+    CREATE UNIQUE INDEX UX_TABLE_PK_COLUMNS_COLUMN ON dbo.TABLE_PRIMARY_KEY_COLUMNS (table_id, table_column_id);
+
+IF OBJECT_ID(N'dbo.TABLE_INDEXES', N'U') IS NULL
+CREATE TABLE dbo.TABLE_INDEXES (
+    id NVARCHAR(128) NOT NULL PRIMARY KEY,
+    table_id NVARCHAR(128) NOT NULL,
+    index_name NVARCHAR(128) NOT NULL,
+    is_unique BIT NOT NULL
+);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_TABLE_INDEXES_NAME' AND object_id = OBJECT_ID(N'dbo.TABLE_INDEXES'))
+    CREATE UNIQUE INDEX UX_TABLE_INDEXES_NAME ON dbo.TABLE_INDEXES (table_id, index_name);
+
+IF OBJECT_ID(N'dbo.TABLE_INDEX_COLUMNS', N'U') IS NULL
+CREATE TABLE dbo.TABLE_INDEX_COLUMNS (
+    index_id NVARCHAR(128) NOT NULL,
+    column_ordinal INT NOT NULL CONSTRAINT CK_TABLE_INDEX_COLUMNS_ordinal CHECK (column_ordinal >= 1),
+    table_column_id NVARCHAR(128) NOT NULL,
+    CONSTRAINT PK_TABLE_INDEX_COLUMNS PRIMARY KEY (index_id, column_ordinal)
+);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_TABLE_INDEX_COLUMNS_COLUMN' AND object_id = OBJECT_ID(N'dbo.TABLE_INDEX_COLUMNS'))
+    CREATE UNIQUE INDEX UX_TABLE_INDEX_COLUMNS_COLUMN ON dbo.TABLE_INDEX_COLUMNS (index_id, table_column_id);
 ");
 
             // Append-only audit table (a table owner can still drop the trigger; the runtime login should only

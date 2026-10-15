@@ -326,4 +326,52 @@ public sealed class GovernedTableReadPlannerTests
         ex.Message.ShouldNotContain("secretcol");
         ex.Message.ShouldNotContain("maskedcol");
     }
+
+    [Fact]
+    public void Plan_TableWithClientIdAndTs_AutomaticallyOrdersByCompositeClientIdTs()
+    {
+        var meta = Unkeyed(("client_id", "varchar"), ("ts", "timestamp"), ("value", "double"));
+        var decision = Levels(
+            ("client_id", ColumnAccessLevel.Clear),
+            ("ts", ColumnAccessLevel.Clear),
+            ("value", ColumnAccessLevel.Clear));
+
+        var planned = _planner.Plan(Intent(limit: 6), meta, decision);
+
+        planned.Sql.ShouldContain("ORDER BY \"client_id\", \"ts\" LIMIT 6");
+    }
+
+    [Fact]
+    public void Plan_TableWithClientIdOnly_AutomaticallyOrdersByClientId()
+    {
+        var meta = Unkeyed(("client_id", "varchar"), ("value", "double"));
+        var decision = Levels(
+            ("client_id", ColumnAccessLevel.Clear),
+            ("value", ColumnAccessLevel.Clear));
+
+        var planned = _planner.Plan(Intent(limit: 6), meta, decision);
+
+        planned.Sql.ShouldContain("ORDER BY \"client_id\" LIMIT 6");
+    }
+
+    [Fact]
+    public void Plan_TableWithDeclaredUniqueIndex_OrdersByShortestClearUniqueIndex()
+    {
+        var meta = Unkeyed(("a", "int"), ("b", "int"), ("c", "int")) with
+        {
+            Indexes = new[]
+            {
+                new TableIndexDefinition("ux_abc", new[] { "a", "b", "c" }, IsUnique: true),
+                new TableIndexDefinition("ux_ab", new[] { "a", "b" }, IsUnique: true)
+            }
+        };
+        var decision = Levels(
+            ("a", ColumnAccessLevel.Clear),
+            ("b", ColumnAccessLevel.Clear),
+            ("c", ColumnAccessLevel.Clear));
+
+        var planned = _planner.Plan(Intent(limit: 6), meta, decision);
+
+        planned.Sql.ShouldContain("ORDER BY \"a\", \"b\" LIMIT 6");
+    }
 }
