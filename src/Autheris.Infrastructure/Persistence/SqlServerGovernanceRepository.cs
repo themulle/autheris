@@ -18,6 +18,9 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, Migr
     private readonly string _connectionString;
     private readonly IEpochValidationService _epochValidationService;
     private readonly ConcurrentDictionary<string, (TableMetadata? Metadata, long CachedAtTicks)> _metadataCache = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Test seam: drops cached metadata after a test changed rows behind the repository.</summary>
+    internal void InvalidateMetadataCacheForTesting() => _metadataCache.Clear();
     private static readonly long MetadataCacheTtlTicks = TimeSpan.FromSeconds(30).Ticks;
     private readonly SemaphoreSlim _auditLock = new(1, 1);
     private volatile bool _isAuditPipelineFaulted = false;
