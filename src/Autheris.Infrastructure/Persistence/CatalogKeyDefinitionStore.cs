@@ -40,6 +40,34 @@ internal static class CatalogKeyDefinitionStore
 
     internal readonly record struct PrimaryKeyRow(int Ordinal, string ColumnId);
 
+    /// <summary>
+    /// Per repository instance: remembers that the key tables exist, so uncached metadata reads do not probe on every call.
+    /// Only a positive result is cached; a missing table is re-probed and always means "unavailable" (fail closed).
+    /// </summary>
+    internal sealed class KeyTableProbe
+    {
+        private volatile bool _present;
+
+        internal bool Present => _present;
+
+        internal void MarkPresent() => _present = true;
+
+        internal void Reset() => _present = false;
+    }
+
+    /// <summary>The raw key rows of one table read in a batch. <see cref="Overflow"/>: a per-table cap was exceeded (table unavailable).</summary>
+    internal sealed class TableKeyRows
+    {
+        internal List<PrimaryKeyRow> PrimaryKey { get; } = new();
+
+        internal List<IndexRow> Indexes { get; } = new();
+
+        internal bool Overflow { get; set; }
+    }
+
+    /// <summary>Parameters per batch query; far below SQL Server's limit of 2100 parameters per command.</summary>
+    internal const int BatchChunkSize = 500;
+
     internal readonly record struct IndexRow(string IndexId, string Name, bool IsUnique, int? Ordinal, string? ColumnId);
 
     private const int MaxIndexRows = TableKeyDefinitionValidator.MaxIndexesPerTable * TableKeyDefinitionValidator.MaxColumnsPerKey;
@@ -58,9 +86,18 @@ internal static class CatalogKeyDefinitionStore
         Guid tableId,
         IReadOnlyList<TableColumn> columns,
         CancellationToken ct,
-        bool tablesVerified = false)
+        KeyTableProbe? probe = null,
+        TableKeyRows? prefetched = null)
     {
-        if (!tablesVerified && !await TablesExistAsync(conn, tx, dialect, ct).ConfigureAwait(false))
+        if (prefetched is not null)
+        {
+            // Batch path: the caller probed the key tables once and read the rows of all tables with one query each.
+            return prefetched.Overflow
+                ? throw new TableMetadataUnavailableException(identifier)
+                : Assemble(identifier, columns, prefetched.PrimaryKey, prefetched.Indexes);
+        }
+
+        if (!await TablesExistAsync(conn, tx, dialect, ct, probe).ConfigureAwait(false))
         {
             throw new TableMetadataUnavailableException(identifier);
         }
@@ -111,6 +148,101 @@ internal static class CatalogKeyDefinitionStore
         }
 
         return Assemble(identifier, columns, pkRows, indexRows);
+    }
+
+    /// <summary>
+    /// Reads the primary key and index rows of many tables with one query each per chunk of <see cref="BatchChunkSize"/> table ids.
+    /// Per-table caps are enforced while reading (an exceeding table is flagged, its rows are dropped). The key tables must exist.
+    /// </summary>
+    internal static async Task<Dictionary<Guid, TableKeyRows>> ReadBatchAsync(
+        DbConnection conn,
+        DbTransaction? tx,
+        KeyDefinitionDialect dialect,
+        IReadOnlyList<Guid> tableIds,
+        CancellationToken ct)
+    {
+        var result = new Dictionary<Guid, TableKeyRows>(tableIds.Count);
+        foreach (var id in tableIds)
+        {
+            result[id] = new TableKeyRows();
+        }
+
+        for (var offset = 0; offset < tableIds.Count; offset += BatchChunkSize)
+        {
+            var count = Math.Min(BatchChunkSize, tableIds.Count - offset);
+            var names = new string[count];
+            for (var i = 0; i < count; i++)
+            {
+                names[i] = "@t" + i.ToString(CultureInfo.InvariantCulture);
+            }
+
+            var inList = string.Join(",", names);
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                Enlist(cmd, tx);
+                cmd.CommandText = $"SELECT table_id, key_ordinal, table_column_id FROM {dialect.Prefix}{PrimaryKeyTable} WHERE table_id IN ({inList}) ORDER BY table_id ASC, key_ordinal ASC";
+                for (var i = 0; i < count; i++)
+                {
+                    AddParameter(cmd, names[i], tableIds[offset + i].ToString());
+                }
+
+                await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    if (!Guid.TryParse(reader.GetString(0), out var tid) || !result.TryGetValue(tid, out var rows) || rows.Overflow)
+                    {
+                        continue;
+                    }
+
+                    if (rows.PrimaryKey.Count >= TableKeyDefinitionValidator.MaxColumnsPerKey)
+                    {
+                        rows.Overflow = true;
+                        continue;
+                    }
+
+                    rows.PrimaryKey.Add(new PrimaryKeyRow(Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture), reader.GetString(2)));
+                }
+            }
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                Enlist(cmd, tx);
+                cmd.CommandText = $@"SELECT i.table_id, i.id, i.index_name, i.is_unique, ic.column_ordinal, ic.table_column_id
+                                     FROM {dialect.Prefix}{IndexTable} i
+                                     LEFT JOIN {dialect.Prefix}{IndexColumnTable} ic ON i.id = ic.index_id
+                                     WHERE i.table_id IN ({inList})
+                                     ORDER BY i.table_id ASC, i.index_name ASC, i.id ASC, ic.column_ordinal ASC";
+                for (var i = 0; i < count; i++)
+                {
+                    AddParameter(cmd, names[i], tableIds[offset + i].ToString());
+                }
+
+                await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    if (!Guid.TryParse(reader.GetString(0), out var tid) || !result.TryGetValue(tid, out var rows) || rows.Overflow)
+                    {
+                        continue;
+                    }
+
+                    if (rows.Indexes.Count >= MaxIndexRows)
+                    {
+                        rows.Overflow = true;
+                        continue;
+                    }
+
+                    rows.Indexes.Add(new IndexRow(
+                        reader.GetString(1),
+                        reader.GetString(2),
+                        Convert.ToBoolean(reader.GetValue(3), CultureInfo.InvariantCulture),
+                        reader.IsDBNull(4) ? null : Convert.ToInt32(reader.GetValue(4), CultureInfo.InvariantCulture),
+                        reader.IsDBNull(5) ? null : reader.GetString(5)));
+                }
+            }
+        }
+
+        return result;
     }
 
     /// <summary>Pure validation of persisted rows; throws <see cref="TableMetadataUnavailableException"/> on any violation.</summary>
@@ -381,8 +513,13 @@ internal static class CatalogKeyDefinitionStore
 
     // ---------------------------------------------------------------- helpers
 
-    internal static async Task<bool> TablesExistAsync(DbConnection conn, DbTransaction? tx, KeyDefinitionDialect dialect, CancellationToken ct)
+    internal static async Task<bool> TablesExistAsync(DbConnection conn, DbTransaction? tx, KeyDefinitionDialect dialect, CancellationToken ct, KeyTableProbe? probe = null)
     {
+        if (probe is { Present: true })
+        {
+            return true;
+        }
+
         foreach (var table in new[] { PrimaryKeyTable, IndexTable, IndexColumnTable })
         {
             await using var cmd = conn.CreateCommand();
@@ -396,6 +533,7 @@ internal static class CatalogKeyDefinitionStore
             }
         }
 
+        probe?.MarkPresent();
         return true;
     }
 

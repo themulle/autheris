@@ -10,7 +10,13 @@ namespace Autheris.Infrastructure.Persistence;
 
 public partial class SqlServerGovernanceRepository
 {
-    public async Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
+    public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) =>
+        GetTableMetadataCoreAsync(table, null, ct);
+
+    private async Task<TableMetadata?> GetTableMetadataCoreAsync(
+        TableIdentifier table,
+        IReadOnlyDictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? prefetchedKeys,
+        CancellationToken ct)
     {
         var cacheKey = table.ToString().ToLowerInvariant();
         var nowTicks = DateTime.UtcNow.Ticks;
@@ -128,7 +134,8 @@ public partial class SqlServerGovernanceRepository
             try
             {
                 (pkColumns, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
-                    conn, null, CatalogKeyDefinitionStore.SqlServer, table, tableId.Value, columns, ct).ConfigureAwait(false);
+                    conn, null, CatalogKeyDefinitionStore.SqlServer, table, tableId.Value, columns, ct,
+                    _keyTables, prefetchedKeys is not null && prefetchedKeys.TryGetValue(tableId.Value, out var keyRows) ? keyRows : null).ConfigureAwait(false);
             }
             catch (TableMetadataUnavailableException)
             {
@@ -153,27 +160,43 @@ public partial class SqlServerGovernanceRepository
 
     public async Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
     {
-        var tables = new List<TableIdentifier>();
+        var tables = new List<(Guid Id, TableIdentifier Identifier)>();
 
         await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
         {
             await using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "SELECT source_name, schema_name, table_name FROM TABLES WHERE is_active = 1";
+                cmd.CommandText = "SELECT id, source_name, schema_name, table_name FROM TABLES WHERE is_active = 1";
                 await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
                 while (await reader.ReadAsync(ct).ConfigureAwait(false))
                 {
-                    tables.Add(new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2)));
+                    tables.Add((Guid.Parse(reader.GetString(0)), new TableIdentifier(reader.GetString(1), reader.GetString(2), reader.GetString(3))));
                 }
             }
         }
 
+        // M4: the key rows of every table that is not cached are read with one query each (chunked), not per table.
+        Dictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? prefetched = null;
+        var uncached = tables
+            .Where(t => !(_metadataCache.TryGetValue(t.Identifier.ToString().ToLowerInvariant(), out var cached) &&
+                          DateTime.UtcNow.Ticks - cached.CachedAtTicks < MetadataCacheTtlTicks))
+            .Select(t => t.Id)
+            .ToList();
+        if (uncached.Count > 1)
+        {
+            await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+            if (await CatalogKeyDefinitionStore.TablesExistAsync(conn, null, CatalogKeyDefinitionStore.SqlServer, ct, _keyTables).ConfigureAwait(false))
+            {
+                prefetched = await CatalogKeyDefinitionStore.ReadBatchAsync(conn, null, CatalogKeyDefinitionStore.SqlServer, uncached, ct).ConfigureAwait(false);
+            }
+        }
+
         var result = new List<TableMetadata>();
-        foreach (var t in tables)
+        foreach (var (_, t) in tables)
         {
             try
             {
-                var meta = await GetTableMetadataAsync(t, ct).ConfigureAwait(false);
+                var meta = await GetTableMetadataCoreAsync(t, prefetched, ct).ConfigureAwait(false);
                 if (meta != null)
                 {
                     result.Add(meta);

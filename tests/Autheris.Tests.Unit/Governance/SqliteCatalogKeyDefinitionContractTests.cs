@@ -325,6 +325,7 @@ public sealed class SqliteCatalogKeyDefinitionContractTests : IDisposable
         await SeedFullDefinitionAsync();
         Exec("DROP TABLE TABLE_INDEX_COLUMNS");
         _repo.InvalidateMetadataCacheForTesting();
+        _repo.ResetKeyTableProbeForTesting(); // a positive probe is cached per instance: model a fresh instance
 
         await Should.ThrowAsync<TableMetadataUnavailableException>(() => _repo.GetTableMetadataAsync(Orders));
         (await _repo.GetAllTablesAsync()).ShouldNotContain(t => t.Identifier.Equals(Orders));

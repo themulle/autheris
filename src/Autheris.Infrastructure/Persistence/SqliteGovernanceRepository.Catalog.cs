@@ -187,7 +187,7 @@ public partial class SqliteGovernanceRepository
             try
             {
                 (pkColumns, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
-                    conn, null, CatalogKeyDefinitionStore.Sqlite, table, tableId.Value, columns, ct).ConfigureAwait(false);
+                    conn, null, CatalogKeyDefinitionStore.Sqlite, table, tableId.Value, columns, ct, _keyTables).ConfigureAwait(false);
             }
             catch (TableMetadataUnavailableException)
             {
@@ -322,7 +322,11 @@ public partial class SqliteGovernanceRepository
                 }
             }
 
-            var keyTablesPresent = await CatalogKeyDefinitionStore.TablesExistAsync(conn, null, CatalogKeyDefinitionStore.Sqlite, ct).ConfigureAwait(false);
+            var keyTablesPresent = await CatalogKeyDefinitionStore.TablesExistAsync(conn, null, CatalogKeyDefinitionStore.Sqlite, ct, _keyTables).ConfigureAwait(false);
+            // M4: one read per key table for all active tables (chunked) instead of two queries per table.
+            var prefetched = keyTablesPresent
+                ? await CatalogKeyDefinitionStore.ReadBatchAsync(conn, null, CatalogKeyDefinitionStore.Sqlite, tableRows.Select(r => r.id).ToList(), ct).ConfigureAwait(false)
+                : null;
             foreach (var (id, domain, name, table) in tableRows)
             {
                 TableIdentifier identifier;
@@ -343,7 +347,8 @@ public partial class SqliteGovernanceRepository
                 try
                 {
                     (pkColumns, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
-                        conn, null, CatalogKeyDefinitionStore.Sqlite, identifier, id, columns, ct, keyTablesPresent).ConfigureAwait(false);
+                        conn, null, CatalogKeyDefinitionStore.Sqlite, identifier, id, columns, ct, _keyTables,
+                        prefetched is not null && prefetched.TryGetValue(id, out var keyRows) ? keyRows : null).ConfigureAwait(false);
                 }
                 catch (TableMetadataUnavailableException)
                 {
