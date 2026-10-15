@@ -30,11 +30,11 @@ public partial class SqliteGovernanceRepository
         var subjectSet = subjects.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (subjectSet.Count == 0) return Array.Empty<Consent>();
 
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             var consents = new List<Consent>();
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 var tenantFilter = tenantId != null ? " AND c.tenant_id = @tenantId" : "";
                 cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
@@ -95,13 +95,9 @@ public partial class SqliteGovernanceRepository
             }
 
             // Hydrate column rules & row filters in batch (K-01)
-            await HydrateConsentsBatchAsync(consents, ct);
+            await HydrateConsentsBatchAsync(conn, consents, ct);
 
             return consents;
-        }
-        finally
-        {
-            _lock.Release();
         }
     }
 
@@ -125,11 +121,11 @@ public partial class SqliteGovernanceRepository
             ? new HashSet<string>(roles, StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             var consents = new List<Consent>();
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 var tenantFilter = tenantId != null ? " AND c.tenant_id = @tenantId" : "";
                 cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
@@ -193,13 +189,9 @@ public partial class SqliteGovernanceRepository
             }
 
             // Hydrate column rules & row filters in batch (K-01)
-            await HydrateConsentsBatchAsync(consents, ct);
+            await HydrateConsentsBatchAsync(conn, consents, ct);
 
             return consents;
-        }
-        finally
-        {
-            _lock.Release();
         }
     }
 
@@ -212,11 +204,11 @@ public partial class SqliteGovernanceRepository
         DateTimeOffset atTime,
         CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             var consents = new List<Consent>();
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                            c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
@@ -258,10 +250,6 @@ public partial class SqliteGovernanceRepository
 
             return consents;
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
     /// <summary>
@@ -270,12 +258,12 @@ public partial class SqliteGovernanceRepository
     /// </summary>
     public async Task<bool> RevokeSystemConsentAsync(Guid consentId, Guid consentRequestId, Sid revokedBySid, string reason, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             TableIdentifier? tableId = null;
             TenantId tenantId = TenantId.LegacySingleTenant;
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id
                                     FROM CONSENTS c
@@ -296,7 +284,7 @@ public partial class SqliteGovernanceRepository
                 return false;
             }
 
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"UPDATE CONSENTS
                                     SET is_revoked = 1, revoked_by_sid = @by, revoked_at = @now, revoke_reason = @reason
@@ -312,9 +300,9 @@ public partial class SqliteGovernanceRepository
                 }
             }
 
-            await IncrementTableEpochInternalAsync(tableId.Value, ct);
+            await IncrementTableEpochInternalAsync(conn, tableId.Value, ct);
 
-            await RecordAuditEventInternalAsync(new AuditLogEntry
+            await RecordAuditEventInternalAsync(conn, new AuditLogEntry
             {
                 TenantId = tenantId,
                 EventType = "CONSENT_REVOKED",
@@ -332,16 +320,12 @@ public partial class SqliteGovernanceRepository
 
             return true;
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
-    private async Task<IReadOnlyList<ConsentColumnRule>> LoadColumnRulesAsync(Guid consentId, CancellationToken ct)
+    private async Task<IReadOnlyList<ConsentColumnRule>> LoadColumnRulesAsync(SqliteConnection conn, Guid consentId, CancellationToken ct)
     {
         var rules = new List<ConsentColumnRule>();
-        using var cmd = _connection.CreateCommand();
+        using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT id, consent_id, table_column_id, column_name, access_level, applicable_scopes
                             FROM CONSENT_COLUMN_RULES WHERE consent_id = @cid";
         cmd.Parameters.AddWithValue("@cid", consentId.ToString());
@@ -369,10 +353,10 @@ public partial class SqliteGovernanceRepository
         return rules;
     }
 
-    private async Task<IReadOnlyList<ConsentRowFilter>> LoadRowFiltersAsync(Guid consentId, CancellationToken ct)
+    private async Task<IReadOnlyList<ConsentRowFilter>> LoadRowFiltersAsync(SqliteConnection conn, Guid consentId, CancellationToken ct)
     {
         var filters = new List<ConsentRowFilter>();
-        using var cmd = _connection.CreateCommand();
+        using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT id, consent_id, filter_group, table_column_id, column_name,
                                    operator, value_type, value_json, value_source, user_attribute,
                                    filter_type, dependent_table, dependent_table_alias, foreign_key_column,
@@ -440,15 +424,15 @@ public partial class SqliteGovernanceRepository
         return filters;
     }
 
-    private async Task HydrateConsentsBatchAsync(List<Consent> consents, CancellationToken ct)
+    private async Task HydrateConsentsBatchAsync(SqliteConnection conn, List<Consent> consents, CancellationToken ct)
     {
         if (consents.Count == 0) return;
 
         if (consents.Count == 1)
         {
             var single = consents[0];
-            single.ColumnRules = await LoadColumnRulesAsync(single.Id, ct);
-            single.RowFilters = await LoadRowFiltersAsync(single.Id, ct);
+            single.ColumnRules = await LoadColumnRulesAsync(conn, single.Id, ct);
+            single.RowFilters = await LoadRowFiltersAsync(conn, single.Id, ct);
             return;
         }
 
@@ -458,7 +442,7 @@ public partial class SqliteGovernanceRepository
             var idList = string.Join(",", consentChunk.Select((_, i) => $"@cid{i}"));
 
             // 1. Batch load column rules
-            using (var cmdRules = _connection.CreateCommand())
+            using (var cmdRules = conn.CreateCommand())
             {
                 cmdRules.CommandText = $@"SELECT id, consent_id, table_column_id, column_name, access_level, applicable_scopes
                                          FROM CONSENT_COLUMN_RULES WHERE consent_id IN ({idList})";
@@ -500,7 +484,7 @@ public partial class SqliteGovernanceRepository
             }
 
             // 2. Batch load row filters
-            using (var cmdFilters = _connection.CreateCommand())
+            using (var cmdFilters = conn.CreateCommand())
             {
                 cmdFilters.CommandText = $@"SELECT id, consent_id, filter_group, table_column_id, column_name,
                                            operator, value_type, value_json, value_source, user_attribute,
@@ -585,10 +569,10 @@ public partial class SqliteGovernanceRepository
 
     public async Task<ConsentRequest> CreateConsentRequestAsync(ConsentRequest request, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             var reqIdsJson = request.RequesterIdentifiers.Count > 0
                 ? JsonSerializer.Serialize(request.RequesterIdentifiers)
                 : null;
@@ -610,18 +594,14 @@ public partial class SqliteGovernanceRepository
             await cmd.ExecuteNonQueryAsync(ct);
             return request;
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
     public async Task<ConsentRequest?> GetConsentRequestAsync(Guid requestId, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
                                        COALESCE(t.source_name, p.domain, 'default'), t.schema_name, t.table_name,
@@ -659,10 +639,6 @@ public partial class SqliteGovernanceRepository
             }
             return null;
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
     public Task<ConsentRequest?> GetConsentRequestByTicketIdAsync(string ticketId, CancellationToken ct = default)
@@ -676,10 +652,10 @@ public partial class SqliteGovernanceRepository
 
     private async Task<ConsentRequest?> GetConsentRequestByTicketIdCoreAsync(string ticketId, TenantId? tenantId, CancellationToken ct)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
                                        COALESCE(t.source_name, p.domain, 'default'), t.schema_name, t.table_name,
@@ -722,10 +698,6 @@ public partial class SqliteGovernanceRepository
             }
             return null;
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
     public Task ActivateConsentAsync(Guid requestId, CancellationToken ct = default)
@@ -740,11 +712,11 @@ public partial class SqliteGovernanceRepository
 
     private async Task ActivateConsentCoreAsync(Guid requestId, Sid? approvedBy, bool allowPendingAutoApprove, CancellationToken ct)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             ConsentRequest? req = null;
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                            r.business_justification, r.status, r.requested_at, r.requested_valid_to,
@@ -778,9 +750,9 @@ public partial class SqliteGovernanceRepository
 
             if (req == null) return;
 
-            using var tx = _connection.BeginTransaction();
+            using var tx = conn.BeginTransaction();
 
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = tx;
                 // SEC H-06: Only a pending or newly approved request may be activated.
@@ -799,7 +771,7 @@ public partial class SqliteGovernanceRepository
                 }
             }
 
-            using (var checkExistingCmd = _connection.CreateCommand())
+            using (var checkExistingCmd = conn.CreateCommand())
             {
                 checkExistingCmd.Transaction = tx;
                 // SEC N-2: Disallow multiple activations of the same consent_request_id, regardless of revocation status.
@@ -815,7 +787,7 @@ public partial class SqliteGovernanceRepository
 
             var isRole = req.RequestedGranteeType == GranteeType.Role;
             var consentId = Guid.NewGuid();
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = tx;
                 cmd.CommandText = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, role_id, role_name, valid_from, valid_to, is_revoked, tenant_id)
@@ -835,7 +807,7 @@ public partial class SqliteGovernanceRepository
 
             // POL-3: Freeze full column snapshot from table metadata on ITSM activation
             var columnRules = new List<(Guid Id, Guid ColId, string ColName, int AccessLevel)>();
-            using (var colCmd = _connection.CreateCommand())
+            using (var colCmd = conn.CreateCommand())
             {
                 colCmd.Transaction = tx;
                 colCmd.CommandText = @"SELECT c.id, c.column_name, c.is_sensitive,
@@ -859,7 +831,7 @@ public partial class SqliteGovernanceRepository
 
             foreach (var (ruleId, colId, colName, accessLevel) in columnRules)
             {
-                using var ruleCmd = _connection.CreateCommand();
+                using var ruleCmd = conn.CreateCommand();
                 ruleCmd.Transaction = tx;
                 ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level, applicable_scopes)
                                         VALUES (@id, @cid, @tcid, @col, @lvl, @scopes)";
@@ -889,61 +861,48 @@ public partial class SqliteGovernanceRepository
                     ValidTo = req.RequestedValidTo
                 })
             };
-            await RecordAuditEventInternalAsync(auditEntry, ct, tx);
+            await RecordAuditEventInternalAsync(conn, auditEntry, ct, tx);
 
-            await IncrementTableEpochInternalAsync(req.TableIdentifier, tx, ct);
+            await IncrementTableEpochInternalAsync(conn, req.TableIdentifier, tx, ct);
             await tx.CommitAsync(ct);
             OnTransactionCommitted(tx);
 
             await _epochValidationService.InvalidateEpochAsync(req.TableIdentifier, ct);
         }
-        finally
-        {
-            RollbackPendingAuditTransactions();
-            _lock.Release();
-        }
     }
 
     public async Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = "DELETE FROM CONSENT_REQUESTS WHERE id = @id";
             cmd.Parameters.AddWithValue("@id", requestId.ToString());
             await cmd.ExecuteNonQueryAsync(ct);
-        }
-        finally
-        {
-            _lock.Release();
         }
     }
 
     public async Task UpdateConsentRequestTicketIdAsync(Guid requestId, string ticketId, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = "UPDATE CONSENT_REQUESTS SET itsm_ticket_id = @ticketId WHERE id = @id";
             cmd.Parameters.AddWithValue("@id", requestId.ToString());
             cmd.Parameters.AddWithValue("@ticketId", ticketId);
             await cmd.ExecuteNonQueryAsync(ct);
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
     public async Task<IReadOnlyList<ConsentRequest>> GetRequestsByRequesterSidAsync(Sid requesterSid, string? status = null, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             var list = new List<ConsentRequest>();
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             var sql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                r.business_justification, r.status, r.requested_at, r.requested_valid_to,
                                COALESCE(t.source_name, p.domain, 'default'), t.schema_name, t.table_name
@@ -979,19 +938,15 @@ public partial class SqliteGovernanceRepository
             }
             return list;
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
     public async Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             var list = new List<ConsentRequest>();
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
                                        COALESCE(t.source_name, p.domain, 'default'), t.schema_name, t.table_name
@@ -1033,10 +988,6 @@ public partial class SqliteGovernanceRepository
             }
             return list;
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
     public Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default)
@@ -1064,11 +1015,11 @@ public partial class SqliteGovernanceRepository
             throw new InvalidOperationException("Separation of duties violated: The requester cannot approve their own request.");
         }
 
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             string currentStatus;
-            using (var checkCmd = _connection.CreateCommand())
+            using (var checkCmd = conn.CreateCommand())
             {
                 checkCmd.CommandText = "SELECT status FROM CONSENT_REQUESTS WHERE id = @id";
                 checkCmd.Parameters.AddWithValue("@id", requestId.ToString());
@@ -1086,15 +1037,15 @@ public partial class SqliteGovernanceRepository
             }
 
             // Review R4-4 (rest): compare by the stable data owner id as well, not only by spelling.
-            var approverOwnerIds = await ResolveDataOwnerIdsInternalAsync(ConsentApprovalPolicy.IdentifierCandidates(approverSid.Value, itsmApproverAccount), ct);
-            if (ConsentApprovalPolicy.ShareOwnerId(approverOwnerIds, await ResolveRequesterOwnerIdsInternalAsync(req, ct)))
+            var approverOwnerIds = await ResolveDataOwnerIdsInternalAsync(conn, ConsentApprovalPolicy.IdentifierCandidates(approverSid.Value, itsmApproverAccount), ct);
+            if (ConsentApprovalPolicy.ShareOwnerId(approverOwnerIds, await ResolveRequesterOwnerIdsInternalAsync(conn, req, ct)))
             {
                 throw new InvalidOperationException("Separation of duties violated: The requester cannot approve their own consent request.");
             }
 
             if (!isExternalItsmApproval)
             {
-                bool isAuthorized = await IsAuthorizedApproverForTableInternalAsync(req.TableIdentifier, approverSid, ct);
+                bool isAuthorized = await IsAuthorizedApproverForTableInternalAsync(conn, req.TableIdentifier, approverSid, ct);
                 if (!isAuthorized)
                 {
                     throw new UnauthorizedAccessException($"User '{approverSid}' is neither a data owner nor a delegated approver for table '{req.TableIdentifier}'.");
@@ -1104,7 +1055,7 @@ public partial class SqliteGovernanceRepository
             {
                 // SEC N-1 / Review R3-1 + R2-5: tables with configured owners need a named ITSM approver who is an
                 // owner, delegate or admin (matched by account or e-mail, passed typed, never parsed from the SID).
-                bool hasConfiguredOwners = await HasConfiguredDataOwnersAsync(req.TableIdentifier, ct);
+                bool hasConfiguredOwners = await HasConfiguredDataOwnersAsync(conn, req.TableIdentifier, ct);
                 if (hasConfiguredOwners)
                 {
                     string? account = string.IsNullOrWhiteSpace(itsmApproverAccount) ? null : itsmApproverAccount.Trim();
@@ -1113,7 +1064,7 @@ public partial class SqliteGovernanceRepository
                         throw new UnauthorizedAccessException($"ITSM approval without a named approver is not allowed for table '{req.TableIdentifier}' with configured data owners.");
                     }
 
-                    bool isAuthorized = await IsAuthorizedApproverForTableInternalAsync(req.TableIdentifier, approverSid, account, ct);
+                    bool isAuthorized = await IsAuthorizedApproverForTableInternalAsync(conn, req.TableIdentifier, approverSid, account, ct);
                     if (!isAuthorized)
                     {
                         throw new UnauthorizedAccessException($"ITSM approver '{account}' is neither a data owner nor a delegated approver for table '{req.TableIdentifier}'.");
@@ -1124,7 +1075,7 @@ public partial class SqliteGovernanceRepository
             // Check if table requires four-eyes
             bool requiresFourEyes = false;
             string? tableSensitivity = null;
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = "SELECT requires_four_eyes, sensitivity FROM TABLES WHERE id = @tid";
                 cmd.Parameters.AddWithValue("@tid", req.TableId.ToString());
@@ -1144,7 +1095,7 @@ public partial class SqliteGovernanceRepository
 
             // Check existing approval steps
             var existingApprovers = new List<string>();
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = "SELECT approver_sid FROM APPROVAL_STEPS WHERE consent_request_id = @reqId AND decision = 'APPROVED' ORDER BY step_number";
                 cmd.Parameters.AddWithValue("@reqId", requestId.ToString());
@@ -1158,7 +1109,7 @@ public partial class SqliteGovernanceRepository
             bool sameApprover = existingApprovers.Any(s => ConsentApprovalPolicy.IsSameApprover(s, approverSid, itsmApproverAccount));
             for (int i = 0; !sameApprover && i < existingApprovers.Count; i++)
             {
-                var storedOwnerIds = await ResolveDataOwnerIdsInternalAsync(ConsentApprovalPolicy.IdentifierCandidates(existingApprovers[i]), ct);
+                var storedOwnerIds = await ResolveDataOwnerIdsInternalAsync(conn, ConsentApprovalPolicy.IdentifierCandidates(existingApprovers[i]), ct);
                 sameApprover = ConsentApprovalPolicy.ShareOwnerId(storedOwnerIds, approverOwnerIds);
             }
 
@@ -1178,9 +1129,9 @@ public partial class SqliteGovernanceRepository
             // four-eyes decision cannot be assembled from one ITSM and one GraphQL approval.
             string newStatus = ConsentApprovalPolicy.StatusAfterApproval(requiresFourEyes, nextStep, isExternalItsmApproval, tableSensitivity);
 
-            using var tx = _connection.BeginTransaction();
+            using var tx = conn.BeginTransaction();
             // Insert approval step
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = tx;
                 cmd.CommandText = @"INSERT INTO APPROVAL_STEPS (id, consent_request_id, step_number, approver_sid, decision, decided_at)
@@ -1194,7 +1145,7 @@ public partial class SqliteGovernanceRepository
             }
 
             // Update status
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = tx;
                 cmd.CommandText = @"UPDATE CONSENT_REQUESTS SET status = @st WHERE id = @id";
@@ -1204,17 +1155,12 @@ public partial class SqliteGovernanceRepository
             }
 
             req.Status = newStatus;
-            await RecordAuditEventInternalAsync(
+            await RecordAuditEventInternalAsync(conn,
                 ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_APPROVAL_STEP", "APPROVED", newStatus, itsmApproverAccount, null), ct, tx);
 
             tx.Commit();
             OnTransactionCommitted(tx);
             return req;
-        }
-        finally
-        {
-            RollbackPendingAuditTransactions();
-            _lock.Release();
         }
     }
 
@@ -1233,11 +1179,11 @@ public partial class SqliteGovernanceRepository
             throw new InvalidOperationException($"Request {requestId} is in status '{req.Status}' and cannot be rejected.");
         }
 
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             string currentStatus;
-            using (var checkCmd = _connection.CreateCommand())
+            using (var checkCmd = conn.CreateCommand())
             {
                 checkCmd.CommandText = "SELECT status FROM CONSENT_REQUESTS WHERE id = @id";
                 checkCmd.Parameters.AddWithValue("@id", requestId.ToString());
@@ -1254,14 +1200,14 @@ public partial class SqliteGovernanceRepository
             }
 
             bool isAuthorized = isExternalItsm ||
-                                await IsAuthorizedApproverForTableInternalAsync(req.TableIdentifier, approverSid, ct);
+                                await IsAuthorizedApproverForTableInternalAsync(conn, req.TableIdentifier, approverSid, ct);
             if (!isAuthorized)
             {
                 throw new UnauthorizedAccessException($"User '{approverSid}' is neither a data owner nor a delegated approver for table '{req.TableIdentifier}'.");
             }
 
-            using var tx = _connection.BeginTransaction();
-            using (var cmd = _connection.CreateCommand())
+            using var tx = conn.BeginTransaction();
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = tx;
                 cmd.CommandText = @"INSERT INTO APPROVAL_STEPS (id, consent_request_id, step_number, approver_sid, decision, rejection_reason, decided_at)
@@ -1274,7 +1220,7 @@ public partial class SqliteGovernanceRepository
                 await cmd.ExecuteNonQueryAsync(ct);
             }
 
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = tx;
                 cmd.CommandText = @"UPDATE CONSENT_REQUESTS SET status = 'REJECTED' WHERE id = @id";
@@ -1283,29 +1229,24 @@ public partial class SqliteGovernanceRepository
             }
 
             req.Status = "REJECTED";
-            await RecordAuditEventInternalAsync(
+            await RecordAuditEventInternalAsync(conn,
                 ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_REQUEST_REJECTED", "REJECTED", "REJECTED", null, reason), ct, tx);
 
             tx.Commit();
             OnTransactionCommitted(tx);
             return req;
         }
-        finally
-        {
-            RollbackPendingAuditTransactions();
-            _lock.Release();
-        }
     }
 
     public async Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default)
     {
         consent.Validate();
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            using var tx = _connection.BeginTransaction();
+            using var tx = conn.BeginTransaction();
 
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, role_id, role_name, valid_from, valid_to, is_revoked, tenant_id)
                                 VALUES (@id, @tid, @reqId, @effect, @type, @sid, @roleId, @roleName, @from, @to, 0, @tenantId)";
@@ -1325,7 +1266,7 @@ public partial class SqliteGovernanceRepository
 
             foreach (var rule in consent.ColumnRules)
             {
-                using var ruleCmd = _connection.CreateCommand();
+                using var ruleCmd = conn.CreateCommand();
                 ruleCmd.Transaction = tx;
                 ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level, applicable_scopes)
                                         VALUES (@id, @cid, @tcid, @col, @lvl, @scopes)";
@@ -1340,7 +1281,7 @@ public partial class SqliteGovernanceRepository
 
             foreach (var filter in consent.RowFilters)
             {
-                using var filterCmd = _connection.CreateCommand();
+                using var filterCmd = conn.CreateCommand();
                 filterCmd.Transaction = tx;
                 filterCmd.CommandText = @"INSERT INTO CONSENT_ROW_FILTERS (
                     id, consent_id, filter_group, table_column_id, column_name, operator, value_type, value_json, value_source, user_attribute,
@@ -1396,9 +1337,9 @@ public partial class SqliteGovernanceRepository
                     ValidTo = consent.ValidTo
                 })
             };
-            await RecordAuditEventInternalAsync(auditEntry, ct, tx);
+            await RecordAuditEventInternalAsync(conn, auditEntry, ct, tx);
 
-            await IncrementTableEpochInternalAsync(consent.TableIdentifier, tx, ct);
+            await IncrementTableEpochInternalAsync(conn, consent.TableIdentifier, tx, ct);
             await tx.CommitAsync(ct);
             OnTransactionCommitted(tx);
 
@@ -1407,20 +1348,15 @@ public partial class SqliteGovernanceRepository
 
             return consent;
         }
-        finally
-        {
-            RollbackPendingAuditTransactions();
-            _lock.Release();
-        }
     }
 
     public async Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             Consent? consent = null;
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                            c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
@@ -1465,28 +1401,24 @@ public partial class SqliteGovernanceRepository
 
             if (consent != null)
             {
-                consent.ColumnRules = await LoadColumnRulesAsync(consent.Id, ct);
-                consent.RowFilters = await LoadRowFiltersAsync(consent.Id, ct);
+                consent.ColumnRules = await LoadColumnRulesAsync(conn, consent.Id, ct);
+                consent.RowFilters = await LoadRowFiltersAsync(conn, consent.Id, ct);
             }
 
             return consent;
-        }
-        finally
-        {
-            _lock.Release();
         }
     }
 
     public async Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             TableIdentifier? tableId = null;
             bool isGranteeSelf = false;
             TenantId revokeTenant = TenantId.LegacySingleTenant;
 
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"SELECT COALESCE(t.source_name, p.domain, 'default'), t.schema_name, t.table_name, c.grantee_type, c.grantee_sid, c.tenant_id
                                     FROM CONSENTS c
@@ -1520,14 +1452,14 @@ public partial class SqliteGovernanceRepository
 
             if (!isGranteeSelf)
             {
-                bool isAuthorized = await IsAuthorizedApproverForTableInternalAsync(tableId.Value, revokedBySid, ct);
+                bool isAuthorized = await IsAuthorizedApproverForTableInternalAsync(conn, tableId.Value, revokedBySid, ct);
                 if (!isAuthorized)
                 {
                     throw new UnauthorizedAccessException($"User '{revokedBySid}' is neither a data owner nor a delegated approver for '{tableId.Value}', nor the beneficiary.");
                 }
             }
 
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"UPDATE CONSENTS
                                     SET is_revoked = 1, revoked_by_sid = @by, revoked_at = @now, revoke_reason = @reason
@@ -1541,7 +1473,7 @@ public partial class SqliteGovernanceRepository
 
             if (tableId.HasValue)
             {
-                await IncrementTableEpochInternalAsync(tableId.Value, ct);
+                await IncrementTableEpochInternalAsync(conn, tableId.Value, ct);
             }
 
             var auditEntry = new AuditLogEntry
@@ -1558,21 +1490,17 @@ public partial class SqliteGovernanceRepository
                     Reason = reason
                 })
             };
-            await RecordAuditEventInternalAsync(auditEntry, ct);
-        }
-        finally
-        {
-            _lock.Release();
+            await RecordAuditEventInternalAsync(conn, auditEntry, ct);
         }
     }
 
     public async Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             var consents = new List<Consent>();
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                        c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
                                        c.is_revoked, c.revoked_by_sid, c.revoked_at, c.revoke_reason,
@@ -1623,20 +1551,16 @@ public partial class SqliteGovernanceRepository
             }
             return consents;
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
     public async Task ExtendConsentExpiryAsync(Guid consentId, DateTimeOffset newValidTo, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
             TableIdentifier? tableId = null;
             TenantId extendTenant = TenantId.LegacySingleTenant;
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id
                                     FROM CONSENTS c
@@ -1654,7 +1578,7 @@ public partial class SqliteGovernanceRepository
                 }
             }
 
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"UPDATE CONSENTS
                                     SET valid_to = @validTo
@@ -1666,11 +1590,11 @@ public partial class SqliteGovernanceRepository
 
             if (tableId.HasValue)
             {
-                await IncrementTableEpochInternalAsync(tableId.Value, ct);
+                await IncrementTableEpochInternalAsync(conn, tableId.Value, ct);
             }
 
             // Review E-10: a longer validity is a policy change and belongs in the hash chain.
-            await RecordAuditEventInternalAsync(new AuditLogEntry
+            await RecordAuditEventInternalAsync(conn, new AuditLogEntry
             {
                 TenantId = extendTenant,
                 EventType = "CONSENT_EXPIRY_EXTENDED",
@@ -1681,15 +1605,11 @@ public partial class SqliteGovernanceRepository
                 DetailsJson = JsonSerializer.Serialize(new { ConsentId = consentId, NewValidTo = newValidTo })
             }, ct);
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
-    private async Task<bool> HasConfiguredDataOwnersAsync(TableIdentifier table, CancellationToken ct)
+    private async Task<bool> HasConfiguredDataOwnersAsync(SqliteConnection conn, TableIdentifier table, CancellationToken ct)
     {
-        using var cmd = _connection.CreateCommand();
+        using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
             SELECT 1
             FROM TABLE_OWNERS tow

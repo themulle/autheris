@@ -68,7 +68,7 @@ public sealed class WebhookSigningAndHygieneTests : IDisposable
     private string RawRows()
     {
         var sb = new StringBuilder();
-        using var cmd = _repo.Connection.CreateCommand();
+        using var cmd = _repo.RawConnection().CreateCommand();
         cmd.CommandText = "SELECT * FROM WEBHOOK_OUTBOX";
         using var r = cmd.ExecuteReader();
         while (r.Read())
@@ -99,7 +99,7 @@ public sealed class WebhookSigningAndHygieneTests : IDisposable
         raw.ShouldNotContain(HeaderValue);
         raw.ShouldNotContain("receiver.internal");
         raw.ShouldNotContain("ce.example.com");
-        using var cmd = _repo.Connection.CreateCommand();
+        using var cmd = _repo.RawConnection().CreateCommand();
         cmd.CommandText = "SELECT group_concat(name) FROM pragma_table_info('WEBHOOK_OUTBOX')";
         var columns = (string)cmd.ExecuteScalar()!;
         columns.ShouldNotContain("url");

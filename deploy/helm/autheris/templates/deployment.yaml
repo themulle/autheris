@@ -65,45 +65,11 @@ spec:
               containerPort: {{ .Values.service.targetPort }}
               protocol: TCP
           env:
-            - name: ASPNETCORE_ENVIRONMENT
-              value: {{ .Values.gateway.aspnetcoreEnvironment | quote }}
-            - name: ASPNETCORE_URLS
-              value: "http://+:{{ .Values.service.targetPort }}"
-            - name: Gateway__DrainDelaySeconds
-              value: {{ .Values.gateway.drainDelaySeconds | quote }}
-            - name: Gateway__ShutdownTimeoutSeconds
-              value: {{ .Values.gateway.shutdownTimeoutSeconds | quote }}
-            # The root filesystem is read-only; async job results go to the writable /tmp emptyDir.
-            - name: Gateway__AsyncJobs__ScratchDirectory
-              value: "/tmp/autheris-jobs"
-            {{- if and .Values.gateway.authentication.forwardAuth.enabled .Values.gateway.authentication.forwardAuth.sharedSecret.existingSecret }}
-            - name: Gateway__Authentication__ForwardAuth__SharedSecret
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.gateway.authentication.forwardAuth.sharedSecret.existingSecret }}
-                  key: {{ .Values.gateway.authentication.forwardAuth.sharedSecret.key | default "sharedSecret" }}
-            {{- end }}
-            {{- if .Values.gateway.governanceDb.existingSecret }}
-            - name: Gateway__GovernanceDb__ConnectionString
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.gateway.governanceDb.existingSecret }}
-                  key: {{ .Values.gateway.governanceDb.connectionStringSecretKey }}
-            {{- end }}
-            {{- if and .Values.gateway.redis.enabled .Values.gateway.redis.existingSecret }}
-            - name: Gateway__Caching__Redis__Configuration
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.gateway.redis.existingSecret }}
-                  key: {{ .Values.gateway.redis.configurationSecretKey }}
-            - name: Gateway__Caching__Redis__InstanceName
-              value: {{ .Values.gateway.redis.instanceName | quote }}
-            {{- if hasKey .Values.gateway.redis "failClosedOnRevocationLookupError" }}
-            - name: Gateway__Caching__Redis__FailClosedOnRevocationLookupError
-              value: {{ .Values.gateway.redis.failClosedOnRevocationLookupError | quote }}
-            {{- end }}
-            - name: Gateway__Caching__Redis__RevocationLookupGraceSeconds
-              value: {{ .Values.gateway.redis.revocationLookupGraceSeconds | default 60 | quote }}
+            {{- include "autheris.gatewayEnv" . | nindent 12 }}
+            {{- if .Values.governanceMigrationJob.enabled }}
+            # The schema is migrated by the pre-install/pre-upgrade job; the application only verifies it.
+            - name: Gateway__GovernanceDb__Migrations__Mode
+              value: "Verify"
             {{- end }}
           envFrom:
             - configMapRef:

@@ -17,12 +17,175 @@ namespace Autheris.Infrastructure.Persistence;
 
 public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrations.IGovernanceStoreInitializer, IDisposable
 {
-    private readonly SqliteConnection _connection;
-    internal SqliteConnection Connection => _connection;
+    private readonly SqliteGovernanceConnectionProvider _connections;
+    internal SqliteGovernanceConnectionProvider Connections => _connections;
+
     private readonly IEpochValidationService _epochValidationService;
-    private readonly SemaphoreSlim _lock = new(1, 1);
-    internal Task LockAsync(CancellationToken ct = default) => _lock.WaitAsync(ct);
-    internal void ReleaseLock() => _lock.Release();
+
+    /// <summary>
+    /// The single write gate (WP-ARC-B-13): held by EVERY mutating operation, the audit channel batches, the synchronous Tier-A path, the
+    /// flush and the chain verification. In-memory databases also serialize their readers behind it. It keeps the audit hash chain linear
+    /// (the in-memory tail is advanced inside business transactions) and makes check-then-write sequences such as the four-eyes
+    /// approval atomic.
+    /// </summary>
+    private readonly ReadinessGatedLock _writeGate;
+
+    /// <summary>
+    /// Identity of the connection of the operation that currently holds the write gate; an audit write inside a caller-managed
+    /// transaction must run on it. Held as an identity token only (compared by reference, never used to execute a command), so the
+    /// repository has no connection field that could be shared between operations.
+    /// </summary>
+    private object? _writeConnection;
+    private long _metadataCacheGeneration;
+
+    // Keys invalidated by the write operation that holds the gate; applied once its transaction has committed (scope disposal).
+    private readonly List<string> _pendingMetadataInvalidations = [];
+
+    /// <summary>Test seam: runs after a metadata read has loaded its snapshot and before the result is cached.</summary>
+    internal Func<CancellationToken, Task>? AfterMetadataSnapshotForTesting { get; set; }
+
+    private void QueueMetadataInvalidation(TableIdentifier table) => _pendingMetadataInvalidations.Add(table.ToString().ToLowerInvariant());
+
+    private void ApplyMetadataInvalidations()
+    {
+        if (_pendingMetadataInvalidations.Count == 0)
+        {
+            return;
+        }
+
+        // The generation moves first so that readers with an older snapshot do not re-cache what is removed next.
+        Interlocked.Increment(ref _metadataCacheGeneration);
+        foreach (var key in _pendingMetadataInvalidations)
+        {
+            _metadataCache.TryRemove(key, out _);
+        }
+
+        _pendingMetadataInvalidations.Clear();
+    }
+
+    private volatile bool _ready;
+    private void ThrowIfNotReady()
+    {
+        if (!_ready)
+        {
+            throw new Migrations.GovernanceStoreNotReadyException(nameof(SqliteGovernanceRepository));
+        }
+    }
+
+    // The migration runner runs before the store is ready; it is the only caller that may enter the gate unguarded.
+    internal Task LockUnguardedAsync(CancellationToken ct = default) => _writeGate.WaitUnguardedAsync(ct);
+    internal void ReleaseLock() => _writeGate.Release();
+
+    /// <summary>An operation's connection and, for writers (and in-memory readers), its hold on the write gate. Disposing returns both.</summary>
+    private sealed class OperationScope(SqliteGovernanceRepository owner, SqliteConnection connection, bool holdsGate, bool isWrite, SqliteTransaction? snapshot) : IAsyncDisposable
+    {
+        public SqliteConnection Connection => connection;
+
+        /// <summary>The deferred read transaction of a snapshot scope.</summary>
+        public SqliteTransaction? Snapshot => snapshot;
+
+        public async ValueTask DisposeAsync()
+        {
+            try
+            {
+                if (snapshot != null)
+                {
+                    await snapshot.DisposeAsync().ConfigureAwait(false);
+                }
+
+                if (isWrite)
+                {
+                    owner._writeConnection = null;
+                }
+
+                await connection.DisposeAsync().ConfigureAwait(false);
+                if (isWrite)
+                {
+                    owner.RollbackPendingAuditTransactions();
+                    owner.ApplyMetadataInvalidations();
+                }
+            }
+            finally
+            {
+                if (holdsGate)
+                {
+                    owner._writeGate.Release();
+                }
+            }
+        }
+    }
+
+    /// <summary>Enters the write gate (readiness checked) and opens a connection for a mutating operation.</summary>
+    private async Task<OperationScope> WriteScopeAsync(CancellationToken ct)
+    {
+        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var connection = await _connections.OpenAsync(ct).ConfigureAwait(false);
+            _writeConnection = connection;
+            return new OperationScope(this, connection, holdsGate: true, isWrite: true, snapshot: null);
+        }
+        catch
+        {
+            _writeGate.Release();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Opens a connection for a read. File databases read concurrently with the writer (WAL); in-memory databases also hold the write gate
+    /// (shared-cache table locks). <paramref name="snapshot"/> reads several statements from one consistent snapshot.
+    /// </summary>
+    private async Task<OperationScope> ReadScopeAsync(CancellationToken ct, bool snapshot = false)
+    {
+        ThrowIfNotReady();
+        var holdsGate = _connections.IsMemory;
+        if (holdsGate)
+        {
+            await _writeGate.WaitAsync(ct).ConfigureAwait(false);
+        }
+
+        try
+        {
+            var connection = await _connections.OpenAsync(ct).ConfigureAwait(false);
+            SqliteTransaction? transaction = null;
+            if (snapshot)
+            {
+                try
+                {
+                    transaction = connection.BeginTransaction(deferred: true);
+                }
+                catch
+                {
+                    await connection.DisposeAsync().ConfigureAwait(false);
+                    throw;
+                }
+            }
+
+            return new OperationScope(this, connection, holdsGate, isWrite: false, snapshot: transaction);
+        }
+        catch
+        {
+            if (holdsGate)
+            {
+                _writeGate.Release();
+            }
+
+            throw;
+        }
+    }
+
+    private async Task<T> WriteAsync<T>(Func<SqliteConnection, Task<T>> body, CancellationToken ct)
+    {
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        return await body(scope.Connection).ConfigureAwait(false);
+    }
+
+    private async Task<T> ReadAsync<T>(Func<SqliteConnection, Task<T>> body, CancellationToken ct, bool snapshot = false)
+    {
+        await using var scope = await ReadScopeAsync(ct, snapshot).ConfigureAwait(false);
+        return await body(scope.Connection).ConfigureAwait(false);
+    }
     private readonly ConcurrentDictionary<string, (TableMetadata? Metadata, long CachedAtTicks)> _metadataCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly long MetadataCacheTtlTicks = TimeSpan.FromSeconds(30).Ticks;
     private volatile bool _isAuditPipelineFaulted = false;
@@ -30,18 +193,16 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
 
     public async Task<bool> PingAsync(CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        if (!_ready)
         {
-            using var cmd = _connection.CreateCommand();
-            cmd.CommandText = "SELECT 1;";
-            var res = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-            return res != null;
+            return false;
         }
-        finally
-        {
-            _lock.Release();
-        }
+
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        await using var cmd = scope.Connection.CreateCommand();
+        cmd.CommandText = "SELECT 1;";
+        var res = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return res != null;
     }
 
     private readonly Channel<AuditLogEntry> _auditChannel;
@@ -63,25 +224,36 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
 
     public SqliteGovernanceRepository(
         IEpochValidationService epochValidationService,
-        IOptions<GatewayOptions>? options = null,
-        Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
-        IKeyVaultSecretProvider? secretProvider = null,
-        IAuditChainAnchorStore? auditAnchorStore = null,
-        ILogger<SqliteGovernanceRepository>? logger = null,
-        IAuditAnchorSigner? auditAnchorSigner = null,
-        ICallerContextProvider? callerContextProvider = null)
+        IOptions<GatewayOptions> options,
+        Microsoft.Extensions.Hosting.IHostEnvironment environment,
+        IKeyVaultSecretProvider secretProvider,
+        IAuditChainAnchorStore auditAnchorStore,
+        ICallerContextProvider callerContextProvider,
+        IGatewayStatePaths statePaths,
+        ILogger<SqliteGovernanceRepository>? logger = null)
     {
-        _epochValidationService = epochValidationService;
-        _logger = logger;
-        _options = options?.Value;
-        _callerContextProvider = callerContextProvider;
-        var connStr = options?.Value?.GovernanceDb?.ConnectionString ?? $"Data Source=governance_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        EnsureSqliteDirectoryExists(connStr);
-        _connection = new SqliteConnection(connStr);
-        _connection.Open();
+        ArgumentNullException.ThrowIfNull(epochValidationService);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(secretProvider);
+        ArgumentNullException.ThrowIfNull(auditAnchorStore);
+        ArgumentNullException.ThrowIfNull(callerContextProvider);
+        ArgumentNullException.ThrowIfNull(statePaths);
 
-        // No DDL here: the schema is created and evolved by the governance migration runner (WP-ARC-B-12).
-        ConfigureConnection();
+        _epochValidationService = epochValidationService;
+        _writeGate = new ReadinessGatedLock(() => _ready, nameof(SqliteGovernanceRepository));
+        _logger = logger;
+        _options = options.Value;
+        _callerContextProvider = callerContextProvider;
+        var connStr = statePaths.ResolveGovernanceConnectionString(options.Value?.GovernanceDb?.ConnectionString);
+
+        // No I/O and no DDL here: the provider opens connections lazily (directory, journal mode) and the schema is created and
+        // evolved by the governance migration runner (WP-ARC-B-12).
+        _connections = new SqliteGovernanceConnectionProvider(
+            connStr,
+            options.Value?.GovernanceDb?.JournalMode,
+            logger,
+            allowUnsafeJournalModes: string.Equals(environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase));
 
         // SEC R2-3: Bounded channel with backpressure to limit in-flight audit entries
         var channelOptions = new BoundedChannelOptions(Math.Max(1, options?.Value?.Audit?.QueryAuditChannelCapacity ?? 5_000))
@@ -103,8 +275,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
             }
             catch (Exception)
             {
-                var env = environment?.EnvironmentName ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-                bool isDev = string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase);
+                bool isDev = string.Equals(environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
                 if (!isDev)
                 {
                     throw new InvalidOperationException("Security critical: Failed to load AuditHmacKeyVaultRef from Key Vault in non-development environment.");
@@ -113,9 +284,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
         }
 
         // R-DEP-1: the length is checked here, where the key is used, not by its reference name.
-        var envName = environment?.EnvironmentName ??
-                      Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
-                      Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        var envName = environment.EnvironmentName;
         bool isDevOrTest = string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase) ||
                            string.Equals(envName, "Test", StringComparison.OrdinalIgnoreCase);
         if (key != null)
@@ -159,17 +328,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
             }
         }
 
-        bool isMemory;
-        try
-        {
-            var csBuilder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(connStr);
-            isMemory = csBuilder.DataSource == ":memory:" || csBuilder.Mode == Microsoft.Data.Sqlite.SqliteOpenMode.Memory;
-        }
-        catch
-        {
-            isMemory = false;
-        }
-
+        var isMemory = _connections.IsMemory;
 
         if (!isDevOrTest)
         {
@@ -191,27 +350,17 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
         // SEC H-17: dedicated sub-key for signing the external audit chain end anchor.
         _auditAnchorKey = HKDF.DeriveKey(HashAlgorithmName.SHA256, _auditHmacKey, 32, info: "Autheris:AuditChainAnchor:v1"u8.ToArray());
 
-        // AU-01 & AU-03: Startabbruch (Fail-Closed) außerhalb von Dev/Test ohne persistenten Anker-Pfad oder KMS-Signer.
-        if (!isDevOrTest && auditAnchorStore == null)
+        // AU-01 & AU-03 are enforced where the anchor store is built (AuditChainAnchorStoreFactory.CreateForGovernance).
+        // Defense in depth: an injected in-memory anchor store never protects a production chain.
+        if (!isDevOrTest && auditAnchorStore is InMemoryAuditChainAnchorStore)
         {
-            if (string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorPath) &&
-                string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorWormDirectory) &&
-                string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorSignerKeyVaultRef) &&
-                auditAnchorSigner == null)
-            {
-                throw new InvalidOperationException(
-                    "CRITICAL AUDIT MISCONFIGURATION (AU-01/AU-03): In production environments, " +
-                    "a persistent audit anchor store (ChainAnchorPath, ChainAnchorWormDirectory, or KMS Signer) " +
-                    "is mandatory. In-memory anchor stores are strictly prohibited outside Development/Test.");
-            }
+            throw new InvalidOperationException(
+                "CRITICAL AUDIT MISCONFIGURATION (AU-01/AU-03): In production environments, " +
+                "a persistent audit anchor store (ChainAnchorPath, ChainAnchorWormDirectory, or KMS Signer) " +
+                "is mandatory. In-memory anchor stores are strictly prohibited outside Development/Test.");
         }
 
-        _auditAnchorStore = auditAnchorStore ?? AuditChainAnchorStoreFactory.Create(
-            options?.Value?.Audit,
-            CreateDefaultAuditAnchorStore(connStr, isMemory, options?.Value?.Audit?.ChainAnchorPath),
-            secretProvider,
-            auditAnchorSigner,
-            _logger);
+        _auditAnchorStore = auditAnchorStore;
         _isDevOrTest = isDevOrTest;
         _shouldSeed = options?.Value?.GovernanceDb?.SeedDemoData ?? (isMemory && isDevOrTest);
     }
@@ -220,34 +369,48 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
     /// Post-migration initialization: reads the audit chain tail, verifies the external chain anchor, seeds demo data (when
     /// configured) and starts the audit processor. Requires the schema to be migrated first; fails closed otherwise.
     /// </summary>
-    public Task InitializeAsync(CancellationToken ct = default)
+    public async Task InitializeAsync(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         if (Interlocked.Exchange(ref _initialized, 1) == 1)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         try
         {
-            // SEC H-17: unsequenced rows are latched as a violation before the tail is read.
-            LatchUnsequencedAuditRows();
-
-            // Startup reference only; it is cross-checked against the external signed anchor (SEC H-17)
-            // in InitializeAuditChainAnchor and never silently re-synchronised from the DB afterwards.
-            var (tailHash, tailSeq) = ReadAuditTail(null);
-            if (tailHash != null)
+            // Initialization runs before the store is ready, so it enters the gate unguarded (like the migration runner).
+            await _writeGate.WaitUnguardedAsync(ct).ConfigureAwait(false);
+            try
             {
-                _lastAuditHash = tailHash;
-                _lastAuditSeq = tailSeq;
+                await using var connection = await _connections.OpenAsync(ct).ConfigureAwait(false);
+
+                // SEC H-17: unsequenced rows are latched as a violation before the tail is read.
+                LatchUnsequencedAuditRows(connection);
+
+                // Startup reference only; it is cross-checked against the external signed anchor (SEC H-17)
+                // in InitializeAuditChainAnchor and never silently re-synchronised from the DB afterwards.
+                var (tailHash, tailSeq) = ReadAuditTail(connection, null);
+                if (tailHash != null)
+                {
+                    _lastAuditHash = tailHash;
+                    _lastAuditSeq = tailSeq;
+                }
+
+                InitializeAuditChainAnchor(_isDevOrTest);
+
+                if (_shouldSeed)
+                {
+                    SeedInitialCatalog(connection);
+                }
+            }
+            finally
+            {
+                _writeGate.Release();
             }
 
-            InitializeAuditChainAnchor(_isDevOrTest);
-
-            if (_shouldSeed)
-            {
-                SeedInitialCatalog();
-            }
+            // The store serves requests only from here on; a failed initialization leaves it closed.
+            _ready = true;
 
             // AU-12: Background processor starts only after keys and stores are completely initialized
             _auditProcessorTask = Task.Run(ProcessAuditChannelAsync, CancellationToken.None);
@@ -257,8 +420,6 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
             Volatile.Write(ref _initialized, 0);
             throw;
         }
-
-        return Task.CompletedTask;
     }
 
 
@@ -296,36 +457,14 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
 
         try
         {
-            _connection.Dispose();
+            _connections.Dispose();
         }
         catch { }
 
         try
         {
-            _lock.Dispose();
+            _writeGate.Dispose();
         }
         catch { }
-    }
-
-    private static void EnsureSqliteDirectoryExists(string connectionString)
-    {
-        try
-        {
-            var builder = new SqliteConnectionStringBuilder(connectionString);
-            if (!string.IsNullOrWhiteSpace(builder.DataSource) &&
-                !builder.DataSource.StartsWith(":memory:", StringComparison.OrdinalIgnoreCase) &&
-                builder.Mode != SqliteOpenMode.Memory)
-            {
-                var dir = Path.GetDirectoryName(builder.DataSource);
-                if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
-                {
-                    Directory.CreateDirectory(dir);
-                }
-            }
-        }
-        catch
-        {
-            // Ignore parse errors; SqliteConnection will validate
-        }
     }
 }

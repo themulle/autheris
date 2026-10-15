@@ -14,7 +14,8 @@ ENV ASPNETCORE_HTTP_PORTS=8080 \
     Gateway__Caching__Garnet__EnableEmbeddedServer=true \
     Gateway__Caching__Garnet__Host=127.0.0.1 \
     Gateway__Caching__Garnet__Port=3278 \
-    Gateway__GovernanceDb__ConnectionString="Data Source=/app/data/governance.db;Cache=Shared"
+    Gateway__State__StateDirectory=/app/data \
+    Gateway__GovernanceDb__ConnectionString="Data Source=/app/data/governance.db"
 
 EXPOSE 8080
 

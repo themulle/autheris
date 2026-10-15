@@ -331,7 +331,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
             (await repo.VerifyAuditHashChainAsync()).ShouldBeTrue();
 
             // Attacker deletes the last two entries directly in the database.
-            using var cmd = repo.Connection.CreateCommand();
+            using var cmd = repo.RawConnection().CreateCommand();
             cmd.CommandText = "DELETE FROM AUDIT_LOG_ENTRIES WHERE rowid IN (SELECT rowid FROM AUDIT_LOG_ENTRIES ORDER BY rowid DESC LIMIT 2)";
             await cmd.ExecuteNonQueryAsync();
         }
@@ -353,7 +353,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
                 await repo.RecordAuditEventAsync(NewAuditEntry(i));
             }
 
-            using var cmd = repo.Connection.CreateCommand();
+            using var cmd = repo.RawConnection().CreateCommand();
             cmd.CommandText = "DELETE FROM AUDIT_LOG_ENTRIES";
             await cmd.ExecuteNonQueryAsync();
         }
@@ -372,7 +372,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
             await repo.RecordAuditEventAsync(NewAuditEntry(i));
         }
 
-        using (var cmd = repo.Connection.CreateCommand())
+        using (var cmd = repo.RawConnection().CreateCommand())
         {
             cmd.CommandText = "DELETE FROM AUDIT_LOG_ENTRIES WHERE rowid = (SELECT MAX(rowid) FROM AUDIT_LOG_ENTRIES)";
             await cmd.ExecuteNonQueryAsync();
@@ -395,7 +395,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
         }
 
         var seqs = new List<long>();
-        using (var cmd = repo.Connection.CreateCommand())
+        using (var cmd = repo.RawConnection().CreateCommand())
         {
             cmd.CommandText = "SELECT seq FROM AUDIT_LOG_ENTRIES ORDER BY rowid";
             using var reader = await cmd.ExecuteReaderAsync();
@@ -407,7 +407,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
         seqs.ShouldBe(new List<long> { 1, 2, 3 });
         (await repo.VerifyAuditHashChainAsync()).ShouldBeTrue();
 
-        using (var cmd = repo.Connection.CreateCommand())
+        using (var cmd = repo.RawConnection().CreateCommand())
         {
             cmd.CommandText = "UPDATE AUDIT_LOG_ENTRIES SET seq = 7 WHERE seq = 3";
             await cmd.ExecuteNonQueryAsync();

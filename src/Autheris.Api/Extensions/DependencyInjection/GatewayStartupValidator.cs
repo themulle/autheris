@@ -502,10 +502,10 @@ public static class GatewayStartupValidator
                 throw new ValidationException("Security violation: Outside Development, S3 WORM with EnforceObjectLock requires S3AccessKey and S3SecretKey to be configured.");
             }
 
+            // WP-ARC-B-13: an unset connection string resolves to the state-directory file outside Development/Test, so only an
+            // explicitly configured in-memory database can be in effect here (and is rejected).
             if (DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite) &&
-                !string.IsNullOrWhiteSpace(options.GovernanceDb.ConnectionString) &&
-                (options.GovernanceDb.ConnectionString.Contains(":memory:", StringComparison.OrdinalIgnoreCase) ||
-                 options.GovernanceDb.ConnectionString.Contains("Mode=Memory", StringComparison.OrdinalIgnoreCase)))
+                IsInMemorySqlite(options.GovernanceDb.ConnectionString))
             {
                 throw new ValidationException("Security violation: In-memory SQLite databases (GovernanceDb.ConnectionString) are strictly prohibited outside Development.");
             }
@@ -528,7 +528,7 @@ public static class GatewayStartupValidator
                             throw new ValidationException(
                                 "Security and configuration error (DEP-4): In the container, the process runs as non-root user ($APP_UID). " +
                                 $"The SQLite path '{builder.DataSource}' is located directly in the non-writable application directory (/app). " +
-                                "Use the writable data directory '/app/data' (e.g. 'Data Source=/app/data/governance.db;Cache=Shared').");
+                                "Use the writable data directory '/app/data' (for example Gateway:State:StateDirectory=/app/data).");
                         }
                     }
                 }
@@ -547,24 +547,6 @@ public static class GatewayStartupValidator
             bool isDevOrTest = string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase) ||
                                string.Equals(envName, "Test", StringComparison.OrdinalIgnoreCase);
 
-            bool isSqliteFile = false;
-            if (DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite) &&
-                !string.IsNullOrWhiteSpace(options.GovernanceDb.ConnectionString))
-            {
-                try
-                {
-                    var csb = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(options.GovernanceDb.ConnectionString);
-                    isSqliteFile = !string.IsNullOrWhiteSpace(csb.DataSource) &&
-                                   !csb.DataSource.StartsWith(":memory:", StringComparison.OrdinalIgnoreCase) &&
-                                   csb.Mode != Microsoft.Data.Sqlite.SqliteOpenMode.Memory;
-                }
-                catch (ArgumentException ex)
-                {
-                    // AR-06: Replace empty catch with logged warning, isSqliteFile remains false (fail-closed)
-                    logger?.LogWarning(ex, "Failed to parse SQLite connection string; falling back to strict production audit anchor requirements.");
-                }
-            }
-
             if (!isDevOrTest)
             {
                 if (options.Audit.HmacKeyIsFallback)
@@ -573,18 +555,16 @@ public static class GatewayStartupValidator
                         "CRITICAL SECURITY VIOLATION: Hardcoded or fallback HMAC audit keys are strictly prohibited in production.");
                 }
 
-                if (!isSqliteFile)
+                // Produktion: Leerer Wert gilt zwingend als Produktion! Every provider, SQLite files included, needs an explicit anchor:
+                // the anchor must not live only next to the database it protects (consistent with AuditChainAnchorStoreFactory).
+                if (string.IsNullOrWhiteSpace(options.Audit.ChainAnchorPath) &&
+                    string.IsNullOrWhiteSpace(options.Audit.ChainAnchorWormDirectory) &&
+                    string.IsNullOrWhiteSpace(options.Audit.ChainAnchorSignerKeyVaultRef))
                 {
-                    // Produktion: Leerer Wert gilt zwingend als Produktion!
-                    if (string.IsNullOrWhiteSpace(options.Audit.ChainAnchorPath) &&
-                        string.IsNullOrWhiteSpace(options.Audit.ChainAnchorWormDirectory) &&
-                        string.IsNullOrWhiteSpace(options.Audit.ChainAnchorSignerKeyVaultRef))
-                    {
-                        throw new ValidationException(
-                            "CRITICAL AUDIT MISCONFIGURATION (AU-01/AU-03): In production environments, " +
-                            "a persistent audit anchor store (ChainAnchorPath, ChainAnchorWormDirectory, or KMS Signer) " +
-                            "is mandatory. In-memory anchor stores are strictly prohibited outside Development/Test.");
-                    }
+                    throw new ValidationException(
+                        "CRITICAL AUDIT MISCONFIGURATION (AU-01/AU-03): In production environments, " +
+                        "a persistent audit anchor store (ChainAnchorPath, ChainAnchorWormDirectory, or KMS Signer) " +
+                        "is mandatory. In-memory anchor stores are strictly prohibited outside Development/Test.");
                 }
             }
         }
@@ -919,6 +899,26 @@ public static class GatewayStartupValidator
 
     internal static bool IsSupportedGovernanceDbProvider(string? provider) =>
         DataSourceProvider.Is(provider, DatabaseDialect.Sqlite) || DataSourceProvider.Is(provider, DatabaseDialect.PostgreSql) || DataSourceProvider.Is(provider, DatabaseDialect.SqlServer);
+
+    private static bool IsInMemorySqlite(string? connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return false;
+        }
+
+        try
+        {
+            var builder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(connectionString);
+            return builder.DataSource.StartsWith(":memory:", StringComparison.OrdinalIgnoreCase) ||
+                   builder.Mode == Microsoft.Data.Sqlite.SqliteOpenMode.Memory;
+        }
+        catch (ArgumentException)
+        {
+            return connectionString.Contains(":memory:", StringComparison.OrdinalIgnoreCase) ||
+                   connectionString.Contains("Mode=Memory", StringComparison.OrdinalIgnoreCase);
+        }
+    }
 
     private static bool IsTruthy(string? value)
     {

@@ -46,15 +46,18 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, Migr
     public SqlServerGovernanceRepository(
         IEpochValidationService epochValidationService,
         IOptions<GatewayOptions> options,
-        Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
-        IKeyVaultSecretProvider? secretProvider = null,
-        IAuditChainAnchorStore? auditAnchorStore = null,
-        ILogger<SqlServerGovernanceRepository>? logger = null,
-        IAuditAnchorSigner? auditAnchorSigner = null,
-        ICallerContextProvider? callerContextProvider = null)
+        Microsoft.Extensions.Hosting.IHostEnvironment environment,
+        IKeyVaultSecretProvider secretProvider,
+        IAuditChainAnchorStore auditAnchorStore,
+        ICallerContextProvider callerContextProvider,
+        ILogger<SqlServerGovernanceRepository>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(epochValidationService);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(secretProvider);
+        ArgumentNullException.ThrowIfNull(auditAnchorStore);
+        ArgumentNullException.ThrowIfNull(callerContextProvider);
 
         _epochValidationService = epochValidationService;
         _logger = logger;
@@ -62,9 +65,7 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, Migr
         _callerContextProvider = callerContextProvider;
 
         var connStr = options?.Value?.GovernanceDb?.ConnectionString;
-        var transportEnv = environment?.EnvironmentName ??
-                           Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
-                           Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        var transportEnv = environment.EnvironmentName;
         bool isDevTransport = string.Equals(transportEnv, "Development", StringComparison.OrdinalIgnoreCase) ||
                               string.Equals(transportEnv, "Test", StringComparison.OrdinalIgnoreCase);
         if (string.IsNullOrWhiteSpace(connStr))
@@ -122,8 +123,7 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, Migr
             }
             catch (Exception)
             {
-                var env = environment?.EnvironmentName ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-                bool isDev = string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase);
+                bool isDev = string.Equals(environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
                 if (!isDev)
                 {
                     throw new InvalidOperationException("Security critical: Failed to load AuditHmacKeyVaultRef from Key Vault in non-development environment.");
@@ -132,9 +132,7 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, Migr
         }
 
         // R-DEP-1: the length is checked here, where the key is used, not by its reference name.
-        var envName = environment?.EnvironmentName ??
-                      Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
-                      Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        var envName = environment.EnvironmentName;
         bool isDevOrTest = string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase) ||
                            string.Equals(envName, "Test", StringComparison.OrdinalIgnoreCase);
         if (key != null)
@@ -200,31 +198,17 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, Migr
 
         _isDevOrTest = isDevOrTest;
 
-        // AU-01 & AU-03: Startabbruch (Fail-Closed) außerhalb von Dev/Test ohne persistenten Anker-Pfad oder KMS-Signer.
-        if (!isDevOrTest && auditAnchorStore == null)
+        // AU-01 & AU-03 are enforced where the anchor store is built (AuditChainAnchorStoreFactory.CreateForGovernance).
+        // Defense in depth: an injected in-memory anchor store never protects a production chain.
+        if (!isDevOrTest && auditAnchorStore is InMemoryAuditChainAnchorStore)
         {
-            if (string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorPath) &&
-                string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorWormDirectory) &&
-                string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorSignerKeyVaultRef) &&
-                auditAnchorSigner == null)
-            {
-                throw new InvalidOperationException(
-                    "CRITICAL AUDIT MISCONFIGURATION (AU-01/AU-03): In production environments, " +
-                    "a persistent audit anchor store (ChainAnchorPath, ChainAnchorWormDirectory, or KMS Signer) " +
-                    "is mandatory. In-memory anchor stores are strictly prohibited outside Development/Test.");
-            }
+            throw new InvalidOperationException(
+                "CRITICAL AUDIT MISCONFIGURATION (AU-01/AU-03): In production environments, " +
+                "a persistent audit anchor store (ChainAnchorPath, ChainAnchorWormDirectory, or KMS Signer) " +
+                "is mandatory. In-memory anchor stores are strictly prohibited outside Development/Test.");
         }
 
-        // Review PG-2: anchor store from Audit:ChainAnchorPath (use a shared, separately protected location when running
-        // several replicas); in-memory only in Development/Test or when nothing is configured (a warning is logged).
-        _auditAnchorStore = auditAnchorStore ?? AuditChainAnchorStoreFactory.Create(
-            options?.Value?.Audit,
-            !string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorPath)
-                ? new FileAuditChainAnchorStore(options.Value.Audit.ChainAnchorPath)
-                : new InMemoryAuditChainAnchorStore(),
-            secretProvider,
-            auditAnchorSigner,
-            _logger);
+        _auditAnchorStore = auditAnchorStore;
 
         // No DDL and no database I/O here: the schema is created by the governance migration runner (WP-ARC-B-12).
         _shouldSeed = options?.Value?.GovernanceDb?.SeedDemoData ?? isDevOrTest;
@@ -257,6 +241,9 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, Migr
                 SeedInitialCatalog();
             }
 
+            // The store serves requests only from here on; a failed initialization leaves it closed.
+            _ready = true;
+
             // AU-12: Background processor starts only after keys and stores are completely initialized
             _auditProcessorTask = Task.Run(ProcessAuditChannelAsync, CancellationToken.None);
         }
@@ -269,7 +256,30 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, Migr
         return Task.CompletedTask;
     }
 
+    private volatile bool _ready;
+
+    private void ThrowIfNotReady()
+    {
+        if (!_ready)
+        {
+            throw new Migrations.GovernanceStoreNotReadyException(nameof(SqlServerGovernanceRepository));
+        }
+    }
+
+    // Every request-time connection goes through the guard; only initialization code uses the Core variants.
     private SqlConnection OpenConnection()
+    {
+        ThrowIfNotReady();
+        return OpenConnectionCore();
+    }
+
+    private Task<SqlConnection> OpenConnectionAsync(CancellationToken ct)
+    {
+        ThrowIfNotReady();
+        return OpenConnectionCoreAsync(ct);
+    }
+
+    private SqlConnection OpenConnectionCore()
     {
         var conn = new SqlConnection(_connectionString);
         try
@@ -284,7 +294,7 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, Migr
         }
     }
 
-    private async Task<SqlConnection> OpenConnectionAsync(CancellationToken ct)
+    private async Task<SqlConnection> OpenConnectionCoreAsync(CancellationToken ct)
     {
         var conn = new SqlConnection(_connectionString);
         try
@@ -301,6 +311,11 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, Migr
 
     public async Task<bool> PingAsync(CancellationToken ct = default)
     {
+        if (!_ready)
+        {
+            return false;
+        }
+
         try
         {
             await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);

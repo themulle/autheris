@@ -14,7 +14,7 @@ public partial class SqlServerGovernanceRepository
             "marketing", "logistics", "crm", "procurement", "billing"
         };
 
-        using var conn = OpenConnection();
+        using var conn = OpenConnectionCore();
         using var trans = conn.BeginTransaction();
         try
         {

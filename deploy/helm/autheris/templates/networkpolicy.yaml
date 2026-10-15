@@ -42,3 +42,43 @@ spec:
     {{- end }}
     {{- end }}
 {{- end }}
+{{- if and .Values.networkPolicy.enabled .Values.governanceMigrationJob.enabled }}
+---
+# The governance migration job needs the same egress as the application (database, Key Vault, DNS) and no ingress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "autheris.fullname" . }}-migrate
+  labels:
+    {{- include "autheris.migrationLabels" . | nindent 4 }}
+  annotations:
+    # A hook as well, so the policy exists before the job pod on the first install too.
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ printf "%s-migrate" (include "autheris.name" .) | trunc 63 | trimSuffix "-" }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Egress
+  egress:
+    {{- if .Values.networkPolicy.egress.allowAll }}
+    - {}
+    {{- else }}
+    - to:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.egress.dns.namespaceSelector | nindent 12 }}
+          podSelector:
+            {{- toYaml .Values.networkPolicy.egress.dns.podSelector | nindent 12 }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- with .Values.networkPolicy.egress.rules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- end }}
+{{- end }}

@@ -14,53 +14,7 @@ namespace Autheris.Infrastructure.Persistence;
 
 public partial class SqliteGovernanceRepository
 {
-    /// <summary>Connection-level pragmas only (no DDL); the schema is created by the governance migration runner.</summary>
-    private void ConfigureConnection()
-    {
-        var configuredJournalMode = _options?.GovernanceDb?.JournalMode;
-        if (string.IsNullOrWhiteSpace(configuredJournalMode))
-        {
-            configuredJournalMode = "WAL";
-        }
-        var journalMode = configuredJournalMode.Trim().ToUpperInvariant();
-        if (journalMode != "WAL" && journalMode != "DELETE" && journalMode != "TRUNCATE" && journalMode != "MEMORY" && journalMode != "OFF")
-        {
-            journalMode = "WAL";
-        }
-
-        try
-        {
-            using var pragmaCmd = _connection.CreateCommand();
-            pragmaCmd.CommandText = $@"
-                PRAGMA journal_mode = {journalMode};
-                PRAGMA synchronous = {(journalMode == "WAL" ? "NORMAL" : "FULL")};
-                PRAGMA busy_timeout = 5000;
-                PRAGMA cache_size = -64000;
-                PRAGMA temp_store = MEMORY;
-            ";
-            pragmaCmd.ExecuteNonQuery();
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to apply PRAGMA journal_mode={JournalMode}; attempting graceful fallback to DELETE mode (R-42).", journalMode);
-            try
-            {
-                using var fallbackCmd = _connection.CreateCommand();
-                fallbackCmd.CommandText = @"
-                    PRAGMA journal_mode = DELETE;
-                    PRAGMA synchronous = FULL;
-                    PRAGMA busy_timeout = 5000;
-                ";
-                fallbackCmd.ExecuteNonQuery();
-            }
-            catch (Exception fbEx)
-            {
-                _logger?.LogError(fbEx, "Graceful fallback to journal_mode=DELETE also failed.");
-            }
-        }
-    }
-
-    private void SeedInitialCatalog()
+    private void SeedInitialCatalog(SqliteConnection conn)
     {
         // 10 domains with sample tables
         var domains = new[]
@@ -69,13 +23,13 @@ public partial class SqliteGovernanceRepository
             "marketing", "logistics", "crm", "procurement", "billing"
         };
 
-        using var trans = _connection.BeginTransaction();
+        using var trans = conn.BeginTransaction();
         try
         {
             // Seed sample DataOwners
             var ownerSid = "S-1-5-21-DATAOWNER-1";
             var ownerId = Guid.NewGuid().ToString();
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = trans;
                 cmd.CommandText = @"INSERT OR IGNORE INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
@@ -90,7 +44,7 @@ public partial class SqliteGovernanceRepository
 
             var salesOwnerSid = "S-1-5-21-DATAOWNER-APPROVER";
             var salesOwnerId = Guid.NewGuid().ToString();
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = trans;
                 cmd.CommandText = @"INSERT OR IGNORE INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
@@ -105,7 +59,7 @@ public partial class SqliteGovernanceRepository
 
             var approverSid = "S-1-5-21-APPROVER";
             var approverId = Guid.NewGuid().ToString();
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = trans;
                 cmd.CommandText = @"INSERT OR IGNORE INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
@@ -120,7 +74,7 @@ public partial class SqliteGovernanceRepository
 
             var approverASid = "S-1-5-21-APPROVER-A";
             var approverAId = Guid.NewGuid().ToString();
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = trans;
                 cmd.CommandText = @"INSERT OR IGNORE INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
@@ -135,7 +89,7 @@ public partial class SqliteGovernanceRepository
 
             var approverBSid = "S-1-5-21-APPROVER-B";
             var approverBId = Guid.NewGuid().ToString();
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = trans;
                 cmd.CommandText = @"INSERT OR IGNORE INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
@@ -148,11 +102,11 @@ public partial class SqliteGovernanceRepository
                 cmd.ExecuteNonQuery();
             }
 
-            ownerId = ResolveOwnerId(_connection, trans, ownerSid, ownerId);
-            salesOwnerId = ResolveOwnerId(_connection, trans, salesOwnerSid, salesOwnerId);
-            approverId = ResolveOwnerId(_connection, trans, approverSid, approverId);
-            approverAId = ResolveOwnerId(_connection, trans, approverASid, approverAId);
-            approverBId = ResolveOwnerId(_connection, trans, approverBSid, approverBId);
+            ownerId = ResolveOwnerId(conn, trans, ownerSid, ownerId);
+            salesOwnerId = ResolveOwnerId(conn, trans, salesOwnerSid, salesOwnerId);
+            approverId = ResolveOwnerId(conn, trans, approverSid, approverId);
+            approverAId = ResolveOwnerId(conn, trans, approverASid, approverAId);
+            approverBId = ResolveOwnerId(conn, trans, approverBSid, approverBId);
 
             foreach (var domain in domains)
             {
@@ -163,7 +117,7 @@ public partial class SqliteGovernanceRepository
                     var schema = "dbo";
 
                     // Insert Table
-                    using (var cmd = _connection.CreateCommand())
+                    using (var cmd = conn.CreateCommand())
                     {
                         cmd.Transaction = trans;
                         cmd.CommandText = @"INSERT OR IGNORE INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active)
@@ -178,7 +132,7 @@ public partial class SqliteGovernanceRepository
                         cmd.ExecuteNonQuery();
                     }
 
-                    using (var idCmd = _connection.CreateCommand())
+                    using (var idCmd = conn.CreateCommand())
                     {
                         idCmd.Transaction = trans;
                         idCmd.CommandText = "SELECT id FROM TABLES WHERE source_name = @domain AND schema_name = @schema AND table_name = @name LIMIT 1";
@@ -194,7 +148,7 @@ public partial class SqliteGovernanceRepository
 
                     if (domain == "finance" && t == 1)
                     {
-                        using var towCmd = _connection.CreateCommand();
+                        using var towCmd = conn.CreateCommand();
                         towCmd.Transaction = trans;
                         towCmd.CommandText = @"INSERT OR IGNORE INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role)
                                               VALUES (@id1, @tid, @oid1, 'PRIMARY'),
@@ -208,7 +162,7 @@ public partial class SqliteGovernanceRepository
                     }
                     else if (domain == "finance" && t == 5)
                     {
-                        using var towCmd = _connection.CreateCommand();
+                        using var towCmd = conn.CreateCommand();
                         towCmd.Transaction = trans;
                         towCmd.CommandText = @"INSERT OR IGNORE INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role)
                                               VALUES (@id1, @tid, @oid1, 'PRIMARY'),
@@ -225,7 +179,7 @@ public partial class SqliteGovernanceRepository
                     }
                     else if (domain == "sales" && (t == 1 || t == 5))
                     {
-                        using var towCmd = _connection.CreateCommand();
+                        using var towCmd = conn.CreateCommand();
                         towCmd.Transaction = trans;
                         towCmd.CommandText = @"INSERT OR IGNORE INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role)
                                               VALUES (@id, @tid, @oid, 'PRIMARY');";
@@ -236,7 +190,7 @@ public partial class SqliteGovernanceRepository
                     }
 
                     // Insert Policy Epoch
-                    using (var cmd = _connection.CreateCommand())
+                    using (var cmd = conn.CreateCommand())
                     {
                         cmd.Transaction = trans;
                         cmd.CommandText = @"INSERT OR IGNORE INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, updated_at)
@@ -262,7 +216,7 @@ public partial class SqliteGovernanceRepository
                     foreach (var (cName, cType, cSens) in columns)
                     {
                         var colId = Guid.NewGuid().ToString();
-                        using (var cmd = _connection.CreateCommand())
+                        using (var cmd = conn.CreateCommand())
                         {
                             cmd.Transaction = trans;
                             cmd.CommandText = @"INSERT OR IGNORE INTO TABLE_COLUMNS (id, table_id, column_name, data_type, is_sensitive)
@@ -275,7 +229,7 @@ public partial class SqliteGovernanceRepository
                             cmd.ExecuteNonQuery();
                         }
 
-                        using (var colIdCmd = _connection.CreateCommand())
+                        using (var colIdCmd = conn.CreateCommand())
                         {
                             colIdCmd.Transaction = trans;
                             colIdCmd.CommandText = "SELECT id FROM TABLE_COLUMNS WHERE table_id = @tid AND column_name = @name LIMIT 1";
@@ -290,7 +244,7 @@ public partial class SqliteGovernanceRepository
 
                         if (cSens)
                         {
-                            using var cmd = _connection.CreateCommand();
+                            using var cmd = conn.CreateCommand();
                             cmd.Transaction = trans;
                             cmd.CommandText = @"INSERT OR IGNORE INTO COLUMN_MASKING_RULES (id, table_column_id, rule_type, pattern_or_format, replacement, hmac_key_id)
                                                 VALUES (@id, @cid, 'REGEX', '', '', 'key-2026-q1');";
@@ -304,7 +258,7 @@ public partial class SqliteGovernanceRepository
 
             // Seed Child Table: finance_items for finance_table_1
             var childTableId = Guid.NewGuid().ToString();
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = trans;
                 cmd.CommandText = @"INSERT OR IGNORE INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active)
@@ -313,7 +267,7 @@ public partial class SqliteGovernanceRepository
                 cmd.ExecuteNonQuery();
             }
 
-            using (var idCmd = _connection.CreateCommand())
+            using (var idCmd = conn.CreateCommand())
             {
                 idCmd.Transaction = trans;
                 idCmd.CommandText = "SELECT id FROM TABLES WHERE source_name = 'finance' AND schema_name = 'dbo' AND table_name = 'finance_items' LIMIT 1";
@@ -324,7 +278,7 @@ public partial class SqliteGovernanceRepository
                 }
             }
 
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = trans;
                 cmd.CommandText = @"INSERT OR IGNORE INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, updated_at)
@@ -345,7 +299,7 @@ public partial class SqliteGovernanceRepository
             foreach (var (cName, cType, cSens) in childCols)
             {
                 var colId = Guid.NewGuid().ToString();
-                using var cmd = _connection.CreateCommand();
+                using var cmd = conn.CreateCommand();
                 cmd.Transaction = trans;
                 cmd.CommandText = @"INSERT OR IGNORE INTO TABLE_COLUMNS (id, table_id, column_name, data_type, is_sensitive)
                                     VALUES (@id, @tid, @name, @type, @sens);";
@@ -356,7 +310,7 @@ public partial class SqliteGovernanceRepository
                 cmd.Parameters.AddWithValue("@sens", cSens ? 1 : 0);
                 cmd.ExecuteNonQuery();
 
-                using (var colIdCmd = _connection.CreateCommand())
+                using (var colIdCmd = conn.CreateCommand())
                 {
                     colIdCmd.Transaction = trans;
                     colIdCmd.CommandText = "SELECT id FROM TABLE_COLUMNS WHERE table_id = @tid AND column_name = @name LIMIT 1";
@@ -371,7 +325,7 @@ public partial class SqliteGovernanceRepository
 
                 if (cSens)
                 {
-                    using var mcmd = _connection.CreateCommand();
+                    using var mcmd = conn.CreateCommand();
                     mcmd.Transaction = trans;
                     mcmd.CommandText = @"INSERT OR IGNORE INTO COLUMN_MASKING_RULES (id, table_column_id, rule_type, pattern_or_format, replacement, hmac_key_id)
                                         VALUES (@id, @cid, 'REDACT', '', '[CONFIDENTIAL NOTE]', 'key-2026-q1');";
@@ -382,7 +336,7 @@ public partial class SqliteGovernanceRepository
             }
 
             // Relate finance_table_1 -> finance_items
-            using (var cmd = _connection.CreateCommand())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = trans;
                 cmd.CommandText = @"INSERT OR IGNORE INTO TABLE_RELATIONS (id, parent_table_id, child_table_id, relation_name, join_key_parent, join_key_child, cardinality)

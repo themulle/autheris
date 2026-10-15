@@ -145,7 +145,7 @@ public sealed class DevSwitchTests
                 ("Gateway:Dev:Persist:Directory", dir));
 
             Directory.Exists(dir).ShouldBeTrue();
-            Bind(config).GovernanceDb.ConnectionString.ShouldBe($"Data Source={Path.Combine(dir, "dev.db")};Cache=Shared");
+            Bind(config).GovernanceDb.ConnectionString.ShouldBe($"Data Source={Path.Combine(dir, "dev.db")}");
             report.Notes.ShouldContain(n => n.Contains("scripts/dev-reset.sh"));
         }
         finally

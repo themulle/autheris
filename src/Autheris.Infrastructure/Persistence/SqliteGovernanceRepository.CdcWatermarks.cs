@@ -9,10 +9,10 @@ public partial class SqliteGovernanceRepository : ICdcWatermarkRepository
 {
     public async Task<long?> GetAsync(string source, string domain, string schema, string table, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 SELECT watermark FROM autheris_cdc_watermarks
                 WHERE source = @source AND domain_name = @domain AND schema_name = @schema AND table_name = @table;";
@@ -24,18 +24,14 @@ public partial class SqliteGovernanceRepository : ICdcWatermarkRepository
             var result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
             return result is null or DBNull ? null : Convert.ToInt64(result, CultureInfo.InvariantCulture);
         }
-        finally
-        {
-            _lock.Release();
-        }
     }
 
     public async Task<bool> TryAdvanceAsync(string source, string domain, string schema, string table, long watermark, long fencingToken, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 INSERT INTO autheris_cdc_watermarks (source, domain_name, schema_name, table_name, watermark, fencing_token, updated_at, updated_by)
                 VALUES (@source, @domain, @schema, @table, @watermark, @token, @updatedAt, @updatedBy)
@@ -55,10 +51,6 @@ public partial class SqliteGovernanceRepository : ICdcWatermarkRepository
             cmd.Parameters.AddWithValue("@updatedBy", Environment.MachineName);
 
             return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
-        }
-        finally
-        {
-            _lock.Release();
         }
     }
 }

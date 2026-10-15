@@ -41,6 +41,13 @@ jobs:
       - name: Test Autheris Solution
         run: dotnet test Autheris.sln -c Release --no-restore -p:AutherisIncludeTestAuth=true --verbosity normal
 
+      # WP-ARC-B-12 (D7): the chart must lint and render with and without the optional governance migration job.
+      - name: Lint and render Helm chart
+        run: |
+          helm lint deploy/helm/autheris
+          helm template autheris deploy/helm/autheris > /dev/null
+          helm template autheris deploy/helm/autheris --set governanceMigrationJob.enabled=true > /dev/null
+
   # SEC2-09: production Helm render guards and container hardening posture (deploy/scripts/verify-hardening.sh).
   helm-render:
     name: Helm Render & Hardening Checks

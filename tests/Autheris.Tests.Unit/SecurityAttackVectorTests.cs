@@ -400,7 +400,7 @@ public sealed class SecurityAttackVectorTests
         isChainValid.ShouldBeTrue();
 
         // Act 2: Tamper directly with entry1 row in database
-        using (var cmd = repo.Connection.CreateCommand())
+        using (var cmd = repo.RawConnection().CreateCommand())
         {
             cmd.CommandText = "UPDATE AUDIT_LOG_ENTRIES SET details_json = '{\"tampered\": true}' WHERE id = @id";
             cmd.Parameters.AddWithValue("@id", entry1.Id.ToString());

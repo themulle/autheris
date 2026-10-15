@@ -1,0 +1,86 @@
+{{- if .Values.governanceMigrationJob.enabled }}
+{{- if eq (lower .Values.gateway.governanceDb.provider) "sqlite" }}
+{{- fail "governanceMigrationJob.enabled is not supported for the sqlite provider: the database file is local to the application pod." }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "autheris.fullname" . }}-migrate
+  labels:
+    {{- include "autheris.migrationLabels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+data:
+  {{- include "autheris.configData" . | nindent 2 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "autheris.fullname" . }}-migrate
+  labels:
+    {{- include "autheris.migrationLabels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.governanceMigrationJob.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.governanceMigrationJob.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: {{ .Values.governanceMigrationJob.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      {{- with .Values.governanceMigrationJob.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- with .Values.governanceMigrationJob.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- include "autheris.migrationLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      {{- with .Values.governanceMigrationJob.serviceAccountName }}
+      serviceAccountName: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: governance-migration
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: {{ include "autheris.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["--migrate-governance"]
+          env:
+            {{- include "autheris.gatewayEnv" . | nindent 12 }}
+            - name: Gateway__GovernanceDb__Migrations__Mode
+              value: "Apply"
+            {{- if .Values.governanceMigrationJob.migrationConnectionStringSecretKey }}
+            - name: Gateway__GovernanceDb__MigrationConnectionString
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.gateway.governanceDb.existingSecret }}
+                  key: {{ .Values.governanceMigrationJob.migrationConnectionStringSecretKey }}
+            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "autheris.fullname" . }}-migrate
+          {{- with .Values.governanceMigrationJob.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

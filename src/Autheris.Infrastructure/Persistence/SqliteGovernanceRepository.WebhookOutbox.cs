@@ -9,28 +9,15 @@ using Autheris.Domain.Model;
 using Microsoft.Data.Sqlite;
 
 /// <summary>
-/// SQLite <see cref="IWebhookOutbox"/> (WP-ARC-A-02). Every statement runs through <see cref="WithOutboxConnectionAsync{T}"/>, the only
-/// place in this file that touches the shared connection; the planned move to pooled connections only has to change that helper.
+/// SQLite <see cref="IWebhookOutbox"/> (WP-ARC-A-02). Every statement runs on a per-operation connection: claim, complete, reschedule,
+/// dead-letter, defer, enqueue and purge are writes under the single write gate; list and count are reads.
 /// </summary>
 public partial class SqliteGovernanceRepository : IWebhookOutbox
 {
-    private async Task<T> WithOutboxConnectionAsync<T>(Func<SqliteConnection, Task<T>> op, CancellationToken ct)
-    {
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            return await op(_connection).ConfigureAwait(false);
-        }
-        finally
-        {
-            _lock.Release();
-        }
-    }
-
     public Task<bool> EnqueueAsync(WebhookOutboxMessage message, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(message);
-        return WithOutboxConnectionAsync(async conn =>
+        return WriteAsync(async conn =>
         {
             await using var cmd = conn.CreateCommand();
             // ON CONFLICT DO NOTHING (not INSERT OR IGNORE, which would also swallow NOT NULL violations).
@@ -61,7 +48,7 @@ public partial class SqliteGovernanceRepository : IWebhookOutbox
     public Task<IReadOnlyList<WebhookOutboxMessage>> ClaimBatchAsync(int limit, DateTimeOffset now, TimeSpan lease, string leaseOwner, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(leaseOwner);
-        return WithOutboxConnectionAsync<IReadOnlyList<WebhookOutboxMessage>>(async conn =>
+        return WriteAsync<IReadOnlyList<WebhookOutboxMessage>>(async conn =>
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = $@"
@@ -108,7 +95,7 @@ public partial class SqliteGovernanceRepository : IWebhookOutbox
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentException.ThrowIfNullOrWhiteSpace(leaseOwner);
-        return WithOutboxConnectionAsync(async conn =>
+        return WriteAsync(async conn =>
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = $"UPDATE WEBHOOK_OUTBOX SET {setClause} WHERE id = @id AND state = 1 AND lease_owner = @owner;";
@@ -125,7 +112,7 @@ public partial class SqliteGovernanceRepository : IWebhookOutbox
     public Task<int> DeferSubscriptionAsync(WebhookSubscriptionSource source, string subscriptionId, DateTimeOffset until, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(subscriptionId);
-        return WithOutboxConnectionAsync(async conn =>
+        return WriteAsync(async conn =>
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
@@ -141,7 +128,7 @@ public partial class SqliteGovernanceRepository : IWebhookOutbox
     public Task<IReadOnlyList<WebhookDeadLetter>> ListDeadLettersAsync(WebhookOwnerScope scope, int limit, CancellationToken ct = default)
     {
         WebhookOutboxMapping.ValidateScope(scope);
-        return WithOutboxConnectionAsync<IReadOnlyList<WebhookDeadLetter>>(async conn =>
+        return ReadAsync<IReadOnlyList<WebhookDeadLetter>>(async conn =>
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = $@"
@@ -166,7 +153,7 @@ public partial class SqliteGovernanceRepository : IWebhookOutbox
     }
 
     public Task<long> CountPendingAsync(CancellationToken ct = default) =>
-        WithOutboxConnectionAsync(async conn =>
+        ReadAsync(async conn =>
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT COUNT(*) FROM WEBHOOK_OUTBOX WHERE state IN (0, 1);";
@@ -174,7 +161,7 @@ public partial class SqliteGovernanceRepository : IWebhookOutbox
         }, ct);
 
     public Task<int> PurgeAsync(DateTimeOffset deliveredBefore, DateTimeOffset deadBefore, CancellationToken ct = default) =>
-        WithOutboxConnectionAsync(async conn =>
+        WriteAsync(async conn =>
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = "DELETE FROM WEBHOOK_OUTBOX WHERE (state = 2 AND updated_ms < @delivered) OR (state = 3 AND updated_ms < @dead);";

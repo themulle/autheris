@@ -44,7 +44,7 @@ public sealed class Pol12ApprovalAuditFailClosedTests
         });
 
         // Break the audit table to simulate an unrecoverable audit write failure
-        using (var cmd = repo.Connection.CreateCommand())
+        using (var cmd = repo.RawConnection().CreateCommand())
         {
             cmd.CommandText = "DROP TABLE AUDIT_LOG_ENTRIES;";
             cmd.ExecuteNonQuery();
@@ -57,7 +57,7 @@ public sealed class Pol12ApprovalAuditFailClosedTests
         });
 
         // Verify that the approval was rolled back and is NOT committed in the database
-        using (var verifyCmd = repo.Connection.CreateCommand())
+        using (var verifyCmd = repo.RawConnection().CreateCommand())
         {
             verifyCmd.CommandText = "SELECT status FROM CONSENT_REQUESTS WHERE id = @id";
             verifyCmd.Parameters.AddWithValue("@id", req.Id.ToString());

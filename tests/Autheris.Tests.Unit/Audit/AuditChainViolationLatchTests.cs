@@ -71,7 +71,7 @@ public sealed class AuditChainViolationLatchTests : IDisposable
     {
         await repo.RecordAuditEventAsync(TierA(1));
         await repo.RecordAuditEventAsync(TierA(2));
-        using (var cmd = repo.Connection.CreateCommand())
+        using (var cmd = repo.RawConnection().CreateCommand())
         {
             cmd.CommandText = "UPDATE AUDIT_LOG_ENTRIES SET details_json = '{\"tampered\":true}' WHERE rowid = 1";
             await cmd.ExecuteNonQueryAsync();

@@ -16,10 +16,10 @@ public partial class SqliteGovernanceRepository
                              JOIN TABLES t ON c.table_id = t.id
                              WHERE c.is_revoked = 0 AND c.tenant_id = @tenantId";
         var result = new List<TableIdentifier>();
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
         {
-            using var cmd = _connection.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = sql;
             cmd.Parameters.AddWithValue("@tenantId", tenantId.Value);
             using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -27,10 +27,6 @@ public partial class SqliteGovernanceRepository
             {
                 result.Add(new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2)));
             }
-        }
-        finally
-        {
-            _lock.Release();
         }
 
         return result;

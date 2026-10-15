@@ -137,7 +137,7 @@ public sealed class Round4EgressTests
             Egress = Egress(
                 hosts: ["jira.corp.local", "bücher.corp.example"],
                 networks: ["10.20.0.0/16", "172.16.0.0/12", "fd12:3456:789a::/48", "2001:db8:1::/48"]),
-            DataMasking = ProdMasking()
+            DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" }
         };
 
         EgressAllowlist.Validate(options.Egress).ShouldBeEmpty();

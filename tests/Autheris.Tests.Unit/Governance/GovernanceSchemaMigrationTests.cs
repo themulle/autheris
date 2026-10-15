@@ -32,7 +32,7 @@ public sealed class GovernanceSchemaMigrationTests
     private static string NewConnectionString() => $"Data Source=mig_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
 
     private static SqliteGovernanceRepository NewRawRepository(string connectionString) =>
-        new(Substitute.For<IEpochValidationService>(), Options.Create(Gateway(connectionString)));
+        GovernanceStoreFactory.CreateUnmigratedSqlite(Substitute.For<IEpochValidationService>(), Options.Create(Gateway(connectionString)));
 
     private static SqliteGovernanceMigrationRunner NewRunner(
         SqliteGovernanceRepository repository,
@@ -43,14 +43,14 @@ public sealed class GovernanceSchemaMigrationTests
 
     private static long Scalar(SqliteGovernanceRepository repository, string sql)
     {
-        using var cmd = repository.Connection.CreateCommand();
+        using var cmd = repository.RawConnection().CreateCommand();
         cmd.CommandText = sql;
         return Convert.ToInt64(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
     private static void Exec(SqliteGovernanceRepository repository, string sql)
     {
-        using var cmd = repository.Connection.CreateCommand();
+        using var cmd = repository.RawConnection().CreateCommand();
         cmd.CommandText = sql;
         cmd.ExecuteNonQuery();
     }
@@ -237,9 +237,9 @@ public sealed class GovernanceSchemaMigrationTests
         {
             GovernanceDb = new GovernanceDbOptions { Provider = "SqlServer", ConnectionString = "Server=localhost;Database=autheris_test;User Id=u;Password=p;TrustServerCertificate=true" }
         });
-        using var sqlite = new SqliteGovernanceRepository(Substitute.For<IEpochValidationService>(), sqliteOptions, env);
-        using var pg = new PostgreSqlGovernanceRepository(Substitute.For<IEpochValidationService>(), pgOptions, env);
-        using var mssql = new SqlServerGovernanceRepository(Substitute.For<IEpochValidationService>(), sqlServerOptions, env);
+        using var sqlite = GovernanceStoreFactory.CreateUnmigratedSqlite(Substitute.For<IEpochValidationService>(), sqliteOptions, env);
+        using var pg = GovernanceStoreFactory.CreateUnmigratedPostgreSql(Substitute.For<IEpochValidationService>(), pgOptions, env);
+        using var mssql = GovernanceStoreFactory.CreateUnmigratedSqlServer(Substitute.For<IEpochValidationService>(), sqlServerOptions, env);
 
         var catalogues = new[]
         {

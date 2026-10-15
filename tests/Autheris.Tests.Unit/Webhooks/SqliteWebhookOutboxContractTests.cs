@@ -55,9 +55,10 @@ public sealed class SqliteWebhookOutboxContractTests : WebhookOutboxContractTest
     }
 
     [Fact]
-    public void OutboxPartial_AccessesConnectionAndLockOnlyThroughOneHelper()
+    public void OutboxPartial_RunsEveryStatementInAWriteOrReadScope_NeverOnASharedConnection()
     {
-        // B-13 converts SQLite to pooled connections; the outbox partial must only need one helper swapped.
+        // WP-ARC-B-13: claim, complete, reschedule, dead-letter, defer, enqueue and purge are writes under the single write gate;
+        // only list and count are reads. The partial never touches the gate or a connection directly.
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Autheris.sln")))
         {
@@ -68,8 +69,12 @@ public sealed class SqliteWebhookOutboxContractTests : WebhookOutboxContractTest
         var file = Path.Combine(dir!.FullName, "src", "Autheris.Infrastructure", "Persistence", "SqliteGovernanceRepository.WebhookOutbox.cs");
         var text = File.ReadAllText(file);
 
-        System.Text.RegularExpressions.Regex.Count(text, @"\b_connection\b").ShouldBe(1);
-        System.Text.RegularExpressions.Regex.Count(text, @"\b_lock\b").ShouldBe(2); // WaitAsync + Release
-        text.ShouldContain("WithOutboxConnectionAsync");
+        foreach (var forbidden in new[] { "_connection", "_lock", "_writeGate", "Connections." })
+        {
+            text.ShouldNotContain(forbidden);
+        }
+
+        System.Text.RegularExpressions.Regex.Count(text, @"(?<!reader\.)\bWriteAsync\b").ShouldBe(5);
+        System.Text.RegularExpressions.Regex.Count(text, @"(?<!reader\.)(?<!\.)\bReadAsync[<(]").ShouldBe(2);
     }
 }

@@ -639,7 +639,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
         (await repo.VerifyAuditHashChainAsync()).ShouldBeTrue();
 
         // Attacker tampers with the ActorSid in the database
-        using (var cmd = repo.Connection.CreateCommand())
+        using (var cmd = repo.RawConnection().CreateCommand())
         {
             cmd.CommandText = "UPDATE AUDIT_LOG_ENTRIES SET actor_sid = 'S-1-5-21-IMPERSONATED' WHERE id = @id";
             cmd.Parameters.AddWithValue("@id", entry1.Id.ToString());
@@ -673,7 +673,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
         (await repo.VerifyAuditHashChainAsync()).ShouldBeTrue();
 
         // Attacker attempts to change audit log from 'DENY' to 'ALLOW'
-        using (var cmd = repo.Connection.CreateCommand())
+        using (var cmd = repo.RawConnection().CreateCommand())
         {
             cmd.CommandText = "UPDATE AUDIT_LOG_ENTRIES SET decision = 'ALLOW' WHERE id = @id";
             cmd.Parameters.AddWithValue("@id", entry1.Id.ToString());

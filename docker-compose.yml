@@ -34,7 +34,8 @@ services:
       # SR-L-02: required outside Development. Add the public host name when published behind a proxy.
       - Gateway__Hosting__AllowedHosts__0=localhost
       - Gateway__Hosting__AllowedHosts__1=127.0.0.1
-      - Gateway__GovernanceDb__ConnectionString=Data Source=/app/data/governance.db;Cache=Shared
+      - Gateway__State__StateDirectory=/app/data
+      - Gateway__GovernanceDb__ConnectionString=Data Source=/app/data/governance.db
     volumes:
       - autheris-data:/app/data
     healthcheck:

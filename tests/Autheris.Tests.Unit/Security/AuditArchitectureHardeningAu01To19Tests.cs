@@ -175,7 +175,7 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
     }
 
     [Fact]
-    public void AU01_SqliteRepository_InProduction_MissingAnchorStore_ThrowsInvalidOperationException()
+    public void AU01_AnchorStoreFactory_InProduction_MissingAnchorStore_ThrowsInvalidOperationException()
     {
         var dbPath = Path.Combine(_testDir, "prod_test.db");
         var options = Options.Create(new GatewayOptions
@@ -198,14 +198,14 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
         mockSecretProvider.GetSecretBytes(Arg.Any<string>())
             .Returns(Encoding.UTF8.GetBytes("secret-audit-key-32-chars-long-minimum!"));
 
+        // ARC-I-13: AU-01/AU-03 are enforced where the repository's anchor store is built.
         var ex = Should.Throw<InvalidOperationException>(() =>
-            GovernanceStoreFactory.CreateSqlite(
-                new EpochValidationService(),
-                options,
-                environment: env,
-                secretProvider: mockSecretProvider,
-                auditAnchorStore: null,
-                logger: NullLogger<SqliteGovernanceRepository>.Instance));
+            AuditChainAnchorStoreFactory.CreateForGovernance(
+                options.Value,
+                env,
+                mockSecretProvider,
+                null,
+                NullLogger<SqliteGovernanceRepository>.Instance));
 
         ex.Message.ShouldContain("AU-01/AU-03");
     }
@@ -344,11 +344,11 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
         using var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options);
 
         var entry1 = CreateAuditEntry(1, "CONSENT_CREATED");
-        await repo.LockAsync();
+        await repo.LockUnguardedAsync();
         try
         {
-            using var tx = repo.Connection.BeginTransaction();
-            await repo.RecordAuditEventAsync(entry1, tx);
+            using var tx = repo.RawConnection().BeginTransaction();
+            await repo.RecordAuditEventInternalAsync(tx.Connection!, entry1, CancellationToken.None, tx);
             await tx.CommitAsync();
             repo.OnTransactionCommitted(tx);
         }
@@ -360,7 +360,7 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
         var isValid = await repo.VerifyAuditHashChainAsync();
         isValid.ShouldBeTrue();
 
-        using var cmd = repo.Connection.CreateCommand();
+        using var cmd = repo.RawConnection().CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES WHERE EVENT_TYPE = 'CONSENT_CREATED'";
         var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
         count.ShouldBe(1);
@@ -393,11 +393,11 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
 
         // 2. Transaction that is rolled back
         var entry2 = CreateAuditEntry(2, "CONSENT_FAILED_ATTEMPT");
-        await repo.LockAsync();
+        await repo.LockUnguardedAsync();
         try
         {
-            using var tx = repo.Connection.BeginTransaction();
-            await repo.RecordAuditEventAsync(entry2, tx);
+            using var tx = repo.RawConnection().BeginTransaction();
+            await repo.RecordAuditEventInternalAsync(tx.Connection!, entry2, CancellationToken.None, tx);
             await tx.RollbackAsync();
             repo.OnTransactionRolledBack(tx);
         }
@@ -411,7 +411,7 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
         chainValidAfterRollback.ShouldBeTrue();
 
         // 4. Failed entry must not exist in table
-        using var cmd = repo.Connection.CreateCommand();
+        using var cmd = repo.RawConnection().CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES WHERE EVENT_TYPE = 'CONSENT_FAILED_ATTEMPT'";
         var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
         count.ShouldBe(0);

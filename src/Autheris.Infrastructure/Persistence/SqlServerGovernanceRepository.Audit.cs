@@ -17,6 +17,9 @@ public partial class SqlServerGovernanceRepository
 {
     public async Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default)
     {
+        // Tier-B events are only enqueued (no connection); they must not be accepted before the audit processor runs.
+        ThrowIfNotReady();
+
         if (entry.Caller == null && _callerContextProvider != null)
         {
             entry.Caller = _callerContextProvider.ResolveCallerContext();
@@ -957,7 +960,7 @@ public partial class SqlServerGovernanceRepository
         string? hash = null;
         long? seq = null;
 
-        var conn = tx?.Connection ?? OpenConnection();
+        var conn = tx?.Connection ?? OpenConnectionCore();
         bool ownsConn = tx == null;
         try
         {

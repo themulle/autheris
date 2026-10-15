@@ -30,7 +30,7 @@ public partial class PostgreSqlGovernanceRepository
         if (subjectSet.Count == 0) return Array.Empty<Consent>();
 
         var consents = new List<Consent>();
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
 
         var tenantFilter = tenantId != null ? " AND c.tenant_id = @tenantId" : "";
@@ -117,7 +117,7 @@ public partial class PostgreSqlGovernanceRepository
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         var consents = new List<Consent>();
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
 
         var tenantFilter = tenantId != null ? " AND c.tenant_id = @tenantId" : "";
@@ -192,7 +192,7 @@ public partial class PostgreSqlGovernanceRepository
         CancellationToken ct = default)
     {
         var consents = new List<Consent>();
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                    c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
@@ -366,7 +366,7 @@ public partial class PostgreSqlGovernanceRepository
     {
         ArgumentNullException.ThrowIfNull(consent);
         consent.Validate(); // Review PG-11: same input validation as SQLite
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
@@ -523,7 +523,7 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         Consent? consent = null;
 
         await using (var cmd = conn.CreateCommand())
@@ -579,7 +579,7 @@ public partial class PostgreSqlGovernanceRepository
         bool isGranteeSelf = false;
         bool alreadyRevoked = false;
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
@@ -682,7 +682,7 @@ public partial class PostgreSqlGovernanceRepository
         TableIdentifier? tableId = null;
         TenantId tenantId = TenantId.LegacySingleTenant;
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
@@ -765,7 +765,7 @@ public partial class PostgreSqlGovernanceRepository
     public async Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, CancellationToken ct = default)
     {
         var consents = new List<Consent>();
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                    c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
@@ -813,7 +813,7 @@ public partial class PostgreSqlGovernanceRepository
     {
         TableIdentifier? tableId = null;
         TenantId extendTenant = TenantId.LegacySingleTenant;
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
@@ -883,7 +883,7 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task<ConsentRequest> CreateConsentRequestAsync(ConsentRequest request, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
 
         string? tableId = null;
         if (request.TableId != Guid.Empty)
@@ -962,7 +962,7 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task<ConsentRequest?> GetConsentRequestAsync(Guid requestId, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         ConsentRequest? req = null;
 
         await using (var cmd = conn.CreateCommand())
@@ -1031,7 +1031,7 @@ public partial class PostgreSqlGovernanceRepository
     public async Task<IReadOnlyList<ConsentRequest>> GetRequestsByRequesterSidAsync(Sid requesterSid, string? status = null, CancellationToken ct = default)
     {
         var list = new List<ConsentRequest>();
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         var sql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                            r.business_justification, r.status, r.requested_at, r.requested_valid_to,
@@ -1071,7 +1071,7 @@ public partial class PostgreSqlGovernanceRepository
     public async Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, CancellationToken ct = default)
     {
         var list = new List<ConsentRequest>();
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                    r.business_justification, r.status, r.requested_at, r.requested_valid_to,
@@ -1169,7 +1169,7 @@ public partial class PostgreSqlGovernanceRepository
             }
         }
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
@@ -1296,7 +1296,7 @@ public partial class PostgreSqlGovernanceRepository
 
     private async Task<bool> HasConfiguredDataOwnersAsync(TableIdentifier table, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         // Review PG-3: any owner row counts (as in SQLite), also deactivated owners, so that deactivating all owners
         // cannot switch the approver check off.
         await using var cmd = conn.CreateCommand();
@@ -1331,7 +1331,7 @@ public partial class PostgreSqlGovernanceRepository
             throw new UnauthorizedAccessException($"User '{approverSid}' is neither a data owner nor a delegated approver for table '{req.TableIdentifier}'.");
         }
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
@@ -1390,7 +1390,7 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task<ConsentRequest?> GetConsentRequestByTicketIdAsync(string ticketId, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT id FROM CONSENT_REQUESTS WHERE itsm_ticket_id = @ticket ORDER BY requested_at, id LIMIT 1";
         cmd.Parameters.AddWithValue("@ticket", ticketId);
@@ -1402,7 +1402,7 @@ public partial class PostgreSqlGovernanceRepository
     /// <summary>SR-M-24: tenant-bound ticket lookup in SQL - a ticket id of another tenant never shadows or resolves.</summary>
     public async Task<ConsentRequest?> GetConsentRequestByTicketIdAsync(string ticketId, TenantId tenantId, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT id FROM CONSENT_REQUESTS WHERE itsm_ticket_id = @ticket AND tenant_id = @tenant ORDER BY requested_at, id LIMIT 1";
         cmd.Parameters.AddWithValue("@ticket", ticketId);
@@ -1428,7 +1428,7 @@ public partial class PostgreSqlGovernanceRepository
         var req = await GetConsentRequestAsync(requestId, ct).ConfigureAwait(false);
         if (req == null) throw new InvalidOperationException($"ConsentRequest {requestId} not found.");
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
@@ -1555,7 +1555,7 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
@@ -1586,7 +1586,7 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task UpdateConsentRequestTicketIdAsync(Guid requestId, string ticketId, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "UPDATE CONSENT_REQUESTS SET itsm_ticket_id = @ticket WHERE id = @id";
         cmd.Parameters.AddWithValue("@id", requestId.ToString());

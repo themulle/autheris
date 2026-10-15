@@ -6,6 +6,7 @@ using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Migrations;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 
 /// <summary>
 /// Creates governance repositories with a migrated and initialized schema (WP-ARC-B-12: repository constructors run no DDL).
@@ -17,7 +18,15 @@ internal static class GovernanceStoreFactory
         IOptions<GatewayOptions> options,
         IHostEnvironment? environment = null)
     {
-        var repository = new PostgreSqlGovernanceRepository(epochValidationService, options, environment);
+        var env = environment ?? DefaultEnvironment();
+        var secrets = NSubstitute.Substitute.For<IKeyVaultSecretProvider>();
+        var repository = new PostgreSqlGovernanceRepository(
+            epochValidationService,
+            options,
+            env,
+            secrets,
+            AuditChainAnchorStoreFactory.CreateForGovernance(options.Value, env, secrets, null, null),
+            NSubstitute.Substitute.For<ICallerContextProvider>());
         try
         {
             new PostgreSqlGovernanceMigrationRunner(repository, options).RunAsync().GetAwaiter().GetResult();
@@ -36,7 +45,15 @@ internal static class GovernanceStoreFactory
         IOptions<GatewayOptions> options,
         IHostEnvironment? environment = null)
     {
-        var repository = new SqlServerGovernanceRepository(epochValidationService, options, environment);
+        var env = environment ?? DefaultEnvironment();
+        var secrets = NSubstitute.Substitute.For<IKeyVaultSecretProvider>();
+        var repository = new SqlServerGovernanceRepository(
+            epochValidationService,
+            options,
+            env,
+            secrets,
+            AuditChainAnchorStoreFactory.CreateForGovernance(options.Value, env, secrets, null, null),
+            NSubstitute.Substitute.For<ICallerContextProvider>());
         try
         {
             new SqlServerGovernanceMigrationRunner(repository, options).RunAsync().GetAwaiter().GetResult();
@@ -48,5 +65,12 @@ internal static class GovernanceStoreFactory
             repository.Dispose();
             throw;
         }
+    }
+
+    private static IHostEnvironment DefaultEnvironment()
+    {
+        var env = NSubstitute.Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Test");
+        return env;
     }
 }
