@@ -1,6 +1,6 @@
 # Master Architecture & Implementation Backlog
 
-**Last Updated:** October 14, 2026 · **Branch:** `main` (`a4137626`)  
+**Last Updated:** October 15, 2026 · **Branch:** `main` (`574c82f1`)  
 **Role:** Solution Architect & Agent Coordinator  
 **Location:** `docs/plans/00-master-plan-overview.md`  
 **Purpose:** Canonical origin plan, dependency graph, and active track status for all AI agents and engineers working on the Autheris ecosystem.
@@ -33,6 +33,7 @@
 | [`architecture.md`](architecture.md)<br/>`PLAN-ARCH-REVIEW` | **Solution Architecture Remediation (R0–R6)** | R0, R1, and Wave 4 R2/R3 items (B-07, B-13, A-02, A-03, A-11, A-12, A-14) delivered. Open: A-13, R3 dialect ports and persistence (B-09..B-11, B-14, A-07), R4–R6 (C-01..C-22). | **IN PROGRESS 🚀** | Wave 5: B-09, B-10, C-01..C-08, A-07, B-14. |
 | [`features.md`](features.md)<br/>`PLAN-FEATURES-ROADMAP` | **Analytics Feature Roadmap** | #28 governed GraphQL aggregations, #37 minimum group size, #38 dbt Semantic Layer Stage 2/3. G-14 resolved (`decision-g14-feat-scope.md`). | **READY FOR EXEC 📋** | Execute FEAT-03 (#28) paired with FEAT-04 (#37), and FEAT-06a/b (#38 Stage 2). |
 | [`implementation/impl-test-suite-speedup.md`](implementation/impl-test-suite-speedup.md)<br/>`IMPL-TEST-SPEEDUP-2026-10-14` | **Test Suite Speed-Up** | WP-TS-00 (TRX artifacts), WP-TS-01 (shared DB servers), WP-TS-03 (parallel Spark job), and WP-TS-04 (Cecil module & call-graph cache) implemented. Open: WP-TS-02, WP-TS-05. | **IN PROGRESS 🚀** | Inspect CI TRX timings, then WP-TS-02 CI shards and WP-TS-05 selective parallelization. |
+| [`2026-10-15-req-issue-94-upgrade-migration-and-pk-ordering.md`](2026-10-15-req-issue-94-upgrade-migration-and-pk-ordering.md)<br/>`REQ-GOV-94` | **Bug #94: Governance Schema Upgrade Reconciliation & Key-Based Read Ordering** | Regression v1.1.8 → v1.1.9/v1.1.10: migration `0002` reconciling legacy shapes (SQLite/PostgreSQL/SQL Server), fail-closed schema drift verification, no guessed `["id"]` primary key, persisted/discovered keys, deterministic policy-safe fallback ordering, WebSQL 504 triage. | **PRD APPROVED – Phase 2 next 📋** | Architect plan (`csharp-architect`): migration `0002` design, shape verification model, shared key resolver. |
 | [`2026-10-15-plan-sqlgate-cutover-and-accepted-differences.md`](2026-10-15-plan-sqlgate-cutover-and-accepted-differences.md)<br/>`PLAN-SQLGATE-CUTOVER-03` | **SqlGate Differences Sign-Off & Cutover** | All 18 triage entries (57 unique statements) in `accepted-differences.json` audited, documented with concrete security justifications, and signed off (`approved`). Cutover precondition verified. | **COMPLETED ✅** | Maintain G4 differential gate regression protection. |
 | [`README.md`](README.md)<br/>`PLAN-AGENT-GOV-DOCS-01` | **Agent Governance & English Documentation Standards** | Project-wide English documentation policy; `docs/plans/` as the plan repository; agent refinement lifecycle rules; root `AGENTS.md` & `CLAUDE.md`. | **ADOPTED ✅** | Ongoing enforcement. |
 
@@ -53,12 +54,14 @@ flowchart TD
     end
 
     TS["implementation/impl-test-suite-speedup.md"]
+    B94["2026-10-15-req-issue-94-...md<br/>Bug #94 upgrade & PK ordering"]
 
     MP --> AG
     MP --> SR
     MP --> AR
     MP --> FT
     MP --> TS
+    MP --> B94
     SR --> IR
     AR --> IR
     FT --> IR
