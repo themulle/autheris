@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Text.Json;
 using Autheris.Api.Extensions;
 using Autheris.Application.DataCatalog.Interfaces;
+using Autheris.Application.Governance;
 using Autheris.Domain.Audit;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;

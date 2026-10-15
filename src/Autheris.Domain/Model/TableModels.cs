@@ -112,7 +112,7 @@ public sealed record TableMetadata
     public string? OwnerTenantId { get; init; }
     public IReadOnlyList<TableColumn> Columns { get; init; } = Array.Empty<TableColumn>();
     public IReadOnlyDictionary<string, MaskingRule> ColumnMaskingRules { get; init; } = new Dictionary<string, MaskingRule>();
-    public IReadOnlyList<string> PrimaryKeyColumns { get; init; } = new[] { "id" };
+    public IReadOnlyList<string> PrimaryKeyColumns { get; init; } = Array.Empty<string>();
 
     public bool IsCompositePrimaryKey => PrimaryKeyColumns.Count > 1;
 

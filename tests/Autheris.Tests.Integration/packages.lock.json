@@ -1833,8 +1833,7 @@
           "Parquet.Net": "[6.1.0, )",
           "System.IO.Hashing": "[10.0.13, )",
           "System.Numerics.Tensors": "[10.0.13, )",
-          "YamlDotNet": "[18.1.0, )",
-          "prometheus-net": "[8.2.1, )"
+          "YamlDotNet": "[18.1.0, )"
         }
       },
       "autheris.domain": {
@@ -1885,7 +1884,10 @@
         }
       },
       "autheris.tests.common": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "Autheris.Application": "[1.0.0, )"
+        }
       },
       "FastSqlEngine": {
         "type": "Project",

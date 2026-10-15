@@ -8,6 +8,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Api.Serialization;
+using Autheris.Application.Interfaces;
 using Autheris.Application.Serialization;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;

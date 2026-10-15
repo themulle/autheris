@@ -75,5 +75,5 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         }
     }
 
-    protected static IEnumerable<SqlNode> VisitChildren(SqlNode node) => node.EnumerateChildren();
+    private static IEnumerable<SqlNode> VisitChildren(SqlNode node) => node.EnumerateChildren();
 }

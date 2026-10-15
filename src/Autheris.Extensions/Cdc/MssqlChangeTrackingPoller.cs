@@ -98,8 +98,10 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
         }
     }
 
-    private static readonly Prometheus.Counter WatermarkExpiredTotal = Prometheus.Metrics.CreateCounter(
-        "autheris_cdc_watermark_expired_total", "Number of polls aborted because the stored CDC watermark is older than the minimum valid change tracking version");
+    private static readonly System.Diagnostics.Metrics.Counter<long> WatermarkExpiredTotal =
+        Autheris.Domain.Diagnostics.GatewayDiagnostics.Meter.CreateCounter<long>(
+            "autheris_cdc_watermark_expired_total",
+            description: "Number of polls aborted because the stored CDC watermark is older than the minimum valid change tracking version");
 
     /// <summary>
     /// Polls one table and publishes its changes. Delivery is at-least-once: events are published first and the watermark is
@@ -151,7 +153,7 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
                 ?? throw new CdcSourceConfigurationException($"Change tracking is not enabled for table '{table}' (no minimum valid version).");
             if (lastVersion < minValidVersion)
             {
-                WatermarkExpiredTotal.Inc();
+                WatermarkExpiredTotal.Add(1);
                 _logger.LogError(
                     "MSSQL Change Tracking watermark {LastVersion} for table {Table} is older than min valid version {MinValidVersion}. Manual recovery is required (delete the row of the table in autheris_cdc_watermarks to restart at the current version).",
                     lastVersion, table, minValidVersion);

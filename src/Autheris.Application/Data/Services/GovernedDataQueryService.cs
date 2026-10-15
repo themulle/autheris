@@ -137,13 +137,6 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             {
                 throw new ArgumentException($"Limit too large: limit must not exceed {windowCap - 1}.", nameof(request));
             }
-
-            // OFFSET paging is only well-defined (and required by SQL Server / Oracle) with a deterministic ORDER BY.
-            if (offset > 0 && string.IsNullOrWhiteSpace(request.OrderBy) && metadata.PrimaryKeyColumns.Count == 0)
-            {
-                throw new ArgumentException(
-                    "Offset paging requires an orderBy or a primary key on the table.", nameof(request));
-            }
         }
 
         // WP-ARC-B-01: column authorization, the oracle-inference guard and the SQL formulation are the shared planner's job.

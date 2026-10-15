@@ -16,7 +16,7 @@ public sealed class PhysicalFileSystemProbe : IFileSystemProbe
 {
     public static readonly PhysicalFileSystemProbe Instance = new();
 
-    public bool FileExists(string path) => File.Exists(Path.GetFullPath(path));
+    public bool FileExists(string path) => File.Exists(System.IO.Path.GetFullPath(path));
 
-    public bool DirectoryExists(string path) => Directory.Exists(Path.GetFullPath(path));
+    public bool DirectoryExists(string path) => Directory.Exists(System.IO.Path.GetFullPath(path));
 }

@@ -127,7 +127,6 @@ public partial class SqlServerGovernanceRepository
                 Table = tableEntity,
                 Columns = columns,
                 ColumnMaskingRules = maskingRules,
-                PrimaryKeyColumns = new List<string> { "id" }
             };
 
             _metadataCache[cacheKey] = (result, DateTime.UtcNow.Ticks);

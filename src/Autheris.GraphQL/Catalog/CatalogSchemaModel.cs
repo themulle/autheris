@@ -90,12 +90,19 @@ public sealed partial class CatalogSchemaModel
         TablesByQueryFieldName = tables.ToDictionary(t => t.QueryFieldName, StringComparer.Ordinal);
     }
 
-    public static async Task<CatalogSchemaModel> BuildAsync(
+    public static Task<CatalogSchemaModel> BuildAsync(
         ITableMetadataRepository metadataRepository,
         ITableRelationRepository relationRepository,
         Microsoft.Extensions.Logging.ILogger? logger = null,
-        CancellationToken ct = default,
-        Autheris.Application.Sql.Dialects.ISqlDialectRegistry? dialectRegistry = null)
+        CancellationToken ct = default)
+        => BuildAsync(metadataRepository, relationRepository, logger, dialectRegistry: null, ct);
+
+    public static async Task<CatalogSchemaModel> BuildAsync(
+        ITableMetadataRepository metadataRepository,
+        ITableRelationRepository relationRepository,
+        Microsoft.Extensions.Logging.ILogger? logger,
+        Autheris.Application.Sql.Dialects.ISqlDialectRegistry? dialectRegistry,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(metadataRepository);
         ArgumentNullException.ThrowIfNull(relationRepository);

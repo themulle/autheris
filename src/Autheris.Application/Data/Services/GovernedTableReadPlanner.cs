@@ -185,26 +185,78 @@ public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
                 items.Add(item.Descending ? quoted + " DESC" : quoted);
             }
         }
-        else if (metadata.PrimaryKeyColumns.Count > 0)
+        else if (TryResolveClearKey(metadata, decision, out var key))
         {
-            items.AddRange(metadata.PrimaryKeyColumns.Select(DataApiFilterTranslator.QuoteIdentifier));
+            items.AddRange(key.Select(DataApiFilterTranslator.QuoteIdentifier));
         }
         else if (intent.Offset > 0)
         {
-            // OFFSET paging needs a deterministic ORDER BY (SQL Server and Oracle require one). A table without a primary key
-            // falls back to its first column that is readable in clear text (ordering on a masked column would leak its order).
-            var fallback = metadata.Columns.FirstOrDefault(c => decision.GetEffectiveColumnAccess(c.ColumnName, metadata) == ColumnAccessLevel.Clear);
-            if (fallback == null)
+            // OFFSET paging needs a deterministic ORDER BY (SQL Server and Oracle require one). Without a usable key, order by
+            // every column that is readable in clear text and has an orderable type (never a masked or denied column: ordering
+            // on it would leak its order).
+            var composite = metadata.Columns
+                .Where(c => decision.GetEffectiveColumnAccess(c.ColumnName, metadata) == ColumnAccessLevel.Clear && IsOrderableType(c.DataType))
+                .Select(c => DataApiFilterTranslator.QuoteIdentifier(c.ColumnName))
+                .ToList();
+            if (composite.Count == 0)
             {
                 throw new ArgumentException(
-                    $"Offset paging on table '{intent.Table.ToQualifiedName()}' needs a primary key or a column readable in clear text to order by.",
+                    $"Offset paging on table '{intent.Table.ToQualifiedName()}' needs an explicit order, a primary key or columns readable in clear text to order by.",
                     nameof(intent));
             }
 
-            items.Add(DataApiFilterTranslator.QuoteIdentifier(fallback.ColumnName));
+            items.AddRange(composite);
         }
 
         return items;
+    }
+
+    /// <summary>The declared key when it is non-empty and every key column exists and is readable in clear text; a key touching a masked or denied column is skipped as a whole.</summary>
+    private static bool TryResolveClearKey(TableMetadata metadata, TableAccessDecision decision, out List<string> key)
+    {
+        key = new List<string>();
+        if (metadata.PrimaryKeyColumns.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var pk in metadata.PrimaryKeyColumns)
+        {
+            var col = metadata.GetColumn(pk);
+            if (col == null || decision.GetEffectiveColumnAccess(col.ColumnName, metadata) != ColumnAccessLevel.Clear)
+            {
+                return false;
+            }
+
+            key.Add(col.ColumnName);
+        }
+
+        return true;
+    }
+
+    private static readonly string[] NonOrderableTypeMarkers =
+    [
+        "text", "image", "xml", "json", "geometry", "geography", "hierarchyid", "blob", "clob", "bytea", "(max)",
+        "sql_variant", "variant", "array", "[]", "map", "row", "struct", "object", "sdo_", "raw", "binary", "bfile", "long", "lob", "cursor"
+    ];
+
+    /// <summary>False for LOB, document, spatial and structured types that cannot (or should not) appear in an ORDER BY.</summary>
+    private static bool IsOrderableType(string? dataType)
+    {
+        if (string.IsNullOrWhiteSpace(dataType))
+        {
+            return true;
+        }
+
+        foreach (var marker in NonOrderableTypeMarkers)
+        {
+            if (dataType.Contains(marker, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static IReadOnlyDictionary<string, object?> ClientParameters(TableReadIntent intent) =>

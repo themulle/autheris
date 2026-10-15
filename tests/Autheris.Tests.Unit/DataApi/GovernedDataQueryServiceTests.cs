@@ -368,17 +368,20 @@ public sealed class GovernedDataQueryServiceTests
     }
 
     [Fact]
-    public async Task ExecuteQueryAsync_NoPrimaryKeyNoOrderBy_OffsetPositive_Rejected()
+    public async Task ExecuteQueryAsync_NoPrimaryKeyNoOrderBy_OffsetPositive_UsesClearColumnsAsOrder()
     {
         AllowAll(CreateCustomerTableMetadata(primaryKey: Array.Empty<string>()));
-        _sqlExecutionService.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+        GovernedSqlQueryRequest? captured = null;
+        _sqlExecutionService.ExecuteQueryBufferedAsync(Arg.Do<GovernedSqlQueryRequest>(r => captured = r), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(SqlResult(5));
         var service = CreateService();
 
-        await Should.ThrowAsync<ArgumentException>(() => service.ExecuteQueryAsync(
-            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "name" }, Limit: 50, Offset: 10), Ctx()));
-        (await service.ExecuteQueryAsync(
-            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "name" }, Limit: 50, Offset: 0), Ctx())).Count.ShouldBe(5);
+        var result = await service.ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "name" }, Limit: 50, Offset: 10), Ctx());
+
+        result.Count.ShouldBe(5);
+        captured.ShouldNotBeNull();
+        captured!.Sql.ShouldContain("ORDER BY \"id\"");
     }
 
     [Fact]

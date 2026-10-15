@@ -227,12 +227,11 @@ public sealed class GovernedTableReadPlannerTests
     }
 
     [Fact]
-    public void Plan_PagedReadWithoutPrimaryKey_OrdersByTheFirstClearColumn()
+    public void Plan_PagedReadWithoutPrimaryKey_OrdersByAllClearOrderableColumns()
     {
         var planned = _planner.Plan(Intent(offset: 20), Metadata(primaryKey: Array.Empty<string>()), Decision());
 
-        planned.Sql.ShouldContain("ORDER BY \"id\"");
-        planned.Sql.ShouldContain("OFFSET 20 ROWS");
+        planned.Sql.ShouldContain("ORDER BY \"id\", \"name\" OFFSET 20 ROWS");
     }
 
     [Fact]
@@ -258,5 +257,73 @@ public sealed class GovernedTableReadPlannerTests
             hasUnconstrainedColumnAllow: true);
 
         Should.Throw<ArgumentException>(() => _planner.Plan(Intent(offset: 5), Metadata(primaryKey: Array.Empty<string>()), decision));
+    }
+
+    private static TableMetadata Unkeyed(params (string Name, string Type)[] cols) => new()
+    {
+        Identifier = Customers,
+        Table = new Table { Id = Guid.NewGuid(), SourceName = "sales", SchemaName = "dbo", TableName = "customers", DataSourceType = DataSourceType.Sql, IsActive = true },
+        Columns = cols.Select(c => new TableColumn { ColumnName = c.Name, DataType = c.Type }).ToList()
+    };
+
+    private static TableAccessDecision Levels(params (string Name, ColumnAccessLevel Level)[] levels) => TableAccessDecision.Allowed(
+        Customers,
+        levels.ToDictionary(l => l.Name, l => l.Level, StringComparer.OrdinalIgnoreCase),
+        hasUnconstrainedColumnAllow: true);
+
+    [Fact]
+    public void TableMetadata_DefaultPrimaryKey_IsEmpty() => new TableMetadata().PrimaryKeyColumns.ShouldBeEmpty();
+
+    [Fact]
+    public void Plan_UnkeyedTableTopOnly_NeverReferencesIdColumn()
+    {
+        var meta = Unkeyed(("code", "varchar"), ("qty", "int"));
+        var planned = _planner.Plan(Intent(limit: 6), meta, Levels(("code", ColumnAccessLevel.Clear), ("qty", ColumnAccessLevel.Clear)));
+
+        planned.Sql.ShouldNotContain("\"id\"");
+        planned.Sql.ShouldNotContain("OFFSET");
+    }
+
+    [Fact]
+    public void Plan_UnkeyedTableOffset_OrdersByClearOrderableColumnsInCatalogOrder()
+    {
+        var meta = Unkeyed(("code", "varchar(20)"), ("masked", "varchar"), ("blob", "varbinary(max)"), ("qty", "int"), ("doc", "xml"), ("hidden", "int"), ("note", "nvarchar(max)"), ("g", "geography"));
+        var decision = Levels(("code", ColumnAccessLevel.Clear), ("masked", ColumnAccessLevel.Mask), ("blob", ColumnAccessLevel.Clear),
+            ("qty", ColumnAccessLevel.Clear), ("doc", ColumnAccessLevel.Clear), ("hidden", ColumnAccessLevel.Deny),
+            ("note", ColumnAccessLevel.Clear), ("g", ColumnAccessLevel.Clear));
+        var planned = _planner.Plan(Intent(limit: 6, offset: 5), meta, decision);
+
+        planned.Sql.ShouldContain("ORDER BY \"code\", \"qty\" OFFSET 5 ROWS");
+    }
+
+    [Fact]
+    public void Plan_KeyWithMaskedColumn_IsSkippedAsAWhole()
+    {
+        var meta = Unkeyed(("a", "int"), ("b", "int"), ("c", "int")) with { PrimaryKeyColumns = new[] { "a", "b" } };
+        var decision = Levels(("a", ColumnAccessLevel.Clear), ("b", ColumnAccessLevel.Mask), ("c", ColumnAccessLevel.Clear));
+        var planned = _planner.Plan(Intent(limit: 6, offset: 5), meta, decision);
+
+        planned.Sql.ShouldContain("ORDER BY \"a\", \"c\" OFFSET");
+        planned.Sql[planned.Sql.IndexOf("ORDER BY", StringComparison.Ordinal)..].ShouldNotContain("\"b\"");
+    }
+
+    [Fact]
+    public void Plan_KeyWithMaskedColumnAndNoOffset_AddsNoOrderBy()
+    {
+        var meta = Unkeyed(("a", "int"), ("b", "int")) with { PrimaryKeyColumns = new[] { "a", "b" } };
+        var planned = _planner.Plan(Intent(limit: 6), meta, Levels(("a", ColumnAccessLevel.Clear), ("b", ColumnAccessLevel.Mask)));
+
+        planned.Sql.ShouldNotContain("ORDER BY");
+    }
+
+    [Fact]
+    public void Plan_NothingOrderable_ThrowsWithoutHiddenColumnNames()
+    {
+        var meta = Unkeyed(("secretcol", "int"), ("maskedcol", "int"), ("doc", "xml"));
+        var decision = Levels(("secretcol", ColumnAccessLevel.Deny), ("maskedcol", ColumnAccessLevel.Mask), ("doc", ColumnAccessLevel.Clear));
+
+        var ex = Should.Throw<ArgumentException>(() => _planner.Plan(Intent(limit: 6, offset: 5), meta, decision));
+        ex.Message.ShouldNotContain("secretcol");
+        ex.Message.ShouldNotContain("maskedcol");
     }
 }

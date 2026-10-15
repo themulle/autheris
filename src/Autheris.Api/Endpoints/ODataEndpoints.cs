@@ -10,6 +10,7 @@ using Autheris.Application.OData.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
+using Autheris.Extensions.OData;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;

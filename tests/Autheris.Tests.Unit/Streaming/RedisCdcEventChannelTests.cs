@@ -11,6 +11,7 @@ using Autheris.Application.Interfaces;
 using Autheris.Application.State;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Subscriptions;
@@ -173,7 +174,7 @@ public sealed class RedisCdcEventChannelTests
     {
         var options = Options.Create(new GatewayOptions
         {
-            GraphQL = new GraphQLGatewayOptions { MaxSubscriptionsPerSubject = 2 }
+            GraphQL = new GraphQLOptions { MaxSubscriptionsPerSubject = 2 }
         });
         var clusterState = Substitute.For<IDistributedClusterStateProvider>();
         var topology = new ClusterStateTopology(ClusterStateMode.External);
@@ -183,19 +184,22 @@ public sealed class RedisCdcEventChannelTests
             clusterState,
             topology);
 
-        var resolver = Substitute.For<ITableAccessResolver>();
-        resolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<TableIdentifier>(), null, null, Arg.Any<CancellationToken>())
-            .Returns(new ResolvedTableAccess(
-                new TableMetadata { Identifier = new TableIdentifier("default", "public", "orders") },
-                new PolicyAccessDecision(true, null, false, new Dictionary<string, ColumnAccessResult>()),
-                Array.Empty<RowFilterCondition>(),
-                null));
-
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
         [
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-100"),
             new Claim("sid", "S-1-5-21-100"),
             new Claim("tenant_id", "tenant-a")
         ], "test"));
+
+        var tableId = new TableIdentifier("default", "public", "orders");
+        var resolver = Substitute.For<ITableAccessResolver>();
+        resolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<TableIdentifier>(), null, null, Arg.Any<CancellationToken>())
+            .Returns(new ResolvedTableAccess(
+                new TableMetadata { Identifier = tableId },
+                TableAccessDecision.Allowed(tableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
+                new TenantId("tenant-a"),
+                new Sid("S-1-5-21-100"),
+                principal));
 
         clusterState.IncrementAsync("cdc:subs:tenant-a", 1, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
             .Returns(ValueTask.FromResult<long?>(1L));
