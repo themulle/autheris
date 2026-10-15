@@ -14,6 +14,7 @@ using Autheris.Application.Policy;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 
@@ -131,6 +132,29 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         _virtualFilterAdmin = virtualFilterAdmin;
         _rebacStore = rebacStore;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    private TableMetadata ApplyDeclaredKeys(TableMetadata metadata, DbtDeclaredKeys declared)
+    {
+        var collector = new Autheris.Application.DataCatalog.Services.CatalogKeyDefinitionImport.Collector();
+        if (declared.Invalid)
+        {
+            collector.AddPrimaryKey(null);
+        }
+        else
+        {
+            if (declared.PrimaryKey is not null)
+            {
+                collector.AddPrimaryKey(declared.PrimaryKey);
+            }
+
+            foreach (var unique in declared.UniqueConstraints)
+            {
+                collector.AddUnique(unique);
+            }
+        }
+
+        return Autheris.Application.DataCatalog.Services.CatalogKeyDefinitionImport.Apply(metadata, collector, _logger, "dbt");
     }
 
     public async Task<DbtSyncResult> IngestManifestFileAsync(string filePath, bool dryRun = false, TenantId? tenant = null, CancellationToken ct = default)
@@ -397,7 +421,18 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             // 3. Omnichannel Documentation Sync (F-DOC-01): Synchronize dbt model and column descriptions
             if (!dryRun)
             {
-                var existingMeta = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
+                TableMetadata? existingMeta;
+                try
+                {
+                    existingMeta = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
+                }
+                catch (TableMetadataUnavailableException)
+                {
+                    // SEC-94-01: no documentation sync (and never an upsert as a new table) for a table whose metadata is unavailable.
+                    warnings.Add($"Table '{tableId}': skipped documentation sync, its stored metadata is unavailable (invalid key or index definition).");
+                    existingMeta = null;
+                }
+
                 if (existingMeta != null)
                 {
                     var updatedTableObj = new Table
@@ -445,8 +480,15 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                         Identifier = existingMeta.Identifier,
                         Columns = updatedColumns,
                         ColumnMaskingRules = existingMeta.ColumnMaskingRules,
-                        PrimaryKeyColumns = existingMeta.PrimaryKeyColumns
+                        PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
+                        Indexes = existingMeta.Indexes
                     };
+
+                    // Issue #94 (D-8): primary_key / unique constraints and unique tests of the manifest replace the stored definition.
+                    if (model.DeclaredKeys is { } declared)
+                    {
+                        updatedMetadata = ApplyDeclaredKeys(updatedMetadata, declared);
+                    }
 
                     await _metadataRepository.UpsertTableMetadataAsync(updatedMetadata, ct).ConfigureAwait(false);
                     await SeedRebacStructureTuplesAsync(updatedMetadata.Identifier, ct).ConfigureAwait(false);
@@ -637,7 +679,18 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                 var itemDatabase = item.TryGetProperty("database", out var dbProp2) ? dbProp2.GetString() : null;
 
                 var tableId = ParseTableIdentifier(tableNameStr, itemSchema, itemDatabase);
-                var existingMeta = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
+                TableMetadata? existingMeta;
+                try
+                {
+                    existingMeta = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
+                }
+                catch (TableMetadataUnavailableException)
+                {
+                    // SEC-94-01: governance import never touches (or recreates) a table whose metadata is unavailable.
+                    warnings.Add($"Table '{tableId}': skipped governance update, its stored metadata is unavailable (invalid key or index definition).");
+                    continue;
+                }
+
                 if (existingMeta == null)
                 {
                     var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);

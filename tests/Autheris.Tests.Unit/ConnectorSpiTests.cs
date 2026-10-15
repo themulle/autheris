@@ -368,6 +368,10 @@ public class ConnectorSpiTests
             return Task.FromResult<IReadOnlyList<TableMetadata>>(_tables);
         }
 
+        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+            TableIdentifier table, IReadOnlyList<string> primaryKey, IReadOnlyList<TableIndexDefinition> indexes, CancellationToken ct = default) =>
+            Task.FromResult<TableKeyDefinitionChange?>(null);
+
         public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
         {
             _tables.RemoveAll(t => t.Identifier.Equals(metadata.Identifier));

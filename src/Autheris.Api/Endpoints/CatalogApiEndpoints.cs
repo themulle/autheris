@@ -8,6 +8,7 @@ using Autheris.Api.Security;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
@@ -142,19 +143,66 @@ public static class CatalogApiEndpoints
         // Issue #94: PUT /api/v1/catalog/datasets/{id}/keys (and /api/catalog/datasets/{id}/keys)
         group.MapPut("/datasets/{id}/keys", SetDatasetKeysHandler)
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
-        .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+        .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogKeyDefinitionChanged);
 
         app.MapPut("/api/catalog/datasets/{id}/keys", SetDatasetKeysHandler)
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
-        .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+        .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogKeyDefinitionChanged);
 
         return app;
+    }
+
+    private const int MaxDatasetIdLength = 512;
+
+    private static IResult DatasetKeysNotFound() => Results.NotFound(new { error = "Dataset was not found." });
+
+    /// <summary>
+    /// Resolves an active dataset by table id (strict "D" GUID) or by domain.schema.table without loading the whole catalog.
+    /// Unknown, inactive and unavailable datasets are indistinguishable (SEC-94-15).
+    /// </summary>
+    private static async Task<TableIdentifier?> ResolveActiveDatasetAsync(
+        string? id,
+        Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(id) || id.Length > MaxDatasetIdLength)
+        {
+            return null;
+        }
+
+        TableIdentifier identifier;
+        if (Guid.TryParseExact(id, "D", out var tableGuid))
+        {
+            var resolved = await metadataRepository.GetActiveTableIdentifierByIdAsync(tableGuid, ct).ConfigureAwait(false);
+            if (resolved is not { } found)
+            {
+                return null;
+            }
+
+            identifier = found;
+        }
+        else if (!TableIdentifier.TryParse(id.Replace('/', '.'), out identifier))
+        {
+            return null;
+        }
+
+        try
+        {
+            var existing = await metadataRepository.GetTableMetadataAsync(identifier, ct).ConfigureAwait(false);
+            return existing is { Table.IsActive: true } ? existing.Identifier : null;
+        }
+        catch (TableMetadataUnavailableException)
+        {
+            return null;
+        }
     }
 
     internal static async Task<IResult> SetDatasetKeysHandler(
         string id,
         SetDatasetKeysDto? request,
-        Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Audit.IAuditWriter auditWriter,
+        HttpContext httpContext,
         CancellationToken ct)
     {
         if (request == null)
@@ -162,21 +210,10 @@ public static class CatalogApiEndpoints
             return Results.BadRequest(new { error = "Key definition payload is required." });
         }
 
-        TableMetadata? existing = null;
-        if (TableIdentifier.TryParse(id.Replace('/', '.'), out var tableId))
+        var tableId = await ResolveActiveDatasetAsync(id, metadataRepository, ct).ConfigureAwait(false);
+        if (tableId is null)
         {
-            existing = await metadataRepository.GetTableMetadataAsync(tableId, ct);
-        }
-
-        if (existing == null && Guid.TryParse(id, out var tableGuid))
-        {
-            var allTables = await metadataRepository.GetAllTablesAsync(ct);
-            existing = System.Linq.Enumerable.FirstOrDefault(allTables, t => t.Table.Id == tableGuid);
-        }
-
-        if (existing == null)
-        {
-            return Results.NotFound(new { error = $"Dataset '{id}' was not found." });
+            return DatasetKeysNotFound();
         }
 
         var pkColumns = request.PrimaryKey ?? request.PrimaryKeyColumns ?? Array.Empty<string>();
@@ -189,30 +226,45 @@ public static class CatalogApiEndpoints
                     i?.IsUnique ?? false)).ToList()
             : (System.Collections.Generic.IReadOnlyList<TableIndexDefinition>)Array.Empty<TableIndexDefinition>();
 
-        TableMetadata validated;
+        // The caps are enforced by the validator inside the repository before anything is allocated per element.
+        TableKeyDefinitionChange? change;
         try
         {
-            validated = TableKeyDefinitionValidator.Validate(existing with
-            {
-                PrimaryKeyColumns = pkColumns,
-                Indexes = indexes,
-                ReplaceKeyDefinition = true
-            });
+            change = await metadataRepository.ReplaceTableKeyDefinitionAsync(tableId.Value, pkColumns, indexes, ct).ConfigureAwait(false);
         }
         catch (TableDefinitionException)
         {
             return Results.BadRequest(new { error = "Invalid table key or index definition." });
         }
 
-        var updated = await metadataRepository.UpsertTableMetadataAsync(
-            validated with { ReplaceKeyDefinition = true },
-            ct);
+        if (change is null)
+        {
+            return DatasetKeysNotFound();
+        }
+
+        // SEC-94-06: a changed definition is traceable in the HMAC-chained audit log (identifiers only, no data). Post-commit: a client
+        // disconnect must not drop the record; an unavailable audit store surfaces as 503 through the exception handler (fail closed).
+        await auditWriter.RecordRequiredAsync(new AuditLogEntry
+        {
+            TenantId = EndpointSecurity.GetRequestTenant(httpContext),
+            EventType = AuditEventTypes.CatalogKeyDefinitionChanged,
+            ActorSid = httpContext.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+            TargetTable = tableId.Value.ToString(),
+            Decision = "ALLOW",
+            TraceId = httpContext.TraceIdentifier,
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                datasetId = tableId.Value.ToString(),
+                before = new { primaryKey = change.Before.PrimaryKey, indexes = change.Before.Indexes },
+                after = new { primaryKey = change.After.PrimaryKey, indexes = change.After.Indexes }
+            })
+        }, CancellationToken.None).ConfigureAwait(false);
 
         return Results.Ok(new
         {
-            datasetId = updated.Identifier.ToString(),
-            primaryKey = updated.PrimaryKeyColumns,
-            indexes = updated.Indexes
+            datasetId = tableId.Value.ToString(),
+            primaryKey = change.After.PrimaryKey,
+            indexes = change.After.Indexes
         });
     }
 

@@ -68,7 +68,7 @@ public sealed class OpenMetadataClient : IOpenMetadataClient
 
     public async Task<IReadOnlyList<OpenMetadataTable>> GetTablesAsync(string? service = null, CancellationToken ct = default)
     {
-        var relativeUrl = "tables?limit=1000&fields=columns,tags,owners,database,databaseSchema,service";
+        var relativeUrl = "tables?limit=1000&fields=columns,tags,owners,database,databaseSchema,service,tableConstraints";
         var tables = await GetPagedEntitiesAsync<OpenMetadataTable>(relativeUrl, ct);
 
         if (!string.IsNullOrWhiteSpace(service))
@@ -85,7 +85,7 @@ public sealed class OpenMetadataClient : IOpenMetadataClient
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(fqn);
 
-        var relativeUrl = $"tables/name/{Uri.EscapeDataString(fqn)}?fields=columns,tags,owners,database,databaseSchema,service";
+        var relativeUrl = $"tables/name/{Uri.EscapeDataString(fqn)}?fields=columns,tags,owners,database,databaseSchema,service,tableConstraints";
         using var response = await _httpClient.GetAsync(relativeUrl, ct);
 
         if (response.StatusCode == HttpStatusCode.NotFound)

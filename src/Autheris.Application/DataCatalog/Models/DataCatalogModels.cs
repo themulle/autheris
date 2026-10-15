@@ -27,6 +27,13 @@ public sealed record CatalogTableAsset
     public List<string> Tags { get; init; } = [];
     public List<string> Classifications { get; init; } = [];
     public List<CatalogColumnAsset> Columns { get; init; } = [];
+
+    /// <summary>Declared primary key (ordered). When empty, the columns flagged <see cref="CatalogColumnAsset.IsPrimaryKey"/> (in column order) are used.</summary>
+    public List<string> PrimaryKeyColumns { get; init; } = [];
+
+    /// <summary>Declared indexes (unique and non-unique). Replaces the stored definition only together with a declared key or when non-empty.</summary>
+    public List<TableIndexDefinition> Indexes { get; init; } = [];
+
     public Dictionary<string, string> CustomProperties { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 }
 

@@ -401,6 +401,7 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.SqliteGovernanceRepository", "governance store repository"),
         ("Autheris.Infrastructure.Persistence.SqlServerGovernanceRepository", "governance store repository and schema bootstrap"),
         ("Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository", "governance store repository and schema bootstrap"),
+        ("Autheris.Infrastructure.Persistence.CatalogKeyDefinitionStore", "governance store: declared key/index tables of the three engines (issue #94), fixed statements with bound values, no client text"),
         ("Autheris.Infrastructure.Persistence.Migrations.*", "governance schema migrations (WP-ARC-B-12): fixed DDL and version-table statements, no client text"),
         ("Autheris.Infrastructure.Persistence.SqliteGovernanceConnectionProvider", "governance SQLite connection setup (WP-ARC-B-13): fixed PRAGMA statements with a validated journal-mode token, no client text"),
         ("Autheris.Infrastructure.Persistence.SqliteGovernanceLintSource", "read-only governance store reader of the pre-deploy policy lint"),
