@@ -70,6 +70,7 @@ internal sealed class PolicyEpochGuard : IDisposable
     private readonly long _backoff;
     private readonly ConcurrentDictionary<string, KeyState> _tenants = new(StringComparer.Ordinal);
     private readonly KeyState _wildcard = new(KeyPrefix + WildcardTenant);
+    private readonly IAsyncDisposable? _hintSubscription;
 
     public PolicyEpochGuard(
         IDistributedClusterStateProvider? state,
@@ -86,6 +87,16 @@ internal sealed class PolicyEpochGuard : IDisposable
         _logger = logger;
         _checkInterval = ToTicks(checkInterval);
         _backoff = ToTicks(unavailableBackoff);
+
+        try
+        {
+            _hintSubscription = state.SubscribeAsync<string>(HintChannel, OnHintAsync);
+        }
+        catch (Exception ex)
+        {
+            // The hint only shortens propagation latency; the periodic epoch check still converges.
+            _logger?.LogWarning(ex, "Casbin policy epoch hint subscription failed; falling back to periodic epoch checks.");
+        }
     }
 
     public EpochStatus GetStatus(string tenant)
@@ -163,6 +174,8 @@ internal sealed class PolicyEpochGuard : IDisposable
                 return;
             }
 
+            await PublishHintAsync(state.Key).ConfigureAwait(false);
+
             lock (state.Gate)
             {
                 // Only a clean +1 is our own change; anything else means another node also changed policy, which the next
@@ -181,6 +194,47 @@ internal sealed class PolicyEpochGuard : IDisposable
 
     public void Dispose()
     {
+        if (_hintSubscription is not null)
+        {
+            _ = _hintSubscription.DisposeAsync().AsTask().ContinueWith(
+                static _ => { },
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+    }
+
+    // A hint names the epoch key that changed; it makes the next evaluation read the counter instead of waiting for the
+    // interval. Anything that is not a policy epoch key is ignored, and a hint never changes the observed value itself.
+    private ValueTask OnHintAsync(string key)
+    {
+        if (string.IsNullOrEmpty(key) || !key.StartsWith(KeyPrefix, StringComparison.Ordinal))
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        if (key.Length == KeyPrefix.Length + 1 && key[^1] == '*')
+        {
+            Volatile.Write(ref _wildcard.NextCheck, 0);
+        }
+        else if (_tenants.TryGetValue(key[KeyPrefix.Length..], out var state))
+        {
+            Volatile.Write(ref state.NextCheck, 0);
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    private async ValueTask PublishHintAsync(string key)
+    {
+        try
+        {
+            await _state.PublishEventAsync(HintChannel, key).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Casbin policy epoch hint could not be published; peers converge on their next epoch check.");
+        }
     }
 
     private KeyState StateFor(string tenantOrWildcard) =>
@@ -197,10 +251,9 @@ internal sealed class PolicyEpochGuard : IDisposable
             {
                 var tenantValue = await _state.GetAsync<long>(tenantState.Key).ConfigureAwait(false);
                 var wildcardValue = await _state.GetAsync<long>(_wildcard.Key).ConfigureAwait(false);
-                var now = _time.GetTimestamp();
 
-                var tenantChanged = Observe(tenantState, tenantValue, now);
-                var wildcardChanged = Observe(_wildcard, wildcardValue, now);
+                var tenantChanged = Observe(tenantState, tenantValue);
+                var wildcardChanged = Observe(_wildcard, wildcardValue);
                 if (tenantChanged || wildcardChanged)
                 {
                     outcome = new EpochCheckOutcome(EpochCheckKind.Changed, tenantChanged, wildcardChanged);
@@ -213,6 +266,13 @@ internal sealed class PolicyEpochGuard : IDisposable
                 {
                     outcome = EpochCheckOutcome.Unchanged;
                 }
+
+                // The next check is scheduled only after a reload finished: until then the status stays Due, so concurrent
+                // callers wait for the reload instead of serving cached decisions of the old policy.
+                var next = _time.GetTimestamp() + _checkInterval;
+                Volatile.Write(ref tenantState.NextCheck, next);
+                Volatile.Write(ref _wildcard.NextCheck, next);
+                Volatile.Write(ref tenantState.UnavailableUntil, 0);
             }
             catch (ClusterStateUnavailableException ex)
             {
@@ -233,12 +293,10 @@ internal sealed class PolicyEpochGuard : IDisposable
         }
     }
 
-    private bool Observe(KeyState state, long value, long now)
+    private static bool Observe(KeyState state, long value)
     {
         lock (state.Gate)
         {
-            state.NextCheck = now + _checkInterval;
-            state.UnavailableUntil = 0;
             if (!state.Initialised)
             {
                 state.Initialised = true;

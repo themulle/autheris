@@ -23,6 +23,7 @@ public sealed class CasbinPolicyEpochTests : IDisposable
     private static readonly TenantId Tenant = new("t1");
     private static readonly TableIdentifier Table = new("sales", "dbo", "orders");
     private const string EpochKey = "policy:epoch:t1";
+    private const string PolicyEpochGuardChannel = "policy:epoch:changed";
 
     private readonly string _dir = Path.Combine(Path.GetTempPath(), $"casbin_epoch_{Guid.NewGuid():N}");
     private readonly string _policyFile;
@@ -83,6 +84,7 @@ public sealed class CasbinPolicyEpochTests : IDisposable
     [Fact]
     public async Task PolicyChangedOnNodeA_IsVisibleOnNodeB_WithinEpochCheckInterval()
     {
+        _state.SuppressEvents = true; // pure polling path: the hint is lost
         var a = Node();
         var b = Node();
         (await b.EvaluatePolicyAsync(Ctx())).IsAllowed.ShouldBeTrue(); // caches the allow and initialises the epoch observation
@@ -96,6 +98,35 @@ public sealed class CasbinPolicyEpochTests : IDisposable
 
         _time.Advance(TimeSpan.FromSeconds(5));
         (await b.EvaluatePolicyAsync(Ctx())).IsAllowed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task EpochHint_MakesPeerCheckImmediately_WithoutWaitingForInterval()
+    {
+        var a = Node();
+        var b = Node();
+        (await b.EvaluatePolicyAsync(Ctx())).IsAllowed.ShouldBeTrue();
+
+        WritePolicy("deny");
+        await a.ReloadPoliciesAsync(Tenant);
+        await WaitForEpochAsync(1);
+
+        _time.Advance(TimeSpan.FromMilliseconds(10)); // far below EpochCheckSeconds
+        (await b.EvaluatePolicyAsync(Ctx())).IsAllowed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task EpochHint_ForUnrelatedOrMalformedKey_IsIgnored()
+    {
+        var b = Node();
+        await b.EvaluatePolicyAsync(Ctx());
+        var reads = _state.Calls;
+
+        await _state.Inner.PublishEventAsync(PolicyEpochGuardChannel, "not-an-epoch-key");
+        await _state.Inner.PublishEventAsync(PolicyEpochGuardChannel, "policy:epoch:other-tenant");
+        await b.EvaluatePolicyAsync(Ctx());
+
+        _state.Calls.ShouldBe(reads); // no extra cluster read was triggered
     }
 
     [Fact]
@@ -289,8 +320,15 @@ internal sealed class SwitchableStateProvider(InMemoryClusterStateProvider inner
     public ValueTask PublishEventAsync<T>(string channel, T payload, CancellationToken ct = default)
     {
         Guard();
+        if (SuppressEvents)
+        {
+            return ValueTask.CompletedTask;
+        }
+
         return Inner.PublishEventAsync(channel, payload, ct);
     }
+
+    public volatile bool SuppressEvents;
 
     public IAsyncDisposable SubscribeAsync<T>(string channel, Func<T, ValueTask> handler, CancellationToken ct = default) =>
         Inner.SubscribeAsync(channel, handler, ct);
