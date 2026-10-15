@@ -14,7 +14,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Cache;
 using Autheris.Infrastructure.Databricks;
-using Autheris.Infrastructure.Diagnostics;
+using Autheris.Domain.Diagnostics;
 using Autheris.Infrastructure.Garnet;
 using Autheris.Infrastructure.Health;
 using Autheris.Infrastructure.Idempotency;

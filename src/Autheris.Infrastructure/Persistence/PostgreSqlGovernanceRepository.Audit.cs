@@ -78,6 +78,62 @@ public partial class PostgreSqlGovernanceRepository
         }
     }
 
+    public async Task RecordAuditEventsAsync(IReadOnlyList<AuditLogEntry> entries, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        ThrowIfNotReady();
+
+        var violation = Volatile.Read(ref _auditChainViolation);
+        var admittedBatch = new List<AuditLogEntry>(entries.Count);
+        AuditLogEntry? firstTierA = null;
+
+        for (int i = 0; i < entries.Count; i++)
+        {
+            var entry = entries[i];
+            if (entry.Caller == null && _callerContextProvider != null)
+            {
+                entry.Caller = _callerContextProvider.ResolveCallerContext();
+            }
+
+            bool isTierA = AuditChainViolationGate.IsTierA(entry);
+            var admitted = AuditChainViolationGate.Admit(entry, isTierA, violation, ViolationPolicy, _logger);
+            admittedBatch.Add(admitted);
+            if (isTierA && firstTierA == null)
+            {
+                firstTierA = admitted;
+            }
+        }
+
+        await _auditLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await RecordAuditEventsBatchInternalAsync(admittedBatch, ct).ConfigureAwait(false);
+            for (int i = 0; i < entries.Count; i++)
+            {
+                if (!ReferenceEquals(admittedBatch[i], entries[i]))
+                {
+                    entries[i].PrevHash = admittedBatch[i].PrevHash;
+                    entries[i].EntryHash = admittedBatch[i].EntryHash;
+                    entries[i].ChainSequence = admittedBatch[i].ChainSequence;
+                }
+            }
+
+            if (violation != null && firstTierA != null && ViolationPolicy != AuditChainViolationPolicy.AlertOnly)
+            {
+                await EmitChainFaultEventOnceAsync(firstTierA, violation, ct).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _auditLock.Release();
+        }
+    }
+
     private AuditChainViolationPolicy ViolationPolicy => AuditChainViolationGate.ResolvePolicy(_options?.Audit, _isDevOrTest);
 
     private int _auditFaultEventEmitted;
@@ -974,7 +1030,7 @@ public partial class PostgreSqlGovernanceRepository
         string? detailsJson,
         string? tenantId)
     {
-        return Autheris.Domain.Audit.AuditCanonicalizer.ComputeEntryHash(
+        return AuditChainEngine.ComputeEntryHash(
             _auditHmacKey,
             sequence,
             id,

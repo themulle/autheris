@@ -11,11 +11,13 @@ using Autheris.Application.Governance;
 using Autheris.Application.Policy.Lint;
 using Autheris.Application.Security;
 using Autheris.Application.Sql;
+using Autheris.Application.Sql.Dialects;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Databricks;
 using Autheris.Infrastructure.Persistence;
+using Autheris.Infrastructure.Persistence.Dialects;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -25,19 +27,21 @@ public static class GatewayStartupValidator
         GatewayOptions options,
         IHostEnvironment environment,
         Func<string, string?>? getEnvVar = null,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        ISqlDialectRegistry? dialectRegistry = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(environment);
 
+        var registry = dialectRegistry ?? SqlDialectRegistry.Default;
         var getEnvironmentVariable = getEnvVar ?? Environment.GetEnvironmentVariable;
         bool isDevEnvironment = environment.IsDevelopment();
 
         ValidateObjectRecursively(options);
 
-        ValidateOracleRuntime(options, environment, logger);
-        ValidateDatabricks(options, environment);
-        ValidateDefaultSchemas(options);
+        ValidateOracleRuntime(options, environment, logger, registry);
+        ValidateDatabricks(options, environment, registry);
+        ValidateDefaultSchemas(options, registry);
         ValidateTenantCollisions(options, environment, logger);
         ValidateWebhookSubscriptions(options);
 

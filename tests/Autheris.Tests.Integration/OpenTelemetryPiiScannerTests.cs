@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
-using Autheris.Infrastructure.Diagnostics;
+using Autheris.Domain.Diagnostics;
 using Shouldly;
 using Xunit;
 

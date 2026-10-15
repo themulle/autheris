@@ -36,6 +36,15 @@ internal sealed class BoundedResponseBufferStream : Stream
 
     public long BufferedLength => _buffer.Length;
 
+    /// <summary>
+    /// WP-ARC-C-14: Zero-copy view over the underlying buffer via <see cref="MemoryStream.TryGetBuffer"/>.
+    /// Avoids allocating a second <c>byte[]</c> when no egress interceptor mutates the response body.
+    /// </summary>
+    public ReadOnlyMemory<byte> WrittenMemory =>
+        _buffer.TryGetBuffer(out var segment)
+            ? segment.AsMemory(0, (int)_buffer.Length)
+            : _buffer.ToArray();
+
     public byte[] GetBufferedBytes() => _buffer.ToArray();
 
     public override bool CanRead => false;
@@ -92,7 +101,7 @@ internal sealed class BoundedResponseBufferStream : Stream
             EnterPassThrough();
             if (_buffer.Length > 0)
             {
-                await _inner.WriteAsync(_buffer.GetBuffer().AsMemory(0, (int)_buffer.Length), cancellationToken).ConfigureAwait(false);
+                await _inner.WriteAsync(WrittenMemory, cancellationToken).ConfigureAwait(false);
             }
             _buffer.SetLength(0);
         }

@@ -149,6 +149,85 @@ public sealed class GovernedSqlExecutor
             InDbColumnMaskingExecuted: !_options.Value.IsColumnMaskingDisabled);
     }
 
+    public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamRowsAsync(
+        GovernedSqlQueryRequest request,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var channel = System.Threading.Channels.Channel.CreateBounded<IReadOnlyDictionary<string, object?>>(
+            new System.Threading.Channels.BoundedChannelOptions(1)
+            {
+                FullMode = System.Threading.Channels.BoundedChannelFullMode.Wait,
+                SingleReader = true,
+                SingleWriter = true,
+                AllowSynchronousContinuations = false
+            });
+
+        using var producerCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var producerToken = producerCts.Token;
+
+        var executionTask = Task.Run(async () =>
+        {
+            try
+            {
+                await ExecuteCoreAsync(
+                    request,
+                    user,
+                    tenantId,
+                    async (reader, token) =>
+                    {
+                        var columnDescriptions = SqlResultColumns.Describe(reader);
+                        var columns = new string[columnDescriptions.Count];
+                        for (int i = 0; i < columnDescriptions.Count; i++)
+                        {
+                            columns[i] = columnDescriptions[i].Name;
+                        }
+
+                        while (await reader.ReadAsync(token).ConfigureAwait(false))
+                        {
+                            var row = new Dictionary<string, object?>(reader.FieldCount, StringComparer.OrdinalIgnoreCase);
+                            for (int i = 0; i < reader.FieldCount; i++)
+                            {
+                                row[columns[i]] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                            }
+
+                            await channel.Writer.WriteAsync(row, token).ConfigureAwait(false);
+                        }
+                    },
+                    producerToken).ConfigureAwait(false);
+
+                channel.Writer.TryComplete();
+            }
+            catch (Exception ex)
+            {
+                channel.Writer.TryComplete(ex);
+                throw;
+            }
+        }, CancellationToken.None);
+
+        bool completedEnumerating = false;
+        try
+        {
+            await foreach (var row in channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+            {
+                yield return row;
+            }
+            completedEnumerating = true;
+        }
+        finally
+        {
+            if (!completedEnumerating)
+            {
+                await producerCts.CancelAsync().ConfigureAwait(false);
+            }
+        }
+
+        await executionTask.ConfigureAwait(false);
+    }
+
     private async Task<string> ExecuteCoreAsync(
         GovernedSqlQueryRequest request,
         ClaimsPrincipal user,

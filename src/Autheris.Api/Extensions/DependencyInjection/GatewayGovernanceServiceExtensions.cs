@@ -50,6 +50,8 @@ public static class GatewayGovernanceServiceExtensions
         GatewayOptions gatewayOptions)
     {
         services.AddSingleton<Autheris.Application.Audit.IAuditWriter, Autheris.Application.Audit.AuditWriter>();
+        services.AddSingleton<Autheris.Application.Auditing.AuditGroupCommitOptions>();
+        services.AddSingleton<Autheris.Application.Auditing.AuditGroupCommitSink>();
 
         // WP-ARC-A-03: the durable CDC webhook subscription store is a view of the governance repository (only when the feature is on).
         var cdcWebhooksEnabled = CdcWebhooksFeature.IsEnabled(services);
@@ -70,75 +72,24 @@ public static class GatewayGovernanceServiceExtensions
 
         if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.PostgreSql))
         {
-            services.AddSingleton<PostgreSqlGovernanceRepository>();
-            services.AddSingleton<IGovernanceStoreInitializer>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
-            services.AddSingleton<IGovernanceMigrationRunner, PostgreSqlGovernanceMigrationRunner>();
-            services.AddSingleton<IGovernanceRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
-            services.AddSingleton<ITableMetadataRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
-            services.AddSingleton<IConsentRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
-            services.AddSingleton<IAuditLogRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
-            services.AddSingleton<IPolicyEpochRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
-            services.AddSingleton<IConsentApprovalRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
-            services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
-            services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
-            services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
-            services.AddSingleton<IWebhookOutbox>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
-            services.AddSingleton<IVirtualFilterRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
-            services.AddSingleton<IAccessProfileRepository, InMemoryAccessProfileRepository>();
-            services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
-            services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
-            if (cdcWebhooksEnabled)
-            {
-                services.AddSingleton<ICloudEventSubscriptionStore>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
-            }
+            RegisterGovernanceAggregateStores<PostgreSqlGovernanceRepository, PostgreSqlGovernanceMigrationRunner>(
+                services,
+                cdcWebhooksEnabled,
+                useRepositoryAccessProfiles: false);
         }
         else if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.SqlServer))
         {
-            services.AddSingleton<SqlServerGovernanceRepository>();
-            services.AddSingleton<IGovernanceStoreInitializer>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
-            services.AddSingleton<IGovernanceMigrationRunner, SqlServerGovernanceMigrationRunner>();
-            services.AddSingleton<IGovernanceRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
-            services.AddSingleton<ITableMetadataRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
-            services.AddSingleton<IConsentRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
-            services.AddSingleton<IAuditLogRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
-            services.AddSingleton<IPolicyEpochRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
-            services.AddSingleton<IConsentApprovalRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
-            services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
-            services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
-            services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
-            services.AddSingleton<IWebhookOutbox>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
-            services.AddSingleton<IVirtualFilterRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
-            services.AddSingleton<IAccessProfileRepository, InMemoryAccessProfileRepository>();
-            services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
-            services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
-            if (cdcWebhooksEnabled)
-            {
-                services.AddSingleton<ICloudEventSubscriptionStore>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
-            }
+            RegisterGovernanceAggregateStores<SqlServerGovernanceRepository, SqlServerGovernanceMigrationRunner>(
+                services,
+                cdcWebhooksEnabled,
+                useRepositoryAccessProfiles: false);
         }
         else
         {
-            services.AddSingleton<SqliteGovernanceRepository>();
-            services.AddSingleton<IGovernanceStoreInitializer>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-            services.AddSingleton<IGovernanceMigrationRunner, SqliteGovernanceMigrationRunner>();
-            services.AddSingleton<IGovernanceRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-            services.AddSingleton<ITableMetadataRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-            services.AddSingleton<IConsentRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-            services.AddSingleton<IAuditLogRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-            services.AddSingleton<IPolicyEpochRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-            services.AddSingleton<IConsentApprovalRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-            services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-            services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-            services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-            services.AddSingleton<IWebhookOutbox>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-            services.AddSingleton<IVirtualFilterRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-            services.AddSingleton<IAccessProfileRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-            services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-            services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-            if (cdcWebhooksEnabled)
-            {
-                services.AddSingleton<ICloudEventSubscriptionStore>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-            }
+            RegisterGovernanceAggregateStores<SqliteGovernanceRepository, SqliteGovernanceMigrationRunner>(
+                services,
+                cdcWebhooksEnabled,
+                useRepositoryAccessProfiles: true);
         }
 
         // WP-ARC-A-11: durable, fenced CDC watermarks live in the governance database (the extension registers no store).
@@ -236,5 +187,57 @@ public static class GatewayGovernanceServiceExtensions
         services.AddScoped<IDataHubCatalogClient, DataHubCatalogClient>();
 
         return services;
+    }
+
+    private static void RegisterGovernanceAggregateStores<TRepository, TMigrationRunner>(
+        IServiceCollection services,
+        bool cdcWebhooksEnabled,
+        bool useRepositoryAccessProfiles)
+        where TRepository : class,
+            IGovernanceStoreInitializer,
+            IGovernanceRepository,
+            ITableMetadataRepository,
+            IConsentRepository,
+            IAuditLogRepository,
+            IPolicyEpochRepository,
+            IConsentApprovalRepository,
+            IDataOwnershipRepository,
+            ITableRelationRepository,
+            IItsmOutboxRepository,
+            IWebhookOutbox,
+            IVirtualFilterRepository,
+            IAuditChainExportSource,
+            ICdcWatermarkRepository,
+            ICloudEventSubscriptionStore
+        where TMigrationRunner : class, IGovernanceMigrationRunner
+    {
+        services.AddSingleton<TRepository>();
+        services.AddSingleton<IGovernanceStoreInitializer>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<IGovernanceMigrationRunner, TMigrationRunner>();
+        services.AddSingleton<IGovernanceRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<ITableMetadataRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<IConsentRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<IAuditLogRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<IPolicyEpochRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<IConsentApprovalRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<IWebhookOutbox>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<IVirtualFilterRepository>(sp => sp.GetRequiredService<TRepository>());
+        if (useRepositoryAccessProfiles)
+        {
+            services.AddSingleton<IAccessProfileRepository>(sp => (IAccessProfileRepository)sp.GetRequiredService<TRepository>());
+        }
+        else
+        {
+            services.AddSingleton<IAccessProfileRepository, InMemoryAccessProfileRepository>();
+        }
+        services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<TRepository>());
+        if (cdcWebhooksEnabled)
+        {
+            services.AddSingleton<ICloudEventSubscriptionStore>(sp => sp.GetRequiredService<TRepository>());
+        }
     }
 }

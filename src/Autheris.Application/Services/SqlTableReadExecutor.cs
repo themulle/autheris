@@ -138,6 +138,65 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
         return rows;
     }
 
+    public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamAsync(
+        DataSourceExecutionContext context,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var metadata = context.Metadata;
+        var decision = context.AccessDecision;
+
+        if (!decision.IsAllowed)
+        {
+            var reasons = decision.DeniedReasons.Count > 0 ? string.Join("; ", decision.DeniedReasons) : "Table is blocked by access policy.";
+            throw new SecurityException($"Zero-Trust violation: Access to table '{metadata.Identifier}' denied: {reasons}");
+        }
+
+        GovernedQueryStages.EnsureCanonicalClusterAdminClaim(context.Principal, metadata.Identifier);
+
+        var tenant = ResolveTenant(context);
+        var selected = ResolveSelectedColumns(context);
+        RejectSpatialColumns(metadata, decision, selected);
+
+        var limit = Math.Max(1, context.Limit);
+        var intent = new TableReadIntent(
+            metadata.Identifier,
+            selected,
+            BuildFilter(context),
+            context.Items.TryGetValue(TableQueryItems.OrderBy, out var order) && order is IReadOnlyList<TableOrderBy> orderBy ? orderBy : null,
+            limit,
+            Math.Max(0, context.Offset),
+            SqlTransports.Rest);
+
+        var planned = _planner.Plan(intent, metadata, decision);
+        var service = _executionService();
+
+        context.Items[RlsPushdownExecutedKey] = true;
+        if (_options?.Value?.IsColumnMaskingDisabled != true &&
+            planned.ColumnsToSelect.Any(c => decision.GetEffectiveColumnAccess(c, metadata) == ColumnAccessLevel.Mask))
+        {
+            context.Items[InDbColumnMaskingExecutedKey] = true;
+        }
+
+        var request = new GovernedSqlQueryRequest(
+            planned.Sql,
+            planned.Parameters.Count > 0 ? planned.Parameters : null,
+            Transport: intent.Transport,
+            PlannedTableRead: true);
+
+        await foreach (var source in service.StreamRowsAsync(request, context.Principal, tenant, ct).ConfigureAwait(false))
+        {
+            var row = new Dictionary<string, object?>(planned.ColumnsToSelect.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var column in planned.ColumnsToSelect)
+            {
+                source.TryGetValue(column, out var raw);
+                row[column] = NormalizeReadValue(raw, column);
+            }
+
+            yield return row;
+        }
+    }
+
     private async Task<long> CountAsync(
         IGovernedSqlExecutionService service,
         TableReadIntent intent,

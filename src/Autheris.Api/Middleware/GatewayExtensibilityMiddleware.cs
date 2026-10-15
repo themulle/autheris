@@ -1,7 +1,9 @@
 namespace Autheris.Api.Middleware;
 
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
-using System.Text.Json;
+using System.Threading.Tasks;
 using Autheris.Application.Extensibility;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Http;
@@ -149,14 +151,15 @@ public sealed class GatewayExtensibilityMiddleware
             return;
         }
 
-        var responseBytes = boundedStream.GetBufferedBytes();
+        // WP-ARC-C-14: Zero-copy slice of the underlying MemoryStream buffer
+        ReadOnlyMemory<byte> responseMemory = boundedStream.WrittenMemory;
 
         // 3. Egress phase
         var egressContext = new EgressContext
         {
             IngressContext = ingressContext,
             StatusCode = context.Response.StatusCode,
-            ResponseBytes = responseBytes,
+            ResponseBytes = responseMemory,
             Elapsed = sw.Elapsed
         };
 
@@ -167,20 +170,20 @@ public sealed class GatewayExtensibilityMiddleware
             context.Response.Headers[k] = v;
         }
 
-        byte[] finalBytes = responseBytes;
+        ReadOnlyMemory<byte> finalMemory = responseMemory;
         if (egressResult.Handled && egressResult.MutatedResponseBytes.HasValue)
         {
-            finalBytes = egressResult.MutatedResponseBytes.Value.ToArray();
+            finalMemory = egressResult.MutatedResponseBytes.Value;
         }
         else if (egressResult.Handled && egressResult.MutatedResponseText != null)
         {
-            finalBytes = System.Text.Encoding.UTF8.GetBytes(egressResult.MutatedResponseText);
+            finalMemory = System.Text.Encoding.UTF8.GetBytes(egressResult.MutatedResponseText);
         }
 
-        if (finalBytes.Length > 0 && !context.Response.HasStarted)
+        if (finalMemory.Length > 0 && !context.Response.HasStarted)
         {
-            context.Response.ContentLength = finalBytes.Length;
-            await context.Response.Body.WriteAsync(finalBytes, context.RequestAborted);
+            context.Response.ContentLength = finalMemory.Length;
+            await context.Response.Body.WriteAsync(finalMemory, context.RequestAborted);
         }
     }
 }

@@ -74,6 +74,57 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         }
     }
 
+    public async Task RecordAuditEventsAsync(IReadOnlyList<AuditLogEntry> entries, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        ThrowIfNotReady();
+
+        var violation = Volatile.Read(ref _auditChainViolation);
+        var admittedBatch = new List<AuditLogEntry>(entries.Count);
+        AuditLogEntry? firstTierA = null;
+
+        for (int i = 0; i < entries.Count; i++)
+        {
+            var entry = entries[i];
+            if (entry.Caller == null && _callerContextProvider != null)
+            {
+                entry.Caller = _callerContextProvider.ResolveCallerContext();
+            }
+
+            bool isTierA = AuditChainViolationGate.IsTierA(entry);
+            var admitted = AuditChainViolationGate.Admit(entry, isTierA, violation, ViolationPolicy, _logger);
+            admittedBatch.Add(admitted);
+            if (isTierA && firstTierA == null)
+            {
+                firstTierA = admitted;
+            }
+        }
+
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
+        await RecordAuditEventsBatchInternalAsync(conn, admittedBatch, ct).ConfigureAwait(false);
+
+        for (int i = 0; i < entries.Count; i++)
+        {
+            if (!ReferenceEquals(admittedBatch[i], entries[i]))
+            {
+                entries[i].PrevHash = admittedBatch[i].PrevHash;
+                entries[i].EntryHash = admittedBatch[i].EntryHash;
+                entries[i].ChainSequence = admittedBatch[i].ChainSequence;
+            }
+        }
+
+        if (violation != null && firstTierA != null && ViolationPolicy != AuditChainViolationPolicy.AlertOnly)
+        {
+            await EmitChainFaultEventOnceAsync(conn, firstTierA, violation, ct).ConfigureAwait(false);
+        }
+    }
+
     private AuditChainViolationPolicy ViolationPolicy => AuditChainViolationGate.ResolvePolicy(_options?.Audit, _isDevOrTest);
 
     private int _auditFaultEventEmitted;
@@ -938,7 +989,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         string? detailsJson,
         string? tenantId)
     {
-        return Autheris.Domain.Audit.AuditCanonicalizer.ComputeEntryHash(
+        return AuditChainEngine.ComputeEntryHash(
             _auditHmacKey,
             sequence,
             id,

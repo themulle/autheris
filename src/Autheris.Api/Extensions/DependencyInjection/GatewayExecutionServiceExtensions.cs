@@ -29,7 +29,7 @@ using Autheris.Domain.Options;
 using Autheris.Extensions;
 using Autheris.GraphQL.Subscriptions;
 using Autheris.Infrastructure.Connectors;
-using Autheris.Infrastructure.Diagnostics;
+using Autheris.Domain.Diagnostics;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Security;
 using Autheris.Infrastructure.Streaming;
@@ -118,9 +118,8 @@ public static class GatewayExecutionServiceExtensions
         // Connectors to foreign systems (Autheris.Extensions)
         services.AddGatewayExtensions(gatewayOptions);
 
-        // Realtime Event Subscriptions & In-Stream RLS (P5 & F-CDC-03)
-        services.AddSingleton<ICdcEventChannel, InMemoryCdcEventChannel>();
-        services.AddSingleton<CdcSubscriptionGovernor>();
+        // Realtime Event Subscriptions & In-Stream RLS (P5, F-CDC-03, WP-ARC-A-13)
+        services.AddAutherisStreaming();
         services.AddSingleton<ICdcEventIngestionService, CdcEventIngestionService>();
         services.AddScoped<IStreamRlsPolicyEnforcer, StreamRlsPolicyEnforcer>();
         services.AddSingleton<PostgreSqlLogicalReplicationService>();

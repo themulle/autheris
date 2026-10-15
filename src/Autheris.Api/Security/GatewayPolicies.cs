@@ -26,6 +26,15 @@ public static class GatewayPolicies
     /// <summary>SEC2-09: Prometheus scrape endpoint; any authenticated user is not enough.</summary>
     public const string MetricsScrape = "MetricsScrape";
 
+    // WP-ARC-C-06: Declarative endpoint authorization policies
+    public const string AdminOnly = "AdminOnly";
+    public const string OperatorOrAbove = "OperatorOrAbove";
+    public const string AuditorOrAbove = "AuditorOrAbove";
+    public const string DataStewardOrAdmin = "DataStewardOrAdmin";
+    public const string AuthenticatedCaller = "AuthenticatedCaller";
+    public const string MetricsScraper = "MetricsScraper";
+    public const string McpCaller = "McpCaller";
+
     public static readonly string[] GovernanceAdminRoles = ["GovernanceAdmin", "ClusterAdmin"];
     public static readonly string[] ApproverRoles = ["DataSteward", "DataOwner", "GovernanceAdmin", "ClusterAdmin"];
     public static readonly string[] ClusterAdminRoles = ["ClusterAdmin"];
@@ -33,6 +42,12 @@ public static class GatewayPolicies
     public static readonly string[] SchemaAdminRoles = ["GovernanceAdmin", "SchemaAdmin", "GatewayAdmin", "PlatformAdmin", "ClusterAdmin"];
     public static readonly string[] SchemaPublisherRoles = ["GovernanceAdmin", "SchemaAdmin", "GatewayAdmin", "PlatformAdmin", "ClusterAdmin", "Developer", "DataOwner"];
     public static readonly string[] MetricsScrapeRoles = ["MetricsScraper", "ClusterAdmin"];
+
+    public static readonly string[] AdminOnlyRoles = ["GovernanceAdmin", "TenantAdmin", "SecurityAdmin", "GatewayAdmin", "PlatformAdmin", "ClusterAdmin"];
+    public static readonly string[] OperatorOrAboveRoles = ["Operator", "DataSteward", "DataOwner", "SchemaAdmin", "GovernanceAdmin", "TenantAdmin", "SecurityAdmin", "GatewayAdmin", "PlatformAdmin", "ClusterAdmin"];
+    public static readonly string[] AuditorOrAboveRoles = ["SecurityAuditor", "Auditor", "PrivacyAdmin", "DataProtectionOfficer", "GovernanceAdmin", "TenantAdmin", "SecurityAdmin", "ClusterAdmin"];
+    public static readonly string[] DataStewardOrAdminRoles = ["DataSteward", "DataOwner", "GovernanceAdmin", "TenantAdmin", "ClusterAdmin"];
+    public static readonly string[] McpCallerRoles = ["AiAgent", "McpCaller", "Developer", "Consumer", "DataSteward", "DataOwner", "GovernanceAdmin", "TenantAdmin", "ClusterAdmin"];
 
     /// <summary>
     /// K-K10: Checks if principal satisfies any of the strongly-typed GatewayRole requirements,
@@ -58,6 +73,15 @@ public static class GatewayPolicies
     }
 
     /// <summary>
+    /// Fluent extension method registering all named gateway policies and the authenticated-user fallback policy (WP-ARC-C-06).
+    /// </summary>
+    public static AuthorizationOptions AddGatewayAuthorizationPolicies(this AuthorizationOptions options)
+    {
+        Configure(options);
+        return options;
+    }
+
+    /// <summary>
     /// Registers all named gateway policies and the authenticated-user fallback policy.
     /// </summary>
     public static void Configure(AuthorizationOptions options)
@@ -76,6 +100,17 @@ public static class GatewayPolicies
         AddRolePolicy(options, SchemaAdmin, SchemaAdminRoles);
         AddRolePolicy(options, SchemaPublisher, SchemaPublisherRoles);
         AddRolePolicy(options, MetricsScrape, MetricsScrapeRoles);
+
+        // WP-ARC-C-06 policies
+        AddRolePolicy(options, AdminOnly, AdminOnlyRoles);
+        AddRolePolicy(options, OperatorOrAbove, OperatorOrAboveRoles);
+        AddRolePolicy(options, AuditorOrAbove, AuditorOrAboveRoles);
+        AddRolePolicy(options, DataStewardOrAdmin, DataStewardOrAdminRoles);
+        AddRolePolicy(options, MetricsScraper, MetricsScrapeRoles);
+        options.AddPolicy(AuthenticatedCaller, policy => policy.RequireAuthenticatedUser());
+        options.AddPolicy(McpCaller, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireAssertion(ctx => ctx.User.Identity?.IsAuthenticated == true));
     }
 
     /// <summary>Roles that satisfy a named role policy (used for diagnostics only).</summary>
@@ -90,6 +125,12 @@ public static class GatewayPolicies
             SchemaAdmin => SchemaAdminRoles,
             SchemaPublisher => SchemaPublisherRoles,
             MetricsScrape => MetricsScrapeRoles,
+            MetricsScraper => MetricsScrapeRoles,
+            AdminOnly => AdminOnlyRoles,
+            OperatorOrAbove => OperatorOrAboveRoles,
+            AuditorOrAbove => AuditorOrAboveRoles,
+            DataStewardOrAdmin => DataStewardOrAdminRoles,
+            McpCaller => McpCallerRoles,
             _ => []
         };
         return roles.Length > 0;

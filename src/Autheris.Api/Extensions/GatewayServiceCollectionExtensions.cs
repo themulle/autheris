@@ -46,7 +46,7 @@ using Autheris.Application.OData.Services;
 using Autheris.Infrastructure.Itsm;
 using Autheris.Infrastructure.Lineage;
 using Autheris.Infrastructure.Plugins;
-using Autheris.Infrastructure.Diagnostics;
+using Autheris.Domain.Diagnostics;
 using Autheris.Application.Caching.Interfaces;
 using Autheris.Infrastructure.Garnet;
 using Autheris.Infrastructure.Serialization;
@@ -78,117 +78,77 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+using Autheris.Api.Configuration.Validation;
 
 namespace Autheris.Api.Extensions;
 
 public static class GatewayServiceCollectionExtensions
 {
+    public static OptionsBuilder<TOptions> AddGatewaySection<TOptions>(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        string sectionPath)
+        where TOptions : class
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sectionPath);
+
+        return services.AddOptions<TOptions>()
+            .Bind(configuration.GetSection(sectionPath))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+    }
+
+    public static OptionsBuilder<TOptions> AddGatewaySection<TOptions>(
+        this IServiceCollection services,
+        string sectionPath)
+        where TOptions : class
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sectionPath);
+
+        return services.AddOptions<TOptions>()
+            .BindConfiguration(sectionPath)
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+    }
+
+    internal static GatewayOptions BindGatewayOptions(IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        var options = new GatewayOptions();
+        configuration.GetSection(GatewaySections.Root).Bind(options);
+        return options;
+    }
+
     public static GatewayOptions AddGatewayOptions(
         this IServiceCollection services,
         IConfiguration configuration,
         IHostEnvironment environment)
     {
         Autheris.Api.Extensions.DependencyInjection.CdcWebhooksFeature.Capture(services, configuration);
+
+        services.TryAddSingleton<IHostEnvironment>(environment);
+        services.TryAddSingleton<IFileSystemProbe>(PhysicalFileSystemProbe.Instance);
+
+        var gatewayOptions = BindGatewayOptions(configuration);
+
         services.AddOptions<GatewayOptions>()
-            .Bind(configuration.GetSection(GatewayOptions.SectionName))
+            .Configure(opts => configuration.GetSection(GatewaySections.Root).Bind(opts))
             .ValidateDataAnnotations()
-            .Validate(opts =>
-                opts.Audit.Retention.SecurityDays >= 365,
-                "Security violation: Audit:Retention:SecurityDays must be at least 365 days.")
-            .Validate(opts =>
-                opts.Audit.AuditLogRetentionDays >= 365,
-                "Security violation: Audit:AuditLogRetentionDays must be at least 365 days.")
-            .Validate(opts =>
-                Enum.IsDefined(opts.RowFilters.SubqueryStrategy),
-                "Gateway:RowFilters:SubqueryStrategy must be Exists, InCorrelated or In.")
-            .Validate(opts =>
-                !opts.Casbin.Enabled || string.IsNullOrWhiteSpace(opts.Casbin.ModelPath) || System.IO.File.Exists(System.IO.Path.GetFullPath(opts.Casbin.ModelPath)),
-                "Gateway:Casbin is enabled, but the configured ModelPath file was not found.")
-            .Validate(opts =>
-                !opts.Casbin.Enabled || !string.IsNullOrWhiteSpace(opts.Casbin.PolicyPath),
-                "Gateway:Casbin is enabled, but PolicyPath is not configured. Failing closed.")
-            .Validate(opts =>
-                !opts.Casbin.Enabled || string.IsNullOrWhiteSpace(opts.Casbin.PolicyPath) || System.IO.File.Exists(System.IO.Path.GetFullPath(opts.Casbin.PolicyPath)),
-                "Gateway:Casbin is enabled, but the configured PolicyPath file was not found.")
-            .Validate(opts =>
-                opts.HighAvailability.ShutdownTimeoutSeconds >= opts.HighAvailability.QueryTimeoutSeconds + 10,
-                "NF-HA-01 violation: ShutdownTimeoutSeconds must be at least 10s greater than QueryTimeoutSeconds.")
-            .Validate(opts =>
-                opts.HighAvailability.TerminationGracePeriodSeconds >= opts.HighAvailability.DrainDelaySeconds + opts.HighAvailability.ShutdownTimeoutSeconds + 10,
-                "NF-HA-01 violation: TerminationGracePeriodSeconds must be greater than DrainDelay + ShutdownTimeout + 10s.")
-            .Validate(opts =>
-                !(opts.Authentication.RequireKerberosOnly && opts.Authentication.BasicAuth.Enabled),
-                "Security conflict: BasicAuth must not be enabled when RequireKerberosOnly is set to true.")
-            .Validate(opts =>
-                environment.IsDevelopment() || !opts.Authentication.ForwardAuth.Enabled ||
-                (!string.IsNullOrWhiteSpace(opts.Authentication.ForwardAuth.SharedSecret) || !string.IsNullOrWhiteSpace(opts.Authentication.ForwardAuth.SharedSecretKeyVaultRef)),
-                "Security violation: Outside Development, ForwardAuth requires a configured SharedSecret or SharedSecretKeyVaultRef.")
-            .Validate(opts =>
-                environment.IsDevelopment() || !opts.Authentication.ForwardAuth.Enabled || opts.Authentication.ForwardAuth.RequireTrustedProxy,
-                "Security violation: RequireTrustedProxy must not be set to false when ForwardAuth is enabled outside Development.")
-            .Validate(opts =>
-#if AUTHERIS_TEST_AUTH
-                environment.IsDevelopment() || !opts.Authentication.EnableTestAuthHandler,
-                "Security violation: EnableTestAuthHandler may be true ONLY in the Development environment.")
-#else
-                !opts.Authentication.EnableTestAuthHandler,
-                "Security violation: EnableTestAuthHandler may be true ONLY in the Development environment.")
-#endif
-            .Validate(opts =>
-                environment.IsDevelopment() || !opts.IsAnonymousAccessAllowed,
-                "Security violation: danger_allow_anonymous_access may be true ONLY in the Development environment.")
-            .Validate(opts =>
-                environment.IsDevelopment() || !opts.AreUntrustedCertificatesAllowed,
-                "Security violation: danger_allow_untrusted_certificates may be true ONLY in the Development environment.")
-            .Validate(opts =>
-                environment.IsDevelopment() || !opts.GraphQL.TrustedOrigins.Contains("*"),
-                "Security violation: TrustedOrigins '*' (wildcard CORS) is prohibited outside the Development environment for security reasons (CSRF protection).")
-            .Validate(opts =>
-                environment.IsDevelopment() || opts.GraphQL.TrustedOrigins.All(o => o == "*" || (Uri.TryCreate(o, UriKind.Absolute, out var u) && string.Equals(u.Scheme, "https", StringComparison.OrdinalIgnoreCase))),
-                "Security violation: Outside Development, TrustedOrigins must contain only HTTPS URLs.")
-            .Validate(opts =>
-                environment.IsDevelopment() || (
-                    !string.IsNullOrWhiteSpace(opts.DataMasking.HmacSecretKeyVaultRef) &&
-                    opts.DataMasking.HmacSecretKeyVaultRef != "DEV_INSECURE_TEST_KEY_ONLY" &&
-                    opts.DataMasking.HmacSecretKeyVaultRef != "dev-only-hmac-salt-secure-fallback"
-                ) || opts.IsInsecureTransportAllowed || opts.IsColumnMaskingDisabled,
-                "NF-SEC-03 violation: Outside Development, HmacSecretKeyVaultRef must be a valid Key Vault secret reference.")
-            .Validate(opts =>
-                IsSupportedGovernanceDbProvider(opts.GovernanceDb.Provider),
-                "The GovernanceDb provider currently supports only 'Sqlite', 'PostgreSql' or 'SqlServer'.")
-            .Validate(opts =>
-                !(opts.HighAvailability.MultiNodeClusterMode || opts.HighAvailability.Replicas > 1) ||
-                !DataSourceProvider.Is(opts.GovernanceDb.Provider, DatabaseDialect.Sqlite),
-                "Security violation (E-2): Multi-node cluster mode and more than 1 replica are not allowed with SQLite, because SQLite uses local database files per instance. Configure GovernanceDb.Provider = 'PostgreSql' or 'SqlServer' for cluster operation.")
-            .Validate(opts =>
-                !(opts.HighAvailability.MultiNodeClusterMode || opts.HighAvailability.Replicas > 1) || !opts.Caching.Garnet.EnableEmbeddedServer,
-                "NF-HA-02 violation: Multi-node cluster mode or more than one replica requires an external Redis/Garnet; the embedded Garnet server is local to one process and cannot provide cluster-wide state.")
-            .Validate(opts =>
-                environment.IsDevelopment() || !opts.OpenMetadata.Enabled ||
-                (Uri.TryCreate(opts.OpenMetadata.ServerUrl, UriKind.Absolute, out var uri) && string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase)) ||
-                opts.IsInsecureTransportAllowed,
-                "Security violation: Outside Development, OpenMetadata.ServerUrl must use HTTPS.")
-            .Validate(opts =>
-                environment.IsDevelopment() || !(opts.HighAvailability.MultiNodeClusterMode || opts.HighAvailability.Replicas > 1) || opts.Caching.Redis.Enabled,
-                "NF-HA-02 violation: In MultiNodeClusterMode or with more than one replica (PG-6), cluster-wide cache and epoch invalidation requires Caching.Redis.Enabled = true.")
-            .Validate(opts =>
-                environment.IsDevelopment() ||
-                string.IsNullOrWhiteSpace(opts.Plugins.Directory) ||
-                !Directory.Exists(System.IO.Path.GetFullPath(opts.Plugins.Directory)) ||
-                opts.Plugins.RequireIntegrityManifest,
-                "Security violation: Outside Development, a configured plugin directory requires Plugins.RequireIntegrityManifest = true.")
-            .Validate(opts =>
-                environment.IsDevelopment() || opts.Rebac.SeedTuples.Count == 0 ||
-                !opts.Rebac.SeedTuples.Any(t => t.User.Contains("david", StringComparison.OrdinalIgnoreCase) || t.Object.Contains("prod", StringComparison.OrdinalIgnoreCase)),
-                "Security critical: Demo or production-targeted ReBAC seed tuples are not permitted outside Development.")
             .ValidateOnStart();
 
-        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<GatewayOptions>>(sp =>
+        services.AddSingleton<IValidateOptions<GatewayOptions>, GatewayCoreOptionsValidator>();
+        services.AddSingleton<IValidateOptions<GatewayOptions>, GatewaySecurityOptionsValidator>();
+        services.AddSingleton<IValidateOptions<GatewayOptions>, GatewayStorageOptionsValidator>();
+        services.AddSingleton<IValidateOptions<GatewayOptions>, GatewayResilienceOptionsValidator>();
+        services.AddSingleton<IValidateOptions<GatewayOptions>>(sp =>
             new Autheris.Api.Extensions.DependencyInjection.GatewayEmptyListConfigurationValidator(
                 configuration,
                 sp.GetService<Microsoft.Extensions.Logging.ILogger<Autheris.Api.Extensions.DependencyInjection.GatewayEmptyListConfigurationValidator>>()));
 
-        var gatewayOptions = configuration.GetSection(GatewayOptions.SectionName).Get<GatewayOptions>() ?? new GatewayOptions();
         Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator.ValidateSqlRewriterEngine(configuration);
         Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator.ValidateRemovedWebSqlSettings(configuration);
         ValidateGatewayOptions(gatewayOptions, environment);

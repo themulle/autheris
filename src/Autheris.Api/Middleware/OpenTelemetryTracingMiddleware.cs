@@ -4,7 +4,7 @@ using System;
 using System.Diagnostics;
 using System.Threading.Tasks;
 using Autheris.Domain.Common;
-using Autheris.Infrastructure.Diagnostics;
+using Autheris.Domain.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using OpenTelemetry.Trace;
 

@@ -16,7 +16,7 @@ using Autheris.Application.SchemaRegistry.Validation;
 using Autheris.Application.Services;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Infrastructure.Diagnostics;
+using Autheris.Domain.Diagnostics;
 using Autheris.Infrastructure.Persistence;
 using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;

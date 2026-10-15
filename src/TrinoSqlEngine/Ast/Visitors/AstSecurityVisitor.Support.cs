@@ -168,6 +168,9 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             case OrderByClause ob:
                 foreach (var el in ob.Elements) stack.Push(el.Expression);
                 break;
+            default:
+                foreach (var child in node.EnumerateChildren()) stack.Push(child);
+                break;
         }
     }
 
@@ -235,8 +238,8 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     public const string FullyRedactedStatement = "@p_redacted_statement";
 
     /// <summary>
-    /// AU-06: DSGVO Art. 17 AST-Literal-Anonymisierung für SQL-Audit-Details (@p_redacted).
-    /// Ersetzt alle String- und numerischen Literale durch @p_redacted. The result carries no literal value, so a hash over it (M-A3: the
+    /// AU-06: GDPR Art. 17 AST literal anonymization for SQL audit details (@p_redacted).
+    /// Replaces all string and numeric literals with @p_redacted. The result carries no literal value, so a hash over it (M-A3: the
     /// keyed <c>originalSqlHash</c> that the gateway builds) can never leak or confirm a value; there is deliberately no hash over the raw text.
     /// </summary>
     public static string RedactSqlLiterals(string? sql)

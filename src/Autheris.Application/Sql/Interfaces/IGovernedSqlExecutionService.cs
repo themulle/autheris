@@ -63,6 +63,24 @@ public interface IGovernedSqlExecutionService
         TenantId tenantId,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// WP-ARC-C-13: Streams governed query rows asynchronously via <c>yield return</c> without buffering the entire result set in memory.
+    /// Governance evaluation, AST compilation, and audit recording complete before rows are yielded.
+    /// </summary>
+    async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamRowsAsync(
+        GovernedSqlQueryRequest request,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var buffered = await ExecuteQueryBufferedAsync(request, user, tenantId, ct).ConfigureAwait(false);
+        foreach (var row in buffered.Rows)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return row;
+        }
+    }
+
     /// <summary>G-6: validates a statement through the governed pipeline without executing it and without returning SQL text.</summary>
     Task ValidateAsync(
         string rawSql,

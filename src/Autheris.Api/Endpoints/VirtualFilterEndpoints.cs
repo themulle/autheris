@@ -2,11 +2,9 @@ namespace Autheris.Api.Endpoints;
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Application.Interfaces;
@@ -21,6 +19,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 /// <summary>
@@ -28,7 +27,7 @@ using Microsoft.Extensions.Options;
 /// FilterAdmin maintains filters and access profiles, FilterSync applies the state of the file repository (Talos),
 /// GovernanceAdmin and SecurityAuditor read. Callers stay within their tenant; only ClusterAdmin acts across tenants.
 /// </summary>
-public static class VirtualFilterEndpoints
+public static partial class VirtualFilterEndpoints
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
@@ -83,139 +82,6 @@ public static class VirtualFilterEndpoints
         return app;
     }
 
-    // ------------------------------------------------------------------ handlers
-
-    internal static async Task<IResult> ListAsync(HttpContext context, VirtualFilterAdministrationService service)
-    {
-        var security = EndpointSecurity.GetSecurityContext(context);
-        if (!CanRead(security))
-        {
-            return Forbidden();
-        }
-
-        var snapshot = await service.GetSnapshotAsync(context.RequestAborted).ConfigureAwait(false);
-        bool all = security.IsClusterAdmin;
-        return Results.Ok(new
-        {
-            generation = snapshot.Generation,
-            filters = snapshot.Filters.Where(f => all || f.TenantId == security.TenantId).Select(FilterView),
-            profiles = snapshot.Profiles.Where(p => all || p.TenantId == security.TenantId).Select(ProfileView)
-        });
-    }
-
-    internal static Task<IResult> PutFilterAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
-        ExecuteAsync(context, GatewayRole.FilterAdmin, async (security, actor) =>
-        {
-            var body = await ReadAsync<FilterBody>(context).ConfigureAwait(false);
-            var tenant = ResolveTenant(security, body.Tenant);
-            if (tenant == null)
-            {
-                return Forbidden();
-            }
-
-            var saved = await service.SaveFilterAsync(body.ToModel(name, tenant.Value), actor, context.RequestAborted).ConfigureAwait(false);
-            return Results.Ok(FilterView(saved));
-        });
-
-    internal static Task<IResult> ApproveFilterAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
-        ExecuteAsync(context, GatewayRole.GovernanceAdmin, async (security, actor) =>
-        {
-            var tenant = ResolveTenant(security, context.Request.Query["tenant"]);
-            if (tenant == null)
-            {
-                return Forbidden();
-            }
-
-            var expectedHash = context.Request.Query["hash"].FirstOrDefault() ?? context.Request.Query["expected_hash"].FirstOrDefault();
-            var approved = await service.ApproveFilterAsync(tenant.Value, name, actor, expectedHash, context.RequestAborted).ConfigureAwait(false);
-            return Results.Ok(FilterView(approved));
-        });
-
-    internal static Task<IResult> DeleteFilterAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
-        ExecuteAsync(context, GatewayRole.FilterAdmin, async (security, actor) =>
-        {
-            await service.DeleteFilterAsync(security.TenantId, name, actor, context.RequestAborted).ConfigureAwait(false);
-            return Results.NoContent();
-        });
-
-    internal static Task<IResult> PutProfileAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
-        ExecuteAsync(context, GatewayRole.FilterAdmin, async (security, actor) =>
-        {
-            var body = await ReadAsync<ProfileBody>(context).ConfigureAwait(false);
-            var tenant = ResolveTenant(security, body.Tenant);
-            if (tenant == null)
-            {
-                return Forbidden();
-            }
-
-            var model = body.ToModel(name, tenant.Value);
-            var saved = await service.SaveProfileAsync(model, actor, body.ExplicitKeyBudgets(model), context.RequestAborted).ConfigureAwait(false);
-            return Results.Ok(ProfileView(saved));
-        });
-
-    internal static Task<IResult> ApproveProfileAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
-        ExecuteAsync(context, GatewayRole.GovernanceAdmin, async (security, actor) =>
-        {
-            var tenant = ResolveTenant(security, context.Request.Query["tenant"]);
-            if (tenant == null)
-            {
-                return Forbidden();
-            }
-
-            var expectedHash = context.Request.Query["hash"].FirstOrDefault() ?? context.Request.Query["expected_hash"].FirstOrDefault();
-            var approved = await service.ApproveProfileAsync(tenant.Value, name, actor, expectedHash, context.RequestAborted).ConfigureAwait(false);
-            return Results.Ok(ProfileView(approved));
-        });
-
-    internal static Task<IResult> DeleteProfileAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
-        ExecuteAsync(context, GatewayRole.FilterAdmin, async (security, actor) =>
-        {
-            await service.DeleteProfileAsync(security.TenantId, name, actor, context.RequestAborted).ConfigureAwait(false);
-            return Results.NoContent();
-        });
-
-    internal static async Task<IResult> PlanSyncAsync(HttpContext context, VirtualFilterAdministrationService service)
-    {
-        var security = EndpointSecurity.GetSecurityContext(context);
-        if (!security.HasRole(GatewayRole.FilterSync) && !security.HasRole(GatewayRole.FilterAdmin))
-        {
-            return Forbidden();
-        }
-
-        return await MapErrorsAsync(async () =>
-        {
-            var request = await ReadSyncRequestAsync(context, security).ConfigureAwait(false);
-            return request == null ? Forbidden() : Results.Ok(await service.PlanSyncAsync(request, context.RequestAborted).ConfigureAwait(false));
-        }, context).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Applies the file repository state. FilterSync applies; a sync that removes many bindings (see
-    /// <c>VirtualFilters:MaxRemovals</c>) only goes through with <c>?force=true</c>, which needs FilterAdmin.
-    /// </summary>
-    internal static async Task<IResult> ApplySyncAsync(HttpContext context, VirtualFilterAdministrationService service)
-    {
-        var security = EndpointSecurity.GetSecurityContext(context);
-        bool force = string.Equals(context.Request.Query["force"], "true", StringComparison.OrdinalIgnoreCase);
-        // SR15-07: Sync requires FilterSync role; force=true requires BOTH FilterSync AND FilterAdmin roles
-        if (!security.HasRole(GatewayRole.FilterSync) || (force && !security.HasRole(GatewayRole.FilterAdmin)))
-        {
-            return Forbidden();
-        }
-
-        return await MapErrorsAsync(async () =>
-        {
-            var request = await ReadSyncRequestAsync(context, security).ConfigureAwait(false);
-            if (request == null)
-            {
-                return Forbidden();
-            }
-
-            var actor = new VirtualFilterActor(security.UserSid, IsSync: true, context.User?.GetUserIdentifiers());
-            return Results.Ok(await service.ApplySyncAsync(request, actor, force, context.RequestAborted).ConfigureAwait(false));
-        }).ConfigureAwait(false);
-    }
-
     /// <summary>
     /// Phase 6: for <c>user</c> (SID, optional <c>groups</c> and <c>roles</c> as comma separated lists) and <c>table</c>
     /// (domain.schema.table) which bindings apply, which columns are missing, what supersedes what, the decision and the
@@ -250,7 +116,7 @@ public static class VirtualFilterEndpoints
                 }).ToList();
                 return Results.Ok(new { user = inspection.User, page = inspection.PageNo, page_size = inspection.PageSize, total = inspection.Total, objects });
             default:
-                throw new System.Diagnostics.UnreachableException();
+                throw new UnreachableException();
         }
     }
 
@@ -282,166 +148,6 @@ public static class VirtualFilterEndpoints
         })
     };
 
-    // ------------------------------------------------------------------ helpers
-
-    internal static async Task<IResult> ConfigSyncStatusAsync(
-        HttpContext context,
-        VirtualFilterAdministrationService service,
-        IOptions<GatewayOptions>? options = null)
-    {
-        var security = EndpointSecurity.GetSecurityContext(context);
-        if (!CanRead(security))
-        {
-            return Forbidden();
-        }
-
-        var snapshot = await service.GetSnapshotAsync(context.RequestAborted).ConfigureAwait(false);
-        var opt = options?.Value?.VirtualFilters ?? new VirtualFilterOptions();
-
-        var filters = snapshot.Filters.Where(f => security.IsClusterAdmin || f.TenantId == security.TenantId).ToList();
-        var profiles = snapshot.Profiles.Where(p => security.IsClusterAdmin || p.TenantId == security.TenantId).ToList();
-
-        var managedFilters = filters.Where(f => f.ManagedBy != null).ToList();
-        var managedProfiles = profiles.Where(p => p.ManagedBy != null).ToList();
-
-        var latestCommit = managedFilters.Select(f => f.ManagedBy!.Commit)
-            .Concat(managedProfiles.Select(p => p.ManagedBy!.Commit))
-            .LastOrDefault() ?? "none";
-
-        var latestSyncAt = managedFilters.Select(f => (DateTimeOffset?)f.UpdatedAt)
-            .Concat(managedProfiles.Select(p => (DateTimeOffset?)p.UpdatedAt))
-            .DefaultIfEmpty(null)
-            .Max();
-
-        string syncStatus;
-        if (filters.Any(f => f.Status == FilterApprovalStatus.PendingApproval) ||
-            profiles.Any(p => p.Status == FilterApprovalStatus.PendingApproval))
-        {
-            syncStatus = "PendingApproval";
-        }
-        else if (managedFilters.Any(f => f.Status != FilterApprovalStatus.Active) ||
-                 managedProfiles.Any(p => p.Status != FilterApprovalStatus.Active))
-        {
-            syncStatus = "DriftDetected";
-        }
-        else
-        {
-            syncStatus = "InSync";
-        }
-
-        return Results.Ok(new
-        {
-            generation = snapshot.Generation,
-            status = syncStatus,
-            lastSyncAt = latestSyncAt,
-            lastCommit = latestCommit,
-            lastWebhookTriggerAt = service.LastWebhookTriggerAt,
-            lastWebhookDeliveryId = service.LastWebhookDeliveryId,
-            filterCount = filters.Count,
-            profileCount = profiles.Count,
-            managedFilterCount = managedFilters.Count,
-            managedProfileCount = managedProfiles.Count,
-            maxRemovals = opt.MaxRemovals,
-            requireApproval = opt.RequireApproval
-        });
-    }
-
-    public static async Task<IResult> HandleConfigSyncWebhookAsync(
-        HttpContext context,
-        VirtualFilterAdministrationService service,
-        IOptions<GatewayOptions>? options = null)
-    {
-        var (payload, tooLarge) = await EndpointSecurity.TryReadBodyAsync(
-            context.Request,
-            2 * 1024 * 1024,
-            "Payload size exceeds maximum allowed size (2 MB).",
-            context.RequestAborted).ConfigureAwait(false);
-
-        if (payload == null)
-        {
-            return tooLarge!;
-        }
-
-        var deliveryId = context.Request.Headers["X-GitHub-Delivery"].FirstOrDefault();
-        if (string.IsNullOrWhiteSpace(deliveryId))
-        {
-            return Results.BadRequest(new { error = "Header X-GitHub-Delivery is required." });
-        }
-
-        var opt = options?.Value?.VirtualFilters ?? new VirtualFilterOptions();
-        var secret = !string.IsNullOrWhiteSpace(opt.WebhookSecret)
-            ? opt.WebhookSecret
-            : Environment.GetEnvironmentVariable("AUTHERIS_CONFIG_SYNC_WEBHOOK_SECRET");
-
-        var signatureHeader = context.Request.Headers["X-Hub-Signature-256"].FirstOrDefault() ??
-                              context.Request.Headers["X-Signature-256"].FirstOrDefault();
-
-        // Timing-safe HMAC verification. Notice: Insecure.danger_bypass_webhook_signature does NOT apply here.
-        if (string.IsNullOrWhiteSpace(secret) || !ValidateHubSignature(payload, signatureHeader, secret))
-        {
-            return Results.Unauthorized();
-        }
-
-        // Validate Git Ref if configured
-        if (!string.IsNullOrWhiteSpace(opt.GitRef))
-        {
-            try
-            {
-                using var doc = JsonDocument.Parse(payload);
-                if (doc.RootElement.TryGetProperty("ref", out var refProp))
-                {
-                    var pushRef = refProp.GetString();
-                    if (!string.Equals(pushRef, opt.GitRef, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return Results.Ok(new { status = "Ignored", reason = $"Push ref '{pushRef}' does not match configured ref '{opt.GitRef}'." });
-                    }
-                }
-            }
-            catch (JsonException)
-            {
-                // Invalid JSON body -> ignore ref matching
-            }
-        }
-
-        var recorded = service.RecordWebhookTrigger(deliveryId, DateTimeOffset.UtcNow);
-
-        return Results.Json(new
-        {
-            status = "Accepted",
-            delivery = deliveryId,
-            message = recorded ? "Sync triggered" : "Delivery already processed"
-        }, statusCode: StatusCodes.Status202Accepted);
-    }
-
-    private static bool ValidateHubSignature(string payload, string? signatureHeader, string secret)
-    {
-        if (string.IsNullOrWhiteSpace(signatureHeader) || string.IsNullOrWhiteSpace(secret))
-        {
-            return false;
-        }
-
-        var clean = signatureHeader.Trim();
-        if (clean.StartsWith("sha256=", StringComparison.OrdinalIgnoreCase))
-        {
-            clean = clean["sha256=".Length..];
-        }
-
-        byte[] expectedBytes;
-        try
-        {
-            expectedBytes = Convert.FromHexString(clean);
-        }
-        catch
-        {
-            return false;
-        }
-
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
-        var computed = hmac.ComputeHash(Encoding.UTF8.GetBytes(payload));
-
-        return CryptographicOperations.FixedTimeEquals(computed, expectedBytes);
-    }
-
     private static bool CanRead(SecurityPrincipalContext security) =>
         security.HasRole(GatewayRole.FilterAdmin) || security.HasRole(GatewayRole.FilterSync) ||
         security.HasRole(GatewayRole.GovernanceAdmin) || security.HasRole(GatewayRole.SecurityAuditor);
@@ -462,7 +168,7 @@ public static class VirtualFilterEndpoints
                 ActorSid = security.UserSid,
                 TenantId = security.TenantId,
                 Decision = "DENY",
-                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { error = "Forbidden: missing required role", requiredRole = requiredRole.ToString() }),
+                DetailsJson = JsonSerializer.Serialize(new { error = "Forbidden: missing required role", requiredRole = requiredRole.ToString() }),
                 OccurredAt = DateTimeOffset.UtcNow
             }, context.RequestAborted).ConfigureAwait(false);
             return Forbidden();
@@ -488,7 +194,7 @@ public static class VirtualFilterEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            bool isDev = context?.RequestServices.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsDevelopment() ?? false;
+            bool isDev = context?.RequestServices.GetService<IHostEnvironment>()?.IsDevelopment() ?? false;
             var message = isDev ? ex.Message : "The requested virtual filter operation is invalid.";
             return Results.Json(new { error = message }, statusCode: StatusCodes.Status400BadRequest);
         }
@@ -519,317 +225,5 @@ public static class VirtualFilterEndpoints
                ?? throw new ArgumentException("The request body is empty.");
     }
 
-    private static async Task<VirtualFilterSyncRequest?> ReadSyncRequestAsync(HttpContext context, SecurityPrincipalContext security)
-    {
-        var body = await ReadAsync<SyncBody>(context).ConfigureAwait(false);
-        var tenant = ResolveTenant(security, body.Tenant);
-        if (tenant == null)
-        {
-            return null;
-        }
-
-        if (string.IsNullOrWhiteSpace(body.Path) || string.IsNullOrWhiteSpace(body.Commit))
-        {
-            throw new ArgumentException("A sync needs the path and commit of the file repository.");
-        }
-
-        var profiles = (body.Profiles ?? []).Select(p => p.Value.ToModel(p.Key, tenant.Value)).ToList();
-        return new VirtualFilterSyncRequest(
-            tenant.Value,
-            new ManagedBy(body.Path, body.Commit),
-            (body.Filters ?? []).Select(p => p.Value.ToModel(p.Key, tenant.Value)).ToList(),
-            profiles)
-        {
-            ExplicitKeyBudgets = ExplicitKeyBudgets((body.Profiles ?? []).Select(p => p.Value), profiles)
-        };
-    }
-
-    private static HashSet<FilterBinding> ExplicitKeyBudgets(IEnumerable<ProfileBody> bodies, IEnumerable<VirtualFilterAccessProfile> models)
-    {
-        var set = new HashSet<FilterBinding>(ReferenceEqualityComparer.Instance);
-        foreach (var (body, model) in bodies.Zip(models))
-        {
-            set.UnionWith(body.ExplicitKeyBudgets(model));
-        }
-
-        return set;
-    }
-
     private static IResult Forbidden() => Results.StatusCode(StatusCodes.Status403Forbidden);
-
-    private static object FilterView(VirtualFilter f) => new
-    {
-        id = f.Id,
-        tenant = f.TenantId.Value,
-        name = f.Name,
-        source = f.Source,
-        sql = f.Sql,
-        target_columns = f.TargetKeyColumns,
-        key_columns = f.KeyColumns,
-        from = f.Structured == null ? null : new { table = $"{f.Structured.From.Schema}.{f.Structured.From.TableName}", alias = f.Structured.FromAlias },
-        joins = f.Structured?.Joins.Select(j => new { table = $"{j.Table.Schema}.{j.Table.TableName}", alias = j.Alias, left = j.LeftColumn, right = j.RightColumn }),
-        where = f.Structured?.Where.Select(w => new { column = w.Column, op = ConditionOperatorName(w.Operator), value = w.Value }),
-        valid_from = f.ValidFromColumn,
-        valid_to = f.ValidToColumn,
-        supersedes = f.Supersedes,
-        managed_by = f.ManagedBy,
-        definition_hash = f.ComputeDefinitionHash(),
-        status = f.Status.ToString(),
-        pending_deletion = f.PendingDeletion,
-        has_draft = f.Draft != null,
-        draft_hash = f.Draft?.ComputeDefinitionHash(),
-        created_by = f.CreatedBy?.Value,
-        approved_by = f.ApprovedBy?.Value,
-        approved_at = f.ApprovedAt,
-        updated_by = f.UpdatedBy,
-        updated_at = f.UpdatedAt
-    };
-
-    private static object ProfileView(VirtualFilterAccessProfile p) => new
-    {
-        id = p.Id,
-        tenant = p.TenantId.Value,
-        name = p.Name,
-        grantee = new { type = p.GranteeType.ToString().ToLowerInvariant(), sid = p.GranteeSid?.Value, role = p.RoleName },
-        scope = p.Scope,
-        uncovered = p.Uncovered is { } uncovered ? VirtualFilterBindingValidator.FormatEnum(uncovered) : null,
-        bindings = p.Bindings.Select(b => new
-        {
-            filter = b.FilterName,
-            target = b.TargetPattern,
-            object_kinds = b.ObjectKinds.ToString(),
-            time_column = b.TimeColumn,
-            map = b.ColumnMap,
-            strategy = VirtualFilterBindingValidator.FormatEnum(b.Strategy),
-            pushdown_format = b.PushdownFormat is { } format ? VirtualFilterBindingValidator.FormatEnum(format) : null,
-            max_pushdown_keys = b.MaxPushdownKeys
-        }),
-        managed_by = p.ManagedBy,
-        definition_hash = p.ComputeDefinitionHash(),
-        status = p.Status.ToString(),
-        pending_deletion = p.PendingDeletion,
-        has_draft = p.Draft != null,
-        draft_hash = p.Draft?.ComputeDefinitionHash(),
-        created_by = p.CreatedBy?.Value,
-        approved_by = p.ApprovedBy?.Value,
-        approved_at = p.ApprovedAt,
-        updated_by = p.UpdatedBy,
-        updated_at = p.UpdatedAt
-    };
-
-    private static string ConditionOperatorName(FilterConditionOperator op) => op switch
-    {
-        FilterConditionOperator.Eq => "eq",
-        FilterConditionOperator.NotEq => "neq",
-        FilterConditionOperator.IsNull => "is_null",
-        _ => "is_not_null"
-    };
-
-    // ------------------------------------------------------------------ request bodies (shape of the Talos files)
-
-    internal sealed class TableRef
-    {
-        [JsonPropertyName("table")] public string Table { get; set; } = string.Empty;
-        [JsonPropertyName("alias")] public string Alias { get; set; } = string.Empty;
-    }
-
-    internal sealed class JoinBody
-    {
-        [JsonPropertyName("table")] public string Table { get; set; } = string.Empty;
-        [JsonPropertyName("alias")] public string Alias { get; set; } = string.Empty;
-        [JsonPropertyName("left")] public string Left { get; set; } = string.Empty;
-        [JsonPropertyName("right")] public string Right { get; set; } = string.Empty;
-    }
-
-    internal sealed class ConditionBody
-    {
-        [JsonPropertyName("column")] public string Column { get; set; } = string.Empty;
-        [JsonPropertyName("op")] public string Op { get; set; } = string.Empty;
-        [JsonPropertyName("value")] public string? Value { get; set; }
-    }
-
-    internal sealed class FilterBody
-    {
-        [JsonPropertyName("tenant")] public string? Tenant { get; set; }
-        [JsonPropertyName("source")] public string Source { get; set; } = string.Empty;
-        [JsonPropertyName("key_columns")] public List<string>? KeyColumns { get; set; }
-        [JsonPropertyName("from")] public TableRef? From { get; set; }
-        [JsonPropertyName("joins")] public List<JoinBody>? Joins { get; set; }
-        [JsonPropertyName("where")] public List<ConditionBody>? Where { get; set; }
-        [JsonPropertyName("valid_from")] public string? ValidFrom { get; set; }
-        [JsonPropertyName("valid_to")] public string? ValidTo { get; set; }
-        [JsonPropertyName("supersedes")] public List<string>? Supersedes { get; set; }
-        [JsonPropertyName("sql")] public string? Sql { get; set; }
-
-        public VirtualFilter ToModel(string name, TenantId tenant)
-        {
-            if (Sql != null)
-            {
-                return new VirtualFilter
-                {
-                    TenantId = tenant,
-                    Name = name,
-                    Source = Source,
-                    Sql = Sql,
-                    KeyColumns = KeyColumns ?? [],
-                    ValidFromColumn = ValidFrom,
-                    ValidToColumn = ValidTo,
-                    Structured = From == null ? null : new StructuredFilterDefinition(),
-                    Supersedes = Supersedes ?? []
-                };
-            }
-
-            if (From == null)
-            {
-                throw new ArgumentException("A virtual filter needs 'from' or 'sql'.");
-            }
-
-            return new VirtualFilter
-            {
-                TenantId = tenant,
-                Name = name,
-                Source = Source,
-                KeyColumns = KeyColumns ?? [],
-                Structured = new StructuredFilterDefinition
-                {
-                    From = Table(Source, From.Table),
-                    FromAlias = From.Alias,
-                    Joins = (Joins ?? []).Select(j => new FilterJoin(Table(Source, j.Table), j.Alias, j.Left, j.Right)).ToList(),
-                    Where = (Where ?? []).Select(w => new FilterCondition(w.Column, ParseOperator(w.Op), w.Value)).ToList()
-                },
-                ValidFromColumn = ValidFrom,
-                ValidToColumn = ValidTo,
-                Supersedes = Supersedes ?? []
-            };
-        }
-
-        private static TableIdentifier Table(string source, string schemaAndTable)
-        {
-            var parts = schemaAndTable.Split('.');
-            if (parts.Length != 2)
-            {
-                throw new ArgumentException($"'{schemaAndTable}' must be schema.table (the data source comes from 'source').");
-            }
-
-            return new TableIdentifier(source, parts[0], parts[1]);
-        }
-
-        private static FilterConditionOperator ParseOperator(string op) => op.ToLowerInvariant() switch
-        {
-            "eq" => FilterConditionOperator.Eq,
-            "neq" => FilterConditionOperator.NotEq,
-            "is_null" => FilterConditionOperator.IsNull,
-            "is_not_null" => FilterConditionOperator.IsNotNull,
-            _ => throw new ArgumentException($"Unknown condition operator '{op}' (eq, neq, is_null, is_not_null).")
-        };
-    }
-
-    internal sealed class GranteeBody
-    {
-        [JsonPropertyName("type")] public string Type { get; set; } = "user";
-        [JsonPropertyName("sid")] public string? Sid { get; set; }
-        [JsonPropertyName("role")] public string? Role { get; set; }
-    }
-
-    internal sealed class BindingBody
-    {
-        [JsonPropertyName("filter")] public string Filter { get; set; } = string.Empty;
-        [JsonPropertyName("target")] public string? Target { get; set; }
-        [JsonPropertyName("object_kinds")] public List<string>? ObjectKinds { get; set; }
-        [JsonPropertyName("time_column")] public string? TimeColumn { get; set; }
-        [JsonPropertyName("map")] public Dictionary<string, string>? Map { get; set; }
-        [JsonPropertyName("strategy")] public string? Strategy { get; set; }
-        [JsonPropertyName("pushdown_format")] public string? PushdownFormat { get; set; }
-        [JsonPropertyName("max_pushdown_keys")] public int? MaxPushdownKeys { get; set; }
-
-        public FilterBinding ToModel()
-        {
-            var kinds = FilterObjectKinds.None;
-            foreach (var kind in ObjectKinds ?? ["relation", "procedure_result"])
-            {
-                kinds |= kind.ToLowerInvariant() switch
-                {
-                    "relation" => FilterObjectKinds.Relation,
-                    "procedure_result" => FilterObjectKinds.ProcedureResult,
-                    _ => throw new ArgumentException($"Unknown object kind '{kind}' (relation, procedure_result).")
-                };
-            }
-
-            var binding = new FilterBinding
-            {
-                FilterName = Filter,
-                TargetPattern = Target,
-                ObjectKinds = kinds,
-                TimeColumn = TimeColumn,
-                ColumnMap = Map,
-                Strategy = Strategy == null
-                    ? VirtualFilterExecutionStrategy.Adaptive
-                    : VirtualFilterBindingValidator.ParseEnum<VirtualFilterExecutionStrategy>(Strategy, "strategy"),
-                PushdownFormat = PushdownFormat == null
-                    ? null
-                    : VirtualFilterBindingValidator.ParseEnum<PushdownParameterFormat>(PushdownFormat, "pushdown_format"),
-            };
-
-            // An omitted field keeps the model's own default; only an explicit value is a request.
-            return MaxPushdownKeys is { } keys ? binding with { MaxPushdownKeys = keys } : binding;
-        }
-    }
-
-    internal sealed class ProfileBody
-    {
-        [JsonPropertyName("tenant")] public string? Tenant { get; set; }
-        [JsonPropertyName("grantee")] public GranteeBody? Grantee { get; set; }
-        [JsonPropertyName("scope")] public string Scope { get; set; } = string.Empty;
-        [JsonPropertyName("uncovered")] public string? Uncovered { get; set; }
-        [JsonPropertyName("bindings")] public List<BindingBody>? Bindings { get; set; }
-
-        /// <summary>The bindings of <paramref name="model"/> (built by <see cref="ToModel"/>) whose body stated <c>max_pushdown_keys</c>.</summary>
-        public HashSet<FilterBinding> ExplicitKeyBudgets(VirtualFilterAccessProfile model)
-        {
-            var set = new HashSet<FilterBinding>(ReferenceEqualityComparer.Instance);
-            foreach (var (body, binding) in (Bindings ?? []).Zip(model.Bindings))
-            {
-                if (body.MaxPushdownKeys.HasValue)
-                {
-                    set.Add(binding);
-                }
-            }
-
-            return set;
-        }
-
-        public VirtualFilterAccessProfile ToModel(string name, TenantId tenant)
-        {
-            var grantee = Grantee ?? throw new ArgumentException("A profile needs a grantee.");
-            var type = grantee.Type.ToLowerInvariant() switch
-            {
-                "user" => GranteeType.User,
-                "group" => GranteeType.Group,
-                "role" => GranteeType.Role,
-                "service_principal" => GranteeType.ServicePrincipal,
-                _ => throw new ArgumentException($"Unknown grantee type '{grantee.Type}'.")
-            };
-
-            return new VirtualFilterAccessProfile
-            {
-                TenantId = tenant,
-                Name = name,
-                GranteeType = type,
-                GranteeSid = string.IsNullOrWhiteSpace(grantee.Sid) ? (Sid?)null : new Sid(grantee.Sid),
-                RoleName = grantee.Role,
-                Scope = Scope,
-                Uncovered = Uncovered == null ? null : VirtualFilterBindingValidator.ParseEnum<UncoveredPolicy>(Uncovered, "uncovered", ignoreCase: true),
-                Bindings = (Bindings ?? []).Select(b => b.ToModel()).ToList()
-            };
-        }
-    }
-
-    internal sealed class SyncBody
-    {
-        [JsonPropertyName("tenant")] public string? Tenant { get; set; }
-        [JsonPropertyName("path")] public string Path { get; set; } = string.Empty;
-        [JsonPropertyName("commit")] public string Commit { get; set; } = string.Empty;
-        [JsonPropertyName("filters")] public Dictionary<string, FilterBody>? Filters { get; set; }
-        [JsonPropertyName("profiles")] public Dictionary<string, ProfileBody>? Profiles { get; set; }
-    }
 }

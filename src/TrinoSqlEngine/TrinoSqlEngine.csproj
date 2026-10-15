@@ -10,7 +10,7 @@
     <Description>High-performance Trino-compatible SQL Parser and RLS rewriter in C# / .NET 10 using ANTLR4.</Description>
     <Authors>FastSqlEngine contributors</Authors>
 
-    <!-- Maximale JIT- & GC-Optimierung -->
+    <!-- Maximum JIT & GC optimization -->
     <TieredPGO>true</TieredPGO>
     <OptimizationPreference>Speed</OptimizationPreference>
     <GarbageCollectionAdaptationMode>1</GarbageCollectionAdaptationMode> <!-- DATAS GC -->
