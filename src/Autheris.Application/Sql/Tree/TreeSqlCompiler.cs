@@ -282,18 +282,20 @@ public static partial class TreeSqlCompiler
             order.Add((column, term.Descending));
             Need(column);
         }
-        if (order.Count == 0 &&
-            Autheris.Application.Data.Services.GovernedTableReadPlanner.TryResolveClearKey(metadata, tableAccess.Decision, out var clearKey))
+        if (order.Count == 0)
         {
-            foreach (var column in clearKey)
+            // SD-2: the same default ordering as every other read path. The composite fallback sorts every clear column, so
+            // nested relation lists stop after the key rules to bound the cost.
+            var defaultOrdering = Autheris.Application.Data.Services.DefaultReadOrdering.Resolve(metadata, tableAccess.Decision);
+            var useDefault = defaultOrdering.Kind != Autheris.Application.Data.Services.DefaultOrderingKind.None &&
+                (path.Count == 0 || defaultOrdering.Kind != Autheris.Application.Data.Services.DefaultOrderingKind.ClearColumnComposite);
+            if (useDefault && defaultOrdering.Columns.All(c => SafeNameRegex().IsMatch(c)))
             {
-                if (!SafeNameRegex().IsMatch(column))
+                foreach (var column in defaultOrdering.Columns)
                 {
-                    order.Clear();
-                    break;
+                    order.Add((column, false));
+                    Need(column);
                 }
-                order.Add((column, false));
-                Need(column);
             }
         }
 

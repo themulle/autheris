@@ -40,7 +40,7 @@ public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
         EnsureAllowed(intent, decision);
         var columnsToSelect = ResolveColumns(intent, metadata, decision);
         var predicate = ResolveFilter(intent, metadata, decision);
-        var orderBy = ResolveOrderBy(intent, metadata, decision);
+        var (orderBy, ordering) = ResolveOrderBy(intent, metadata, decision);
 
         var sb = new StringBuilder();
         sb.Append("SELECT ")
@@ -67,7 +67,7 @@ public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
 
         sb.Append(" LIMIT ").Append(intent.Limit.ToString(CultureInfo.InvariantCulture));
 
-        return new PlannedTableRead(sb.ToString(), ClientParameters(intent), columnsToSelect);
+        return new PlannedTableRead(sb.ToString(), ClientParameters(intent), columnsToSelect, ordering);
     }
 
     public PlannedTableRead PlanCount(TableReadIntent intent, TableMetadata metadata, TableAccessDecision decision)
@@ -106,14 +106,9 @@ public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
             foreach (var col in requested)
             {
                 var colMeta = metadata.GetColumn(col);
-                if (colMeta == null)
+                if (colMeta == null || decision.GetEffectiveColumnAccess(colMeta.ColumnName, metadata) == ColumnAccessLevel.Deny)
                 {
-                    throw new ArgumentException($"Column '{col}' does not exist on table '{intent.Table.ToQualifiedName()}'.", nameof(intent));
-                }
-
-                if (decision.GetEffectiveColumnAccess(colMeta.ColumnName, metadata) == ColumnAccessLevel.Deny)
-                {
-                    throw new ArgumentException($"Access to column '{col}' is denied on table '{intent.Table.ToQualifiedName()}'.", nameof(intent));
+                    throw UnknownColumn(col, intent);
                 }
             }
 
@@ -143,12 +138,13 @@ public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
         foreach (var col in intent.Filter.ReferencedColumns)
         {
             var colMeta = metadata.GetColumn(col);
-            if (colMeta == null)
+            var access = colMeta == null ? ColumnAccessLevel.Deny : decision.GetEffectiveColumnAccess(colMeta.ColumnName, metadata);
+            if (colMeta == null || access == ColumnAccessLevel.Deny)
             {
-                throw new ArgumentException($"Column '{col}' does not exist on table '{intent.Table}'.", nameof(intent));
+                throw UnknownColumn(col, intent);
             }
 
-            if (decision.GetEffectiveColumnAccess(colMeta.ColumnName, metadata) != ColumnAccessLevel.Clear)
+            if (access != ColumnAccessLevel.Clear)
             {
                 throw new ArgumentException(
                     $"Filtering on masked or denied column '{col}' is rejected to prevent oracle inference attacks.",
@@ -160,216 +156,64 @@ public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
         return string.IsNullOrWhiteSpace(predicate) ? null : predicate;
     }
 
-    /// <summary>ORDER BY items (quoted catalog spellings); the primary key when the request names no ordering (first clear column for a paged read of a table without one).</summary>
-    private static List<string> ResolveOrderBy(TableReadIntent intent, TableMetadata metadata, TableAccessDecision decision)
+    /// <summary>Text of the 400 for a paged read that has no deterministic order. Reveals no column name.</summary>
+    public const string NoOrderableColumnMessage = "Paging is not possible: no orderable column readable in clear text is available to order by.";
+
+    /// <summary>
+    /// ORDER BY items (quoted catalog spellings) and the rule behind them. An explicit order gets the default ordering columns
+    /// as tiebreaker (clear columns only); without an explicit order the shared <see cref="DefaultReadOrdering"/> applies.
+    /// </summary>
+    private static (List<string> Items, DefaultOrderingKind Kind) ResolveOrderBy(TableReadIntent intent, TableMetadata metadata, TableAccessDecision decision)
     {
         var items = new List<string>();
+        var named = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var defaultOrdering = DefaultReadOrdering.Resolve(metadata, decision);
         if (intent.OrderBy is { Count: > 0 } requested)
         {
             foreach (var item in requested)
             {
                 var colMeta = metadata.GetColumn(item.Column);
-                if (colMeta == null)
+                var access = colMeta == null ? ColumnAccessLevel.Deny : decision.GetEffectiveColumnAccess(colMeta.ColumnName, metadata);
+                if (colMeta == null || access == ColumnAccessLevel.Deny)
                 {
-                    throw new ArgumentException($"Column '{item.Column}' does not exist on table '{intent.Table}'.", nameof(intent));
+                    throw UnknownColumn(item.Column, intent);
                 }
 
-                if (decision.GetEffectiveColumnAccess(colMeta.ColumnName, metadata) != ColumnAccessLevel.Clear)
+                if (access != ColumnAccessLevel.Clear)
                 {
                     throw new ArgumentException(
                         $"Ordering on masked or denied column '{item.Column}' is rejected to prevent oracle inference attacks.",
                         nameof(intent));
                 }
 
+                named.Add(colMeta.ColumnName);
                 var quoted = DataApiFilterTranslator.QuoteIdentifier(colMeta.ColumnName);
                 items.Add(item.Descending ? quoted + " DESC" : quoted);
             }
-        }
-        else if (TryResolveClearKey(metadata, decision, out var key))
-        {
-            items.AddRange(key.Select(DataApiFilterTranslator.QuoteIdentifier));
-        }
-        else if (intent.Offset > 0)
-        {
-            // OFFSET paging needs a deterministic ORDER BY (SQL Server and Oracle require one). Without a usable key, order by
-            // every column that is readable in clear text and has an orderable type (never a masked or denied column: ordering
-            // on it would leak its order).
-            var composite = metadata.Columns
-                .Where(c => decision.GetEffectiveColumnAccess(c.ColumnName, metadata) == ColumnAccessLevel.Clear && IsOrderableType(c.DataType))
-                .Select(c => DataApiFilterTranslator.QuoteIdentifier(c.ColumnName))
-                .ToList();
-            if (composite.Count == 0)
+
+            foreach (var column in defaultOrdering.Columns)
             {
-                throw new ArgumentException(
-                    $"Offset paging on table '{intent.Table.ToQualifiedName()}' needs an explicit order, a primary key or columns readable in clear text to order by.",
-                    nameof(intent));
-            }
-
-            items.AddRange(composite);
-        }
-
-        return items;
-    }
-
-    /// <summary>
-    /// Resolves a deterministic clear-text ordering key when the caller did not specify an explicit ORDER BY:
-    /// 1. Declared <see cref="TableMetadata.PrimaryKeyColumns"/> when all columns exist and are Clear.
-    /// 2. Declared unique index in <see cref="TableMetadata.Indexes"/> with the fewest columns where all columns exist and are Clear.
-    /// 3. Column <c>Meta</c> primary key markers (<c>primary_key_ordinal</c>, <c>is_primary_key=true</c>, <c>role=primary_key</c>) when all marked columns are Clear.
-    /// 4. Conventional <c>(client_id, ts)</c> or <c>client_id</c> key columns when <see cref="TableMetadata.PrimaryKeyColumns"/> is empty and those columns exist and are Clear.
-    /// </summary>
-    public static bool TryResolveClearKey(TableMetadata metadata, TableAccessDecision decision, out List<string> key)
-    {
-        if (metadata.PrimaryKeyColumns.Count > 0 &&
-            TryResolveAllClearColumns(metadata.PrimaryKeyColumns, metadata, decision, out key))
-        {
-            return true;
-        }
-
-        if (metadata.Indexes.Count > 0)
-        {
-            foreach (var index in metadata.Indexes
-                         .Where(i => i is { IsUnique: true, Columns.Count: > 0 })
-                         .OrderBy(i => i.Columns.Count))
-            {
-                if (TryResolveAllClearColumns(index.Columns, metadata, decision, out key))
+                if (named.Add(column))
                 {
-                    return true;
+                    items.Add(DataApiFilterTranslator.QuoteIdentifier(column));
                 }
             }
+
+            return (items, DefaultOrderingKind.Explicit);
         }
 
-        var metaKeyColumns = ExtractMetaPrimaryKeyColumns(metadata.Columns);
-        if (metaKeyColumns.Count > 0 &&
-            TryResolveAllClearColumns(metaKeyColumns, metadata, decision, out key))
+        if (defaultOrdering.Kind == DefaultOrderingKind.None && intent.Offset > 0)
         {
-            return true;
+            throw new ArgumentException(NoOrderableColumnMessage, nameof(intent));
         }
 
-        if (metadata.PrimaryKeyColumns.Count == 0)
-        {
-            var clientIdCol = metadata.GetColumn("client_id");
-            if (clientIdCol != null &&
-                decision.GetEffectiveColumnAccess(clientIdCol.ColumnName, metadata) == ColumnAccessLevel.Clear)
-            {
-                var tsCol = metadata.GetColumn("ts");
-                if (tsCol != null &&
-                    decision.GetEffectiveColumnAccess(tsCol.ColumnName, metadata) == ColumnAccessLevel.Clear)
-                {
-                    key = [clientIdCol.ColumnName, tsCol.ColumnName];
-                    return true;
-                }
-
-                key = [clientIdCol.ColumnName];
-                return true;
-            }
-        }
-
-        key = new List<string>();
-        return false;
+        items.AddRange(defaultOrdering.Columns.Select(DataApiFilterTranslator.QuoteIdentifier));
+        return (items, defaultOrdering.Kind);
     }
 
-    private static bool TryResolveAllClearColumns(
-        IReadOnlyList<string> candidateColumns,
-        TableMetadata metadata,
-        TableAccessDecision decision,
-        out List<string> key)
-    {
-        key = new List<string>(candidateColumns.Count);
-        if (candidateColumns.Count == 0)
-        {
-            return false;
-        }
-
-        foreach (var candidate in candidateColumns)
-        {
-            var col = metadata.GetColumn(candidate);
-            if (col == null || decision.GetEffectiveColumnAccess(col.ColumnName, metadata) != ColumnAccessLevel.Clear)
-            {
-                key.Clear();
-                return false;
-            }
-
-            if (!key.Contains(col.ColumnName, StringComparer.OrdinalIgnoreCase))
-            {
-                key.Add(col.ColumnName);
-            }
-        }
-
-        return key.Count > 0;
-    }
-
-    public static IReadOnlyList<string> ExtractMetaPrimaryKeyColumns(IReadOnlyList<TableColumn> columns)
-    {
-        if (columns == null || columns.Count == 0)
-        {
-            return Array.Empty<string>();
-        }
-
-        var ordinalCols = new List<(int Ordinal, int Index, string Name)>();
-        for (int i = 0; i < columns.Count; i++)
-        {
-            var col = columns[i];
-            if (col.Meta != null &&
-                col.Meta.TryGetValue("primary_key_ordinal", out var ordStr) &&
-                int.TryParse(ordStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var ord) &&
-                ord >= 1)
-            {
-                ordinalCols.Add((ord, i, col.ColumnName));
-            }
-        }
-
-        if (ordinalCols.Count > 0)
-        {
-            return ordinalCols
-                .OrderBy(x => x.Ordinal)
-                .ThenBy(x => x.Index)
-                .Select(x => x.Name)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-        }
-
-        var flagCols = new List<string>();
-        foreach (var col in columns)
-        {
-            if (col.Meta == null) continue;
-            if ((col.Meta.TryGetValue("is_primary_key", out var isPk) && string.Equals(isPk, "true", StringComparison.OrdinalIgnoreCase)) ||
-                (col.Meta.TryGetValue("role", out var role) && string.Equals(role, "primary_key", StringComparison.OrdinalIgnoreCase)))
-            {
-                if (!flagCols.Contains(col.ColumnName, StringComparer.OrdinalIgnoreCase))
-                {
-                    flagCols.Add(col.ColumnName);
-                }
-            }
-        }
-
-        return flagCols.Count > 0 ? flagCols : Array.Empty<string>();
-    }
-
-    private static readonly string[] NonOrderableTypeMarkers =
-    [
-        "text", "image", "xml", "json", "geometry", "geography", "hierarchyid", "blob", "clob", "bytea", "(max)",
-        "sql_variant", "variant", "array", "[]", "map", "row", "struct", "object", "sdo_", "raw", "binary", "bfile", "long", "lob", "cursor"
-    ];
-
-    /// <summary>False for LOB, document, spatial and structured types that cannot (or should not) appear in an ORDER BY.</summary>
-    private static bool IsOrderableType(string? dataType)
-    {
-        if (string.IsNullOrWhiteSpace(dataType))
-        {
-            return true;
-        }
-
-        foreach (var marker in NonOrderableTypeMarkers)
-        {
-            if (dataType.Contains(marker, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
+    /// <summary>One text for an unknown column and for a column the caller may not see, so the message is no existence oracle.</summary>
+    private static ArgumentException UnknownColumn(string column, TableReadIntent intent) =>
+        new($"Column '{column}' does not exist on table '{intent.Table.ToQualifiedName()}'.", nameof(intent));
 
     private static IReadOnlyDictionary<string, object?> ClientParameters(TableReadIntent intent) =>
         intent.Filter == null || intent.Filter.Parameters.Count == 0
