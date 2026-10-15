@@ -172,6 +172,32 @@ public sealed class GovernanceRepositoryConstructorArchitectureTests
         public string Name { get; }
     }
 
+    // WP-ARC-B-13: the shared connection is gone; every operation opens its own connection through the provider.
+    [Fact]
+    public void SqliteGovernanceRepository_HasNoSqliteConnectionField()
+    {
+        var module = InfrastructureModule();
+        var repository = module.GetType("Autheris.Infrastructure.Persistence.SqliteGovernanceRepository")!;
+
+        var connectionFields = repository.Fields
+            .Where(f => f.FieldType.FullName == "Microsoft.Data.Sqlite.SqliteConnection")
+            .Select(f => f.Name)
+            .ToList();
+        var connectionProperties = repository.Properties
+            .Where(p => p.PropertyType.FullName == "Microsoft.Data.Sqlite.SqliteConnection")
+            .Select(p => p.Name)
+            .ToList();
+
+        connectionFields.ShouldBeEmpty("a shared SqliteConnection field would bypass the write gate: " + string.Join(", ", connectionFields));
+        connectionProperties.ShouldBeEmpty("a shared SqliteConnection property would bypass the write gate: " + string.Join(", ", connectionProperties));
+    }
+
+    [Fact]
+    public void ConstructorIoAllowList_IsEmpty()
+    {
+        ConstructorIoAllowList.ShouldBeEmpty();
+    }
+
     [Fact]
     public void ConstructorIoAllowList_ContainsOnlyKnownRepositories()
     {

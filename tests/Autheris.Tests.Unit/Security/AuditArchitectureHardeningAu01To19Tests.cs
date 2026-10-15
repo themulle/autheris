@@ -348,7 +348,7 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
         try
         {
             using var tx = repo.RawConnection().BeginTransaction();
-            await repo.RecordAuditEventAsync(entry1, tx);
+            await repo.RecordAuditEventInternalAsync(tx.Connection!, entry1, CancellationToken.None, tx);
             await tx.CommitAsync();
             repo.OnTransactionCommitted(tx);
         }
@@ -397,7 +397,7 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
         try
         {
             using var tx = repo.RawConnection().BeginTransaction();
-            await repo.RecordAuditEventAsync(entry2, tx);
+            await repo.RecordAuditEventInternalAsync(tx.Connection!, entry2, CancellationToken.None, tx);
             await tx.RollbackAsync();
             repo.OnTransactionRolledBack(tx);
         }

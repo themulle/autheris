@@ -294,4 +294,39 @@ public sealed class SqliteGovernanceConcurrencyTests : IDisposable
         (await _repository.GetConsentByIdAsync(consent.Id))!.IsRevoked.ShouldBeTrue();
         (await _repository.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-REVOKE-VISIBLE")], meta.Identifier, DateTimeOffset.UtcNow)).ShouldBeEmpty();
     }
+
+    [Fact]
+    public async Task RecordAuditWithForeignTransaction_IsRejected()
+    {
+        // A transaction opened by a caller (not by a repository write operation that holds the gate) could advance the audit chain
+        // outside the single writer and fork it.
+        await using var foreign = _repository.RawConnection().BeginTransaction();
+        var before = await ScalarAsync("SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES");
+
+        await Should.ThrowAsync<InvalidOperationException>(() => _repository.RecordAuditEventAsync(NewAudit(1), foreign));
+
+        await foreign.RollbackAsync();
+        (await ScalarAsync("SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES")).ShouldBe(before);
+        (await _repository.VerifyAuditHashChainAsync()).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task AuditPipeline_TierBEvents_AreWrittenThroughTheGate_AndFlushOnRead()
+    {
+        for (var i = 0; i < 30; i++)
+        {
+            await _repository.RecordAuditEventAsync(new AuditLogEntry
+            {
+                EventType = AuditEventTypes.TableQuery,
+                ActorSid = new Sid("S-1-5-21-READER"),
+                TargetTable = "finance.dbo.finance_table_1",
+                TraceId = $"tierb-{i}"
+            });
+        }
+
+        var entries = await _repository.QueryAuditLogsAsync(actorSid: new Sid("S-1-5-21-READER"));
+
+        entries.Count.ShouldBe(30);
+        (await _repository.VerifyAuditHashChainAsync()).ShouldBeTrue();
+    }
 }

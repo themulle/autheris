@@ -20,9 +20,6 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
     private readonly SqliteGovernanceConnectionProvider _connections;
     internal SqliteGovernanceConnectionProvider Connections => _connections;
 
-    // Transitional: the partials that are not yet converted to per-operation connections keep one connection from the provider
-    // (opened by InitializeAsync) and use it under the write gate exactly as before.
-    private SqliteConnection _connection = null!;
     private readonly IEpochValidationService _epochValidationService;
 
     /// <summary>
@@ -33,8 +30,12 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
     /// </summary>
     private readonly ReadinessGatedLock _writeGate;
 
-    /// <summary>The connection of the operation that currently holds the write gate; audit writes inside a business transaction must use it.</summary>
-    private SqliteConnection? _writeConnection;
+    /// <summary>
+    /// Identity of the connection of the operation that currently holds the write gate; an audit write inside a caller-managed
+    /// transaction must run on it. Held as an identity token only (compared by reference, never used to execute a command), so the
+    /// repository has no connection field that could be shared between operations.
+    /// </summary>
+    private object? _writeConnection;
     private volatile bool _ready;
     private void ThrowIfNotReady()
     {
@@ -347,19 +348,14 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
             await _writeGate.WaitUnguardedAsync(ct).ConfigureAwait(false);
             try
             {
-                if (_connection != null)
-                {
-                    await _connection.DisposeAsync().ConfigureAwait(false);
-                }
-
-                _connection = await _connections.OpenAsync(ct).ConfigureAwait(false);
+                await using var connection = await _connections.OpenAsync(ct).ConfigureAwait(false);
 
                 // SEC H-17: unsequenced rows are latched as a violation before the tail is read.
-                LatchUnsequencedAuditRows(_connection);
+                LatchUnsequencedAuditRows(connection);
 
                 // Startup reference only; it is cross-checked against the external signed anchor (SEC H-17)
                 // in InitializeAuditChainAnchor and never silently re-synchronised from the DB afterwards.
-                var (tailHash, tailSeq) = ReadAuditTail(_connection, null);
+                var (tailHash, tailSeq) = ReadAuditTail(connection, null);
                 if (tailHash != null)
                 {
                     _lastAuditHash = tailHash;
@@ -370,7 +366,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
 
                 if (_shouldSeed)
                 {
-                    SeedInitialCatalog(_connection);
+                    SeedInitialCatalog(connection);
                 }
             }
             finally
@@ -423,12 +419,6 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
             _auditCts.Dispose();
         }
         catch (ObjectDisposedException) { }
-
-        try
-        {
-            _connection?.Dispose();
-        }
-        catch { }
 
         try
         {

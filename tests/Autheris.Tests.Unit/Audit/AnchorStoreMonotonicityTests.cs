@@ -114,7 +114,7 @@ public sealed class AnchorStoreMonotonicityTests : IDisposable
 
         // Replica A commits a caller-managed transaction whose audit entry has sequence 1: that must not pull the shared anchor back.
         using var tx = replicaA.RawConnection().BeginTransaction();
-        await replicaA.RecordAuditEventAsync(NewEntry(99), tx);
+        await replicaA.RecordAuditEventInternalAsync(tx.Connection!, NewEntry(99), CancellationToken.None, tx);
         tx.Commit();
         replicaA.OnTransactionCommitted(tx);
 
