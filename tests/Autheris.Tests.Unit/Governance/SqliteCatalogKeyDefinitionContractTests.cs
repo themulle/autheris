@@ -320,6 +320,24 @@ public sealed class SqliteCatalogKeyDefinitionContractTests : IDisposable
     }
 
     [Fact]
+    public async Task ReplacingUpsert_StripsKeyMarkersOfStoredColumnsThatAreNotSupplied()
+    {
+        await _repo.UpsertTableMetadataAsync(Meta(Orders, replace: true, pk: ["a", "b"]));
+        // The second upsert supplies only c and d: the stored columns a and b must not keep a stale ordinal.
+        var onlyCd = Meta(Orders, replace: true, pk: ["c"]) with
+        {
+            Columns = [new TableColumn { ColumnName = "c", DataType = "varchar" }, new TableColumn { ColumnName = "d", DataType = "varchar" }]
+        };
+
+        await _repo.UpsertTableMetadataAsync(onlyCd);
+
+        _repo.InvalidateMetadataCacheForTesting();
+        var loaded = (await _repo.GetTableMetadataAsync(Orders))!;
+        loaded.PrimaryKeyColumns.ShouldBe(["c"]);
+        loaded.Columns.Where(c => c.ColumnName is "a" or "b").ShouldAllBe(c => !c.Meta.ContainsKey("primary_key_ordinal"));
+    }
+
+    [Fact]
     public async Task MissingKeyTables_TableIsUnavailable()
     {
         await SeedFullDefinitionAsync();

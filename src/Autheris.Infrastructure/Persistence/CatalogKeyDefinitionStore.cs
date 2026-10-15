@@ -368,6 +368,8 @@ internal static class CatalogKeyDefinitionStore
                 ("@tid", tid), ("@ord", ordinal++), ("@cid", ColumnId(colIdByName, column))).ConfigureAwait(false);
         }
 
+        await RewriteMarkersAsync(conn, tx, dialect, tableId, validated.PrimaryKeyColumns, ct).ConfigureAwait(false);
+
         foreach (var index in validated.Indexes)
         {
             var indexId = Guid.NewGuid().ToString();
@@ -381,6 +383,45 @@ internal static class CatalogKeyDefinitionStore
                     $"INSERT INTO {dialect.Prefix}{IndexColumnTable} (index_id, column_ordinal, table_column_id) VALUES (@idx, @ord, @cid)", ct,
                     ("@idx", indexId), ("@ord", i + 1), ("@cid", ColumnId(colIdByName, index.Columns[i]))).ConfigureAwait(false);
             }
+        }
+    }
+
+    /// <summary>
+    /// Rewrites the legacy markers of ALL stored columns of the table to match the replaced primary key, including columns the caller did
+    /// not supply, so no stale ordinal survives (L1).
+    /// </summary>
+    private static async Task RewriteMarkersAsync(
+        DbConnection conn,
+        DbTransaction tx,
+        KeyDefinitionDialect dialect,
+        Guid tableId,
+        IReadOnlyList<string> primaryKey,
+        CancellationToken ct)
+    {
+        var stored = new List<(string Id, string Name, IReadOnlyDictionary<string, string> Meta)>();
+        await using (var cmd = conn.CreateCommand())
+        {
+            Enlist(cmd, tx);
+            cmd.CommandText = $"SELECT id, column_name, meta_json FROM {dialect.Prefix}TABLE_COLUMNS WHERE table_id = @tid";
+            AddParameter(cmd, "@tid", tableId.ToString());
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                stored.Add((reader.GetString(0), reader.GetString(1),
+                    SqliteGovernanceRepository.ParseColumnMetaJson(reader.IsDBNull(2) ? null : reader.GetString(2))));
+            }
+        }
+
+        foreach (var (id, name, meta) in stored)
+        {
+            var markers = WithKeyMarkers(meta, name, primaryKey);
+            if (markers.Count == meta.Count && markers.All(kv => meta.TryGetValue(kv.Key, out var v) && v == kv.Value))
+            {
+                continue;
+            }
+
+            await ExecAsync(conn, tx, $"UPDATE {dialect.Prefix}TABLE_COLUMNS SET meta_json = @meta WHERE id = @id", ct,
+                ("@meta", markers.Count > 0 ? System.Text.Json.JsonSerializer.Serialize(markers) : "{}"), ("@id", id)).ConfigureAwait(false);
         }
     }
 
