@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Jobs.Interfaces;
 using Autheris.Application.Sql;
+using Autheris.Application.State;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -23,23 +24,34 @@ using Microsoft.Extensions.Options;
 public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
 {
     private readonly IAsyncQueryJobManager _jobManager;
+    private readonly IAsyncJobQueue _queue;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IAuditLogRepository _auditLogRepository;
     private readonly ILogger<AsyncQueryJobBackgroundWorker> _logger;
     private readonly IOptions<GatewayOptions>? _options;
+    private readonly IOptions<AsyncJobOptions>? _jobOptions;
+    private readonly IDistributedClusterStateProvider? _clusterState;
 
     public AsyncQueryJobBackgroundWorker(
         IAsyncQueryJobManager jobManager,
+        IAsyncJobQueue queue,
         IServiceScopeFactory scopeFactory,
         IAuditLogRepository auditLogRepository,
         ILogger<AsyncQueryJobBackgroundWorker>? logger = null,
-        IOptions<GatewayOptions>? options = null)
+        IOptions<GatewayOptions>? options = null,
+        IOptions<AsyncJobOptions>? jobOptions = null,
+        IDistributedClusterStateProvider? clusterState = null,
+        IClusterStateTopology? topology = null)
     {
         _options = options;
+        _jobOptions = jobOptions;
+        _clusterState = topology?.IsClusterWide == true ? clusterState : null;
         ArgumentNullException.ThrowIfNull(jobManager);
+        ArgumentNullException.ThrowIfNull(queue);
         ArgumentNullException.ThrowIfNull(scopeFactory);
         ArgumentNullException.ThrowIfNull(auditLogRepository);
         _jobManager = jobManager;
+        _queue = queue;
         _scopeFactory = scopeFactory;
         _auditLogRepository = auditLogRepository;
         _logger = logger ?? NullLogger<AsyncQueryJobBackgroundWorker>.Instance;
@@ -47,22 +59,65 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (_jobManager is not AsyncQueryJobManager concreteManager)
-        {
-            _logger.LogWarning("AsyncQueryJobBackgroundWorker requires concrete AsyncQueryJobManager. Worker exiting.");
-            return;
-        }
-
         _logger.LogInformation("AsyncQueryJobBackgroundWorker started.");
 
-        var purgeTask = RunPurgeLoopAsync(concreteManager, stoppingToken);
+        // Cancel requests for jobs running here that were issued on another node.
+        IAsyncDisposable? cancelSubscription = null;
+        try
+        {
+            cancelSubscription = _clusterState?.SubscribeAsync<AsyncJobCancelSignal>(
+                AsyncJobCancelSignal.Channel,
+                signal => _queue.ApplyCancelSignalAsync(signal, stoppingToken),
+                stoppingToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Without the subscription the owner still honours the cancel tombstone at its next state write.
+            SubscribeFailures.Add(1);
+            _logger.LogError(ex, "Could not subscribe to async job cancel signals; remote cancels apply at the next state write.");
+        }
 
         try
         {
-            await foreach (var item in concreteManager.ChannelReader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
+            await RunAsync(stoppingToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (cancelSubscription is not null)
             {
-                await ProcessJobItemAsync(concreteManager, item, stoppingToken).ConfigureAwait(false);
+                await cancelSubscription.DisposeAsync().ConfigureAwait(false);
             }
+        }
+    }
+
+    private static readonly System.Diagnostics.Metrics.Meter Meter = new("Autheris.AsyncJobs");
+    private static readonly System.Diagnostics.Metrics.Counter<long> SubscribeFailures =
+        Meter.CreateCounter<long>("autheris.asyncjobs.subscribe_failures", description: "Failed subscriptions to the async job cancel channel.");
+
+    private async Task RunAsync(CancellationToken stoppingToken)
+    {
+
+        try
+        {
+            await _queue.SweepOrphanedScratchFilesAsync(stoppingToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Sweeping orphaned async job scratch files failed.");
+        }
+
+        var purgeTask = RunPurgeLoopAsync(stoppingToken);
+
+        try
+        {
+            var jobs = JobOptions;
+            using var scheduler = new AsyncJobScheduler(
+                jobs.MaxConcurrentJobs,
+                jobs.MaxConcurrentJobsPerTenant,
+                ProcessJobItemAsync,
+                _logger,
+                DiscardQueuedAsync);
+            await scheduler.RunAsync(_queue.Reader, stoppingToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -76,16 +131,30 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         await purgeTask.ConfigureAwait(false);
     }
 
-    /// <summary>SR-M-21: periodically removes finished jobs and their result files after the retention period.</summary>
-    private async Task RunPurgeLoopAsync(AsyncQueryJobManager manager, CancellationToken stoppingToken)
+    private AsyncJobOptions JobOptions => _jobOptions?.Value ?? _options?.Value?.AsyncJobs ?? new AsyncJobOptions();
+
+    /// <summary>A job still queued at shutdown is cancelled: the in-memory queue does not survive the process.</summary>
+    private async Task DiscardQueuedAsync(AsyncJobExecutionItem item)
     {
-        var interval = TimeSpan.FromMinutes(Math.Max(1, (_options?.Value?.AsyncJobs ?? new AsyncJobOptions()).PurgeIntervalMinutes));
+        var cancelled = item.Job with
+        {
+            State = AsyncJobState.Cancelled,
+            CompletedAt = DateTimeOffset.UtcNow,
+            ErrorMessage = "Job cancelled because the gateway is shutting down."
+        };
+        await _queue.TryTransitionAsync(cancelled, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>SR-M-21: periodically removes finished jobs and their result files after the retention period.</summary>
+    private async Task RunPurgeLoopAsync(CancellationToken stoppingToken)
+    {
+        var interval = TimeSpan.FromMinutes(Math.Max(1, JobOptions.PurgeIntervalMinutes));
         try
         {
             using var timer = new PeriodicTimer(interval);
             while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
             {
-                await PurgeOnceAsync(manager, stoppingToken).ConfigureAwait(false);
+                await PurgeOnceAsync(stoppingToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -93,12 +162,12 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         }
     }
 
-    internal async Task PurgeOnceAsync(AsyncQueryJobManager manager, CancellationToken ct)
+    internal async Task PurgeOnceAsync(CancellationToken ct)
     {
-        var retention = TimeSpan.FromHours(Math.Max(0, (_options?.Value?.AsyncJobs ?? new AsyncJobOptions()).RetentionHours));
+        var retention = TimeSpan.FromHours(Math.Max(0, JobOptions.RetentionHours));
         try
         {
-            await manager.PurgeExpiredJobsAsync(retention, ct).ConfigureAwait(false);
+            await _jobManager.PurgeExpiredJobsAsync(retention, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -107,19 +176,26 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
     }
 
     private async Task ProcessJobItemAsync(
-        AsyncQueryJobManager manager,
         AsyncJobExecutionItem item,
         CancellationToken stoppingToken)
     {
+        // State writes must still work while the host is stopping: they get their own short deadline.
+        using var writeCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var writeCt = writeCts.Token;
         var startedAt = DateTimeOffset.UtcNow;
         var runningJob = item.Job with
         {
             State = AsyncJobState.Running,
             StartedAt = startedAt
         };
-        manager.UpdateJob(runningJob);
+        if (!await _queue.TryTransitionAsync(runningJob, writeCt).ConfigureAwait(false))
+        {
+            // Cancelled (or otherwise finished) while still queued: nothing to execute.
+            return;
+        }
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, item.Cts.Token);
+        string? writtenPath = null;
 
         try
         {
@@ -142,11 +218,12 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
                 linkedCts.Token).ConfigureAwait(false);
 
             // Persist output to scratch directory (Pre-Storage DDM & RLS applied by GovernedSqlExecutionService)
-            var tenantDir = Path.Combine(manager.ScratchDirectory, item.Job.TenantId);
+            var tenantDir = Path.Combine(_queue.ScratchDirectory, item.Job.TenantId);
             Directory.CreateDirectory(tenantDir);
 
             var ext = item.Job.Format.Equals("csv", StringComparison.OrdinalIgnoreCase) ? "csv" : "json";
             var filePath = Path.Combine(tenantDir, $"{item.Job.JobId}.{ext}");
+            writtenPath = filePath;
 
             if (ext == "csv")
             {
@@ -166,23 +243,31 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
                 RowsProduced = result.RowCount,
                 BytesProduced = fileInfo.Length
             };
-            manager.UpdateJob(completed);
+            if (!await _queue.TryTransitionAsync(completed, writeCt).ConfigureAwait(false))
+            {
+                // Lost the race against a cancel: the job stays terminal and its result must not outlive it.
+                try { File.Delete(filePath); } catch (Exception ex) { _logger.LogWarning(ex, "Could not delete result of cancelled job {JobId}", item.Job.JobId); }
+                return;
+            }
 
-            await RecordAuditAsync(completed, item.User, AuditEventTypes.AsyncJobCompleted, "ALLOW", "Job completed successfully.", stoppingToken).ConfigureAwait(false);
+            await RecordAuditAsync(completed, item.User, AuditEventTypes.AsyncJobCompleted, "ALLOW", "Job completed successfully.", writeCt).ConfigureAwait(false);
         }
         // ParseCanceledException derives from OperationCanceledException: a governed SQL error (syntax, parser timeout) is a failed job.
         catch (OperationCanceledException ex) when (!Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out _))
         {
+            _logger.LogDebug(ex, "Async job {JobId} cancelled or timed out.", item.Job.JobId);
+            DeletePartialResult(writtenPath);
             var cancelled = runningJob with
             {
                 State = AsyncJobState.Cancelled,
                 CompletedAt = DateTimeOffset.UtcNow,
                 ErrorMessage = "Job execution cancelled or timed out."
             };
-            manager.UpdateJob(cancelled);
+            await _queue.TryTransitionAsync(cancelled, writeCt).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
+            DeletePartialResult(writtenPath);
             // WP-X0a (SEC-X1-01): the persisted message is the fixed message of the stable code, never Exception.Message (driver text, values).
             var sanitized = Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.FixedMessageOrDefault(ex, "The job could not be executed. Contact support with the trace id.");
             var failed = runningJob with
@@ -191,9 +276,20 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
                 CompletedAt = DateTimeOffset.UtcNow,
                 ErrorMessage = sanitized
             };
-            manager.UpdateJob(failed);
+            await _queue.TryTransitionAsync(failed, writeCt).ConfigureAwait(false);
             _logger.LogError(ex, "Failed to execute async query job {JobId}", item.Job.JobId);
         }
+    }
+
+    private void DeletePartialResult(string? path)
+    {
+        if (path is null)
+        {
+            return;
+        }
+
+        try { File.Delete(path); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Could not delete partial job result."); }
     }
 
     private static async Task WriteJsonResultAsync(

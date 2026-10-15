@@ -1661,6 +1661,24 @@ public sealed class TransportRowLimitsOptions
 /// <summary>Server-side bounds of asynchronous query jobs. Client-supplied timeout and row count never exceed them (SR-H-05).</summary>
 public sealed class AsyncJobOptions
 {
+    /// <summary>Configuration section the options are bound from (standalone and through <see cref="GatewayOptions.AsyncJobs"/>).</summary>
+    public const string SectionName = "Gateway:AsyncJobs";
+
+    /// <summary>Maximum number of jobs this node executes in parallel.</summary>
+    public int MaxConcurrentJobs { get; init; } = 4;
+
+    /// <summary>Maximum number of jobs of one tenant this node executes in parallel (at most <see cref="MaxConcurrentJobs"/>).</summary>
+    public int MaxConcurrentJobsPerTenant { get; init; } = 2;
+
+    /// <summary>Absolute directory for job result files; null uses ContentRoot/scratch/jobs (the Helm chart sets a path on its writable /tmp volume).</summary>
+    public string? ScratchDirectory { get; init; }
+
+    /// <summary>True when <see cref="ScratchDirectory"/> is a volume shared by all replicas, so any node can serve a result written by another.</summary>
+    public bool SharedScratchDirectory { get; init; }
+
+    /// <summary>Maximum number of queued plus running jobs of one tenant on this node; further submits are rejected (HTTP 429).</summary>
+    public int MaxQueuedJobsPerTenant { get; init; } = 50;
+
     /// <summary>Timeout applied when the client supplies none (or a non-positive one).</summary>
     public int DefaultTimeoutSeconds { get; init; } = 300;
 
