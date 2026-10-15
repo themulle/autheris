@@ -79,8 +79,8 @@ public class MaskTests
             });
 
         Assert.DoesNotContain('\'', c.Sql);
-        Assert.Contains("LEFT([Email], @p0)", c.Sql);
-        Assert.Contains("RIGHT([Email], @p1)", c.Sql);
+        Assert.Contains("LEFT([Email], GREATEST(CAST(@p0 AS int), 0))", c.Sql);
+        Assert.Contains("RIGHT([Email], GREATEST(CAST(@p1 AS int), 0))", c.Sql);
         Assert.Contains("REPLICATE(@p2", c.Sql);
         Assert.Equal(3, c.Parameters.Length);
         Assert.All(c.Parameters, p => Assert.Equal(ParameterOrigin.Mask, p.Origin));

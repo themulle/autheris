@@ -372,16 +372,42 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
 
             case Governance.MaskKind.PartialMask:
             {
-                string prefix = context.BindPolicy(args.KeepPrefix ?? throw MissingArgument(mask, "KeepPrefix"));
-                string suffix = context.BindPolicy(args.KeepSuffix ?? throw MissingArgument(mask, "KeepSuffix"));
+                // GREATEST(n, 0): a negative count would make LEFT/RIGHT throw at runtime (Msg 536) or skew the prefix + suffix length check.
+                string prefix = "GREATEST(CAST(" + context.BindPolicy(args.KeepPrefix ?? throw MissingArgument(mask, "KeepPrefix")) + " AS int), ";
+                string suffix = "GREATEST(CAST(" + context.BindPolicy(args.KeepSuffix ?? throw MissingArgument(mask, "KeepSuffix")) + " AS int), ";
                 string maskChar = context.BindPolicy(args.MaskChar ?? throw MissingArgument(mask, "MaskChar"));
-                string keep = "(" + prefix + " + " + suffix + ")";
-                Put(ref builder, "CASE WHEN ", column, " IS NULL THEN NULL WHEN LEN(", column, ") <= ", keep, " THEN REPLICATE(", maskChar, ", ");
+
+                void Clamped(ref ValueStringBuilder b, string head)
+                {
+                    b.Append(head);
+                    AppendInlineInteger(ref b, 0, context);
+                    b.Append(')');
+                }
+
+                void Keep(ref ValueStringBuilder b)
+                {
+                    b.Append('(');
+                    Clamped(ref b, prefix);
+                    b.Append(" + ");
+                    Clamped(ref b, suffix);
+                    b.Append(')');
+                }
+
+                Put(ref builder, "CASE WHEN ", column, " IS NULL THEN NULL WHEN LEN(", column, ") <= ");
+                Keep(ref builder);
+                Put(ref builder, " THEN REPLICATE(", maskChar, ", ");
                 AppendInlineInteger(ref builder, 5, context);
-                Put(ref builder, ") ELSE CONCAT(LEFT(", column, ", ", prefix, "), REPLICATE(", maskChar,
-                    ", CASE WHEN LEN(", column, ") > ", keep, " THEN LEN(", column, ") - ", keep, " ELSE ");
+                Put(ref builder, ") ELSE CONCAT(LEFT(", column, ", ");
+                Clamped(ref builder, prefix);
+                Put(ref builder, "), REPLICATE(", maskChar, ", CASE WHEN LEN(", column, ") > ");
+                Keep(ref builder);
+                Put(ref builder, " THEN LEN(", column, ") - ");
+                Keep(ref builder);
+                Put(ref builder, " ELSE ");
                 AppendInlineInteger(ref builder, 5, context);
-                Put(ref builder, " END), RIGHT(", column, ", ", suffix, ")) END");
+                Put(ref builder, " END), RIGHT(", column, ", ");
+                Clamped(ref builder, suffix);
+                builder.Append(")) END");
                 break;
             }
 
