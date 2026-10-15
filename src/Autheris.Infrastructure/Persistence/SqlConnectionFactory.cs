@@ -86,17 +86,23 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
         }
 
         string connectionString = options.ConnectionString;
+        SspiContextProvider? sqlServerSspiProvider = null;
         if (dialect == DatabaseDialect.Oracle)
         {
             // WP-F1: validated before any network traffic.
             OracleConnectionStringPolicy.Validate(connectionString, _requireOracleTcps);
             connectionString = ResolveOraclePassword(options, connectionString);
         }
+        else if (dialect == DatabaseDialect.SqlServer)
+        {
+            // Issue #102: validate and configure Managed NTLM (System.Net.Security.UseManagedNtlm) / GSSAPI (gss-ntlmssp / libgssapi-krb5-2) before opening.
+            connectionString = SqlServerWindowsAuthConfigurator.PrepareConnection(options, _secrets, _environment, out sqlServerSspiProvider);
+        }
 
         DbConnection connection = dialect switch
         {
             DatabaseDialect.Sqlite => new SqliteConnection(options.ConnectionString),
-            DatabaseDialect.SqlServer => new SqlConnection(options.ConnectionString),
+            DatabaseDialect.SqlServer => CreateSqlServerConnection(connectionString, sqlServerSspiProvider),
             DatabaseDialect.PostgreSql => new Npgsql.NpgsqlConnection(options.ConnectionString),
             // CR-ADG-07: the raw driver connection never leaves this factory; every command is created with BindByName = true.
             DatabaseDialect.Oracle => new BindByNameOracleConnection(new OracleConnection(connectionString)),
@@ -105,7 +111,14 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
 
         try
         {
-            await connection.OpenAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await connection.OpenAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception openEx) when (dialect == DatabaseDialect.SqlServer)
+            {
+                throw SqlServerWindowsAuthConfigurator.ClassifyOpenException(openEx, options);
+            }
 
             if (connection is Npgsql.NpgsqlConnection pgConn)
             {
@@ -252,6 +265,17 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
         string password = SecretReferenceResolver.Resolve(_secrets, options.PasswordKeyVaultRef, _environment, allowPlaintextInDevelopment: false, logger: null, "Oracle database password")
             ?? throw new System.Security.SecurityException("The Oracle database password could not be resolved (fail-closed).");
         return new OracleConnectionStringBuilder(connectionString) { Password = password }.ConnectionString;
+    }
+
+    private static SqlConnection CreateSqlServerConnection(string connectionString, SspiContextProvider? sspiContextProvider)
+    {
+        var sqlConnection = new SqlConnection(connectionString);
+        if (sspiContextProvider is not null)
+        {
+            sqlConnection.SspiContextProvider = sspiContextProvider;
+        }
+
+        return sqlConnection;
     }
 
     private static void AddParameter(DbCommand cmd, string name, object value)

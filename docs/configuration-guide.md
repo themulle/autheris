@@ -251,6 +251,91 @@ SQL table reads (GraphQL, OData, MCP, connectors) run through the governed SQL p
 }
 ```
 
+#### 2.4.1 SQL Server Windows Authentication (NTLM / Kerberos) in Linux Containers
+
+When connecting from a Linux container (`mcr.microsoft.com/dotnet/aspnet:10.0`) to an on-premises SQL Server that requires Active Directory Windows Authentication (`Integrated Security=true` / `Integrated Security=SSPI`), `Microsoft.Data.SqlClient` delegates authentication to GSSAPI (`libgssapi-krb5-2`) and the NTLM GSSAPI plugin (`gss-ntlmssp`).
+
+All official Autheris container images (`Dockerfile`, `Dockerfile.production`, `Dockerfile.staging`) pre-install `libgssapi-krb5-2`, `gss-ntlmssp`, `krb5-user`, and `libkrb5-3`, register `/etc/gss/mech.d/mech.ntlmssp.conf` (and `/etc/gss/mech`) with read permissions for the non-root container user (`10001:10001`), and provide `/app/data/gss` (`0700`) for runtime GSS state.
+
+> [!CAUTION]
+> **Active Directory Account Lockout Warning:**
+> - **Never** pass a Windows domain account (`DOMAIN\user`) via `User ID=...;Password=...` without `Integrated Security=true`! `Microsoft.Data.SqlClient` sends `User ID` as a SQL Server login, which fails for AD accounts and increments the Active Directory bad-password counter until the service account is locked out.
+> - Autheris detects and rejects domain-qualified `User ID` values without `Integrated Security=true` both at startup (`GatewayStartupValidator.ValidateSqlServerWindowsAuth`) and before opening any connection (`SqlServerWindowsAuthConfigurator.PrepareConnection`), **without attempting a network login**.
+
+##### Option A: Per-Datasource `WindowsAuth` Configuration with Secret Reference (Recommended)
+
+Configure `DataSources:Connections:<name>:WindowsAuth` with `Domain`, `Username`, and `PasswordRef` (pointing to a mounted container secret `file:/run/secrets/...` or Key Vault secret). Autheris automatically enforces `Integrated Security=true`, resolves the secret, materializes a `0600`-restricted `NTLM_USER_FILE` in `/app/data/gss/ntlm_users`, and sets `NTLM_USER_FILE`, `NTLMUSER`, and `NETBIOS_DOMAIN_NAME`:
+
+```json
+"DataSources": {
+  "Connections": {
+    "LweBi": {
+      "Provider": "SqlServer",
+      "ConnectionString": "Server=10.160.2.94,1433;Database=Reporting;Integrated Security=true;Encrypt=True;TrustServerCertificate=True;",
+      "WindowsAuth": {
+        "Mode": "Ntlm",
+        "Domain": "LWEW2K",
+        "Username": "lwesvcbidbreportread",
+        "PasswordRef": "file:/run/secrets/lwe_bi_password"
+      }
+    }
+  }
+}
+```
+
+##### Option B: Pre-Mounted `NTLM_USER_FILE` (`DOMAIN:USER:PASSWORD`)
+
+Mount a credentials file with permissions `0400` or `0600` owned by `10001:10001` where each line follows the `gss-ntlmssp` format `DOMAIN:USER:PASSWORD`:
+
+```text
+LWEW2K:lwesvcbidbreportread:<PASSWORD>
+```
+
+Docker Compose example:
+
+```yaml
+services:
+  autheris:
+    image: ghcr.io/themulle/autheris:latest
+    environment:
+      NTLM_USER_FILE: /run/secrets/ntlm_users
+      Gateway__DataSources__Connections__LweBi__Provider: SqlServer
+      Gateway__DataSources__Connections__LweBi__ConnectionString: "Server=10.160.2.94,1433;Database=Reporting;Integrated Security=true;Encrypt=True;TrustServerCertificate=True;"
+      Gateway__DataSources__Connections__LweBi__WindowsAuth__Mode: Ntlm
+      Gateway__DataSources__Connections__LweBi__WindowsAuth__NtlmUserFilePath: /run/secrets/ntlm_users
+    secrets:
+      - source: ntlm_users
+        target: /run/secrets/ntlm_users
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+
+secrets:
+  ntlm_users:
+    file: ./secrets/ntlm_users
+```
+
+##### Option C: Kerberos (`krb5.conf` + Keytab)
+
+When a Kerberos KDC is reachable and the SQL Server SPN (`MSSQLSvc/<fqdn>:1433@REALM`) is registered in Active Directory:
+
+```json
+"DataSources": {
+  "Connections": {
+    "LweBi": {
+      "Provider": "SqlServer",
+      "ConnectionString": "Server=sql-prod.lwe.local,1433;Database=Reporting;Integrated Security=true;Encrypt=Mandatory;TrustServerCertificate=false;",
+      "WindowsAuth": {
+        "Mode": "Kerberos",
+        "KerberosConfigPath": "/etc/krb5.conf",
+        "KerberosKeytabPath": "/run/secrets/sql_client.keytab",
+        "ServicePrincipalName": "MSSQLSvc/sql-prod.lwe.local:1433@LWE.LOCAL"
+      }
+    }
+  }
+}
+```
+
 ---
 
 ### 2.5 `Caching` (Zweistufiges Caching & Multi-Instance Redis Clustering)

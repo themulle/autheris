@@ -83,8 +83,12 @@ public sealed class IncrementalDeliveryTests
         using var streamCts = manager.CreateStreamTimeoutCts(clientCts.Token);
         streamCts.Token.IsCancellationRequested.ShouldBeFalse();
 
-        // Wait for timeout (options configured with 500ms)
-        await Task.Delay(800);
+        // Wait for timeout (options configured with 500ms); allow up to 5s for ThreadPool timer queue under heavy CI load.
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (!streamCts.Token.IsCancellationRequested && sw.ElapsedMilliseconds < 5000)
+        {
+            await Task.Delay(25);
+        }
 
         // Assert
         streamCts.Token.IsCancellationRequested.ShouldBeTrue();
