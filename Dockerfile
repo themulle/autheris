@@ -29,6 +29,8 @@ EXPOSE 8080
 # DEP-4: Verhindert SQLite Error 14 ('unable to open database file'), da /app root gehört
 # Issue #102: Install GSSAPI, gss-ntlmssp, and Kerberos runtime packages for SQL Server Windows Authentication (NTLM/Kerberos)
 ENV APP_UID=10001
+RUN mkdir -p /app/data && chown -R $APP_UID:$APP_UID /app/data
+RUN mkdir -p /app/shared-docs /app/scratch && chown -R $APP_UID:$APP_UID /app/shared-docs /app/scratch
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libgssapi-krb5-2 \
@@ -42,8 +44,8 @@ RUN apt-get update \
         && cp -f /etc/gss/mech.d/mech.ntlmssp.conf /etc/gss/mech \
         && chmod 0644 /etc/gss/mech; \
     fi \
-    && mkdir -p /app/data/gss /app/shared-docs /app/scratch \
-    && chown -R $APP_UID:$APP_UID /app/data /app/shared-docs /app/scratch \
+    && mkdir -p /app/data/gss \
+    && chown -R $APP_UID:$APP_UID /app/data/gss \
     && chmod 0700 /app/data/gss
 VOLUME /app/data
 VOLUME /app/shared-docs

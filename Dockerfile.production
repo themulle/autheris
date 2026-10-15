@@ -20,6 +20,7 @@ ENV ASPNETCORE_HTTP_PORTS=8080 \
 EXPOSE 8080
 
 # Setup data volume for SQLite governance DB and install GSSAPI/NTLM/Kerberos runtime with non-root ownership (10001:10001)
+RUN mkdir -p /app/data && chown -R 10001:10001 /app/data
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libgssapi-krb5-2 \
@@ -34,7 +35,7 @@ RUN apt-get update \
         && chmod 0644 /etc/gss/mech; \
     fi \
     && mkdir -p /app/data/gss \
-    && chown -R 10001:10001 /app/data \
+    && chown -R 10001:10001 /app/data/gss \
     && chmod 0700 /app/data/gss
 VOLUME /app/data
 
