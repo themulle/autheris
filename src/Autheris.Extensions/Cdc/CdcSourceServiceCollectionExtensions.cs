@@ -8,9 +8,11 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 public static class CdcSourceServiceCollectionExtensions
 {
     /// <summary>
-    /// CDC sources feeding the core stream backbone (ICdcEventChannel): native MSSQL Change Tracking poller
-    /// (F-CDC-02) and the Debezium envelope parser (<see cref="DebeziumCdcParser"/>, used statically by the CDC endpoint).
-    /// The durable <see cref="IMssqlWatermarkStore"/> is provided by the host (governance database); the polling worker is only registered when <c>Gateway:MssqlChangeTracking:Enabled</c> is true.
+    /// CDC sources: the native MSSQL Change Tracking producer (F-CDC-02), which appends to the durable governed stream
+    /// (<c>ICdcStreamStore</c>, provided by the host), and the Debezium envelope parser (<see cref="DebeziumCdcParser"/>, used statically
+    /// by the CDC endpoint). The producer (<see cref="CdcProducerService"/>, one fenced lease per tracked table) is only registered when
+    /// <c>Gateway:MssqlChangeTracking:Enabled</c> is true. The host also provides <c>ICdcStreamCrypto</c>, <c>ICdcPayloadCodec</c> and
+    /// <c>ICdcStreamSignal</c>.
     /// </summary>
     public static IServiceCollection AddCdcSourceIntegration(this IServiceCollection services, GatewayOptions gatewayOptions)
     {
@@ -22,12 +24,13 @@ public static class CdcSourceServiceCollectionExtensions
             return services;
         }
 
+        services.TryAddSingleton<ICdcTableActivator, CdcTableActivator>();
+        services.TryAddSingleton<CdcChangeEventBuilder>();
         services.TryAddSingleton<IMssqlChangeTrackingPoller, MssqlChangeTrackingPoller>();
         if (gatewayOptions.MssqlChangeTracking.Enabled)
         {
             services.TryAddSingleton<CdcPollFailureTracker>();
-            services.TryAddScoped<MssqlChangeTrackingPollJob>();
-            services.AddHostedService<MssqlChangeTrackingHostedService>();
+            services.AddHostedService<CdcProducerService>();
         }
 
         return services;
