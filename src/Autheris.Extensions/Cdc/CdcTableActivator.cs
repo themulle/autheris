@@ -3,6 +3,7 @@ namespace Autheris.Extensions.Cdc;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Security;
@@ -243,9 +244,10 @@ public sealed class CdcTableActivator : ICdcTableActivator
             return CdcActivationResult.Fail(CdcActivationCodes.TenantColumnMissing);
         }
 
-        // 4..6 need the source
-        await using (var conn = await _connectionFactory.CreateOpenConnectionAsync(source, ct).ConfigureAwait(false))
+        // 4..6 need the source; a login without VIEW CHANGE TRACKING / SELECT fails with a stable code, never as a transient error
+        try
         {
+            await using var conn = await _connectionFactory.CreateOpenConnectionAsync(source, ct).ConfigureAwait(false);
             var minValid = await CdcSourceQueries.GetMinValidVersionAsync(conn, null, table, settings.QueryTimeoutSeconds, ct).ConfigureAwait(false);
             if (minValid is null)
             {
@@ -263,6 +265,10 @@ public sealed class CdcTableActivator : ICdcTableActivator
             {
                 return CdcActivationResult.Fail(CdcActivationCodes.SnapshotIsolationOff);
             }
+        }
+        catch (DbException ex) when (CdcSourceQueries.IsPermissionDenied(ex))
+        {
+            return CdcActivationResult.Fail(CdcActivationCodes.TrackingDisabled);
         }
 
         // 7. stream keys

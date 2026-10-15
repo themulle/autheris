@@ -86,7 +86,7 @@ internal static class CdcSourceQueries
     }
 
     /// <summary>
-    /// Opens and commits a SNAPSHOT transaction that reads nothing. Returns false when the database has snapshot isolation off
+    /// Opens and commits a SNAPSHOT transaction that reads one row (a plan that touches no data would not raise error 3952). Returns false when the database has snapshot isolation off
     /// (error 3952); other failures propagate as transient.
     /// </summary>
     public static async Task<bool> ProbeSnapshotIsolationAsync(DbConnection conn, TableIdentifier table, int timeoutSeconds, CancellationToken ct)
@@ -96,7 +96,7 @@ internal static class CdcSourceQueries
             await using var tx = await conn.BeginTransactionAsync(IsolationLevel.Snapshot, ct).ConfigureAwait(false);
             await using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = $"SELECT TOP (0) 1 FROM {Qualified(table)};";
+                cmd.CommandText = $"SELECT TOP (1) 1 FROM {Qualified(table)};";
                 cmd.Transaction = tx;
                 cmd.CommandTimeout = timeoutSeconds;
                 await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
@@ -110,6 +110,11 @@ internal static class CdcSourceQueries
             return false;
         }
     }
+
+    /// <summary>
+    /// Permission denied on the object (SQL Server errors 229, 230, 262, 297, 300): the login lacks <c>VIEW CHANGE TRACKING</c> or <c>SELECT</c>.
+    /// </summary>
+    public static bool IsPermissionDenied(DbException ex) => ErrorNumber(ex) is 229 or 230 or 262 or 297 or 300;
 
     /// <summary>The provider error number (<c>SqlException.Number</c>) of a database exception, or 0.</summary>
     public static int ErrorNumber(DbException ex) =>

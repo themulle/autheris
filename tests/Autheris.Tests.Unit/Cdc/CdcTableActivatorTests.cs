@@ -138,6 +138,18 @@ public sealed class CdcTableActivatorTests
     }
 
     [Theory]
+    [InlineData(229)]
+    [InlineData(297)]
+    public async Task PermissionDenied_OnTheSource_IsTrackingDisabled_NotATransientError(int errorNumber)
+    {
+        // SEC-CDC99-22: the login lacks VIEW CHANGE TRACKING
+        var (result, h) = await ActivateAsync(h => h.Source.OnStatement = _ => throw new FakeSqlException(errorNumber));
+
+        result.Code.ShouldBe(CdcActivationCodes.TrackingDisabled);
+        h.InnerStore.Only.ActivationCode.ShouldBe(CdcActivationCodes.TrackingDisabled);
+    }
+
+    [Theory]
     [InlineData("Id,Other")]
     [InlineData("Other")]
     [InlineData("")]

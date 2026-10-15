@@ -40,6 +40,8 @@
     <Compile Include="..\Autheris.Tests.Unit\TestDoubles\SyntheticSqlDataSourceExecutor.cs" Link="TestDoubles\SyntheticSqlDataSourceExecutor.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Webhooks\WebhookOutboxContractTests.cs" Link="Webhooks\WebhookOutboxContractTests.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Persistence\CloudEventSubscriptionStoreContractTests.cs" Link="Persistence\CloudEventSubscriptionStoreContractTests.cs" />
+    <!-- REQ-CDC-99: stream store, crypto and codec test doubles of the producer tests (the real ones are built by I1-A/I1-C). -->
+    <Compile Include="..\Autheris.Tests.Unit\Cdc\CdcStreamTestDoubles.cs" Link="Cdc\CdcStreamTestDoubles.cs" />
   </ItemGroup>
 
   <ItemGroup>
