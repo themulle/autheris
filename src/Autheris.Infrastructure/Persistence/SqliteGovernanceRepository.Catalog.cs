@@ -149,7 +149,7 @@ public partial class SqliteGovernanceRepository
     private static async Task<bool> SqliteTableExistsAsync(SqliteConnection conn, SqliteTransaction? tx, string tableName, CancellationToken ct)
     {
         using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        if (tx != null) cmd.Transaction = tx;
         cmd.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = @name LIMIT 1";
         cmd.Parameters.AddWithValue("@name", tableName);
         var res = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
@@ -173,7 +173,7 @@ public partial class SqliteGovernanceRepository
         if (await SqliteTableExistsAsync(conn, tx, "TABLE_PRIMARY_KEY_COLUMNS", ct).ConfigureAwait(false))
         {
             using var pkCmd = conn.CreateCommand();
-            pkCmd.Transaction = tx;
+            if (tx != null) pkCmd.Transaction = tx;
             pkCmd.CommandText = @"SELECT table_column_id FROM TABLE_PRIMARY_KEY_COLUMNS
                                   WHERE table_id = @tid
                                   ORDER BY key_ordinal ASC";
@@ -199,7 +199,7 @@ public partial class SqliteGovernanceRepository
             await SqliteTableExistsAsync(conn, tx, "TABLE_INDEX_COLUMNS", ct).ConfigureAwait(false))
         {
             using var idxCmd = conn.CreateCommand();
-            idxCmd.Transaction = tx;
+            if (tx != null) idxCmd.Transaction = tx;
             idxCmd.CommandText = @"SELECT i.id, i.index_name, i.is_unique, ic.table_column_id
                                    FROM TABLE_INDEXES i
                                    JOIN TABLE_INDEX_COLUMNS ic ON i.id = ic.index_id

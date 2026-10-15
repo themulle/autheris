@@ -10,7 +10,7 @@ public partial class PostgreSqlGovernanceRepository
     private static async Task<bool> PostgresTableExistsAsync(NpgsqlConnection conn, NpgsqlTransaction? tx, string tableName, CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        if (tx != null) cmd.Transaction = tx;
         cmd.CommandText = "SELECT to_regclass(@name) IS NOT NULL";
         cmd.Parameters.AddWithValue("@name", tableName);
         var res = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);

@@ -11,7 +11,7 @@ public partial class SqlServerGovernanceRepository
     private static async Task<bool> SqlServerTableExistsAsync(SqlConnection conn, SqlTransaction? tx, string tableName, CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        if (tx != null) cmd.Transaction = tx;
         cmd.CommandText = "SELECT CASE WHEN OBJECT_ID(@name, N'U') IS NOT NULL THEN 1 ELSE 0 END";
         cmd.Parameters.AddWithValue("@name", "dbo." + tableName);
         var res = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
