@@ -186,7 +186,7 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
         bool unordered = planned.Ordering == DefaultOrderingKind.None;
         if (unordered && offset > 0)
         {
-            throw new ArgumentException(GovernedTableReadPlanner.NoOrderableColumnMessage, nameof(request));
+            throw new UnorderedPagingException(nameof(request));
         }
 
         // 6. Execution & Routing
@@ -238,7 +238,7 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
         if (unordered && hasMore)
         {
             // Refuse rather than return a first page that the next page may duplicate or skip.
-            throw new ArgumentException(GovernedTableReadPlanner.NoOrderableColumnMessage, nameof(request));
+            throw new UnorderedPagingException(nameof(request));
         }
 
         int pageCount = Math.Min(limit, available);

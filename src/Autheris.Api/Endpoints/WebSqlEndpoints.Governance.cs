@@ -17,6 +17,12 @@ using Microsoft.Extensions.Logging;
 
 public static partial class WebSqlEndpoints
 {
+    /// <summary>Stable problem type URI of the WebSQL execution timeout (RFC 9457).</summary>
+    /// <summary>Same value as <c>GovernedSqlErrorCodes.Timeout</c> (stable); used when the mapper did not classify the timeout.</summary>
+    private const string FallbackTimeoutCode = "SQL_TIMEOUT";
+
+    internal const string ExecutionTimeoutProblemType = "urn:autheris:problem:websql-execution-timeout";
+
     internal static async Task WriteWebSqlErrorAsync(
         HttpContext httpContext,
         Exception ex,
@@ -81,14 +87,7 @@ public static partial class WebSqlEndpoints
 
             case Exception timeoutEx when IsExecutionTimeout(timeoutEx):
                 logger.LogWarning(timeoutEx, "WebSQL execution timed out. TraceId={TraceId}", httpContext.TraceIdentifier);
-                httpContext.Response.StatusCode = StatusCodes.Status504GatewayTimeout;
-                httpContext.Response.ContentType = "application/json; charset=utf-8";
-                await httpContext.Response.WriteAsJsonAsync(new
-                {
-                    error = "GatewayTimeout",
-                    message = GenericTimeoutMessage,
-                    traceId = httpContext.TraceIdentifier
-                }, ct);
+                await WriteTimeoutProblemAsync(httpContext, FallbackTimeoutCode, ct);
                 break;
 
             case ArgumentException argEx:
@@ -118,9 +117,39 @@ public static partial class WebSqlEndpoints
         }
     }
 
-    private static Task WriteMappedErrorAsync(
-        HttpContext httpContext, Exception ex, SqlErrorMapping mapped, ILogger logger, CancellationToken ct) =>
-        SqlErrorResponse.WriteAsync(httpContext, ex, mapped, logger, "WebSQL", ct);
+    private static async Task WriteMappedErrorAsync(
+        HttpContext httpContext, Exception ex, SqlErrorMapping mapped, ILogger logger, CancellationToken ct)
+    {
+        if (mapped.Status != StatusCodes.Status504GatewayTimeout)
+        {
+            await SqlErrorResponse.WriteAsync(httpContext, ex, mapped, logger, "WebSQL", ct);
+            return;
+        }
+
+        SqlCompilerErrorMapper.RecordOutcome(mapped);
+        logger.LogWarning(ex, "WebSQL rejected with {Code}. TraceId={TraceId}", mapped.Code, httpContext.TraceIdentifier);
+        await WriteTimeoutProblemAsync(httpContext, mapped.Code, ct);
+    }
+
+    /// <summary>
+    /// D-11 / SEC-94-13: the execution timeout as RFC 9457 problem details (<c>application/problem+json</c>), written explicitly
+    /// so that no problem-details service or developer exception page can add the query, the exception type or a stack trace.
+    /// <c>code</c> is the stable extension member of the former body.
+    /// </summary>
+    private static Task WriteTimeoutProblemAsync(HttpContext httpContext, string code, CancellationToken ct)
+    {
+        httpContext.Response.StatusCode = StatusCodes.Status504GatewayTimeout;
+        httpContext.Response.ContentType = "application/problem+json; charset=utf-8";
+        return httpContext.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["type"] = ExecutionTimeoutProblemType,
+            ["title"] = "Gateway Timeout",
+            ["status"] = StatusCodes.Status504GatewayTimeout,
+            ["detail"] = GenericTimeoutMessage,
+            ["code"] = code,
+            ["traceId"] = httpContext.TraceIdentifier
+        }), ct);
+    }
 
     /// <summary>Database command timeouts (e.g. SqlException "Execution Timeout Expired") and TimeoutExceptions.</summary>
     private static bool IsExecutionTimeout(Exception ex)

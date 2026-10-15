@@ -199,14 +199,14 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
         }
     }
 
-    /// <summary>A rejected read intent (unknown column, no order for paging) is a client error (400), not a server fault.</summary>
+    /// <summary>A paged read without any possible order is a client error (400), not a server fault.</summary>
     private PlannedTableRead PlanOrThrow(TableReadIntent intent, TableMetadata metadata, TableAccessDecision decision)
     {
         try
         {
             return _planner.Plan(intent, metadata, decision);
         }
-        catch (ArgumentException ex)
+        catch (UnorderedPagingException ex)
         {
             throw new GatewayInvalidQueryException(ex.Message);
         }

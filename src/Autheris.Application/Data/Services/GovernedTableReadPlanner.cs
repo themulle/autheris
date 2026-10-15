@@ -11,6 +11,18 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
 /// <summary>
+/// A paged read has no deterministic order (no orderable column readable in clear text). An <see cref="ArgumentException"/>
+/// (client error); the fixed message names no column.
+/// </summary>
+public sealed class UnorderedPagingException : ArgumentException
+{
+    public UnorderedPagingException(string? paramName)
+        : base(GovernedTableReadPlanner.NoOrderableColumnMessage, paramName)
+    {
+    }
+}
+
+/// <summary>
 /// WP-ARC-B-01: the shared table-read planner extracted from <c>GovernedDataQueryService</c> (column authorization,
 /// oracle-inference guard on filter and order columns, SQL formulation). Stateless and thread-safe.
 /// <para>
@@ -204,7 +216,7 @@ public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
 
         if (defaultOrdering.Kind == DefaultOrderingKind.None && intent.Offset > 0)
         {
-            throw new ArgumentException(NoOrderableColumnMessage, nameof(intent));
+            throw new UnorderedPagingException(nameof(intent));
         }
 
         items.AddRange(defaultOrdering.Columns.Select(DataApiFilterTranslator.QuoteIdentifier));
