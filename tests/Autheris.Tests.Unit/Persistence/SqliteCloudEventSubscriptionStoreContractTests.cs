@@ -30,7 +30,7 @@ public sealed class SqliteCloudEventSubscriptionStoreContractTests : CloudEventS
         Task.FromResult<ICloudEventSubscriptionStore?>(Track(NewRepository(_connectionString)));
 
     [Fact]
-    public void SubscriptionsPartial_AccessesConnectionAndLockOnlyThroughOneHelper()
+    public void SubscriptionsPartial_RunsEveryStatementInAWriteOrReadScope_NeverOnASharedConnection()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Autheris.sln")))
@@ -39,11 +39,16 @@ public sealed class SqliteCloudEventSubscriptionStoreContractTests : CloudEventS
         }
 
         dir.ShouldNotBeNull();
-        var text = File.ReadAllText(Path.Combine(dir!.FullName, "src", "Autheris.Infrastructure", "Persistence", "SqliteGovernanceRepository.CloudEventSubscriptions.cs"));
+        var file = Path.Combine(dir!.FullName, "src", "Autheris.Infrastructure", "Persistence", "SqliteGovernanceRepository.CloudEventSubscriptions.cs");
+        var text = File.ReadAllText(file);
 
-        System.Text.RegularExpressions.Regex.Count(text, @"\b_connection\b").ShouldBe(1);
-        System.Text.RegularExpressions.Regex.Count(text, @"\b_lock\b").ShouldBe(2);
-        text.ShouldContain("WithSubscriptionsConnectionAsync");
+        foreach (var forbidden in new[] { "_connection", "_lock", "_writeGate", "Connections." })
+        {
+            text.ShouldNotContain(forbidden);
+        }
+
+        System.Text.RegularExpressions.Regex.Count(text, @"(?<!reader\.)(?<!\.)\bWriteAsync[<(]").ShouldBe(2);
+        System.Text.RegularExpressions.Regex.Count(text, @"(?<!reader\.)(?<!\.)\bReadAsync[<(]").ShouldBe(1);
     }
 
     [Fact]
@@ -52,7 +57,7 @@ public sealed class SqliteCloudEventSubscriptionStoreContractTests : CloudEventS
         var repo = NewRepository(_connectionString);
         Track(repo);
         await ((ICloudEventSubscriptionStore)repo).RegisterSubscriptionAsync(Sub("good"), Quota);
-        await using (var cmd = repo.Connection.CreateCommand())
+        await using (var cmd = repo.RawConnection().CreateCommand())
         {
             cmd.CommandText = "INSERT INTO CLOUDEVENT_SUBSCRIPTIONS (id, tenant_id, target_url, filter_table, filter_operations, is_enabled, created_ms) VALUES ('bad','tenant-a','https://e.test','*','{not json',1,1)";
             await cmd.ExecuteNonQueryAsync();
