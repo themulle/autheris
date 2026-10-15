@@ -109,6 +109,38 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task ManifestApply_EndToEnd_UsesTheTransactionalReplace_IsIdempotentAndRevokesChangedPolicies()
+    {
+        await EnsureTableAsync();
+        var svc = new Autheris.Application.Governance.Services.DeclarativeConsentApplyService(_repo, _repo, _repo);
+        var caller = ManifestAdmin(Admin.Value, TenantA.Value);
+        var policy = new DeclarativeConsentPolicy(_table.Domain, _table.Schema, _table.TableName, "Role", "Analyst", "Allow");
+        var epochBefore = await _repo.GetTableEpochAsync(_table);
+
+        var first = await svc.ApplyManifestAsync(caller, new DeclarativeConsentManifest("1", [policy]));
+        var epochAfterFirst = await _repo.GetTableEpochAsync(_table);
+        var second = await svc.ApplyManifestAsync(caller, new DeclarativeConsentManifest("1", [policy]));
+        var changed = policy with { ColumnRules = [new DeclarativeColumnRule("id", "Mask")] };
+        var third = await svc.ApplyManifestAsync(caller, new DeclarativeConsentManifest("2", [changed]));
+
+        first.Applied.ShouldBe(1);
+        second.Unchanged.ShouldBe(1);
+        second.Applied.ShouldBe(0);
+        third.Applied.ShouldBe(1);
+        third.Revoked.ShouldBe(1);
+        epochAfterFirst.ShouldBe(epochBefore + 1);
+        (await _repo.GetTableEpochAsync(_table)).ShouldBe(epochAfterFirst + 1);
+        (await _repo.GetActiveRoleConsentsAsync(_table, "Analyst", TenantA, DateTimeOffset.UtcNow)).Count.ShouldBe(1);
+    }
+
+    private static System.Security.Claims.ClaimsPrincipal ManifestAdmin(string sid, string tenant) => new(new System.Security.Claims.ClaimsIdentity(
+    [
+        new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, sid),
+        new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "GOVERNANCE_ADMIN"),
+        new System.Security.Claims.Claim("tenant_id", tenant)
+    ], "test"));
+
+    [Fact]
     public async Task Replace_FaultAfterTheRevocation_LeavesNothingChanged()
     {
         await EnsureTableAsync();

@@ -201,4 +201,20 @@ public sealed class AccessProfileAssignmentRulesTests
         forward.ShouldBe(backward);
         forward.ShouldBe(["s", "d", "u"]);
     }
+
+    [Fact]
+    public void ProfileClamp_AppliesToLegacyProfilesOnly_AssignmentBackedProfilesAreBoundedPerAssignment()
+    {
+        var legacy = Profile(MaskingPolicyMode.Unmasked);
+        legacy.IsActive(Now).ShouldBeFalse(); // created 400 days ago, no assignments: clamped to 30 days
+
+        var backed = Profile(MaskingPolicyMode.Unmasked);
+        backed.Assignments.Add(new AccessProfileAssignment
+        {
+            Subject = "analysts", SubjectType = AccessProfileSubjectType.Group, AssignedAt = Now.AddDays(-1), CreatedBy = "req", ApprovedBy = "app"
+        });
+        backed.IsActive(Now).ShouldBeTrue();
+        AccessProfileAssignmentRules.IsEffective(backed, backed.Assignments[0], Now).ShouldBeTrue();
+        AccessProfileAssignmentRules.IsEffective(backed, backed.Assignments[0] with { ApprovedBy = null }, Now).ShouldBeFalse();
+    }
 }

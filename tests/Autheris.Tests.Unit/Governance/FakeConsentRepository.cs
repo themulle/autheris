@@ -16,6 +16,9 @@ internal sealed class FakeConsentRepository : IConsentRepository
 
     public IReadOnlyList<Consent> Active(DateTimeOffset at) => _consents.Where(c => c.IsActive(at)).ToList();
 
+    public Task<Autheris.Application.Governance.Paging.ConsentPage> GetConsentPageAsync(Autheris.Application.Governance.Paging.ConsentPageQuery query, CancellationToken ct = default) =>
+        throw new NotImplementedException();
+
     public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, CancellationToken ct = default)
     {
         ReplaceCalls++;

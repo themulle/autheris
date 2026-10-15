@@ -1037,4 +1037,74 @@ public sealed class AccessProfileTests
 
         status.ShouldBe(StatusCodes.Status404NotFound);
     }
+
+    [Fact]
+    public async Task BulkConsent_StoresTypedTimeBoundAssignmentThroughStrictAssignApi()
+    {
+        var repo = new InMemoryAccessProfileRepository();
+        var auditRepo = Substitute.For<IAuditLogRepository>();
+        var context = CreateEndpointContext(callerSid: "S-1-5-21-ADMIN", callerName: "admin", auditRepo: auditRepo);
+        var req = new BulkConsentRequest
+        {
+            Subject = "alice", SubjectType = "User", MaskingMode = "Default", Tables = ["tem.*"],
+            Justification = "Support case needs access to telemetry data", ValidDays = 7
+        };
+
+        var result = await GovernanceEndpoints.CreateBulkConsentAsync(req, context, repo, CancellationToken.None);
+        var (status, body) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status201Created, body);
+        var profile = (await repo.GetAllProfilesAsync(TenantLiebherr)).ShouldHaveSingleItem();
+        var assignment = profile.Assignments.ShouldHaveSingleItem();
+        assignment.Subject.ShouldBe("alice");
+        assignment.SubjectType.ShouldBe(AccessProfileSubjectType.User);
+        assignment.ExpiresAt.ShouldNotBeNull();
+        assignment.CreatedBy.ShouldBe("S-1-5-21-ADMIN");
+        await auditRepo.Received().RecordAuditEventAsync(Arg.Is<AuditLogEntry>(e => e.EventType == Autheris.Domain.Audit.AuditEventTypes.ConsentGranted), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task BulkConsent_GroupSubject_IsStoredAsGroupAssignment()
+    {
+        var repo = new InMemoryAccessProfileRepository();
+        var context = CreateEndpointContext();
+        var req = new BulkConsentRequest
+        {
+            Subject = "analysts", SubjectType = "Group", MaskingMode = "Default", Tables = ["tem.*"],
+            Justification = "Standing access for the analyst group", ValidDays = 30
+        };
+
+        var result = await GovernanceEndpoints.CreateBulkConsentAsync(req, context, repo, CancellationToken.None);
+        var (status, body) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status201Created, body);
+        var profile = (await repo.GetAllProfilesAsync(TenantLiebherr)).ShouldHaveSingleItem();
+        profile.Assignments.ShouldHaveSingleItem().SubjectType.ShouldBe(AccessProfileSubjectType.Group);
+    }
+
+    [Fact]
+    public async Task BulkConsent_AssignmentRejectedByRules_Returns400AndLeavesNoProfileBehind()
+    {
+        var inner = new InMemoryAccessProfileRepository();
+        var repo = Substitute.For<IAccessProfileRepository>();
+        repo.UpsertProfileAsync(Arg.Any<AccessProfile>(), Arg.Any<CancellationToken>())
+            .Returns(ci => inner.UpsertProfileAsync(ci.Arg<AccessProfile>()));
+        repo.DeleteProfileAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci => inner.DeleteProfileAsync(ci.Arg<TenantId>(), ci.Arg<string>()));
+        repo.AssignProfileAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<AccessProfileAssignment>(), Arg.Any<CancellationToken>())
+            .Returns<Task<AccessProfileAssignment>>(_ => throw new AccessProfileAssignmentRejectedException(AccessProfileAssignmentRules.TooLong, "too long"));
+        var context = CreateEndpointContext();
+        var req = new BulkConsentRequest
+        {
+            Subject = "alice", MaskingMode = "Default", Tables = ["tem.*"],
+            Justification = "Support case needs access to telemetry data", ValidDays = 7
+        };
+
+        var result = await GovernanceEndpoints.CreateBulkConsentAsync(req, context, repo, CancellationToken.None);
+        var (status, body) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        body.ShouldContain(AccessProfileAssignmentRules.TooLong);
+        (await inner.GetAllProfilesAsync(TenantLiebherr)).ShouldBeEmpty();
+    }
 }

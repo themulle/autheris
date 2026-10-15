@@ -171,7 +171,8 @@ public static class AccessProfileAssignmentRules
     /// <summary>Whether <paramref name="a"/> grants <paramref name="profile"/> at <paramref name="now"/>. Anything doubtful is not effective (fail closed).</summary>
     public static bool IsEffective(AccessProfile profile, AccessProfileAssignment a, DateTimeOffset now)
     {
-        if (!profile.IsActive(now))
+        // The profile's own validity is the stored one; the clamp of Unmasked access happens per assignment below (EffectiveExpiry).
+        if (profile.ValidTo is { } profileEnd && profileEnd <= now)
         {
             return false;
         }

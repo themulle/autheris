@@ -26,6 +26,9 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
 
     protected abstract Task DisposeRepositoryAsync();
 
+    /// <summary>Makes <paramref name="sid"/> a member of the GovernanceAdmin role (the manifest apply actor must be authorized to revoke).</summary>
+    protected abstract Task GrantGovernanceAdminAsync(string sid);
+
     public async Task InitializeAsync()
     {
         var repo = await CreateRepositoryAsync();
@@ -241,6 +244,37 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         (await Repo.GetConsentByIdAsync(old.Id))!.IsRevoked.ShouldBeTrue();
         (await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Dave"), new Sid("S-1-5-21-Erin")], seed.Table, seed.Now, TenantA)).Count(c => c.GranteeType != GranteeType.Role).ShouldBe(2);
         (await Repo.GetTableEpochAsync(seed.Table)).ShouldBe(before + 1);
+    }
+
+    [Fact]
+    public async Task ManifestApply_EndToEnd_UsesTheTransactionalReplace_IsIdempotentAndRevokesChangedPolicies()
+    {
+        if (!Available) return;
+        var seed = await SeedAsync();
+        await GrantGovernanceAdminAsync("S-1-5-21-MANIFEST-ADMIN");
+        var svc = new Autheris.Application.Governance.Services.DeclarativeConsentApplyService(Repo, Repo, Repo);
+        var caller = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+        [
+            new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "S-1-5-21-MANIFEST-ADMIN"),
+            new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "GOVERNANCE_ADMIN"),
+            new System.Security.Claims.Claim("tenant_id", TenantA.Value)
+        ], "test"));
+        var policy = new DeclarativeConsentPolicy(seed.Table.Domain, seed.Table.Schema, seed.Table.TableName, "Role", "manifest-role", "Allow");
+        var epochBefore = await Repo.GetTableEpochAsync(seed.Table);
+
+        var first = await svc.ApplyManifestAsync(caller, new DeclarativeConsentManifest("1", [policy]));
+        var epochAfterFirst = await Repo.GetTableEpochAsync(seed.Table);
+        var second = await svc.ApplyManifestAsync(caller, new DeclarativeConsentManifest("1", [policy]));
+        var third = await svc.ApplyManifestAsync(caller, new DeclarativeConsentManifest("2", [policy with { ColumnRules = [new DeclarativeColumnRule("id", "Mask")] }]));
+
+        first.Applied.ShouldBe(1);
+        second.Unchanged.ShouldBe(1);
+        second.Applied.ShouldBe(0);
+        third.Applied.ShouldBe(1);
+        third.Revoked.ShouldBe(1);
+        epochAfterFirst.ShouldBe(epochBefore + 1);
+        (await Repo.GetTableEpochAsync(seed.Table)).ShouldBe(epochAfterFirst + 1);
+        (await Repo.GetActiveRoleConsentsAsync(seed.Table, "manifest-role", TenantA, DateTimeOffset.UtcNow)).Count.ShouldBe(1);
     }
 
     [Fact]

@@ -242,7 +242,7 @@ public static partial class GovernanceEndpoints
             MaskingMode = mode,
             TargetTables = targetTables,
             RowFilterPredicate = string.IsNullOrWhiteSpace(req.RowFilter) ? null : req.RowFilter.Trim(),
-            AssignedSubjects = [trimmedSubject],
+            AssignedSubjects = [],
             CreatedAt = now,
             ValidTo = validTo,
             Justification = req.Justification.Trim(),
@@ -250,6 +250,36 @@ public static partial class GovernanceEndpoints
         };
 
         await accessProfileRepo.UpsertProfileAsync(profile, ct).ConfigureAwait(false);
+
+        // WP-SC-03: the assignment goes through the strict assignment API (time-bound individual grants, Unmasked and break-glass rules).
+        // A rejection leaves no unassigned profile behind.
+        var assignmentSubjectType = bulkGranteeType switch
+        {
+            GranteeType.Group => AccessProfileSubjectType.Group,
+            GranteeType.Role => AccessProfileSubjectType.Role,
+            _ => AccessProfileSubjectType.User
+        };
+        try
+        {
+            await accessProfileRepo.AssignProfileAsync(tenantId, profileId, new AccessProfileAssignment
+            {
+                Subject = trimmedSubject,
+                SubjectType = assignmentSubjectType,
+                ExpiresAt = validTo,
+                CreatedBy = callerSid,
+                Justification = profile.Justification
+            }, ct).ConfigureAwait(false);
+        }
+        catch (AccessProfileAssignmentRejectedException ex)
+        {
+            await accessProfileRepo.DeleteProfileAsync(tenantId, profileId, CancellationToken.None).ConfigureAwait(false);
+            return Results.Json(new { error = ex.Code, message = "The access profile assignment violates the grant rules." }, statusCode: StatusCodes.Status400BadRequest);
+        }
+        catch
+        {
+            await accessProfileRepo.DeleteProfileAsync(tenantId, profileId, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
 
         // Tier-A audit anchoring (CONSENT_GRANTED)
         var auditEvent = new AuditLogEntry

@@ -52,6 +52,22 @@ public sealed class SqlServerConsentQueryContractTests : ConsentQueryContractTes
         }
     }
 
+    protected override async Task GrantGovernanceAdminAsync(string sid)
+    {
+        await using var conn = new SqlConnection(_db!.ConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = new SqlCommand(@"
+            INSERT INTO ROLES (id, role_name, description)
+            SELECT @rid, 'GovernanceAdmin', 'Governance Administrator'
+            WHERE NOT EXISTS (SELECT 1 FROM ROLES WHERE role_name = 'GovernanceAdmin');
+            INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
+            SELECT @m, id, 'User', @sid FROM ROLES WHERE role_name = 'GovernanceAdmin';", conn);
+        cmd.Parameters.AddWithValue("@rid", Guid.NewGuid().ToString());
+        cmd.Parameters.AddWithValue("@m", Guid.NewGuid().ToString());
+        cmd.Parameters.AddWithValue("@sid", sid);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
     [Theory]
     [InlineData("ix_consents_tenant_table", "CONSENTS")]
     [InlineData("ix_consents_tenant_grantee", "CONSENTS")]

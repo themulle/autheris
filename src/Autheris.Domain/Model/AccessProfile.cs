@@ -20,8 +20,14 @@ public sealed class AccessProfile
     public string? Justification { get; init; }
     public string? CreatedBy { get; init; }
 
-    /// <summary>WP-SC-16: expiry after the read-time clamp of legacy permanent Unmasked profiles.</summary>
-    public DateTimeOffset? EffectiveValidTo => IndividualGrantLimits.EffectiveProfileValidTo(MaskingMode, CreatedAt, ValidTo);
+    /// <summary>
+    /// WP-SC-16: expiry after the read-time clamp of legacy permanent Unmasked profiles. A profile with typed assignments is bounded per assignment
+    /// instead (<see cref="AccessProfileAssignmentRules.EffectiveExpiry"/>: individual users at most 30 days from the grant, standing group/role
+    /// mappings only after a second administrator approved them), so the profile creation date does not end an approved, renewed mapping.
+    /// </summary>
+    public DateTimeOffset? EffectiveValidTo => Assignments.Count > 0
+        ? ValidTo
+        : IndividualGrantLimits.EffectiveProfileValidTo(MaskingMode, CreatedAt, ValidTo);
 
     public bool IsActive(DateTimeOffset at)
     {
