@@ -186,6 +186,7 @@ public sealed class RedisCdcEventChannelTests
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
         [
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-100"),
             new Claim("sid", "S-1-5-21-100"),
             new Claim("tenant_id", "tenant-a")
         ], "test"));
