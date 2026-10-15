@@ -1,0 +1,591 @@
+using System.Security;
+using System.Text;
+using Autheris.Application.Interfaces;
+using Autheris.Application.Security;
+using Autheris.Domain.Options;
+using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+
+namespace Autheris.Infrastructure.Persistence;
+
+/// <summary>
+/// Issue #102: Configures and validates SQL Server Windows Authentication (NTLM via <c>gss-ntlmssp</c> and Kerberos via
+/// <c>libgssapi-krb5-2</c>) for Linux containers and non-domain hosts.
+/// <para>
+/// Security guarantees:
+/// <list type="bullet">
+///   <item>Never logs or includes plaintext passwords in exception messages or connection strings.</item>
+///   <item>Detects and rejects the common anti-pattern of putting <c>User ID=DOMAIN\user</c> without <c>Integrated Security=true</c>,
+///   which would send an AD credential as a SQL login and risk locking the Active Directory account after failed attempts.</item>
+///   <item>Supports both pre-mounted <c>NTLM_USER_FILE</c> (<c>DOMAIN:USER:PASSWORD</c>, mode <c>0400</c>/<c>0600</c>) and
+///   per-datasource <see cref="SqlServerWindowsAuthOptions"/> backed by <see cref="SecretReferenceResolver"/> (<c>file:/run/secrets/...</c> or Key Vault).</item>
+///   <item>Classifies runtime <see cref="SqlException"/> / GSSAPI failures into actionable operator diagnostics.</item>
+/// </list>
+/// </para>
+/// </summary>
+public static class SqlServerWindowsAuthConfigurator
+{
+    public const string DefaultGssStateDirectory = "/app/data/gss";
+    public const string DefaultGeneratedNtlmFileName = "ntlm_users";
+    public const string GssMechConfigPath = "/etc/gss/mech.d/mech.ntlmssp.conf";
+    public const string LegacyGssMechPath = "/etc/gss/mech";
+
+    private static readonly Lock SyncLock = new();
+
+    /// <summary>
+    /// Prepares the SQL Server connection string and process GSSAPI environment for Windows Authentication (NTLM / Kerberos)
+    /// when configured on <paramref name="options"/> or when <c>Integrated Security=true</c> is present in the connection string.
+    /// </summary>
+    public static string PrepareConnection(
+        DataSourceConnectionOptions options,
+        IKeyVaultSecretProvider? secrets,
+        IHostEnvironment? environment,
+        ILogger? logger = null,
+        string? gssStateDirectory = null,
+        Func<string, string?>? getEnvVar = null,
+        Action<string, string>? setEnvVar = null)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var getEnvironmentVariable = getEnvVar ?? Environment.GetEnvironmentVariable;
+        var setEnvironmentVariable = setEnvVar ?? Environment.SetEnvironmentVariable;
+
+        var builder = new SqlConnectionStringBuilder(options.ConnectionString);
+        var winAuth = options.WindowsAuth;
+        bool hasWindowsAuthConfig = winAuth is not null && winAuth.Mode != SqlServerWindowsAuthMode.None;
+
+        // Guard against the classic AD lockout trap: "User ID=DOMAIN\user" without Integrated Security=true
+        // sends a Windows account to SQL Server as a SQL Login, which fails and increments the AD badPwdCount!
+        if (!builder.IntegratedSecurity &&
+            !string.IsNullOrWhiteSpace(builder.UserID) &&
+            builder.UserID.Contains('\\', StringComparison.Ordinal))
+        {
+            throw new SecurityException(
+                "SQL Server connection string contains a domain-qualified 'User ID' (DOMAIN\\user) without 'Integrated Security=true'. " +
+                "Microsoft.Data.SqlClient does not accept Windows domain credentials via 'User ID'/'Password' and would send them as a SQL Server login, " +
+                "which can lock out the Active Directory account. Use 'Integrated Security=true' with NTLM_USER_FILE or DataSources:Connections:<name>:WindowsAuth.");
+        }
+
+        if (!hasWindowsAuthConfig && !builder.IntegratedSecurity)
+        {
+            return options.ConnectionString;
+        }
+
+        if (hasWindowsAuthConfig)
+        {
+            // Enforce Integrated Security=true and strip any User ID / Password from the connection string so
+            // SqlClient uses GSSAPI (gss-ntlmssp / krb5) instead of SQL authentication.
+            builder.IntegratedSecurity = true;
+            builder.Remove("User ID");
+            builder.Remove("UID");
+            builder.Remove("Password");
+            builder.Remove("PWD");
+
+            ConfigureGssEnvironment(
+                winAuth!,
+                secrets,
+                environment,
+                logger,
+                gssStateDirectory,
+                getEnvironmentVariable,
+                setEnvironmentVariable);
+        }
+        else if (builder.IntegratedSecurity)
+        {
+            // Integrated Security=true without explicit WindowsAuth section: check ambient NTLM_USER_FILE if set.
+            var ambientNtlmFile = getEnvironmentVariable("NTLM_USER_FILE");
+            if (!string.IsNullOrWhiteSpace(ambientNtlmFile))
+            {
+                ValidateNtlmUserFile(ambientNtlmFile, logger);
+            }
+        }
+
+        return builder.ConnectionString;
+    }
+
+    /// <summary>
+    /// Configures the GSSAPI environment variables (<c>NTLM_USER_FILE</c>, <c>NTLMUSER</c>, <c>NETBIOS_DOMAIN_NAME</c>,
+    /// <c>KRB5_CONFIG</c>, <c>KRB5_CLIENT_KTNAME</c>, <c>KRB5CCNAME</c>) required by <c>gss-ntlmssp</c> and <c>libgssapi-krb5-2</c>.
+    /// </summary>
+    public static void ConfigureGssEnvironment(
+        SqlServerWindowsAuthOptions winAuth,
+        IKeyVaultSecretProvider? secrets,
+        IHostEnvironment? environment,
+        ILogger? logger = null,
+        string? gssStateDirectory = null,
+        Func<string, string?>? getEnvVar = null,
+        Action<string, string>? setEnvVar = null)
+    {
+        ArgumentNullException.ThrowIfNull(winAuth);
+
+        var getEnvironmentVariable = getEnvVar ?? Environment.GetEnvironmentVariable;
+        var setEnvironmentVariable = setEnvVar ?? Environment.SetEnvironmentVariable;
+
+        var effectiveMode = ResolveEffectiveMode(winAuth, getEnvironmentVariable);
+        if (effectiveMode == SqlServerWindowsAuthMode.None)
+        {
+            return;
+        }
+
+        if (effectiveMode == SqlServerWindowsAuthMode.Kerberos)
+        {
+            if (!string.IsNullOrWhiteSpace(winAuth.KerberosConfigPath))
+            {
+                EnsureFileExists(winAuth.KerberosConfigPath, "Kerberos configuration file (KerberosConfigPath)");
+                setEnvironmentVariable("KRB5_CONFIG", Path.GetFullPath(winAuth.KerberosConfigPath));
+            }
+
+            if (!string.IsNullOrWhiteSpace(winAuth.KerberosKeytabPath))
+            {
+                EnsureFileExists(winAuth.KerberosKeytabPath, "Kerberos keytab file (KerberosKeytabPath)");
+                CheckRestrictedFilePermissions(winAuth.KerberosKeytabPath, "Kerberos keytab file", logger);
+                setEnvironmentVariable("KRB5_CLIENT_KTNAME", Path.GetFullPath(winAuth.KerberosKeytabPath));
+            }
+
+            if (!string.IsNullOrWhiteSpace(winAuth.KerberosCachePath))
+            {
+                setEnvironmentVariable("KRB5CCNAME", Path.GetFullPath(winAuth.KerberosCachePath));
+            }
+
+            return;
+        }
+
+        // NTLM mode (or Auto resolved to NTLM)
+        string? ntlmFilePath = winAuth.NtlmUserFilePath;
+        if (string.IsNullOrWhiteSpace(ntlmFilePath))
+        {
+            ntlmFilePath = getEnvironmentVariable("NTLM_USER_FILE");
+        }
+
+        var (domain, username) = NormalizeDomainAndUser(winAuth.Domain, winAuth.Username);
+
+        if (!string.IsNullOrWhiteSpace(winAuth.PasswordRef))
+        {
+            if (string.IsNullOrWhiteSpace(username))
+            {
+                throw new SecurityException(
+                    "SQL Server WindowsAuth with PasswordRef requires Username (and Domain) to be configured.");
+            }
+
+            // Outside Development, never allow a literal plaintext password in PasswordRef: require a secret provider
+            // resolution (file:/run/secrets/..., Key Vault, or environment variable).
+            string password = SecretReferenceResolver.Resolve(
+                secrets,
+                winAuth.PasswordRef,
+                environment,
+                allowPlaintextInDevelopment: true,
+                logger: logger,
+                secretDescription: "SQL Server WindowsAuth AD password")
+                ?? throw new SecurityException("The SQL Server WindowsAuth password could not be resolved (fail-closed).");
+
+            if (password.AsSpan().IndexOfAny('\r', '\n') >= 0)
+            {
+                throw new SecurityException("The resolved SQL Server WindowsAuth password contains invalid newline characters.");
+            }
+
+            ntlmFilePath = MaterializeNtlmUserFile(domain ?? string.Empty, username, password, gssStateDirectory);
+        }
+        else if (!string.IsNullOrWhiteSpace(ntlmFilePath))
+        {
+            ValidateNtlmUserFile(ntlmFilePath, logger, out var fileDomain, out var fileUser);
+            if (string.IsNullOrWhiteSpace(domain))
+            {
+                domain = fileDomain;
+            }
+
+            if (string.IsNullOrWhiteSpace(username))
+            {
+                username = fileUser;
+            }
+        }
+        else
+        {
+            throw new SecurityException(
+                "SQL Server WindowsAuth (NTLM) requires either (Domain, Username, PasswordRef) or an existing NTLM_USER_FILE / NtlmUserFilePath.");
+        }
+
+        lock (SyncLock)
+        {
+            setEnvironmentVariable("NTLM_USER_FILE", Path.GetFullPath(ntlmFilePath));
+            if (!string.IsNullOrWhiteSpace(username))
+            {
+                // gss-ntlmssp looks up getenv("NTLMUSER") (falling back to getenv("USER")) when SqlClient calls
+                // gss_init_sec_context with GSS_C_NO_CREDENTIAL in a non-root container where UID 10001 has no matching /etc/passwd user.
+                setEnvironmentVariable("NTLMUSER", username);
+            }
+
+            if (!string.IsNullOrWhiteSpace(domain))
+            {
+                setEnvironmentVariable("NETBIOS_DOMAIN_NAME", domain);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Materializes or updates a restricted (<c>0600</c>) <c>NTLM_USER_FILE</c> entry (<c>DOMAIN:USER:PASSWORD</c>)
+    /// in the private GSS state directory so <c>gss-ntlmssp</c> can authenticate multiple AD accounts or a single service account.
+    /// </summary>
+    public static string MaterializeNtlmUserFile(string domain, string username, string password, string? gssStateDirectory = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(username);
+        ArgumentException.ThrowIfNullOrWhiteSpace(password);
+
+        if (domain.AsSpan().IndexOfAny(':', '\r', '\n') >= 0)
+        {
+            throw new ArgumentException("Domain name must not contain ':' or newline characters.", nameof(domain));
+        }
+
+        if (username.AsSpan().IndexOfAny(':', '\r', '\n') >= 0)
+        {
+            throw new ArgumentException("Username must not contain ':' or newline characters.", nameof(username));
+        }
+
+        string targetDir = ResolveWritableGssDirectory(gssStateDirectory);
+        string filePath = Path.Combine(targetDir, DefaultGeneratedNtlmFileName);
+        string entryKey = $"{domain}:{username}:";
+        string newLine = $"{domain}:{username}:{password}";
+
+        lock (SyncLock)
+        {
+            Directory.CreateDirectory(targetDir);
+            TrySetUnixDirectoryPermissions(targetDir);
+
+            var lines = new List<string>();
+            if (File.Exists(filePath))
+            {
+                foreach (var existing in File.ReadAllLines(filePath, Encoding.UTF8))
+                {
+                    if (string.IsNullOrWhiteSpace(existing))
+                    {
+                        continue;
+                    }
+
+                    if (!existing.StartsWith(entryKey, StringComparison.OrdinalIgnoreCase))
+                    {
+                        lines.Add(existing);
+                    }
+                }
+            }
+
+            lines.Add(newLine);
+            string content = string.Join('\n', lines) + "\n";
+
+            // Write atomically via temp file in the same directory with 0600 permissions on Unix
+            string tempPath = Path.Combine(targetDir, $".{DefaultGeneratedNtlmFileName}.{Guid.NewGuid():N}.tmp");
+            File.WriteAllText(tempPath, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            TrySetUnixFilePermissions(tempPath);
+            File.Move(tempPath, filePath, overwrite: true);
+            TrySetUnixFilePermissions(filePath);
+        }
+
+        return filePath;
+    }
+
+    /// <summary>
+    /// Validates that an <c>NTLM_USER_FILE</c> exists, is non-empty, and has valid <c>DOMAIN:USER:PASSWORD</c> lines.
+    /// Never includes file contents or passwords in exception messages or logs.
+    /// </summary>
+    public static void ValidateNtlmUserFile(string filePath, ILogger? logger = null) =>
+        ValidateNtlmUserFile(filePath, logger, out _, out _);
+
+    public static void ValidateNtlmUserFile(
+        string filePath,
+        ILogger? logger,
+        out string? firstDomain,
+        out string? firstUsername)
+    {
+        firstDomain = null;
+        firstUsername = null;
+
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            throw new SecurityException("NTLM_USER_FILE path is empty.");
+        }
+
+        string fullPath = Path.GetFullPath(filePath);
+        if (!File.Exists(fullPath))
+        {
+            throw new SecurityException($"Configured NTLM_USER_FILE '{fullPath}' does not exist.");
+        }
+
+        CheckRestrictedFilePermissions(fullPath, "NTLM_USER_FILE", logger);
+
+        string[] lines = File.ReadAllLines(fullPath, Encoding.UTF8);
+        int validEntries = 0;
+        for (int i = 0; i < lines.Length; i++)
+        {
+            string line = lines[i].TrimEnd('\r', '\n');
+            if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#'))
+            {
+                continue;
+            }
+
+            // Expected gss-ntlmssp format: DOMAIN:USER:PASSWORD (password itself may contain colons)
+            int firstColon = line.IndexOf(':', StringComparison.Ordinal);
+            int secondColon = firstColon >= 0 ? line.IndexOf(':', firstColon + 1) : -1;
+            if (firstColon < 0 || secondColon <= firstColon + 1 || secondColon == line.Length - 1)
+            {
+                throw new SecurityException(
+                    $"Invalid format in NTLM_USER_FILE '{fullPath}' on line {i + 1}: expected 'DOMAIN:USER:PASSWORD' with non-empty user and password.");
+            }
+
+            string domainPart = line[..firstColon].Trim();
+            string userPart = line[(firstColon + 1)..secondColon].Trim();
+            if (string.IsNullOrWhiteSpace(userPart))
+            {
+                throw new SecurityException(
+                    $"Invalid format in NTLM_USER_FILE '{fullPath}' on line {i + 1}: username segment in 'DOMAIN:USER:PASSWORD' must not be empty.");
+            }
+
+            if (validEntries == 0)
+            {
+                firstDomain = domainPart;
+                firstUsername = userPart;
+            }
+
+            validEntries++;
+        }
+
+        if (validEntries == 0)
+        {
+            throw new SecurityException($"NTLM_USER_FILE '{fullPath}' contains no valid 'DOMAIN:USER:PASSWORD' entries.");
+        }
+    }
+
+    /// <summary>
+    /// Classifies an exception thrown during <see cref="SqlConnection.OpenAsync(CancellationToken)"/> when <c>Integrated Security=true</c>
+    /// is active and wraps it with a clear, actionable diagnostic message (without leaking credentials).
+    /// </summary>
+    public static Exception ClassifyOpenException(
+        Exception exception,
+        DataSourceConnectionOptions options,
+        Func<string, string?>? getEnvVar = null)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        ArgumentNullException.ThrowIfNull(options);
+
+        bool isIntegrated = options.WindowsAuth is { Mode: not SqlServerWindowsAuthMode.None };
+        if (!isIntegrated && !string.IsNullOrWhiteSpace(options.ConnectionString))
+        {
+            try
+            {
+                isIntegrated = new SqlConnectionStringBuilder(options.ConnectionString).IntegratedSecurity;
+            }
+            catch
+            {
+                // Ignore malformed connection string here
+            }
+        }
+
+        if (!isIntegrated)
+        {
+            return exception;
+        }
+
+        var getEnvironmentVariable = getEnvVar ?? Environment.GetEnvironmentVariable;
+        string msg = FullExceptionText(exception);
+
+        // 1. Missing GSSAPI / gss-ntlmssp native library or mechanism
+        if (msg.Contains("libgssapi_krb5", StringComparison.OrdinalIgnoreCase) ||
+            msg.Contains("gssntlmssp", StringComparison.OrdinalIgnoreCase) ||
+            msg.Contains("GSSAPI operation failed", StringComparison.OrdinalIgnoreCase) &&
+            (msg.Contains("No credentials were supplied", StringComparison.OrdinalIgnoreCase) ||
+             msg.Contains("An unsupported mechanism was requested", StringComparison.OrdinalIgnoreCase) ||
+             msg.Contains("Mechanismitched", StringComparison.OrdinalIgnoreCase)))
+        {
+            string ntlmFile = getEnvironmentVariable("NTLM_USER_FILE") ?? options.WindowsAuth?.NtlmUserFilePath ?? "<not set>";
+            return new InvalidOperationException(
+                "SQL Server Windows Authentication (GSSAPI/NTLM) failed to acquire client credentials in container/Linux environment. " +
+                $"Ensure 'libgssapi-krb5-2' and 'gss-ntlmssp' are installed, '{GssMechConfigPath}' is readable by the container user, " +
+                $"and NTLM credentials are provided via NTLM_USER_FILE ('{ntlmFile}', format 'DOMAIN:USER:PASSWORD') or DataSources:Connections:<name>:WindowsAuth.",
+                exception);
+        }
+
+        // 2. Kerberos SPN / KDC / SSPI context failure
+        if (msg.Contains("Cannot generate SSPI context", StringComparison.OrdinalIgnoreCase) ||
+            msg.Contains("Server not found in Kerberos database", StringComparison.OrdinalIgnoreCase) ||
+            msg.Contains("KRB5", StringComparison.OrdinalIgnoreCase) ||
+            msg.Contains("SPN", StringComparison.OrdinalIgnoreCase))
+        {
+            return new InvalidOperationException(
+                "SQL Server Windows Authentication failed during SSPI/Kerberos negotiation ('Cannot generate SSPI context' / SPN error). " +
+                "Verify that the SQL Server Service Principal Name (MSSQLSvc/<fqdn>:<port>@REALM) is registered in Active Directory, " +
+                "or use NTLM authentication via 'gss-ntlmssp' (WindowsAuth.Mode = 'Ntlm' / NTLM_USER_FILE).",
+                exception);
+        }
+
+        // 3. SQL Server Login failed (Error 18456 / 18452) — warn about AD account lockout!
+        if ((exception is SqlException sqlEx && (sqlEx.Number == 18456 || sqlEx.Number == 18452)) ||
+            msg.Contains("Login failed for user", StringComparison.OrdinalIgnoreCase) ||
+            msg.Contains("untrusted domain", StringComparison.OrdinalIgnoreCase))
+        {
+            return new InvalidOperationException(
+                "SQL Server Windows Authentication login was rejected by the server (Error 18456/18452). " +
+                "WARNING: Repeated failed Windows authentication attempts can lock out the Active Directory service account! " +
+                "Verify the domain name, username, password secret, and that the AD account has CONNECT/LOGIN permission on the target SQL Server before retrying.",
+                exception);
+        }
+
+        return exception;
+    }
+
+    public static SqlServerWindowsAuthMode ResolveEffectiveMode(
+        SqlServerWindowsAuthOptions winAuth,
+        Func<string, string?>? getEnvVar = null)
+    {
+        ArgumentNullException.ThrowIfNull(winAuth);
+        if (winAuth.Mode != SqlServerWindowsAuthMode.Auto)
+        {
+            return winAuth.Mode;
+        }
+
+        var getEnvironmentVariable = getEnvVar ?? Environment.GetEnvironmentVariable;
+        if (!string.IsNullOrWhiteSpace(winAuth.KerberosKeytabPath) ||
+            !string.IsNullOrWhiteSpace(winAuth.KerberosCachePath) ||
+            (!string.IsNullOrWhiteSpace(winAuth.KerberosConfigPath) &&
+             string.IsNullOrWhiteSpace(winAuth.PasswordRef) &&
+             string.IsNullOrWhiteSpace(winAuth.NtlmUserFilePath) &&
+             string.IsNullOrWhiteSpace(getEnvironmentVariable("NTLM_USER_FILE"))))
+        {
+            return SqlServerWindowsAuthMode.Kerberos;
+        }
+
+        return SqlServerWindowsAuthMode.Ntlm;
+    }
+
+    public static (string? Domain, string? Username) NormalizeDomainAndUser(string? domain, string? username)
+    {
+        string? cleanDomain = string.IsNullOrWhiteSpace(domain) ? null : domain.Trim();
+        string? cleanUser = string.IsNullOrWhiteSpace(username) ? null : username.Trim();
+
+        if (!string.IsNullOrWhiteSpace(cleanUser) && cleanUser.Contains('\\', StringComparison.Ordinal))
+        {
+            var parts = cleanUser.Split('\\', 2);
+            if (string.IsNullOrWhiteSpace(cleanDomain) && !string.IsNullOrWhiteSpace(parts[0]))
+            {
+                cleanDomain = parts[0].Trim();
+            }
+
+            cleanUser = parts[1].Trim();
+        }
+
+        return (cleanDomain, cleanUser);
+    }
+
+    /// <summary>
+    /// Checks whether the Linux GSSAPI NTLM mechanism configuration (<c>/etc/gss/mech.d/mech.ntlmssp.conf</c> or <c>/etc/gss/mech</c>)
+    /// is present on disk.
+    /// </summary>
+    public static bool IsLinuxGssNtlmMechanismPresent() =>
+        File.Exists(GssMechConfigPath) || File.Exists(LegacyGssMechPath);
+
+    private static string ResolveWritableGssDirectory(string? configuredDirectory)
+    {
+        if (!string.IsNullOrWhiteSpace(configuredDirectory))
+        {
+            return Path.GetFullPath(configuredDirectory);
+        }
+
+        try
+        {
+            if (Directory.Exists("/app/data"))
+            {
+                return DefaultGssStateDirectory;
+            }
+        }
+        catch
+        {
+            // Fall back to temp directory
+        }
+
+        return Path.Combine(Path.GetTempPath(), $"autheris-gss-{Environment.ProcessId}");
+    }
+
+    private static void EnsureFileExists(string path, string description)
+    {
+        string fullPath = Path.GetFullPath(path);
+        if (!File.Exists(fullPath))
+        {
+            throw new SecurityException($"Configured {description} '{fullPath}' does not exist.");
+        }
+    }
+
+    private static void CheckRestrictedFilePermissions(string fullPath, string description, ILogger? logger)
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        try
+        {
+            var mode = File.GetUnixFileMode(fullPath);
+            const UnixFileMode groupOrOtherMask =
+                UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
+                UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
+
+            if ((mode & groupOrOtherMask) != 0)
+            {
+                logger?.LogWarning(
+                    "Security warning: {Description} '{FilePath}' has overly permissive Unix file mode ({FileMode}). Recommended permissions are 0400 or 0600.",
+                    description,
+                    fullPath,
+                    mode);
+            }
+        }
+        catch
+        {
+            // Ignore on filesystems that do not support UnixFileMode
+        }
+    }
+
+    private static void TrySetUnixDirectoryPermissions(string directoryPath)
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        try
+        {
+            File.SetUnixFileMode(
+                directoryPath,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+        catch
+        {
+            // Best-effort on mounted volumes
+        }
+    }
+
+    private static void TrySetUnixFilePermissions(string filePath)
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        try
+        {
+            File.SetUnixFileMode(
+                filePath,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+        catch
+        {
+            // Best-effort on mounted volumes
+        }
+    }
+
+    private static string FullExceptionText(Exception ex)
+    {
+        var sb = new StringBuilder();
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            sb.Append(current.Message).Append(' ');
+        }
+
+        return sb.ToString();
+    }
+}

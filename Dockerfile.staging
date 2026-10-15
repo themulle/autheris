@@ -19,8 +19,23 @@ ENV ASPNETCORE_HTTP_PORTS=8080 \
 
 EXPOSE 8080
 
-# Setup data volume for SQLite governance DB with non-root ownership (10001:10001)
-RUN mkdir -p /app/data && chown -R 10001:10001 /app/data
+# Setup data volume for SQLite governance DB and install GSSAPI/NTLM/Kerberos runtime with non-root ownership (10001:10001)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libgssapi-krb5-2 \
+        gss-ntlmssp \
+        krb5-user \
+        libkrb5-3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /etc/gss/mech.d \
+    && if [ -f /etc/gss/mech.d/mech.ntlmssp.conf ]; then \
+        chmod 0644 /etc/gss/mech.d/mech.ntlmssp.conf \
+        && cp -f /etc/gss/mech.d/mech.ntlmssp.conf /etc/gss/mech \
+        && chmod 0644 /etc/gss/mech; \
+    fi \
+    && mkdir -p /app/data/gss \
+    && chown -R 10001:10001 /app/data \
+    && chmod 0700 /app/data/gss
 VOLUME /app/data
 
 # Copy pre-built publish artifacts

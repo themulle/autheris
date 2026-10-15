@@ -41,6 +41,7 @@ public static class GatewayStartupValidator
 
         _ = registry;
         ValidateOracleRuntime(options, environment, logger);
+        ValidateSqlServerWindowsAuth(options, environment, getEnvironmentVariable, logger);
         ValidateDatabricks(options, environment);
         ValidateDefaultSchemas(options);
         ValidateTenantCollisions(options, environment, logger);
@@ -786,6 +787,154 @@ public static class GatewayStartupValidator
             {
                 throw new ValidationException(
                     $"Security violation: Oracle data source '{name}' needs DataSources:Connections:{name}:PasswordKeyVaultRef outside Development.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Issue #102: Validates SQL Server Windows Authentication (NTLM / Kerberos) configuration at startup without opening a network
+    /// connection (so Active Directory service accounts can never be locked out by startup probes).
+    /// </summary>
+    public static void ValidateSqlServerWindowsAuth(
+        GatewayOptions options,
+        IHostEnvironment environment,
+        Func<string, string?>? getEnvVar = null,
+        ILogger? logger = null)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(environment);
+        var getEnvironmentVariable = getEnvVar ?? Environment.GetEnvironmentVariable;
+        bool isContainer = IsTruthy(getEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER"));
+
+        foreach (var (name, connection) in options.DataSources.Connections)
+        {
+            if (!DataSourceProvider.Is(connection.Provider, DatabaseDialect.SqlServer) || string.IsNullOrWhiteSpace(connection.ConnectionString))
+            {
+                continue;
+            }
+
+            Microsoft.Data.SqlClient.SqlConnectionStringBuilder builder;
+            try
+            {
+                builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connection.ConnectionString);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new ValidationException($"SQL Server data source '{name}' has an invalid connection string: {ex.Message}", ex);
+            }
+
+            // Reject domain-qualified User ID without Integrated Security=true (prevents sending AD user as SQL Login and locking out AD account)
+            if (!builder.IntegratedSecurity &&
+                !string.IsNullOrWhiteSpace(builder.UserID) &&
+                builder.UserID.Contains('\\', StringComparison.Ordinal))
+            {
+                throw new ValidationException(
+                    $"Security violation: SQL Server data source '{name}' specifies a domain-qualified 'User ID' ('{builder.UserID}') without 'Integrated Security=true'. " +
+                    "Microsoft.Data.SqlClient sends 'User ID' as a SQL Server login, which fails for Active Directory accounts and risks locking out the AD account. " +
+                    $"Remove 'User ID'/'Password' from the connection string and configure 'Integrated Security=true' with NTLM_USER_FILE or DataSources:Connections:{name}:WindowsAuth.");
+            }
+
+            var winAuth = connection.WindowsAuth;
+            bool hasWinAuth = winAuth is not null && winAuth.Mode != SqlServerWindowsAuthMode.None;
+            if (!hasWinAuth && !builder.IntegratedSecurity)
+            {
+                continue;
+            }
+
+            if (hasWinAuth)
+            {
+                var mode = SqlServerWindowsAuthConfigurator.ResolveEffectiveMode(winAuth!, getEnvironmentVariable);
+                if (mode == SqlServerWindowsAuthMode.Kerberos)
+                {
+                    if (!string.IsNullOrWhiteSpace(winAuth!.KerberosConfigPath) && !File.Exists(Path.GetFullPath(winAuth.KerberosConfigPath)))
+                    {
+                        throw new ValidationException(
+                            $"SQL Server data source '{name}': configured KerberosConfigPath '{winAuth.KerberosConfigPath}' does not exist.");
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(winAuth.KerberosKeytabPath) && !File.Exists(Path.GetFullPath(winAuth.KerberosKeytabPath)))
+                    {
+                        throw new ValidationException(
+                            $"SQL Server data source '{name}': configured KerberosKeytabPath '{winAuth.KerberosKeytabPath}' does not exist.");
+                    }
+                }
+                else if (mode == SqlServerWindowsAuthMode.Ntlm)
+                {
+                    string? ntlmFile = !string.IsNullOrWhiteSpace(winAuth!.NtlmUserFilePath)
+                        ? winAuth.NtlmUserFilePath
+                        : getEnvironmentVariable("NTLM_USER_FILE");
+
+                    if (!string.IsNullOrWhiteSpace(winAuth.PasswordRef))
+                    {
+                        var (_, username) = SqlServerWindowsAuthConfigurator.NormalizeDomainAndUser(winAuth.Domain, winAuth.Username);
+                        if (string.IsNullOrWhiteSpace(username))
+                        {
+                            throw new ValidationException(
+                                $"SQL Server data source '{name}': WindowsAuth.Username (and Domain) is required when WindowsAuth.PasswordRef is set.");
+                        }
+
+                        if (winAuth.PasswordRef.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+                        {
+                            string secretFilePath = winAuth.PasswordRef["file:".Length..].Trim();
+                            if (string.IsNullOrWhiteSpace(secretFilePath) || !File.Exists(Path.GetFullPath(secretFilePath)))
+                            {
+                                throw new ValidationException(
+                                    $"SQL Server data source '{name}': WindowsAuth.PasswordRef secret file '{secretFilePath}' does not exist.");
+                            }
+                        }
+                    }
+                    else if (!string.IsNullOrWhiteSpace(ntlmFile))
+                    {
+                        try
+                        {
+                            SqlServerWindowsAuthConfigurator.ValidateNtlmUserFile(ntlmFile, logger);
+                        }
+                        catch (Exception ex)
+                        {
+                            throw new ValidationException($"SQL Server data source '{name}': {ex.Message}", ex);
+                        }
+                    }
+                    else
+                    {
+                        throw new ValidationException(
+                            $"SQL Server data source '{name}': WindowsAuth (NTLM) requires either (Domain, Username, PasswordRef) or an existing NtlmUserFilePath / NTLM_USER_FILE.");
+                    }
+                }
+            }
+            else if (builder.IntegratedSecurity)
+            {
+                string? ambientNtlmFile = getEnvironmentVariable("NTLM_USER_FILE");
+                if (!string.IsNullOrWhiteSpace(ambientNtlmFile))
+                {
+                    try
+                    {
+                        SqlServerWindowsAuthConfigurator.ValidateNtlmUserFile(ambientNtlmFile, logger);
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new ValidationException($"SQL Server data source '{name}': {ex.Message}", ex);
+                    }
+                }
+                else if (OperatingSystem.IsLinux() && isContainer &&
+                         string.IsNullOrWhiteSpace(getEnvironmentVariable("KRB5_CLIENT_KTNAME")) &&
+                         string.IsNullOrWhiteSpace(getEnvironmentVariable("KRB5CCNAME")))
+                {
+                    logger?.LogWarning(
+                        "SQL Server data source '{DataSource}' uses 'Integrated Security=true' inside a Linux container, but neither NTLM_USER_FILE, " +
+                        "KRB5_CLIENT_KTNAME, KRB5CCNAME, nor DataSources:Connections:{DataSource}:WindowsAuth is configured. " +
+                        "Connections will fail unless ambient GSSAPI credentials are available.",
+                        name,
+                        name);
+                }
+            }
+
+            if (OperatingSystem.IsLinux() && isContainer && !SqlServerWindowsAuthConfigurator.IsLinuxGssNtlmMechanismPresent())
+            {
+                logger?.LogWarning(
+                    "SQL Server data source '{DataSource}' uses Windows Authentication on Linux, but '{GssMechConfig}' was not found. " +
+                    "Ensure 'gss-ntlmssp' and 'libgssapi-krb5-2' are installed in the container image.",
+                    name,
+                    SqlServerWindowsAuthConfigurator.GssMechConfigPath);
             }
         }
     }

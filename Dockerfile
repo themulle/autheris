@@ -27,9 +27,24 @@ EXPOSE 8080
 
 # Datenverzeichnis für persistente SQLite-Governance-DB & Cache anlegen und an Non-Root User übergeben
 # DEP-4: Verhindert SQLite Error 14 ('unable to open database file'), da /app root gehört
+# Issue #102: Install GSSAPI, gss-ntlmssp, and Kerberos runtime packages for SQL Server Windows Authentication (NTLM/Kerberos)
 ENV APP_UID=10001
-RUN mkdir -p /app/data && chown -R $APP_UID:$APP_UID /app/data
-RUN mkdir -p /app/shared-docs /app/scratch && chown -R $APP_UID:$APP_UID /app/shared-docs /app/scratch
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libgssapi-krb5-2 \
+        gss-ntlmssp \
+        krb5-user \
+        libkrb5-3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /etc/gss/mech.d \
+    && if [ -f /etc/gss/mech.d/mech.ntlmssp.conf ]; then \
+        chmod 0644 /etc/gss/mech.d/mech.ntlmssp.conf \
+        && cp -f /etc/gss/mech.d/mech.ntlmssp.conf /etc/gss/mech \
+        && chmod 0644 /etc/gss/mech; \
+    fi \
+    && mkdir -p /app/data/gss /app/shared-docs /app/scratch \
+    && chown -R $APP_UID:$APP_UID /app/data /app/shared-docs /app/scratch \
+    && chmod 0700 /app/data/gss
 VOLUME /app/data
 VOLUME /app/shared-docs
 VOLUME /app/scratch

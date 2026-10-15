@@ -36,6 +36,7 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-ARCH-11** | Envoy External Authorization (ext_authz) & Istio Service Mesh Integration | [f-arch-11-envoy-external-authorization.md](f-arch-11-envoy-external-authorization.md) |
 | **F-AUDIT-01** | Hardened Cryptographic Audit & Asymmetric KMS Anchors (AU-01..19) | [f-audit-01-hardened-cryptographic-audit.md](f-audit-01-hardened-cryptographic-audit.md) |
 | **F-AUTH-03** | RFC 6238 TOTP Two-Factor Authentication & HitL Step-Up Engine | [f-auth-03-rfc6238-totp-2fa-stepup.md](f-auth-03-rfc6238-totp-2fa-stepup.md) |
+| **F-AUTH-04** | SQL Server Windows Authentication (NTLM & Kerberos) in Containers | [f-auth-04-sqlserver-windows-auth-ntlm-kerberos.md](f-auth-04-sqlserver-windows-auth-ntlm-kerberos.md) |
 | **F-AUTH-DX** | Basic Auth with Cookie Session and Developer Helpers (Development / internal test environments) | [f-auth-dx-basic-auth-session.md](f-auth-dx-basic-auth-session.md) |
 | **F-CDC-02** | Native MSSQL Change Tracking Ingestion Provider | [f-cdc-02-mssql-change-tracking.md](f-cdc-02-mssql-change-tracking.md) |
 | **F-CDC-03** | Zero-Kafka PostgreSQL CDC via Logical Streaming Replication | [f-cdc-03-zero-kafka-postgresql-cdc.md](f-cdc-03-zero-kafka-postgresql-cdc.md) |

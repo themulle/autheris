@@ -92,11 +92,16 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             OracleConnectionStringPolicy.Validate(connectionString, _requireOracleTcps);
             connectionString = ResolveOraclePassword(options, connectionString);
         }
+        else if (dialect == DatabaseDialect.SqlServer)
+        {
+            // Issue #102: validate and configure NTLM (gss-ntlmssp) / Kerberos (libgssapi-krb5-2) before opening.
+            connectionString = SqlServerWindowsAuthConfigurator.PrepareConnection(options, _secrets, _environment);
+        }
 
         DbConnection connection = dialect switch
         {
             DatabaseDialect.Sqlite => new SqliteConnection(options.ConnectionString),
-            DatabaseDialect.SqlServer => new SqlConnection(options.ConnectionString),
+            DatabaseDialect.SqlServer => new SqlConnection(connectionString),
             DatabaseDialect.PostgreSql => new Npgsql.NpgsqlConnection(options.ConnectionString),
             // CR-ADG-07: the raw driver connection never leaves this factory; every command is created with BindByName = true.
             DatabaseDialect.Oracle => new BindByNameOracleConnection(new OracleConnection(connectionString)),
@@ -105,7 +110,14 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
 
         try
         {
-            await connection.OpenAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await connection.OpenAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception openEx) when (dialect == DatabaseDialect.SqlServer)
+            {
+                throw SqlServerWindowsAuthConfigurator.ClassifyOpenException(openEx, options);
+            }
 
             if (connection is Npgsql.NpgsqlConnection pgConn)
             {
