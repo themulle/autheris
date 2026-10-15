@@ -67,7 +67,7 @@ public sealed class DifferentialPrivacyEngine : IDifferentialPrivacyEngine
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to read DP budget from cluster store for client '{ClientId}'.", clientId);
+            _logger.LogWarning(ex, "Failed to read DP budget from cluster store for client '{ClientId}'.", ForLog(clientId));
         }
 
         var consumed = consumedMicro / (double)MicroUnits;
@@ -85,7 +85,7 @@ public sealed class DifferentialPrivacyEngine : IDifferentialPrivacyEngine
         var key = GetBudgetKey(clientId);
         await _clusterState.RemoveAsync(key, cancellationToken).ConfigureAwait(false);
 
-        _logger.LogInformation("Epsilon privacy budget manually reset for client '{ClientId}'.", clientId);
+        _logger.LogInformation("Epsilon privacy budget manually reset for client '{ClientId}'.", ForLog(clientId));
 
         if (_auditLog != null)
         {
@@ -145,7 +145,7 @@ public sealed class DifferentialPrivacyEngine : IDifferentialPrivacyEngine
             var attemptedTotal = (consumedAfterMicro + costMicro) / (double)MicroUnits;
             _logger.LogWarning(
                 "Client '{ClientId}' exhausted daily privacy budget. Attempted to consume {Attempted:F2} with {Consumed:F2}/{Total:F2} already consumed.",
-                request.ClientId, request.Epsilon, consumed, _dailyEpsilonBudget);
+                ForLog(request.ClientId), request.Epsilon, consumed, _dailyEpsilonBudget);
 
             if (_auditLog != null)
             {
@@ -162,7 +162,7 @@ public sealed class DifferentialPrivacyEngine : IDifferentialPrivacyEngine
 
         if (outcome == BudgetConsumeOutcome.StoreUnavailable)
         {
-            _logger.LogError("Differential privacy cluster budget store is unavailable for client '{ClientId}'. Fail-closed.", request.ClientId);
+            _logger.LogError("Differential privacy cluster budget store is unavailable for client '{ClientId}'. Fail-closed.", ForLog(request.ClientId));
 
             if (_auditLog != null)
             {
@@ -201,6 +201,9 @@ public sealed class DifferentialPrivacyEngine : IDifferentialPrivacyEngine
         var dateUtc = _timeProvider.GetUtcNow().ToString("yyyyMMdd");
         return $"dp:budget:{clientId.Trim()}:{dateUtc}";
     }
+
+    /// <summary>The client id is caller-supplied: strip line breaks so it cannot forge log entries.</summary>
+    private static string ForLog(string? value) => (value ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
 
     private static double GenerateLaplaceNoise(double scale)
     {
