@@ -2,6 +2,7 @@ namespace Autheris.Api.Extensions.DependencyInjection;
 
 using System;
 using Autheris.Application.DataCatalog.Interfaces;
+using Autheris.Application.Events.Interfaces;
 using Autheris.Application.DataCatalog.Services;
 using Autheris.Application.Dbt.Interfaces;
 using Autheris.Application.Dbt.Services;
@@ -50,6 +51,9 @@ public static class GatewayGovernanceServiceExtensions
     {
         services.AddSingleton<Autheris.Application.Audit.IAuditWriter, Autheris.Application.Audit.AuditWriter>();
 
+        // WP-ARC-A-03: the durable CDC webhook subscription store is a view of the governance repository (only when the feature is on).
+        var cdcWebhooksEnabled = CdcWebhooksFeature.IsEnabled(services);
+
         if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.PostgreSql))
         {
             services.AddSingleton<PostgreSqlGovernanceRepository>();
@@ -69,6 +73,10 @@ public static class GatewayGovernanceServiceExtensions
             services.AddSingleton<IAccessProfileRepository, InMemoryAccessProfileRepository>();
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
+            if (cdcWebhooksEnabled)
+            {
+                services.AddSingleton<ICloudEventSubscriptionStore>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
+            }
         }
         else if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.SqlServer))
         {
@@ -89,6 +97,10 @@ public static class GatewayGovernanceServiceExtensions
             services.AddSingleton<IAccessProfileRepository, InMemoryAccessProfileRepository>();
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
             services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
+            if (cdcWebhooksEnabled)
+            {
+                services.AddSingleton<ICloudEventSubscriptionStore>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
+            }
         }
         else
         {
@@ -109,6 +121,10 @@ public static class GatewayGovernanceServiceExtensions
             services.AddSingleton<IAccessProfileRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+            if (cdcWebhooksEnabled)
+            {
+                services.AddSingleton<ICloudEventSubscriptionStore>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+            }
         }
 
         // WP-ARC-A-11: durable, fenced CDC watermarks live in the governance database (the extension registers no store).

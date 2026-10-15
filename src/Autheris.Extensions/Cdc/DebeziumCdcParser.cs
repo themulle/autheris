@@ -64,7 +64,8 @@ public static class DebeziumCdcParser
         var before = ExtractRow(root, "before");
         var after = ExtractRow(root, "after");
 
-        var eventId = Guid.NewGuid().ToString("N");
+        // Deterministic id (hash of the trimmed body): the same body ingested twice dedupes downstream, and no row value leaks into the id.
+        var eventId = "dbz-" + Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(jsonString.Trim())))[..32];
         var timestamp = DateTimeOffset.FromUnixTimeMilliseconds(tsMs);
 
         var afterTenant = ExtractTenant(after, tenantColumn);

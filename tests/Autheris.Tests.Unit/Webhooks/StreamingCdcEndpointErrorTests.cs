@@ -28,6 +28,10 @@ public sealed class StreamingCdcEndpointErrorTests
         services.AddLogging();
         services.AddSingleton<IOptions<CdcWebhooksOptions>>(Options.Create(new CdcWebhooksOptions { Enabled = true }));
         services.AddSingleton(store);
+        var protector = Substitute.For<Autheris.Application.Webhooks.IWebhookSecretProtector>();
+        protector.IsAvailable.Returns(true);
+        protector.Protect(default!, default!, default!).ReturnsForAnyArgs("enc:v1:test");
+        services.AddSingleton(protector);
         var context = new DefaultHttpContext { RequestServices = services.BuildServiceProvider() };
         context.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
         {
@@ -41,6 +45,7 @@ public sealed class StreamingCdcEndpointErrorTests
         context.User = new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim(ClaimTypes.NameIdentifier, "S-1-5-21-ADMIN"),
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"),
             new Claim(ClaimTypes.Name, "admin"),
             new Claim("tenant", "tenant-a"),
             new Claim(ClaimTypes.Role, "GovernanceAdmin")
@@ -49,7 +54,7 @@ public sealed class StreamingCdcEndpointErrorTests
     }
 
     private static CloudEventWebhookSubscription Subscription(string url) =>
-        new("client-id", "tenant-a", url, "public.orders", [], "secret");
+        new("client-id", "tenant-a", url, "public.orders", [], new string('s', 40));
 
     [Fact]
     public async Task CdcSubscription_PrivateAddressTarget_ResponseDoesNotContainResolverDetails()
@@ -71,7 +76,7 @@ public sealed class StreamingCdcEndpointErrorTests
         // Identical body for both failure classes: the endpoint must not act as a resolver/network oracle.
         unresolvableProblem.ProblemDetails.Detail.ShouldBe(privateProblem.ProblemDetails.Detail);
         unresolvableProblem.ProblemDetails.Extensions["code"].ShouldBe(privateProblem.ProblemDetails.Extensions["code"]);
-        await store.DidNotReceiveWithAnyArgs().RegisterSubscriptionAsync(default!, default);
+        await store.DidNotReceiveWithAnyArgs().RegisterSubscriptionAsync(default!, default(int), default);
     }
 
     [Fact]
@@ -79,7 +84,7 @@ public sealed class StreamingCdcEndpointErrorTests
     {
         const string internalDetail = "INTERNAL subscription limit of 7 for tenant tenant-a";
         var store = Substitute.For<ICloudEventSubscriptionStore>();
-        store.RegisterSubscriptionAsync(Arg.Any<CloudEventWebhookSubscription>(), Arg.Any<CancellationToken>())
+        store.RegisterSubscriptionAsync(Arg.Any<CloudEventWebhookSubscription>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns<ValueTask>(_ => throw new InvalidOperationException(internalDetail));
 
         // A public literal address passes the egress policy without DNS resolution.

@@ -50,7 +50,7 @@ public sealed class CdcWebhookSubscriptionGuardTests
         var result = await StreamingCdcEndpoints.CreateSubscriptionAsync(ctx, Sub());
 
         Status(result).ShouldBe(StatusCodes.Status501NotImplemented);
-        await store.DidNotReceiveWithAnyArgs().RegisterSubscriptionAsync(default!, default);
+        await store.DidNotReceiveWithAnyArgs().RegisterSubscriptionAsync(default!, default(int), default);
     }
 
     [Fact]
@@ -92,7 +92,7 @@ public sealed class CdcWebhookSubscriptionGuardTests
         var result = await StreamingCdcEndpoints.CreateSubscriptionAsync(ctx, Sub());
 
         Status(result).ShouldBe(StatusCodes.Status403Forbidden);
-        await store.DidNotReceiveWithAnyArgs().RegisterSubscriptionAsync(default!, default);
+        await store.DidNotReceiveWithAnyArgs().RegisterSubscriptionAsync(default!, default(int), default);
     }
 
     [Fact]

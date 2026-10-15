@@ -28,10 +28,7 @@ public static class GatewayEventServiceExtensions
 
         // WP-ARC-A-02: durable webhook outbox. The bridge enqueues configured-webhook rows; the delivery service (any node) drains
         // with leases. CloudEvent (CDC) rows must be delivered even when the configured webhooks are disabled.
-        var configuration = services.FirstOrDefault(d => d.ServiceType == typeof(Microsoft.Extensions.Configuration.IConfiguration))
-            ?.ImplementationInstance as Microsoft.Extensions.Configuration.IConfiguration;
-        var cdcWebhooksEnabled = configuration?.GetSection(CdcWebhooksOptions.SectionName)
-            .GetValue<bool>(nameof(CdcWebhooksOptions.Enabled)) == true;
+        var cdcWebhooksEnabled = CdcWebhooksFeature.IsEnabled(services);
         if (gatewayOptions.Webhooks.Enabled || cdcWebhooksEnabled)
         {
             services.AddSingleton(sp => new WebhookRetryPolicy(

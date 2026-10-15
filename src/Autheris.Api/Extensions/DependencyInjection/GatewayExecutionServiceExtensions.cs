@@ -134,13 +134,12 @@ public static class GatewayExecutionServiceExtensions
         // Interim guard (WP-ARC-A-01): disabled by default; nothing is registered (no store, no egress client).
         services.AddOptions<Autheris.Domain.Options.CdcWebhooksOptions>()
             .BindConfiguration(Autheris.Domain.Options.CdcWebhooksOptions.SectionName);
-        var configuration = services.FirstOrDefault(d => d.ServiceType == typeof(Microsoft.Extensions.Configuration.IConfiguration))
-            ?.ImplementationInstance as Microsoft.Extensions.Configuration.IConfiguration;
-        var cdcWebhooksEnabled = configuration?.GetSection(Autheris.Domain.Options.CdcWebhooksOptions.SectionName)
-            .GetValue<bool>(nameof(Autheris.Domain.Options.CdcWebhooksOptions.Enabled)) == true;
+        var cdcWebhooksEnabled = CdcWebhooksFeature.IsEnabled(services);
         if (cdcWebhooksEnabled)
         {
-            services.AddSingleton<ICloudEventSubscriptionStore, InMemoryCloudEventSubscriptionStore>();
+            // The durable subscription store is registered with the governance repositories (AddAutherisGovernance).
+            services.AddSingleton<IValidateOptions<Autheris.Domain.Options.CdcWebhooksOptions>, Autheris.Application.Events.Services.CdcWebhooksOptionsValidator>();
+            services.AddSingleton<Autheris.Application.Webhooks.IWebhookSecretProtector, Autheris.Infrastructure.Security.KeyVaultWebhookSecretProtector>();
             services.AddSingleton<ICloudEventTransformer, CloudEventTransformer>();
         }
 

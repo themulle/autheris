@@ -203,7 +203,7 @@ public sealed class WebhookDeliveryClient
     /// Review G5: true for headers a subscription must not control (Host, Proxy-*, Forwarded, X-Forwarded-*, hop-by-hop,
     /// framing, CloudEvents ce-* and the gateway signature headers, including the removed legacy name so no lookalike can be injected).
     /// </summary>
-    internal static bool IsForbiddenCustomHeader(string name)
+    public static bool IsForbiddenCustomHeader(string name)
     {
         if (string.IsNullOrWhiteSpace(name))
         {

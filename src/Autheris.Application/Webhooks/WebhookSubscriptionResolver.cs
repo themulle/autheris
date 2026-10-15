@@ -54,10 +54,27 @@ public sealed class WebhookSubscriptionResolver(IOptions<GatewayOptions> options
                 var subscription = await store.GetSubscriptionAsync(message.OwnerTenantId, message.SubscriptionId, ct).ConfigureAwait(false);
                 return subscription is null
                     ? null
-                    : new ResolvedWebhookTarget(subscription.TargetUrl, subscription.HmacSecret, subscription.CustomHeaders, subscription.IsEnabled);
+                    : new ResolvedWebhookTarget(subscription.TargetUrl, UnprotectSecret(subscription), subscription.CustomHeaders, subscription.IsEnabled);
 
             default:
                 return null;
         }
+    }
+
+    /// <summary>
+    /// Stored secrets are KEK-protected (<c>enc:v1:</c>). A protected value that cannot be unprotected throws (never signs with the
+    /// ciphertext); the row's lease expires and the poison-attempt budget bounds the retries. A value without the prefix is a plaintext
+    /// secret from a test/in-memory store and is used as is.
+    /// </summary>
+    private string UnprotectSecret(CloudEventWebhookSubscription subscription)
+    {
+        var stored = subscription.HmacSecret;
+        if (string.IsNullOrEmpty(stored) || !stored.StartsWith("enc:v1:", StringComparison.Ordinal))
+        {
+            return stored ?? string.Empty;
+        }
+
+        var protector = services.GetService<IWebhookSecretProtector>() ?? throw new WebhookSecretUnavailableException();
+        return protector.Unprotect(subscription.TenantId, subscription.Id, stored);
     }
 }
