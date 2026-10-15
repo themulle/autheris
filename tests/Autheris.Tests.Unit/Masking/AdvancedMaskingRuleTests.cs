@@ -388,6 +388,44 @@ public class AdvancedMaskingRuleTests
             Compile("SELECT a.id, b.info FROM a JOIN b ON a.ssn = b.ssn", "ssn"));
     }
 
+    [Theory]
+    [InlineData("SELECT sum(bonus) OVER (PARTITION BY department) FROM sales")]
+    [InlineData("SELECT row_number() OVER (PARTITION BY bonus ORDER BY id) FROM sales")]
+    [InlineData("SELECT row_number() OVER (PARTITION BY department ORDER BY bonus) FROM sales")]
+    [InlineData("SELECT lag(bonus) OVER (ORDER BY id) FROM sales")]
+    [InlineData("WITH c AS (SELECT bonus AS b FROM sales) SELECT b, count(*) FROM c GROUP BY b")]
+    [InlineData("WITH c AS (SELECT department, bonus AS b FROM sales) SELECT department, sum(b) FROM c GROUP BY department")]
+    [InlineData("SELECT sub.b, count(*) FROM (SELECT bonus AS b FROM sales) sub GROUP BY sub.b")]
+    public void AggregateGuard_WindowFunctionsAndAliasedCteOrSubqueryMaskedColumns_Throws(string sql)
+    {
+        foreach (var dialect in new[] { TargetSqlDialect.SqlServer, TargetSqlDialect.PostgreSql })
+        {
+            Should.Throw<MaskedAggregationException>(() => Compile(sql, "bonus", dialect));
+        }
+    }
+
+    [Theory]
+    [InlineData("WITH c AS (SELECT id, ssn AS x FROM users) SELECT id FROM c WHERE x = '123'")]
+    [InlineData("WITH c AS (SELECT id, ssn AS x FROM users) SELECT id FROM c ORDER BY x")]
+    [InlineData("SELECT sub.id FROM (SELECT id, ssn AS x FROM users) sub WHERE sub.x = '123'")]
+    [InlineData("SELECT sub.id FROM (SELECT id, ssn AS x FROM users) sub ORDER BY sub.x")]
+    public void PredicateGuard_AliasedMaskedColumnInCteOrSubquery_ThrowsSecurityException(string sql)
+    {
+        Should.Throw<SecurityException>(() => Compile(sql, "ssn"));
+    }
+
+    [Fact]
+    public void PredicateGuard_UnmaskedColumnSharingNameWithAnotherTablesMaskedColumn_Succeeds()
+    {
+        var env = new TestCompileEnv(TargetSqlDialect.PostgreSql, "public")
+            .Table("users", "tenant_id", "id:INTEGER", "name", "tenant_id")
+            .Table("departments", "tenant_id", "id:INTEGER", "name", "tenant_id");
+        var nullify = new MaskSpec(MaskKind.Nullify, new MaskArguments(), FrozenDictionary<string, PolicyValue>.Empty);
+        env.Mask("users", "name", nullify);
+
+        Should.NotThrow(() => env.Compile("SELECT id, name FROM departments WHERE name = 'Engineering' ORDER BY name"));
+    }
+
     [Fact]
     public void PredicateGuard_UnmaskedColumnsInPredicates_SucceedsNormally()
     {

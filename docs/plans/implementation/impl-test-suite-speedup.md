@@ -85,3 +85,4 @@ CI gain. Re-baseline the table above with the result.
 | WP-TS-03 | Implemented (`Category=Spark` trait on Spark execution tests + parallel `spark-integration-tests` job in `ci.yml`) |
 | WP-TS-04 | Implemented (`CecilModuleCache` + cached production types and call graph in `Autheris.Tests.Architecture`) |
 | WP-TS-05 | Planned |
+| WP-TS-06 (added 2026-10-15) | Implemented: the PR `sql-compiler-gate` job no longer waits for `build-and-test` (`needs` removed) and drops the steps the other jobs already cover: the Release `Category=SqlGate` run and the architecture tests (both run in `build-and-test`, which executes the whole solution in Release) and the G8 benchmark (kept in `sql-compiler-gate-nightly.yml`). `WorkflowPolicyTests` now asserts the Release guarantee on `build-and-test` (negative control checked). Before: gate 6:43 after Build & Test 4:29 (critical path ≈ 11:15); expected gate ≈ 4:30 from start, critical path CodeQL ≈ 9:40. |

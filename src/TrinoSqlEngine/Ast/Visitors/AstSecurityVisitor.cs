@@ -30,7 +30,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 {
     private readonly AstSecurityVisitorOptions _options;
     private readonly Stack<HashSet<string>> _cteScopeStack = new();
-    private readonly PolicyFilterCteGuard _cteFilterGuard = new();
+    private readonly Stack<Dictionary<string, HashSet<string>>> _cteMaskedColumns = new();
 
     /// <summary>CTE names are compared by ordinal bytes: a delimited physical name that differs in case is not the CTE (INV-11).</summary>
     private static StringComparer CteScopeComparer =>
@@ -56,6 +56,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         _options = options;
         _typed = typedPolicy;
         _cteScopeStack.Push(new HashSet<string>(CteScopeComparer));
+        _cteMaskedColumns.Push(new Dictionary<string, HashSet<string>>(CteScopeComparer));
     }
 
     private SecurityScope CurrentScope =>

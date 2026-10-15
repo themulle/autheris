@@ -3,6 +3,7 @@ namespace Autheris.Tests.Unit;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Security.Claims;
 using System.Text.Json;
@@ -19,6 +20,7 @@ using Autheris.Application.ResourceGroups;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -494,7 +496,9 @@ public sealed class Wave2MarketFeaturesTests
         var lease1 = await manager.TryAcquireLeaseAsync(ResourceGroupTier.Interactive, "t1");
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var queuedTask = Task.Run(async () => await manager.TryAcquireLeaseAsync(ResourceGroupTier.Interactive, "t2", cts.Token));
-        await Task.Delay(200);
+        // Wait for the second request to be queued instead of a fixed delay (flaky on loaded CI runners).
+        Assert.True(await Eventually.WaitAsync(
+            () => manager.GetMetrics().Tiers.Any(t => t.QueuedRequests >= 1), TimeSpan.FromSeconds(10)), "the second request was never queued");
 
         var service = new GatewaySystemMetricsService(
             manager,

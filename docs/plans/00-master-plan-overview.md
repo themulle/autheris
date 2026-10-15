@@ -33,6 +33,7 @@
 | [`architecture.md`](architecture.md)<br/>`PLAN-ARCH-REVIEW` | **Solution Architecture Remediation (R0–R6)** | R0–R6 architecture waves implemented: cluster-wide CDC fan-out (`A-13`), WORM audit group commit & `AuditChainEngine` (`A-07`, `B-14`), `ISqlDialectProvider` & `ISqlDialectRegistry` (`B-09`), Application package diet (`B-10`), `GatewayOptions` split & `IValidateOptions<T>` (`C-01`, `C-02`), API middleware/ProblemDetails/policies/endpoints (`C-04..C-08`), god-class decomposition (`C-09`), lock-free template cache & non-reflection AST walk (`C-10`, `C-12`), true streaming core & egress (`C-13`, `C-14`), `ICatalogVersionProvider` & `ICatalogLookup` (`C-15`), `IRedisConnectionProvider` & unified `GatewayDiagnostics` (`C-16`), and test/build hygiene (`C-17`, `C-18`, `C-20..C-22`). | **COMPLETED ✅** | Optional freeze-window test project split (`WP-ARC-C-19`). |
 | [`features.md`](features.md)<br/>`PLAN-FEATURES-ROADMAP` | **Analytics Feature Roadmap** | #28 governed GraphQL aggregations, #37 minimum group size, #38 dbt Semantic Layer Stage 2/3. G-14 resolved (`decision-g14-feat-scope.md`). | **READY FOR EXEC 📋** | Execute FEAT-03 (#28) paired with FEAT-04 (#37), and FEAT-06a/b (#38 Stage 2). |
 | [`implementation/impl-test-suite-speedup.md`](implementation/impl-test-suite-speedup.md)<br/>`IMPL-TEST-SPEEDUP-2026-10-14` | **Test Suite Speed-Up** | WP-TS-00 (TRX artifacts), WP-TS-01 (shared DB servers), WP-TS-02 (CI shards), WP-TS-03 (parallel Spark job), and WP-TS-04 (Cecil module & call-graph cache) implemented. Open: WP-TS-05. | **IN PROGRESS 🚀** | WP-TS-05 selective integration parallelization. |
+| [`2026-10-15-req-issue-94-upgrade-migration-and-pk-ordering.md`](2026-10-15-req-issue-94-upgrade-migration-and-pk-ordering.md)<br/>`REQ-GOV-94`<br/>Plan: [`2026-10-15-plan-issue-94-upgrade-migration-and-pk-ordering.md`](2026-10-15-plan-issue-94-upgrade-migration-and-pk-ordering.md) | **Bug #94: Schema Shape Verification, Declared Keys/Indexes & Key-Based Read Ordering** | Regression v1.1.8 → v1.1.9/v1.1.10. Owner decisions 2026-10-15: no upgrade/repair migrations; read-only, fail-closed shape verification before the version is recorded; declared composite primary keys and indexes persisted in the extended baseline (`0001` checksum unchanged), validated fail-closed; no source catalog queries for keys (least privilege); ordering PK → unique index → clear-text composite → 400; WebSQL 504 by design (problem details). | **Security approved – Phase 4 (TDD) next** | Phase 3 approved with conditions (plan section 13: SEC-94-01 to SEC-94-16, mandatory security tests). Phase 4 streams A (DDL + verifier), B (definition + persistence + entry points), C (ordering + consumers incl. GraphQL tree compiler). |
 | [`2026-10-15-plan-sqlgate-cutover-and-accepted-differences.md`](2026-10-15-plan-sqlgate-cutover-and-accepted-differences.md)<br/>`PLAN-SQLGATE-CUTOVER-03` | **SqlGate Differences Sign-Off & Cutover** | All 18 triage entries (57 unique statements) in `accepted-differences.json` audited, documented with concrete security justifications, and signed off (`approved`). Cutover precondition verified. | **COMPLETED ✅** | Maintain G4 differential gate regression protection. |
 | [`README.md`](README.md)<br/>`PLAN-AGENT-GOV-DOCS-01` | **Agent Governance & English Documentation Standards** | Project-wide English documentation policy; `docs/plans/` as the plan repository; agent refinement lifecycle rules; root `AGENTS.md` & `CLAUDE.md`. | **ADOPTED ✅** | Ongoing enforcement. |
 
@@ -53,12 +54,14 @@ flowchart TD
     end
 
     TS["implementation/impl-test-suite-speedup.md"]
+    B94["2026-10-15-req-issue-94-...md<br/>Bug #94 upgrade & PK ordering"]
 
     MP --> AG
     MP --> SR
     MP --> AR
     MP --> FT
     MP --> TS
+    MP --> B94
     SR --> IR
     AR --> IR
     FT --> IR

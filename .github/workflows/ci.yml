@@ -165,7 +165,7 @@ jobs:
   # Making this job a required check is a repository-admin step (branch protection), see the WP-X0w log in the plan.
   sql-compiler-gate:
     name: SQL Compiler Gate
-    needs: [build-and-test, spark-integration-tests]
+    # No `needs`: the gate starts in parallel with the other jobs (it builds what it tests), so it is not on the critical path.
     runs-on: ubuntu-latest # Docker is available for Testcontainers
     timeout-minutes: 60
     permissions:
@@ -187,34 +187,21 @@ jobs:
       - name: Restore with Locked Mode
         run: dotnet restore Autheris.sln --locked-mode
 
-      # G2, G3, G5 in-memory, G7. Debug and Release compile the same security code (ARC-S-06); the mutant hooks live in the test assembly,
-      # so both runs kill the mutants.
+      # G2, G3, G5 in-memory, G7. Debug and Release compile the same security code (ARC-S-06); the mutant hooks live in the test assembly.
+      # The Release run of the same tests is part of the build-and-test job (all of TrinoSqlEngine.Tests in Release).
       - name: Gate tests, Debug (security mutants)
         run: dotnet test tests/TrinoSqlEngine.Tests -c Debug --no-restore --filter "Category=SqlGate" --verbosity normal
-
-      - name: Gate tests, Release (security mutants, no hooks in shipped code)
-        run: dotnet test tests/TrinoSqlEngine.Tests -c Release --no-restore --filter "Category=SqlGate" --verbosity normal
 
       # G4 differential, G6 execution on PostgreSQL, SQL Server and Oracle (CI=true makes a missing database fail).
       - name: Differential and execution gate
         run: dotnet test tests/Autheris.Tests.SqlCompilerGate -c Release --no-restore -p:AutherisIncludeTestAuth=true --verbosity normal
 
-      - name: Architecture tests
-        run: dotnet test tests/Autheris.Tests.Architecture -c Release --no-restore -p:AutherisIncludeTestAuth=true --verbosity normal
-
-      # G8: the AST compiler is measured and compared with the frozen legacy baseline (benchmarks/baselines/sql-compiler-legacy.json) by bytes (allocation) and Gen2 count.
-      - name: G8 performance benchmark
-        run: dotnet run -c Release --no-restore --project benchmarks/Autheris.Benchmarks -- --filter "*SqlCompiler*" --job short --inProcess --exporters json --artifacts benchmarks/results
-
-      - name: G8 thresholds
-        run: dotnet run -c Release --no-restore --project tools/SqlGate.BenchCheck -- benchmarks/results benchmarks/baselines
+      # The architecture tests run in the build-and-test job; the G8 performance benchmark runs in sql-compiler-gate-nightly.yml.
 
       - name: Upload gate report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sqlgate-report
-          path: |
-            sqlgate-report
-            benchmarks/results
+          path: sqlgate-report
           if-no-files-found: ignore

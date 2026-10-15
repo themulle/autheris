@@ -58,7 +58,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                     isMasked = _options.MaskedColumns.HasMask(qualifier, colName);
                 }
 
-                if (!isMasked && _options.TablesWithMaskedColumns != null)
+                if (!isMasked && _options.TablesWithMaskedColumns != null && !IsKnownUnmaskedColumnOfTarget(normalizedTableName, targetAlias, colRef))
                 {
                     foreach (var tbl in _options.TablesWithMaskedColumns)
                     {
@@ -90,7 +90,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 {
                     string colName = col.Value;
                     bool isMasked = _options.MaskedColumns.HasMask(normalizedTableName, colName);
-                    if (!isMasked && _options.TablesWithMaskedColumns != null)
+                    if (!isMasked && _options.TablesWithMaskedColumns != null && !IsKnownUnmaskedColumnOfTarget(normalizedTableName, colName))
                     {
                         foreach (var tbl in _options.TablesWithMaskedColumns)
                         {
@@ -134,6 +134,94 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         }
     }
 
+    private bool IsKnownUnmaskedColumnOfTarget(string normalizedTableName, string? targetAlias, ColumnReference colRef)
+    {
+        if (colRef.Name.Parts.Count > 1)
+        {
+            string qualifier = colRef.Name.Parts[^2].Value;
+            string simpleTable = SqlIdentifierHelper.GetSimpleName(normalizedTableName);
+            bool matchesTarget = qualifier.Equals(normalizedTableName, StringComparison.OrdinalIgnoreCase) ||
+                                 qualifier.Equals(simpleTable, StringComparison.OrdinalIgnoreCase) ||
+                                 (!string.IsNullOrEmpty(targetAlias) && qualifier.Equals(targetAlias, StringComparison.OrdinalIgnoreCase));
+            if (!matchesTarget)
+                return false;
+        }
+
+        return IsKnownUnmaskedColumnOfTarget(normalizedTableName, colRef.Name.SimpleName);
+    }
+
+    private bool IsKnownUnmaskedColumnOfTarget(string normalizedTableName, string colName)
+    {
+        var cols = _options.TableColumns(normalizedTableName);
+        return cols != null &&
+               cols.Any(c => c.Equals(colName, StringComparison.OrdinalIgnoreCase)) &&
+               !_options.MaskedColumns.HasMask(normalizedTableName, colName);
+    }
+
+    private void EnsureNoDerivedMaskedColumnReferencesInPredicate(
+        List<(string SourceName, string? Alias, HashSet<string> MaskedColumns)> derived,
+        SqlNode scope,
+        string clause)
+    {
+        if (!_options.RejectMaskedColumnsInPredicates || derived.Count == 0)
+            return;
+
+        CheckNoDerivedMaskedColumnReferences(derived, scope, clause);
+    }
+
+    private void CheckNoDerivedMaskedColumnReferences(
+        List<(string SourceName, string? Alias, HashSet<string> MaskedColumns)> derived,
+        SqlNode scope,
+        string clause)
+    {
+        if (derived.Count == 0)
+            return;
+
+        var stack = _maskGuardStack ??= new Stack<SqlNode>(64);
+        stack.Clear();
+        stack.Push(scope);
+
+        while (stack.Count > 0)
+        {
+            var node = stack.Pop();
+            if (node is ColumnReference colRef)
+            {
+                string colName = colRef.Name.SimpleName;
+                foreach (var (sourceName, alias, maskedCols) in derived)
+                {
+                    if (!maskedCols.Contains(colName))
+                        continue;
+
+                    if (colRef.Name.Parts.Count > 1)
+                    {
+                        string qualifier = colRef.Name.Parts[^2].Value;
+                        bool matchesQualifier = qualifier.Equals(sourceName, StringComparison.OrdinalIgnoreCase) ||
+                                                (!string.IsNullOrEmpty(alias) && qualifier.Equals(alias, StringComparison.OrdinalIgnoreCase));
+                        if (!matchesQualifier)
+                            continue;
+                    }
+
+                    throw new SecurityException($"Masked column '{colName}' of '{sourceName}' must not be referenced in {clause}.");
+                }
+            }
+            else if (node is UsingJoinCondition usingCond)
+            {
+                foreach (var col in usingCond.Columns)
+                {
+                    foreach (var (sourceName, _, maskedCols) in derived)
+                    {
+                        if (maskedCols.Contains(col.Value))
+                        {
+                            throw new SecurityException($"Masked column '{col.Value}' of '{sourceName}' must not be referenced in {clause}.");
+                        }
+                    }
+                }
+            }
+
+            PushChildren(node, stack);
+        }
+    }
+
     private static readonly FrozenSet<string> AggregateFunctionNames = new[]
     {
         "count", "sum", "avg", "min", "max", "every", "any_value", "median", "mode",
@@ -146,8 +234,8 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// A masked column must not be an aggregate argument (including FILTER and the ordered-aggregate ORDER BY) or a grouping expression:
-    /// the secured derived table would feed mask output into the aggregate (WP-FEAT-02, <c>AGGREGATION_ON_MASKED_COLUMN</c>).
+    /// A masked column must not be an aggregate argument (including FILTER, ordered-aggregate ORDER BY, and window functions) or a
+    /// grouping expression: the secured derived table would feed mask output into the aggregate (WP-FEAT-02, <c>AGGREGATION_ON_MASKED_COLUMN</c>).
     /// Subqueries are skipped here; their own query specification is visited with its own tables.
     /// </summary>
     private void EnsureNoMaskedColumnsInAggregatesAndGrouping(QuerySpecification node)
@@ -157,12 +245,14 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
         var tables = new List<(string TableName, string? Alias)>();
         CollectTableSources(node.From, tables);
-        if (tables.Count == 0)
+        var derived = new List<(string SourceName, string? Alias, HashSet<string> MaskedColumns)>();
+        CollectDerivedMaskedSources(node.From, derived);
+        if (tables.Count == 0 && derived.Count == 0)
             return;
 
         if (node.GroupBy != null)
         {
-            CheckAggregationScope(tables, node.GroupBy);
+            CheckAggregationScope(tables, derived, node.GroupBy);
         }
 
         var stack = new Stack<SqlNode>(16);
@@ -171,9 +261,9 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         {
             var current = stack.Pop();
             if (current is SelectStatement) continue;
-            if (current is FunctionCallExpression { Window: null } fn && AggregateFunctionNames.Contains(fn.Name.SimpleName))
+            if (current is FunctionCallExpression fn && (fn.Window != null || AggregateFunctionNames.Contains(fn.Name.SimpleName)))
             {
-                CheckAggregationScope(tables, fn);
+                CheckAggregationScope(tables, derived, fn);
                 continue;
             }
 
@@ -181,18 +271,23 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         }
     }
 
-    private void CheckAggregationScope(List<(string TableName, string? Alias)> tables, SqlNode scope)
+    private void CheckAggregationScope(
+        List<(string TableName, string? Alias)> tables,
+        List<(string SourceName, string? Alias, HashSet<string> MaskedColumns)> derived,
+        SqlNode scope)
     {
-        foreach (var (tbl, alias) in tables)
+        try
         {
-            try
+            foreach (var (tbl, alias) in tables)
             {
                 CheckNoMaskedColumnReferences(tbl, alias, scope, "an aggregate or GROUP BY");
             }
-            catch (SecurityException ex) when (ex is not MaskedAggregationException)
-            {
-                throw new MaskedAggregationException();
-            }
+
+            CheckNoDerivedMaskedColumnReferences(derived, scope, "an aggregate or GROUP BY");
+        }
+        catch (SecurityException ex) when (ex is not MaskedAggregationException)
+        {
+            throw new MaskedAggregationException();
         }
     }
 
@@ -278,6 +373,271 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         }
     }
 
+    private void CollectDerivedMaskedSources(QueryBody? body, List<(string SourceName, string? Alias, HashSet<string> MaskedColumns)> derived)
+    {
+        if (body == null) return;
+        switch (body)
+        {
+            case QuerySpecification qs:
+                CollectDerivedMaskedSources(qs.From, derived);
+                break;
+            case SetOperationQuery so:
+                CollectDerivedMaskedSources(so.Left, derived);
+                CollectDerivedMaskedSources(so.Right, derived);
+                break;
+            case TableQueryBody tq:
+                if (IsCte(tq.TableName))
+                {
+                    string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(tq.TableName.Parts[0]);
+                    if (_cteMaskedColumns.Peek().TryGetValue(cteKey, out var cols) && cols.Count > 0)
+                    {
+                        derived.Add((tq.TableName.NormalizedName, null, cols));
+                    }
+                }
+                break;
+        }
+    }
+
+    private void CollectDerivedMaskedSources(TableSource? from, List<(string SourceName, string? Alias, HashSet<string> MaskedColumns)> derived)
+    {
+        if (from == null) return;
+        switch (from)
+        {
+            case NamedTableSource named when IsCte(named.Name):
+            {
+                string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(named.Name.Parts[0]);
+                if (_cteMaskedColumns.Peek().TryGetValue(cteKey, out var cols) && cols.Count > 0)
+                {
+                    derived.Add((named.Name.NormalizedName, named.Alias?.Value, cols));
+                }
+                break;
+            }
+            case JoinedTableSource joined:
+                CollectDerivedMaskedSources(joined.Left, derived);
+                CollectDerivedMaskedSources(joined.Right, derived);
+                break;
+            case SubqueryTableSource subquery:
+            {
+                var cols = CollectMaskedOutputColumns(subquery.Subquery, subquery.ColumnAliases);
+                if (cols.Count > 0)
+                {
+                    string alias = subquery.Alias?.Value ?? "<subquery>";
+                    derived.Add((alias, subquery.Alias?.Value, cols));
+                }
+                break;
+            }
+            case LateralTableSource lateral:
+            {
+                var cols = CollectMaskedOutputColumns(lateral.Subquery, lateral.ColumnAliases);
+                if (cols.Count > 0)
+                {
+                    string alias = lateral.Alias?.Value ?? "<lateral>";
+                    derived.Add((alias, lateral.Alias?.Value, cols));
+                }
+                break;
+            }
+        }
+    }
+
+    private HashSet<string> CollectMaskedOutputColumns(SelectStatement query, IReadOnlyList<SqlIdentifier>? columnAliases = null)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool pushedWith = false;
+        if (query.With != null)
+        {
+            _cteMaskedColumns.Push(new Dictionary<string, HashSet<string>>(_cteMaskedColumns.Peek(), CteScopeComparer));
+            _cteScopeStack.Push(new HashSet<string>(_cteScopeStack.Peek(), CteScopeComparer));
+            pushedWith = true;
+            foreach (var cte in query.With.Ctes)
+            {
+                string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(cte.Name);
+                var cteMasked = CollectMaskedOutputColumns(cte.Query, cte.ColumnAliases);
+                _cteScopeStack.Peek().Add(cteKey);
+                if (cteMasked.Count > 0)
+                {
+                    _cteMaskedColumns.Peek()[cteKey] = cteMasked;
+                }
+            }
+        }
+
+        try
+        {
+            CollectMaskedOutputColumnsFromBody(query.Body, columnAliases, result);
+        }
+        finally
+        {
+            if (pushedWith)
+            {
+                _cteScopeStack.Pop();
+                _cteMaskedColumns.Pop();
+            }
+        }
+
+        return result;
+    }
+
+    private void CollectMaskedOutputColumnsFromBody(
+        QueryBody? body,
+        IReadOnlyList<SqlIdentifier>? columnAliases,
+        HashSet<string> result)
+    {
+        if (body == null) return;
+        switch (body)
+        {
+            case TableQueryBody tq:
+            {
+                if (IsCte(tq.TableName))
+                {
+                    string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(tq.TableName.Parts[0]);
+                    if (_cteMaskedColumns.Peek().TryGetValue(cteKey, out var cols))
+                    {
+                        foreach (var c in cols) result.Add(c);
+                    }
+                }
+                else
+                {
+                    AddTableMaskedColumns(tq.TableName.NormalizedName, columnAliases, result);
+                }
+                break;
+            }
+            case SetOperationQuery so:
+            {
+                CollectMaskedOutputColumnsFromBody(so.Left, columnAliases, result);
+                CollectMaskedOutputColumnsFromBody(so.Right, columnAliases, result);
+                break;
+            }
+            case QuerySpecification qs:
+            {
+                if (qs.From == null) break;
+                var tables = new List<(string TableName, string? Alias)>();
+                CollectTableSources(qs.From, tables);
+                var derived = new List<(string SourceName, string? Alias, HashSet<string> MaskedColumns)>();
+                CollectDerivedMaskedSources(qs.From, derived);
+                if (tables.Count == 0 && derived.Count == 0) break;
+
+                for (int i = 0; i < qs.Projections.Count; i++)
+                {
+                    var proj = qs.Projections[i];
+                    if (proj is WildcardSelectItem wc)
+                    {
+                        foreach (var (tbl, alias) in tables)
+                        {
+                            if (MatchesWildcardQualifier(wc.Qualifier, tbl, alias))
+                            {
+                                AddTableMaskedColumns(tbl, null, result);
+                            }
+                        }
+                        foreach (var (src, alias, maskedCols) in derived)
+                        {
+                            if (MatchesWildcardQualifier(wc.Qualifier, src, alias))
+                            {
+                                foreach (var c in maskedCols) result.Add(c);
+                            }
+                        }
+                    }
+                    else if (proj is ColumnSelectItem csi && ExpressionReferencesMaskedColumn(csi.Expression, tables, derived))
+                    {
+                        string? outName = csi.Alias?.Value ?? (csi.Expression is ColumnReference cr ? cr.Name.SimpleName : null);
+                        if (!string.IsNullOrEmpty(outName))
+                        {
+                            result.Add(outName);
+                        }
+                        if (columnAliases != null && i < columnAliases.Count)
+                        {
+                            result.Add(columnAliases[i].Value);
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    private void AddTableMaskedColumns(string normalizedTableName, IReadOnlyList<SqlIdentifier>? columnAliases, HashSet<string> result)
+    {
+        var cols = _options.TableColumns(normalizedTableName);
+        if (cols == null) return;
+        for (int i = 0; i < cols.Count; i++)
+        {
+            if (_options.MaskedColumns.HasMask(normalizedTableName, cols[i]))
+            {
+                result.Add(cols[i]);
+                if (columnAliases != null && i < columnAliases.Count)
+                {
+                    result.Add(columnAliases[i].Value);
+                }
+            }
+        }
+    }
+
+    private static bool MatchesWildcardQualifier(SqlQualifiedName? qualifier, string sourceName, string? alias)
+    {
+        if (qualifier == null) return true;
+        string qualSimple = qualifier.SimpleName;
+        string qualNorm = qualifier.NormalizedName;
+        string simpleSource = SqlIdentifierHelper.GetSimpleName(sourceName);
+        return qualSimple.Equals(simpleSource, StringComparison.OrdinalIgnoreCase) ||
+               qualNorm.Equals(sourceName, StringComparison.OrdinalIgnoreCase) ||
+               (!string.IsNullOrEmpty(alias) &&
+                (qualSimple.Equals(alias, StringComparison.OrdinalIgnoreCase) ||
+                 qualNorm.Equals(alias, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private bool ExpressionReferencesMaskedColumn(
+        SqlNode expr,
+        List<(string TableName, string? Alias)> tables,
+        List<(string SourceName, string? Alias, HashSet<string> MaskedColumns)> derived)
+    {
+        var stack = new Stack<SqlNode>(16);
+        stack.Push(expr);
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+            if (current is MaskExpression)
+                return true;
+
+            if (current is ColumnReference colRef)
+            {
+                string colName = colRef.Name.SimpleName;
+                foreach (var (tbl, alias) in tables)
+                {
+                    if (_options.MaskedColumns.HasMask(tbl, colName))
+                        return true;
+                    if (colRef.Name.Parts.Count > 1 && _options.MaskedColumns.HasMask(colRef.Name.Parts[^2].Value, colName))
+                        return true;
+                    if (_options.TablesWithMaskedColumns != null && !IsKnownUnmaskedColumnOfTarget(tbl, alias, colRef))
+                    {
+                        foreach (var maskedTbl in _options.TablesWithMaskedColumns)
+                        {
+                            if (_options.MaskedColumns.HasMask(maskedTbl, colName))
+                                return true;
+                        }
+                    }
+                }
+
+                foreach (var (src, alias, maskedCols) in derived)
+                {
+                    if (!maskedCols.Contains(colName))
+                        continue;
+                    if (colRef.Name.Parts.Count > 1)
+                    {
+                        string qualifier = colRef.Name.Parts[^2].Value;
+                        if (!qualifier.Equals(src, StringComparison.OrdinalIgnoreCase) &&
+                            (string.IsNullOrEmpty(alias) || !qualifier.Equals(alias, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            continue;
+                        }
+                    }
+                    return true;
+                }
+            }
+
+            PushChildren(current, stack);
+        }
+
+        return false;
+    }
+
     private void CheckJoinConditions(TableSource? from, List<(string TableName, string? Alias)> tables)
     {
         if (from is JoinedTableSource j)
@@ -298,6 +658,26 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             }
             CheckJoinConditions(j.Left, tables);
             CheckJoinConditions(j.Right, tables);
+        }
+    }
+
+    private void CheckDerivedJoinConditions(
+        TableSource? from,
+        List<(string SourceName, string? Alias, HashSet<string> MaskedColumns)> derived)
+    {
+        if (derived.Count == 0) return;
+        if (from is JoinedTableSource j)
+        {
+            if (j.Condition is OnJoinCondition on)
+            {
+                EnsureNoDerivedMaskedColumnReferencesInPredicate(derived, on.Predicate, "JOIN condition");
+            }
+            else if (j.Condition is UsingJoinCondition usingCond)
+            {
+                EnsureNoDerivedMaskedColumnReferencesInPredicate(derived, usingCond, "JOIN condition");
+            }
+            CheckDerivedJoinConditions(j.Left, derived);
+            CheckDerivedJoinConditions(j.Right, derived);
         }
     }
 }

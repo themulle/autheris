@@ -84,9 +84,46 @@ public sealed class ClusterScheduledServiceTests
         }
     }
 
+    /// <summary>A <see cref="FakeTimeProvider"/> that counts the timers not yet disposed (a pending <c>Task.Delay</c> holds one).</summary>
+    private sealed class TrackingTimeProvider : FakeTimeProvider
+    {
+        private int _pending;
+
+        public int PendingTimers => Volatile.Read(ref _pending);
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            Interlocked.Increment(ref _pending);
+            return new TrackedTimer(base.CreateTimer(callback, state, dueTime, period), this);
+        }
+
+        private sealed class TrackedTimer(ITimer inner, TrackingTimeProvider owner) : ITimer
+        {
+            private int _disposed;
+
+            public bool Change(TimeSpan dueTime, TimeSpan period) => inner.Change(dueTime, period);
+
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                {
+                    Interlocked.Decrement(ref owner._pending);
+                }
+
+                inner.Dispose();
+            }
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
+        }
+    }
+
     private sealed class Harness : IAsyncDisposable
     {
-        public FakeTimeProvider Time { get; } = new();
+        public TrackingTimeProvider Time { get; } = new();
 
         public Probe Probe { get; } = new();
 
@@ -107,10 +144,18 @@ public sealed class ClusterScheduledServiceTests
             Service = new TestService(_provider.GetRequiredService<IServiceScopeFactory>(), State, Schedule, Time);
         }
 
-        public async Task StartAsync() => await Service.StartAsync(CancellationToken.None);
+        public async Task StartAsync()
+        {
+            await Service.StartAsync(CancellationToken.None);
+            // Advancing the clock before the service registered its first delay would be lost (flaky on loaded CI runners).
+            (await Eventually.WaitAsync(() => Time.PendingTimers > 0, TimeSpan.FromSeconds(5))).ShouldBeTrue("the service never started waiting on the clock");
+        }
 
         public async Task AdvanceAsync(TimeSpan by)
         {
+            // Let a cycle that just ran schedule its next delay first; a job that is still running simply times out the wait.
+            await Eventually.WaitAsync(() => Time.PendingTimers > 0, TimeSpan.FromSeconds(2));
+
             // Advance in small steps so cycles started by an earlier timer can schedule the next one.
             var remaining = by;
             var step = TimeSpan.FromSeconds(1);
