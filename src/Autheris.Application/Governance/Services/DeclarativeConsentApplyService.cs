@@ -122,9 +122,12 @@ public sealed class DeclarativeConsentApplyService(
                     policy.ValidUntil,
                     now,
                     GrantClassifier.Classify([metadata]),
-                    Justification: policy.Description ?? "GitOps manifest"));
+                    Justification: policy.Description ?? "GitOps manifest",
+                    Effect: effect));
                 GrantPolicyViolationException.ThrowIfDenied(decision);
-                validTo = policy.ValidUntil!.Value;
+
+                // A deny needs no expiry; without one it is stored as long-lived (deny rules are never clamped).
+                validTo = policy.ValidUntil ?? now.AddYears(100);
             }
             else
             {

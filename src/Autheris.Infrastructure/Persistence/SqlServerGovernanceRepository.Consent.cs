@@ -746,7 +746,7 @@ public partial class SqlServerGovernanceRepository
             await using (var getCmd = conn.CreateCommand())
             {
                 getCmd.Transaction = tx;
-                getCmd.CommandText = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id
+                getCmd.CommandText = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.valid_from
                                        FROM CONSENTS c WITH (UPDLOCK, ROWLOCK)
                                        JOIN TABLES t ON c.table_id = t.id
                                        WHERE c.id = @id AND c.consent_request_id = @reqId AND c.is_revoked = 0";
@@ -870,6 +870,7 @@ public partial class SqlServerGovernanceRepository
     {
         TableIdentifier? tableId = null;
         TenantId extendTenant = TenantId.LegacySingleTenant;
+        var newValidFrom = DateTimeOffset.UtcNow;
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
@@ -890,15 +891,18 @@ public partial class SqlServerGovernanceRepository
                     {
                         extendTenant = new TenantId(reader.GetString(3));
                     }
+
+                    newValidFrom = ConsentSubjectFilter.RenewalPeriodStart(reader.GetString(4), DateTimeOffset.UtcNow);
                 }
             }
 
             await using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = tx;
-                cmd.CommandText = "UPDATE CONSENTS SET valid_to = @validTo, renewal_count = renewal_count + 1 WHERE id = @id";
+                cmd.CommandText = "UPDATE CONSENTS SET valid_to = @validTo, valid_from = @validFrom, renewal_count = renewal_count + 1 WHERE id = @id";
                 cmd.Parameters.AddWithValue("@id", consentId.ToString());
                 cmd.Parameters.AddWithValue("@validTo", newValidTo.ToString("O"));
+                cmd.Parameters.AddWithValue("@validFrom", newValidFrom.ToString("O"));
                 await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 

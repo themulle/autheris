@@ -35,6 +35,11 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
             return GrantDecision.Deny(GrantErrorCodes.Indeterminate, "Unknown grantee type.");
         }
 
+        if (r.Effect == ConsentEffect.Deny && r.Kind != GrantKind.BreakGlass)
+        {
+            return new GrantDecision(true, null, false, GrantRecertClass.None, GrantClass.Standing, "Deny grants only restrict access and have no maximum.");
+        }
+
         if (r.GranteeType is GranteeType.Group or GranteeType.Role && r.Kind != GrantKind.BreakGlass)
         {
             return new GrantDecision(true, null, false, GrantRecertClass.None, GrantClass.Standing, "Standing group/role grant.");

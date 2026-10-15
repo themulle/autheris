@@ -95,7 +95,7 @@ public sealed class Consent
     public string? RowFilterCondition { get; init; }
 
     /// <summary>WP-SC-16: expiry after the read-time clamp of legacy individual grants (never later than <see cref="ValidTo"/>).</summary>
-    public DateTimeOffset EffectiveValidTo => IndividualGrantLimits.EffectiveConsentValidTo(GranteeType, ValidFrom, ValidTo);
+    public DateTimeOffset EffectiveValidTo => IndividualGrantLimits.EffectiveConsentValidTo(GranteeType, ValidFrom, ValidTo, Effect);
 
     public bool IsActive(DateTimeOffset atTime)
     {

@@ -53,10 +53,10 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         ValidFrom = DateTimeOffset.UtcNow.AddDays(fromDays), ValidTo = DateTimeOffset.UtcNow.AddDays(toDays), CreatedBySid = Admin
     };
 
-    private Consent UserConsent(string sid) => new()
+    private Consent UserConsent(string sid, ConsentEffect effect = ConsentEffect.Allow, int fromDays = -1, double toDays = 30) => new()
     {
-        TableId = _tableId, TableIdentifier = _table, TenantId = TenantA, GranteeType = GranteeType.User, GranteeSid = new Sid(sid),
-        ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(30), CreatedBySid = Admin
+        TableId = _tableId, TableIdentifier = _table, TenantId = TenantA, GranteeType = GranteeType.User, GranteeSid = new Sid(sid), Effect = effect,
+        ValidFrom = DateTimeOffset.UtcNow.AddDays(fromDays), ValidTo = DateTimeOffset.UtcNow.AddDays(toDays), CreatedBySid = Admin
     };
 
     [Fact]
@@ -195,6 +195,39 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         var audit = await _repo.GetAuditLogEntriesAsync(50);
         audit.ShouldContain(e => e.EventType == "CONSENT_REVOKED" && e.ActorSid == Admin);
         audit.Count(e => e.EventType == "CONSENT_GRANTED").ShouldBeGreaterThanOrEqualTo(2);
+    }
+
+    [Fact]
+    public async Task SEC_SC_20_LegacyPermanentDeny_StaysActive_WhileALegacyAllowIsClamped()
+    {
+        await EnsureTableAsync();
+        var now = DateTimeOffset.UtcNow;
+        var deny = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice", ConsentEffect.Deny, -400, 365 * 50));
+        var allow = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice", ConsentEffect.Allow, -400, 365 * 50));
+
+        var active = await _repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Alice")], _table, now, TenantA);
+
+        active.ShouldContain(c => c.Id == deny.Id);
+        active.ShouldNotContain(c => c.Id == allow.Id);
+    }
+
+    [Fact]
+    public async Task SEC_SC_20_Renewal_RestartsTheClampPeriod_AtDay150_AndAfterExpiry()
+    {
+        await EnsureTableAsync();
+        var now = DateTimeOffset.UtcNow;
+        var day150 = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice", ConsentEffect.Allow, -150, 10));
+        var expired = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Bob", ConsentEffect.Allow, -200, -1));
+
+        await _repo.ExtendConsentExpiryAsync(day150.Id, now.AddDays(170));
+        await _repo.ExtendConsentExpiryAsync(expired.Id, now.AddDays(60));
+
+        var renewed150 = (await _repo.GetConsentByIdAsync(day150.Id))!;
+        renewed150.IsActive(now.AddDays(100)).ShouldBeTrue("the renewal must not be cancelled by the original period start");
+        renewed150.IsActive(now.AddDays(171)).ShouldBeFalse();
+        var renewedExpired = (await _repo.GetConsentByIdAsync(expired.Id))!;
+        renewedExpired.IsActive(now.AddDays(1)).ShouldBeTrue();
+        renewedExpired.IsActive(now.AddDays(61)).ShouldBeFalse();
     }
 
     [Fact]

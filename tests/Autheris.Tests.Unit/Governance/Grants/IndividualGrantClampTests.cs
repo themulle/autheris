@@ -36,6 +36,35 @@ public sealed class IndividualGrantClampTests : IDisposable
         c.ValidTo.ShouldBe(DateTimeOffset.MaxValue, "nothing is rewritten");
     }
 
+    [Theory]
+    [InlineData(GranteeType.User)]
+    [InlineData(GranteeType.ServicePrincipal)]
+    public void SEC_SC_20_DenyConsent_IsNeverClamped_SoALegacyPermanentDenyStaysActive(GranteeType type)
+    {
+        var deny = new Consent
+        {
+            Effect = ConsentEffect.Deny, GranteeType = type, GranteeSid = new Sid("S-1-5-21-X"),
+            ValidFrom = From, ValidTo = DateTimeOffset.MaxValue
+        };
+
+        deny.EffectiveValidTo.ShouldBe(DateTimeOffset.MaxValue);
+        deny.IsActive(From.AddDays(400)).ShouldBeTrue("an expired deny would fail open");
+    }
+
+    [Fact]
+    public void SEC_SC_20_GrantPolicy_DenyConsent_NeedsNoExpiryAndNoMaximum()
+    {
+        var policy = new Autheris.Application.Governance.Grants.GrantPolicy();
+        var r = new Autheris.Application.Governance.Grants.GrantRequest(
+            GranteeType.User, "S-1-5-21-X", Autheris.Application.Governance.Grants.GrantKind.ManifestPolicy, null, From, Effect: ConsentEffect.Deny);
+
+        var d = policy.Evaluate(r);
+
+        d.Allowed.ShouldBeTrue();
+        d.MaxValidTo.ShouldBeNull();
+        policy.Evaluate(r with { Effect = ConsentEffect.Allow }).Allowed.ShouldBeFalse();
+    }
+
     [Fact]
     public void SEC_SC_20_IndividualConsent_WithinLimit_KeepsItsOwnExpiry()
     {

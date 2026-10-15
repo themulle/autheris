@@ -50,6 +50,7 @@ public enum GrantRecertClass
 /// Null when the grant is only being validated before approval (request time); a list (possibly empty) when approvals are being
 /// enforced at activation time. Four-eyes is enforced only when this is not null.
 /// </param>
+/// <param name="Effect">A <see cref="ConsentEffect.Deny"/> only restricts access: it is never limited (no expiry, no maximum) and never clamped, because an expiring deny would fail open.</param>
 /// <param name="Renewer">The actor of a renewal. A renewal by the grantee is always rejected.</param>
 public sealed record GrantRequest(
     GranteeType GranteeType,
@@ -65,7 +66,8 @@ public sealed record GrantRequest(
     IReadOnlyList<string>? Approvers = null,
     string? Renewer = null,
     int RenewalCount = 0,
-    string? Justification = null);
+    string? Justification = null,
+    ConsentEffect Effect = ConsentEffect.Allow);
 
 /// <param name="ErrorCode">Stable machine code when <see cref="Allowed"/> is false (HTTP 400/403 mapping by the caller).</param>
 public sealed record GrantDecision(

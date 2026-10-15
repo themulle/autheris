@@ -209,11 +209,12 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
 
     // ---- WP-SC-02 / SEC-SC-03: role lookup and atomic replace ----
 
-    private static Consent NewConsent(Seed seed, GranteeType type, string? sid, string? role, TenantId tenant) => new()
+    private static Consent NewConsent(Seed seed, GranteeType type, string? sid, string? role, TenantId tenant,
+        ConsentEffect effect = ConsentEffect.Allow, int fromDays = -1, double toDays = 30) => new()
     {
-        TableId = seed.TableId, TableIdentifier = seed.Table, TenantId = tenant, GranteeType = type,
+        TableId = seed.TableId, TableIdentifier = seed.Table, TenantId = tenant, GranteeType = type, Effect = effect,
         GranteeSid = sid == null ? (Sid?)null : new Sid(sid), RoleName = role,
-        ValidFrom = seed.Now.AddDays(-1), ValidTo = seed.Now.AddDays(30), CreatedBySid = new Sid("SYSTEM")
+        ValidFrom = seed.Now.AddDays(fromDays), ValidTo = seed.Now.AddDays(toDays), CreatedBySid = new Sid("SYSTEM")
     };
 
     [Fact]
@@ -311,6 +312,37 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
 
         (await Repo.GetConsentByIdAsync(old.Id))!.IsRevoked.ShouldBeFalse();
         (await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Gina")], seed.Table, seed.Now, TenantA)).ShouldNotContain(c => c.GranteeType != GranteeType.Role);
+    }
+
+    [Fact]
+    public async Task SEC_SC_20_LegacyPermanentDeny_StaysActive_WhileALegacyAllowIsClamped()
+    {
+        if (!Available) return;
+        var seed = await SeedAsync();
+        var sid = new Sid("S-1-5-21-Legacy");
+        var deny = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, sid.Value, null, TenantA, ConsentEffect.Deny, -400, 365 * 50));
+        var allow = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, sid.Value, null, TenantA, ConsentEffect.Allow, -400, 365 * 50));
+
+        var active = await Repo.GetActiveConsentsForSubjectsAsync([sid], seed.Table, seed.Now, TenantA);
+
+        active.ShouldContain(c => c.Id == deny.Id);
+        active.ShouldNotContain(c => c.Id == allow.Id);
+    }
+
+    [Fact]
+    public async Task SEC_SC_20_Renewal_RestartsTheClampPeriod_AtDay150_AndAfterExpiry()
+    {
+        if (!Available) return;
+        var seed = await SeedAsync();
+        var d150 = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-R150", null, TenantA, ConsentEffect.Allow, -150, 10));
+        var expired = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-RExp", null, TenantA, ConsentEffect.Allow, -200, -1));
+
+        await Repo.ExtendConsentExpiryAsync(d150.Id, seed.Now.AddDays(170));
+        await Repo.ExtendConsentExpiryAsync(expired.Id, seed.Now.AddDays(60));
+
+        (await Repo.GetConsentByIdAsync(d150.Id))!.IsActive(seed.Now.AddDays(100)).ShouldBeTrue();
+        (await Repo.GetConsentByIdAsync(expired.Id))!.IsActive(seed.Now.AddDays(1)).ShouldBeTrue();
+        (await Repo.GetConsentByIdAsync(expired.Id))!.IsActive(seed.Now.AddDays(61)).ShouldBeFalse();
     }
 
     [Fact]

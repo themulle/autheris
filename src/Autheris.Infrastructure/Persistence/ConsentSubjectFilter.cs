@@ -15,6 +15,14 @@ internal static class ConsentSubjectFilter
     /// The normalised form stored in <c>CONSENTS.grantee_sid_norm</c> and used for the lookup (upper-case, invariant). Equal under
     /// <see cref="StringComparison.OrdinalIgnoreCase"/> implies equal here, so the prefilter never drops a consent that the C# filter keeps.
     /// </summary>
+    /// <summary>
+    /// WP-SC-16: start of the read-time clamp period after a renewal. The clamp is <c>min(valid_to, valid_from + max)</c>, so a renewal
+    /// restarts the period at <paramref name="now"/> by moving <c>valid_from</c> forward (as access-profile renewals do with <c>assigned_at</c>);
+    /// a grant that has not started yet keeps its later start. No extra column is needed, so the 0001 baselines stay unchanged.
+    /// </summary>
+    internal static DateTimeOffset RenewalPeriodStart(string storedValidFrom, DateTimeOffset now) =>
+        DateTimeOffset.TryParse(storedValidFrom, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var from) && from > now ? from : now;
+
     internal static string Normalize(string sid) => sid.ToUpperInvariant();
 
     internal static string? NormalizeOrNull(Sid? sid) => sid is { } s ? Normalize(s.Value) : null;

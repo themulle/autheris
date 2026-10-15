@@ -34,9 +34,10 @@ public static class IndividualGrantLimits
     public static void Reset() => Configure(DefaultRegularMax, DefaultUnmaskedMax, DefaultServicePrincipalMax);
 
     /// <summary>Effective expiry of a consent grant. A default <paramref name="validFrom"/> (never stored by a writer) is not clamped.</summary>
-    public static DateTimeOffset EffectiveConsentValidTo(GranteeType granteeType, DateTimeOffset validFrom, DateTimeOffset validTo)
+    public static DateTimeOffset EffectiveConsentValidTo(GranteeType granteeType, DateTimeOffset validFrom, DateTimeOffset validTo, ConsentEffect effect = ConsentEffect.Allow)
     {
-        if (validFrom == default)
+        // A deny only restricts access; expiring it at read time would silently re-open the data (fail open).
+        if (effect == ConsentEffect.Deny || validFrom == default)
         {
             return validTo;
         }

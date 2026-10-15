@@ -1610,9 +1610,10 @@ public partial class SqliteGovernanceRepository
         {
             TableIdentifier? tableId = null;
             TenantId extendTenant = TenantId.LegacySingleTenant;
+            var newValidFrom = DateTimeOffset.UtcNow;
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id
+                cmd.CommandText = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.valid_from
                                     FROM CONSENTS c
                                     JOIN TABLES t ON c.table_id = t.id
                                     WHERE c.id = @id";
@@ -1620,6 +1621,7 @@ public partial class SqliteGovernanceRepository
                 using var reader = await cmd.ExecuteReaderAsync(ct);
                 if (await reader.ReadAsync(ct))
                 {
+                    newValidFrom = ConsentSubjectFilter.RenewalPeriodStart(reader.GetString(4), DateTimeOffset.UtcNow);
                     tableId = new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
                     if (!reader.IsDBNull(3))
                     {
@@ -1631,9 +1633,10 @@ public partial class SqliteGovernanceRepository
             using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"UPDATE CONSENTS
-                                    SET valid_to = @validTo, renewal_count = renewal_count + 1
+                                    SET valid_to = @validTo, valid_from = @validFrom, renewal_count = renewal_count + 1
                                     WHERE id = @id";
                 cmd.Parameters.AddWithValue("@id", consentId.ToString());
+                cmd.Parameters.AddWithValue("@validFrom", newValidFrom.ToString("O"));
                 cmd.Parameters.AddWithValue("@validTo", newValidTo.ToString("O"));
                 await cmd.ExecuteNonQueryAsync(ct);
             }
