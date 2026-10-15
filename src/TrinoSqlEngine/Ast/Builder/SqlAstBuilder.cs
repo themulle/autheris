@@ -1091,8 +1091,9 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
             return new ColumnReference(new SqlQualifiedName(parts));
         }
 
-        // Dereference of non-column expression (e.g. record field access)
-        return new ColumnReference(new SqlQualifiedName(new[] { new SqlIdentifier(baseExpr.ToString() ?? string.Empty), field }));
+        // Field access on a non-column expression (literal, function call, row value) has no AST node. Fail closed: turning the
+        // base node into an identifier would carry its text (for example a string literal) into the emitted SQL.
+        throw new AstBuildException("Field access is supported on column references only.");
     }
 
     public override SqlNode VisitParameter(SqlBaseParser.ParameterContext context)

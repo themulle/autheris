@@ -36,4 +36,28 @@ public class KnownDefectTests
         Assert.Null(compiled);
         Assert.IsType<AstBuildException>(error);
     }
+
+    /// <summary>
+    /// KD-2: field access on a non-column base (<c>'text'."col"</c>, <c>lower(x).y</c>) used to be emitted as a column reference
+    /// whose qualifier was the <c>ToString()</c> of the base AST node, so a string literal reached the SQL text as a quoted
+    /// identifier (found by <c>GrammarFuzzProperties</c>, seed 1784412052261209272). The builder rejects it with a typed
+    /// <see cref="AstBuildException"/>.
+    /// </summary>
+    public static TheoryData<string> Kd2Inputs => new()
+    {
+        "SELECT v.* FROM (VALUES (1, 2)) AS v (c0, c1) WHERE 'LIT1_x' IN ('LIT2_v'.\"quoted\", 'LIT3_v')",
+        "SELECT 'LIT2_v'.\"quoted\" FROM orders",
+        "SELECT id FROM orders WHERE 'LIT2_v'.status = 'open'",
+        "SELECT 42.5.x FROM orders",
+        "SELECT lower(status).x FROM orders"
+    };
+
+    [Theory]
+    [MemberData(nameof(Kd2Inputs))]
+    public void DereferenceOfANonColumnExpression_IsRejectedWithATypedException(string sql)
+    {
+        var (compiled, error) = Oracles.TryCompile(ProductionCompiler.Compile, sql, Ctx, StatementPermissions.ReadOnly);
+        Assert.Null(compiled);
+        Assert.IsType<AstBuildException>(error);
+    }
 }
