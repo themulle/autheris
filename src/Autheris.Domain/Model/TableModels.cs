@@ -108,6 +108,12 @@ public sealed class TableColumn
 /// <summary>A declared index: ordered columns and the unique flag.</summary>
 public sealed record TableIndexDefinition(string Name, IReadOnlyList<string> Columns, bool IsUnique);
 
+/// <summary>The declared key definition of a table: ordered primary key and indexes (identifiers only, no data).</summary>
+public sealed record TableKeyDefinition(IReadOnlyList<string> PrimaryKey, IReadOnlyList<TableIndexDefinition> Indexes);
+
+/// <summary>Result of a narrow key definition replacement (audit before/after).</summary>
+public sealed record TableKeyDefinitionChange(TableKeyDefinition Before, TableKeyDefinition After);
+
 public sealed record TableMetadata
 {
     public Table Table { get; init; } = new();

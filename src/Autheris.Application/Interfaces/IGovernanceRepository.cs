@@ -5,6 +5,32 @@ public interface ITableMetadataRepository
     Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default);
     Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default);
     Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default);
+
+    /// <summary>
+    /// Issue #94 (SD-5): replaces ONLY the declared primary key and indexes of a table. In one transaction the stored columns are read,
+    /// the definition is validated against them and replaced, and the epoch is bumped once; masking rules and column metadata other than
+    /// the key markers are untouched. Returns null when the table does not exist; throws <c>TableDefinitionException</c> when invalid.
+    /// </summary>
+    Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+        TableIdentifier table,
+        IReadOnlyList<string> primaryKey,
+        IReadOnlyList<TableIndexDefinition> indexes,
+        CancellationToken ct = default);
+
+    /// <summary>Resolves an active table by its id without loading every table (default: scan of <see cref="GetAllTablesAsync"/>).</summary>
+    async Task<TableIdentifier?> GetActiveTableIdentifierByIdAsync(Guid tableId, CancellationToken ct = default)
+    {
+        var all = await GetAllTablesAsync(ct).ConfigureAwait(false);
+        foreach (var t in all)
+        {
+            if (t.Table.Id == tableId)
+            {
+                return t.Identifier;
+            }
+        }
+
+        return null;
+    }
 }
 
 public interface IConsentRepository
