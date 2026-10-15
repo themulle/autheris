@@ -21,16 +21,7 @@ using static Autheris.Application.Mcp.Services.McpDatasetTools;
 /// (<see cref="McpCatalogVisibility"/>); rows are read only through <see cref="IGatewayExecutionService"/>, so consent,
 /// ReBAC, Casbin, row filters and masking apply exactly as for REST and GraphQL.
 /// </summary>
-public sealed class McpDatasetCatalog(
-    ITableMetadataRepository metadataRepository,
-    IConsentRepository consentRepository,
-    IGatewayExecutionService gatewayExecutionService,
-    IGoldenQueryService? goldenQueryService = null,
-    IOptions<GatewayOptions>? options = null,
-    IGraphQlCatalogMap? graphQlMap = null,
-    Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService? explanationService = null,
-    IDataOwnershipRepository? dataOwnershipRepository = null,
-    IConsentApprovalRepository? approvalRepository = null) : IMcpDatasetCatalog
+public sealed class McpDatasetCatalog : IMcpDatasetCatalog
 {
     public const int MaxListedDatasets = 200;
     public const int DefaultSampleRows = 5;
@@ -43,9 +34,78 @@ public sealed class McpDatasetCatalog(
         "describe_dataset returns the GraphQL field, the filter and sort types and an example query for each dataset. " +
         "The other endpoints are listed for clients that need a specific protocol.";
 
-    private readonly ITableMetadataRepository _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
-    private readonly IConsentRepository _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
-    private readonly IGatewayExecutionService _gatewayExecutionService = gatewayExecutionService ?? throw new ArgumentNullException(nameof(gatewayExecutionService));
+    private readonly ITableMetadataRepository _metadataRepository;
+    private readonly IConsentRepository _consentRepository;
+    private readonly IGatewayExecutionService _gatewayExecutionService;
+    private readonly IGoldenQueryService? goldenQueryService;
+    private readonly IOptions<GatewayOptions>? options;
+    private readonly IGraphQlCatalogMap? graphQlMap;
+    private readonly Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService? explanationService;
+    private readonly IDataOwnershipRepository? dataOwnershipRepository;
+    private readonly IConsentApprovalRepository? approvalRepository;
+    private readonly Autheris.Application.Catalog.Profiling.IColumnValueProfileService? profileService;
+    private readonly Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator;
+    private readonly IAuditLogRepository? auditLogRepository;
+    private readonly Autheris.Application.Governance.Interfaces.ISchemaSunsettingService? sunsettingService;
+
+    [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
+    public McpDatasetCatalog(
+        ITableMetadataRepository metadataRepository,
+        IConsentRepository consentRepository,
+        IGatewayExecutionService gatewayExecutionService,
+        IAuditLogRepository auditLogRepository,
+        IGoldenQueryService? goldenQueryService = null,
+        IOptions<GatewayOptions>? options = null,
+        IGraphQlCatalogMap? graphQlMap = null,
+        Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService? explanationService = null,
+        IDataOwnershipRepository? dataOwnershipRepository = null,
+        IConsentApprovalRepository? approvalRepository = null,
+        Autheris.Application.Catalog.Profiling.IColumnValueProfileService? profileService = null,
+        Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator = null,
+        Autheris.Application.Governance.Interfaces.ISchemaSunsettingService? sunsettingService = null)
+    {
+        _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
+        _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
+        _gatewayExecutionService = gatewayExecutionService ?? throw new ArgumentNullException(nameof(gatewayExecutionService));
+        this.auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
+        this.goldenQueryService = goldenQueryService;
+        this.options = options;
+        this.graphQlMap = graphQlMap;
+        this.explanationService = explanationService;
+        this.dataOwnershipRepository = dataOwnershipRepository;
+        this.approvalRepository = approvalRepository;
+        this.profileService = profileService;
+        this.syntheticRowGenerator = syntheticRowGenerator;
+        this.sunsettingService = sunsettingService;
+    }
+
+    public McpDatasetCatalog(
+        ITableMetadataRepository metadataRepository,
+        IConsentRepository consentRepository,
+        IGatewayExecutionService gatewayExecutionService,
+        IGoldenQueryService? goldenQueryService = null,
+        IOptions<GatewayOptions>? options = null,
+        IGraphQlCatalogMap? graphQlMap = null,
+        Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService? explanationService = null,
+        IDataOwnershipRepository? dataOwnershipRepository = null,
+        IConsentApprovalRepository? approvalRepository = null,
+        Autheris.Application.Catalog.Profiling.IColumnValueProfileService? profileService = null,
+        Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator = null,
+        Autheris.Application.Governance.Interfaces.ISchemaSunsettingService? sunsettingService = null)
+    {
+        _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
+        _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
+        _gatewayExecutionService = gatewayExecutionService ?? throw new ArgumentNullException(nameof(gatewayExecutionService));
+        this.goldenQueryService = goldenQueryService;
+        this.options = options;
+        this.graphQlMap = graphQlMap;
+        this.explanationService = explanationService;
+        this.dataOwnershipRepository = dataOwnershipRepository;
+        this.approvalRepository = approvalRepository;
+        this.profileService = profileService;
+        this.syntheticRowGenerator = syntheticRowGenerator;
+        this.sunsettingService = sunsettingService;
+    }
 
     public Task<McpDatasetList> ListDatasetsAsync(
         ClaimsPrincipal principal,
@@ -127,6 +187,18 @@ public sealed class McpDatasetCatalog(
         var table = await FindVisibleAsync(principal, dataset, ct).ConfigureAwait(false);
         var id = table.Identifier;
 
+        var (activeConsents, pendingRequests, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
+        var accessStatus = options?.Value.IsMcpAuthBypassed == true
+            ? "GRANTED"
+            : CatalogVisibility.ComputeAccessStatus(id, activeConsents, pendingRequests, isAdmin);
+
+        bool canViewProfile = string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase) ||
+                              table.ReleaseProfileToCatalogViewers;
+
+        var (columnAccessLevels, hasActiveRowFilters) = ComputeTableColumnAccessAndFilters(table, activeConsents, isAdmin);
+        var effectiveProfileService = profileService ?? new Autheris.Application.Catalog.Profiling.ColumnValueProfileService();
+        var sunsetRules = await LoadSunsettingRulesAsync(ct).ConfigureAwait(false);
+
         var graphQl = graphQlMap == null ? null : await graphQlMap.GetTableAsync(id, ct).ConfigureAwait(false);
         var graphQlColumns = (graphQl?.Columns ?? []).ToDictionary(c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
 
@@ -135,7 +207,29 @@ public sealed class McpDatasetCatalog(
             .Select(c =>
             {
                 graphQlColumns.TryGetValue(c.ColumnName, out var field);
-                return new McpDatasetColumn(c.ColumnName, c.DataType, c.Description, c.IsSensitive, primaryKeys.Contains(c.ColumnName), field?.Field, field?.GraphQlType, c.Semantics);
+                var deprecation = ResolveFieldDeprecation(id, c, sunsetRules);
+                ColumnValueProfile? valueProfile = null;
+                if (canViewProfile)
+                {
+                    var effectiveLevel = columnAccessLevels.TryGetValue(c.ColumnName, out var lvl)
+                        ? lvl
+                        : (c.IsSensitive || (table.ColumnMaskingRules != null && table.ColumnMaskingRules.ContainsKey(c.ColumnName))
+                            ? Autheris.Domain.Interfaces.ColumnAccessLevel.Mask
+                            : Autheris.Domain.Interfaces.ColumnAccessLevel.Clear);
+                    valueProfile = effectiveProfileService.GetColumnProfile(table, c, effectiveLevel, hasActiveRowFilters);
+                }
+
+                return new McpDatasetColumn(
+                    c.ColumnName,
+                    c.DataType,
+                    c.Description,
+                    c.IsSensitive,
+                    primaryKeys.Contains(c.ColumnName),
+                    field?.Field,
+                    field?.GraphQlType,
+                    c.Semantics,
+                    Deprecation: deprecation,
+                    ValueProfile: valueProfile);
             })
             .ToList();
 
@@ -147,11 +241,6 @@ public sealed class McpDatasetCatalog(
                 .Select(g => new McpDatasetExample(g.Title, g.Description, g.QueryText, g.VariablesJson))
                 .ToList();
         }
-
-        var (activeConsents, pendingRequests, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
-        var accessStatus = options?.Value.IsMcpAuthBypassed == true
-            ? "GRANTED"
-            : CatalogVisibility.ComputeAccessStatus(id, activeConsents, pendingRequests, isAdmin);
 
         string? dataOwner = null;
         List<string>? dataOwnerDelegates = null;
@@ -203,6 +292,170 @@ public sealed class McpDatasetCatalog(
             DataOwner: dataOwner,
             DataOwnerDelegates: dataOwnerDelegates,
             AccessStatus: accessStatus);
+    }
+
+    private async Task<IReadOnlyList<FieldSunsettingRule>> LoadSunsettingRulesAsync(CancellationToken ct)
+    {
+        var list = new List<FieldSunsettingRule>();
+        if (options?.Value.FieldSunsetting?.Rules is { Count: > 0 } configured)
+        {
+            list.AddRange(configured);
+        }
+
+        if (sunsettingService != null)
+        {
+            try
+            {
+                var serviceRules = await sunsettingService.GetRulesAsync(ct).ConfigureAwait(false);
+                if (serviceRules is { Count: > 0 })
+                {
+                    list.AddRange(serviceRules);
+                }
+            }
+            catch
+            {
+                // Fail-safe
+            }
+        }
+
+        return list;
+    }
+
+    internal static FieldDeprecationInfo? ResolveFieldDeprecation(
+        TableIdentifier tableId,
+        TableColumn column,
+        IReadOnlyList<FieldSunsettingRule>? rules)
+    {
+        if (rules is { Count: > 0 })
+        {
+            var fullId = DatasetId(tableId);
+            var schemaTable = $"{tableId.Schema}.{tableId.TableName}";
+            var match = rules.FirstOrDefault(r =>
+                r.IsActive &&
+                string.Equals(r.FieldName, column.ColumnName, StringComparison.OrdinalIgnoreCase) &&
+                (string.Equals(r.TargetTable, fullId, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(r.TargetTable, schemaTable, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(r.TargetTable, tableId.TableName, StringComparison.OrdinalIgnoreCase)));
+
+            if (match != null)
+            {
+                return new FieldDeprecationInfo(
+                    match.DeprecatedAt,
+                    match.SunsetAt,
+                    match.ReplacementField,
+                    match.DeprecationReason);
+            }
+        }
+
+        if (column.Meta is { Count: > 0 } meta)
+        {
+            meta.TryGetValue("deprecated_since", out var depStr);
+            if (string.IsNullOrWhiteSpace(depStr))
+            {
+                meta.TryGetValue("deprecated_at", out depStr);
+            }
+
+            meta.TryGetValue("sunset_date", out var sunStr);
+            if (string.IsNullOrWhiteSpace(sunStr))
+            {
+                meta.TryGetValue("sunset_at", out sunStr);
+            }
+
+            bool hasDep = !string.IsNullOrWhiteSpace(depStr) &&
+                          DateTimeOffset.TryParse(depStr, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out _);
+            bool hasSun = !string.IsNullOrWhiteSpace(sunStr) &&
+                          DateTimeOffset.TryParse(sunStr, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out _);
+
+            if (hasDep || hasSun)
+            {
+                var parsedDep = hasDep
+                    ? DateTimeOffset.Parse(depStr!, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal)
+                    : DateTimeOffset.Parse(sunStr!, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal).AddDays(-30);
+
+                var parsedSun = hasSun
+                    ? DateTimeOffset.Parse(sunStr!, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal)
+                    : parsedDep.AddDays(90);
+
+                meta.TryGetValue("replacement_field", out var replacement);
+                if (!meta.TryGetValue("deprecation_reason", out var reason))
+                {
+                    meta.TryGetValue("reason", out reason);
+                }
+
+                return new FieldDeprecationInfo(
+                    parsedDep,
+                    parsedSun,
+                    string.IsNullOrWhiteSpace(replacement) ? null : replacement.Trim(),
+                    string.IsNullOrWhiteSpace(reason) ? null : reason.Trim());
+            }
+        }
+
+        return null;
+    }
+
+    private static (IReadOnlyDictionary<string, Autheris.Domain.Interfaces.ColumnAccessLevel> AccessLevels, bool HasActiveRowFilters) ComputeTableColumnAccessAndFilters(
+        TableMetadata table,
+        IReadOnlyList<Consent> activeConsents,
+        bool isAdmin)
+    {
+        var tableConsents = activeConsents
+            .Where(c => c.TableIdentifier == table.Identifier)
+            .ToList();
+
+        var allowConsents = tableConsents
+            .Where(c => c.Effect == ConsentEffect.Allow)
+            .ToList();
+
+        bool hasActiveRowFilters = !string.IsNullOrWhiteSpace(table.Table.RlsExpression) ||
+                                   allowConsents.Any(c => c.RowFilters is { Count: > 0 } || !string.IsNullOrWhiteSpace(c.RowFilterCondition));
+
+        var levels = new Dictionary<string, Autheris.Domain.Interfaces.ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
+        foreach (var col in table.Columns)
+        {
+            if (isAdmin)
+            {
+                levels[col.ColumnName] = Autheris.Domain.Interfaces.ColumnAccessLevel.Clear;
+                continue;
+            }
+
+            bool isExplicitlyDenied = tableConsents
+                .SelectMany(c => c.ColumnRules)
+                .Any(cr => string.Equals(cr.ColumnName, col.ColumnName, StringComparison.OrdinalIgnoreCase) &&
+                           cr.AccessLevel == Autheris.Domain.Interfaces.ColumnAccessLevel.Deny) ||
+                (table.ColumnMaskingRules != null &&
+                 table.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mr) &&
+                 string.Equals(mr.RuleType, "DENY", StringComparison.OrdinalIgnoreCase));
+
+            if (isExplicitlyDenied)
+            {
+                levels[col.ColumnName] = Autheris.Domain.Interfaces.ColumnAccessLevel.Deny;
+                continue;
+            }
+
+            bool hasExplicitClear = allowConsents
+                .SelectMany(c => c.ColumnRules)
+                .Any(cr => string.Equals(cr.ColumnName, col.ColumnName, StringComparison.OrdinalIgnoreCase) &&
+                           cr.AccessLevel == Autheris.Domain.Interfaces.ColumnAccessLevel.Clear);
+
+            bool hasExplicitMask = allowConsents
+                .SelectMany(c => c.ColumnRules)
+                .Any(cr => string.Equals(cr.ColumnName, col.ColumnName, StringComparison.OrdinalIgnoreCase) &&
+                           cr.AccessLevel == Autheris.Domain.Interfaces.ColumnAccessLevel.Mask);
+
+            bool isSensitiveInCatalog = col.IsSensitive ||
+                                        (table.ColumnMaskingRules != null && table.ColumnMaskingRules.ContainsKey(col.ColumnName));
+
+            if ((isSensitiveInCatalog && !hasExplicitClear) || (hasExplicitMask && !hasExplicitClear))
+            {
+                levels[col.ColumnName] = Autheris.Domain.Interfaces.ColumnAccessLevel.Mask;
+            }
+            else
+            {
+                levels[col.ColumnName] = Autheris.Domain.Interfaces.ColumnAccessLevel.Clear;
+            }
+        }
+
+        return (levels, hasActiveRowFilters);
     }
 
     private async Task<(IReadOnlyList<Consent> ActiveConsents, IReadOnlyList<ConsentRequest> PendingRequests, bool IsAdmin)> GetCallerConsentsAndRequestsAsync(ClaimsPrincipal principal, CancellationToken ct)
@@ -257,10 +510,57 @@ public sealed class McpDatasetCatalog(
         throw new InvalidOperationException("EffectiveAccessExplanationService is not configured.");
     }
 
-    public async Task<McpDatasetSample> SampleRowsAsync(ClaimsPrincipal principal, string dataset, int? count, CancellationToken ct = default)
+    public Task<McpDatasetSample> SampleRowsAsync(ClaimsPrincipal principal, string dataset, int? count, CancellationToken ct = default) =>
+        SampleRowsAsync(principal, dataset, count, synthetic: false, ct);
+
+    public async Task<McpDatasetSample> SampleRowsAsync(ClaimsPrincipal principal, string dataset, int? count, bool synthetic, CancellationToken ct = default)
     {
         var table = await FindVisibleAsync(principal, dataset, ct).ConfigureAwait(false);
         var rowCount = Math.Clamp(count ?? DefaultSampleRows, 1, MaxSampleRows);
+
+        if (synthetic)
+        {
+            var (activeConsents, pendingRequests, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
+            var accessStatus = options?.Value.IsMcpAuthBypassed == true
+                ? "GRANTED"
+                : CatalogVisibility.ComputeAccessStatus(table.Identifier, activeConsents, pendingRequests, isAdmin);
+
+            bool isGranted = string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase);
+            if (!isGranted && !table.ReleaseProfileToCatalogViewers)
+            {
+                throw new GatewayForbiddenException("Synthetic sample rows require either an active table consent or ReleaseProfileToCatalogViewers enabled by the data owner.");
+            }
+
+            var (columnAccessLevels, hasActiveRowFilters) = ComputeTableColumnAccessAndFilters(table, activeConsents, isAdmin);
+            var generator = syntheticRowGenerator ?? new Autheris.Application.Catalog.Profiling.SyntheticSampleRowGenerator(profileService);
+            var syntheticRows = generator.GenerateRows(table, rowCount, columnAccessLevels, hasActiveRowFilters);
+            var datasetId = DatasetId(table.Identifier);
+            var queryText = $"sample_rows(dataset={datasetId}, count={rowCount}, synthetic=true)";
+
+            if (auditLogRepository != null)
+            {
+                var actorSid = principal.GetUserSid() ?? new Sid(principal.Identity?.Name ?? "anonymous");
+                await auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+                {
+                    TenantId = principal.GetTenantId(),
+                    OccurredAt = DateTimeOffset.UtcNow,
+                    EventType = Autheris.Domain.Audit.AuditEventTypes.MetadataSyntheticSample,
+                    ActorSid = actorSid,
+                    TargetTable = datasetId,
+                    Query = queryText,
+                    Decision = "ALLOW",
+                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        query = queryText,
+                        dataset = datasetId,
+                        count = rowCount,
+                        synthetic = true
+                    })
+                }, ct).ConfigureAwait(false);
+            }
+
+            return new McpDatasetSample(datasetId, syntheticRows.Count, syntheticRows, IsSynthetic: true);
+        }
 
         var (rows, decision) = await _gatewayExecutionService.ExecuteTableQueryAsync(
             principal,
@@ -277,7 +577,7 @@ public sealed class McpDatasetCatalog(
             throw new GatewayForbiddenException("Access denied by data governance policy.");
         }
 
-        return new McpDatasetSample(DatasetId(table.Identifier), rows.Count, rows);
+        return new McpDatasetSample(DatasetId(table.Identifier), rows.Count, rows, IsSynthetic: false);
     }
 
     private string GraphQlEndpoint => options?.Value.GraphQL.EndpointPath is { Length: > 0 } path ? path : "/graphql";

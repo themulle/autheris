@@ -25,7 +25,12 @@ public sealed record DbtMetric(
     string? TypeParams,
     IReadOnlyList<string> Dimensions,
     IReadOnlyList<string> Measures,
-    IReadOnlyDictionary<string, string> Meta
+    IReadOnlyDictionary<string, string> Meta,
+    string? Unit = null,
+    string? Format = null,
+    int? MinGroupSize = null,
+    IReadOnlyList<string>? AllowedTimeGranularities = null,
+    string? Version = null
 );
 
 /// <summary>
@@ -35,7 +40,9 @@ public sealed record DbtMeasure(
     string Name,
     string Aggregation, // "sum", "count", "avg", "min", "max", "count_distinct"
     string? Expr,
-    string? Description
+    string? Description,
+    string? Unit = null,
+    int? MinGroupSize = null
 );
 
 /// <summary>
@@ -46,7 +53,9 @@ public sealed record DbtDimension(
     string Type, // "categorical", "time"
     string? Description,
     bool IsPartition = false,
-    string? TypeParams = null
+    string? TypeParams = null,
+    string? TimeGranularity = null,
+    IReadOnlyList<string>? AllowedTimeGranularities = null
 );
 
 /// <summary>
@@ -75,5 +84,7 @@ public sealed record DbtSemanticModel(
 /// </summary>
 public sealed record DbtSemanticManifest(
     IReadOnlyList<DbtSemanticModel> SemanticModels,
-    IReadOnlyList<DbtMetric> Metrics
+    IReadOnlyList<DbtMetric> Metrics,
+    string Version = "1.0"
 );
+

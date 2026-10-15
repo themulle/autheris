@@ -7,6 +7,7 @@ using Autheris.Domain.Model;
 
 public interface ISemanticCatalogService
 {
+    string ManifestVersion => "1.0";
     Task RegisterManifestAsync(DbtSemanticManifest manifest, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<DbtMetric>> ListMetricsAsync(string? modelOrDataset = null, CancellationToken cancellationToken = default);
     Task<DbtMetric?> GetMetricAsync(string metricName, CancellationToken cancellationToken = default);

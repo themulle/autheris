@@ -27,6 +27,7 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-AI-14** | MCP Schema-RAG & Hybrid-Vector Search Engine | [f-ai-14-mcp-schema-rag-vector-search.md](f-ai-14-mcp-schema-rag-vector-search.md) |
 | **F-AI-15** | Offline Doc- & Runbook-MCP Gateway | [f-ai-15-offline-doc-runbook-mcp-gateway.md](f-ai-15-offline-doc-runbook-mcp-gateway.md) |
 | **F-AI-16** | Universal Multi-App Document Store & Headless Ingestion Gateway | [f-ai-16-universal-doc-store-mcp.md](f-ai-16-universal-doc-store-mcp.md) |
+| **F-AI-17** | Privacy-Coarsened Column Value Profiles & Synthetic Sample Rows | [f-ai-17-column-value-profiles-and-synthetic-samples.md](f-ai-17-column-value-profiles-and-synthetic-samples.md) |
 | **F-API-03** | Dual-Access Exposure (OData v4 & Dynamic OpenAPI 3.1) | [f-api-03-odata-openapi.md](f-api-03-odata-openapi.md) |
 | **F-API-04** | Upstream Web API & Microservice Ingestion via OpenAPI | [f-api-04-openapi-ingestion.md](f-api-04-openapi-ingestion.md) |
 | **F-API-07** | Canonical System Metadata & Monitoring Schema ($system) | [f-api-07-system-metadata-monitoring.md](f-api-07-system-metadata-monitoring.md) |
@@ -47,12 +48,15 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-DATA-05** | Apache Iceberg REST Catalog (IRC) & Dynamic STS Credential Vending | [f-data-05-iceberg-rest-catalog.md](f-data-05-iceberg-rest-catalog.md) |
 | **F-DATA-06** | Governed REST Data API & System Virtual Tables (`governance.system.*`) | [f-data-06-governed-rest-data-api.md](f-data-06-governed-rest-data-api.md) |
 | **F-DATA-07** | Asynchronous Query Job Engine & Sandbox Storage | [f-data-07-async-query-jobs.md](f-data-07-async-query-jobs.md) |
+| **F-DATA-08** | Governed Aggregations & Minimum Group Size (k-Anonymity Guard) | [f-data-08-governed-aggregations-and-k-anonymity.md](f-data-08-governed-aggregations-and-k-anonymity.md) |
+| **F-DATA-09** | Governed Change Detection (ETag) & Stateless changesSince Cursor | [f-data-09-change-detection-and-changes-since-cursor.md](f-data-09-change-detection-and-changes-since-cursor.md) |
 | **F-DBT-1** | dbt Data Health Circuit Breaker | [f-dbt-01-health-circuit-breaker.md](f-dbt-01-health-circuit-breaker.md) |
 | **F-DBT-2** | dbt Model Contract Enforcement & Breaking-Change CI Gate | [f-dbt-02-contract-enforcement.md](f-dbt-02-contract-enforcement.md) |
 | **F-DBT-3** | Live-Telemetry Exposure Publisher | [f-dbt-03-telemetry-exposures.md](f-dbt-03-telemetry-exposures.md) |
 | **F-DBT-4** | Zero-Touch dbt Cloud & Orchestrator Webhook Integration | [f-dbt-04-orchestrator-webhooks.md](f-dbt-04-orchestrator-webhooks.md) |
 | **F-DBT-05** | Streaming dbt Metadata Ingestion & Automated Model Sync | [f-dbt-05-streaming-metadata-ingestion.md](f-dbt-05-streaming-metadata-ingestion.md) |
 | **F-DBT-6** | Policy & RLS Auto-Sync from dbt Metadata | [f-dbt-06-policy-rls-sync.md](f-dbt-06-policy-rls-sync.md) |
+| **F-DBT-07** | dbt Semantic Layer Metric Catalog & Governed Metric Execution | [f-dbt-07-dbt-semantic-layer-metrics.md](f-dbt-07-dbt-semantic-layer-metrics.md) |
 | **F-DIALECT-01** | Multi-Target SQL AST Compiler & Native Dialect Pushdown (superseded by F-DIALECT-02) | [f-dialect-01-ast-target-dialect-pushdown.md](f-dialect-01-ast-target-dialect-pushdown.md) |
 | **F-DIALECT-02** | Governed AST SQL Compiler: the single governed SQL path (DQL and DML; admitted dialects PostgreSQL, SQL Server, SQLite, Oracle; Databricks experimental) | [f-dialect-02-ast-sql-compiler.md](f-dialect-02-ast-sql-compiler.md) |
 | **F-DOC-01** | Omnichannel Semantic Documentation Passthrough | [f-doc-01-omnichannel-documentation.md](f-doc-01-omnichannel-documentation.md) |
@@ -69,6 +73,8 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-GOV-16** | Catalog Discovery Transparency, Data Ownership & Response Masking Metadata | [f-gov-16-catalog-ownership-transparency.md](f-gov-16-catalog-ownership-transparency.md) |
 | **F-GOV-17** | GraphQL Cursor Pagination, Temporal Types & dbt Column Semantics | [f-gov-17-graphql-temporal-dbt-semantics.md](f-gov-17-graphql-temporal-dbt-semantics.md) |
 | **F-GOV-18** | Dual-Mode DataHub Integration, Declarative Contracts & SLA Circuit Breakers | [f-gov-18-datahub-integration-contracts.md](f-gov-18-datahub-integration-contracts.md) |
+| **F-GOV-19** | Governed Cross-Source GraphQL Relations & Batched Key Lookup | [f-gov-19-cross-source-graphql-relations.md](f-gov-19-cross-source-graphql-relations.md) |
+| **F-GOV-20** | Zero-Read Static Query Analysis, Bundled Consents & Field Deprecation | [f-gov-20-static-query-analysis-and-bundled-consents.md](f-gov-20-static-query-analysis-and-bundled-consents.md) |
 | **F-INT-01** | Spotify Backstage Software Catalog Integration | [f-int-01-backstage-software-catalog.md](f-int-01-backstage-software-catalog.md) |
 | **F-MASK-02** | Extended Column Masking Engine (GEO_JITTER, PARTIAL_MASK, TOKENIZATION) | [f-mask-02-extended-masking-engine.md](f-mask-02-extended-masking-engine.md) |
 | **F-OPEN-01** | OpenSchema Mode, Multi-File OpenAPI & Catalog Slicing | [f-open-01-openschema-catalog-slicing.md](f-open-01-openschema-catalog-slicing.md) |

@@ -207,6 +207,7 @@ public static class GatewayApplicationBuilderExtensions
         app.MapHitLEndpoints();
         app.MapGovernanceApiEndpoints();
         app.MapGovernancePlanEndpoints();
+        app.MapQueryAnalysisAndProfilingEndpoints();
         app.MapTokenRevocationEndpoints(); // SEC M-14 (GAP-B)
         app.MapTenantRegistryAdminEndpoints(); // M-A2: operator resolution of a tenant id collision
         app.MapFinOpsEndpoints();
@@ -231,6 +232,8 @@ public static class GatewayApplicationBuilderExtensions
         app.MapEnvoyExtAuthzEndpoints();
         app.MapWebSqlEndpoints(gatewayOptions);
         app.MapDatasetDataEndpoints();
+        app.MapAnalyticsEndpoints();
+        app.MapChangeDetectionEndpoints();
         app.MapSqlEndpoints(gatewayOptions);
         app.MapProcedureEndpoints(gatewayOptions);
         app.MapDevPortalEndpoints(gatewayOptions);

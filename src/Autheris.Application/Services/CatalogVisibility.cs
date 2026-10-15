@@ -93,7 +93,9 @@ public static class CatalogVisibility
 
                 if (table.Table.Visibility == DatasetVisibility.Summary)
                 {
-                    visible.Add(table with { Columns = Array.Empty<TableColumn>() });
+                    visible.Add(table.ReleaseProfileToCatalogViewers
+                        ? table
+                        : table with { Columns = Array.Empty<TableColumn>() });
                     continue;
                 }
 

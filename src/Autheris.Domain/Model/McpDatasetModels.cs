@@ -35,6 +35,29 @@ public sealed record McpDatasetList(
     int Limit = 50,
     int? NextOffset = null);
 
+/// <summary>Issue #79: Field sunsetting and deprecation metadata exposed in <c>describe_dataset</c> and query analysis.</summary>
+public sealed record FieldDeprecationInfo(
+    System.DateTimeOffset DeprecatedSince,
+    System.DateTimeOffset SunsetDate,
+    string? ReplacementField = null,
+    string? Reason = null);
+
+/// <summary>Issue #80: Coarsened value profile of a column exposed in <c>describe_dataset</c> without querying the data source.</summary>
+public sealed record ColumnValueProfile(
+    string? FormatPattern = null,
+    string? MinValue = null,
+    string? MaxValue = null,
+    double EmptyShare = 0.0,
+    int? TypicalLength = null,
+    long? ApproximateDistinctCount = null,
+    IReadOnlyList<string>? AllowedValues = null,
+    string? DistinctCountBucket = null,
+    IReadOnlyList<string>? SampleValues = null)
+{
+    public string? Min => MinValue;
+    public string? Max => MaxValue;
+}
+
 /// <summary>A column the caller may see, as described by the MCP <c>describe_dataset</c> tool.</summary>
 /// <param name="Type">Data type in the source database.</param>
 /// <param name="GraphQlField">Field name in the GraphQL API (may differ from the column name).</param>
@@ -47,7 +70,9 @@ public sealed record McpDatasetColumn(
     bool PrimaryKey,
     string? GraphQlField = null,
     string? GraphQlType = null,
-    ColumnSemantics? Semantics = null);
+    ColumnSemantics? Semantics = null,
+    FieldDeprecationInfo? Deprecation = null,
+    ColumnValueProfile? ValueProfile = null);
 
 /// <summary>A navigation from a dataset to a related dataset in the GraphQL API.</summary>
 public sealed record McpGraphQlRelation(string Field, string Dataset, bool IsList);
@@ -103,8 +128,9 @@ public sealed record GraphQlColumnMapping(string ColumnName, string Field, strin
 
 public sealed record GraphQlRelationMapping(string Field, TableIdentifier Target, bool IsList);
 
-/// <summary>Result of the MCP <c>sample_rows</c> tool: rows as returned by the governed read path (masked, row filtered).</summary>
+/// <summary>Result of the MCP <c>sample_rows</c> tool: rows as returned by the governed read path (masked, row filtered) or synthetic generator.</summary>
 public sealed record McpDatasetSample(
     string Id,
     int RowCount,
-    IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows);
+    IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows,
+    bool IsSynthetic = false);
