@@ -48,6 +48,7 @@ public sealed class OpenApiIngestionServiceTests
             "description": "Captured payment transaction record.",
             "x-long-description": "Audit record containing original gateway authorization code and settlement date.",
             "required": ["payment_id", "amount"],
+            "x-autheris-primary-key": ["payment_id"],
             "properties": {
               "payment_id": {
                 "type": "string",
@@ -127,7 +128,10 @@ public sealed class OpenApiIngestionServiceTests
 
         var refundTable = upsertedTables.FirstOrDefault(t => t.Identifier.TableName == "refund");
         refundTable.ShouldNotBeNull();
-        refundTable.PrimaryKeyColumns.ShouldContain("refund_id");
+        // Issue #94: no key is guessed (not from "required", "id"/"*_id" columns or the first column); only the declared extension counts.
+        paymentTable.ReplaceKeyDefinition.ShouldBeTrue();
+        refundTable.PrimaryKeyColumns.ShouldBeEmpty();
+        refundTable.ReplaceKeyDefinition.ShouldBeFalse();
         refundTable.Columns.Count.ShouldBe(2);
 
         // SG-11: Newly discovered tables must be created with IsActive = false
