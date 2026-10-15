@@ -14,7 +14,7 @@ public static class GatewayDiagnostics
     public static readonly Meter Meter = new(MeterName, "2.0.0");
 
     public static readonly Counter<long> ForbiddenRequestsCounter =
-        Meter.CreateCounter<long>("autheris_forbidden_requests_total", description: "Anzahl abgewiesener Anfragen (403/Forbidden)");
+        Meter.CreateCounter<long>("autheris_forbidden_requests_total", description: "Total number of rejected requests (403/Forbidden)");
 
     /// <summary>R-3: a Redis event-bus publish failed (tag <c>message_type</c> only: channel names can carry tenant ids).</summary>
     public static readonly Counter<long> EventBusPublishFailedCounter =
@@ -59,12 +59,12 @@ public static class GatewayDiagnostics
         Meter.CreateCounter<long>("autheris_event_bus_handler_timeout_total", description: "Gateway event handler invocations that exceeded the per-handler timeout");
 
     public static readonly Histogram<double> PolicyEvaluationDuration =
-        Meter.CreateHistogram<double>("autheris_policy_evaluation_duration_ms", "ms", description: "Dauer der Casbin ABAC Evaluierung");
+        Meter.CreateHistogram<double>("autheris_policy_evaluation_duration_ms", "ms", description: "Duration of Casbin ABAC policy evaluation");
 
     public static readonly Histogram<double> LineageTraversalDuration =
-        Meter.CreateHistogram<double>("autheris_lineage_traversal_duration_ms", "ms", description: "Dauer der zyklensicheren Lineage-Traversierung");
+        Meter.CreateHistogram<double>("autheris_lineage_traversal_duration_ms", "ms", description: "Duration of cycle-safe lineage traversal");
 
-    // Versionierte PII-Allow-List je Span-Typ (Frozen für Zero-Allocation Thread-Safe Lookups)
+    // Versioned PII allow-list per span type (Frozen for zero-allocation thread-safe lookups)
     private static readonly FrozenDictionary<string, FrozenSet<string>> SpanTagAllowList = new Dictionary<string, FrozenSet<string>>
     {
         ["Governance.EvaluateConsent"] = (FrozenSet<string>)new[] { "user.sid", "tenant.id", "decision", "table.id", "policy.epoch" }.ToFrozenSet(),

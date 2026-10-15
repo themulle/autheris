@@ -132,8 +132,13 @@ public sealed class SqlConnector : IAutherisConnector
             ConnectorSessionContext session,
             [EnumeratorCancellation] CancellationToken ct = default)
         {
-            var batch = await ReadBatchAsync(split, session, ct);
-            foreach (var row in batch)
+            var dsContext = CreateExecutionContext(session);
+
+            using var scope = _scopeFactory.CreateScope();
+            var executor = scope.ServiceProvider.GetServices<IDataSourceExecutor>().FirstOrDefault(e => e.SupportedType == DataSourceType.Sql)
+                ?? throw new InvalidOperationException("No SQL table read executor is registered.");
+
+            await foreach (var row in executor.StreamAsync(dsContext, ct).WithCancellation(ct).ConfigureAwait(false))
             {
                 yield return row;
             }
@@ -143,6 +148,17 @@ public sealed class SqlConnector : IAutherisConnector
             ConnectorSplit split,
             ConnectorSessionContext session,
             CancellationToken ct = default)
+        {
+            var dsContext = CreateExecutionContext(session);
+
+            // WP-ARC-B-02: the read runs through the governed pipeline (planner + compiler + binder), resolved in its own scope.
+            using var scope = _scopeFactory.CreateScope();
+            var executor = scope.ServiceProvider.GetServices<IDataSourceExecutor>().FirstOrDefault(e => e.SupportedType == DataSourceType.Sql)
+                ?? throw new InvalidOperationException("No SQL table read executor is registered.");
+            return await executor.ExecuteAsync(dsContext, ct);
+        }
+
+        private DataSourceExecutionContext CreateExecutionContext(ConnectorSessionContext session)
         {
             ArgumentNullException.ThrowIfNull(session);
 
@@ -166,7 +182,7 @@ public sealed class SqlConnector : IAutherisConnector
             var defaultLimit = session.Limit ?? 1000;
             var clampedLimit = Math.Clamp(defaultLimit, 1, maxAllowed);
 
-            var dsContext = new DataSourceExecutionContext(
+            return new DataSourceExecutionContext(
                 // The connection is configured per data source (Gateway:DataSources:Connections:<source>), so the
                 // table's own source name must be used; the connector id ("default-sql") never matches a connection.
                 SourceName: string.IsNullOrWhiteSpace(meta.Table.SourceName) ? _connectorId : meta.Table.SourceName,
@@ -180,12 +196,6 @@ public sealed class SqlConnector : IAutherisConnector
                 Offset: Math.Max(0, session.Offset ?? 0),
                 Tenant: session.Tenant,
                 Items: session.Items);
-
-            // WP-ARC-B-02: the read runs through the governed pipeline (planner + compiler + binder), resolved in its own scope.
-            using var scope = _scopeFactory.CreateScope();
-            var executor = scope.ServiceProvider.GetServices<IDataSourceExecutor>().FirstOrDefault(e => e.SupportedType == DataSourceType.Sql)
-                ?? throw new InvalidOperationException("No SQL table read executor is registered.");
-            return await executor.ExecuteAsync(dsContext, ct);
         }
     }
 }

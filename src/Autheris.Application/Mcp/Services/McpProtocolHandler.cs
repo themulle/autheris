@@ -15,7 +15,7 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// JSON-RPC 2.0 Protocol Handler implementing the Model Context Protocol (MCP) specification (2024-11-05), used by the
-/// standard I/O runner (<see cref="McpStdioRunner"/>). The HTTP endpoint runs on the official MCP SDK (Autheris.Api.Mcp.GatewayMcpServer).
+/// standard I/O runner (<see cref="IMcpStdioRunner"/>). The HTTP endpoint runs on the official MCP SDK (Autheris.Api.Mcp.GatewayMcpServer).
 /// </summary>
 public sealed class McpProtocolHandler : IMcpProtocolHandler
 {

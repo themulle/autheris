@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
+using Autheris.Application.State;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
@@ -16,11 +17,11 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// GQL-3 / GQL-4: admission and audit for CDC subscriptions.
+/// GQL-3 / GQL-4 / WP-ARC-A-13: admission and audit for CDC subscriptions.
 /// <list type="bullet">
 /// <item><c>cdc_all</c> is reserved for global governance administrators.</item>
 /// <item>A table topic requires a catalog table the caller may read (same decision as table queries).</item>
-/// <item>Open subscriptions are limited per subject (tenant + SID), so one user cannot occupy all slots.</item>
+/// <item>Open subscriptions are limited per subject (tenant + SID), and cluster-wide per tenant when <see cref="IClusterStateTopology.IsClusterWide"/> is active.</item>
 /// <item>Subscribe (allowed and denied) and the aggregated delivery are audited.</item>
 /// </list>
 /// </summary>
@@ -28,15 +29,29 @@ public sealed class CdcSubscriptionGovernor
 {
     public const string AllTopic = "cdc_all";
     private const string DeniedMessage = "Forbidden: subscription to this topic is not permitted.";
+    private static readonly TimeSpan ClusterSubscriptionCounterTtl = TimeSpan.FromHours(24);
 
     private readonly ConcurrentDictionary<string, int> _openPerSubject = new(StringComparer.Ordinal);
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<CdcSubscriptionGovernor> _logger;
+    private readonly IDistributedClusterStateProvider? _clusterState;
+    private readonly IClusterStateTopology? _topology;
 
     public CdcSubscriptionGovernor(IOptions<GatewayOptions> options, ILogger<CdcSubscriptionGovernor> logger)
+        : this(options, logger, null, null)
+    {
+    }
+
+    public CdcSubscriptionGovernor(
+        IOptions<GatewayOptions> options,
+        ILogger<CdcSubscriptionGovernor> logger,
+        IDistributedClusterStateProvider? clusterState = null,
+        IClusterStateTopology? topology = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _clusterState = clusterState;
+        _topology = topology;
     }
 
     /// <summary>Resolves the topic for a <c>table</c> argument: <c>cdc_all</c>, <c>cdc_{schema.table}</c> or <c>cdc_{table}</c>.</summary>
@@ -121,21 +136,76 @@ public sealed class CdcSubscriptionGovernor
             throw Denied("TOO_MANY_REQUESTS", $"Too many open subscriptions (limit {max}).");
         }
 
+        string? clusterKey = null;
+        if (_topology?.IsClusterWide == true && _clusterState is not null)
+        {
+            clusterKey = $"cdc:subs:{tenant.Value}";
+            long? clusterOpen;
+            try
+            {
+                clusterOpen = await _clusterState.IncrementAsync(clusterKey, 1, ClusterSubscriptionCounterTtl, ct).ConfigureAwait(false);
+            }
+            catch (ClusterStateUnavailableException ex)
+            {
+                Release(key);
+                _logger.LogError(ex, "Cluster state unavailable while admitting CDC subscription to {Topic} for tenant {Tenant}; failing closed.", topic, tenant.Value);
+                await WriteAuditAsync(audit, tenant, sid, topic, "STREAM_SUBSCRIBE", "DENY", new { topic, reason = "cluster state unavailable" }, ct).ConfigureAwait(false);
+                throw Denied("SERVICE_UNAVAILABLE", "Cluster state store is unavailable; subscription rejected (fail-closed).");
+            }
+
+            if (clusterOpen is null)
+            {
+                Release(key);
+                _logger.LogError("Cluster state returned null while admitting CDC subscription to {Topic} for tenant {Tenant}; failing closed.", topic, tenant.Value);
+                await WriteAuditAsync(audit, tenant, sid, topic, "STREAM_SUBSCRIBE", "DENY", new { topic, reason = "cluster state unavailable" }, ct).ConfigureAwait(false);
+                throw Denied("SERVICE_UNAVAILABLE", "Cluster state store is unavailable; subscription rejected (fail-closed).");
+            }
+
+            if (clusterOpen.Value > max)
+            {
+                await ReleaseClusterKeyAsync(clusterKey).ConfigureAwait(false);
+                Release(key);
+                await WriteAuditAsync(audit, tenant, sid, topic, "STREAM_SUBSCRIBE", "DENY", new { topic, reason = "cluster subscription limit" }, ct).ConfigureAwait(false);
+                throw Denied("TOO_MANY_REQUESTS", $"Too many open subscriptions across cluster (limit {max}).");
+            }
+        }
+
         try
         {
             await WriteAuditAsync(audit, tenant, sid, topic, "STREAM_SUBSCRIBE", "ALLOW", new { topic }, ct).ConfigureAwait(false);
         }
         catch
         {
+            if (clusterKey is not null)
+            {
+                await ReleaseClusterKeyAsync(clusterKey).ConfigureAwait(false);
+            }
             Release(key);
             throw;
         }
 
-        return new Lease(this, key, tenant, sid, topic, audit);
+        return new Lease(this, key, clusterKey, tenant, sid, topic, audit);
     }
 
     internal int OpenSubscriptions(TenantId tenant, Sid sid) =>
         _openPerSubject.TryGetValue($"{tenant.Value}|{sid.Value}", out var n) ? n : 0;
+
+    private async ValueTask ReleaseClusterKeyAsync(string clusterKey)
+    {
+        if (_clusterState is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _clusterState.IncrementAsync(clusterKey, -1, ClusterSubscriptionCounterTtl, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to decrement cluster subscription counter for {ClusterKey}.", clusterKey);
+        }
+    }
 
     private void Release(string key)
     {
@@ -177,6 +247,7 @@ public sealed class CdcSubscriptionGovernor
     {
         private readonly CdcSubscriptionGovernor _owner;
         private readonly string _key;
+        private readonly string? _clusterKey;
         private readonly TenantId _tenant;
         private readonly Sid _sid;
         private readonly string _topic;
@@ -185,10 +256,11 @@ public sealed class CdcSubscriptionGovernor
         private long _delivered;
         private int _disposed;
 
-        internal Lease(CdcSubscriptionGovernor owner, string key, TenantId tenant, Sid sid, string topic, IAuditLogRepository audit)
+        internal Lease(CdcSubscriptionGovernor owner, string key, string? clusterKey, TenantId tenant, Sid sid, string topic, IAuditLogRepository audit)
         {
             _owner = owner;
             _key = key;
+            _clusterKey = clusterKey;
             _tenant = tenant;
             _sid = sid;
             _topic = topic;
@@ -205,6 +277,11 @@ public sealed class CdcSubscriptionGovernor
             }
 
             _owner.Release(_key);
+            if (_clusterKey is not null)
+            {
+                await _owner.ReleaseClusterKeyAsync(_clusterKey).ConfigureAwait(false);
+            }
+
             try
             {
                 await WriteAuditAsync(_audit, _tenant, _sid, _topic, "STREAM_DELIVERY", "ALLOW",

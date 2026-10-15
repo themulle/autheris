@@ -123,6 +123,7 @@ public sealed class AuditLogEntry
         }
     }
 
+    public long? ChainSequence { get; set; }
     public string PrevHash { get; set; } = string.Empty;
     public string EntryHash { get; set; } = string.Empty;
 }

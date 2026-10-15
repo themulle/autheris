@@ -15,12 +15,14 @@ using Microsoft.Extensions.Options;
 
 public static class Plan9ServiceExtensions
 {
-    public static IServiceCollection AddPlan9Services(this IServiceCollection services, IConfiguration? configuration = null)
+    public static IServiceCollection AddDatasourceTesting(this IServiceCollection services)
     {
-        // AP-9.1: Datasource Connection Testing
         services.AddScoped<IDatasourceTestingService, DatasourceTestingService>();
+        return services;
+    }
 
-        // AP-9.4: Async Long-Running Query Job Engine
+    public static IServiceCollection AddAsyncJobs(this IServiceCollection services, IConfiguration? configuration = null)
+    {
         services.AddOptions<AsyncJobOptions>().BindConfiguration(AsyncJobOptions.SectionName).ValidateOnStart();
         services.AddSingleton<IValidateOptions<AsyncJobOptions>, AsyncJobOptionsValidator>();
         services.AddSingleton<AsyncJobNodeIdentity>();
@@ -28,8 +30,14 @@ public static class Plan9ServiceExtensions
         services.AddSingleton<IAsyncQueryJobManager>(sp => sp.GetRequiredService<AsyncQueryJobManager>());
         services.AddSingleton<IAsyncJobQueue>(sp => sp.GetRequiredService<AsyncQueryJobManager>());
         services.AddHostedService<AsyncQueryJobBackgroundWorker>();
-
         return services;
+    }
+
+    public static IServiceCollection AddPlan9Services(this IServiceCollection services, IConfiguration? configuration = null)
+    {
+        return services
+            .AddDatasourceTesting()
+            .AddAsyncJobs(configuration);
     }
 
     public static IEndpointRouteBuilder MapPlan9Endpoints(this IEndpointRouteBuilder app)
@@ -38,3 +46,4 @@ public static class Plan9ServiceExtensions
         return app;
     }
 }
+

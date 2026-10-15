@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\..\src\Autheris.Application\Autheris.Application.csproj" />
   </ItemGroup>
 
 </Project>

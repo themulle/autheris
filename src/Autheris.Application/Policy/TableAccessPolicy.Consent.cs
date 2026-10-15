@@ -1,0 +1,227 @@
+namespace Autheris.Application.Policy;
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Autheris.Application.Interfaces;
+using Autheris.Application.Services;
+using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
+using Autheris.Domain.Model;
+
+public sealed partial class TableAccessPolicy
+{
+    private async Task<bool> IsRebacDeniedAsync(TableAccessQuery query, CancellationToken ct)
+    {
+        if (_options?.IsRebacBypassed == true)
+        {
+            return false;
+        }
+
+        var enforced = query.Rebac switch
+        {
+            RebacEnforcement.WhenEnabled => _rebacEvaluator is { IsEnabled: true },
+            _ => RebacTableGate.IsEnforcedOnQueryPaths(_options)
+        };
+
+        return enforced &&
+               !await RebacTableGate.IsAllowedAsync(_rebacEvaluator, query.Tenant, query.UserSid, query.Metadata.Identifier, ct).ConfigureAwait(false);
+    }
+
+    private async Task<TableAccessDecision> ResolveConsentAsync(TableAccessQuery query, CancellationToken ct)
+    {
+        var table = query.Metadata.Identifier;
+        var scopes = Autheris.Domain.Security.TokenAccessScope.GetScopeSet(query.Claims);
+        string? contextHash = null;
+        if (_cacheService != null)
+        {
+            contextHash = IConsentCacheService.ComputeSubjectContextHash(query.GroupSids, query.Roles, scopes);
+            var cached = await _cacheService.GetCachedDecisionAsync(query.Tenant, query.UserSid, table, contextHash, ct).ConfigureAwait(false);
+            if (cached != null && !IsUntypedConsentFilter(cached, query.Metadata))
+            {
+                return WithTypedConsentPolicy(cached, query.Metadata);
+            }
+        }
+
+        // RR-L4-06: epoch snapshot BEFORE loading consents (compare-and-set on cache write)
+        var epochAtLoad = _cacheService != null ? await _cacheService.GetEpochSnapshotAsync(table, ct).ConfigureAwait(false) : 0;
+        IEnumerable<Sid> userSids = query.AllUserSids != null && query.AllUserSids.Count > 0
+            ? query.AllUserSids
+            : [query.UserSid];
+        var subjects = userSids
+            .Concat(query.GroupSids)
+            .Distinct()
+            .ToList();
+        var activeConsents = (await _consentRepository.GetActiveConsentsForSubjectsAsync(subjects, table, DateTimeOffset.UtcNow, query.Tenant, ct).ConfigureAwait(false))
+            .Where(c => c.TenantId == query.Tenant) // multi-tenancy isolation
+            .ToList();
+
+        var allSids = query.AllUserSids != null && query.AllUserSids.Any(s => s != query.UserSid)
+            ? query.AllUserSids
+            : null;
+        var decision = _resolutionService.ResolveAccess(
+            query.UserSid,
+            query.GroupSids,
+            query.Roles,
+            table,
+            activeConsents,
+            query.Metadata.Dialect,
+            allSids,
+            scopes is { Count: > 0 } ? scopes : null);
+        if (decision == null)
+        {
+            return TableAccessDecision.Denied(table, "Access denied: consent resolution returned no decision.");
+        }
+
+        if (_cacheService != null)
+        {
+            // SEC: TTL bounded by the earliest consent ValidTo; shorter for highly sensitive tables.
+            var ttl = ConsentResolutionService.ComputeDecisionCacheTtl(query.Metadata.Table.IsHighlySensitive, activeConsents, DateTimeOffset.UtcNow);
+            await _cacheService.SetCachedDecisionAsync(query.Tenant, query.UserSid, table, decision, ttl, contextHash!, epochAtLoad, ct).ConfigureAwait(false);
+        }
+
+        return WithTypedConsentPolicy(decision, query.Metadata);
+    }
+
+    /// <summary>The compiler path needs the typed form only for SQL sources; the other sources keep the legacy text (no marker consumers there).</summary>
+    private bool WantsTypedConsentPolicy(TableMetadata metadata) =>
+        _rowPolicyFactory != null && metadata.DataSourceType == DataSourceType.Sql;
+
+    /// <summary>
+    /// WP-X0l: a cached decision that carries a consent row filter as text only (an entry written before the recipe existed, or one whose
+    /// recipe did not survive the L2 round trip) cannot be typed. It is treated as a miss, so the consents are resolved again.
+    /// </summary>
+    private bool IsUntypedConsentFilter(TableAccessDecision cached, TableMetadata metadata) =>
+        WantsTypedConsentPolicy(metadata) && cached.IsAllowed && cached.ConsentFilterRecipe == null &&
+        !string.IsNullOrWhiteSpace(cached.CombinedRowFilterSql);
+
+    /// <summary>
+    /// WP-X0l: replaces the legacy consent text by the typed row policy built from the same filter inputs (the decision's
+    /// <see cref="ConsentRowFilterRecipe"/>). The text becomes the projection of the policy and the values become bound parameters. A
+    /// filter that cannot be typed leaves the decision string-only, which the compiler path denies.
+    /// </summary>
+    private TableAccessDecision WithTypedConsentPolicy(TableAccessDecision decision, TableMetadata metadata)
+    {
+        if (!WantsTypedConsentPolicy(metadata) || !decision.IsAllowed || decision.RowPolicy != null || decision.ConsentFilterRecipe == null)
+        {
+            return decision;
+        }
+
+        try
+        {
+            var policy = _rowPolicyFactory!.FromConsentFilters(decision.ConsentFilterRecipe, metadata.Dialect);
+            return policy == null
+                ? decision
+                : (decision with { CombinedRowFilterSql = null, RowFilterParameters = null }).WithAdditionalRowPolicy(policy);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Security.SecurityException or ArgumentException or NotSupportedException)
+        {
+            return decision;
+        }
+    }
+
+    /// <summary>
+    /// SR-M-07: applies an access profile to an already allowed consent decision. <see cref="MaskingPolicyMode.Unmasked"/> relaxes
+    /// masked columns to Clear (a Deny stays a Deny); Default and Strict can only lower the level of sensitive columns. The profile
+    /// row filter is AND-ed with the consent row filter.
+    /// </summary>
+    private static TableAccessDecision ApplyProfileToDecision(TableAccessDecision consent, AccessProfile profile, TableMetadata metadata, IRowPolicy? rowPolicy)
+    {
+        var colAccess = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
+        foreach (var col in metadata.Columns)
+        {
+            var raw = consent.GetColumnAccess(col.ColumnName);
+            var effective = consent.GetEffectiveColumnAccess(col.ColumnName, metadata);
+            var sensitive = col.IsSensitive || metadata.ColumnMaskingRules.ContainsKey(col.ColumnName);
+            ColumnAccessLevel level;
+            if (raw == ColumnAccessLevel.Deny)
+            {
+                level = ColumnAccessLevel.Deny;
+            }
+            else
+            {
+                level = profile.MaskingMode switch
+                {
+                    MaskingPolicyMode.Unmasked => effective == ColumnAccessLevel.Mask ? ColumnAccessLevel.Clear : raw,
+                    MaskingPolicyMode.Default => sensitive && raw == ColumnAccessLevel.Clear && !consent.HasExplicitClear(col.ColumnName) ? ColumnAccessLevel.Mask : raw,
+                    MaskingPolicyMode.Strict => sensitive ? ColumnAccessLevel.Deny : raw,
+                    _ => raw
+                };
+            }
+
+            colAccess[col.ColumnName] = level;
+        }
+
+        var restricted = consent with { ColumnAccess = colAccess };
+        if (rowPolicy != null)
+        {
+            return restricted.WithAdditionalRowPolicy(rowPolicy);
+        }
+
+        return string.IsNullOrWhiteSpace(profile.RowFilterPredicate)
+            ? restricted
+            : restricted.WithAdditionalRowFilter(profile.RowFilterPredicate);
+    }
+
+    private async Task<AccessProfile?> ResolveActiveAccessProfileAsync(TableAccessQuery query, CancellationToken ct)
+    {
+        if (_accessProfileCache == null && _accessProfileRepository == null)
+        {
+            return null;
+        }
+
+        var tenant = query.Tenant;
+        var subject = query.UserSid.Value;
+        if (string.IsNullOrWhiteSpace(subject))
+        {
+            return null;
+        }
+
+        IReadOnlyList<AccessProfile>? profiles = null;
+        if (_accessProfileCache != null)
+        {
+            profiles = await _accessProfileCache.GetProfilesAsync(tenant, subject, ct).ConfigureAwait(false);
+            if ((profiles == null || profiles.Count == 0) && query.AllUserSids != null && query.AllUserSids.Count > 0)
+            {
+                foreach (var altSid in query.AllUserSids)
+                {
+                    if (altSid.Value == subject) continue;
+                    var altProfiles = await _accessProfileCache.GetProfilesAsync(tenant, altSid.Value, ct).ConfigureAwait(false);
+                    if (altProfiles.Count > 0)
+                    {
+                        profiles = altProfiles;
+                        break;
+                    }
+                }
+            }
+        }
+        else if (_accessProfileRepository != null)
+        {
+            profiles = await _accessProfileRepository.GetProfilesForSubjectAsync(tenant, subject, ct).ConfigureAwait(false);
+            if ((profiles == null || profiles.Count == 0) && query.AllUserSids != null && query.AllUserSids.Count > 0)
+            {
+                foreach (var altSid in query.AllUserSids)
+                {
+                    if (altSid.Value == subject) continue;
+                    var altProfiles = await _accessProfileRepository.GetProfilesForSubjectAsync(tenant, altSid.Value, ct).ConfigureAwait(false);
+                    if (altProfiles.Count > 0)
+                    {
+                        profiles = altProfiles;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (profiles == null || profiles.Count == 0)
+        {
+            return null;
+        }
+
+        var table = query.Metadata.Identifier;
+        var now = DateTimeOffset.UtcNow;
+        return profiles.FirstOrDefault(p => p.IsActive(now) && p.MatchesTable(table));
+    }
+}

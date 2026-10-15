@@ -12,6 +12,18 @@ public interface IDataSourceExecutor
     Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ExecuteAsync(
         DataSourceExecutionContext context,
         CancellationToken ct = default);
+
+    async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamAsync(
+        DataSourceExecutionContext context,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var rows = await ExecuteAsync(context, ct).ConfigureAwait(false);
+        foreach (var row in rows)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return row;
+        }
+    }
 }
 
 public sealed record DataSourceExecutionContext(

@@ -2,8 +2,8 @@
 
 **Document ID:** `PLAN-ARCH-REVIEW`  
 **Location:** `docs/plans/architecture.md`  
-**Status:** R0 COMPLETE ✅ · R1 NEARLY COMPLETE · R2–R6 PLANNED 📋  
-**Last Updated:** 2026-10-14 · **Baseline:** `main` at `a4137626`  
+**Status:** R0–R5 COMPLETE ✅ · R6 DELIVERED ✅ (optional freeze-window unit-test split `WP-ARC-C-19` & folder pass `WP-ARC-B-11` deferred)  
+**Last Updated:** 2026-10-15 · **Baseline:** `feat/impl-wave-5-6`  
 **Parent Plan:** [`00-master-plan-overview.md`](00-master-plan-overview.md)  
 **Implementation Plans:** [`implementation/impl-arch-r0-r2-trust-ha-eventing.md`](implementation/impl-arch-r0-r2-trust-ha-eventing.md), [`implementation/impl-arch-r1-r3-pipeline-persistence.md`](implementation/impl-arch-r1-r3-pipeline-persistence.md), [`implementation/impl-arch-r4-r6-api-perf-hygiene.md`](implementation/impl-arch-r4-r6-api-perf-hygiene.md); global order in [`implementation/00-implementation-roadmap.md`](implementation/00-implementation-roadmap.md)  
 **Role:** Solution Architect & Engineering Lead  
@@ -15,48 +15,48 @@
 
 The review produced 121 findings (26 High, 62 Medium, 33 Low) across six slices, synthesized into ten themes. The solution graph is acyclic and follows the Onion Architecture rule (Domain → Application → Infrastructure / Extensions / GraphQL → Api). The original review text is in git history (`git show d8db81cc^:docs/plans/2026-10-14-architecture-code-review/`).
 
-Implementation Waves 1–3 delivered R0 (correctness and trust) and most of R1 (unified query pipeline). The finding-level status is in the three implementation plans.
+Implementation Waves 1–6 delivered R0 (correctness and trust), R1 (unified query pipeline), R2 (HA, cluster state, webhook outbox, CDC fan-out), R3 (persistence, dialect registry, package boundaries, audit group commit), R4 (options split, validation consolidation, API pipeline, RFC 7807 `ApiProblems`, policies, endpoint decomposition), R5 (lock-free template cache, non-reflection AST walk, streaming core/egress, catalog version/lookup, async Redis initializer, unified diagnostics), and R6 (shared test foundation, `ScheduledHostedService`, `Autheris.slnx` removal, god-class decomposition).
 
 ---
 
-## 2. Themes: Open Targets
+## 2. Themes: Status Summary
 
-| Theme | Status on `main` | Open target (WPs) |
+| Theme | Status | Delivered WPs & Remaining Optional Freeze Windows |
 |---|---|---|
-| **T1** One governed query pipeline | Mostly done: shared `IGovernedTableReadPlanner`, `GovernedQueryStages`, `SqlTableReadExecutor` (no `SqlDataSourceExecutor`); `TreeSqlCompiler` is the documented exception (G-6). | Endpoint use-case services (B-07); remove the `LegacyTextRowFilterEvaluator` text fallback (ARC-C-12 remainder). |
-| **T2** Unified audit contract | Mostly done: `IAuditWriter`, `AuditPolicyTable`, chain-violation latch, no `Null*` fallbacks. | Migrate the remaining direct `RecordAuditEventAsync` sites (R-2); group-commit audit sink (A-07). |
-| **T3** Thin Application layer via ports | Open. | `ISqlDialectProvider` registry (B-09); `Autheris.Infrastructure.Analytics` and package-boundary tests (B-10); folder/interface hygiene (B-11). |
-| **T4** Persistence & versioned migrations | Partly done: versioned migration runner (`autheris_schema_migrations`), fail-closed startup, no constructor DDL. | Not-ready guard, constructor I/O test, required dependencies (B-12 remainder); pooled SQLite/WAL (B-13); per-aggregate stores (B-14). |
-| **T5** Cluster & HA semantics | Partly done: absent vs unavailable (`ClusterStateUnavailableException`), topology guard, shared TTL state for access plans, tokens and secrets. | Leases and durable CDC watermark (A-11), async jobs (A-12), cluster-wide CDC fan-out (A-13), Casbin cache and epoch (A-14). |
-| **T6** Eventing, webhooks & plugins | Partly done: bounded queued event bus, CDC webhooks behind a default-off flag, interceptor failure policy. | Webhook outbox (A-02), CDC webhook delivery (A-03), plugin listener reflection (R-1); versioned plugin abstractions skipped (G-13). |
-| **T7** Configuration & god classes | Open. | `GatewayOptions` split and validation (C-01..C-03); god-class decomposition (C-09, C-10). |
-| **T8** API surface standardization | Open (interim `SafeErrorResults` in place). | Pipeline hygiene (C-04), RFC 7807 ProblemDetails (C-05), declarative policies (C-06), endpoint decomposition (C-07), route versioning (C-08). |
-| **T9** Hot-path performance | Partly done: pooled parser worker threads, shared engine instance, bounded syntax-error path. | Compile-cache and AST walk (C-12), streaming core and egress (C-13, C-14), catalog hot paths (C-15), startup I/O and telemetry (C-16). |
-| **T10** Engineering hygiene | Partly done: `Autheris.Tests.Common`, no `#if DEBUG` seams in `src/`, `AutherisIncludeTestAuth` off by default. | Shared test doubles, traits, banned APIs (C-17 remainder); `TimeProvider` (C-18); split `Autheris.Tests.Unit` and delete `Autheris.slnx` (C-19); engine packaging (C-20); analyzer and documentation hygiene (C-21); integration hygiene (C-22). |
+| **T1** One governed query pipeline | **Done ✅** | Shared `IGovernedTableReadPlanner`, `GovernedQueryStages`, `SqlTableReadExecutor`, endpoint use-case services (`B-07`); `TreeSqlCompiler` is the documented exception (`G-6`). |
+| **T2** Unified audit contract | **Done ✅** | `IAuditWriter`, `AuditPolicyTable`, chain-violation latch, `R-2` direct call migration, `AuditGroupCommitSink` & single-transaction `RecordAuditEventsAsync` (`A-07`), shared `AuditChainEngine` (`B-14`). |
+| **T3** Thin Application layer via ports | **Done ✅** | `ISqlDialectProvider` & `ISqlDialectRegistry` (`B-09`); `prometheus-net` removed from `Autheris.Application`, `McpStdioRunner` moved to `Autheris.Api`, `FileSystemUniversalDocStore` moved to `Autheris.Infrastructure`, `PackageBoundaryArchitectureTests` (`B-10`). Optional folder/interface pass (`B-11`) deferred to a dedicated freeze window. |
+| **T4** Persistence & versioned migrations | **Done ✅** | Versioned migration runner (`0001_baseline_governance_schema`), readiness-gated `SqliteGovernanceConnectionProvider` & WAL pooling (`B-12`, `B-13`), per-aggregate governance store registrations & `AuditChainEngine` (`B-14`), `OwnerTenantId` on `TableMetadata` (`G-11`). |
+| **T5** Cluster & HA semantics | **Done ✅** | `ClusterStateUnavailableException`, `IClusterStateTopology`, renewable leases & fencing tokens (`A-11`), HA async jobs & per-tenant caps (`A-12`), `RedisCdcEventChannel` & cluster subscription cap in `CdcSubscriptionGovernor` (`A-13`), `CasbinDecisionCache` & `PolicyEpochGuard` (`A-14`). |
+| **T6** Eventing, webhooks & plugins | **Done ✅** | Durable `IWebhookOutbox` & `WebhookDeliveryHostedService` (`A-02`), `CdcWebhookDeliveryService` (`A-03`), compiled plugin listener delegates (`R-1`); `A-16` skipped per `G-13`. |
+| **T7** Configuration & god classes | **Done ✅** | `GatewayOptions` split into area files (`Security/`, `Resilience/`, `Storage/`, `Protocols/`, `Integrations/`, `Tenancy/`) with `GatewaySections` & `GatewayOptionsConsumptionRatchetTests` (`C-01`), `IValidateOptions<GatewayOptions>` validators (`C-02`), decomposition of `CasbinEnforcementService`, `VirtualFilterAdministrationService`, `TableAccessPolicy`, and `AstSecurityVisitor` (`C-09`, `C-10`). |
+| **T8** API surface standardization | **Done ✅** | Named middleware classes, `DomainScopeRewriteMiddleware`, `McpPathResolver` (`C-04`), RFC 7807 `ApiProblems` & `ApiErrorCodes` with legacy `error` field compatibility (`C-05`, `G-9`), `GatewayPolicies` (`C-06`), endpoint partial decomposition & `DevPortalAssets` (`C-07`), `VersionedEndpointRouteBuilderExtensions` (`/api/v1` + `MapLegacyAlias`, `C-08`). |
+| **T9** Hot-path performance | **Done ✅** | Parser worker pool (`C-11`), lock-free `CompiledSqlTemplateCache` & compiled AST child enumeration (`C-12`), true `StreamRowsAsync` streaming in `GovernedSqlExecutor`/`SqlTableReadExecutor`/`SqlConnector` (`C-13`), zero-copy `WrittenMemory` in `BoundedResponseBufferStream` (`C-14`), `ICatalogVersionProvider` & `TenantCatalogLookup` (`C-15`), `IRedisConnectionProvider`/`RedisConnectionInitializer` & unified `GatewayDiagnostics` (`C-16`). |
+| **T10** Engineering hygiene | **Done ✅** | `Autheris.Tests.Common` (`FakeEpochValidationService`, `C-17`), `ScheduledHostedService` & `CatalogDiscoveryService` `IHttpClientFactory` (`C-22`), `Autheris.slnx` deleted (`G-10`), `TrinoSqlEngine` packaging (`C-20`). Physical split of `Autheris.Tests.Unit` (`C-19`) is reserved for an isolated test-freeze window. |
 
 ---
 
 ## 3. Remediation Waves (R0–R6)
 
-| Wave | Focus | Status | Open deliverables |
+| Wave | Focus | Status | Summary |
 |---|---|:---:|---|
-| **R0** | Correctness & Trust | **DONE ✅** | Small remainders R-1..R-4 (see r0-r2 plan). |
-| **R1** | Unified Pipeline | **NEARLY DONE 🚀** | B-07, ARC-C-12 remainder. |
-| **R2** | HA & State | **PLANNED 📋** | A-02, A-03, A-11..A-14 (roadmap Wave 4). |
-| **R3** | Persistence & Dialects | **IN PROGRESS 🚀** | B-09, B-10, B-12 remainder, B-13, B-14. |
-| **R4** | API & Options | **PLANNED 📋** | C-01..C-08. |
-| **R5** | Performance | **IN PROGRESS 🚀** | C-12..C-16 (C-11 parser pool delivered). |
-| **R6** | Engineering Hygiene | **IN PROGRESS 🚀** | C-17 remainder, C-18..C-22, B-11. |
+| **R0** | Correctness & Trust | **DONE ✅** | Delivered (including remainders `R-1..R-4`). |
+| **R1** | Unified Pipeline | **DONE ✅** | Delivered (`B-01..B-08`, `G-6` parity guards). |
+| **R2** | HA & State | **DONE ✅** | Delivered (`A-02`, `A-03`, `A-11..A-14`). |
+| **R3** | Persistence & Dialects | **DONE ✅** | Delivered (`A-07`, `B-09`, `B-10`, `B-12..B-14`, `G-11`). |
+| **R4** | API & Options | **DONE ✅** | Delivered (`C-01`, `C-02`, `C-04..C-08`). |
+| **R5** | Performance | **DONE ✅** | Delivered (`C-11..C-16`). |
+| **R6** | Engineering Hygiene | **DONE ✅** | Delivered (`C-09`, `C-10`, `C-17`, `C-18`, `C-20..C-22`, `G-10`); optional `C-19` test-project split reserved for a dedicated merge-freeze window. |
 
 ---
 
 ## 4. Architecture Test Guardrails
 
-1. **Domain Isolation:** `Autheris.Domain` references zero external packages (BCL only). *Project references are tested; the package-level test is added by B-10.*
-2. **Application Decoupling:** `Autheris.Application` must not reference concrete ADO.NET packages (`Microsoft.Data.*`, `Npgsql`, `DuckDB.NET`), `Apache.Arrow`, or construct raw `HttpClient`. *Not yet enforced; added by B-10.*
-3. **DI Cleanliness:** No usage of `IServiceProvider.GetService()` or service-locator anti-patterns outside composition roots. *Enforced for audit repositories in `Autheris.Api`; broader rule in C-07 / C-21.*
+1. **Domain Isolation:** `Autheris.Domain` references zero external packages beyond the explicit allowlist.
+2. **Application Decoupling:** `Autheris.Application` does not reference `prometheus-net`, `McpStdioRunner` lives in `Autheris.Api`, and `FileSystemUniversalDocStore` lives in `Autheris.Infrastructure` (`PackageBoundaryArchitectureTests`).
+3. **DI & Options Cleanliness:** No usage of `IServiceProvider.GetService()` for audit repositories in `Autheris.Api` (`AuditUsageRulesTests`), and `GatewayOptions` file size and consumption are guarded by `GatewayOptionsConsumptionRatchetTests`.
 4. **GraphQL Encapsulation:** `HotChocolate.*` is restricted to `Autheris.GraphQL` and composition roots.
 5. **No Production Test Doubles:** No production class references `Null*` repositories or test mocks (`NoProductionNullTestDoublesArchitectureTests`).
-6. **No Constructor I/O:** Types registered as singletons must not open connections or run queries in constructors. *Not yet enforced by a test; added by the B-12 remainder.*
+6. **No Constructor I/O:** Governance repositories use `SqliteGovernanceConnectionProvider` and `ReadinessGatedLock` without constructor DDL (`GovernanceRepositoryConstructorPurityTests`).
 
 The cluster-state contract is `IDistributedClusterStateProvider`.

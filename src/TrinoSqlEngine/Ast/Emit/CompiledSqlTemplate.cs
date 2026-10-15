@@ -104,27 +104,29 @@ public sealed record CompileCacheStats(long Hits, long Misses, int Entries);
 /// </summary>
 public sealed class CompiledSqlTemplateCache
 {
-    private readonly object _gate = new();
-    private readonly Dictionary<string, CompiledSqlTemplate> _entries = new(StringComparer.Ordinal);
-    private readonly Queue<string> _order = new();
+    private sealed class CacheEntry(CompiledSqlTemplate template, long lastAccessSequence)
+    {
+        public CompiledSqlTemplate Template { get; } = template;
+        public long LastAccessSequence = lastAccessSequence;
+    }
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, CacheEntry> _entries = new(StringComparer.Ordinal);
+    private readonly object _evictionLock = new();
     private readonly int _maxEntries;
-    private long _hits, _misses;
+    private long _hits;
+    private long _misses;
+    private long _accessClock;
 
     public CompiledSqlTemplateCache(int maxEntries = 512)
     {
         _maxEntries = maxEntries;
     }
 
-    public CompileCacheStats Stats
-    {
-        get
-        {
-            lock (_gate)
-            {
-                return new CompileCacheStats(_hits, _misses, _entries.Count);
-            }
-        }
-    }
+    public CompileCacheStats Stats =>
+        new(
+            System.Threading.Interlocked.Read(ref _hits),
+            System.Threading.Interlocked.Read(ref _misses),
+            _entries.Count);
 
     public static string HashOf(string keyMaterial)
     {
@@ -154,54 +156,80 @@ public sealed class CompiledSqlTemplateCache
         return Convert.ToHexString(digest);
     }
 
+    public bool TryGet(string keyMaterial, out CompiledSqlTemplate? template) =>
+        TryGet(keyMaterial, HashOf(keyMaterial), out template);
+
+    public bool TryGet(string keyMaterial, string hash, out CompiledSqlTemplate? template)
+    {
+        template = Find(keyMaterial, hash);
+        return template is not null;
+    }
+
     public CompiledSqlTemplate? Find(string keyMaterial) => Find(keyMaterial, HashOf(keyMaterial));
 
     /// <summary>Lookup with a hash the caller computed once (<see cref="HashOf"/>); the full key material is still compared on a hit.</summary>
     public CompiledSqlTemplate? Find(string keyMaterial, string hash)
     {
-        lock (_gate)
+        if (_entries.TryGetValue(hash, out var entry) &&
+            string.Equals(entry.Template.KeyMaterial, keyMaterial, StringComparison.Ordinal))
         {
-            if (_entries.TryGetValue(hash, out var t) && string.Equals(t.KeyMaterial, keyMaterial, StringComparison.Ordinal))
-            {
-                return t;
-            }
-
-            return null;
+            System.Threading.Interlocked.Exchange(
+                ref entry.LastAccessSequence,
+                System.Threading.Interlocked.Increment(ref _accessClock));
+            return entry.Template;
         }
+
+        return null;
     }
 
-    public void CountHit()
-    {
-        lock (_gate) { _hits++; }
-    }
+    public void CountHit() => System.Threading.Interlocked.Increment(ref _hits);
 
-    public void CountMiss()
-    {
-        lock (_gate) { _misses++; }
-    }
+    public void CountMiss() => System.Threading.Interlocked.Increment(ref _misses);
 
     public void Add(CompiledSqlTemplate template) => Add(template, HashOf(template.KeyMaterial));
 
     public void Add(CompiledSqlTemplate template, string key)
     {
-        lock (_gate)
+        if (_maxEntries <= 0)
         {
-            if (!_entries.ContainsKey(key)) _order.Enqueue(key);
-            _entries[key] = template;
-            while (_entries.Count > _maxEntries && _order.Count > 0)
+            return;
+        }
+
+        long seq = System.Threading.Interlocked.Increment(ref _accessClock);
+        _entries[key] = new CacheEntry(template, seq);
+
+        if (_entries.Count <= _maxEntries)
+        {
+            return;
+        }
+
+        lock (_evictionLock)
+        {
+            while (_entries.Count > _maxEntries)
             {
-                _entries.Remove(_order.Dequeue());
+                string? lruKey = null;
+                long lruSequence = long.MaxValue;
+
+                foreach (var kvp in _entries)
+                {
+                    long entrySeq = System.Threading.Interlocked.Read(ref kvp.Value.LastAccessSequence);
+                    if (entrySeq < lruSequence)
+                    {
+                        lruSequence = entrySeq;
+                        lruKey = kvp.Key;
+                    }
+                }
+
+                if (lruKey is null || !_entries.TryRemove(lruKey, out _))
+                {
+                    break;
+                }
             }
         }
     }
 
-    public IReadOnlyList<CompiledSqlTemplate> Snapshot()
-    {
-        lock (_gate)
-        {
-            return _entries.Values.ToList();
-        }
-    }
+    public IReadOnlyList<CompiledSqlTemplate> Snapshot() =>
+        _entries.Values.Select(static e => e.Template).ToList();
 }
 
 /// <summary>

@@ -50,7 +50,7 @@ public sealed class ParquetGraphQLResponseMiddleware
         _graphQlPath = _options.GraphQL.EndpointPath.StartsWith('/')
             ? _options.GraphQL.EndpointPath
             : "/" + _options.GraphQL.EndpointPath;
-        _mcpBasePath = GatewayApplicationBuilderExtensions.ResolveMcpBasePath(_options);
+        _mcpBasePath = Autheris.Api.Security.McpPathResolver.Resolve(_options);
     }
 
     public async Task InvokeAsync(HttpContext context)

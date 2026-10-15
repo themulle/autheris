@@ -30,6 +30,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     private readonly ICatalogSearchEngine? _searchEngine;
     private readonly ILogger<CatalogDiscoveryService> _logger;
     private readonly long _maxSpecDownloadBytes;
+    private readonly IHttpClientFactory? _httpClientFactory;
 
     public CatalogDiscoveryService(
         ITableMetadataRepository metadataRepository,
@@ -39,7 +40,8 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         IOpenApiIngestionService? openApiIngestionService = null,
         ICatalogSearchEngine? searchEngine = null,
         ILogger<CatalogDiscoveryService>? logger = null,
-        IOptions<CatalogDiscoveryOptions>? options = null)
+        IOptions<CatalogDiscoveryOptions>? options = null,
+        IHttpClientFactory? httpClientFactory = null)
     {
         _maxSpecDownloadBytes = options?.Value.MaxSpecDownloadBytes ?? new CatalogDiscoveryOptions().MaxSpecDownloadBytes;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
@@ -49,6 +51,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         _openApiIngestionService = openApiIngestionService;
         _searchEngine = searchEngine;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<CatalogDiscoveryService>.Instance;
+        _httpClientFactory = httpClientFactory;
     }
 
     public async Task<IReadOnlyList<CatalogDatasetSummary>> ListDatasetsAsync(RequestContext context, CancellationToken ct = default)
@@ -318,18 +321,30 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
 
             await EgressUrlPolicy.ValidateResolvedAsync(specUri, isDev: false, ct).ConfigureAwait(false);
 
-            using var handler = SecureOutboundHttp.CreatePrimaryHandler(
-                isDevelopment: false,
-                allowlist: EgressAllowlist.Create(null, null),
-                allowUntrustedCertificates: false,
-                resolver: SecureOutboundHttp.DefaultResolver);
+            if (_httpClientFactory != null)
+            {
+                using var httpClient = _httpClientFactory.CreateClient("OpenApiIngestion");
+                httpClient.Timeout = TimeSpan.FromSeconds(30);
+                using var specRequest = new HttpRequestMessage(HttpMethod.Get, specUri);
+                using var specResponse = await httpClient.SendAsync(specRequest, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+                specResponse.EnsureSuccessStatusCode();
+                specContent = await BoundedHttpContentReader.ReadStringAsync(specResponse.Content, _maxSpecDownloadBytes, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                using var handler = SecureOutboundHttp.CreatePrimaryHandler(
+                    isDevelopment: false,
+                    allowlist: EgressAllowlist.Create(null, null),
+                    allowUntrustedCertificates: false,
+                    resolver: SecureOutboundHttp.DefaultResolver);
 
-            using var httpClient = new HttpClient(handler);
-            httpClient.Timeout = TimeSpan.FromSeconds(30);
-            using var specRequest = new HttpRequestMessage(HttpMethod.Get, specUri);
-            using var specResponse = await httpClient.SendAsync(specRequest, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
-            specResponse.EnsureSuccessStatusCode();
-            specContent = await BoundedHttpContentReader.ReadStringAsync(specResponse.Content, _maxSpecDownloadBytes, ct).ConfigureAwait(false);
+                using var httpClient = new HttpClient(handler);
+                httpClient.Timeout = TimeSpan.FromSeconds(30);
+                using var specRequest = new HttpRequestMessage(HttpMethod.Get, specUri);
+                using var specResponse = await httpClient.SendAsync(specRequest, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+                specResponse.EnsureSuccessStatusCode();
+                specContent = await BoundedHttpContentReader.ReadStringAsync(specResponse.Content, _maxSpecDownloadBytes, ct).ConfigureAwait(false);
+            }
         }
 
         if (string.IsNullOrWhiteSpace(specContent))

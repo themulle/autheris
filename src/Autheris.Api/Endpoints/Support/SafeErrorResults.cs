@@ -1,22 +1,14 @@
 namespace Autheris.Api.Endpoints.Support;
 
 using System;
-using System.Collections.Generic;
-using System.Diagnostics;
+using Autheris.Api.Errors;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Thin helper that produces client-safe <c>application/problem+json</c> error responses with a fixed detail text,
-/// a stable machine-readable <c>code</c> and the <c>traceId</c>. Exception text never reaches the client; the original
-/// exception is logged server-side. This is an interim wrapper so that a later central ProblemDetails factory can
-/// replace the call sites with a one-line change.
+/// Thin compatibility wrapper that delegates directly to <see cref="ApiProblems"/> (WP-ARC-C-05).
 /// </summary>
 internal static class SafeErrorResults
 {
-    private const string LogCategory = "Autheris.Api.Endpoints.SafeErrors";
-
     public static IResult BadRequest(string code, string generic, HttpContext context) =>
         Problem(StatusCodes.Status400BadRequest, code, generic, context);
 
@@ -29,14 +21,7 @@ internal static class SafeErrorResults
     public static IResult Problem(int statusCode, string code, string generic, HttpContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return Results.Problem(
-            detail: generic,
-            statusCode: statusCode,
-            extensions: new Dictionary<string, object?>
-            {
-                ["code"] = code,
-                ["traceId"] = ResolveTraceId(context)
-            });
+        return ApiProblems.Problem(statusCode, code, generic, context);
     }
 
     /// <summary>Logs the original exception server-side (never returned to the client).</summary>
@@ -44,10 +29,7 @@ internal static class SafeErrorResults
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(exception);
-        var logger = context.RequestServices?.GetService<ILoggerFactory>()?.CreateLogger(LogCategory);
-        logger?.LogWarning(exception, "Request failed with code {ErrorCode} (trace {TraceId}).", code, ResolveTraceId(context));
+        ApiProblems.LogFailure(context, exception, code);
     }
-
-    private static string ResolveTraceId(HttpContext context) =>
-        Activity.Current?.TraceId.ToString() ?? context.TraceIdentifier;
 }
+

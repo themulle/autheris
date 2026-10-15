@@ -2,12 +2,13 @@
 
 **Document ID:** `PLAN-IMPL-ARC-A`
 **Parent plans:** [`../00-master-plan-overview.md`](../00-master-plan-overview.md), [`../architecture.md`](../architecture.md) (themes T2, T5, T6; waves R0 and R2)
-**Scope:** Open ARC-* findings of theme T2 (audit), T5 (cluster/HA semantics) and T6 (eventing, webhooks, plugin contracts).
+**Status:** **DELIVERED ✅** (`R-1..R-4`, `WP-ARC-A-01..A-15` delivered; `WP-ARC-A-16` skipped per `G-13`)
+**Scope:** ARC-* findings of theme T2 (audit), T5 (cluster/HA semantics) and T6 (eventing, webhooks, plugin contracts).
 **WP prefix:** `WP-ARC-A-NN`
-**Date:** 2026-10-14
-**Baseline:** `main` at `a4137626` (Waves 1-3 merged)
+**Date:** 2026-10-15
+**Baseline:** `feat/impl-wave-5-6`
 
-R0 is complete on `main`: WP-ARC-A-01 (CDC webhook flag, 501 by default), A-04 (queued event bus), A-05 (no `Null*` fallbacks in `src/`), A-06 (`IAuditWriter`, `AuditPolicyTable`), A-08 (`ICompilerHooks`, no `#if DEBUG` in `src/`), A-09 (`ClusterStateUnavailableException`, `IClusterStateTopology`, embedded-Garnet guard), A-10 (`IAccessPlanStore`, shared TTL state) and A-15 (interceptor failure policy, dead plugin members removed). This plan keeps only the open remainders and the R2/R4 work packages.
+Waves R0 and R2 are complete: `WP-ARC-A-01..A-15` and remainders `R-1..R-4` have been delivered across Waves 1–5 (including `IWebhookOutbox` / `WebhookDeliveryHostedService` in `A-02`, `CdcWebhookDeliveryService` in `A-03`, `AuditGroupCommitSink` / `RecordAuditEventsAsync` in `A-07`, `IClusterLeaderLease` / `GovernanceDbMssqlWatermarkStore` in `A-11`, HA `AsyncJobScheduler` in `A-12`, `RedisCdcEventChannel` & cluster subscription cap in `A-13`, and `CasbinDecisionCache` / `PolicyEpochGuard` in `A-14`). `WP-ARC-A-16` is skipped per Gate 0 decision `G-13`.
 
 ---
 

@@ -25,23 +25,27 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
 {
     private readonly ITableMetadataRepository _metadataRepo;
     private readonly ITableRelationRepository _relationRepo;
+    private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _versionProvider;
     private readonly Microsoft.Extensions.Logging.ILogger<CatalogGraphQlTypeModule>? _logger;
     private readonly TimeSpan _refreshInterval;
     private readonly object _timerLock = new();
     private Timer? _refreshTimer;
     private volatile string? _builtFingerprint;
+    private volatile string? _builtVersion;
     private int _checking;
 
     public CatalogGraphQlTypeModule(
         ITableMetadataRepository metadataRepo,
         ITableRelationRepository relationRepo,
         Microsoft.Extensions.Logging.ILogger<CatalogGraphQlTypeModule>? logger = null,
-        TimeSpan? refreshInterval = null)
+        TimeSpan? refreshInterval = null,
+        Autheris.Application.Catalog.ICatalogVersionProvider? versionProvider = null)
     {
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _relationRepo = relationRepo ?? throw new ArgumentNullException(nameof(relationRepo));
         _logger = logger;
         _refreshInterval = refreshInterval ?? TimeSpan.Zero;
+        _versionProvider = versionProvider;
     }
 
     /// <summary>
@@ -62,6 +66,22 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
 
         try
         {
+            if (_versionProvider != null && _builtVersion != null)
+            {
+                try
+                {
+                    var currentVersion = await _versionProvider.GetVersionAsync(ct).ConfigureAwait(false);
+                    if (string.Equals(currentVersion, _builtVersion, StringComparison.Ordinal))
+                    {
+                        return false;
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger?.LogDebug(ex, "GraphQL catalog version check failed; falling back to schema fingerprint check.");
+                }
+            }
+
             string current;
             try
             {
@@ -122,12 +142,17 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
             schemaModel = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, _logger, cancellationToken)
                 .ConfigureAwait(false);
             _builtFingerprint = schemaModel.Fingerprint();
+            if (_versionProvider != null)
+            {
+                _builtVersion = await _versionProvider.GetVersionAsync(cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger?.LogError(ex, "GraphQL catalog schema could not be built; serving the schema without catalog tables until the catalog is reachable.");
             schemaModel = CatalogSchemaModel.Empty;
             _builtFingerprint = null;
+            _builtVersion = null;
         }
 
         EnsureRefreshTimer();

@@ -1,10 +1,14 @@
 namespace Autheris.Application.Hosting;
 
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.State;
+using Autheris.Domain.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -23,27 +27,44 @@ public sealed record ClusterSchedule(bool Enabled, TimeSpan Interval, TimeSpan I
 
 internal static class ClusterScheduledJobMetrics
 {
-    private static readonly string[] JobLabel = ["job"];
+    private static readonly ConcurrentDictionary<string, long> LastSuccessByJob = new(StringComparer.Ordinal);
 
-    public static readonly Prometheus.Gauge LastSuccess = Prometheus.Metrics.CreateGauge(
-        "autheris_scheduled_job_last_success_timestamp_seconds", "Unix time of the last successful scheduled job run",
-        new Prometheus.GaugeConfiguration { LabelNames = JobLabel });
+    private static readonly ObservableGauge<long> LastSuccessGauge = GatewayDiagnostics.Meter.CreateObservableGauge(
+        "autheris_scheduled_job_last_success_timestamp_seconds",
+        ObserveLastSuccess,
+        unit: "s",
+        description: "Unix time of the last successful scheduled job run");
 
-    public static readonly Prometheus.Histogram Duration = Prometheus.Metrics.CreateHistogram(
-        "autheris_scheduled_job_duration_seconds", "Duration of scheduled job runs that held the lease",
-        new Prometheus.HistogramConfiguration { LabelNames = JobLabel });
+    public static readonly Histogram<double> Duration = GatewayDiagnostics.Meter.CreateHistogram<double>(
+        "autheris_scheduled_job_duration_seconds",
+        unit: "s",
+        description: "Duration of scheduled job runs that held the lease");
 
-    public static readonly Prometheus.Counter LeaseLost = Prometheus.Metrics.CreateCounter(
-        "autheris_scheduled_job_lease_lost_total", "Scheduled job runs aborted because the lease was lost or fenced out",
-        new Prometheus.CounterConfiguration { LabelNames = JobLabel });
+    public static readonly Counter<long> LeaseLost = GatewayDiagnostics.Meter.CreateCounter<long>(
+        "autheris_scheduled_job_lease_lost_total",
+        description: "Scheduled job runs aborted because the lease was lost or fenced out");
 
-    public static readonly Prometheus.Counter Failures = Prometheus.Metrics.CreateCounter(
-        "autheris_scheduled_job_failures_total", "Scheduled job runs that failed with an exception",
-        new Prometheus.CounterConfiguration { LabelNames = JobLabel });
+    public static readonly Counter<long> Failures = GatewayDiagnostics.Meter.CreateCounter<long>(
+        "autheris_scheduled_job_failures_total",
+        description: "Scheduled job runs that failed with an exception");
 
-    public static readonly Prometheus.Counter Skipped = Prometheus.Metrics.CreateCounter(
-        "autheris_scheduled_job_skipped_total", "Scheduled job cycles skipped before the job started",
-        new Prometheus.CounterConfiguration { LabelNames = ["job", "reason"] });
+    public static readonly Counter<long> Skipped = GatewayDiagnostics.Meter.CreateCounter<long>(
+        "autheris_scheduled_job_skipped_total",
+        description: "Scheduled job cycles skipped before the job started");
+
+    public static void RecordLastSuccess(string jobName, long unixTimeSeconds)
+    {
+        _ = LastSuccessGauge;
+        LastSuccessByJob[jobName] = unixTimeSeconds;
+    }
+
+    private static IEnumerable<Measurement<long>> ObserveLastSuccess()
+    {
+        foreach (var pair in LastSuccessByJob)
+        {
+            yield return new Measurement<long>(pair.Value, new KeyValuePair<string, object?>("job", pair.Key));
+        }
+    }
 }
 
 /// <summary>
@@ -159,20 +180,20 @@ public abstract class ClusterScheduledService<TJob> : BackgroundService
         {
             // Never run unguarded and never crash the host: skip this cycle.
             _logger.LogWarning(ex, "Scheduled job {Job} skipped: cluster state unavailable.", _jobName);
-            ClusterScheduledJobMetrics.Skipped.WithLabels(_jobName, "state_unavailable").Inc();
+            ClusterScheduledJobMetrics.Skipped.Add(1, new KeyValuePair<string, object?>("job", _jobName), new KeyValuePair<string, object?>("reason", "state_unavailable"));
             return;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Scheduled job {Job} skipped: acquiring the lease failed unexpectedly.", _jobName);
-            ClusterScheduledJobMetrics.Failures.WithLabels(_jobName).Inc();
+            ClusterScheduledJobMetrics.Failures.Add(1, new KeyValuePair<string, object?>("job", _jobName));
             return;
         }
 
         if (lease is null)
         {
             _logger.LogDebug("Scheduled job {Job} lease is held by another cluster replica; skipping cycle.", _jobName);
-            ClusterScheduledJobMetrics.Skipped.WithLabels(_jobName, "busy").Inc();
+            ClusterScheduledJobMetrics.Skipped.Add(1, new KeyValuePair<string, object?>("job", _jobName), new KeyValuePair<string, object?>("reason", "busy"));
             return;
         }
 
@@ -189,11 +210,11 @@ public abstract class ClusterScheduledService<TJob> : BackgroundService
                 if (lease.LeaseLost.IsCancellationRequested)
                 {
                     _logger.LogWarning("Scheduled job {Job} finished after its lease was lost.", _jobName);
-                    ClusterScheduledJobMetrics.LeaseLost.WithLabels(_jobName).Inc();
+                    ClusterScheduledJobMetrics.LeaseLost.Add(1, new KeyValuePair<string, object?>("job", _jobName));
                 }
                 else
                 {
-                    ClusterScheduledJobMetrics.LastSuccess.WithLabels(_jobName).Set(_time.GetUtcNow().ToUnixTimeSeconds());
+                    ClusterScheduledJobMetrics.RecordLastSuccess(_jobName, _time.GetUtcNow().ToUnixTimeSeconds());
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -203,21 +224,21 @@ public abstract class ClusterScheduledService<TJob> : BackgroundService
             catch (OperationCanceledException) when (lease.LeaseLost.IsCancellationRequested)
             {
                 _logger.LogWarning("Scheduled job {Job} was cancelled because its lease was lost.", _jobName);
-                ClusterScheduledJobMetrics.LeaseLost.WithLabels(_jobName).Inc();
+                ClusterScheduledJobMetrics.LeaseLost.Add(1, new KeyValuePair<string, object?>("job", _jobName));
             }
             catch (FencingTokenRejectedException ex)
             {
                 _logger.LogError(ex, "Scheduled job {Job} was fenced out by a newer lease owner.", _jobName);
-                ClusterScheduledJobMetrics.LeaseLost.WithLabels(_jobName).Inc();
+                ClusterScheduledJobMetrics.LeaseLost.Add(1, new KeyValuePair<string, object?>("job", _jobName));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Scheduled job {Job} failed.", _jobName);
-                ClusterScheduledJobMetrics.Failures.WithLabels(_jobName).Inc();
+                ClusterScheduledJobMetrics.Failures.Add(1, new KeyValuePair<string, object?>("job", _jobName));
             }
             finally
             {
-                ClusterScheduledJobMetrics.Duration.WithLabels(_jobName).Observe(Stopwatch.GetElapsedTime(started).TotalSeconds);
+                ClusterScheduledJobMetrics.Duration.Record(Stopwatch.GetElapsedTime(started).TotalSeconds, new KeyValuePair<string, object?>("job", _jobName));
             }
         }
     }

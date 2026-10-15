@@ -1,12 +1,13 @@
 namespace Autheris.Application.Sql.Errors;
 
+using System.Diagnostics.Metrics;
 using System.Security;
 using Antlr4.Runtime;
 using Antlr4.Runtime.Misc;
 using Autheris.Application.Common;
 using Autheris.Application.Interfaces;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Exceptions;
-using Prometheus;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Builder;
 using TrinoSqlEngine.Ast.Capabilities;
@@ -32,9 +33,9 @@ public static class SqlCompilerErrorMapper
     /// <summary>Depth of the inner-exception walk (<c>GovernedSqlRewriter</c> wraps engine exceptions).</summary>
     private const int MaxDepth = 8;
 
-    private static readonly Counter InvariantFailures = Metrics.CreateCounter(
+    private static readonly Counter<long> InvariantFailures = GatewayDiagnostics.Meter.CreateCounter<long>(
         "autheris_sql_compiler_invariant_failures_total",
-        "Gateway defects of the governed SQL compiler that failed closed (SQL_COMPILER_INVARIANT, DML_CHECKED_EXECUTION_REQUIRED).");
+        description: "Gateway defects of the governed SQL compiler that failed closed (SQL_COMPILER_INVARIANT, DML_CHECKED_EXECUTION_REQUIRED).");
 
     /// <summary>Maps an exception (or an exception in its inner chain) to the stable error; false when it is not a governed SQL error.</summary>
     public static bool TryMap(Exception? exception, out SqlErrorMapping mapping)
@@ -92,7 +93,7 @@ public static class SqlCompilerErrorMapper
     {
         if (mapping.Code is GovernedSqlErrorCodes.CompilerInvariant or GovernedSqlErrorCodes.CheckedExecutionRequired)
         {
-            InvariantFailures.Inc();
+            InvariantFailures.Add(1);
         }
     }
 

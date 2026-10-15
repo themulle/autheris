@@ -51,6 +51,32 @@ public static class AuditCanonicalizer
     }
 
     /// <summary>
+    /// Builds the canonical v1 (unsequenced) or v2 (sequenced) audit payload string.
+    /// </summary>
+    public static string BuildCanonicalPayload(
+        long? sequence,
+        string id,
+        string prevHash,
+        DateTimeOffset occurredAt,
+        string? eventType,
+        string? actorSid,
+        string? targetTable,
+        string? targetColumn,
+        string? decision,
+        string? traceId,
+        string? detailsJson,
+        string? tenantId = null)
+    {
+        var payload = $"{id}|{prevHash}|{occurredAt:O}|{CanonicalizeField(eventType)}|{CanonicalizeField(actorSid)}|{CanonicalizeField(targetTable)}|{CanonicalizeField(targetColumn)}|{CanonicalizeField(decision)}|{CanonicalizeField(traceId)}|{CanonicalizeField(detailsJson)}|{CanonicalizeField(tenantId)}";
+        if (sequence.HasValue)
+        {
+            payload = $"v2|{sequence.Value}|{payload}";
+        }
+
+        return payload;
+    }
+
+    /// <summary>
     /// Computes the HMAC-SHA256 entry hash over individual canonicalized fields.
     /// Supports v1 (unsequenced) and v2 (sequenced) payload layouts.
     /// </summary>
@@ -71,11 +97,19 @@ public static class AuditCanonicalizer
     {
         ArgumentNullException.ThrowIfNull(hmacKey);
 
-        var payload = $"{id}|{prevHash}|{occurredAt:O}|{CanonicalizeField(eventType)}|{CanonicalizeField(actorSid)}|{CanonicalizeField(targetTable)}|{CanonicalizeField(targetColumn)}|{CanonicalizeField(decision)}|{CanonicalizeField(traceId)}|{CanonicalizeField(detailsJson)}|{CanonicalizeField(tenantId)}";
-        if (sequence.HasValue)
-        {
-            payload = $"v2|{sequence.Value}|{payload}";
-        }
+        var payload = BuildCanonicalPayload(
+            sequence,
+            id,
+            prevHash,
+            occurredAt,
+            eventType,
+            actorSid,
+            targetTable,
+            targetColumn,
+            decision,
+            traceId,
+            detailsJson,
+            tenantId);
 
         Span<byte> hashBytes = stackalloc byte[32];
         HMACSHA256.HashData(hmacKey, Encoding.UTF8.GetBytes(payload), hashBytes);
