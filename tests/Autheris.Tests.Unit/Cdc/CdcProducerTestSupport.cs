@@ -748,6 +748,16 @@ internal sealed class CdcProducerHarness
 
     public TableMetadata? MetadataFor { get; set; }
 
+    /// <summary>A second producer instance (own activation cache) on the same source and the same stream store.</summary>
+    public MssqlChangeTrackingPoller CreateSecondPoller(FaultInjectingStreamStore? store = null)
+    {
+        var s = store ?? Store;
+        var factory = new FakeSourceConnectionFactory(Source);
+        var activator = new CdcTableActivator(Metadata, factory, s, Crypto, Monitor, NullLogger<CdcTableActivator>.Instance, null, Time);
+        var builder = new CdcChangeEventBuilder(s, Crypto, Codec, Monitor, Time);
+        return new MssqlChangeTrackingPoller(factory, activator, s, builder, Signal, Monitor, NullLogger<MssqlChangeTrackingPoller>.Instance, Time);
+    }
+
     public static TableMetadata Meta(
         IEnumerable<string>? columns = null,
         IEnumerable<string>? pk = null,
