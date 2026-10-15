@@ -398,6 +398,31 @@ internal static class PostgreSqlBaselineSchema
                 created_ms BIGINT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS ix_cloudevent_subs_tenant ON CLOUDEVENT_SUBSCRIPTIONS (tenant_id, is_enabled);
+
+            -- Issue #94: declared primary keys and indexes (composite, ordered, unique flag); columns referenced by TABLE_COLUMNS.id
+            CREATE TABLE IF NOT EXISTS TABLE_PRIMARY_KEY_COLUMNS (
+                table_id TEXT NOT NULL,
+                key_ordinal INTEGER NOT NULL CHECK (key_ordinal >= 1),
+                table_column_id TEXT NOT NULL,
+                PRIMARY KEY (table_id, key_ordinal)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_table_pk_columns_column ON TABLE_PRIMARY_KEY_COLUMNS (table_id, table_column_id);
+
+            CREATE TABLE IF NOT EXISTS TABLE_INDEXES (
+                id TEXT PRIMARY KEY,
+                table_id TEXT NOT NULL,
+                index_name TEXT NOT NULL,
+                is_unique BOOLEAN NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_table_indexes_name ON TABLE_INDEXES (table_id, index_name);
+
+            CREATE TABLE IF NOT EXISTS TABLE_INDEX_COLUMNS (
+                index_id TEXT NOT NULL,
+                column_ordinal INTEGER NOT NULL CHECK (column_ordinal >= 1),
+                table_column_id TEXT NOT NULL,
+                PRIMARY KEY (index_id, column_ordinal)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_table_index_columns_column ON TABLE_INDEX_COLUMNS (index_id, table_column_id);
         ";
         cmd.ExecuteNonQuery();
 

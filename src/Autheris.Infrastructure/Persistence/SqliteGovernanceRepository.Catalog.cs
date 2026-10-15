@@ -64,6 +64,302 @@ public partial class SqliteGovernanceRepository
         }
     }
 
+    internal static IReadOnlyDictionary<string, string> WithPrimaryKeyOrdinalMeta(
+        IReadOnlyDictionary<string, string>? meta,
+        string columnName,
+        IReadOnlyList<string> primaryKeyColumns,
+        bool replaceKeyDefinition)
+    {
+        var dict = meta != null
+            ? new Dictionary<string, string>(meta, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        if (replaceKeyDefinition || primaryKeyColumns.Count > 0)
+        {
+            int pkIndex = -1;
+            for (int i = 0; i < primaryKeyColumns.Count; i++)
+            {
+                if (string.Equals(primaryKeyColumns[i], columnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    pkIndex = i;
+                    break;
+                }
+            }
+
+            if (pkIndex >= 0)
+            {
+                dict["primary_key_ordinal"] = (pkIndex + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+            else if (replaceKeyDefinition)
+            {
+                dict.Remove("primary_key_ordinal");
+            }
+        }
+
+        return dict;
+    }
+
+    internal static IReadOnlyList<string> ExtractPrimaryKeyFromColumnMeta(IReadOnlyList<TableColumn> columns)
+    {
+        if (columns == null || columns.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        var ordinalCols = new List<(int Ordinal, int Index, string Name)>();
+        for (int i = 0; i < columns.Count; i++)
+        {
+            var col = columns[i];
+            if (col.Meta != null &&
+                col.Meta.TryGetValue("primary_key_ordinal", out var ordStr) &&
+                int.TryParse(ordStr, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var ord) &&
+                ord >= 1)
+            {
+                ordinalCols.Add((ord, i, col.ColumnName));
+            }
+        }
+
+        if (ordinalCols.Count > 0)
+        {
+            return ordinalCols
+                .OrderBy(x => x.Ordinal)
+                .ThenBy(x => x.Index)
+                .Select(x => x.Name)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        var flagCols = new List<string>();
+        foreach (var col in columns)
+        {
+            if (col.Meta == null) continue;
+            if ((col.Meta.TryGetValue("is_primary_key", out var isPk) && string.Equals(isPk, "true", StringComparison.OrdinalIgnoreCase)) ||
+                (col.Meta.TryGetValue("role", out var role) && string.Equals(role, "primary_key", StringComparison.OrdinalIgnoreCase)))
+            {
+                if (!flagCols.Contains(col.ColumnName, StringComparer.OrdinalIgnoreCase))
+                {
+                    flagCols.Add(col.ColumnName);
+                }
+            }
+        }
+
+        return flagCols.Count > 0 ? flagCols : Array.Empty<string>();
+    }
+
+    private static async Task<bool> SqliteTableExistsAsync(SqliteConnection conn, SqliteTransaction? tx, string tableName, CancellationToken ct)
+    {
+        using var cmd = conn.CreateCommand();
+        if (tx != null) cmd.Transaction = tx;
+        cmd.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = @name LIMIT 1";
+        cmd.Parameters.AddWithValue("@name", tableName);
+        var res = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return res != null;
+    }
+
+    private static async Task<(IReadOnlyList<string> PrimaryKeyColumns, IReadOnlyList<TableIndexDefinition> Indexes)> ReadTableKeysAndIndexesAsync(
+        SqliteConnection conn,
+        SqliteTransaction? tx,
+        Guid tableId,
+        IReadOnlyList<TableColumn> columns,
+        CancellationToken ct)
+    {
+        var colNameById = new Dictionary<Guid, string>();
+        foreach (var col in columns)
+        {
+            colNameById[col.Id] = col.ColumnName;
+        }
+
+        var pkColumns = new List<string>();
+        if (await SqliteTableExistsAsync(conn, tx, "TABLE_PRIMARY_KEY_COLUMNS", ct).ConfigureAwait(false))
+        {
+            using var pkCmd = conn.CreateCommand();
+            if (tx != null) pkCmd.Transaction = tx;
+            pkCmd.CommandText = @"SELECT table_column_id FROM TABLE_PRIMARY_KEY_COLUMNS
+                                  WHERE table_id = @tid
+                                  ORDER BY key_ordinal ASC";
+            pkCmd.Parameters.AddWithValue("@tid", tableId.ToString());
+            using var reader = await pkCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                if (Guid.TryParse(reader.GetString(0), out var colId) &&
+                    colNameById.TryGetValue(colId, out var colName) &&
+                    !pkColumns.Contains(colName, StringComparer.OrdinalIgnoreCase))
+                {
+                    pkColumns.Add(colName);
+                }
+            }
+        }
+
+        var resolvedPks = pkColumns.Count > 0
+            ? (IReadOnlyList<string>)pkColumns
+            : ExtractPrimaryKeyFromColumnMeta(columns);
+
+        var indexes = new List<TableIndexDefinition>();
+        if (await SqliteTableExistsAsync(conn, tx, "TABLE_INDEXES", ct).ConfigureAwait(false) &&
+            await SqliteTableExistsAsync(conn, tx, "TABLE_INDEX_COLUMNS", ct).ConfigureAwait(false))
+        {
+            using var idxCmd = conn.CreateCommand();
+            if (tx != null) idxCmd.Transaction = tx;
+            idxCmd.CommandText = @"SELECT i.id, i.index_name, i.is_unique, ic.table_column_id
+                                   FROM TABLE_INDEXES i
+                                   JOIN TABLE_INDEX_COLUMNS ic ON i.id = ic.index_id
+                                   WHERE i.table_id = @tid
+                                   ORDER BY i.index_name ASC, ic.column_ordinal ASC";
+            idxCmd.Parameters.AddWithValue("@tid", tableId.ToString());
+            using var reader = await idxCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+            var indexMap = new Dictionary<string, (string Name, bool IsUnique, List<string> Columns)>(StringComparer.OrdinalIgnoreCase);
+            var indexOrder = new List<string>();
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                var idxId = reader.GetString(0);
+                var idxName = reader.GetString(1);
+                var isUnique = reader.GetInt32(2) == 1;
+                var colIdStr = reader.GetString(3);
+                if (!Guid.TryParse(colIdStr, out var colId) || !colNameById.TryGetValue(colId, out var colName))
+                {
+                    continue;
+                }
+
+                if (!indexMap.TryGetValue(idxId, out var entry))
+                {
+                    entry = (idxName, isUnique, new List<string>());
+                    indexMap[idxId] = entry;
+                    indexOrder.Add(idxId);
+                }
+
+                if (!entry.Columns.Contains(colName, StringComparer.OrdinalIgnoreCase))
+                {
+                    entry.Columns.Add(colName);
+                }
+            }
+
+            foreach (var idxId in indexOrder)
+            {
+                var entry = indexMap[idxId];
+                if (entry.Columns.Count > 0)
+                {
+                    indexes.Add(new TableIndexDefinition(entry.Name, entry.Columns, entry.IsUnique));
+                }
+            }
+        }
+
+        return (resolvedPks, indexes);
+    }
+
+    private static async Task PersistTableKeysAndIndexesAsync(
+        SqliteConnection conn,
+        SqliteTransaction tx,
+        Guid tableId,
+        TableMetadata metadata,
+        IReadOnlyDictionary<string, Guid> colIdByName,
+        CancellationToken ct)
+    {
+        if ((metadata.ReplaceKeyDefinition || metadata.PrimaryKeyColumns.Count > 0) &&
+            await SqliteTableExistsAsync(conn, tx, "TABLE_PRIMARY_KEY_COLUMNS", ct).ConfigureAwait(false))
+        {
+            using (var delPkCmd = conn.CreateCommand())
+            {
+                delPkCmd.Transaction = tx;
+                delPkCmd.CommandText = "DELETE FROM TABLE_PRIMARY_KEY_COLUMNS WHERE table_id = @tid";
+                delPkCmd.Parameters.AddWithValue("@tid", tableId.ToString());
+                await delPkCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            int ordinal = 1;
+            var seenPk = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var pkCol in metadata.PrimaryKeyColumns)
+            {
+                if (!seenPk.Add(pkCol) || !colIdByName.TryGetValue(pkCol, out var colId))
+                {
+                    continue;
+                }
+
+                using var insPkCmd = conn.CreateCommand();
+                insPkCmd.Transaction = tx;
+                insPkCmd.CommandText = @"INSERT INTO TABLE_PRIMARY_KEY_COLUMNS (table_id, key_ordinal, table_column_id)
+                                         VALUES (@tid, @ord, @cid)";
+                insPkCmd.Parameters.AddWithValue("@tid", tableId.ToString());
+                insPkCmd.Parameters.AddWithValue("@ord", ordinal++);
+                insPkCmd.Parameters.AddWithValue("@cid", colId.ToString());
+                await insPkCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+        }
+
+        if ((metadata.ReplaceKeyDefinition || metadata.Indexes.Count > 0) &&
+            await SqliteTableExistsAsync(conn, tx, "TABLE_INDEXES", ct).ConfigureAwait(false) &&
+            await SqliteTableExistsAsync(conn, tx, "TABLE_INDEX_COLUMNS", ct).ConfigureAwait(false))
+        {
+            using (var delIdxColsCmd = conn.CreateCommand())
+            {
+                delIdxColsCmd.Transaction = tx;
+                delIdxColsCmd.CommandText = "DELETE FROM TABLE_INDEX_COLUMNS WHERE index_id IN (SELECT id FROM TABLE_INDEXES WHERE table_id = @tid)";
+                delIdxColsCmd.Parameters.AddWithValue("@tid", tableId.ToString());
+                await delIdxColsCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            using (var delIdxCmd = conn.CreateCommand())
+            {
+                delIdxCmd.Transaction = tx;
+                delIdxCmd.CommandText = "DELETE FROM TABLE_INDEXES WHERE table_id = @tid";
+                delIdxCmd.Parameters.AddWithValue("@tid", tableId.ToString());
+                await delIdxCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            var seenIndexNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var idx in metadata.Indexes)
+            {
+                if (string.IsNullOrWhiteSpace(idx.Name) || !seenIndexNames.Add(idx.Name) || idx.Columns.Count == 0)
+                {
+                    continue;
+                }
+
+                var resolvedCols = new List<Guid>(idx.Columns.Count);
+                var seenCols = new HashSet<Guid>();
+                bool allResolved = true;
+                foreach (var cName in idx.Columns)
+                {
+                    if (!colIdByName.TryGetValue(cName, out var cId) || !seenCols.Add(cId))
+                    {
+                        allResolved = false;
+                        break;
+                    }
+                    resolvedCols.Add(cId);
+                }
+
+                if (!allResolved || resolvedCols.Count == 0)
+                {
+                    continue;
+                }
+
+                var indexId = Guid.NewGuid().ToString();
+                using (var insIdxCmd = conn.CreateCommand())
+                {
+                    insIdxCmd.Transaction = tx;
+                    insIdxCmd.CommandText = @"INSERT INTO TABLE_INDEXES (id, table_id, index_name, is_unique)
+                                              VALUES (@id, @tid, @name, @unique)";
+                    insIdxCmd.Parameters.AddWithValue("@id", indexId);
+                    insIdxCmd.Parameters.AddWithValue("@tid", tableId.ToString());
+                    insIdxCmd.Parameters.AddWithValue("@name", idx.Name);
+                    insIdxCmd.Parameters.AddWithValue("@unique", idx.IsUnique ? 1 : 0);
+                    await insIdxCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                }
+
+                for (int i = 0; i < resolvedCols.Count; i++)
+                {
+                    using var insIdxColCmd = conn.CreateCommand();
+                    insIdxColCmd.Transaction = tx;
+                    insIdxColCmd.CommandText = @"INSERT INTO TABLE_INDEX_COLUMNS (index_id, column_ordinal, table_column_id)
+                                                 VALUES (@idxId, @ord, @cid)";
+                    insIdxColCmd.Parameters.AddWithValue("@idxId", indexId);
+                    insIdxColCmd.Parameters.AddWithValue("@ord", i + 1);
+                    insIdxColCmd.Parameters.AddWithValue("@cid", resolvedCols[i].ToString());
+                    await insIdxColCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                }
+            }
+        }
+    }
+
     public async Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
     {
         var cacheKey = table.ToString().ToLowerInvariant();
@@ -181,12 +477,16 @@ public partial class SqliteGovernanceRepository
                 }
             }
 
+            var (pkColumns, indexes) = await ReadTableKeysAndIndexesAsync(conn, null, tableId.Value, columns, ct).ConfigureAwait(false);
+
             var result = new TableMetadata
             {
                 Table = tableEntity,
                 Identifier = table,
                 Columns = columns,
-                ColumnMaskingRules = maskingRules
+                ColumnMaskingRules = maskingRules,
+                PrimaryKeyColumns = pkColumns,
+                Indexes = indexes
             };
 
             if (AfterMetadataSnapshotForTesting is { } hook)
@@ -321,13 +621,16 @@ public partial class SqliteGovernanceRepository
                 }
 
                 var columns = columnsByTable.TryGetValue(id, out var cols) ? cols : new List<TableColumn>();
+                var (pkColumns, indexes) = await ReadTableKeysAndIndexesAsync(conn, null, id, columns, ct).ConfigureAwait(false);
 
                 results.Add(new TableMetadata
                 {
                     Table = table,
                     Identifier = identifier,
                     Columns = columns,
-                    ColumnMaskingRules = new Dictionary<string, MaskingRule>()
+                    ColumnMaskingRules = new Dictionary<string, MaskingRule>(),
+                    PrimaryKeyColumns = pkColumns,
+                    Indexes = indexes
                 });
             }
 
@@ -356,6 +659,8 @@ public partial class SqliteGovernanceRepository
             string? targetDesc = metadata.Table.Description;
             string? targetLongDesc = metadata.Table.LongDescription;
             string? targetDocSource = metadata.Table.DocumentationSource;
+            IReadOnlyList<string> persistedPks;
+            IReadOnlyList<TableIndexDefinition> persistedIndexes;
             using var tx = conn.BeginTransaction();
             try
             {
@@ -447,6 +752,7 @@ public partial class SqliteGovernanceRepository
                 }
 
                 var existingColsByName = new Dictionary<string, (Guid Id, string? Description, string? LongDescription, string? DocSource)>(StringComparer.OrdinalIgnoreCase);
+                var colIdByName = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
                 using (var getColsCmd = conn.CreateCommand())
                 {
                     getColsCmd.Transaction = tx;
@@ -461,13 +767,16 @@ public partial class SqliteGovernanceRepository
                         var cLongDesc = reader.IsDBNull(3) ? null : reader.GetString(3);
                         var cDocSource = reader.IsDBNull(4) ? null : reader.GetString(4);
                         existingColsByName[cName] = (cId, cDesc, cLongDesc, cDocSource);
+                        colIdByName[cName] = cId;
                     }
                 }
 
+                var updatedColumns = new List<TableColumn>(metadata.Columns.Count);
                 foreach (var col in metadata.Columns)
                 {
                     Guid colId;
-                    var metaJson = col.Meta.Count > 0 ? JsonSerializer.Serialize(col.Meta) : null;
+                    var effectiveMeta = WithPrimaryKeyOrdinalMeta(col.Meta, col.ColumnName, metadata.PrimaryKeyColumns, metadata.ReplaceKeyDefinition);
+                    var metaJson = effectiveMeta.Count > 0 ? JsonSerializer.Serialize(effectiveMeta) : null;
                     var incomingColSource = col.DocumentationSource ?? metadata.Table.DocumentationSource;
 
                     if (existingColsByName.TryGetValue(col.ColumnName, out var existingCol))
@@ -519,6 +828,20 @@ public partial class SqliteGovernanceRepository
                         await insertColCmd.ExecuteNonQueryAsync(ct);
                     }
 
+                    colIdByName[col.ColumnName] = colId;
+                    updatedColumns.Add(new TableColumn
+                    {
+                        Id = colId,
+                        TableId = tableId,
+                        ColumnName = col.ColumnName,
+                        DataType = col.DataType,
+                        IsSensitive = col.IsSensitive,
+                        Description = col.Description,
+                        LongDescription = col.LongDescription,
+                        DocumentationSource = incomingColSource,
+                        Meta = effectiveMeta
+                    });
+
                     using (var delMaskCmd = conn.CreateCommand())
                     {
                         delMaskCmd.Transaction = tx;
@@ -542,6 +865,13 @@ public partial class SqliteGovernanceRepository
                         await insertMaskCmd.ExecuteNonQueryAsync(ct);
                     }
                 }
+
+                if (metadata.ReplaceKeyDefinition || metadata.PrimaryKeyColumns.Count > 0 || metadata.Indexes.Count > 0)
+                {
+                    await PersistTableKeysAndIndexesAsync(conn, tx, tableId, metadata, colIdByName, ct).ConfigureAwait(false);
+                }
+
+                (persistedPks, persistedIndexes) = await ReadTableKeysAndIndexesAsync(conn, tx, tableId, updatedColumns, ct).ConfigureAwait(false);
 
                 await IncrementTableEpochInternalAsync(conn, metadata.Identifier, tx, ct);
                 await tx.CommitAsync(ct);
@@ -580,7 +910,8 @@ public partial class SqliteGovernanceRepository
                 Table = updatedTable,
                 Columns = metadata.Columns,
                 ColumnMaskingRules = metadata.ColumnMaskingRules,
-                PrimaryKeyColumns = metadata.PrimaryKeyColumns
+                PrimaryKeyColumns = persistedPks,
+                Indexes = persistedIndexes
             };
         }
     }

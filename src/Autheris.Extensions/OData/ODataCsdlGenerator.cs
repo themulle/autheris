@@ -162,29 +162,43 @@ public static class ODataCsdlGenerator
     /// <summary>
     /// Befund 4a.4: Resolves entity keys referencing strictly existing properties of the entity type.
     /// Priority:
-    /// 1. Declared primary keys from catalog matching an existing column.
-    /// 2. Existing column named 'id' (case-insensitive).
-    /// 3. All table columns as a composite key (read-only query gateway).
-    /// 4. Fallback to 'id' if the table has zero columns.
+    /// 1. Declared primary keys from catalog where all columns are present in <see cref="TableMetadata.Columns"/>.
+    /// 2. Declared unique index in <see cref="TableMetadata.Indexes"/> (fewest columns, all present in <see cref="TableMetadata.Columns"/>).
+    /// 3. Column <c>Meta</c> primary key markers (<c>primary_key_ordinal</c>, <c>is_primary_key</c>, <c>role=primary_key</c>).
+    /// 4. Existing column named <c>id</c> (case-insensitive).
+    /// 5. Conventional <c>(client_id, ts)</c> if both present, else <c>client_id</c> if present.
+    /// 6. All table columns as a composite key (or <c>id</c> if the table has zero columns).
     /// </summary>
     public static IReadOnlyList<string> ResolveEntityKeys(TableMetadata table)
     {
-        var validKeys = new List<string>();
         if (table.PrimaryKeyColumns.Count > 0)
         {
-            foreach (var pk in table.PrimaryKeyColumns)
+            var validPkColumns = table.PrimaryKeyColumns
+                .Where(pk => table.Columns.Any(c => string.Equals(c.ColumnName, pk, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+            if (validPkColumns.Count > 0)
             {
-                var match = table.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, pk, StringComparison.OrdinalIgnoreCase));
-                if (match != null && !validKeys.Contains(match.ColumnName, StringComparer.OrdinalIgnoreCase))
+                return validPkColumns;
+            }
+        }
+
+        if (table.Indexes.Count > 0)
+        {
+            foreach (var index in table.Indexes
+                         .Where(i => i is { IsUnique: true, Columns.Count: > 0 })
+                         .OrderBy(i => i.Columns.Count))
+            {
+                if (TryMatchAllColumns(table, index.Columns, out var indexKeys))
                 {
-                    validKeys.Add(match.ColumnName);
+                    return indexKeys;
                 }
             }
         }
 
-        if (validKeys.Count > 0)
+        var metaKeys = Autheris.Application.Data.Services.GovernedTableReadPlanner.ExtractMetaPrimaryKeyColumns(table.Columns);
+        if (metaKeys.Count > 0 && TryMatchAllColumns(table, metaKeys, out var resolvedMetaKeys))
         {
-            return validKeys;
+            return resolvedMetaKeys;
         }
 
         var idCol = table.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, "id", StringComparison.OrdinalIgnoreCase));
@@ -193,12 +207,45 @@ public static class ODataCsdlGenerator
             return [idCol.ColumnName];
         }
 
+        var clientIdCol = table.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, "client_id", StringComparison.OrdinalIgnoreCase));
+        if (clientIdCol != null)
+        {
+            var tsCol = table.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, "ts", StringComparison.OrdinalIgnoreCase));
+            if (tsCol != null)
+            {
+                return [clientIdCol.ColumnName, tsCol.ColumnName];
+            }
+
+            return [clientIdCol.ColumnName];
+        }
+
         if (table.Columns.Count > 0)
         {
             return table.Columns.Select(c => c.ColumnName).ToList();
         }
 
         return ["id"];
+    }
+
+    private static bool TryMatchAllColumns(TableMetadata table, IReadOnlyList<string> candidates, out List<string> matched)
+    {
+        matched = new List<string>(candidates.Count);
+        foreach (var colName in candidates)
+        {
+            var match = table.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, colName, StringComparison.OrdinalIgnoreCase));
+            if (match == null)
+            {
+                matched.Clear();
+                return false;
+            }
+
+            if (!matched.Contains(match.ColumnName, StringComparer.OrdinalIgnoreCase))
+            {
+                matched.Add(match.ColumnName);
+            }
+        }
+
+        return matched.Count > 0;
     }
 }
 

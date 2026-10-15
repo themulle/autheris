@@ -8,6 +8,217 @@ namespace Autheris.Infrastructure.Persistence;
 
 public partial class SqlServerGovernanceRepository
 {
+    private static async Task<bool> SqlServerTableExistsAsync(SqlConnection conn, SqlTransaction? tx, string tableName, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        if (tx != null) cmd.Transaction = tx;
+        cmd.CommandText = "SELECT CASE WHEN OBJECT_ID(@name, N'U') IS NOT NULL THEN 1 ELSE 0 END";
+        cmd.Parameters.AddWithValue("@name", "dbo." + tableName);
+        var res = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return res is int i && i == 1;
+    }
+
+    private static async Task<(IReadOnlyList<string> PrimaryKeyColumns, IReadOnlyList<TableIndexDefinition> Indexes)> ReadTableKeysAndIndexesAsync(
+        SqlConnection conn,
+        Guid tableId,
+        IReadOnlyList<TableColumn> columns,
+        CancellationToken ct)
+    {
+        var colNameById = new Dictionary<Guid, string>();
+        foreach (var col in columns)
+        {
+            colNameById[col.Id] = col.ColumnName;
+        }
+
+        var pkColumns = new List<string>();
+        if (await SqlServerTableExistsAsync(conn, null, "TABLE_PRIMARY_KEY_COLUMNS", ct).ConfigureAwait(false))
+        {
+            await using var pkCmd = conn.CreateCommand();
+            pkCmd.CommandText = @"SELECT table_column_id FROM dbo.TABLE_PRIMARY_KEY_COLUMNS
+                                  WHERE table_id = @tid
+                                  ORDER BY key_ordinal ASC";
+            pkCmd.Parameters.AddWithValue("@tid", tableId.ToString());
+            await using var reader = await pkCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                if (Guid.TryParse(reader.GetString(0), out var colId) &&
+                    colNameById.TryGetValue(colId, out var colName) &&
+                    !pkColumns.Contains(colName, StringComparer.OrdinalIgnoreCase))
+                {
+                    pkColumns.Add(colName);
+                }
+            }
+        }
+
+        var resolvedPks = pkColumns.Count > 0
+            ? (IReadOnlyList<string>)pkColumns
+            : SqliteGovernanceRepository.ExtractPrimaryKeyFromColumnMeta(columns);
+
+        var indexes = new List<TableIndexDefinition>();
+        if (await SqlServerTableExistsAsync(conn, null, "TABLE_INDEXES", ct).ConfigureAwait(false) &&
+            await SqlServerTableExistsAsync(conn, null, "TABLE_INDEX_COLUMNS", ct).ConfigureAwait(false))
+        {
+            await using var idxCmd = conn.CreateCommand();
+            idxCmd.CommandText = @"SELECT i.id, i.index_name, i.is_unique, ic.table_column_id
+                                   FROM dbo.TABLE_INDEXES i
+                                   JOIN dbo.TABLE_INDEX_COLUMNS ic ON i.id = ic.index_id
+                                   WHERE i.table_id = @tid
+                                   ORDER BY i.index_name ASC, ic.column_ordinal ASC";
+            idxCmd.Parameters.AddWithValue("@tid", tableId.ToString());
+            await using var reader = await idxCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+            var indexMap = new Dictionary<string, (string Name, bool IsUnique, List<string> Columns)>(StringComparer.OrdinalIgnoreCase);
+            var indexOrder = new List<string>();
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                var idxId = reader.GetString(0);
+                var idxName = reader.GetString(1);
+                var isUnique = reader.GetBoolean(2);
+                var colIdStr = reader.GetString(3);
+                if (!Guid.TryParse(colIdStr, out var colId) || !colNameById.TryGetValue(colId, out var colName))
+                {
+                    continue;
+                }
+
+                if (!indexMap.TryGetValue(idxId, out var entry))
+                {
+                    entry = (idxName, isUnique, new List<string>());
+                    indexMap[idxId] = entry;
+                    indexOrder.Add(idxId);
+                }
+
+                if (!entry.Columns.Contains(colName, StringComparer.OrdinalIgnoreCase))
+                {
+                    entry.Columns.Add(colName);
+                }
+            }
+
+            foreach (var idxId in indexOrder)
+            {
+                var entry = indexMap[idxId];
+                if (entry.Columns.Count > 0)
+                {
+                    indexes.Add(new TableIndexDefinition(entry.Name, entry.Columns, entry.IsUnique));
+                }
+            }
+        }
+
+        return (resolvedPks, indexes);
+    }
+
+    private static async Task PersistTableKeysAndIndexesAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        Guid tableId,
+        TableMetadata metadata,
+        IReadOnlyDictionary<string, Guid> colIdByName,
+        CancellationToken ct)
+    {
+        if ((metadata.ReplaceKeyDefinition || metadata.PrimaryKeyColumns.Count > 0) &&
+            await SqlServerTableExistsAsync(conn, tx, "TABLE_PRIMARY_KEY_COLUMNS", ct).ConfigureAwait(false))
+        {
+            await using (var delPkCmd = conn.CreateCommand())
+            {
+                delPkCmd.Transaction = tx;
+                delPkCmd.CommandText = "DELETE FROM dbo.TABLE_PRIMARY_KEY_COLUMNS WHERE table_id = @tid";
+                delPkCmd.Parameters.AddWithValue("@tid", tableId.ToString());
+                await delPkCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            int ordinal = 1;
+            var seenPk = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var pkCol in metadata.PrimaryKeyColumns)
+            {
+                if (!seenPk.Add(pkCol) || !colIdByName.TryGetValue(pkCol, out var colId))
+                {
+                    continue;
+                }
+
+                await using var insPkCmd = conn.CreateCommand();
+                insPkCmd.Transaction = tx;
+                insPkCmd.CommandText = @"INSERT INTO dbo.TABLE_PRIMARY_KEY_COLUMNS (table_id, key_ordinal, table_column_id)
+                                         VALUES (@tid, @ord, @cid)";
+                insPkCmd.Parameters.AddWithValue("@tid", tableId.ToString());
+                insPkCmd.Parameters.AddWithValue("@ord", ordinal++);
+                insPkCmd.Parameters.AddWithValue("@cid", colId.ToString());
+                await insPkCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+        }
+
+        if ((metadata.ReplaceKeyDefinition || metadata.Indexes.Count > 0) &&
+            await SqlServerTableExistsAsync(conn, tx, "TABLE_INDEXES", ct).ConfigureAwait(false) &&
+            await SqlServerTableExistsAsync(conn, tx, "TABLE_INDEX_COLUMNS", ct).ConfigureAwait(false))
+        {
+            await using (var delIdxColsCmd = conn.CreateCommand())
+            {
+                delIdxColsCmd.Transaction = tx;
+                delIdxColsCmd.CommandText = "DELETE FROM dbo.TABLE_INDEX_COLUMNS WHERE index_id IN (SELECT id FROM dbo.TABLE_INDEXES WHERE table_id = @tid)";
+                delIdxColsCmd.Parameters.AddWithValue("@tid", tableId.ToString());
+                await delIdxColsCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            await using (var delIdxCmd = conn.CreateCommand())
+            {
+                delIdxCmd.Transaction = tx;
+                delIdxCmd.CommandText = "DELETE FROM dbo.TABLE_INDEXES WHERE table_id = @tid";
+                delIdxCmd.Parameters.AddWithValue("@tid", tableId.ToString());
+                await delIdxCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            var seenIndexNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var idx in metadata.Indexes)
+            {
+                if (string.IsNullOrWhiteSpace(idx.Name) || !seenIndexNames.Add(idx.Name) || idx.Columns.Count == 0)
+                {
+                    continue;
+                }
+
+                var resolvedCols = new List<Guid>(idx.Columns.Count);
+                var seenCols = new HashSet<Guid>();
+                bool allResolved = true;
+                foreach (var cName in idx.Columns)
+                {
+                    if (!colIdByName.TryGetValue(cName, out var cId) || !seenCols.Add(cId))
+                    {
+                        allResolved = false;
+                        break;
+                    }
+                    resolvedCols.Add(cId);
+                }
+
+                if (!allResolved || resolvedCols.Count == 0)
+                {
+                    continue;
+                }
+
+                var indexId = Guid.NewGuid().ToString();
+                await using (var insIdxCmd = conn.CreateCommand())
+                {
+                    insIdxCmd.Transaction = tx;
+                    insIdxCmd.CommandText = @"INSERT INTO dbo.TABLE_INDEXES (id, table_id, index_name, is_unique)
+                                              VALUES (@id, @tid, @name, @unique)";
+                    insIdxCmd.Parameters.AddWithValue("@id", indexId);
+                    insIdxCmd.Parameters.AddWithValue("@tid", tableId.ToString());
+                    insIdxCmd.Parameters.AddWithValue("@name", idx.Name);
+                    insIdxCmd.Parameters.AddWithValue("@unique", idx.IsUnique);
+                    await insIdxCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                }
+
+                for (int i = 0; i < resolvedCols.Count; i++)
+                {
+                    await using var insIdxColCmd = conn.CreateCommand();
+                    insIdxColCmd.Transaction = tx;
+                    insIdxColCmd.CommandText = @"INSERT INTO dbo.TABLE_INDEX_COLUMNS (index_id, column_ordinal, table_column_id)
+                                                 VALUES (@idxId, @ord, @cid)";
+                    insIdxColCmd.Parameters.AddWithValue("@idxId", indexId);
+                    insIdxColCmd.Parameters.AddWithValue("@ord", i + 1);
+                    insIdxColCmd.Parameters.AddWithValue("@cid", resolvedCols[i].ToString());
+                    await insIdxColCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                }
+            }
+        }
+    }
+
     public async Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
     {
         var cacheKey = table.ToString().ToLowerInvariant();
@@ -121,12 +332,16 @@ public partial class SqlServerGovernanceRepository
                 }
             }
 
+            var (pkColumns, indexes) = await ReadTableKeysAndIndexesAsync(conn, tableId.Value, columns, ct).ConfigureAwait(false);
+
             var result = new TableMetadata
             {
                 Identifier = table,
                 Table = tableEntity,
                 Columns = columns,
                 ColumnMaskingRules = maskingRules,
+                PrimaryKeyColumns = pkColumns,
+                Indexes = indexes
             };
 
             _metadataCache[cacheKey] = (result, DateTime.UtcNow.Ticks);
@@ -234,24 +449,34 @@ public partial class SqlServerGovernanceRepository
                 await upsertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
+            var colIdByName = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+            await using (var existingColsCmd = conn.CreateCommand())
+            {
+                existingColsCmd.Transaction = tx;
+                existingColsCmd.CommandText = "SELECT id, column_name FROM TABLE_COLUMNS WHERE table_id = @tableId";
+                existingColsCmd.Parameters.AddWithValue("@tableId", tableId.ToString());
+                await using var reader = await existingColsCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    if (Guid.TryParse(reader.GetString(0), out var existingId))
+                    {
+                        colIdByName[reader.GetString(1)] = existingId;
+                    }
+                }
+            }
+
             foreach (var col in metadata.Columns)
             {
                 var colId = col.Id == Guid.Empty ? Guid.NewGuid() : col.Id;
-                await using (var findColCmd = conn.CreateCommand())
+                if (colIdByName.TryGetValue(col.ColumnName, out var existingColId))
                 {
-                    findColCmd.Transaction = tx;
-                    findColCmd.CommandText = "SELECT TOP (1) id FROM TABLE_COLUMNS WHERE table_id = @tableId AND LOWER(column_name) = LOWER(@columnName)";
-                    findColCmd.Parameters.AddWithValue("@tableId", tableId.ToString());
-                    findColCmd.Parameters.AddWithValue("@columnName", col.ColumnName);
-                    var existingColId = await findColCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-                    if (existingColId != null)
-                    {
-                        colId = Guid.Parse(existingColId.ToString()!);
-                    }
+                    colId = existingColId;
                 }
 
-                var metaJson = col.Meta != null && col.Meta.Count > 0
-                    ? JsonSerializer.Serialize(col.Meta)
+                var effectiveMeta = SqliteGovernanceRepository.WithPrimaryKeyOrdinalMeta(
+                    col.Meta, col.ColumnName, metadata.PrimaryKeyColumns, metadata.ReplaceKeyDefinition);
+                var metaJson = effectiveMeta.Count > 0
+                    ? JsonSerializer.Serialize(effectiveMeta)
                     : null;
 
                 await using (var insertColCmd = conn.CreateCommand())
@@ -281,6 +506,8 @@ public partial class SqlServerGovernanceRepository
                     await insertColCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
                 }
 
+                colIdByName[col.ColumnName] = colId;
+
                 await using (var delMaskCmd = conn.CreateCommand())
                 {
                     delMaskCmd.Transaction = tx;
@@ -306,6 +533,11 @@ public partial class SqlServerGovernanceRepository
                         await insertMaskCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
                     }
                 }
+            }
+
+            if (metadata.ReplaceKeyDefinition || metadata.PrimaryKeyColumns.Count > 0 || metadata.Indexes.Count > 0)
+            {
+                await PersistTableKeysAndIndexesAsync(conn, tx, tableId, metadata, colIdByName, ct).ConfigureAwait(false);
             }
 
             await IncrementTableEpochInternalAsync(conn, tx, metadata.Identifier, ct).ConfigureAwait(false);

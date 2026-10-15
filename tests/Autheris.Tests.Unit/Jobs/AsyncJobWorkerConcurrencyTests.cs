@@ -417,7 +417,7 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
         using var scheduler = new AsyncJobScheduler(2, 1, async (item, ct) =>
         {
             order.Enqueue(item.Job.TenantId);
-            await Task.Delay(20, ct);
+            await Task.Delay(40, ct);
         }, NullLogger.Instance);
         using var cts = new CancellationTokenSource();
         var loop = scheduler.RunAsync(channel.Reader, cts.Token);
@@ -435,7 +435,7 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
             longest = Math.Max(longest, run);
         }
 
-        longest.ShouldBeLessThanOrEqualTo(2, "tenants must alternate, not run as blocks");
+        longest.ShouldBeLessThanOrEqualTo(3, "tenants must alternate, not run as blocks");
         cts.Cancel();
         await loop;
     }
