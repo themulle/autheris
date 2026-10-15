@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
+using Autheris.Application.Data.Interfaces;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Serialization;
 using Autheris.Application.Sql;
@@ -49,6 +50,7 @@ public static class ArrowExportEndpoints
         HttpContext httpContext,
         IArrowExportService arrowService,
         IGovernedSqlExecutionService? sqlExecutionService,
+        IGovernedTableReadPlanner planner,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(httpContext);
@@ -122,11 +124,13 @@ public static class ArrowExportEndpoints
                 detail: "Target table parameter or SQL query is required.");
         }
 
+        TableIdentifier? tableId = null;
         if (!string.IsNullOrWhiteSpace(table))
         {
             try
             {
                 var norm = TableIdentifierNormalizer.Normalize(table);
+                tableId = norm;
                 table = norm.ToQualifiedName();
             }
             catch
@@ -162,7 +166,9 @@ public static class ArrowExportEndpoints
                 detail: "Access denied by ReBAC policy.");
         }
 
-        var effectiveSql = !string.IsNullOrWhiteSpace(sql) ? sql : $"SELECT * FROM {table}";
+        var effectiveSql = !string.IsNullOrWhiteSpace(sql)
+            ? sql
+            : planner.BuildFullTableSelect(tableId!.Value);
 
         // 3. Execute Governed Query (RLS + Masking + AST Security)
         IReadOnlyList<IReadOnlyDictionary<string, object?>> rows = Array.Empty<IReadOnlyDictionary<string, object?>>();

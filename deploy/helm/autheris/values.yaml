@@ -35,6 +35,10 @@ podSecurityContext:
   seccompProfile:
     type: RuntimeDefault
 
+# Writable /tmp emptyDir (also holds async job result files). Set sizeLimit, e.g. "2Gi", to bound it.
+tmpVolume:
+  sizeLimit: ""
+
 securityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
