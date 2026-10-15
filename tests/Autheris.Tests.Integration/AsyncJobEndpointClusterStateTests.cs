@@ -41,7 +41,7 @@ public sealed class AsyncJobEndpointClusterStateTests : IClassFixture<WebApplica
     private sealed class UnavailableJobManager : IAsyncQueryJobManager
     {
         public Task<AsyncJobDescriptor> SubmitJobAsync(AsyncQueryJobRequest request, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default) =>
-            throw new ClusterStateUnavailableException();
+            request.Query == "limit" ? throw new AsyncJobQueueLimitExceededException(50) : throw new ClusterStateUnavailableException();
 
         public Task<AsyncJobDescriptor?> GetJobAsync(string jobId, TenantId tenantId, string userSid, CancellationToken ct = default) =>
             throw new ClusterStateUnavailableException();
@@ -83,5 +83,23 @@ public sealed class AsyncJobEndpointClusterStateTests : IClassFixture<WebApplica
 
         response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
         (await response.Content.ReadAsStringAsync()).ShouldContain("ASYNC_JOB_RESULT_NODE_LOCAL");
+    }
+
+    [Fact]
+    public async Task QueueLimit_Endpoint_Returns429WithRetryAfter()
+    {
+        var response = await Client().PostAsJsonAsync("/api/v1/jobs/query", new AsyncQueryJobRequest("limit"));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
+        response.Headers.RetryAfter.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task StateUnavailable_Endpoint_SetsRetryAfter()
+    {
+        var response = await Client().GetAsync($"/api/v1/jobs/{Guid.NewGuid():D}/status");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+        response.Headers.RetryAfter.ShouldNotBeNull();
     }
 }

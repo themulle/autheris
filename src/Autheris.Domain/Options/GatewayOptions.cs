@@ -1670,7 +1670,7 @@ public sealed class AsyncJobOptions
     /// <summary>Maximum number of jobs of one tenant this node executes in parallel (at most <see cref="MaxConcurrentJobs"/>).</summary>
     public int MaxConcurrentJobsPerTenant { get; init; } = 2;
 
-    /// <summary>Absolute directory for job result files; null uses a writable default under the system temp directory.</summary>
+    /// <summary>Absolute directory for job result files; null uses ContentRoot/scratch/jobs (the Helm chart sets a path on its writable /tmp volume).</summary>
     public string? ScratchDirectory { get; init; }
 
     /// <summary>True when <see cref="ScratchDirectory"/> is a volume shared by all replicas, so any node can serve a result written by another.</summary>

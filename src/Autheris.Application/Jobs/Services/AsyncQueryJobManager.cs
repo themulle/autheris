@@ -31,6 +31,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
     private readonly string _scratchDirectory;
     private readonly IOptions<GatewayOptions>? _options;
     private readonly IOptions<AsyncJobOptions>? _jobOptions;
+    private const int QueueCapacity = 1_000;
     private readonly object _submitGate = new();
     private readonly IDistributedClusterStateProvider? _cluster;
     private readonly AsyncJobNodeIdentity _node;
@@ -68,7 +69,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         _auditLogRepository = auditLogRepository;
         _logger = logger ?? NullLogger<AsyncQueryJobManager>.Instance;
 
-        var boundedOptions = new BoundedChannelOptions(1_000)
+        var boundedOptions = new BoundedChannelOptions(QueueCapacity)
         {
             FullMode = BoundedChannelFullMode.Wait,
             SingleReader = false,
@@ -104,22 +105,36 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
     {
         ArgumentNullException.ThrowIfNull(next);
 
-        if (_cluster is not null && next.State is AsyncJobState.Completed or AsyncJobState.Failed)
+        if (_cluster is not null && next.State != AsyncJobState.Cancelled)
         {
-            // Another node may have cancelled this job meanwhile: a Cancelled record must not be overwritten.
+            // A cancel issued on another node is recorded as a tombstone; it wins over every later owner write
+            // (Running as well as Completed or Failed).
+            AsyncJobCancelTombstone? tombstone = null;
             try
             {
-                var record = await _cluster.GetAsync<AsyncJobClusterRecord>(RecordKey(next.TenantId, next.JobId), ct).ConfigureAwait(false);
-                if (record is { State: AsyncJobState.Cancelled })
-                {
-                    TryTransitionLocal(next with { State = AsyncJobState.Cancelled, CompletedAt = record.CompletedAt, ErrorMessage = record.ErrorMessage, ResultFilePath = null });
-                    DeleteQuietly(next.ResultFilePath);
-                    return false;
-                }
+                tombstone = await _cluster.GetAsync<AsyncJobCancelTombstone>(TombstoneKey(next.TenantId, next.JobId), ct).ConfigureAwait(false);
             }
             catch (ClusterStateUnavailableException ex)
             {
                 _logger.LogWarning(ex, "Cluster state unavailable while checking job {JobId} for a remote cancel.", next.JobId);
+            }
+
+            if (tombstone is not null)
+            {
+                var cancelled = next with
+                {
+                    State = AsyncJobState.Cancelled,
+                    CompletedAt = tombstone.CancelledAt,
+                    ErrorMessage = "Job cancelled by user request.",
+                    ResultFilePath = null
+                };
+                DeleteQuietly(next.ResultFilePath);
+                if (TryTransitionLocal(cancelled))
+                {
+                    await WriteRecordAsync(cancelled, throwOnFailure: false, ct).ConfigureAwait(false);
+                }
+
+                return false;
             }
         }
 
@@ -131,6 +146,8 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         await WriteRecordAsync(next, throwOnFailure: false, ct).ConfigureAwait(false);
         return true;
     }
+
+    private static string TombstoneKey(string tenantId, string jobId) => $"asyncjob:{tenantId}:{jobId}:cancel";
 
     private static void DeleteQuietly(string? path)
     {
@@ -215,6 +232,21 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
 
             if (_jobs.TryUpdate(next.JobId, next, current))
             {
+                if (IsTerminal(next.State) && _activeCts.TryRemove(next.JobId, out var cts))
+                {
+                    // A finished job needs no timeout source; a cancelled one must stop its running query.
+                    try
+                    {
+                        if (next.State == AsyncJobState.Cancelled)
+                        {
+                            cts.Cancel();
+                        }
+                    }
+                    catch (ObjectDisposedException) { }
+
+                    cts.Dispose();
+                }
+
                 return true;
             }
         }
@@ -296,6 +328,12 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
                 "ALLOW",
                 "Job enqueued for background execution.",
                 ct).ConfigureAwait(false);
+
+            // Bounded queue: a full channel rejects instead of blocking the request (the cleanup below removes the job).
+            if (!_channel.Writer.TryWrite(new AsyncJobExecutionItem(descriptor, request, user, cts)))
+            {
+                throw new AsyncJobQueueLimitExceededException("The async job queue of this node is full. Retry later.", QueueCapacity);
+            }
         }
         catch
         {
@@ -304,7 +342,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
             if (recordWritten)
             {
                 try { await _cluster!.RemoveAsync(RecordKey(descriptor.TenantId, jobId), CancellationToken.None).ConfigureAwait(false); }
-                catch (ClusterStateUnavailableException) { }
+                catch (Exception ex) when (ex is not OperationCanceledException) { _logger.LogWarning(ex, "Could not remove the cluster record of rejected job {JobId}.", jobId); }
             }
 
             if (_activeCts.TryRemove(jobId, out var failedCts))
@@ -313,8 +351,6 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
             }
             throw;
         }
-
-        await _channel.Writer.WriteAsync(new AsyncJobExecutionItem(descriptor, request, user, cts), ct).ConfigureAwait(false);
 
         return descriptor;
     }
@@ -371,6 +407,19 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
             _logger.LogWarning("Zero-IDOR access violation blocked for job {JobId}. Tenant mismatch or user mismatch.", jobId);
             await RecordAccessDeniedAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
             return null;
+        }
+
+        // The cancel tombstone is authoritative while the job has not reached a terminal state: owner writes cannot mask it.
+        var tombstone = await _cluster.GetAsync<AsyncJobCancelTombstone>(TombstoneKey(tenantId.Value, jobId), ct).ConfigureAwait(false);
+        if (tombstone is not null && record.State is AsyncJobState.Queued or AsyncJobState.Running)
+        {
+            record = record with
+            {
+                State = AsyncJobState.Cancelled,
+                CompletedAt = tombstone.CancelledAt,
+                ErrorMessage = "Job cancelled by user request.",
+                ResultFileName = null
+            };
         }
 
         return new ResolvedJob(ToDescriptor(record), record);
@@ -645,28 +694,35 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         }
     }
 
-    /// <summary>Cancels a job owned by another node: the shared record becomes Cancelled and the owner is signalled.</summary>
+    /// <summary>Cancels a job owned by another node: a tombstone is written and the owner is signalled.</summary>
     private async Task<bool> CancelRemoteAsync(AsyncJobClusterRecord record, TenantId tenantId, string userSid, CancellationToken ct)
     {
-        var cancelled = record with
+        // The record handed in may be stale: re-read right before deciding, and never cancel a finished job.
+        var current = await _cluster!.GetAsync<AsyncJobClusterRecord>(RecordKey(record.TenantId, record.JobId), ct).ConfigureAwait(false);
+        if (current is null || current.State is AsyncJobState.Completed or AsyncJobState.Failed or AsyncJobState.Cancelled)
         {
-            State = AsyncJobState.Cancelled,
-            CompletedAt = _time.GetUtcNow(),
-            ErrorMessage = "Job cancelled by user request.",
-            ResultFileName = null
-        };
+            return false;
+        }
 
         // Authoritative state first (fail closed: an unreachable state surfaces as 503), then the best-effort signal.
-        await _cluster!.SetAsync(RecordKey(record.TenantId, record.JobId), cancelled, RecordTtl, ct).ConfigureAwait(false);
+        var tombstone = new AsyncJobCancelTombstone(record.TenantId, record.JobId, userSid, _time.GetUtcNow());
+        await _cluster.SetAsync(TombstoneKey(record.TenantId, record.JobId), tombstone, RecordTtl, ct).ConfigureAwait(false);
         try
         {
             await _cluster.PublishEventAsync(AsyncJobCancelSignal.Channel, new AsyncJobCancelSignal(record.TenantId, record.JobId, userSid), ct).ConfigureAwait(false);
         }
         catch (ClusterStateUnavailableException ex)
         {
-            _logger.LogWarning(ex, "Could not signal the owner node of job {JobId}; the cancelled record stops the job at its next state write.", record.JobId);
+            _logger.LogWarning(ex, "Could not signal the owner node of job {JobId}; the tombstone stops the job at its next state write.", record.JobId);
         }
 
+        var cancelled = current with
+        {
+            State = AsyncJobState.Cancelled,
+            CompletedAt = tombstone.CancelledAt,
+            ErrorMessage = "Job cancelled by user request.",
+            ResultFileName = null
+        };
         await RecordAuditAsync(
             ToDescriptor(cancelled),
             new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, userSid), new Claim("tenant_id", tenantId.Value)], "JobAuth")),
@@ -678,17 +734,34 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         return true;
     }
 
-    public ValueTask ApplyCancelSignalAsync(AsyncJobCancelSignal signal, CancellationToken ct)
+    public async ValueTask ApplyCancelSignalAsync(AsyncJobCancelSignal signal, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(signal);
 
-        if (!_jobs.TryGetValue(signal.JobId, out var job) ||
+        if (_cluster is null ||
+            !_jobs.TryGetValue(signal.JobId, out var job) ||
             !string.Equals(job.TenantId, signal.TenantId, StringComparison.Ordinal) ||
             !string.Equals(job.SubmittedByUserId, signal.RequesterSid, StringComparison.OrdinalIgnoreCase))
         {
             // Not our job, or not requested by its owner: a forged or misrouted signal changes nothing.
             _logger.LogWarning("Ignored async job cancel signal for job {JobId}: unknown job or requester is not the owner.", signal.JobId);
-            return ValueTask.CompletedTask;
+            return;
+        }
+
+        // The signal is only a hint: act solely when the shared state confirms the cancel (unavailable state = ignore).
+        try
+        {
+            var tombstone = await _cluster.GetAsync<AsyncJobCancelTombstone>(TombstoneKey(signal.TenantId, signal.JobId), ct).ConfigureAwait(false);
+            if (tombstone is null || !string.Equals(tombstone.RequesterSid, signal.RequesterSid, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("Ignored async job cancel signal for job {JobId}: no matching cancel tombstone.", signal.JobId);
+                return;
+            }
+        }
+        catch (ClusterStateUnavailableException ex)
+        {
+            _logger.LogWarning(ex, "Ignored async job cancel signal for job {JobId}: cluster state unavailable.", signal.JobId);
+            return;
         }
 
         var cancelled = job with
@@ -700,18 +773,11 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         };
         if (!TryTransitionLocal(cancelled))
         {
-            return ValueTask.CompletedTask;
-        }
-
-        if (_activeCts.TryRemove(signal.JobId, out var cts))
-        {
-            try { cts.Cancel(); }
-            catch (ObjectDisposedException) { }
-            cts.Dispose();
+            return;
         }
 
         DeleteQuietly(job.ResultFilePath);
-        return ValueTask.CompletedTask;
+        await WriteRecordAsync(cancelled, throwOnFailure: false, ct).ConfigureAwait(false);
     }
 
     public Task PurgeExpiredJobsAsync(TimeSpan retentionPeriod, CancellationToken ct = default)

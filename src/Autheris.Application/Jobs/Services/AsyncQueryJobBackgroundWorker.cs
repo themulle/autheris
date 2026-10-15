@@ -62,10 +62,40 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         _logger.LogInformation("AsyncQueryJobBackgroundWorker started.");
 
         // Cancel requests for jobs running here that were issued on another node.
-        await using var cancelSubscription = _clusterState?.SubscribeAsync<AsyncJobCancelSignal>(
-            AsyncJobCancelSignal.Channel,
-            signal => _queue.ApplyCancelSignalAsync(signal, stoppingToken),
-            stoppingToken);
+        IAsyncDisposable? cancelSubscription = null;
+        try
+        {
+            cancelSubscription = _clusterState?.SubscribeAsync<AsyncJobCancelSignal>(
+                AsyncJobCancelSignal.Channel,
+                signal => _queue.ApplyCancelSignalAsync(signal, stoppingToken),
+                stoppingToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Without the subscription the owner still honours the cancel tombstone at its next state write.
+            SubscribeFailures.Add(1);
+            _logger.LogError(ex, "Could not subscribe to async job cancel signals; remote cancels apply at the next state write.");
+        }
+
+        try
+        {
+            await RunAsync(stoppingToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (cancelSubscription is not null)
+            {
+                await cancelSubscription.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    private static readonly System.Diagnostics.Metrics.Meter Meter = new("Autheris.AsyncJobs");
+    private static readonly System.Diagnostics.Metrics.Counter<long> SubscribeFailures =
+        Meter.CreateCounter<long>("autheris.asyncjobs.subscribe_failures", description: "Failed subscriptions to the async job cancel channel.");
+
+    private async Task RunAsync(CancellationToken stoppingToken)
+    {
 
         try
         {
@@ -149,13 +179,16 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         AsyncJobExecutionItem item,
         CancellationToken stoppingToken)
     {
+        // State writes must still work while the host is stopping: they get their own short deadline.
+        using var writeCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var writeCt = writeCts.Token;
         var startedAt = DateTimeOffset.UtcNow;
         var runningJob = item.Job with
         {
             State = AsyncJobState.Running,
             StartedAt = startedAt
         };
-        if (!await _queue.TryTransitionAsync(runningJob, stoppingToken).ConfigureAwait(false))
+        if (!await _queue.TryTransitionAsync(runningJob, writeCt).ConfigureAwait(false))
         {
             // Cancelled (or otherwise finished) while still queued: nothing to execute.
             return;
@@ -210,18 +243,19 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
                 RowsProduced = result.RowCount,
                 BytesProduced = fileInfo.Length
             };
-            if (!await _queue.TryTransitionAsync(completed, stoppingToken).ConfigureAwait(false))
+            if (!await _queue.TryTransitionAsync(completed, writeCt).ConfigureAwait(false))
             {
                 // Lost the race against a cancel: the job stays terminal and its result must not outlive it.
                 try { File.Delete(filePath); } catch (Exception ex) { _logger.LogWarning(ex, "Could not delete result of cancelled job {JobId}", item.Job.JobId); }
                 return;
             }
 
-            await RecordAuditAsync(completed, item.User, AuditEventTypes.AsyncJobCompleted, "ALLOW", "Job completed successfully.", stoppingToken).ConfigureAwait(false);
+            await RecordAuditAsync(completed, item.User, AuditEventTypes.AsyncJobCompleted, "ALLOW", "Job completed successfully.", writeCt).ConfigureAwait(false);
         }
         // ParseCanceledException derives from OperationCanceledException: a governed SQL error (syntax, parser timeout) is a failed job.
         catch (OperationCanceledException ex) when (!Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out _))
         {
+            _logger.LogDebug(ex, "Async job {JobId} cancelled or timed out.", item.Job.JobId);
             DeletePartialResult(writtenPath);
             var cancelled = runningJob with
             {
@@ -229,7 +263,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
                 CompletedAt = DateTimeOffset.UtcNow,
                 ErrorMessage = "Job execution cancelled or timed out."
             };
-            await _queue.TryTransitionAsync(cancelled, stoppingToken).ConfigureAwait(false);
+            await _queue.TryTransitionAsync(cancelled, writeCt).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -242,7 +276,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
                 CompletedAt = DateTimeOffset.UtcNow,
                 ErrorMessage = sanitized
             };
-            await _queue.TryTransitionAsync(failed, stoppingToken).ConfigureAwait(false);
+            await _queue.TryTransitionAsync(failed, writeCt).ConfigureAwait(false);
             _logger.LogError(ex, "Failed to execute async query job {JobId}", item.Job.JobId);
         }
     }

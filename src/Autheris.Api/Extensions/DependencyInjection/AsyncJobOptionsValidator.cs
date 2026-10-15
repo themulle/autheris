@@ -31,6 +31,16 @@ public sealed class AsyncJobOptionsValidator : IValidateOptions<AsyncJobOptions>
             return ValidateOptionsResult.Fail($"{section}:DefaultTimeoutSeconds and MaxTimeoutSeconds must be at least 1, and the default must not exceed the maximum.");
         }
 
+        if (options.RetentionHours < 1 || options.PurgeIntervalMinutes < 1)
+        {
+            return ValidateOptionsResult.Fail($"{section}:RetentionHours and PurgeIntervalMinutes must be at least 1.");
+        }
+
+        if (options.SharedScratchDirectory && string.IsNullOrWhiteSpace(options.ScratchDirectory))
+        {
+            return ValidateOptionsResult.Fail($"{section}:ScratchDirectory is required when SharedScratchDirectory is true.");
+        }
+
         if (!string.IsNullOrWhiteSpace(options.ScratchDirectory) && !System.IO.Path.IsPathRooted(options.ScratchDirectory))
         {
             return ValidateOptionsResult.Fail($"{section}:ScratchDirectory must be an absolute path when set.");

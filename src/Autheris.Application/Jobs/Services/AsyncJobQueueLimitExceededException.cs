@@ -11,5 +11,11 @@ public sealed class AsyncJobQueueLimitExceededException : Exception
         Limit = limit;
     }
 
+    public AsyncJobQueueLimitExceededException(string message, int limit)
+        : base(message)
+    {
+        Limit = limit;
+    }
+
     public int Limit { get; }
 }
