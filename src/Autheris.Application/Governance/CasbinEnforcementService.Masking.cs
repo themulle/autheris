@@ -179,6 +179,9 @@ public sealed partial class CasbinEnforcementService
         }
     }
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Regex> ObjectPatternRegexes = new(StringComparer.Ordinal);
+    private const int MaxObjectPatternRegexes = 20_000;
+
     /// <summary>
     /// Gateway object matcher (SEC M-18/H-12). Supports:
     /// <c>*</c> (everything), exact match, <c>prefix.*</c> (any object strictly below <c>prefix.</c>, segment-bounded),
@@ -252,7 +255,19 @@ public sealed partial class CasbinEnforcementService
 
         try
         {
-            return Regex.IsMatch(target, regex.ToString(), RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
+            // WP-PF-03: one precompiled linear-time regex per distinct pattern (the static Regex cache holds only 15 entries).
+            var compiled = ObjectPatternRegexes.GetOrAdd(pattern, static (_, expression) =>
+                new Regex(
+                    expression,
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking,
+                    TimeSpan.FromMilliseconds(200)),
+                regex.ToString());
+            if (ObjectPatternRegexes.Count > MaxObjectPatternRegexes)
+            {
+                ObjectPatternRegexes.Clear();
+            }
+
+            return compiled.IsMatch(target);
         }
         catch (RegexMatchTimeoutException)
         {
