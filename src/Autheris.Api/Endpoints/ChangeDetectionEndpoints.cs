@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Extensions;
 using Autheris.Application.Data.Changes;
 using Autheris.Domain.Audit;
@@ -13,7 +14,6 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.Logging;
 
 /// <summary>
 /// HTTP payload for <c>POST /api/v1/data/{domain}/{schema}/{table}/changes</c> (#77).
@@ -49,19 +49,17 @@ public static class ChangeDetectionEndpoints
         string table,
         HttpContext httpContext,
         IGovernedChangeDetectionService changeService,
-        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(domain) || string.IsNullOrWhiteSpace(schema) || string.IsNullOrWhiteSpace(table))
         {
-            return Results.BadRequest(new { error = "Domain, schema, and table must be specified." });
+            return SafeErrorResults.BadRequest("INVALID_DATASET", "Domain, schema, and table must be specified.", httpContext);
         }
 
         var tableId = new TableIdentifier(domain, schema, table);
         var tenant = EndpointSecurity.GetRequestTenant(httpContext);
         var clientIp = httpContext.Connection.RemoteIpAddress?.ToString();
         var ifNoneMatch = httpContext.Request.Headers.IfNoneMatch.ToString();
-        var logger = loggerFactory.CreateLogger(typeof(ChangeDetectionEndpoints));
 
         try
         {
@@ -94,18 +92,18 @@ public static class ChangeDetectionEndpoints
         }
         catch (TableNotFoundException ex)
         {
-            logger.LogWarning("Dataset not found checking change token for {Table}: {Message}", tableId, ex.Message);
-            return Results.NotFound(new { error = "Requested dataset was not found.", code = ex.ErrorCode });
+            SafeErrorResults.LogFailure(httpContext, ex, ex.ErrorCode);
+            return SafeErrorResults.Problem(StatusCodes.Status404NotFound, ex.ErrorCode, "Requested dataset was not found.", httpContext);
         }
         catch (UnauthorizedAccessException ex)
         {
-            logger.LogWarning("Access forbidden checking change token for {Table}: {Message}", tableId, ex.Message);
-            return Results.Json(new { error = "Access denied by data governance policy.", code = "FORBIDDEN" }, statusCode: StatusCodes.Status403Forbidden);
+            SafeErrorResults.LogFailure(httpContext, ex, "FORBIDDEN");
+            return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, "FORBIDDEN", "Access denied by data governance policy.", httpContext);
         }
         catch (GatewaySecurityException ex)
         {
-            logger.LogWarning("Security exception checking change token for {Table}: {Code} - {Message}", tableId, ex.ErrorCode, ex.Message);
-            return Results.Json(new { error = "Security policy rejected the change-token request.", code = ex.ErrorCode }, statusCode: StatusCodes.Status403Forbidden);
+            SafeErrorResults.LogFailure(httpContext, ex, ex.ErrorCode);
+            return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, ex.ErrorCode, "Security policy rejected the change-token request.", httpContext);
         }
     }
 
@@ -116,18 +114,16 @@ public static class ChangeDetectionEndpoints
         [FromBody] ChangesSinceHttpRequest? body,
         HttpContext httpContext,
         IGovernedChangeDetectionService changeService,
-        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(domain) || string.IsNullOrWhiteSpace(schema) || string.IsNullOrWhiteSpace(table))
         {
-            return Results.BadRequest(new { error = "Domain, schema, and table must be specified." });
+            return SafeErrorResults.BadRequest("INVALID_DATASET", "Domain, schema, and table must be specified.", httpContext);
         }
 
         var tableId = new TableIdentifier(domain, schema, table);
         var tenant = EndpointSecurity.GetRequestTenant(httpContext);
         var clientIp = httpContext.Connection.RemoteIpAddress?.ToString();
-        var logger = loggerFactory.CreateLogger(typeof(ChangeDetectionEndpoints));
 
         IReadOnlyList<IReadOnlyDictionary<string, object?>>? knownKeys = null;
         if (body?.KnownKeys is { Count: > 0 })
@@ -157,26 +153,26 @@ public static class ChangeDetectionEndpoints
         }
         catch (TableNotFoundException ex)
         {
-            logger.LogWarning("Dataset not found querying changesSince for {Table}: {Message}", tableId, ex.Message);
-            return Results.NotFound(new { error = "Requested dataset was not found.", code = ex.ErrorCode });
+            SafeErrorResults.LogFailure(httpContext, ex, ex.ErrorCode);
+            return SafeErrorResults.Problem(StatusCodes.Status404NotFound, ex.ErrorCode, "Requested dataset was not found.", httpContext);
         }
         catch (UnauthorizedAccessException ex)
         {
-            logger.LogWarning("Access forbidden querying changesSince for {Table}: {Message}", tableId, ex.Message);
-            return Results.Json(new { error = "Access denied by data governance policy.", code = "FORBIDDEN" }, statusCode: StatusCodes.Status403Forbidden);
+            SafeErrorResults.LogFailure(httpContext, ex, "FORBIDDEN");
+            return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, "FORBIDDEN", "Access denied by data governance policy.", httpContext);
         }
         catch (GatewayInvalidQueryException ex)
         {
-            logger.LogWarning("Invalid query in changesSince for {Table}: {Message}", tableId, ex.Message);
-            return Results.BadRequest(new { error = "Invalid change-tracking query request.", code = ex.ErrorCode });
+            SafeErrorResults.LogFailure(httpContext, ex, ex.ErrorCode);
+            return SafeErrorResults.BadRequest(ex.ErrorCode, "Invalid change-tracking query request.", httpContext);
         }
         catch (GatewaySecurityException ex)
         {
-            logger.LogWarning("Security exception in changesSince for {Table}: {Code} - {Message}", tableId, ex.ErrorCode, ex.Message);
+            SafeErrorResults.LogFailure(httpContext, ex, ex.ErrorCode);
             int status = ex.ErrorCode is ChangeDetectionErrorCodes.CursorExpired or ChangeDetectionErrorCodes.CursorInvalid
                 ? StatusCodes.Status410Gone
                 : StatusCodes.Status403Forbidden;
-            return Results.Json(new { error = "Change cursor validation or governance check failed.", code = ex.ErrorCode }, statusCode: status);
+            return SafeErrorResults.Problem(status, ex.ErrorCode, "Change cursor validation or governance check failed.", httpContext);
         }
     }
 }

@@ -5,18 +5,15 @@ using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Extensions;
-using Autheris.Application.Catalog.Profiling;
 using Autheris.Application.Governance.Analysis;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Domain.Audit;
-using Autheris.Domain.Common;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 
 /// <summary>
 /// HTTP request payload for <c>POST /api/v1/governance/queries/analyze</c> (Issue #79).
@@ -47,15 +44,6 @@ public sealed record ComputeDatasetProfileHttpRequest(
 /// </summary>
 public static class QueryAnalysisAndProfilingEndpoints
 {
-    public static IServiceCollection AddQueryAnalysisAndProfilingServices(this IServiceCollection services)
-    {
-        services.TryAddSingleton<IColumnValueProfileService, ColumnValueProfileService>();
-        services.TryAddSingleton<ISyntheticSampleRowGenerator, SyntheticSampleRowGenerator>();
-        services.TryAddScoped<IQueryAnalysisService, QueryAnalysisService>();
-        services.TryAddScoped<IBundledConsentRequestService, BundledConsentRequestService>();
-        return services;
-    }
-
     public static IEndpointRouteBuilder MapQueryAnalysisAndProfilingEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapPost("/api/v1/governance/queries/analyze", HandleAnalyzeQueriesAsync)
@@ -84,7 +72,7 @@ public static class QueryAnalysisAndProfilingEndpoints
     {
         if (request?.Queries is null || request.Queries.Count == 0)
         {
-            return Results.BadRequest(new { error = "At least one query item is required." });
+            return SafeErrorResults.BadRequest("INVALID_ANALYSIS_REQUEST", "At least one query item is required.", httpContext);
         }
 
         ClaimsPrincipal? targetPrincipal = null;
@@ -120,9 +108,10 @@ public static class QueryAnalysisAndProfilingEndpoints
 
             return Results.Ok(result);
         }
-        catch (UnauthorizedAccessException)
+        catch (UnauthorizedAccessException ex)
         {
-            return Results.Json(new { error = "Access denied by governance policy.", code = "FORBIDDEN" }, statusCode: StatusCodes.Status403Forbidden);
+            SafeErrorResults.LogFailure(httpContext, ex, "FORBIDDEN");
+            return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, "FORBIDDEN", "Access denied by governance policy.", httpContext);
         }
     }
 
@@ -134,7 +123,7 @@ public static class QueryAnalysisAndProfilingEndpoints
     {
         if (request?.Items is null || request.Items.Count == 0)
         {
-            return Results.BadRequest(new { error = "At least one consent item is required." });
+            return SafeErrorResults.BadRequest("INVALID_CONSENT_BUNDLE", "At least one consent item is required.", httpContext);
         }
 
         try
@@ -150,13 +139,15 @@ public static class QueryAnalysisAndProfilingEndpoints
 
             return Results.Ok(result);
         }
-        catch (KeyNotFoundException)
+        catch (KeyNotFoundException ex)
         {
-            return Results.NotFound(new { error = "One or more requested datasets were not found." });
+            SafeErrorResults.LogFailure(httpContext, ex, "NOT_FOUND");
+            return SafeErrorResults.Problem(StatusCodes.Status404NotFound, "NOT_FOUND", "One or more requested datasets were not found.", httpContext);
         }
-        catch (UnauthorizedAccessException)
+        catch (UnauthorizedAccessException ex)
         {
-            return Results.Json(new { error = "Access denied by governance policy.", code = "FORBIDDEN" }, statusCode: StatusCodes.Status403Forbidden);
+            SafeErrorResults.LogFailure(httpContext, ex, "FORBIDDEN");
+            return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, "FORBIDDEN", "Access denied by governance policy.", httpContext);
         }
     }
 
@@ -179,13 +170,15 @@ public static class QueryAnalysisAndProfilingEndpoints
 
             return Results.Ok(result);
         }
-        catch (KeyNotFoundException)
+        catch (KeyNotFoundException ex)
         {
-            return Results.NotFound(new { error = "Requested dataset was not found." });
+            SafeErrorResults.LogFailure(httpContext, ex, "NOT_FOUND");
+            return SafeErrorResults.Problem(StatusCodes.Status404NotFound, "NOT_FOUND", "Requested dataset was not found.", httpContext);
         }
-        catch (UnauthorizedAccessException)
+        catch (UnauthorizedAccessException ex)
         {
-            return Results.Json(new { error = "Access denied by governance policy.", code = "FORBIDDEN" }, statusCode: StatusCodes.Status403Forbidden);
+            SafeErrorResults.LogFailure(httpContext, ex, "FORBIDDEN");
+            return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, "FORBIDDEN", "Access denied by governance policy.", httpContext);
         }
     }
 }
