@@ -2,6 +2,7 @@ namespace Autheris.Extensions.Cdc;
 
 using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Text.Json;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -64,7 +65,6 @@ public static class DebeziumCdcParser
         var before = ExtractRow(root, "before");
         var after = ExtractRow(root, "after");
 
-        var eventId = Guid.NewGuid().ToString("N");
         var timestamp = DateTimeOffset.FromUnixTimeMilliseconds(tsMs);
 
         var afterTenant = ExtractTenant(after, tenantColumn);
@@ -77,6 +77,10 @@ public static class DebeziumCdcParser
 
         var tenantId = afterTenant ?? beforeTenant ?? defaultTenantId;
 
+        // Deterministic, tenant-bound id computed after tenant resolution: the same event ingested twice dedupes, a byte-identical event of
+        // another tenant does not, and no row value leaks into the id (it is a hash).
+        var eventId = BuildEventId(root, tenantId, op, serverName, schemaName, tableName);
+
         return new CdcEvent(
             EventId: eventId,
             Table: tableIdentifier,
@@ -86,6 +90,59 @@ public static class DebeziumCdcParser
             After: after,
             Timestamp: timestamp
         );
+    }
+
+    private static readonly string[] PositionKeys = ["lsn", "txId", "pos", "change_lsn", "commit_lsn", "event_serial_no", "file", "sequence"];
+
+    private static string BuildEventId(JsonElement root, string? tenantId, CdcOperation op, string server, string schema, string table)
+    {
+        var key = new StringBuilder();
+        var hasPosition = false;
+        if (root.TryGetProperty("source", out var source) && source.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var name in PositionKeys)
+            {
+                if (source.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null)
+                {
+                    hasPosition = true;
+                    key.Append(name).Append('=').Append(value.GetRawText()).Append('|');
+                }
+            }
+        }
+
+        if (hasPosition)
+        {
+            // Source coordinates identify the change; the row images (canonical, whitespace-free) separate rows sharing a position.
+            if (root.TryGetProperty("source", out var s2) && s2.TryGetProperty("ts_ms", out var ts))
+            {
+                key.Append("ts_ms=").Append(ts.GetRawText()).Append('|');
+            }
+
+            key.Append(op).Append('|').Append(server).Append('|').Append(schema).Append('|').Append(table).Append('|');
+            foreach (var image in new[] { "before", "after" })
+            {
+                key.Append(root.TryGetProperty(image, out var img) ? Canonical(img) : "null").Append('|');
+            }
+        }
+        else
+        {
+            key.Append(Canonical(root));
+        }
+
+        var hash = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes((tenantId ?? string.Empty) + "\n" + key));
+        return "dbz-" + Convert.ToHexStringLower(hash)[..32];
+    }
+
+    /// <summary>Whitespace-free re-serialisation (property order preserved), so a reformatted copy of the same event hashes identically.</summary>
+    private static string Canonical(JsonElement element)
+    {
+        using var stream = new System.IO.MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            element.WriteTo(writer);
+        }
+
+        return Encoding.UTF8.GetString(stream.ToArray());
     }
 
     private static string? ExtractTenant(IReadOnlyDictionary<string, object?>? row, string? tenantColumn)

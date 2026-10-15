@@ -18,9 +18,10 @@ public sealed class InMemoryCloudEventSubscriptionStore : ICloudEventSubscriptio
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, CloudEventWebhookSubscription>> _subscriptions =
         new(StringComparer.Ordinal);
 
-    private const int MaxSubscriptionsPerTenant = 100;
+    public ValueTask RegisterSubscriptionAsync(CloudEventWebhookSubscription subscription, CancellationToken ct = default) =>
+        RegisterSubscriptionAsync(subscription, ICloudEventSubscriptionStore.DefaultMaxSubscriptionsPerTenant, ct);
 
-    public ValueTask RegisterSubscriptionAsync(CloudEventWebhookSubscription subscription, CancellationToken ct = default)
+    public ValueTask RegisterSubscriptionAsync(CloudEventWebhookSubscription subscription, int maxSubscriptionsPerTenant, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(subscription);
         ArgumentException.ThrowIfNullOrWhiteSpace(subscription.TenantId);
@@ -31,9 +32,9 @@ public sealed class InMemoryCloudEventSubscriptionStore : ICloudEventSubscriptio
         lock (tenantStore)
         {
             // SEC M-5: Unbounded in-memory subscription store DoS defense
-            if (tenantStore.Count >= MaxSubscriptionsPerTenant && !tenantStore.ContainsKey(subscription.Id))
+            if (tenantStore.Count >= maxSubscriptionsPerTenant && !tenantStore.ContainsKey(subscription.Id))
             {
-                throw new InvalidOperationException($"Maximum webhook subscriptions ({MaxSubscriptionsPerTenant}) reached for tenant '{subscription.TenantId}'.");
+                throw new InvalidOperationException($"Maximum webhook subscriptions ({maxSubscriptionsPerTenant}) reached for tenant '{subscription.TenantId}'.");
             }
 
             tenantStore[subscription.Id] = subscription;
@@ -74,11 +75,7 @@ public sealed class InMemoryCloudEventSubscriptionStore : ICloudEventSubscriptio
             return ValueTask.FromResult<IReadOnlyList<CloudEventWebhookSubscription>>(Array.Empty<CloudEventWebhookSubscription>());
         }
 
-        var matched = tenantStore.Values
-            .Where(s => s.IsEnabled)
-            .Where(s => s.FilterTable == "*" || string.Equals(s.FilterTable, tableName, StringComparison.OrdinalIgnoreCase))
-            .Where(s => s.FilterOperations.Count == 0 || s.FilterOperations.Contains(operation))
-            .ToList();
+        var matched = tenantStore.Values.Where(s => CloudEventSubscriptionMatcher.Matches(s, tableName, operation)).ToList();
 
         return ValueTask.FromResult<IReadOnlyList<CloudEventWebhookSubscription>>(matched);
     }
@@ -96,22 +93,9 @@ public sealed class InMemoryCloudEventSubscriptionStore : ICloudEventSubscriptio
             return ValueTask.FromResult<IReadOnlyList<CloudEventWebhookSubscription>>(Array.Empty<CloudEventWebhookSubscription>());
         }
 
-        var matched = tenantStore.Values
-            .Where(s => s.IsEnabled)
-            .Where(s => MatchesTableFilter(s.FilterTable, table))
-            .Where(s => s.FilterOperations.Count == 0 || s.FilterOperations.Contains(operation))
-            .ToList();
+        var matched = tenantStore.Values.Where(s => CloudEventSubscriptionMatcher.Matches(s, table, operation)).ToList();
 
         return ValueTask.FromResult<IReadOnlyList<CloudEventWebhookSubscription>>(matched);
-    }
-
-    private static bool MatchesTableFilter(string filterTable, TableIdentifier table)
-    {
-        if (filterTable == "*") return true;
-        if (string.Equals(filterTable, table.TableName, StringComparison.OrdinalIgnoreCase)) return true;
-        if (string.Equals(filterTable, table.ToQualifiedName(), StringComparison.OrdinalIgnoreCase)) return true;
-        if (string.Equals(filterTable, table.ToString(), StringComparison.OrdinalIgnoreCase)) return true;
-        return false;
     }
 
     public ValueTask<CloudEventWebhookSubscription?> GetSubscriptionAsync(string tenantId, string subscriptionId, CancellationToken ct = default)

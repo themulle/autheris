@@ -33,7 +33,13 @@ public sealed class SqliteGovernanceMigrationRunner : GovernanceMigrationRunnerB
             3,
             "cdc_watermarks",
             MigrationStep.ComputeChecksum("sqlite:0003:cdc_watermarks:v1"),
-            ctx => ExecuteAsync(ctx.Connection, ctx.Transaction, CdcWatermarksDdl, ctx.CancellationToken))
+            ctx => ExecuteAsync(ctx.Connection, ctx.Transaction, CdcWatermarksDdl, ctx.CancellationToken)),
+        new MigrationStep(
+            4,
+            "cloudevent_subscriptions",
+            MigrationStep.ComputeChecksum("sqlite:0004:cloudevent_subscriptions:v1"),
+            ctx => ExecuteAsync(ctx.Connection, ctx.Transaction, CloudEventSubscriptionsSchema.Sqlite, ctx.CancellationToken),
+            Transactional: true)
     ];
 
     private readonly SqliteGovernanceRepository _repository;

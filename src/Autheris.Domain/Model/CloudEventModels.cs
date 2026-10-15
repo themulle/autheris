@@ -30,5 +30,11 @@ public sealed record CloudEventWebhookSubscription(
     IReadOnlyList<CdcOperation> FilterOperations,
     string HmacSecret,
     bool IsEnabled = true,
-    IReadOnlyDictionary<string, string>? CustomHeaders = null
+    IReadOnlyDictionary<string, string>? CustomHeaders = null,
+    // Creator principal snapshot (server-written; client-supplied values are always overwritten). Authorisation of every
+    // delivered event is evaluated as this principal against the CURRENT policies.
+    string? CreatedBySid = null,
+    IReadOnlyList<string>? CreatedByGroupSids = null,
+    IReadOnlyList<string>? CreatedByRoles = null,
+    DateTimeOffset? CreatedAt = null
 );

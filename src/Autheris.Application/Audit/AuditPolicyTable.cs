@@ -33,6 +33,8 @@ public static class AuditPolicyTable
         [AuditEventTypes.WebSqlDmlFailed] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.QueryExecutionError] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.StreamSubscribe] = AuditFailurePolicy.FailClosed,
+        // Tier B: aggregated per subscription; the raw CDC stream is high volume and nothing is denied by a failed audit write.
+        [AuditEventTypes.CdcWebhookDeliveryBatch] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.EgressShadowCopy] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.AuditRead] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.AuditExport] = AuditFailurePolicy.FailClosed,

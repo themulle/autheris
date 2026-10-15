@@ -106,6 +106,21 @@ public sealed class GovernanceSchemaMigrationTests
     }
 
     [Fact]
+    public async Task Run_AppliesCloudEventSubscriptionsMigration_AsVersion4()
+    {
+        var cs = NewConnectionString();
+        using var repository = NewRawRepository(cs);
+        var runner = NewRunner(repository, cs);
+
+        runner.Steps.ShouldContain(s => s.Version == 4 && s.Name == "cloudevent_subscriptions");
+        await runner.RunAsync();
+        await runner.RunAsync();
+
+        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 4 AND name = 'cloudevent_subscriptions' AND length(checksum) = 64").ShouldBe(1);
+        Scalar(repository, "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('CLOUDEVENT_SUBSCRIPTIONS', 'ix_cloudevent_subs_tenant')").ShouldBe(2);
+    }
+
+    [Fact]
     public async Task Run_OnPreExistingDatabaseWithoutVersionTable_AdoptsBaselineAndKeepsData()
     {
         var cs = NewConnectionString();

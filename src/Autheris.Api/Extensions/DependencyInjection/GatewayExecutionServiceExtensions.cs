@@ -131,17 +131,20 @@ public static class GatewayExecutionServiceExtensions
         }
 
         // F-EVT-01: CloudEvents v1.0 Outbound Webhook Subscriptions
-        // Interim guard (WP-ARC-A-01): disabled by default; nothing is registered (no store, no egress client).
+        // Enabled by default (G-2); while disabled nothing is registered (no store, no delivery service, no secret protector).
+        services.AddSingleton<IValidateOptions<Autheris.Domain.Options.CdcWebhooksOptions>, Autheris.Application.Events.Services.CdcWebhooksOptionsValidator>();
         services.AddOptions<Autheris.Domain.Options.CdcWebhooksOptions>()
-            .BindConfiguration(Autheris.Domain.Options.CdcWebhooksOptions.SectionName);
-        var configuration = services.FirstOrDefault(d => d.ServiceType == typeof(Microsoft.Extensions.Configuration.IConfiguration))
-            ?.ImplementationInstance as Microsoft.Extensions.Configuration.IConfiguration;
-        var cdcWebhooksEnabled = configuration?.GetSection(Autheris.Domain.Options.CdcWebhooksOptions.SectionName)
-            .GetValue<bool>(nameof(Autheris.Domain.Options.CdcWebhooksOptions.Enabled)) == true;
+            .BindConfiguration(Autheris.Domain.Options.CdcWebhooksOptions.SectionName)
+            .ValidateOnStart();
+        var cdcWebhooksEnabled = CdcWebhooksFeature.IsEnabled(services);
         if (cdcWebhooksEnabled)
         {
-            services.AddSingleton<ICloudEventSubscriptionStore, InMemoryCloudEventSubscriptionStore>();
+            // The durable subscription store is registered with the governance repositories (AddAutherisGovernance).
+            services.AddSingleton<Autheris.Application.Webhooks.IWebhookSecretProtector, Autheris.Infrastructure.Security.KeyVaultWebhookSecretProtector>();
             services.AddSingleton<ICloudEventTransformer, CloudEventTransformer>();
+            Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddSingleton(services, TimeProvider.System);
+            services.AddHostedService<Autheris.Application.Streaming.Services.CdcWebhookDeliveryService>();
+            services.AddHostedService<Autheris.Api.Hosting.CdcWebhookStartupCheck>();
         }
 
         // AST-Aware Traffic Shadowing & Dark Replay (F-OPS-01, INF-2)
