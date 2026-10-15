@@ -36,7 +36,7 @@ public static class AsyncJobEndpoints
             }
             catch (ClusterStateUnavailableException)
             {
-                return StateUnavailable();
+                return StateUnavailable(httpContext);
             }
             catch (AsyncJobQueueLimitExceededException)
             {
@@ -79,7 +79,7 @@ public static class AsyncJobEndpoints
             }
             catch (ClusterStateUnavailableException)
             {
-                return StateUnavailable();
+                return StateUnavailable(httpContext);
             }
 
             if (job == null)
@@ -114,7 +114,7 @@ public static class AsyncJobEndpoints
             var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
             var userSid = AsyncJobOwner.Resolve(httpContext.User) ?? string.Empty;
 
-            Stream? stream;
+            Stream? stream = null;
             AsyncJobDescriptor? job;
             try
             {
@@ -124,27 +124,35 @@ public static class AsyncJobEndpoints
                     return Results.NotFound();
                 }
 
-                MarkDomainAudited(httpContext);
                 job = await jobManager.GetJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
             }
             catch (ClusterStateUnavailableException)
             {
-                return StateUnavailable();
+                if (stream is not null) await stream.DisposeAsync().ConfigureAwait(false);
+                return StateUnavailable(httpContext);
             }
             catch (AsyncJobResultUnavailableException ex)
             {
+                if (stream is not null) await stream.DisposeAsync().ConfigureAwait(false);
+                httpContext.Response.Headers.RetryAfter = "5";
                 return Results.Problem(
                     statusCode: StatusCodes.Status503ServiceUnavailable,
                     title: "The job result is not available on this node.",
                     detail: "The job result is stored on another gateway node and the scratch directory is not shared. Retry later or contact the operator.",
                     extensions: new Dictionary<string, object?> { ["code"] = ex.ErrorCode });
             }
+            catch
+            {
+                if (stream is not null) await stream.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
 
+            MarkDomainAudited(httpContext);
             var format = job?.Format ?? "json";
             var contentType = format.Equals("csv", StringComparison.OrdinalIgnoreCase) ? "text/csv" : "application/json";
             var fileName = $"query-result-{jobId}.{format}";
 
-            return Results.File(stream, contentType, fileDownloadName: fileName);
+            return Results.File(stream!, contentType, fileDownloadName: fileName);
         }).RequireAuthorization().WithAudit(AuditLevel.Delegated, AuditEventTypes.AsyncJobDownloaded);
 
         group.MapDelete("/{jobId}", async (
@@ -163,7 +171,7 @@ public static class AsyncJobEndpoints
             }
             catch (ClusterStateUnavailableException)
             {
-                return StateUnavailable();
+                return StateUnavailable(httpContext);
             }
 
             if (cancelled)
@@ -177,10 +185,14 @@ public static class AsyncJobEndpoints
         return app;
     }
 
-    private static IResult StateUnavailable() => Results.Problem(
-        statusCode: StatusCodes.Status503ServiceUnavailable,
-        title: "The shared job state is temporarily unavailable.",
-        detail: "The cluster state store could not be reached. Retry later.");
+    private static IResult StateUnavailable(HttpContext httpContext)
+    {
+        httpContext.Response.Headers.RetryAfter = "5";
+        return Results.Problem(
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "The shared job state is temporarily unavailable.",
+            detail: "The cluster state store could not be reached. Retry later.");
+    }
 
     /// <summary>
     /// Delegated audit routes: the job manager has written the ALLOW audit record (fail-closed), so the central

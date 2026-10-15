@@ -385,7 +385,12 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
         ct.IsCancellationRequested.ShouldBeFalse();
         (await a.GetJobAsync(job.JobId, _tenant, "alice"))!.State.ShouldBe(AsyncJobState.Running);
 
-        // The legitimate owner signal does cancel.
+        // A signal without a cancel tombstone in the shared state is only a hint and changes nothing.
+        await _state.PublishEventAsync("asyncjob:cancel", new AsyncJobCancelSignal("t", job.JobId, "alice"));
+        ct.IsCancellationRequested.ShouldBeFalse();
+
+        // With the tombstone in place the owner's signal does cancel.
+        await _state.SetAsync($"asyncjob:t:{job.JobId}:cancel", new AsyncJobCancelTombstone("t", job.JobId, "alice", _time.GetUtcNow()), TimeSpan.FromHours(1));
         await _state.PublishEventAsync("asyncjob:cancel", new AsyncJobCancelSignal("t", job.JobId, "alice"));
         ct.IsCancellationRequested.ShouldBeTrue();
         await worker.StopAsync(CancellationToken.None);
@@ -408,5 +413,99 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
         File.Exists(file).ShouldBeFalse();
         (await a.GetJobAsync(job.JobId, _tenant, "alice"))!.State.ShouldBe(AsyncJobState.Cancelled);
         (await _state.GetAsync<AsyncJobClusterRecord>($"asyncjob:t:{job.JobId}"))!.State.ShouldBe(AsyncJobState.Cancelled);
+    }
+
+    // ---- review findings (M1) ----
+
+    [Fact]
+    public async Task RemoteCancelWhileQueued_SignalNeverDelivered_WorkerDoesNotRunJob()
+    {
+        var a = Node(_auditA, "a");
+        var b = Node(_auditB, "b");
+        var job = await SubmitAsync(a);
+        // No worker (hence no subscriber) runs on A yet: the pub/sub signal is lost.
+        (await b.CancelJobAsync(job.JobId, _tenant, "alice")).ShouldBeTrue();
+
+        var sqlCalls = 0;
+        var sql = Substitute.For<IGovernedSqlExecutionService>();
+        sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(_ => { Interlocked.Increment(ref sqlCalls); return Task.FromResult(AsyncJobWorkerConcurrencyTests.EmptyResult()); });
+        var worker = new AsyncQueryJobBackgroundWorker(
+            a, a, AsyncJobWorkerConcurrencyTests.Scopes(sql), Substitute.For<IAuditLogRepository>(),
+            NullLogger<AsyncQueryJobBackgroundWorker>.Instance,
+            clusterState: _state, topology: new ClusterStateTopology(ClusterStateMode.External));
+        await worker.StartAsync(CancellationToken.None);
+        await Task.Delay(500);
+        await worker.StopAsync(CancellationToken.None);
+
+        sqlCalls.ShouldBe(0, "a cancelled job must never start");
+        (await b.GetJobAsync(job.JobId, _tenant, "alice"))!.State.ShouldBe(AsyncJobState.Cancelled);
+        (await a.GetJobAsync(job.JobId, _tenant, "alice"))!.State.ShouldBe(AsyncJobState.Cancelled);
+        (await b.GetJobResultStreamAsync(job.JobId, _tenant, "alice")).ShouldBeNull();
+    }
+
+    private sealed class StaleOnceState(IDistributedClusterStateProvider inner, AsyncJobClusterRecord stale) : IDistributedClusterStateProvider
+    {
+        private int _served;
+
+        public ValueTask<T?> GetAsync<T>(string key, CancellationToken ct = default)
+        {
+            if (typeof(T) == typeof(AsyncJobClusterRecord) && Interlocked.Exchange(ref _served, 1) == 0)
+            {
+                return ValueTask.FromResult((T?)(object)stale);
+            }
+
+            return inner.GetAsync<T>(key, ct);
+        }
+
+        public ValueTask SetAsync<T>(string key, T value, TimeSpan ttl, CancellationToken ct = default) => inner.SetAsync(key, value, ttl, ct);
+        public ValueTask<bool> RemoveAsync(string key, CancellationToken ct = default) => inner.RemoveAsync(key, ct);
+        public ValueTask<long?> IncrementAsync(string key, long delta, TimeSpan ttl, CancellationToken ct = default) => inner.IncrementAsync(key, delta, ttl, ct);
+        public ValueTask<(BudgetConsumeOutcome Outcome, long ConsumedAfter)> TryConsumeBudgetAsync(string key, long cost, long limit, TimeSpan ttl, CancellationToken ct = default) => inner.TryConsumeBudgetAsync(key, cost, limit, ttl, ct);
+        public ValueTask PublishEventAsync<T>(string channel, T payload, CancellationToken ct = default) => inner.PublishEventAsync(channel, payload, ct);
+        public IAsyncDisposable SubscribeAsync<T>(string channel, Func<T, ValueTask> handler, CancellationToken ct = default) => inner.SubscribeAsync(channel, handler, ct);
+        public ValueTask<IAsyncDisposable?> TryAcquireLockAsync(string resourceKey, TimeSpan expiry, CancellationToken ct = default) => inner.TryAcquireLockAsync(resourceKey, expiry, ct);
+        public ValueTask<IDistributedLease?> TryAcquireLeaseAsync(string resourceKey, TimeSpan ttl, CancellationToken ct = default) => inner.TryAcquireLeaseAsync(resourceKey, ttl, ct);
+    }
+
+    [Fact]
+    public async Task RemoteCancelRacingCompletion_DoesNotOverwriteCompletedRecord()
+    {
+        var a = Node(_auditA, "a");
+        var job = await SubmitAsync(a);
+        var queuedRecord = (await _state.GetAsync<AsyncJobClusterRecord>($"asyncjob:t:{job.JobId}"))!;
+        var b = Node(_auditB, "b", new StaleOnceState(_state, queuedRecord));
+        var file = Path.Combine(a.ScratchDirectory, "t", $"{job.JobId}.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        File.WriteAllText(file, "[]");
+        await a.TryTransitionAsync(job with { State = AsyncJobState.Completed, CompletedAt = _time.GetUtcNow(), ResultFilePath = file }, CancellationToken.None);
+
+        // B decided on a stale Queued read; the job completed in between.
+        (await b.CancelJobAsync(job.JobId, _tenant, "alice")).ShouldBeFalse();
+
+        (await _state.GetAsync<AsyncJobClusterRecord>($"asyncjob:t:{job.JobId}"))!.State.ShouldBe(AsyncJobState.Completed);
+        (await b.GetJobAsync(job.JobId, _tenant, "alice"))!.State.ShouldBe(AsyncJobState.Completed);
+    }
+
+    [Fact]
+    public async Task Worker_SubscribeFailure_DoesNotStopProcessing()
+    {
+        var state = Substitute.For<IDistributedClusterStateProvider>();
+        state.SubscribeAsync<AsyncJobCancelSignal>(Arg.Any<string>(), Arg.Any<Func<AsyncJobCancelSignal, ValueTask>>(), Arg.Any<CancellationToken>())
+            .Returns(_ => throw new ClusterStateUnavailableException());
+        var node = Node(_auditA, "a", state);
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sql = Substitute.For<IGovernedSqlExecutionService>();
+        sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(_ => { done.TrySetResult(); return Task.FromResult(AsyncJobWorkerConcurrencyTests.EmptyResult()); });
+        var worker = new AsyncQueryJobBackgroundWorker(
+            node, node, AsyncJobWorkerConcurrencyTests.Scopes(sql), Substitute.For<IAuditLogRepository>(),
+            NullLogger<AsyncQueryJobBackgroundWorker>.Instance,
+            clusterState: state, topology: new ClusterStateTopology(ClusterStateMode.External));
+        await SubmitAsync(node);
+
+        await worker.StartAsync(CancellationToken.None);
+        await done.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await worker.StopAsync(CancellationToken.None);
     }
 }

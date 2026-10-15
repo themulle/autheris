@@ -370,4 +370,113 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
         await WaitUntilAsync(() => !File.Exists(orphan));
         await worker.StopAsync(CancellationToken.None);
     }
+
+    // ---- review findings (M2, shutdown, channel capacity, validator) ----
+
+    [Fact]
+    public async Task NewTenant_IsNotStarvedByBackloggedTenants()
+    {
+        var channel = Channel.CreateUnbounded<AsyncJobExecutionItem>();
+        using var gate = new SemaphoreSlim(0);
+        var started = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        using var scheduler = new AsyncJobScheduler(4, 2, async (item, ct) =>
+        {
+            started.Enqueue(item.Job.TenantId);
+            if (item.Job.TenantId != "c") await gate.WaitAsync(ct);
+        }, NullLogger.Instance);
+        using var cts = new CancellationTokenSource();
+        var loop = scheduler.RunAsync(channel.Reader, cts.Token);
+        for (var i = 0; i < 10; i++) channel.Writer.TryWrite(Item("a"));
+        for (var i = 0; i < 10; i++) channel.Writer.TryWrite(Item("b"));
+        await WaitUntilAsync(() => started.Count == 4);
+
+        channel.Writer.TryWrite(Item("c"));
+        await Task.Delay(100);
+        // Exactly one running job finishes: the freed slot must go to the new tenant, not to the backlog of A or B.
+        gate.Release();
+
+        await WaitUntilAsync(() => started.Contains("c"));
+        started.Count(t => t != "c").ShouldBeLessThanOrEqualTo(5);
+        gate.Release(100);
+        cts.Cancel();
+        await loop;
+    }
+
+    [Fact]
+    public async Task BackloggedTenants_ShareSlotsRoundRobin()
+    {
+        var channel = Channel.CreateUnbounded<AsyncJobExecutionItem>();
+        var order = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        using var scheduler = new AsyncJobScheduler(2, 1, async (item, ct) =>
+        {
+            order.Enqueue(item.Job.TenantId);
+            await Task.Delay(20, ct);
+        }, NullLogger.Instance);
+        using var cts = new CancellationTokenSource();
+        var loop = scheduler.RunAsync(channel.Reader, cts.Token);
+        for (var i = 0; i < 6; i++) channel.Writer.TryWrite(Item("a"));
+        for (var i = 0; i < 6; i++) channel.Writer.TryWrite(Item("b"));
+
+        await WaitUntilAsync(() => order.Count == 12);
+        // Never more than one tenant-a job in a row beyond the first two slots is not guaranteed, but b must not wait for all of a.
+        order.ToArray().Take(4).ShouldContain("b");
+        cts.Cancel();
+        await loop;
+    }
+
+    [Fact]
+    public async Task JobsQueuedAtShutdown_AreMarkedCancelled()
+    {
+        var manager = new AsyncQueryJobManager(_audit, environment: _env,
+            jobOptions: Options.Create(new AsyncJobOptions { MaxConcurrentJobs = 1, MaxConcurrentJobsPerTenant = 1 }));
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sql = Substitute.For<IGovernedSqlExecutionService>();
+        sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(async call => { started.TrySetResult(); await Task.Delay(Timeout.Infinite, call.Arg<CancellationToken>()); return EmptyResult(); });
+        var worker = new AsyncQueryJobBackgroundWorker(manager, manager, Scopes(sql), _audit, NullLogger<AsyncQueryJobBackgroundWorker>.Instance,
+            jobOptions: Options.Create(new AsyncJobOptions { MaxConcurrentJobs = 1, MaxConcurrentJobsPerTenant = 1 }));
+        var first = await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), User(), new TenantId("t"));
+        var second = await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 2"), User(), new TenantId("t"));
+        var third = await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 3"), User("alice", "u"), new TenantId("u"));
+        await worker.StartAsync(CancellationToken.None);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await Task.Delay(200);
+
+        await worker.StopAsync(CancellationToken.None);
+
+        foreach (var j in new[] { first, second })
+        {
+            (await manager.GetJobAsync(j.JobId, new TenantId("t"), "alice"))!.State.ShouldBe(AsyncJobState.Cancelled);
+        }
+
+        (await manager.GetJobAsync(third.JobId, new TenantId("u"), "alice"))!.State.ShouldBe(AsyncJobState.Cancelled);
+    }
+
+    [Fact]
+    public async Task Submit_WhenChannelIsFull_IsRejectedAndLeavesNothingBehind()
+    {
+        var manager = new AsyncQueryJobManager(_audit, environment: _env,
+            jobOptions: Options.Create(new AsyncJobOptions { MaxQueuedJobsPerTenant = 10_000 }));
+        for (var i = 0; i < 1000; i++)
+        {
+            await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), User("alice", "t" + (i % 50)), new TenantId("t" + (i % 50)));
+        }
+
+        var overflow = manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), User(), new TenantId("t"));
+        var completed = await Task.WhenAny(overflow, Task.Delay(TimeSpan.FromSeconds(5)));
+
+        completed.ShouldBe(overflow, "a full queue must reject instead of blocking the request");
+        await Should.ThrowAsync<AsyncJobQueueLimitExceededException>(() => overflow);
+    }
+
+    [Fact]
+    public void AsyncJobOptionsValidator_RejectsRetentionPurgeAndSharedWithoutDirectory()
+    {
+        var validator = new AsyncJobOptionsValidator();
+
+        validator.Validate(null, new AsyncJobOptions { RetentionHours = 0 }).Failed.ShouldBeTrue();
+        validator.Validate(null, new AsyncJobOptions { PurgeIntervalMinutes = 0 }).Failed.ShouldBeTrue();
+        validator.Validate(null, new AsyncJobOptions { SharedScratchDirectory = true }).Failed.ShouldBeTrue();
+        validator.Validate(null, new AsyncJobOptions { SharedScratchDirectory = true, ScratchDirectory = Path.GetTempPath() }).Succeeded.ShouldBeTrue();
+    }
 }
