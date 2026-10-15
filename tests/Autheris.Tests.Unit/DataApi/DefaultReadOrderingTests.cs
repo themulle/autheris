@@ -181,7 +181,7 @@ public sealed class DefaultReadOrderingTests
     {
         var cols = new[] { Col("k1", ("primary_key_ordinal", o1)), Col("k2", ("primary_key_ordinal", o2)) };
 
-        DefaultReadOrdering.ExtractMetaPrimaryKeyColumns(cols).ShouldBeEmpty();
+        TableKeyMarkers.Parse(cols).Columns.ShouldBeEmpty();
     }
 
     [Fact]
@@ -189,7 +189,49 @@ public sealed class DefaultReadOrderingTests
     {
         var cols = new[] { Col("a"), Col("b", ("is_primary_key", "true")), Col("c", ("role", "primary_key")) };
 
-        DefaultReadOrdering.ExtractMetaPrimaryKeyColumns(cols).ShouldBe(new[] { "b", "c" });
+        TableKeyMarkers.Parse(cols).Columns.ShouldBe(new[] { "b", "c" });
+    }
+
+    [Fact]
+    public void StaleMarkerOnSubsetOfDeclaredKey_IsIgnored_DeclaredRowsWin()
+    {
+        // Declared PK (tenant_id, id); tenant_id is denied for the caller; a stale marker flags only id.
+        var m = Meta() with
+        {
+            Columns = new[] { Col("tenant_id"), Col("id", ("is_primary_key", "true")), Col("v") },
+            PrimaryKeyColumns = new[] { "tenant_id", "id" }
+        };
+
+        var o = DefaultReadOrdering.Resolve(m, Levels(("tenant_id", ColumnAccessLevel.Deny), ("id", ColumnAccessLevel.Clear), ("v", ColumnAccessLevel.Clear)));
+
+        o.Kind.ShouldBe(DefaultOrderingKind.ClearColumnComposite);
+        o.Columns.ShouldBe(new[] { "id", "v" });
+    }
+
+    [Fact]
+    public void ContradictingMarkerKinds_AreInvalidWhole()
+    {
+        var cols = new[] { Col("a", ("primary_key_ordinal", "1")), Col("b", ("is_primary_key", "true")) };
+
+        var r = TableKeyMarkers.Parse(cols);
+
+        r.IsValid.ShouldBeFalse();
+        r.Columns.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Restrict_StaleMarkerWithDeclaredKey_DoesNotLeakPartialMarkerKey()
+    {
+        var m = Meta() with
+        {
+            Columns = new[] { Col("tenant_id"), Col("id", ("is_primary_key", "true")) },
+            PrimaryKeyColumns = new[] { "tenant_id", "id" }
+        };
+
+        var restricted = TableKeyVisibility.Restrict(m, new[] { m.Columns[1] });
+
+        restricted.PrimaryKeyColumns.ShouldBeEmpty();
+        restricted.Columns[0].Meta.ShouldNotContainKey("is_primary_key");
     }
 
     [Fact]

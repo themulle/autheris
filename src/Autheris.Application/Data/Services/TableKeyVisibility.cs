@@ -12,8 +12,6 @@ using Autheris.Domain.Model;
 /// </summary>
 public static class TableKeyVisibility
 {
-    private static readonly string[] MarkerKeys = ["primary_key_ordinal", "is_primary_key"];
-
     /// <summary>
     /// Returns <paramref name="metadata"/> restricted to <paramref name="visibleColumns"/>, with the definition filtered as a whole.
     /// </summary>
@@ -29,11 +27,18 @@ public static class TableKeyVisibility
             .ToList();
 
         var columns = visibleColumns;
-        var markerKey = DefaultReadOrdering.ExtractMetaPrimaryKeyColumns(metadata.Columns);
-        var markerKeyComplete = markerKey.Count > 0 && AllVisible(markerKey, visible);
-        if (!markerKeyComplete && visibleColumns.Any(HasMarker))
+        // Markers are a declaration channel only while no declared primary key rows exist (declared rows win). They stay on the
+        // visible columns only when they still form a complete, valid key there; otherwise the remaining markers would read as
+        // a partial key once the (filtered) declared key is empty.
+        var markersUsable = primaryKey.Count > 0;
+        if (!markersUsable && metadata.PrimaryKeyColumns.Count == 0)
         {
-            // The marker key is not wholly visible (or invalid): the remaining markers would read as a partial key.
+            var markers = TableKeyMarkers.Parse(metadata.Columns);
+            markersUsable = markers.IsValid && AllVisible(markers.Columns, visible);
+        }
+
+        if (!markersUsable && visibleColumns.Any(TableKeyMarkers.HasMarker))
+        {
             columns = visibleColumns.Select(StripMarkers).ToList();
         }
 
@@ -43,21 +48,15 @@ public static class TableKeyVisibility
     private static bool AllVisible(IReadOnlyList<string> names, HashSet<string> visible) =>
         names.Count > 0 && names.All(visible.Contains);
 
-    private static bool HasMarker(TableColumn column) =>
-        column.Meta.Count > 0 &&
-        (MarkerKeys.Any(column.Meta.ContainsKey) ||
-         (column.Meta.TryGetValue("role", out var role) && string.Equals(role, "primary_key", StringComparison.OrdinalIgnoreCase)));
-
     private static TableColumn StripMarkers(TableColumn column)
     {
-        if (!HasMarker(column))
+        if (!TableKeyMarkers.HasMarker(column))
         {
             return column;
         }
 
         var meta = column.Meta
-            .Where(kv => !MarkerKeys.Contains(kv.Key) &&
-                         !(string.Equals(kv.Key, "role", StringComparison.Ordinal) && string.Equals(kv.Value, "primary_key", StringComparison.OrdinalIgnoreCase)))
+            .Where(kv => !TableKeyMarkers.IsMarkerEntry(kv.Key, kv.Value))
             .ToDictionary(kv => kv.Key, kv => kv.Value);
         return new TableColumn
         {

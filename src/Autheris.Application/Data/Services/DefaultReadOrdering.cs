@@ -2,7 +2,6 @@ namespace Autheris.Application.Data.Services;
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -84,8 +83,11 @@ public static class DefaultReadOrdering
             }
         }
 
+        // H2: declared rows win; the markers are a declaration channel only when no declared primary key exists, all-or-nothing.
         kind = DefaultOrderingKind.MetaMarkerKey;
-        if (TryAllUsable(ExtractMetaPrimaryKeyColumns(metadata.Columns), metadata, usable, out key))
+        if (metadata.PrimaryKeyColumns.Count == 0 &&
+            TableKeyMarkers.Parse(metadata.Columns) is { IsValid: true, Columns.Count: > 0 } markers &&
+            TryAllUsable(markers.Columns, metadata, usable, out key))
         {
             return true;
         }
@@ -125,67 +127,6 @@ public static class DefaultReadOrdering
         }
 
         return key.Count > 0;
-    }
-
-    /// <summary>
-    /// Column <c>Meta</c> markers as a declaration channel (<c>primary_key_ordinal</c>, <c>is_primary_key=true</c>,
-    /// <c>role=primary_key</c>), validated like a declared key and fail closed: a non-numeric or non-positive ordinal, a
-    /// duplicate or a gap makes the whole marker key invalid (empty result). Ordinals win over flags.
-    /// </summary>
-    public static IReadOnlyList<string> ExtractMetaPrimaryKeyColumns(IReadOnlyList<TableColumn> columns)
-    {
-        if (columns == null || columns.Count == 0)
-        {
-            return Array.Empty<string>();
-        }
-
-        var ordinalCols = new List<(int Ordinal, string Name)>();
-        foreach (var col in columns)
-        {
-            if (col.Meta != null && col.Meta.TryGetValue("primary_key_ordinal", out var ordStr))
-            {
-                if (!int.TryParse(ordStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var ord) || ord < 1)
-                {
-                    return Array.Empty<string>();
-                }
-
-                ordinalCols.Add((ord, col.ColumnName));
-            }
-        }
-
-        if (ordinalCols.Count > 0)
-        {
-            var sorted = ordinalCols.OrderBy(x => x.Ordinal).ToList();
-            for (var i = 0; i < sorted.Count; i++)
-            {
-                if (sorted[i].Ordinal != i + 1)
-                {
-                    return Array.Empty<string>();
-                }
-            }
-
-            var names = sorted.Select(x => x.Name).ToList();
-            return names.Distinct(StringComparer.OrdinalIgnoreCase).Count() == names.Count ? names : Array.Empty<string>();
-        }
-
-        var flagCols = new List<string>();
-        foreach (var col in columns)
-        {
-            if (col.Meta == null)
-            {
-                continue;
-            }
-
-            if ((col.Meta.TryGetValue("is_primary_key", out var isPk) && string.Equals(isPk, "true", StringComparison.OrdinalIgnoreCase)) ||
-                (col.Meta.TryGetValue("role", out var role) && string.Equals(role, "primary_key", StringComparison.OrdinalIgnoreCase)))
-            {
-                flagCols.Add(col.ColumnName);
-            }
-        }
-
-        return flagCols.Count > 0 && flagCols.Distinct(StringComparer.OrdinalIgnoreCase).Count() == flagCols.Count
-            ? flagCols
-            : Array.Empty<string>();
     }
 
     private static readonly HashSet<string> NonOrderableBaseTypes = new(StringComparer.OrdinalIgnoreCase)

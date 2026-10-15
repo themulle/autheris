@@ -197,63 +197,13 @@ internal static class CatalogKeyDefinitionStore
     }
 
     /// <summary>
-    /// H2: validates the column Meta markers as a declaration channel. Corrupt or contradicting markers make the table unavailable;
-    /// no markers means no key. All-or-nothing, never a partial key.
+    /// H2: validates the column Meta markers as a declaration channel (shared parser <see cref="TableKeyMarkers"/>). Corrupt or
+    /// contradicting markers make the table unavailable; no markers means no key. All-or-nothing, never a partial key.
     /// </summary>
     internal static IReadOnlyList<string> ResolveMarkerPrimaryKey(TableIdentifier identifier, IReadOnlyList<TableColumn> columns)
     {
-        List<(int Ordinal, string Name)>? ordinals = null;
-        List<string>? flagged = null;
-        foreach (var column in columns)
-        {
-            var meta = column.Meta;
-            if (meta is null)
-            {
-                continue;
-            }
-
-            if (meta.TryGetValue("primary_key_ordinal", out var ordinalText))
-            {
-                if (!int.TryParse(ordinalText, NumberStyles.None, CultureInfo.InvariantCulture, out var ordinal) || ordinal < 1)
-                {
-                    throw new TableMetadataUnavailableException(identifier);
-                }
-
-                (ordinals ??= new()).Add((ordinal, column.ColumnName));
-            }
-
-            if ((meta.TryGetValue("is_primary_key", out var isKey) && string.Equals(isKey, "true", StringComparison.OrdinalIgnoreCase)) ||
-                (meta.TryGetValue("role", out var role) && string.Equals(role, "primary_key", StringComparison.OrdinalIgnoreCase)))
-            {
-                (flagged ??= new()).Add(column.ColumnName);
-            }
-        }
-
-        if (ordinals is null)
-        {
-            return flagged is null ? Array.Empty<string>() : flagged;
-        }
-
-        ordinals.Sort(static (a, b) => a.Ordinal.CompareTo(b.Ordinal));
-        var names = new List<string>(ordinals.Count);
-        for (var i = 0; i < ordinals.Count; i++)
-        {
-            if (ordinals[i].Ordinal != i + 1)
-            {
-                throw new TableMetadataUnavailableException(identifier);
-            }
-
-            names.Add(ordinals[i].Name);
-        }
-
-        // A second marker kind that names other columns would make the key ambiguous: refuse instead of picking a subset.
-        if (flagged is not null &&
-            (flagged.Count != names.Count || flagged.Except(names, StringComparer.OrdinalIgnoreCase).Any()))
-        {
-            throw new TableMetadataUnavailableException(identifier);
-        }
-
-        return names;
+        var result = TableKeyMarkers.Parse(columns);
+        return result.IsValid ? result.Columns : throw new TableMetadataUnavailableException(identifier);
     }
 
     // ---------------------------------------------------------------- write
