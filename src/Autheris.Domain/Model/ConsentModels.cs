@@ -87,15 +87,21 @@ public sealed class Consent
     public DateTimeOffset? RevokedAt { get; init; }
     public string? RevokeReason { get; init; }
 
+    /// <summary>WP-SC-16: number of approved renewals (extensions) of this grant; persisted by the repositories.</summary>
+    public int RenewalCount { get; init; }
+
     public IReadOnlyList<ConsentColumnRule> ColumnRules { get; set; } = Array.Empty<ConsentColumnRule>();
     public IReadOnlyList<ConsentRowFilter> RowFilters { get; set; } = Array.Empty<ConsentRowFilter>();
     public string? RowFilterCondition { get; init; }
+
+    /// <summary>WP-SC-16: expiry after the read-time clamp of legacy individual grants (never later than <see cref="ValidTo"/>).</summary>
+    public DateTimeOffset EffectiveValidTo => IndividualGrantLimits.EffectiveConsentValidTo(GranteeType, ValidFrom, ValidTo);
 
     public bool IsActive(DateTimeOffset atTime)
     {
         if (IsRevoked) return false;
         if (ValidFrom > atTime) return false;
-        if (atTime >= ValidTo) return false;
+        if (atTime >= EffectiveValidTo) return false;
         return true;
     }
 

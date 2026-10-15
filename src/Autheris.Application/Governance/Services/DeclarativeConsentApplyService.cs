@@ -6,6 +6,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
@@ -16,8 +17,12 @@ using Autheris.Domain.Security;
 public sealed class DeclarativeConsentApplyService(
     ITableMetadataRepository metadataRepository,
     IConsentRepository consentRepository,
-    IAuditLogRepository auditLogRepository) : IDeclarativeConsentApplyService
+    IAuditLogRepository auditLogRepository,
+    IGrantPolicy? grantPolicy = null) : IDeclarativeConsentApplyService
 {
+    // WP-SC-16: the policy is stateless; without an injected instance the built-in maxima apply (never "no policy").
+    private readonly IGrantPolicy _grantPolicy = grantPolicy ?? new GrantPolicy();
+
     public async Task<DeclarativeApplyResult> ApplyManifestAsync(
         ClaimsPrincipal caller,
         DeclarativeConsentManifest manifest,
@@ -105,6 +110,27 @@ public sealed class DeclarativeConsentApplyService(
                 granteeSid = new Sid(policy.GranteeRef);
             }
 
+            // WP-SC-16: individual grants need an absolute, class-bounded validUntil (also in dry-run). Group/role grants are standing.
+            var individual = granteeType is GranteeType.User or GranteeType.ServicePrincipal;
+            DateTimeOffset validTo;
+            if (individual)
+            {
+                var decision = _grantPolicy.Evaluate(new GrantRequest(
+                    granteeType,
+                    policy.GranteeRef,
+                    GrantKind.ManifestPolicy,
+                    policy.ValidUntil,
+                    now,
+                    GrantClassifier.Classify([metadata]),
+                    Justification: policy.Description ?? "GitOps manifest"));
+                GrantPolicyViolationException.ThrowIfDenied(decision);
+                validTo = policy.ValidUntil!.Value;
+            }
+            else
+            {
+                validTo = now.AddDays(policy.ValidityDays is > 0 ? policy.ValidityDays.Value : 365);
+            }
+
             // WP-SC-02: role consents have no subject SID, so they are looked up by role name (the subject lookup never returns them).
             IReadOnlyList<Consent> existingConsents = granteeType == GranteeType.Role
                 ? await consentRepository.GetActiveRoleConsentsAsync(tableId, roleName!, tenantId, now, ct).ConfigureAwait(false)
@@ -130,7 +156,6 @@ public sealed class DeclarativeConsentApplyService(
                 revokeIds.AddRange(activeExisting.Select(c => c.Id));
 
                 // Construct new Consent
-                var validityDays = policy.ValidityDays is > 0 ? policy.ValidityDays.Value : 365;
                 var consentId = Guid.NewGuid();
                 var newConsent = new Consent
                 {
@@ -144,7 +169,7 @@ public sealed class DeclarativeConsentApplyService(
                     RoleName = roleName,
                     RoleId = roleId,
                     ValidFrom = now,
-                    ValidTo = now.AddDays(validityDays),
+                    ValidTo = validTo,
                     IsRevoked = false
                 };
 

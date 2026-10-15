@@ -65,7 +65,8 @@ public sealed class Wave2GovernanceTests
                     "S-1-5-21-USER1",
                     "Allow",
                     ColumnRules: [new DeclarativeColumnRule("secret_notes", "Mask", ["Agent.Read"])],
-                    RowFilters: [new DeclarativeRowFilter("tenant_id", "EQ", "string", "[\"tenant_test\"]")]
+                    RowFilters: [new DeclarativeRowFilter("tenant_id", "EQ", "string", "[\"tenant_test\"]")],
+                    ValidUntil: DateTimeOffset.UtcNow.AddDays(30)
                 )
             ]);
 

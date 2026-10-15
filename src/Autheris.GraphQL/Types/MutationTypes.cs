@@ -308,6 +308,36 @@ public sealed class Mutation
                 }
             }
 
+            // WP-SC-16: an individual grant is activated only within the class maximum (now + max), evaluated at activation time.
+            if (approved.RequestedGranteeType is GranteeType.User or GranteeType.ServicePrincipal)
+            {
+                var requestServices = httpContextAccessor?.HttpContext?.RequestServices;
+                var policy = (requestServices != null
+                        ? Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<Autheris.Application.Governance.Grants.IGrantPolicy>(requestServices)
+                        : null)
+                    ?? new Autheris.Application.Governance.Grants.GrantPolicy();
+                Autheris.Domain.Model.TableMetadata? grantMeta = metadataRepository != null
+                    ? await metadataRepository.GetTableMetadataAsync(approved.TableIdentifier, ct)
+                    : null;
+                var activationNow = DateTimeOffset.UtcNow;
+                var grantDecision = policy.Evaluate(new Autheris.Application.Governance.Grants.GrantRequest(
+                    approved.RequestedGranteeType,
+                    approved.RequestedGranteeRef,
+                    Autheris.Application.Governance.Grants.GrantKind.Consent,
+                    approved.RequestedValidTo,
+                    activationNow,
+                    Autheris.Application.Governance.Grants.GrantClassifier.Classify([grantMeta]),
+                    Requester: approved.RequesterSid.Value,
+                    Justification: approved.BusinessJustification));
+                if (!grantDecision.Allowed)
+                {
+                    throw new GraphQLException(ErrorBuilder.New()
+                        .SetCode(grantDecision.ErrorCode ?? "INDIVIDUAL_GRANT_INDETERMINATE")
+                        .SetMessage(grantDecision.Reason)
+                        .Build());
+                }
+            }
+
             var consent = new Consent
             {
                 TableId = approved.TableId,

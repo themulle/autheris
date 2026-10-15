@@ -106,7 +106,16 @@ public static partial class GovernanceEndpoints
             return Results.BadRequest(new { error = "Manifest payload is null or empty." });
         }
 
-        var result = await applyService.ApplyManifestAsync(context.User, manifest, dryRun, ct);
-        return Results.Ok(result);
+        try
+        {
+            var result = await applyService.ApplyManifestAsync(context.User, manifest, dryRun, ct);
+            return Results.Ok(result);
+        }
+        catch (Autheris.Application.Governance.Grants.GrantPolicyViolationException ex)
+        {
+            return Results.Json(
+                new { error = ex.ErrorCode, message = ex.Decision.Reason, maxValidTo = ex.MaxValidTo },
+                statusCode: StatusCodes.Status400BadRequest);
+        }
     }
 }

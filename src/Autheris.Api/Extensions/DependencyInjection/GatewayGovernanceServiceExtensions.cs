@@ -155,6 +155,12 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IDifferentialPrivacyEngine, DifferentialPrivacyEngine>();
         services.AddSingleton<IEuAiActAuditExporter, EuAiActAuditExporter>();
         services.AddSingleton<Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService, Autheris.Application.Governance.Services.EffectiveAccessExplanationService>();
+        services.AddOptions<Autheris.Domain.Options.IndividualGrantOptions>() // WP-SC-16
+            .Configure<Microsoft.Extensions.Configuration.IConfiguration>((o, cfg) =>
+                Microsoft.Extensions.Configuration.ConfigurationBinder.Bind(cfg.GetSection(Autheris.Domain.Options.IndividualGrantOptions.SectionName), o))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        Autheris.Application.Governance.Grants.IndividualGrantServiceCollectionExtensions.AddIndividualGrantPolicy(services);
         services.AddSingleton<Autheris.Application.Governance.Interfaces.IDeclarativeConsentApplyService, Autheris.Application.Governance.Services.DeclarativeConsentApplyService>();
 
         // ITSM orchestration (dispatcher, recertification, outbox workers)

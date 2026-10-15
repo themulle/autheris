@@ -7,6 +7,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Governance.Grants;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Audit;
@@ -26,13 +27,17 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
     private readonly IAuditLogRepository? _auditLogRepository;
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
+    private readonly IGrantPolicy _grantPolicy;
+
     public BundledConsentRequestService(
         ITableMetadataRepository metadataRepository,
         IConsentRepository consentRepository,
         IAuditLogRepository auditLogRepository,
         IConsentApprovalRepository? approvalRepository = null,
-        IDataOwnershipRepository? dataOwnershipRepository = null)
+        IDataOwnershipRepository? dataOwnershipRepository = null,
+        IGrantPolicy? grantPolicy = null)
     {
+        _grantPolicy = grantPolicy ?? new GrantPolicy();
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
@@ -44,8 +49,10 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
         ITableMetadataRepository metadataRepository,
         IConsentRepository consentRepository,
         IConsentApprovalRepository? approvalRepository = null,
-        IDataOwnershipRepository? dataOwnershipRepository = null)
+        IDataOwnershipRepository? dataOwnershipRepository = null,
+        IGrantPolicy? grantPolicy = null)
     {
+        _grantPolicy = grantPolicy ?? new GrantPolicy();
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _approvalRepository = approvalRepository;
@@ -150,6 +157,19 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
                     ? request.Purpose
                     : item.SuggestedPurpose;
 
+                // WP-SC-16: bundled requests are individual grants for the requester; the default duration (90 days) and any
+                // requested expiry must respect the class maximum of the table.
+                var bundledNow = DateTimeOffset.UtcNow;
+                GrantPolicyViolationException.ThrowIfDenied(_grantPolicy.Evaluate(new GrantRequest(
+                    GranteeType.User,
+                    requesterSid.Value.Value,
+                    GrantKind.Consent,
+                    request.RequestedUntilUtc ?? bundledNow.AddDays(Math.Min(90, (int)IndividualGrantLimits.RegularMax.TotalDays)),
+                    bundledNow,
+                    GrantClassifier.Classify([table]),
+                    Requester: requesterSid.Value.Value,
+                    Justification: effectivePurpose)));
+
                 var requestRecord = new ConsentRequest
                 {
                     Id = Guid.NewGuid(),
@@ -163,7 +183,7 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
                         : $"[Ref:{request.ConsumerReference}] {effectivePurpose}",
                     Status = "PENDING",
                     RequestedAt = DateTimeOffset.UtcNow,
-                    RequestedValidTo = request.RequestedUntilUtc ?? DateTimeOffset.UtcNow.AddDays(90),
+                    RequestedValidTo = request.RequestedUntilUtc ?? bundledNow.AddDays(Math.Min(90, (int)IndividualGrantLimits.RegularMax.TotalDays)),
                     ItsmTicketId = request.ConsumerReference ?? ticketId.ToString("N"),
                     TenantId = tenantId,
                     ApprovalSteps = bucket.PrimaryOwnerSid is { } approverSid

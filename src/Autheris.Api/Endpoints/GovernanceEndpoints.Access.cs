@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Security;
+using Autheris.Application.Governance.Grants;
 using Autheris.Application.Interfaces;
 using Autheris.Application.State;
 using Autheris.Domain.Audit;
@@ -186,13 +187,15 @@ public static partial class GovernanceEndpoints
 
         // Calculate matched tables
         int tablesMatched = 0;
+        IReadOnlyList<TableMetadata>? matchedTables = null; // null = classification unavailable (fail closed to Sensitive)
         var metaRepo = context.RequestServices.GetService<ITableMetadataRepository>();
         if (metaRepo != null)
         {
             try
             {
                 var allTables = await metaRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
-                tablesMatched = allTables.Count(t => targetTables.Any(pattern => AccessProfile.MatchesPattern(pattern, t.Identifier)));
+                matchedTables = allTables.Where(t => targetTables.Any(pattern => AccessProfile.MatchesPattern(pattern, t.Identifier))).ToList();
+                tablesMatched = matchedTables.Count;
             }
             catch
             {
@@ -206,6 +209,31 @@ public static partial class GovernanceEndpoints
         }
 
         var subjectType = string.IsNullOrWhiteSpace(req.SubjectType) ? "User" : req.SubjectType.Trim();
+
+        // WP-SC-16: every individual grant is time-bound within the class maximum (also for bulk grants).
+        if (!Enum.TryParse<GranteeType>(subjectType, ignoreCase: true, out var bulkGranteeType) || !Enum.IsDefined(bulkGranteeType))
+        {
+            return Results.BadRequest(new { error = $"Invalid subjectType '{subjectType}'. Supported values: User, Group, Role, ServicePrincipal." });
+        }
+
+        var grantPolicy = context.RequestServices.GetService<IGrantPolicy>() ?? new GrantPolicy();
+        var grantDecision = grantPolicy.Evaluate(new GrantRequest(
+            bulkGranteeType,
+            trimmedSubject,
+            GrantKind.BulkGrant,
+            validTo,
+            now,
+            GrantClassifier.Classify(matchedTables),
+            mode,
+            Requester: callerSid,
+            Justification: req.Justification.Trim()));
+        if (!grantDecision.Allowed)
+        {
+            return Results.Json(
+                new { error = grantDecision.ErrorCode, message = grantDecision.Reason, maxValidTo = grantDecision.MaxValidTo },
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
         var profile = new AccessProfile
         {
             ProfileId = profileId,

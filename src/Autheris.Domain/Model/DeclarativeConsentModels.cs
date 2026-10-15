@@ -10,6 +10,10 @@ public sealed record DeclarativeConsentManifest(
     string Version,
     IReadOnlyList<DeclarativeConsentPolicy> Policies);
 
+/// <remarks>
+/// WP-SC-16: <c>ValidUntil</c> is an absolute expiry and is mandatory for individual (User / ServicePrincipal) grantees; group and role
+/// grantees use <c>ValidityDays</c> (default 365). Re-applying a manifest never extends an existing identical grant.
+/// </remarks>
 public sealed record DeclarativeConsentPolicy(
     string Domain,
     string Schema,
@@ -20,7 +24,8 @@ public sealed record DeclarativeConsentPolicy(
     IReadOnlyList<DeclarativeColumnRule>? ColumnRules = null,
     IReadOnlyList<DeclarativeRowFilter>? RowFilters = null,
     int? ValidityDays = null,
-    string? Description = null);
+    string? Description = null,
+    DateTimeOffset? ValidUntil = null);
 
 public sealed record DeclarativeColumnRule(
     string ColumnName,

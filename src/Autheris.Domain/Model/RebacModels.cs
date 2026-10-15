@@ -21,6 +21,12 @@ public sealed record RebacTuple(
     string Object
 )
 {
+    /// <summary>
+    /// WP-SC-16: absolute expiry of a time-bound individual grant. Null for standing tuples. Stores must treat a tuple past this
+    /// instant as absent (fail closed).
+    /// </summary>
+    public DateTimeOffset? ExpiresAt { get; init; }
+
     public override string ToString() => $"({TenantId}, {User}, {Relation}, {Object})";
 }
 
