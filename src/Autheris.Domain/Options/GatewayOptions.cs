@@ -44,6 +44,7 @@ public sealed class GatewayOptions
     [Required] public DevOptions Dev { get; init; } = new();
     [Required] public MssqlChangeTrackingOptions MssqlChangeTracking { get; init; } = new();
     [Required] public PostgreSqlCdcOptions PostgreSqlCdc { get; init; } = new();
+    [Required] public CdcStreamOptions CdcStream { get; init; } = new();
     [Required] public TrafficShadowingOptions TrafficShadowing { get; init; } = new();
     [Required] public FinOpsOptions FinOps { get; init; } = new();
     [Required] public SchemaContractsOptions SchemaContracts { get; init; } = new();

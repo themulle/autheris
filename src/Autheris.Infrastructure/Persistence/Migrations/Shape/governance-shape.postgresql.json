@@ -339,6 +339,281 @@
       ]
     },
     {
+      "name": "autheris_cdc_row_images",
+      "columns": [
+        {
+          "name": "stream_id",
+          "type": "CHARACTER VARYING(32)",
+          "family": "string"
+        },
+        {
+          "name": "key_fingerprint",
+          "type": "BYTEA",
+          "family": "binary"
+        },
+        {
+          "name": "tenant_scope",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "tenant_id",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "dek_id",
+          "type": "CHARACTER VARYING(32)",
+          "family": "string"
+        },
+        {
+          "name": "image",
+          "type": "BYTEA",
+          "family": "binary"
+        },
+        {
+          "name": "event_offset",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "updated_ms",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "stream_id",
+        "key_fingerprint"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "autheris_cdc_stream_events",
+      "columns": [
+        {
+          "name": "stream_id",
+          "type": "CHARACTER VARYING(32)",
+          "family": "string"
+        },
+        {
+          "name": "event_offset",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "change_version",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "kind",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "operation",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "tenant_scope",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "tenant_id",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "prior_tenant_id",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "dek_id",
+          "type": "CHARACTER VARYING(32)",
+          "family": "string"
+        },
+        {
+          "name": "payload",
+          "type": "BYTEA",
+          "family": "binary"
+        },
+        {
+          "name": "produced_ms",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "stream_id",
+        "event_offset"
+      ],
+      "indexes": [
+        {
+          "name": "ix_cdc_stream_events_dek",
+          "unique": false,
+          "columns": [
+            "stream_id",
+            "dek_id"
+          ]
+        },
+        {
+          "name": "ix_cdc_stream_events_produced",
+          "unique": false,
+          "columns": [
+            "stream_id",
+            "produced_ms"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "autheris_cdc_stream_keys",
+      "columns": [
+        {
+          "name": "stream_id",
+          "type": "CHARACTER VARYING(32)",
+          "family": "string"
+        },
+        {
+          "name": "dek_id",
+          "type": "CHARACTER VARYING(32)",
+          "family": "string"
+        },
+        {
+          "name": "purpose",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "kek_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "wrapped_key",
+          "type": "BYTEA",
+          "family": "binary"
+        },
+        {
+          "name": "created_ms",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "retired_ms",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "stream_id",
+        "dek_id"
+      ],
+      "indexes": [
+        {
+          "name": "ix_cdc_stream_keys_kek",
+          "unique": false,
+          "columns": [
+            "kek_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "autheris_cdc_streams",
+      "columns": [
+        {
+          "name": "stream_id",
+          "type": "CHARACTER VARYING(32)",
+          "family": "string"
+        },
+        {
+          "name": "source",
+          "type": "CHARACTER VARYING(32)",
+          "family": "string"
+        },
+        {
+          "name": "domain_name",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "schema_name",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "table_name",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "status",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "activation_code",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "head_offset",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "tail_offset",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "producer_fencing_token",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "retention_fencing_token",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "last_polled_ms",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "created_ms",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "updated_ms",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "stream_id"
+      ],
+      "indexes": [
+        {
+          "name": "ux_cdc_streams_table",
+          "unique": true,
+          "columns": [
+            "source",
+            "domain_name",
+            "schema_name",
+            "table_name"
+          ]
+        }
+      ]
+    },
+    {
       "name": "autheris_cdc_watermarks",
       "columns": [
         {

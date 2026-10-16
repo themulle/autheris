@@ -35,6 +35,20 @@ public static class AuditEventTypes
     public const string CdcWebhookDeliveryBatch = "CDC_WEBHOOK_DELIVERY_BATCH";
     public const string EgressShadowCopy = "EGRESS_SHADOW_COPY";
 
+    // Governed CDC fan-out (issue #99, PLAN-CDC-99 D-B8): the batch event is Tier B; lifecycle/admin events are individually audited.
+    public const string CdcDeliveryBatch = "CDC_DELIVERY_BATCH";
+    public const string CdcConsumerRegistered = "CDC_CONSUMER_REGISTERED";
+    public const string CdcConsumerRejected = "CDC_CONSUMER_REJECTED";
+    public const string CdcConsumerDeleted = "CDC_CONSUMER_DELETED";
+    public const string CdcConsumerPaused = "CDC_CONSUMER_PAUSED";
+    public const string CdcConsumerResumed = "CDC_CONSUMER_RESUMED";
+    public const string CdcConsumerOffsetReset = "CDC_CONSUMER_OFFSET_RESET";
+    public const string CdcDeadLetterReplayed = "CDC_DEAD_LETTER_REPLAYED";
+    public const string CdcStreamResync = "CDC_STREAM_RESYNC";
+    public const string CdcStreamKeyRotated = "CDC_STREAM_KEY_ROTATED";
+    public const string CdcPluginReceiverBound = "CDC_PLUGIN_RECEIVER_BOUND";
+    public const string CdcPluginReceiverRejected = "CDC_PLUGIN_RECEIVER_REJECTED";
+
     // Administration & Audit Self-Governance (Tier A)
     public const string AuditRead = "AUDIT_READ";
     public const string AuditExport = "AUDIT_EXPORT";

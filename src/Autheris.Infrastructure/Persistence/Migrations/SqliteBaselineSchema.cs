@@ -397,6 +397,72 @@ internal sealed class SqliteBaselineSchema
                 PRIMARY KEY (source, domain_name, schema_name, table_name)
             );
 
+            -- Issue #99 (I1): governed CDC stream (durable, encrypted, fenced append; see PLAN-CDC-99)
+
+            CREATE TABLE IF NOT EXISTS autheris_cdc_streams (
+                stream_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                domain_name TEXT NOT NULL,
+                schema_name TEXT NOT NULL,
+                table_name TEXT NOT NULL,
+                status INTEGER NOT NULL,
+                activation_code TEXT NULL,
+                head_offset INTEGER NOT NULL,
+                tail_offset INTEGER NOT NULL,
+                producer_fencing_token INTEGER NOT NULL,
+                retention_fencing_token INTEGER NOT NULL,
+                last_polled_ms INTEGER NULL,
+                created_ms INTEGER NOT NULL,
+                updated_ms INTEGER NOT NULL,
+                PRIMARY KEY (stream_id)
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_cdc_streams_table ON autheris_cdc_streams (source, domain_name, schema_name, table_name);
+
+            CREATE TABLE IF NOT EXISTS autheris_cdc_stream_events (
+                stream_id TEXT NOT NULL,
+                event_offset INTEGER NOT NULL,
+                change_version INTEGER NOT NULL,
+                kind INTEGER NOT NULL,
+                operation INTEGER NULL,
+                tenant_scope INTEGER NOT NULL,
+                tenant_id TEXT NULL,
+                prior_tenant_id TEXT NULL,
+                dek_id TEXT NOT NULL,
+                payload BLOB NOT NULL,
+                produced_ms INTEGER NOT NULL,
+                PRIMARY KEY (stream_id, event_offset)
+            );
+
+            CREATE INDEX IF NOT EXISTS ix_cdc_stream_events_produced ON autheris_cdc_stream_events (stream_id, produced_ms);
+
+            CREATE INDEX IF NOT EXISTS ix_cdc_stream_events_dek ON autheris_cdc_stream_events (stream_id, dek_id);
+
+            CREATE TABLE IF NOT EXISTS autheris_cdc_row_images (
+                stream_id TEXT NOT NULL,
+                key_fingerprint BLOB NOT NULL,
+                tenant_scope INTEGER NOT NULL,
+                tenant_id TEXT NULL,
+                dek_id TEXT NOT NULL,
+                image BLOB NOT NULL,
+                event_offset INTEGER NOT NULL,
+                updated_ms INTEGER NOT NULL,
+                PRIMARY KEY (stream_id, key_fingerprint)
+            );
+
+            CREATE TABLE IF NOT EXISTS autheris_cdc_stream_keys (
+                stream_id TEXT NOT NULL,
+                dek_id TEXT NOT NULL,
+                purpose INTEGER NOT NULL,
+                kek_id TEXT NOT NULL,
+                wrapped_key BLOB NOT NULL,
+                created_ms INTEGER NOT NULL,
+                retired_ms INTEGER NULL,
+                PRIMARY KEY (stream_id, dek_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS ix_cdc_stream_keys_kek ON autheris_cdc_stream_keys (kek_id);
+
             -- WP-ARC-A-03: durable CDC webhook (CloudEvent) subscriptions
             CREATE TABLE IF NOT EXISTS CLOUDEVENT_SUBSCRIPTIONS (
                 id TEXT PRIMARY KEY,

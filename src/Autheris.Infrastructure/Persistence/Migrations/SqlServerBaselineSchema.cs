@@ -469,6 +469,80 @@ CREATE TABLE dbo.autheris_cdc_watermarks (
     CONSTRAINT PK_autheris_cdc_watermarks PRIMARY KEY (source, domain_name, schema_name, table_name)
 );
 
+-- Issue #99 (I1): governed CDC stream (durable, encrypted, fenced append; see PLAN-CDC-99)
+
+IF OBJECT_ID(N'dbo.autheris_cdc_streams', N'U') IS NULL
+CREATE TABLE dbo.autheris_cdc_streams (
+    stream_id NVARCHAR(32) NOT NULL,
+    source NVARCHAR(32) NOT NULL,
+    domain_name NVARCHAR(128) NOT NULL,
+    schema_name NVARCHAR(128) NOT NULL,
+    table_name NVARCHAR(128) NOT NULL,
+    status INT NOT NULL,
+    activation_code NVARCHAR(64) NULL,
+    head_offset BIGINT NOT NULL,
+    tail_offset BIGINT NOT NULL,
+    producer_fencing_token BIGINT NOT NULL,
+    retention_fencing_token BIGINT NOT NULL,
+    last_polled_ms BIGINT NULL,
+    created_ms BIGINT NOT NULL,
+    updated_ms BIGINT NOT NULL,
+    CONSTRAINT PK_autheris_cdc_streams PRIMARY KEY (stream_id)
+);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ux_cdc_streams_table' AND object_id = OBJECT_ID(N'dbo.autheris_cdc_streams'))
+    CREATE UNIQUE INDEX ux_cdc_streams_table ON dbo.autheris_cdc_streams (source, domain_name, schema_name, table_name);
+
+IF OBJECT_ID(N'dbo.autheris_cdc_stream_events', N'U') IS NULL
+CREATE TABLE dbo.autheris_cdc_stream_events (
+    stream_id NVARCHAR(32) NOT NULL,
+    event_offset BIGINT NOT NULL,
+    change_version BIGINT NOT NULL,
+    kind INT NOT NULL,
+    operation INT NULL,
+    tenant_scope INT NOT NULL,
+    tenant_id NVARCHAR(128) NULL,
+    prior_tenant_id NVARCHAR(128) NULL,
+    dek_id NVARCHAR(32) NOT NULL,
+    payload VARBINARY(MAX) NOT NULL,
+    produced_ms BIGINT NOT NULL,
+    CONSTRAINT PK_autheris_cdc_stream_events PRIMARY KEY (stream_id, event_offset)
+);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_cdc_stream_events_produced' AND object_id = OBJECT_ID(N'dbo.autheris_cdc_stream_events'))
+    CREATE INDEX ix_cdc_stream_events_produced ON dbo.autheris_cdc_stream_events (stream_id, produced_ms);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_cdc_stream_events_dek' AND object_id = OBJECT_ID(N'dbo.autheris_cdc_stream_events'))
+    CREATE INDEX ix_cdc_stream_events_dek ON dbo.autheris_cdc_stream_events (stream_id, dek_id);
+
+IF OBJECT_ID(N'dbo.autheris_cdc_row_images', N'U') IS NULL
+CREATE TABLE dbo.autheris_cdc_row_images (
+    stream_id NVARCHAR(32) NOT NULL,
+    key_fingerprint VARBINARY(32) NOT NULL,
+    tenant_scope INT NOT NULL,
+    tenant_id NVARCHAR(128) NULL,
+    dek_id NVARCHAR(32) NOT NULL,
+    image VARBINARY(MAX) NOT NULL,
+    event_offset BIGINT NOT NULL,
+    updated_ms BIGINT NOT NULL,
+    CONSTRAINT PK_autheris_cdc_row_images PRIMARY KEY (stream_id, key_fingerprint)
+);
+
+IF OBJECT_ID(N'dbo.autheris_cdc_stream_keys', N'U') IS NULL
+CREATE TABLE dbo.autheris_cdc_stream_keys (
+    stream_id NVARCHAR(32) NOT NULL,
+    dek_id NVARCHAR(32) NOT NULL,
+    purpose INT NOT NULL,
+    kek_id NVARCHAR(64) NOT NULL,
+    wrapped_key VARBINARY(256) NOT NULL,
+    created_ms BIGINT NOT NULL,
+    retired_ms BIGINT NULL,
+    CONSTRAINT PK_autheris_cdc_stream_keys PRIMARY KEY (stream_id, dek_id)
+);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_cdc_stream_keys_kek' AND object_id = OBJECT_ID(N'dbo.autheris_cdc_stream_keys'))
+    CREATE INDEX ix_cdc_stream_keys_kek ON dbo.autheris_cdc_stream_keys (kek_id);
+
 -- WP-ARC-A-03: durable CDC webhook (CloudEvent) subscriptions
 IF OBJECT_ID(N'dbo.CLOUDEVENT_SUBSCRIPTIONS', N'U') IS NULL
 CREATE TABLE dbo.CLOUDEVENT_SUBSCRIPTIONS (

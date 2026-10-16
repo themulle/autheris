@@ -144,6 +144,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<IValidateOptions<GatewayOptions>, GatewaySecurityOptionsValidator>();
         services.AddSingleton<IValidateOptions<GatewayOptions>, GatewayStorageOptionsValidator>();
         services.AddSingleton<IValidateOptions<GatewayOptions>, GatewayResilienceOptionsValidator>();
+        services.AddSingleton<IValidateOptions<GatewayOptions>, CdcStreamOptionsValidator>();
         services.AddSingleton<IValidateOptions<GatewayOptions>>(sp =>
             new Autheris.Api.Extensions.DependencyInjection.GatewayEmptyListConfigurationValidator(
                 configuration,

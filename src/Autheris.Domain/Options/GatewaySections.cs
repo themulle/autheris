@@ -83,6 +83,7 @@ public static class GatewaySections
     public const string Procedures = "Gateway:SqlEndpoints:Procedures";
     public const string MssqlChangeTracking = "Gateway:MssqlChangeTracking";
     public const string PostgreSqlCdc = "Gateway:PostgreSqlCdc";
+    public const string CdcStream = "Gateway:CdcStream";
 
     // Integrations
     public const string OpenMetadata = "Gateway:OpenMetadata";
