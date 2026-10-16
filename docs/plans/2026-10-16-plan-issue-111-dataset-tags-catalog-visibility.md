@@ -1,13 +1,15 @@
 # Implementation Plan: REQ-GOV-111 - Persist Dataset Tags and Catalog Visibility (`Hidden` / `Summary` / `Full`)
 
-**Document ID:** `PLAN-GOV-111` (revision 1, 2026-10-16)
+**Document ID:** `PLAN-GOV-111` (revision 2, 2026-10-16)
 **Phase:** 2 (Solution Architect, `csharp-architect`)
 **Input:** [PRD REQ-GOV-111, section 2](2026-10-16-req-issues-111-115-catalog-access-analytics.md) (D-111-1..4, FR-111-1..9, SI-111-1..4, AC 1..8, T-111-1)
-**Branch:** to be created from `main` after #115 (`feat/issue-111-dataset-tags-visibility`); planning base `3ece5edd`
+**Branch:** WP-0: `fix/catalog-schema-disclosure` from `main`, merged first (before #107 and #111); WP-1..WP-6: `feat/issue-111-dataset-tags-visibility` from `main` after #115 and after WP-0; planning base `3ece5edd`
 **Parent Plan:** [00-master-plan-overview.md](00-master-plan-overview.md); requirement `REQ-GOV-111`; delivery tracker [PLAN-DELIVERY-W23](2026-10-16-plan-waves-2-3-delivery.md) (step P-6, implementation step I-7)
-**Status:** PROPOSED, Phase 3 security review done: CHANGES REQUIRED (revision 2 of the plan must close SEC-111-01..14 and the binding conditions BC-1..BC-14 before Phase 4; G-1 recommended as a separate security fix first)
+**Status:** PROPOSED rev. 2 (awaiting Phase 3 re-review). Revision 2 closes SEC-111-01..14 and BC-1..BC-14 of the Phase 3 review (mapping in the section "Revision 2 - response to Phase 3" before the review). **Delivery split:** WP-0 (security bugfix of the pre-existing catalog leaks) is self-contained and ships as its own PR before #111 and before #107 (tracker step `I-6a`); WP-1..WP-6 are the #111 feature.
 
 **Binding rules applied:** the `0001` baseline DDL of SQLite, PostgreSQL and SQL Server is extended in place, the `0001` checksum constants stay unchanged (`*GovernanceMigrationRunner.cs:18/22/22`), the shape snapshots under `src/Autheris.Infrastructure/Persistence/Migrations/Shape/` and their tests are updated (the way #107 added `TABLE_ROW_FILTER_STRATEGIES`); fail closed; rights are checked by the backend from the authenticated principal and the ownership store, never from request content or the calling agent; owner decision **Q-111-1**: raising a dataset to `Full` is governance-admin-only, data owners and delegates may set only `Hidden` and `Summary`; Q-111-2 (`Summary` tenant-wide now) and Q-111-3 (new sources default `Hidden`, option `Catalog:DefaultVisibility`) follow the PRD recommendation; Phase-4 developers are Sonnet; one sequential developer.
+
+**Revision 2 scope rule:** everything that leaks today, independent of the new tiers (REST catalog, search index and `RelevantColumns`, `/datasources`, the GraphQL `AllowAuthenticatedCatalogDiscovery` branch, query-analysis column evaluation, `sample_rows` guard form), is moved out of #111 into **WP-0**, which uses only the current consent-based `CatalogVisibility` and introduces no tier, no new type of #111 and no schema change. #111 then adds the tiers on top of the already-closed channels and re-runs the WP-0 leak tests with `Summary`/`Full` fixtures.
 
 ---
 
@@ -20,7 +22,7 @@
 | Model fields | `Table.Tags` and `Table.Visibility` (default `Hidden`) at `src/Autheris.Domain/Model/TableModels.cs:53-54`; `DatasetVisibility { Hidden = 0, Summary = 1, Full = 2 }` at `:17-22`. |
 | Not persisted, confirmed | The `TABLES` DDL has no column (`SqliteBaselineSchema.cs:26-41`); all readers build `Table` without them: SQLite `SqliteGovernanceRepository.Catalog.cs:111` (single table, cached), `:258` (`GetAllTablesAsync`), PostgreSQL `PostgreSqlGovernanceRepository.Catalog.cs:52`, SQL Server `SqlServerGovernanceRepository.Catalog.cs:53`. The `Table` that `UpsertTableMetadataAsync` returns (`SqliteGovernanceRepository.Catalog.cs:644`) also omits them. `ReleaseProfileToCatalogViewers` (`TableModels.cs:160`) is not persisted either (no hit under `src/Autheris.Infrastructure`), so today it is always `false`. |
 | `FilterForSubject` after PR #141 | `CatalogVisibility.cs:59-140`. A table without an (undenied) Allow consent is dropped for `Hidden` (`:90`), returned **with columns** for `Summary` when `ReleaseProfileToCatalogViewers` (`:95-101`), and returned **with all columns, unfiltered** for `Full` (`:103-107`): no column Deny rule, no `ColumnMaskingRules` DENY removal. #127's scope-aware logic (`:112-138`) applies only to consented tables. Tier rows are never tenant-filtered: the method takes `tenantId` only to filter consents (`:65`). |
-| `VisibleTablesAsync` | `CatalogVisibility.cs:220-259`: GovernanceAdmin/ClusterAdmin see everything (`:239-243`), no SID or no consent repository = nothing (`:245-249`), otherwise `FilterForSubject` (`:256`). **No tenant filter on `Summary`/`Full` rows.** `FilterToTenant` (`:151-174`, consent-derived ownership + `Gateway:Catalog:SharedTables`, `DataCatalogOptions.cs:76`) is used only by the GraphQL admin/discovery branch (`QueryTypes.cs:437-441`). Once tiers are persistable, a `Summary` table of tenant A is listed to every authenticated person of tenant B in MCP, Trino, Arrow and Iceberg: **FR-111-8 is violated by the existing code** (PRD risk confirmed, see G-4). |
+| `VisibleTablesAsync` | `CatalogVisibility.cs:220-259`: GovernanceAdmin/ClusterAdmin see everything (`:239-243`), no SID or no consent repository = nothing (`:245-249`), otherwise `FilterForSubject` (`:256`). **No tenant filter on `Summary`/`Full` rows.** `FilterToTenant` (`:151-174`, consent-derived ownership + `Gateway:Catalog:SharedTables`, `DataCatalogOptions.cs:76`) is used only by the GraphQL admin/discovery branch (`QueryTypes.cs:437-441`). Once tiers are persistable, a `Summary` table of tenant A is listed to every authenticated person of tenant B in MCP, Trino, Arrow and Iceberg: **FR-111-8 is violated by the existing code** (PRD risk confirmed, see G-4; latent today because no tier is persisted, closed inside #111 by the `SharedTables` rule of A-4). |
 | Tag filter | `McpDatasetCatalog.cs:140` (case-insensitive exact), tags returned at `:166`, `:299`; GraphQL `catalog(tag:)` `QueryTypes.cs:~450+` (`FilterAndPaginateCatalog`), DTO `Tags` `:456`. `FilterByContract` (`CatalogVisibility.cs:176-216`) already treats `Table.Tags` and `Sensitivity` as contract tags: **persisting tags changes which tables a schema contract includes/excludes** (new, intended, but a regression risk, R-6). |
 | Only other visibility readers | `BundledConsentRequestService.cs:126` and `QueryAnalysisService.Evaluation.cs:62` (`Hidden` and no grant/owner/admin = "unknown table" diagnostic). With persisted tiers `Summary`/`Full` tables become requestable here, which is the intended discovery-to-request path. No other file reads `Table.Visibility` (grep over `src`). |
 
@@ -40,17 +42,29 @@
 | 10 | AI guardrail (four-eyes gate and golden queries) | `AiDataGuardrailService.cs:290` (`isVisible` before the four-eyes gate), `:354` | access gate | **must stay consent-based** (`DataAccess`); a `Summary` table that merely is visible must not pass this gate |
 | 11 | Semantic MCP resources | `SemanticMcpCompiler.cs:116` | compiles resources with columns/measures | `DataAccess` surface |
 | 12 | `describe_my_access` | `EffectiveAccessExplanationService.cs:59,93` | own access | `DataAccess` (explains consent-derived access only) |
+| 14 | REST search engine / hybrid index (`CatalogDiscoveryService.cs:200-262`, `CatalogSearchWarmupService.cs:43`) and MCP `Matches` (`McpDatasetCatalog.cs:798-803`) | search over column names; `RelevantColumns` in results | **discovery** | **G-7, WP-0** (index result post-filtered to the visible set and re-matched without column-derived hits; `RelevantColumns` only for tables whose columns the caller may see); #111 adds `Full` DENY-column removal before matching |
+| 15 | REST `GET /api/v1/catalog/datasources` (`CatalogApiEndpoints.cs:55-63`, `CatalogDiscoveryService.cs:268-300`) | domains, endpoint `BaseUrl`, auth configuration state | admin metadata | **G-8, WP-0** (GovernanceAdmin/ClusterAdmin only, GovernanceAdmin tenant-filtered) |
+| 16 | GraphQL `catalog` admin/discovery branch (`QueryTypes.cs:435-441`, flag `AllowAuthenticatedCatalogDiscovery`) | `FilterToTenant` result **with all columns** for any non-admin when the flag is on (leaks today with the flag on) | discovery | **G-9, WP-0** (non-admins always take the consent path; flag no longer widens); O-5 |
+| 17 | Query analysis `QueryAnalysisService.Evaluation.cs:62-161` (REST/MCP/GraphQL analysis entry points) and `BundledConsentRequestService.cs:111-135` | `select *` expansion, `OutputColumns`, `UnknownColumn` existence oracle for a table without grant | analysis | **G-10, WP-0** (latent today because every table is `Hidden`; fixed consent-based so it cannot become a leak when tiers exist) |
+| 18 | MCP `sample_rows` (`McpDatasetCatalog.cs:575-595`) | synthetic rows for a caller without consent when `ReleaseProfileToCatalogViewers` | data-adjacent | **G-11, WP-0** (positive guard) and #111 (`CatalogView` positive) |
+| 19 | MCP resources `autheris://catalog/summary`, `autheris://datasets/{id}/schema` (`McpResourceProvider.cs:51,68`) and `invoke_api` (`ApiDispatcherService.cs:111,145`) | same service as row 6 | discovery | **WP-0** through the fixed service; verified per channel in M-12 |
 | 13 | Tables read for other purposes without visibility rules | OData `ODataEndpoints.Query.cs:37`, `ODataHandler.cs:137` (per-table authorization), `DynamicOpenApiGenerator.cs:53,72,134`, `TenantCatalogLookup.cs:114` (consent-derived), `GovernanceEndpoints.Access.cs:196` (admin) | n/a | they never consult `Visibility` and filter by authorization or tenant; they stay unchanged, but a **leak regression test per channel** (T-5) pins that a `Summary`/`Hidden` table without consent exposes no column |
 
 ### 1.3 PRD gaps found (closed by this plan)
 
 | # | Gap | Evidence | Resolution |
 |---|---|---|---|
-| G-1 | **The REST catalog service does not use `CatalogVisibility` at all.** `GET /api/v1/catalog/datasets` and `/{id}` require only an authenticated caller (`CatalogApiEndpoints.cs:33,51`); without ReBAC (`_rebacEvaluator is not { IsEnabled: true }`) `ListDatasetsAsync` returns **every table of every tenant** (`CatalogDiscoveryService.cs:67-79`) and `GetDatasetDetailAsync` returns **all columns with types** (`:141-165`); the MCP resource provider and `invoke_api` use the same service. `Hidden` and the "Summary never exposes columns" invariant cannot hold while this exists. | cited | WP-5: for callers that are not GovernanceAdmin/ClusterAdmin, list/detail/search use `CatalogVisibility.VisibleTablesAsync(..., Discovery)` first; ReBAC remains an additional filter (intersection). Behaviour change for non-admins without consent when ReBAC is off: they see `Summary`/`Full` tables or their consented tables only. Flagged for the owner (O-1). |
+| G-1 | **(Moved to WP-0, standalone security bugfix; #111 only adds the `Discovery` surface on top.)** **The REST catalog service does not use `CatalogVisibility` at all.** `GET /api/v1/catalog/datasets` and `/{id}` require only an authenticated caller (`CatalogApiEndpoints.cs:33,51`); without ReBAC (`_rebacEvaluator is not { IsEnabled: true }`) `ListDatasetsAsync` returns **every table of every tenant** (`CatalogDiscoveryService.cs:67-79`) and `GetDatasetDetailAsync` returns **all columns with types** (`:141-165`); the MCP resource provider and `invoke_api` use the same service. `Hidden` and the "Summary never exposes columns" invariant cannot hold while this exists. | cited | **WP-0** (consent-based, no tier): for callers that are not GovernanceAdmin/ClusterAdmin, list/detail/search go through `CatalogVisibility.VisibleTablesAsync` (5-arg, `DataAccess` semantics = today's rule) first; ReBAC remains an additional filter (intersection); GovernanceAdmin through `FilterToTenant`; detail of an invisible table is the same 404 as an unknown one. Behaviour change for non-admins without consent: they see their consented tables only (today: everything when ReBAC is off). Owner flag O-1 (answered: yes, accelerate). #111 WP-5 then only switches these call sites to `Discovery`. |
 | G-2 | `Full` currently returns columns **ignoring** column-level DENY masking rules and Deny consents (`CatalogVisibility.cs:103-107`). A persisted `Full` would show denied column names to everybody. | cited | `Full` for a caller without consent removes every column that has a `ColumnMaskingRules` DENY rule (as `:122-130` does for consented callers). Unit test in T-2. |
 | G-3 | `Summary` listing shows `Columns.Count` and `describe_dataset` returns GraphQL field names, filter/order type names, golden query texts, endpoint URLs and indexes for any visible table (`McpDatasetCatalog.cs:166,300-308`, golden examples `:268-275`). With emptied columns most is empty, but golden queries and GraphQL access (`QueryField`, example query) are column-derived. | cited | A-4: the `Summary` view is an allow-list, built explicitly, not derived by removing fields. |
-| G-4 | The tenant concept for tables does not exist (`TableMetadata` has no tenant; ownership is consent-derived, `CatalogVisibility.cs:143-149`). "`Summary` tenant-wide" (Q-111-2) therefore needs a definition. | cited | G-4 resolution: in multi-tenant mode a `Summary`/`Full` tier applies to a table only when it is tenant-visible by the existing `FilterToTenant` rule (tenant holds a consent record on it, or it is in `Gateway:Catalog:SharedTables`). Single-tenant (`TenantId.LegacySingleTenant`) is unrestricted. Consequence documented (R-3, O-2). |
-| G-5 | A visibility change must reach the SQLite single-table metadata cache. Only the SQLite repository has one (`_metadataCache`, `SqliteGovernanceRepository.Catalog.cs:68-216`, invalidation `QueueMetadataInvalidation` `SqliteGovernanceRepository.cs:47`); PostgreSQL and SQL Server read per call (no `QueueMetadataInvalidation` there). | cited | A-6. |
+| G-4 | The tenant concept for tables does not exist (`TableMetadata` has no tenant; ownership is consent-derived, `CatalogVisibility.cs:143-149`). "`Summary` tenant-wide" (Q-111-2) therefore needs a definition. The consent-derived signal is forgeable (a tenant admin can create a consent, also a Deny consent, on a foreign table identifier) and circular (SEC-111-02). | cited | **Rev. 2 resolution (BC-3, O-2):** in multi-tenant mode a `Summary`/`Full` tier applies to a table **only when it is in the operator list `Gateway:Catalog:SharedTables`**; the consent-derived part of the signal is dropped for tiers. No consent (Allow, Deny, pending, expired) can make a table tier-visible. Single-tenant (`TenantId.LegacySingleTenant`) is unrestricted. A dedicated tenant-owner attribute for tables is the scheduled follow-up (F-1). Consequence documented (R-3, O-2). |
+| G-5 | **Corrected in rev. 2 (SEC-111-01).** All three repositories have a **process-local** `_metadataCache` with a 30 s TTL (`MetadataCacheTtlTicks`): SQLite `SqliteGovernanceRepository.Catalog.cs:68-216` (generation invalidation via `QueueMetadataInvalidation`, `SqliteGovernanceRepository.cs:47`), PostgreSQL `PostgreSqlGovernanceRepository.cs:43,49`, `PostgreSqlGovernanceRepository.Catalog.cs:22,155,180,385,429,503,516`, SQL Server `SqlServerGovernanceRepository.Catalog.cs:23,156,181`. `GetAllTablesAsync` consults the cache on PostgreSQL and SQL Server too. There is no cross-node invalidation, so on a multi-replica deployment another replica would serve an old tier (including `Full` after lowering to `Hidden`) for up to 30 s. | cited | A-6: tier and tags are read **outside** the cache on every engine (always fresh on every replica); the cache keeps only structural data; all new write methods additionally remove the local key. No staleness window is accepted for restrictions. |
+| G-7 | Search is a column-name oracle: the REST search engine / hybrid index is built from the whole catalog including columns and returns `RelevantColumns`; MCP `Matches` matches column names; the index result is filtered only by the (unfiltered) list (`CatalogDiscoveryService.cs:200-262`, `CatalogSearchWarmupService.cs:43`, `McpDatasetCatalog.cs:798-803`). Exists today for REST (G-1). | cited (P3.2/SEC-111-05) | WP-0: post-filter and re-match (A-0.2). |
+| G-8 | `GET /api/v1/catalog/datasources` discloses every domain, endpoint `BaseUrl` and auth state to any authenticated caller (`CatalogApiEndpoints.cs:55-63`, `CatalogDiscoveryService.cs:268-300`). Exists today. | cited | WP-0: GovernanceAdmin/ClusterAdmin only (A-0.3). |
+| G-9 | With `AllowAuthenticatedCatalogDiscovery = true` (default `false`, `DataCatalogOptions.cs:69`) any non-admin takes the `FilterToTenant` branch and receives **all columns** of every tenant-visible table (`QueryTypes.cs:435-456`). Leaks today when the flag is on. | cited (SEC-111-04) | WP-0: non-admins always take the consent path (A-0.4); O-5. |
+| G-10 | Query analysis continues column evaluation for a table without grant/owner/admin unless `Visibility == Hidden` (`QueryAnalysisService.Evaluation.cs:62-79,103-161`): `select *` expansion, `OutputColumns`, `UnknownColumn` oracle. Latent today (every table is `Hidden`), live the moment any tier is persisted. | cited (SEC-111-06) | WP-0: consent-based stop at table level, independent of `Visibility` (A-0.5). |
+| G-11 | `sample_rows` (synthetic) allows a caller without consent when `ReleaseProfileToCatalogViewers` (`McpDatasetCatalog.cs:589`); the planned `CatalogView != Summary` guard was negative and the enum default `Granted` fail-open (SEC-111-07). `ReleaseProfileToCatalogViewers` is always `false` today (not persisted). | cited | WP-0 pins the guard positively (A-0.6); #111 A-4 uses a restrictive enum default and a positive `Full` check. |
+| G-12 | Tenant-scoped GovernanceAdmin could change tier/tags of any dataset (global catalog; `/state` and `/keys` precedent, `CatalogApiEndpoints.cs:121-150`, `GovernanceEndpoints.Catalog.cs:69-74`) (SEC-111-03). | cited | A-5 (rev. 2). |
 | G-6 | PRD FR-111-3 asks for an MCP admin tool "two-phase HITL". The plan store (`StoredAccessPlan`, `IAccessPlanStore.cs:12`) is typed to access grants and has no plan kind; the established single-call precedent for catalog mutations is `admin_set_dataset_state` (`McpAdminTools.cs:23,126,197-203`). | cited | A-8: one tool following the `admin_set_dataset_state` precedent (cluster admin only); revisit if the plan kind of PLAN-GOV-107 has landed (O-3). |
 
 ### 1.4 Where tags exist today
@@ -76,6 +90,24 @@
 
 ## 2. Architecture Decisions
 
+### A-0 WP-0 - standalone security bugfix of the pre-existing catalog leaks (independent of #111)
+
+WP-0 is a self-contained change set. **Invariants:** it uses only the current consent-based `CatalogVisibility` (5-argument overloads = `DataAccess` semantics, no `CatalogSurface`, no tier, no `CatalogView`, no `TABLE_TAGS`/settings table, no migration, no new public contract of #111); it compiles and is green with `main` alone; #111 and #107 rebase onto it, not the other way round. Owner rule "security bugs first": it is merged before #107 and before #111 (tracker step `I-6a`, BC-1). The owner flag O-1 applies to this PR (answered: yes).
+
+**A-0.1 REST list/detail (G-1).** `CatalogDiscoveryService.ListDatasetsAsync` and `GetDatasetDetailAsync` resolve the caller class first: ClusterAdmin = all (unchanged); GovernanceAdmin = `CatalogVisibility.FilterToTenant` (the rule already used by GraphQL, SR-L-21; this keeps the existing consent-derived tenant signal for an admin view, its weakness is tracked as F-1 and is not widened); everybody else = `CatalogVisibility.VisibleTablesAsync` (consents of the caller, #127 column logic). The ReBAC evaluator stays an additional filter (intersection of both sets, never a union). Detail for a table outside the set is the same `404` body/status as an unknown dataset; the detail columns come from the filtered `TableMetadata` (only columns the caller's consent allows). No tenant or caller input beyond the authenticated principal is used. Missing consent repository or principal without SID = empty list / 404 (fail closed).
+
+**A-0.2 Search (G-7).** REST search (index ready and fallback) and the `invoke_api`/MCP resource paths: the index hit list is intersected with the visible set **before** shaping; each surviving hit is re-evaluated against the filtered `TableMetadata` (only visible columns): a hit whose only match is a column the caller cannot see is dropped; `RelevantColumns` is limited to visible columns (empty for admins' own scope rules unchanged). MCP `Matches` already searches the filtered table; a test pins it. Highlights, `MatchedTerms` and scores of dropped hits never leave the service.
+
+**A-0.3 `/datasources` (G-8).** Endpoint policy: GovernanceAdmin or ClusterAdmin (`GatewayPolicies`), non-admin 403; the service additionally tenant-filters domains for a non-cluster admin by the domains of its `FilterToTenant` set and never returns `BaseUrl`/auth state for a domain outside it. A service-level call by a non-admin returns an empty list (fail closed). Behaviour change flagged with O-1 (release note).
+
+**A-0.4 GraphQL flag (G-9, O-5).** `QueryTypes.cs`: the `isGovernanceAdmin || allowDiscovery` branch becomes `isGovernanceAdmin`; non-admin callers always use `FilterForSubject` (consent path), the flag no longer widens anything and logs one Warning at startup when set (deprecation, O-5). No new listing of consent-less tables exists in WP-0 (tiers in #111 provide the sanctioned form of "consent-less tenant users may see a listing").
+
+**A-0.5 Query analysis (G-10).** In `QueryAnalysisService.Evaluation.cs`, a table without table grant, ownership or admin role yields exactly the existing `UnknownTable` diagnostic when `Visibility == Hidden` (unchanged, today always) **and**, for any other value, the table-level `MissingConsents` item and then `return` (no `select *` expansion, no `OutputColumns`, no `UnknownColumn`, no column-level `MissingConsents`). The decision no longer depends on `Visibility` for the column stage, so it cannot regress when #111 persists tiers. `BundledConsentRequestService.cs:111-135` is verified: a column-level request for a table without grant/owner/admin is converted to the table-level READ request or answered as unknown (no per-column validation message), pinned by test.
+
+**A-0.6 `sample_rows` guard (G-11).** The synthetic branch is rewritten positively: `allowed = isAdmin || isGranted || (table.ReleaseProfileToCatalogViewers && <explicitly full-marked>)`; in WP-0 the third term is `false` (the flag is not persisted, so the effective behaviour stays "consent or admin only") and a code comment/test states that the term is replaced by `CatalogView == Full` in #111 WP-3; every other case throws `GatewayForbiddenException`. Non-synthetic `sample_rows` keeps its consent requirement; a test pins both.
+
+**Not in WP-0:** tiers, tags, tenant rule for `Summary`, admin APIs, DDL, DENY-removal for `Full` (needs tiers), any `CatalogSurface` plumbing. WP-0 changes no signature that #111 changes (the signature work of C-2 happens in #111; WP-0 only calls existing overloads).
+
 ### A-1 Storage: two tables, separate from `TABLES` (D-111-1 confirmed)
 `TABLE_TAGS (table_id, tag, source, created_by, created_at; PK (table_id, tag))` and `TABLE_CATALOG_SETTINGS (table_id PK, visibility, updated_by, updated_at)`. Reason as F-GOV-21/#107: ingestion upserts rewrite `TABLES`; owner decisions must survive. No foreign keys and no CHECK constraints (consistent with `TABLE_ROW_FILTER_STRATEGIES`); validity is enforced on write and re-validated on read. `table_id` is the `TABLES.id` GUID in its `D` form. A missing visibility row = `Hidden`.
 
@@ -89,11 +121,13 @@
 New enum `CatalogSurface { DataAccess = 0, Discovery = 1 }` (Application). `DataAccess` is the **default** of every overload (fail closed): only admins and consented tables, exactly today's behaviour for tables without a persisted tier. Only the discovery surfaces of section 1.2 (rows 1-6) pass `Discovery`, where the tiers apply:
 
 - `Hidden`: not listed, `describe_dataset` answers as for an unknown table (`TableNotFoundException`, `McpDatasetCatalog.cs:659-660`; #117 behaviour).
-- `Summary`: listed for every authenticated caller of the tenant (G-4). **Columns are always empty; `ReleaseProfileToCatalogViewers` is ignored for `Summary`** (the `:97-100` branch is deleted).
-- `Full`: columns of the table minus every column with a table-level DENY masking rule (G-2); `ReleaseProfileToCatalogViewers` keeps its meaning for `Full` only (XML doc at `TableModels.cs:159` corrected from "Summary or Full").
+- `Summary`: listed for every authenticated caller of the tenant for tables in `Gateway:Catalog:SharedTables` (multi-tenant) or every table (single-tenant), see G-4 (rev. 2: consent records never make a table tier-visible). **Columns are always empty; `ReleaseProfileToCatalogViewers` is ignored for `Summary`** (the `:97-100` branch is deleted).
+- `Full`: columns of the table minus every column with a table-level DENY masking rule (G-2); **the removal happens inside `FilterForSubject`, before any search matching or index result shaping (BC-6)**; `ReleaseProfileToCatalogViewers` keeps its meaning for `Full` only (XML doc at `TableModels.cs:159` corrected from "Summary or Full").
 - A caller with an undenied Allow consent always takes the consent path (columns per consent, #127 scope logic untouched).
+- **`DataAccess` removes the tier branches entirely** (BC-12): in that mode the `Hidden`/`Summary`/`Full` switch is not executed at all (a table without Allow consent is dropped), it is not "conditionally skipped".
+- **GraphQL `AllowAuthenticatedCatalogDiscovery` (BC-5, O-5):** tiers always win; the flag is deprecated and has no effect on columns or listing (WP-0, A-0.4); non-admin GraphQL discovery uses `FilterForSubject(Discovery)` only.
 
-`FilterForSubject` returns a new init property `TableMetadata.CatalogView` (`Granted | Summary | Full`; default `Granted`, set only by the discovery filter) so that consumers know which restriction applied without recomputing. **`describe_dataset` builds the `Summary` answer from an allow-list** (new `McpDatasetCatalog.BuildSummaryDescription`): dataset id and domain/schema/table, `Description`, `Sensitivity`, `RequiresFourEyes` (not column-derived; needed by a requester, Phase 3 to confirm), `Tags`, `DataOwner`, `DataOwnerDelegates`, `AccessStatus`, `View = "summary"`; **not** included: `LongDescription` (free text, may name columns), columns, examples (golden queries), `GraphQl` access block, `Access` endpoint hints, `Indexes`/keys, value profiles, row counts, freshness. `McpDatasetSummary` for `Summary` rows reports `ColumnCount = 0` and no GraphQL query field. `search`/`Matches` therefore cannot match on column names. `sample_rows` on a `Summary` table without a consent is rejected (`GatewayForbiddenException`) regardless of the flag (`McpDatasetCatalog.cs:589` guarded by `CatalogView != Summary`). GraphQL `catalog` returns `Columns = []` for `Summary`.
+`FilterForSubject` returns a new init property `TableMetadata.CatalogView` (`Unmarked = 0 | Granted | Summary | Full`; **the default is `Unmarked`, which every consumer treats as the most restrictive value, never as `Granted`** (SEC-111-07/BC-8); the filter sets `Granted`, `Summary` or `Full` explicitly on every row it returns, including the consent path) so that consumers know which restriction applied without recomputing, and every consumer checks **positively** (`== Full`, `== Granted` with a consent), never negatively. **`describe_dataset` builds the `Summary` answer from an allow-list** (new `McpDatasetCatalog.BuildSummaryDescription`): dataset id and domain/schema/table, `Description`, `Sensitivity`, `RequiresFourEyes` (not column-derived; needed by a requester, Phase 3 to confirm), `Tags`, `DataOwner`, `DataOwnerDelegates`, `AccessStatus`, `View = "summary"`; **not** included: `LongDescription` (free text, may name columns), columns, examples (golden queries), `GraphQl` access block, `Access` endpoint hints, `Indexes`/keys, value profiles, row counts, freshness. `McpDatasetSummary` for `Summary` rows reports `ColumnCount = 0` and no GraphQL query field. `search`/`Matches` therefore cannot match on column names; the REST index path is already post-filtered by WP-0 (A-0.2) and #111 adds that `Summary` hits are re-matched on identifier/description only and `Full` hits only on non-DENY columns. **`DataOwner` and `DataOwnerDelegates` in the `Summary` view are display names only, never SIDs, e-mails or UPNs (BC-14)**; a reflection test pins the exact allowed property set (any new property of `McpDatasetDescription` defaults to excluded). `sample_rows`: the WP-0 positive guard (A-0.6) is extended so that the no-consent synthetic branch is allowed **only** for `CatalogView == Full` with `ReleaseProfileToCatalogViewers` (flag on; DENY columns excluded); `Summary`, `Granted` without a consent, `Unmarked` and every future value throw `GatewayForbiddenException`. GraphQL `catalog` returns `Columns = []` for `Summary`.
 
 ### A-5 Who may change what (Q-111-1, rights checked by the backend)
 One application service `DatasetCatalogAdminService` is the only writer; REST, the manifest and the MCP tool all call it. It authorizes from the **authenticated `ClaimsPrincipal`** and the repositories, never from request fields:
@@ -104,13 +138,20 @@ One application service `DatasetCatalogAdminService` is the only writer; REST, t
 | Data owner or active delegate (`IsAuthorizedApproverForTableAsync`) | yes | yes | **no** (`FORBIDDEN` 403) |
 | Everybody else, read-only tokens, anonymous | no | no | no |
 
-Rules: a caller who is neither admin nor owner gets the same `404` as for an unknown dataset (no existence oracle for hidden datasets); an owner who requests `Full` gets `403 FORBIDDEN` (the dataset is known to them) and the attempt is audited as `DENY`; an owner may always **lower** a `Full` dataset to `Summary`/`Hidden` (restricting is allowed); an owner "setting" `Full` on an already-`Full` dataset is still refused (no special-casing). Ownership repository unavailable -> `503`, fail closed (as `GovernanceEndpoints.Access.cs:470-473`). The tier decision uses the **requested** value only after parsing it with `Enum.TryParse` + `Enum.IsDefined` (strings or numbers outside the three names -> `INVALID_VISIBILITY` 400; `Full` is never reachable through an unrecognized value). Tenant: GovernanceAdmin is tenant-scoped, the dataset catalog is global (`AdminControlPlane` precedent), so the admin gate for a tenant admin is the same as for the existing `/state` and `/keys` endpoints (GovernanceAdmin policy) and the mutation audit carries the request tenant.
+Rules: a caller who is neither admin nor owner gets the same `404` as for an unknown dataset (no existence oracle for hidden datasets); an owner who requests `Full` gets `403 FORBIDDEN` (the dataset is known to them) and the attempt is audited as `DENY`; an owner may always **lower** a `Full` dataset to `Summary`/`Hidden` (restricting is allowed); an owner "setting" `Full` on an already-`Full` dataset is still refused (no special-casing). Ownership repository unavailable -> `503`, fail closed (as `GovernanceEndpoints.Access.cs:470-473`). The tier decision uses the **requested** value only after parsing it with `Enum.TryParse` + `Enum.IsDefined` (strings or numbers outside the three names -> `INVALID_VISIBILITY` 400; `Full` is never reachable through an unrecognized value). **Tenant scope (SEC-111-03/BC-4, rev. 2):** the dataset catalog is global but a tier on a `SharedTables` table is visible to **every** tenant, so a tenant-scoped lever is a cross-tenant lever. In **multi-tenant mode only the canonical ClusterAdmin may change tags or tier of a dataset by role**; a tenant-scoped GovernanceAdmin is treated like "everybody else" (manageable only if the ownership store makes it the owner/delegate of that table, else the identical 404). In single-tenant mode GovernanceAdmin is unrestricted as before. This holds for REST, manifest (a `Datasets` entry the caller cannot manage is reported as unknown and skipped) and the MCP tool. The mutation audit carries the request tenant and the principal's authentication type (token vs session) (BC-13).
+
+**Mandatory order (SEC-111-08/BC-9):** (1) authenticate; (2) if the caller is not an admin per the rule above and the ownership store is unavailable: **503 for every such caller, before any dataset is resolved**; (3) resolve the dataset (unknown, inactive: same 404); (4) determine `manageable` (admin or owner/delegate), else the identical 404 (same body, same headers, no distinguishing detail, no early exit on a cheaper path; a DENY audit entry is written for the probe without influencing the response); (5) validate the body (400 codes) only now; (6) enforce the `Full` rule (owner: 403 `FORBIDDEN`, DENY audit); (7) write. The 403 is returned only after ownership is established.
+
+**Read modes (SEC-111-09/BC-10):** the catalog read path degrades to `Hidden` (A-6); the admin service `GetAsync`/`ApplyAsync` reads the before-state through a **strict** repository read that throws on failure (503, nothing written, no audit `before` of a fake `Hidden`).
 
 ### A-6 Persistence semantics, caches, no epoch
-Repository writes run in one transaction with the `before` read, return a `DatasetCatalogChange` (before/after tags and visibility), and then (SQLite only) `QueueMetadataInvalidation` + `ApplyMetadataInvalidations`. No `IncrementTableEpoch*` (A-6 reasoning in 1.5). Replace semantics are idempotent (`PUT` tags with the same set = no change, `Changed = false`, no audit entry, status 200). Both readers (`GetAllTablesAsync`, `GetTableMetadataAsync`) load tags and the settings row inside the existing snapshot read scope with two additional set-based queries (all tags, all settings; for a single table by `table_id`), no per-table queries. **Read failures degrade to the secure value**: a failing, missing or malformed tag/settings query (store error, unknown stored integer, tag failing `DatasetTagRules`) yields `Hidden` and empty tags for the affected rows, an Error log with row id (no values), and a counter; it never throws the whole catalog read and never yields `Full` (SI-111-2). Stored visibility integers are mapped with an explicit switch; every value other than 0, 1, 2 is `Hidden`.
+
+**Cache rule (rev. 2, SEC-111-01/BC-2, replaces the rev. 1 premise):** `_metadataCache` is process-local with a 30 s TTL on **all three** engines and has no cross-replica invalidation. Decision: **tier and tags are never stored in or served from `_metadataCache`.** The cached entry stays structural (columns etc., with `Visibility = Hidden`, no tags, `CatalogView = Unmarked`); `GetTableMetadataAsync` and `GetAllTablesAsync` overlay a **fresh** settings/tags read on every call (single table: two PK lookups by `table_id`; list: two set-based queries), on every engine, so a restriction (e.g. `Full` -> `Hidden`) is effective on every replica on the next read with **zero** accepted staleness. In addition each write method removes the local cache key on commit (`TryRemove` on PostgreSQL/SQL Server, generation/`QueueMetadataInvalidation` on SQLite) so a replaced structural entry never carries an overlay (test: cache entries contain no tier/tags). Residual: column structure (not security-relevant for tiers: `Summary` shows no columns, `Full` columns are DENY-filtered from fresh rules) keeps the existing <= 30 s TTL. Extra cost: one small indexed query per single-table read; measured in the contract test, accepted.
+
+Repository writes run in one transaction with the `before` read, return a `DatasetCatalogChange` (before/after tags and visibility), and then removes the local cache key on **every** engine (SQLite: `QueueMetadataInvalidation` + `ApplyMetadataInvalidations`; PostgreSQL/SQL Server: `_metadataCache.TryRemove`). No `IncrementTableEpoch*` (reasoning in 1.5). Replace semantics are idempotent (`PUT` tags with the same set = no change, `Changed = false`, no audit entry, status 200). Both readers (`GetAllTablesAsync`, `GetTableMetadataAsync`) load tags and the settings row **outside the metadata cache** (see cache rule) inside the existing snapshot read scope with two additional set-based queries (all tags, all settings; for a single table by `table_id`), no per-table queries. **Two read modes:** the catalog read mode degrades per row to `Hidden` (below); the admin read mode (`GetDatasetCatalogSettingsAsync(strict: true)`, used by `DatasetCatalogAdminService`) throws on any store error. **Read failures degrade to the secure value**: a failing, missing or malformed tag/settings query (store error, unknown stored integer, tag failing `DatasetTagRules`) yields `Hidden` and empty tags for the affected rows, an Error log with row id (no values), and a counter; it never throws the whole catalog read and never yields `Full` (SI-111-2). Stored visibility integers are mapped with an explicit switch; every value other than 0, 1, 2 is `Hidden`.
 
 ### A-7 Declarative import (FR-111-5)
-`DeclarativeConsentManifest` gains an optional trailing `IReadOnlyList<DeclarativeDatasetCatalog>? Datasets = null` (`Domain, Schema, TableName, Tags?, Visibility?`; null field = unchanged, never a reset; an empty `Tags` list = replace with none, only when the property is present). It is applied by `DeclarativeConsentApplyService` through `DatasetCatalogAdminService` with the caller principal (the apply endpoint is GovernanceAdmin-only, `GovernanceEndpoints.cs`), so `Full` through the manifest is an admin act and audited like the REST path. Dry run reports the planned changes and writes nothing (as for consents). A manifest entry for an unknown table is reported and skipped (existing wording `:89`). Old manifests (without `Datasets`) deserialize unchanged.
+`DeclarativeConsentManifest` gains an optional trailing `IReadOnlyList<DeclarativeDatasetCatalog>? Datasets = null` (`Domain, Schema, TableName, Tags?, Visibility?`; null field = unchanged, never a reset; an empty `Tags` list = replace with none, only when the property is present). It is applied by `DeclarativeConsentApplyService` through `DatasetCatalogAdminService` with the caller principal (the apply endpoint is GovernanceAdmin-only, `GovernanceEndpoints.cs`), so `Full` through the manifest is an admin act and audited like the REST path. Dry run reports the planned changes and writes nothing (as for consents), **but runs exactly the same authorization, tenant rule (A-5) and validation as apply** (BC-11), so it is not a visibility oracle; a non-admin dry run is 403. `Visibility` is parsed with `DatasetTagRules.TryParseVisibility` (names only; numeric strings, comma lists, numbers rejected), never with the `JsonStringEnumConverter` of `GitOpsJsonOptions`. `DatasetCatalogAdminService` never accepts a null or system principal for `Full` (unit test); a future non-HTTP apply (GitOps pull job) must pass a ClusterAdmin/GovernanceAdmin principal. A manifest entry for an unknown table is reported and skipped (existing wording `:89`). Old manifests (without `Datasets`) deserialize unchanged.
 
 ### A-8 Admin surfaces
 REST (all through `DatasetCatalogAdminService`, `RequireAuthorization()` plus the in-service check of A-5, **not** `GatewayPolicies.GovernanceAdmin`, because owners must reach them):
@@ -122,12 +163,12 @@ REST (all through `DatasetCatalogAdminService`, `RequireAuthorization()` plus th
 MCP: `admin_set_dataset_catalog` (arguments `dataset`, optional `tags`, optional `visibility`), registered like `admin_set_dataset_state` (`McpAdminTools.cs:23,38,126,197`): usable only by the canonical cluster admin through a non-read-only session (`CanUseAdminTools` `:42-52`), calls the same service with the session principal rebuilt from the session (`McpProtocolHandler.BuildPrincipalFromSession`), so an agent cannot widen anything beyond what its principal may do. Group/gating by PLAN-SEC-115: the five/six admin tools are "ungrouped" there, so the new name is added to the pin test of `McpToolGroups` (decision: ungrouped, only `DisabledTools` can disable it).
 
 ### A-9 Audit, telemetry, configuration
-- Audit events `CATALOG_VISIBILITY_CHANGED` and `CATALOG_TAGS_CHANGED` (`AuditEventTypes`, `AuditPolicyTable` = `FailClosed`), written post-commit with `RecordRequiredAsync(..., CancellationToken.None)` as `CatalogKeyDefinitionChanged` (`CatalogApiEndpoints.cs:245-263`): actor SID, target table id, `before`/`after`, `source` (`admin|manifest|mcp|dbt`); an unavailable audit store surfaces as 503 through the exception handler. A refused attempt (owner asks `Full`, caller not manageable) is recorded with `Decision = "DENY"` via the normal writer (best effort). dbt tag replacement writes one `CATALOG_TAGS_CHANGED` entry per table only when the set changed.
+- Audit events `CATALOG_VISIBILITY_CHANGED` and `CATALOG_TAGS_CHANGED` (`AuditEventTypes`, `AuditPolicyTable` = `FailClosed`), written post-commit with `RecordRequiredAsync(..., CancellationToken.None)` as `CatalogKeyDefinitionChanged` (`CatalogApiEndpoints.cs:245-263`): actor SID, target table id, `before`/`after`, `source` (`admin|manifest|mcp|dbt`); an unavailable audit store surfaces as 503 through the exception handler. A refused attempt (owner asks `Full`, caller not manageable) is recorded with `Decision = "DENY"` via the normal writer (best effort). dbt tag replacement writes one `CATALOG_TAGS_CHANGED` entry per table only when the set changed. **Rev. 2 additions (SEC-111-12/BC-13):** (a) refused attempts are audited with `Decision = "DENY"` for the owner-asks-`Full` case **and** for foreign/non-manageable callers (probing signal), without changing the identical 404 response; (b) `before`/`after` are explicit structured fields (`visibility`, `tags`), so an alert can key on `after.visibility == Full`, and the entries carry the request tenant and the authentication type (token vs session); (c) the effective `Catalog:DefaultVisibility` is audited once at startup and on every configuration change, and each ingestion run that created tables with a non-`Hidden` default writes **one aggregated** audit entry (count, source; no table names required).
 - Metric `autheris_catalog_visibility_total{tier}` (observable gauge over a cached count, refreshed on change and at start; no table names or ids as labels), counter `autheris_catalog_visibility_degraded_total` (A-6 degradations).
 - Configuration (`DataCatalogOptions`, section `Gateway:Catalog`): `MaxTagsPerDataset` (32; range 1-256), `DefaultVisibility` (`Hidden`; only `Hidden` and `Summary` are valid, anything else, including `Full`, fails startup validation). The default is applied **at table creation only** (A-10), never at read time, so flipping the option never exposes existing tables.
 
 ### A-10 New-source default (Q-111-3)
-Interface `ICatalogVisibilityDefaults` (Domain, `DatasetVisibility NewTableDefault`, default `Hidden`) is injected optionally into the three governance repositories. In the **insert branch** of `UpsertTableMetadataAsync` (SQLite `:473` `INSERT INTO TABLES`; PostgreSQL and SQL Server analogues), when the default is `Summary`, the repository inserts the `TABLE_CATALOG_SETTINGS` row in the same transaction with `updated_by = 'system:default'`. Existing tables and the `Hidden` default write nothing. No per-table audit entry for the system default (volume); the option itself is a configuration decision visible in the configuration audit.
+Interface `ICatalogVisibilityDefaults` (Domain, `DatasetVisibility NewTableDefault`, default `Hidden`) is injected optionally into the three governance repositories. In the **insert branch** of `UpsertTableMetadataAsync` (SQLite `:473` `INSERT INTO TABLES`; PostgreSQL and SQL Server analogues), when the default is `Summary`, the repository inserts the `TABLE_CATALOG_SETTINGS` row in the same transaction with `updated_by = 'system:default'`. Existing tables and the `Hidden` default write nothing. No per-table audit entry for the system default (volume); instead the aggregated creation audit and the startup/configuration-change audit of A-9(c) (BC-13). The default affects only tables created after the option change; existing tables never change (test M-14).
 
 ### A-11 Alternatives rejected
 - Tags/visibility columns on `TABLES`: re-ingestion overwrites owner decisions (PRD veto 2).
@@ -144,7 +185,7 @@ Interface `ICatalogVisibilityDefaults` (Domain, `DatasetVisibility NewTableDefau
 ### C-1 Domain (`src/Autheris.Domain`)
 ```csharp
 // Model/TableModels.cs additions
-public enum CatalogView { Granted = 0, Summary = 1, Full = 2 }
+public enum CatalogView { Unmarked = 0, Granted = 1, Summary = 2, Full = 3 }   // default Unmarked = most restrictive; consumers check positively
 public sealed record TableMetadata { /* ... */ public CatalogView CatalogView { get; init; } = CatalogView.Granted; }
 
 // Model/DatasetCatalogModels.cs (new)
@@ -191,16 +232,16 @@ public static IReadOnlyList<TableMetadata> FilterForSubject(
     IEnumerable<TableMetadata> allTables, IEnumerable<Consent> activeConsents, TenantId tenantId,
     IReadOnlySet<string>? callerScopes = null,
     CatalogSurface surface = CatalogSurface.DataAccess,
-    IReadOnlySet<TableIdentifier>? tenantTables = null);   // Discovery + multi-tenant + null => tiers off (fail closed)
+    IReadOnlySet<TableIdentifier>? sharedTables = null);   // Discovery + multi-tenant: tiers apply ONLY to this set (= Gateway:Catalog:SharedTables); null/empty => tiers off (fail closed). Consents never extend it.
 public static Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(/* existing params */, CatalogSurface surface = CatalogSurface.DataAccess, CancellationToken ct = default);
 // McpCatalogVisibility.VisibleTablesAsync gains the same optional surface parameter.
 
 // Interfaces/IGovernanceRepository.cs, ITableMetadataRepository (defaults throw NotSupportedException, #107 style)
-Task<DatasetCatalogSettings?> GetDatasetCatalogSettingsAsync(TableIdentifier table, CancellationToken ct = default);
+Task<DatasetCatalogSettings?> GetDatasetCatalogSettingsAsync(TableIdentifier table, bool strict = true, CancellationToken ct = default);   // strict: throws on store error (admin read mode)
 Task<DatasetCatalogChange?> ReplaceDatasetTagsAsync(TableIdentifier table, IReadOnlyList<string> tags, DatasetTagSource source, Sid actor, CancellationToken ct = default);
 Task<DatasetCatalogChange?> ChangeDatasetTagsAsync(TableIdentifier table, IReadOnlyList<string> add, IReadOnlyList<string> remove, Sid actor, CancellationToken ct = default); // admin source only
 Task<DatasetCatalogChange?> SetDatasetVisibilityAsync(TableIdentifier table, DatasetVisibility visibility, Sid actor, CancellationToken ct = default);
-// all: null when the table is unknown/inactive; one transaction (before-read, write); no epoch bump; SQLite invalidates its metadata cache.
+// all: null when the table is unknown/inactive; one transaction (strict before-read, write); no epoch bump; every engine removes its local metadata cache key on commit; tier/tags are never cached (A-6).
 // ReplaceDatasetTagsAsync(Admin) replaces ONLY admin-source rows, (Dbt) only dbt-source rows (A-2).
 
 // Governance/Interfaces/IDatasetCatalogAdminService.cs + Governance/Services/DatasetCatalogAdminService.cs (new)
@@ -230,18 +271,28 @@ Idempotent (`CREATE TABLE IF NOT EXISTS` / `IF OBJECT_ID ... IS NULL`), appended
 
 Ownership is single (one developer owns every file); the work packages are an ordering, each ends green and committed. "Red first" applies to every package (section 6).
 
+### WP-0 Security bugfix: pre-existing catalog leaks (own PR, merged FIRST; independent of #111 and #107)
+
+Branch `fix/catalog-schema-disclosure` from `main`. Consent-based only (A-0). No Domain/Infrastructure/DDL/shape change, no checksum change, no new options except the deprecation Warning.
+- Application: `Catalog/Services/CatalogDiscoveryService.cs` (list, detail, search incl. index post-filter and column re-match, `ListDatasourcesAsync`), `Governance/Analysis/QueryAnalysisService.Evaluation.cs` (table-level stop), `Governance/Analysis/BundledConsentRequestService.cs` (verify/pin, change only if the test is red), `Mcp/Services/McpDatasetCatalog.cs` (positive `sample_rows` guard only; `Matches` pinned by test), `Mcp/Services/McpResourceProvider.cs` only if it needs the principal passed through (it already calls `ICatalogDiscoveryService` with the principal).
+- GraphQL: `Autheris.GraphQL/Types/QueryTypes.cs` (branch `isGovernanceAdmin` only, flag deprecation Warning).
+- Api: `Endpoints/CatalogApiEndpoints.cs` (`/datasources` admin policy; detail 404 unchanged shape).
+- Tests (red first): `Tests.Unit/Catalog/CatalogDiscoveryConsentVisibilityTests.cs` (new: ReBAC off/on x user/GovernanceAdmin/ClusterAdmin x list/detail/search/datasources), `Tests.Unit/Catalog/CatalogSearchColumnOracleTests.cs` (new, M-5 baseline), `Tests.Unit/Governance/QueryAnalysisUnconsentedTableTests.cs` (new, M-6 baseline), `Tests.Unit/Mcp/McpSampleRowsGuardTests.cs` (new, M-7 baseline), `Tests.Unit/GraphQL/CatalogDiscoveryFlagTests.cs` (new, M-4 baseline), `Tests.Integration/CatalogChannelParityTests.cs` (new in WP-0, SQLite fixture: REST list/detail/search/datasources, MCP resources and `invoke_api` for a consent-less tenant-B user versus tenant-A tables, M-12; #111 extends the same class with tier fixtures).
+- Existing suites to adapt: tests asserting that non-admins list every table when ReBAC is off.
+- Size: **~260 LOC production, ~700 LOC tests** (S-M). Release note for O-1 (non-admins lose the unfiltered REST catalog and `/datasources`).
+
 ### WP-1 Contracts and persistence (all three engines)
 - Domain: `Model/TableModels.cs` (`CatalogView`, doc fix of `ReleaseProfileToCatalogViewers`), `Model/DatasetCatalogModels.cs` (new), `Model/DatasetTagRules.cs` (new), `Model/DeclarativeConsentModels.cs`, `Options/Integrations/DataCatalogOptions.cs`, `Audit/AuditEventTypes.cs`, `Interfaces/ICatalogVisibilityDefaults.cs` (new).
 - Application: `Interfaces/IGovernanceRepository.cs` (C-2), `Audit/AuditPolicyTable.cs` (2 entries), options validator for `MaxTagsPerDataset` / `DefaultVisibility` (start fails on `Full`).
-- Infrastructure: `Persistence/Migrations/{Sqlite,PostgreSql,SqlServer}BaselineSchema.cs` (C-3), `Persistence/Migrations/Shape/governance-shape.{sqlite,postgresql,sqlserver}.json`, `Persistence/{Sqlite,PostgreSql,SqlServer}GovernanceRepository.Catalog.cs` (load tags/visibility in `GetAllTablesAsync` and `GetTableMetadataAsync`, four new methods, default on insert, degradation per A-6); SQLite cache invalidation in `SqliteGovernanceRepository.Catalog.cs`/`.cs`; `SqliteGovernanceLintSource.cs` only if it enumerates table lists.
+- Infrastructure: `Persistence/Migrations/{Sqlite,PostgreSql,SqlServer}BaselineSchema.cs` (C-3), `Persistence/Migrations/Shape/governance-shape.{sqlite,postgresql,sqlserver}.json`, `Persistence/{Sqlite,PostgreSql,SqlServer}GovernanceRepository.Catalog.cs` (fresh overlay of tags/visibility **outside `_metadataCache`** in `GetAllTablesAsync` and `GetTableMetadataAsync`, four new methods with cache-key removal on all three engines, strict admin read, default on insert, degradation per A-6); SQLite generation invalidation in `SqliteGovernanceRepository.Catalog.cs`/`.cs`, `_metadataCache.TryRemove` in the PostgreSQL/SQL Server files (cache entry never holds tier/tags); `SqliteGovernanceLintSource.cs` only if it enumerates table lists.
 - Tests: `Tests.Unit/Domain/DatasetTagRulesTests.cs`, `Tests.Unit/Persistence/GovernanceSchemaShapeSnapshotTests.cs` (extend), `Tests.Integration/CatalogSettingsRepositoryContractTestsBase.cs` + SQLite/PostgreSQL/SQL Server subclasses (shared container fixtures), least-privilege tests.
 
 ### WP-2 Visibility engine
-- Application: `Services/CatalogVisibility.cs` (surface, tier rules, `Full` DENY-column removal, `Summary` columns always empty, tenant gate, `CatalogView`), `Mcp/Services/McpCatalogVisibility.cs` (pass-through of the surface), the discovery call sites choose `Discovery`: `Mcp/Services/McpDatasetCatalog.cs:788-795` (list, describe, relations) and `Autheris.GraphQL/Types/QueryTypes.cs:444`; **all other callers of section 1.2 (rows 7-12) are not edited** (their default is `DataAccess`), and a source-level test asserts it (T-3).
+- Application: `Services/CatalogVisibility.cs` (surface, tier rules removed entirely for `DataAccess`, `Full` DENY-column removal before matching, `Summary` columns always empty, `SharedTables`-only tenant gate, explicit `CatalogView` on every returned row), `Mcp/Services/McpCatalogVisibility.cs` (pass-through of the surface; default `DataAccess`), the discovery call sites choose `Discovery`: `Mcp/Services/McpDatasetCatalog.cs:788-795` (list, describe, relations) and `Autheris.GraphQL/Types/QueryTypes.cs` (non-admin branch; the flag branch no longer exists after WP-0); **all other callers of section 1.2 (rows 7-12) are not edited** (their default is `DataAccess`), and a source-level test asserts it (T-3).
 - Tests: `Tests.Unit/Catalog/CatalogVisibilityTierTests.cs` (new), adaptation of `Wave3CatalogOwnershipTests.cs`, `Issue127ScopeAwareLevelTests.cs`, `Issue116ScopeOnlyColumnRuleConsistencyTests.cs`, `DynamicSchemaContractTests.cs` where they assume `Summary`/`Full` through the 4-argument call.
 
 ### WP-3 MCP and GraphQL discovery output
-- Application: `Mcp/Services/McpDatasetCatalog.cs` (`BuildSummaryDescription`, `ColumnCount`, sample_rows guard), `Domain/Model/McpDatasetModels.cs` (`View` property on description, nullable `GraphQl`).
+- Application: `Mcp/Services/McpDatasetCatalog.cs` (`BuildSummaryDescription` with display-name-only owners, `ColumnCount`, `sample_rows` third term becomes `CatalogView == Full`, `Summary`/`Full` re-match for search), `Domain/Model/McpDatasetModels.cs` (`View` property on description, nullable `GraphQl`).
 - GraphQL: `Types/QueryTypes.cs` (tenant tables for the tier, `Columns = []` for `Summary` by construction).
 - Tests: `Tests.Unit/Mcp/McpCatalogSummaryViewTests.cs`, GraphQL catalog tests.
 
@@ -251,20 +302,22 @@ Ownership is single (one developer owns every file); the work packages are an or
 - Api: `Endpoints/CatalogApiEndpoints.cs` (routes, DTOs, shared `ResolveActiveDatasetAsync`), DI registration in `Extensions/DependencyInjection/GatewayGovernanceServiceExtensions.cs`, `GovernanceEndpoints.Catalog.cs` only if the manifest endpoint needs the principal passed through.
 - Tests: `Tests.Unit/Catalog/DatasetCatalogAdminServiceTests.cs`, `Tests.Unit/Catalog/CatalogTagsVisibilityEndpointTests.cs`, `Tests.Unit/Governance/DeclarativeConsentApplyDatasetsTests.cs`, dbt ingestion tests, MCP admin tool tests.
 
-### WP-5 REST catalog service (G-1) and leak parity
-- Application: `Catalog/Services/CatalogDiscoveryService.cs` (`ListDatasetsAsync`, `GetDatasetDetailAsync`, search paths: non-admins intersect with `CatalogVisibility.VisibleTablesAsync(..., Discovery)`; `Summary` detail returns the allow-listed shape without columns), `Catalog/Interfaces/ICatalogDiscoveryService.cs` if the context needs the principal (`RequestContext.User` already carries it, `CatalogApiEndpoints.cs:293`).
-- Tests: `Tests.Unit/Catalog/CatalogDiscoveryVisibilityTests.cs`, `Tests.Integration/CatalogChannelParityTests.cs` (the per-channel leak matrix of T-5, SQLite fixture; PostgreSQL/SQL Server for the repository contract only).
+### WP-5 Tiers on the REST catalog service and leak parity (builds on WP-0)
+- Application: `Catalog/Services/CatalogDiscoveryService.cs` (WP-0 already closed the consent-based leak; WP-5 switches the non-admin path to `VisibleTablesAsync(..., Discovery)` with ReBAC intersection; `Summary` detail returns the allow-listed shape without columns; `Summary`/`Full` search re-match; admin `FilterToTenant` view unchanged), `Catalog/Interfaces/ICatalogDiscoveryService.cs` if the context needs the principal (`RequestContext.User` already carries it, `CatalogApiEndpoints.cs:293`).
+- Tests: `Tests.Unit/Catalog/CatalogDiscoveryVisibilityTests.cs`, `Tests.Integration/CatalogChannelParityTests.cs` (extended from WP-0 with `Summary`/`Hidden`/`Full` fixtures: the per-channel leak matrix of T-5, SQLite fixture; PostgreSQL/SQL Server for the repository contract only).
 
 ### WP-6 Cleanup
 - Tests: update existing tests adapted in WP-2; `ArchitectureTests` if a rule lists catalog consumers. Phase 6 (not this plan) updates `docs/features/f-gov-16-catalog-ownership-transparency.md` (removes the "not persisted" limitation, `:62`), F-GOV-12, F-GOV-15, `docs/features/README.md`, and the master plan.
 
-Not changed (stated so the reviewer can check): `FilterByContract` code, `ComputeAccessStatus`, `ConsentResolutionService`, any data path (`TableAccessPolicy`, governed rewriter), `CatalogVersionProvider`, `IEpochValidationService`, OData/OpenAPI generators, Trino/Arrow/Iceberg call sites.
+Not changed (stated so the reviewer can check): `FilterByContract` code, `QueryAnalysisService` after WP-0, `ComputeAccessStatus`, `ConsentResolutionService`, any data path (`TableAccessPolicy`, governed rewriter), `CatalogVersionProvider`, `IEpochValidationService`, OData/OpenAPI generators, Trino/Arrow/Iceberg call sites.
 
 ---
 
 ## 5. Sequencing
 
-Strictly sequential, one developer: WP-1 (contracts commit first, then DDL x3 + shapes, then repositories) -> WP-2 -> WP-3 -> WP-4 -> WP-5 -> WP-6. WP-2 may start only after the repository contract tests of WP-1 are green on SQLite (Testcontainers runs for PostgreSQL/SQL Server may finish later in CI). No parallel agents; per project memory the lead compiles and tests once at the end (Release build, warnings as errors, before the push; `DOTNET_USE_POLLING_FILE_WATCHER=true` for integration tests under WSL).
+**WP-0 first and separately:** WP-0 is implemented, reviewed and merged as its own PR before #107 and before #111 (security bugs first, BC-1; tracker step `I-6a` ahead of I-7); it has no dependency on any other plan. #111 starts from `main` after WP-0 is merged (and after #115).
+
+#111 itself strictly sequential, one developer: WP-1 (contracts commit first, then DDL x3 + shapes, then repositories) -> WP-2 -> WP-3 -> WP-4 -> WP-5 -> WP-6. WP-2 may start only after the repository contract tests of WP-1 (including the replica/cache tests M-1) are green on SQLite (Testcontainers runs for PostgreSQL/SQL Server may finish later in CI). No parallel agents; per project memory the lead compiles and tests once at the end (Release build, warnings as errors, before the push; `DOTNET_USE_POLLING_FILE_WATCHER=true` for integration tests under WSL).
 
 ---
 
@@ -313,6 +366,24 @@ T-6 Operations (WP-1/WP-4)
 29. `CatalogVersionProvider.GetVersionAsync` is unchanged by a tag or visibility change.
 30. `McpToolGroups` pin test (PLAN-SEC-115) includes `admin_set_dataset_catalog` as ungrouped.
 
+T-7 Phase 3 mandatory tests (rev. 2; WP column says where each is implemented). Tests marked WP-0 are written without tiers (consent-based fixtures) and re-run with tier fixtures in #111.
+31. **M-1 (WP-1)** per engine (SQLite, PostgreSQL, SQL Server): set `Full`, read via `GetTableMetadataAsync` and `GetAllTablesAsync`, lower to `Hidden`, read again on the same instance without TTL wait: no stale tier; a second repository instance (replica simulation, own `_metadataCache`) observes the change on the next read; the cached entry holds no tier/tags.
+32. **M-2 (WP-2)** tenant B admin creates Allow and Deny consents (REST, bulk, manifest) on a tenant-A `Summary` table: it does not become visible to tenant B users (tiers apply only to `SharedTables`); `SharedTables` listing positive/negative; multi-tenant with empty `SharedTables`: tiers off.
+33. **M-3 (WP-4)** tenant-B GovernanceAdmin in multi-tenant mode: REST, manifest and MCP attempts to set tier/tags on a tenant-A or shared dataset: identical 404 / skipped-as-unknown, nothing written; ClusterAdmin succeeds; single-tenant GovernanceAdmin succeeds; owner of the table succeeds for `Hidden`/`Summary`.
+34. **M-4 (WP-0, re-run in WP-3)** GraphQL `catalog` with `AllowAuthenticatedCatalogDiscovery = true`: consent-less caller sees no columns and no hidden/unconsented table; with tiers: `Hidden` absent, `Summary` columns `[]`, `Full` minus DENY columns.
+35. **M-5 (WP-0, extended in WP-2/3)** searching the exact column name and a prefix of an unconsented/`Summary`/`Hidden` table returns no hit and no `RelevantColumns` via MCP `list_datasets`/`search_catalog`, REST `/search` and `/datasets?search`, with the index ready and with the fallback; `Full` with a DENY-masked column: name neither listed nor matched.
+36. **M-6 (WP-0, re-run in WP-2)** query analysis (REST, MCP, GraphQL entry points): `select *`, a guessed existing and a non-existing column on an unconsented table (`Hidden` today, `Summary` with tiers): identical responses, no column names/types, only the table-level item; `BundledConsentRequestService` column request pinned.
+37. **M-7 (WP-0 baseline, WP-3 tiers)** `sample_rows` synthetic and non-synthetic: unconsented -> refused with and without `ReleaseProfileToCatalogViewers` (WP-0); with tiers: `Summary` refused, `Full` flag off refused, `Full` flag on allowed with DENY columns excluded, an `Unmarked` `TableMetadata` without consent refused.
+38. **M-8 (WP-4)** status/body equality matrix: unknown, inactive, foreign-tenant, hidden-and-not-owned dataset, each with valid and invalid body, as owner-less user: identical 404; ownership store down: 503 for every non-admin caller independent of existence and before resolving; owner `Full`: 403 + `DENY` audit + no write; foreign probe writes a `DENY` audit entry.
+39. **M-9 (WP-1/WP-4)** settings read failure: catalog list degrades non-admins to `Hidden`; admin `GetAsync`/`ApplyAsync` answer 503, no write, no audit with a fake `Hidden` before.
+40. **M-10 (WP-4)** manifest: `Visibility: "2"`, `"Full,Summary"`, `2` rejected; non-admin dry run 403; admin dry run writes nothing and reports the `Full` change; tenant-B admin `Full` entry for a tenant-A dataset skipped as unknown; null/system principal cannot raise `Full`.
+41. **M-11 (WP-2)** call-site guard over the three `VisibleTablesAsync` overloads and `McpCatalogVisibility`: default surface `DataAccess`; `AiDataGuardrailService`, `SemanticMcpCompiler`, Trino, Arrow, Iceberg sources contain no `CatalogSurface.Discovery`; behavioural: unconsented `Summary`/`Full` absent in Trino `SHOW TABLES`/`information_schema`, Flight SQL, Iceberg listing, guardrail gate (denied), golden queries, semantic resources.
+42. **M-12 (WP-0, extended in WP-5)** REST catalog ReBAC off and on: tenant-B user without consent gets no tenant-A table in `/datasets`, 404 on `/datasets/{id}`, empty `/search`, `/datasources` 403 (service: empty); MCP resources `autheris://catalog/summary`, `autheris://datasets/{id}/schema` and `invoke_api` composition follow the same result.
+43. **M-13 (WP-4)** owner lowering `Full` is audited with `before = Full`; combined tags+visibility edit with forbidden `Full` applies nothing; `after.visibility == Full` present as a structured field.
+44. **M-14 (WP-1)** `Catalog:DefaultVisibility = Summary`: system rows only for tables created after the change, one aggregated audit entry per creating run, startup/config-change audit; `Full` fails startup.
+45. **Display names only (BC-14, WP-3)** `Summary` view contains no SID/e-mail/UPN for owner and delegates; reflection test pins the exact allowed property set of the `Summary` allow-list.
+46. **Search `Summary` re-match (WP-3)** `Summary` hits only via identifier/description; `RelevantColumns` always empty.
+
 Existing suites that must stay green: #127 (`Issue127*`), #116, `RowFilterChannelParityTests`, F-GOV-12 shape tests, `Wave3CatalogOwnershipTests` (adapted only where noted), SQL gate suites (untouched).
 
 ---
@@ -331,7 +402,15 @@ Existing suites that must stay green: #127 (`Issue127*`), #116, `RowFilterChanne
 | Audit store unavailable | 503 (`FailClosed`) |
 | `Catalog:DefaultVisibility` = `Full` or unknown | startup validation fails |
 | Principal without SID / anonymous MCP client | no tables (existing `McpCatalogVisibility.cs:36-40`) |
-| Caller neither admin nor owner | 404 identical to unknown dataset |
+| Caller neither admin nor owner | 404 identical to unknown dataset (same body/headers; probe audited) |
+| Ownership store unavailable, non-admin caller | 503 for every such caller before dataset resolution (no existence oracle) |
+| Tier/tags read in admin mode fails | 503, nothing written (strict read) |
+| `CatalogView` unset (`Unmarked`) | treated as most restrictive; no consumer may read it as `Granted` |
+| Multi-tenant, table not in `SharedTables` | tiers do not apply; consent path only |
+| Multi-tenant, tenant-scoped GovernanceAdmin changes tier/tags of a non-owned dataset | identical 404, nothing written |
+| Unconsented table in query analysis | table-level `MissingConsents` only, no column evaluation |
+| `sample_rows` without consent | refused unless `CatalogView == Full` and the owner flag; everything else refused |
+| REST catalog / search / `/datasources` caller without consent | consented tables only; `/datasources` admin-only |
 
 ---
 
@@ -340,8 +419,10 @@ Existing suites that must stay green: #127 (`Issue127*`), #116, `RowFilterChanne
 | # | Risk | Mitigation |
 |---|---|---|
 | R-1 | A forgotten surface leaks `Summary`/`Full` columns | Section 1.2 inventory, default `DataAccess`, source-level call-site test (13), channel matrix (23-25) |
-| R-2 | WP-5 changes REST catalog behaviour for non-admins when ReBAC is off (today everything is listed) | Owner flag O-1; release note; intersection with ReBAC kept; admins unchanged |
-| R-3 | In multi-tenant mode a `Summary` table nobody of the tenant holds a consent on stays invisible (no tenant ownership model) | `Gateway:Catalog:SharedTables` is the documented route; owner flag O-2; a table-level tenant owner attribute is a later extension |
+| R-2 | WP-0 changes REST catalog and `/datasources` behaviour for non-admins (today everything is listed when ReBAC is off) | Separate PR first; owner flag O-1 (answered: yes); release note; intersection with ReBAC kept; admins unchanged |
+| R-3 | In multi-tenant mode tiers work only for `Gateway:Catalog:SharedTables` tables (no tenant ownership model); a tenant-scoped GovernanceAdmin cannot change tiers | Documented route; owner flag O-2 (answered); follow-up F-1: dedicated tenant-owner attribute for tables; ClusterAdmin or the table owner changes tiers |
+| R-9 | WP-0 and #111 touch `CatalogDiscoveryService` and `QueryTypes.cs` in sequence | WP-0 merges first; #111 starts from the merged `main`; WP-5 is a small delta (`Discovery` switch) |
+| R-10 | Tier/tag read outside the metadata cache adds a query per single-table read | Indexed PK lookup, measured in the contract test; correctness over latency for restrictions |
 | R-4 | Existing tests build `Summary`/`Full` tables and call the 4-argument `FilterForSubject` | Planned adaptation (WP-2); the new default is deliberately narrower |
 | R-5 | `UpsertTableMetadataAsync` callers might pass `Tags`/`Visibility` expecting persistence | Documented in XML doc on `Table.Tags`/`Visibility` ("persisted via the catalog settings API, ignored by the upsert"); upsert test pins it |
 | R-6 | Persisted tags activate `FilterByContract` tag include/exclude, which previously saw empty tags | Test 27; Phase 6 documentation; dbt-derived tags like `pii` may now exclude tables from contracts, intended |
@@ -350,10 +431,13 @@ Existing suites that must stay green: #127 (`Issue127*`), #116, `RowFilterChanne
 
 ## 9. Owner Flags
 
-- **O-1** REST `GET /api/v1/catalog/datasets*` currently lists/describes all tables of all tenants to any authenticated caller when ReBAC is off (G-1). The plan closes it as part of #111 (needed for AC 3/8). Confirm that this behaviour change for non-admins is wanted in this release.
-- **O-2** `Summary` "tenant-wide" is implemented as tenant-visible by consent record or `SharedTables` (G-4). A dedicated tenant-owner attribute for tables would be a separate feature.
-- **O-3** MCP admin tool is single-call like `admin_set_dataset_state` instead of the PRD's two-phase plan/confirm (G-6); cluster admin only. Switch to plan/confirm if PLAN-GOV-107's plan kind is merged first.
-- **O-4** `RequiresFourEyes` is part of the `Summary` view (not column-derived); remove if you consider it metadata beyond the PRD list.
+Answers follow the Phase 3 recommendations (P3.7); items marked DECIDED are resolved by this revision and only need the owner's veto.
+
+- **O-1 (DECIDED: yes, accelerated)** REST `GET /api/v1/catalog/datasets*` and `/datasources` currently list/describe all tables (and data source URLs) of all tenants to any authenticated caller when ReBAC is off (G-1, G-8). Closed in **WP-0**, a separate security PR merged before #111 and #107. Release note: non-admins without consent no longer see foreign tenants' tables, columns or data sources through REST, MCP resources and `invoke_api`.
+- **O-2 (DECIDED: interim restriction)** Multi-tenant tiers apply to `Gateway:Catalog:SharedTables` only; the consent-derived tenant signal is forgeable and circular and is not used for tiers (G-4). Tenant-scoped GovernanceAdmin cannot change tiers/tags by role in multi-tenant mode (A-5). Follow-up **F-1** (to schedule in the master plan): dedicated tenant-owner attribute for tables, then tiers become tenant-wide and tenant admins can manage their own datasets.
+- **O-3 (DECIDED: single call)** MCP admin tool is single-call like `admin_set_dataset_state`, cluster admin only, non-read-only session, audit `source = mcp` with the session principal, ungrouped in `McpToolGroups` with the pin test. Switch to plan/confirm when PLAN-GOV-107's plan kind is merged (no security difference, the `Full` rule lives in the service).
+- **O-4 (DECIDED: keep)** `RequiresFourEyes` stays in the `Summary` view (not column-derived, useful to a requester); owner veto removes it, no security dependency.
+- **O-5 (DECIDED: deprecate)** `AllowAuthenticatedCatalogDiscovery`: tiers always win; the flag has no effect on columns or listing from WP-0 on and logs a startup Warning (deprecation); removal of the option in a later breaking-change window. Behaviour change for deployments that enabled it: they lose the all-column tenant listing; the sanctioned replacement is `Summary` tiers on `SharedTables` tables (#111) and consents.
 
 ## 10. Security Notes for Phase 3
 
@@ -368,19 +452,24 @@ Existing suites that must stay green: #127 (`Issue127*`), #116, `RowFilterChanne
 9. Default visibility option (A-10): creation-time only, `Full` impossible, no retroactive exposure.
 10. Audit completeness and policy: `FailClosed` entries, before/after contents, no data values, sources (`admin|manifest|mcp|dbt`).
 11. Least-privilege runtime login grants on the two new tables; no FK/CHECK reliance.
+12. (rev. 2) WP-0 channels (REST list/detail/search/datasources, GraphQL flag, query analysis, `sample_rows` guard): consent-based only; verify the post-filter of the search index and the identical 404.
+13. (rev. 2) Cache rule A-6: tier and tags never cached; per-engine replica test M-1.
+14. (rev. 2) Tenant rule: `SharedTables` only, no consent-derived signal; ClusterAdmin-only tier writes in multi-tenant mode; authorization order of A-5.
 
 ## 11. LOC Estimate
 
 | Area | Production | Tests |
 |---|---|---|
-| WP-1 Domain, options, DDL x3, shape JSON (generated), repositories x3 | ~700 | ~650 |
-| WP-2 Visibility engine and call sites | ~170 | ~420 |
-| WP-3 MCP/GraphQL discovery output | ~190 | ~330 |
-| WP-4 Admin service, REST, MCP tool, manifest, dbt hook | ~560 | ~560 |
-| WP-5 REST catalog service, channel matrix | ~130 | ~480 |
-| Total | **~1,750** | **~2,450** |
+| **WP-0** security bugfix (own PR, first): REST list/detail/search/datasources, GraphQL flag, query analysis, `sample_rows` guard, channel parity tests | ~260 | ~700 |
+| WP-1 Domain, options, DDL x3, shape JSON (generated), repositories x3 (incl. cache rule, strict read) | ~760 | ~720 |
+| WP-2 Visibility engine and call sites (SharedTables rule, `CatalogView`) | ~170 | ~460 |
+| WP-3 MCP/GraphQL discovery output | ~190 | ~360 |
+| WP-4 Admin service (order, tenant rule, strict read), REST, MCP tool, manifest, dbt hook, audit additions | ~620 | ~650 |
+| WP-5 Tiers on the REST catalog service (delta on WP-0), channel matrix extension | ~60 | ~300 |
+| #111 total (WP-1..WP-6) | **~1,800** | **~2,490** |
+| WP-0 + #111 | **~2,060** | **~3,190** |
 
-Size M-L (PRD said M): the REST catalog closure (G-1) and the tenant gate (G-4) are additions found during verification. Shape JSON diffs (~200 lines per engine) excluded.
+Size of #111: M-L (PRD said M); WP-0 is S-M and independently shippable. Shape JSON diffs (~200 lines per engine) excluded.
 
 ## 12. Changelog
 
@@ -388,6 +477,59 @@ Size M-L (PRD said M): the REST catalog closure (G-1) and the tenant gate (G-4) 
 |---|---|---|
 | 1 | 2026-10-16 | Initial Phase 2 plan (PROPOSED), based on `3ece5edd`. |
 | 1+P3 | 2026-10-16 | Phase 3 security review appended (CHANGES REQUIRED); no change to the plan body yet. |
+| 2 | 2026-10-16 | Revision 2 responding to Phase 3 (SEC-111-01..14, BC-1..BC-14, M-1..M-14, O-1..O-5): new standalone WP-0 security bugfix (pre-existing leaks G-1, G-7..G-11) ahead of #111 and #107; cache premise corrected (all engines, tier/tags read outside the cache); tenant signal reduced to `SharedTables`, ClusterAdmin-only tier writes in multi-tenant mode; inventory and tests extended (T-7); owner flags answered. Awaiting Phase 3 re-review. |
+
+---
+
+## Revision 2 - response to Phase 3
+
+Every finding and binding condition of the review below maps to a concrete change in this plan. The review text itself is unchanged.
+
+### Findings
+
+| ID | Change made in revision 2 |
+|---|---|
+| SEC-111-01 | G-5 corrected (all three engines, 30 s process-local cache, no cross-node invalidation); A-6 cache rule: tier/tags read outside `_metadataCache` on every engine (zero accepted staleness), all write methods also remove the local key; C-2 contract note; WP-1 files; tests T-7 31 (M-1), R-10. |
+| SEC-111-02 | G-4 rewritten: tiers in multi-tenant mode apply only to `Gateway:Catalog:SharedTables`; consent-derived signal dropped; `FilterForSubject` parameter `sharedTables` (C-2); tests T-7 32 (M-2); O-2 decided; follow-up F-1. |
+| SEC-111-03 | G-12; A-5 tenant scope: in multi-tenant mode only ClusterAdmin (or the table owner/delegate) changes tags/tier; tenant-scoped GovernanceAdmin gets the identical 404 on REST, manifest and MCP; tests T-7 33 (M-3). |
+| SEC-111-04 | G-9 and inventory row 16 moved to WP-0 (A-0.4); A-4 bullet "tiers always win"; O-5 decided (deprecate flag); tests T-7 34 (M-4). |
+| SEC-111-05 | G-7 and row 14: WP-0 (A-0.2) post-filter and re-match of the index result; #111 adds `Full` DENY removal before matching and `Summary` identifier/description-only re-match (A-4); tests T-7 35, 46 (M-5). |
+| SEC-111-06 | G-10 and row 17: WP-0 (A-0.5) table-level stop independent of `Visibility`; `BundledConsentRequestService` verified/pinned; tests T-7 36 (M-6). |
+| SEC-111-07 | G-11: WP-0 positive guard (A-0.6); `CatalogView` default `Unmarked` (most restrictive), explicit on every returned row, positive `== Full` check (C-1, A-4); tests T-7 37 (M-7). |
+| SEC-111-08 | A-5 mandatory order (503 for all non-admins before resolve, resolve, manageable-or-404, validate, `Full` rule, write); tests T-7 38 (M-8). |
+| SEC-111-09 | A-6 two read modes (catalog degrades, admin strict, `GetDatasetCatalogSettingsAsync(strict)`); A-5 read modes; tests T-7 39 (M-9). |
+| SEC-111-10 | A-7: dry run authorizes like apply, strict name parser (no `JsonStringEnumConverter`), null/system principal cannot raise `Full`; tests T-7 40 (M-10). |
+| SEC-111-11 | A-4 `DataAccess` removes tier branches entirely; call-site guard extended to three overloads and `McpCatalogVisibility`; tests T-7 41 (M-11). |
+| SEC-111-12 | A-9 additions: DENY audit also for foreign probes, structured `before`/`after`, tenant and authentication type, startup/config-change audit of `DefaultVisibility`, aggregated creation audit; A-10; tests T-7 43, 44 (M-13, M-14). |
+| SEC-111-13 | Unchanged design (charset, escaping); Phase 6 documentation requirement kept: tags are public metadata on `Summary` and not auto-derived from sensitivity/column names; dbt tag import documented (test 27 stays). |
+| SEC-111-14 | A-4: display names only for owner/delegates, reflection test pins the allowed `Summary` property set; test T-7 45. |
+
+### Binding conditions
+
+| BC | Closed by |
+|---|---|
+| BC-1 | WP-0 as a separate first PR with own file list, tests, LOC (A-0, section 4, section 11); tracker step `I-6a`; independent of the tiers (uses current consent-based `CatalogVisibility`); WP-5 reduced to the `Discovery` delta. |
+| BC-2 | G-5 corrected, A-6 cache rule, M-1 (T-7 31). |
+| BC-3 | G-4: `SharedTables`-only (interim), no Deny/pending/expired/any consent counts; M-2. |
+| BC-4 | A-5 tenant scope (stricter than required: shared datasets are ClusterAdmin/owner only); M-3. |
+| BC-5 | A-0.4, A-4, O-5. |
+| BC-6 | A-0.2 plus A-4 (DENY removal inside `FilterForSubject`, before matching); M-5. |
+| BC-7 | A-0.5, inventory row 17; M-6. |
+| BC-8 | A-0.6, C-1 `CatalogView.Unmarked = 0`, A-4 positive guard; M-7. |
+| BC-9 | A-5 mandatory order; M-8. |
+| BC-10 | A-6/A-5 read modes; M-9. |
+| BC-11 | A-7; M-10. |
+| BC-12 | A-4 `DataAccess` bullet, test T-7 41 (M-11). |
+| BC-13 | A-9 additions, A-10; M-13, M-14. |
+| BC-14 | A-4 display names only, reflection test, T-7 45. |
+
+### Mandatory tests M-1..M-14
+
+All fourteen are listed verbatim in test group T-7 (items 31-44) with the work package that implements them; M-4, M-5, M-6, M-7 and M-12 are first written in WP-0 without tiers and re-run with tier fixtures in #111. Items 45 and 46 add the display-name and `Summary` re-match tests.
+
+### Owner flags
+
+O-1 decided yes and accelerated (WP-0); O-2 decided interim `SharedTables`-only plus follow-up F-1; O-3 single call kept; O-4 keep `RequiresFourEyes`; O-5 decided: deprecate `AllowAuthenticatedCatalogDiscovery` (tiers win). See section 9.
 
 ---
 
