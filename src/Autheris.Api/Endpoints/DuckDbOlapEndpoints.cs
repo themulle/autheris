@@ -103,7 +103,9 @@ public static class DuckDbOlapEndpoints
             catch (Exception ex)
             {
                 // Same contract as before the extraction: a failure while writing the result is a 400 with a generic error.
-                logger.LogError(ex, "Error executing DuckDB OLAP query.");
+                // SEC-FED-DELTA-01: type and trace id only above Debug; the message can quote data values.
+                logger.LogError("Error executing DuckDB OLAP query ({ExceptionType}). TraceId={TraceId}", ex.GetType().Name, httpContext.TraceIdentifier);
+                logger.LogDebug(ex, "Error executing DuckDB OLAP query (full exception). TraceId={TraceId}", httpContext.TraceIdentifier);
                 if (!httpContext.Response.HasStarted)
                 {
                     httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;

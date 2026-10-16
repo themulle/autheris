@@ -104,7 +104,9 @@ public static partial class WebSqlEndpoints
 
             default:
                 // SEC M-10: Never echo exception/database messages to the client
-                logger.LogError(ex, "WebSQL Execution Failed. TraceId={TraceId}", httpContext.TraceIdentifier);
+                // SEC-FED-DELTA-01: type and trace id only above Debug; the message can quote staged data values.
+                logger.LogError("WebSQL Execution Failed ({ExceptionType}). TraceId={TraceId}", ex.GetType().Name, httpContext.TraceIdentifier);
+                logger.LogDebug(ex, "WebSQL Execution Failed (full exception). TraceId={TraceId}", httpContext.TraceIdentifier);
                 httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
                 httpContext.Response.ContentType = "application/json; charset=utf-8";
                 await httpContext.Response.WriteAsJsonAsync(new
@@ -127,7 +129,8 @@ public static partial class WebSqlEndpoints
         }
 
         SqlCompilerErrorMapper.RecordOutcome(mapped);
-        logger.LogWarning(ex, "WebSQL rejected with {Code}. TraceId={TraceId}", mapped.Code, httpContext.TraceIdentifier);
+        logger.LogWarning("WebSQL rejected with {Code} ({ExceptionType}). TraceId={TraceId}", mapped.Code, ex.GetType().Name, httpContext.TraceIdentifier);
+        logger.LogDebug(ex, "WebSQL rejected with {Code} (full exception). TraceId={TraceId}", mapped.Code, httpContext.TraceIdentifier);
         await WriteTimeoutProblemAsync(httpContext, mapped.Code, ct);
     }
 

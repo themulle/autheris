@@ -621,13 +621,15 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             bool isDenied = ex is WebSqlPolicyException or SecurityException or GatewaySecurityException;
             var eventType = isDenied ? AuditEventTypes.WebSqlQueryDenied : AuditEventTypes.QueryExecutionError;
 
+            var reasonCode = ex is GatewaySecurityException gse ? gse.ErrorCode : isDenied ? "POLICY_VIOLATION" : ex.GetType().Name;
             var detailsJson = JsonSerializer.Serialize(new
             {
                 originalSql = redactedOriginalSql,
                 originalSqlHash,
-                reasonCode = ex is GatewaySecurityException gse ? gse.ErrorCode : isDenied ? "POLICY_VIOLATION" : ex.GetType().Name,
-                // SEC-11: a denial stores its code only; messages may carry names or data values of the failing source.
-                error = ex is GatewaySecurityException denial ? $"Access denied ({denial.ErrorCode})" : ex.Message
+                reasonCode,
+                // SEC-11 / SEC-FED-DELTA-01: the audit stores a stable code or the exception type name for every failure, never
+                // Exception.Message (it may quote data values of the failing source or of the DuckDB stage; audit entries cannot be redacted).
+                error = ex is GatewaySecurityException ? $"Access denied ({reasonCode})" : $"Query failed ({reasonCode})"
             });
 
             await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry

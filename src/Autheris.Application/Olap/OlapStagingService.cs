@@ -111,6 +111,19 @@ public sealed class OlapStagingService(
         }
     }
 
+    /// <summary>
+    /// Logs a failure at <paramref name="level"/> with the stable code and the exception type name only (SEC-FED-DELTA-01):
+    /// exception messages and inner exceptions can quote staged data values. The full exception goes to Debug.
+    /// </summary>
+    private void LogFailure(Exception ex, LogLevel level, string code, string description)
+    {
+        logger.Log(level, "{Description} ({Code}, {ExceptionType})", description, code, ex.GetType().Name);
+        if (logger.IsEnabled(LogLevel.Debug))
+        {
+            logger.LogDebug(ex, "{Description} (full exception, {Code})", description, code);
+        }
+    }
+
     private OlapStagingOutcome MapException(Exception ex, bool isDev)
     {
         switch (ex)
@@ -123,16 +136,16 @@ public sealed class OlapStagingService(
                     isDev ? rejected.Message : null,
                     ErrorCode: rejected.Code);
             case GatewayForbiddenException:
-                logger.LogWarning(ex, "OLAP read denied by the governed pipeline.");
+                LogFailure(ex, LogLevel.Warning, "OLAP_ACCESS_DENIED", "OLAP read denied by the governed pipeline.");
                 return new OlapStagingOutcome(403, "Access denied.", ErrorCode: "OLAP_ACCESS_DENIED");
             case GatewaySecurityException security when string.Equals(security.ErrorCode, "RESPONSE_TOO_LARGE", StringComparison.Ordinal):
-                logger.LogWarning(ex, "OLAP staging byte budget exceeded.");
+                LogFailure(ex, LogLevel.Warning, "OLAP_STAGING_TOO_LARGE", "OLAP staging byte budget exceeded.");
                 return new OlapStagingOutcome(400, "The requested tables exceed the maximum allowed staging size.", ErrorCode: "OLAP_STAGING_TOO_LARGE");
             case GatewaySecurityException:
-                logger.LogWarning(ex, "OLAP read denied by the governed pipeline.");
+                LogFailure(ex, LogLevel.Warning, "OLAP_ACCESS_DENIED", "OLAP read denied by the governed pipeline.");
                 return new OlapStagingOutcome(403, "Access denied.", ErrorCode: "OLAP_ACCESS_DENIED");
             default:
-                logger.LogError(ex, "OLAP request failed.");
+                LogFailure(ex, LogLevel.Error, "OLAP_FAILED", "OLAP request failed.");
                 return new OlapStagingOutcome(502, "The analytical request could not be completed.", isDev ? ex.Message : null, ErrorCode: "OLAP_FAILED");
         }
     }
@@ -533,22 +546,22 @@ public sealed class OlapStagingService(
         }
         catch (InvalidOperationException ex) when (HasCode(ex, DuckDbOlapEngine.CodeStagedRows))
         {
-            logger.LogWarning(ex, "Max staged rows limit exceeded in OLAP query.");
+            LogFailure(ex, LogLevel.Warning, DuckDbOlapEngine.CodeStagedRows, "Max staged rows limit exceeded in OLAP query.");
             return new OlapStagingOutcome(400, ex.Message);
         }
         catch (SecurityException ex) when (HasCode(ex, DuckDbOlapEngine.CodeCapacity))
         {
-            logger.LogWarning(ex, "OLAP engine concurrency limit reached.");
+            LogFailure(ex, LogLevel.Warning, DuckDbOlapEngine.CodeCapacity, "OLAP engine concurrency limit reached.");
             return new OlapStagingOutcome(429, "OLAP capacity limit reached. Please retry later.");
         }
         catch (SecurityException ex) when (HasCode(ex, DuckDbOlapEngine.CodeResultSize))
         {
-            logger.LogWarning(ex, "OLAP query result byte budget exceeded.");
+            LogFailure(ex, LogLevel.Warning, DuckDbOlapEngine.CodeResultSize, "OLAP query result byte budget exceeded.");
             return new OlapStagingOutcome(400, isDev ? ex.Message : "OLAP query result exceeded maximum allowed memory size.");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogError(ex, "Error executing DuckDB OLAP query.");
+            LogFailure(ex, LogLevel.Error, "EXECUTION_FAILED", "Error executing DuckDB OLAP query.");
             if (stagedCounts.Count > 0)
             {
                 await tryAudit("OLAP_QUERY_FAILED", string.Join(",", stagedCounts.Keys), "ALLOW", FailureDetails("EXECUTION_FAILED")).ConfigureAwait(false);

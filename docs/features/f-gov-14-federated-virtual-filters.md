@@ -367,6 +367,7 @@ Audit records never contain key values.
 | `WEBSQL_CROSS_SOURCE_SOURCE_READ` (key source, one per loaded key set) | `kind = virtualFilterKeySource`, `table`, `filter`, `source`, `keyCount`, `droppedKeys` (keys that could not be converted), `cacheHit`. Also written when the plan is denied after the keys were loaded. |
 | `WEBSQL_CROSS_SOURCE_SOURCE_READ` (upstream read) | `table`, `stagingName`, `dataSourceType`, `sourceName`, `rowCount`, and for a protected table `vfTier`, `upstreamCalled`, `pushdownKeyCount`, `rowsReceived`, `rowsKept`, `upstreamRequests`, and for a path lookup `upstreamKeysNotFound`. |
 | `WEBSQL_QUERY_DENIED` | `reasonCode` = the `VF_*` (or other) code, `error = "Access denied (<code>)"`, anonymized SQL and hash. |
+| `QUERY_EXECUTION_ERROR` | `reasonCode` = the exception type name (or `POLICY_VIOLATION` for a policy denial), `error = "Query failed (<reasonCode>)"`, anonymized SQL and hash. The exception message is never stored: it can quote staged data values, and audit entries cannot be redacted. |
 
 Notes:
 
