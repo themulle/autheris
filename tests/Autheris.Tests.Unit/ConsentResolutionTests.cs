@@ -650,6 +650,64 @@ public class ConsentResolutionTests
         agentDecision.GetColumnAccess("salary").ShouldBe(ColumnAccessLevel.Mask);
     }
 
+    private ColumnAccessLevel SalaryLevel(IEnumerable<ConsentColumnRule> rules, params string[] scopes)
+    {
+        var consent = CreateBaseConsent(ConsentEffect.Allow, GranteeType.User, _userSid);
+        consent.ColumnRules = rules.ToList();
+        var decision = _service.ResolveAccess(
+            _userSid,
+            new HashSet<Sid>(),
+            new HashSet<string>(),
+            _testTable,
+            new[] { consent },
+            callerScopes: new HashSet<string>(scopes, StringComparer.OrdinalIgnoreCase));
+        return decision.GetColumnAccess("salary");
+    }
+
+    private static ConsentColumnRule Rule(ColumnAccessLevel level, params string[] scopes) =>
+        new() { ColumnName = "salary", AccessLevel = level, ApplicableScopes = scopes };
+
+    private static ConsentColumnRule Other() =>
+        new() { ColumnName = "name", AccessLevel = ColumnAccessLevel.Clear };
+
+    [Fact]
+    public void ScopeOnlyRule_CallerWithScope_GetsRuleLevel() =>
+        SalaryLevel(new[] { Other(), Rule(ColumnAccessLevel.Mask, "A") }, "A").ShouldBe(ColumnAccessLevel.Mask);
+
+    [Fact]
+    public void ScopeOnlyRule_CallerWithOtherScope_IsDenied() =>
+        SalaryLevel(new[] { Other(), Rule(ColumnAccessLevel.Mask, "A") }, "B").ShouldBe(ColumnAccessLevel.Deny);
+
+    [Fact]
+    public void ScopeOnlyRule_CallerWithoutScopes_IsDenied() =>
+        SalaryLevel(new[] { Other(), Rule(ColumnAccessLevel.Mask, "A") }).ShouldBe(ColumnAccessLevel.Deny);
+
+    [Fact]
+    public void ScopeOnlyRules_Multiple_EachScopeGetsOwnLevel_OthersDenied()
+    {
+        var rules = new[] { Other(), Rule(ColumnAccessLevel.Mask, "A"), Rule(ColumnAccessLevel.Clear, "B") };
+        SalaryLevel(rules, "A").ShouldBe(ColumnAccessLevel.Mask);
+        SalaryLevel(rules, "B").ShouldBe(ColumnAccessLevel.Clear);
+        SalaryLevel(rules, "C").ShouldBe(ColumnAccessLevel.Deny);
+        SalaryLevel(rules, "A", "B").ShouldBe(ColumnAccessLevel.Mask);
+    }
+
+    [Fact]
+    public void BaseClearPlusScopeMask_ScopeAMasked_ScopeBClear()
+    {
+        var rules = new[] { Other(), Rule(ColumnAccessLevel.Clear), Rule(ColumnAccessLevel.Mask, "A") };
+        SalaryLevel(rules, "A").ShouldBe(ColumnAccessLevel.Mask);
+        SalaryLevel(rules, "B").ShouldBe(ColumnAccessLevel.Clear);
+    }
+
+    [Fact]
+    public void BaseMaskPlusScopeClear_ScopeRuleOnlyRestricts()
+    {
+        var rules = new[] { Other(), Rule(ColumnAccessLevel.Mask), Rule(ColumnAccessLevel.Clear, "A") };
+        SalaryLevel(rules, "A").ShouldBe(ColumnAccessLevel.Mask);
+        SalaryLevel(rules, "B").ShouldBe(ColumnAccessLevel.Mask);
+    }
+
     [Fact]
     public void ResolveAccess_WithScope_CannotWidenDeniedColumn_MonotonicHardening()
     {

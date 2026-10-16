@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Data;
 using Autheris.Application.Policy;
+using Autheris.Application.Services;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -151,9 +152,9 @@ public sealed partial class SemanticMetricQueryService
                     })
                     .ToList();
 
+                var scopes = TokenAccessScope.GetScopeSet(principal.Claims);
                 if (_resolutionService != null)
                 {
-                    var scopes = TokenAccessScope.GetScopeSet(principal.Claims);
                     var metricDecision = _resolutionService.ResolveAccess(
                         userSid,
                         groupSids,
@@ -179,9 +180,17 @@ public sealed partial class SemanticMetricQueryService
                         : ColumnAccessLevel.Clear;
                 }
 
-                foreach (var rule in projectedConsents.SelectMany(c => c.ColumnRules))
+                // Scope-aware and order independent (issue #116): resolve per consent with the shared semantics and
+                // combine consents by the most permissive level, like ConsentResolutionService.
+                var ruleColumns = projectedConsents
+                    .SelectMany(c => c.ColumnRules)
+                    .Select(r => r.ColumnName)
+                    .Distinct(StringComparer.OrdinalIgnoreCase);
+                foreach (var ruleColumn in ruleColumns)
                 {
-                    colAccess[rule.ColumnName] = rule.AccessLevel;
+                    colAccess[ruleColumn] = projectedConsents
+                        .Where(c => c.ColumnRules.Any(r => string.Equals(r.ColumnName, ruleColumn, StringComparison.OrdinalIgnoreCase)))
+                        .Max(c => ConsentResolutionService.ResolveConsentColumnLevel(c, ruleColumn, scopes.Count > 0 ? scopes : null));
                 }
 
                 return (TableAccessDecision.Allowed(table, colAccess, hasUnconstrainedColumnAllow: true), true);

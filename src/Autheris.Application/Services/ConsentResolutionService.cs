@@ -227,6 +227,17 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         return result;
     }
 
+    /// <summary>
+    /// Shared column level semantics for one consent (issue #116): base rules apply to all callers and scope rules can only
+    /// tighten them; a column with only scope rules is Deny for callers that hold none of the listed scopes.
+    /// </summary>
+    internal static ColumnAccessLevel ResolveConsentColumnLevel(Consent consent, string? column, IReadOnlySet<string>? callerScopes = null)
+        => GetConsentColumnLevel(consent, column, callerScopes);
+
+    /// <summary>True when the rule only applies to callers holding one of its listed scopes.</summary>
+    internal static bool IsScopeSpecific(ConsentColumnRule rule)
+        => rule.ApplicableScopes != null && rule.ApplicableScopes.Count > 0;
+
     private static ColumnAccessLevel GetConsentColumnLevel(Consent consent, string? column, IReadOnlySet<string>? callerScopes = null)
     {
         if (consent.ColumnRules.Count == 0)
@@ -256,30 +267,38 @@ public sealed class ConsentResolutionService : IConsentResolutionService
             .Where(r => r.ApplicableScopes != null && r.ApplicableScopes.Count > 0)
             .ToList();
 
-        ColumnAccessLevel baseLevel;
+        ColumnAccessLevel effectiveLevel;
         if (baseRules.Count > 0)
         {
             var raw = baseRules.Max(r => r.AccessLevel);
-            baseLevel = Enum.IsDefined(raw) ? raw : ColumnAccessLevel.Deny;
-        }
-        else
-        {
-            // If only scope-specific rules exist, access defaults to Clear for callers without that scope
-            baseLevel = ColumnAccessLevel.Clear;
-        }
-
-        ColumnAccessLevel effectiveLevel = baseLevel;
-        if (callerScopes != null && callerScopes.Count > 0)
-        {
-            foreach (var sr in scopeRules)
+            effectiveLevel = Enum.IsDefined(raw) ? raw : ColumnAccessLevel.Deny;
+            if (callerScopes != null && callerScopes.Count > 0)
             {
-                if (sr.ApplicableScopes.Any(s => callerScopes.Contains(s)))
+                foreach (var sr in scopeRules)
                 {
-                    // Monotonic hardening: scope rules can ONLY tighten access level
-                    if (sr.AccessLevel < effectiveLevel)
+                    // Monotonic hardening: with a base rule, scope rules can ONLY tighten the access level.
+                    if (sr.ApplicableScopes.Any(callerScopes.Contains) && sr.AccessLevel < effectiveLevel)
                     {
                         effectiveLevel = sr.AccessLevel;
                     }
+                }
+            }
+        }
+        else
+        {
+            // Fail closed (issue #116): without a rule that applies to all scopes the column stays denied for every
+            // caller whose scopes are not listed. A scope-only rule defines the level only for callers holding that scope
+            // (the strictest matching rule wins); it never opens the column for other scopes.
+            effectiveLevel = ColumnAccessLevel.Deny;
+            if (callerScopes != null && callerScopes.Count > 0)
+            {
+                var matched = scopeRules
+                    .Where(sr => sr.ApplicableScopes.Any(callerScopes.Contains))
+                    .Select(sr => Enum.IsDefined(sr.AccessLevel) ? sr.AccessLevel : ColumnAccessLevel.Deny)
+                    .ToList();
+                if (matched.Count > 0)
+                {
+                    effectiveLevel = matched.Min();
                 }
             }
         }

@@ -286,9 +286,11 @@ public sealed partial class QueryAnalysisService
             return ColumnAccessLevel.Deny;
         }
 
+        // Fail closed (issue #116): the analysis has no caller scopes, so a scope-specific rule never counts as a grant.
         bool hasExplicitClear = allowConsents
             .SelectMany(c => c.ColumnRules)
             .Any(cr => string.Equals(cr.ColumnName, column.ColumnName, StringComparison.OrdinalIgnoreCase) &&
+                       !Autheris.Application.Services.ConsentResolutionService.IsScopeSpecific(cr) &&
                        cr.AccessLevel == ColumnAccessLevel.Clear);
 
         bool hasExplicitMask = allowConsents

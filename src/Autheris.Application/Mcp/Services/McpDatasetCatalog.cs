@@ -435,9 +435,11 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
                 continue;
             }
 
+            // Fail closed (issue #116): no caller scopes here, so a scope-specific rule never counts as a grant.
             bool hasExplicitClear = allowConsents
                 .SelectMany(c => c.ColumnRules)
                 .Any(cr => string.Equals(cr.ColumnName, col.ColumnName, StringComparison.OrdinalIgnoreCase) &&
+                           !Autheris.Application.Services.ConsentResolutionService.IsScopeSpecific(cr) &&
                            cr.AccessLevel == Autheris.Domain.Interfaces.ColumnAccessLevel.Clear);
 
             bool hasExplicitMask = allowConsents

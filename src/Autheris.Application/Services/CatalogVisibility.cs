@@ -112,7 +112,8 @@ public static class CatalogVisibility
             var hasUnconstrainedAllow = tableAllows.Any(c => c.ColumnRules.Count == 0);
             var explicitlyGrantedColumns = tableAllows
                 .SelectMany(c => c.ColumnRules)
-                .Where(cr => cr.AccessLevel != ColumnAccessLevel.Deny)
+                // Fail closed (issue #116): scope-specific rules never make a column visible for every caller.
+                .Where(cr => cr.AccessLevel != ColumnAccessLevel.Deny && !ConsentResolutionService.IsScopeSpecific(cr))
                 .Select(cr => cr.ColumnName)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
