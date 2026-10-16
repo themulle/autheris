@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -16,8 +17,15 @@ using Autheris.Domain.Security;
 public sealed class EffectiveAccessExplanationService(
     ITableMetadataRepository metadataRepository,
     IConsentRepository consentRepository,
-    IConsentResolutionService resolutionService) : IEffectiveAccessExplanationService
+    IConsentResolutionService resolutionService,
+    IDataOwnershipRepository? ownershipRepository = null) : IEffectiveAccessExplanationService
 {
+    /// <summary>Answer for tables that do not exist or that the caller may not discover (identical on purpose).</summary>
+    internal const string TableNotFoundMessage = "Table not found in catalog.";
+
+    /// <summary>Row filter description for callers who are not allowed to see the filter definition.</summary>
+    internal const string RowFilterDescription = "Row filter applies (defined by data owner).";
+
     public async Task<EffectiveTableAccessDto> ExplainMyAccessAsync(
         ClaimsPrincipal principal,
         TableIdentifier table,
@@ -41,25 +49,20 @@ public sealed class EffectiveAccessExplanationService(
         }
 
         var metadata = await metadataRepository.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
+        var tenantId = principal.GetTenantId();
+        var roles = principal.GetUserRoles();
+        var isAdmin = IsGovernanceAdmin(principal, roles);
+
         if (metadata == null)
         {
-            return new EffectiveTableAccessDto(
-                table.ToString(),
-                "DENIED",
-                Array.Empty<string>(),
-                Array.Empty<string>(),
-                Array.Empty<string>(),
-                Array.Empty<string>(),
-                "Table not found in catalog.",
-                null
-            );
+            // Same lookups as for an existing table, so unknown and hidden tables behave alike.
+            await CatalogVisibility.VisibleTablesAsync(Array.Empty<TableMetadata>(), principal, tenantId, consentRepository, ct).ConfigureAwait(false);
+            return NotFound(table);
         }
 
         var groupSids = principal.GetGroupSids();
-        var roles = principal.GetUserRoles();
         var allUserSids = principal.GetAllUserSids();
         var callerScopes = TokenAccessScope.GetScopeSet(principal);
-        var tenantId = principal.GetTenantId();
 
         var subjects = (allUserSids != null && allUserSids.Count > 0 ? allUserSids : [userSid.Value])
             .Concat(groupSids)
@@ -82,16 +85,22 @@ public sealed class EffectiveAccessExplanationService(
             callerScopes
         );
 
-        var allColumnNames = metadata.Columns.Select(c => c.ColumnName).ToList();
-
         if (!decision.IsAllowed)
         {
+            // Only tables the caller can discover in the catalog are described; everything else is answered
+            // exactly like an unknown table (no columns, same message).
+            var visible = await CatalogVisibility.VisibleTablesAsync([metadata], principal, tenantId, consentRepository, ct).ConfigureAwait(false);
+            if (visible.Count == 0)
+            {
+                return NotFound(table);
+            }
+
             return new EffectiveTableAccessDto(
                 table.ToString(),
                 "DENIED",
                 Array.Empty<string>(),
                 Array.Empty<string>(),
-                allColumnNames,
+                visible[0].Columns.Select(c => c.ColumnName).ToList(),
                 Array.Empty<string>(),
                 decision.DeniedReasons.Count > 0 ? string.Join("; ", decision.DeniedReasons) : "No active allow consent.",
                 null
@@ -123,7 +132,9 @@ public sealed class EffectiveAccessExplanationService(
         var activeRowFilters = new List<string>();
         if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
         {
-            activeRowFilters.Add(decision.CombinedRowFilterSql);
+            // The SQL (literal values, internal rules) is shown only to owners, delegates and governance admins.
+            var canSeeDefinition = isAdmin || await IsOwnerOrDelegateAsync(userSid.Value, table, ct).ConfigureAwait(false);
+            activeRowFilters.Add(canSeeDefinition ? decision.CombinedRowFilterSql : RowFilterDescription);
         }
 
         var applicableConsents = activeConsents
@@ -147,5 +158,40 @@ public sealed class EffectiveAccessExplanationService(
             description,
             validTo
         );
+    }
+
+    private static EffectiveTableAccessDto NotFound(TableIdentifier table) => new(
+        table.ToString(),
+        "DENIED",
+        Array.Empty<string>(),
+        Array.Empty<string>(),
+        Array.Empty<string>(),
+        Array.Empty<string>(),
+        TableNotFoundMessage,
+        null);
+
+    private static bool IsGovernanceAdmin(ClaimsPrincipal principal, IReadOnlySet<string> roles) =>
+        roles.Contains("GovernanceAdmin") || ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+
+    /// <summary>Data owner or active delegate of the table (fail-closed: errors mean no).</summary>
+    private async Task<bool> IsOwnerOrDelegateAsync(Sid userSid, TableIdentifier table, CancellationToken ct)
+    {
+        if (ownershipRepository == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return await ownershipRepository.IsAuthorizedApproverForTableAsync(table, userSid, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
