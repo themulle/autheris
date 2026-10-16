@@ -141,3 +141,42 @@ Scope: the fix commit `88e992d2` plus the gate changes below. Verdict: **APPROVE
 - `ManagedNtlmSspiContextProvider` identity equality; `MaterializeNtlmUserFile` creates the file with `0600`.
 - Catalog logs a blocked retry at Debug, not Warning per query.
 - Tests: `SqlLoginCircuitBreakerTests` (new), additions to `DatasourceTestingServiceSqlTests` and `GovernedCatalogProviderDiagnosticsTests`.
+
+## 4. Phase 4: TDD Verification (csharp-tdd-developer)
+
+All acceptance criteria AC-1 to AC-12 map to unit tests (table in section 1.4). The lead ran the suite on `88e992d2` (unit 7818/7818, architecture 110/110 with one skipped); the gate commits add tests that still have to be built and run.
+
+Tests added in the gates: `SqlLoginCircuitBreakerTests` (breaker open/close/cool-down/identity/disable, credential vs. non-credential statuses, `GssIdentityRegistry`, describer login name, provider pool-key identity, `ntlm_users` mode and no-rewrite), `DatasourceTestingServiceSqlTests.OpenBlockedByLoginBreaker_...` and login name assertion, `GovernedCatalogProviderDiagnosticsTests` (unsupported provider, breaker-open without Warning).
+
+Known gaps (accepted, no feasible unit test):
+
+- A real `SqlException` (18456/18452/18451) cannot be constructed without the driver internals; the number check in `SqlLoginCircuitBreaker.IsLoginFailure` and `ClassifyOpenException` is covered only through `SqlServerWindowsAuthException`. Covered by the opt-in real-server test (section 1.6).
+- `SqlConnectionFactory` wiring of the breaker (check before `PrepareConnection`, record, clear) needs a reachable SQL Server; the breaker class is tested in isolation.
+- The 30 s Warning window of the catalog is not asserted (needs a time source; `Environment.TickCount64`).
+- Managed NTLM against a real server (OPEN-2) and the 18452 case (OPEN-1).
+- Integration tests were not run locally.
+
+## 5. Phase 5: Code Review (csharp-code-reviewer)
+
+| Finding | Decision |
+|---------|----------|
+| Log spam: the catalog logged a Warning for every table on every cache miss while a source is down. | Fixed: one Warning per data source and reason per 30 s, repeats at Debug (`NextLoadFailureLevel`); breaker-open retries at Debug; the breaker itself logs once on open. |
+| `MaterializeNtlmUserFile` rewrote the file on every connection open (read, rewrite, move) next to gss-ntlmssp readers. | Fixed: an unchanged entry is not rewritten. |
+| Provider created per open without a stable identity breaks SqlClient pooling. | Fixed (SEC-NTLM-06). |
+| `NativeEnvironment.Set` does managed and native `getenv` plus a lock per variable per open. | Accepted: four variables at most, microseconds against a network login; writes only on change. |
+| Breaker hot path: fingerprint hashing on every open. | Fixed by design: the fingerprint is computed only when an entry exists (`_entries.IsEmpty` early exit); the failure path is rare. |
+| `LogLoadFailure` builds a list per failure. | Accepted: failure path only. |
+| `SqlSourceDescriber.DescribeLogin` allocates a key array per call. | Accepted: probe path only. |
+| C# 13 idioms: `Lock`, `LibraryImport`, collection and pattern matching used consistently; naming follows the surrounding code (`SqlServer*`, `Sql*`). | OK. |
+| `ManagedNtlmSspiContextProvider` instances are never disposed by the factory (last `NegotiateAuthentication` is released by the GC). | Accepted: small, unchanged behaviour; follow-up could dispose after open. |
+| Pre-existing typo `"Mechanismitched"` in the GSSAPI classification string match. | Accepted, not changed in this track (a match on a message fragment that never occurs; the other conditions of the branch still apply). Follow-up. |
+| `ClassifyOpenException` for a SQL-login source (no integrated security) returns the raw `SqlException`; the breaker still recognizes 18456 through `FindSqlException`-style chain walking. | OK. |
+
+## 6. Phase 6: Documentation (documentation-expert)
+
+- [F-AUTH-04](../features/f-auth-04-sqlserver-windows-auth-ntlm-kerberos.md): verified against the code; added the applying combination, `PasswordRef` rules per environment (as enforced by `SecretReferenceResolver` and `DefaultEnvironmentSecretProvider`), file modes and the Windows bind mount note, the login circuit breaker (section 3.7), probe login name and lock, the `setenv` thread-safety note and the verification gap. No progress or WIP notes.
+- [F-API-09](../features/f-api-09-datasource-connectivity-testing.md): SQL section corrected (real probe, login name, retry lock).
+- `docs/configuration-guide.md`: `UseManagedNtlm` and `LoginFailureCooldownSeconds` noted at the `WindowsAuth` example.
+- Searched `docs/`, `README.md`, Dockerfiles for the old fake SQL probe (`sql-engine`, TLS 1.3) and for a `UseManagedNtlm` default: none remain. The Dockerfiles still set `DOTNET_System_Net_Security_UseManagedNtlm=true`, which now matches the policy rather than overriding it.
+- No new feature id: the track extends F-AUTH-04 and F-API-09, so `docs/features/README.md` needs no new registration.
+- Master plan updated: [`00-master-plan-overview.md`](00-master-plan-overview.md), row `REQ-BUG-NTLM-01`.

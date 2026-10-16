@@ -270,6 +270,8 @@ All official Autheris container images (`Dockerfile`, `Dockerfile.production`, `
 
 Configure `DataSources:Connections:<name>:WindowsAuth` with `Domain`, `Username`, and `PasswordRef` (pointing to a mounted container secret `file:/run/secrets/...` or Key Vault secret). Autheris automatically enforces `Integrated Security=true`, resolves the secret, materializes a `0600`-restricted `NTLM_USER_FILE` in `/app/data/gss/ntlm_users`, and sets `NTLM_USER_FILE`, `NTLMUSER`, and `NETBIOS_DOMAIN_NAME`:
 
+Optional per data source: `WindowsAuth.UseManagedNtlm` (`true` managed NTLM, `false` gss-ntlmssp; unset follows `DOTNET_System_Net_Security_UseManagedNtlm`, default managed) and `LoginFailureCooldownSeconds` (default 300, `0` disables the login circuit breaker). See F-AUTH-04 sections 3.3 and 3.7.
+
 ```json
 "DataSources": {
   "Connections": {
