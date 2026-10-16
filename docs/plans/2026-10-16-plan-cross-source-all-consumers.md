@@ -2,8 +2,8 @@
 
 **Document ID:** `PLAN-FED-01`
 **Date:** 2026-10-16
-**Status:** PLAN READY (Phase 2 complete); next: Phase 3 security review (`csharp-security-expert`)
-**Author:** Solution Architect (Phase 2, `csharp-architect` role)
+**Status:** PLAN READY (Phase 2 complete); security review appended in section 12 (Phase 3); next: Phase 4 (TDD developers)
+**Author:** Solution Architect (Phase 2, `csharp-architect` role), Security Expert (Phase 3, section 12)
 **PRD:** [2026-10-16-req-cross-source-all-consumers.md](2026-10-16-req-cross-source-all-consumers.md) (`REQ-FED-01`)
 **Parent Plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
 **Branch:** `feat/cross-source-all-consumers` (base `main` `70b75e27`)
@@ -286,13 +286,80 @@ All unit tests green, new tests failed first (Red-Green-Refactor), no new analyz
 
 ## 11. Hand-off
 
-- Phase 3 (section 12) appends binding security conditions.
+- Phase 3 section 12 is binding for Phase 4 and Phase 5.
 - Phase 6 rewrites `docs/features/f-gov-19-cross-source-graphql-relations.md`, corrects every row of PRD 2.1, adds a federation feature document and the `docs/configuration-guide.md` section, registers it in `docs/features/README.md`, and sets the master plan status.
 
 ## 12. Security Review (Phase 3)
 
-Pending (Phase 3).
+*Reviewer: Security Expert (`csharp-security-expert` role). Scope: PRD `REQ-FED-01` and sections 1-10 of this plan, audited against the code at `70b75e27`. Fail-closed, Casbin ABAC, HMAC audit and tenant isolation were checked as in earlier features.*
+
+### 12.1 Threat Model
+
+| ID | Threat | Vector | Present today? | Control (binding condition) |
+|---|---|---|---|---|
+| T-1 | **Cross-source oracle** | Caller infers existence or attributes of rows in source 2 from error codes, latency, empty-versus-null differences, or distinct errors for "denied" and "not found" | Partly: the resolver throws `GatewayForbiddenException` for the child table before reading (fine), but a governed-away child could differ from a missing one | SEC-FED-03, SEC-FED-04 |
+| T-2 | **Key leakage via masked join keys** | Join on a masked or pseudonymised column reveals or lets the caller correlate masked values across sources (equality oracle, re-identification) | Guarded in SQL federation (SEC-JOIN-01); resolver checks Clear keys but nothing enforces it in the GraphQL decorator yet | SEC-FED-02 |
+| T-3 | **RLS bypass on source 2** | Child rows read raw and filtered in the gateway with a weaker evaluator, or through a service account; federated virtual filters not applied; tenant `NULL` passes | **Yes** in the current resolver (`Helpers.cs:232-267`, `NULL` tenant passes; no federated virtual filters); also the OLAP endpoint lacks compiler guardrails | SEC-FED-01, SEC-FED-05, SEC-FED-12 |
+| T-4 | **Tenant mixing** | Key lookups, staging or result files shared across tenants; DuckDB staging or spill directory reused; relation flag set for tenant A influences tenant B | Staging is per request; result files partitioned by tenant; schema cache could mix if keyed without tenant | SEC-FED-06, SEC-FED-07 |
+| T-5 | **Amplification and DoS by fan-out** | One GraphQL page with many distinct keys causes many batches against source 2; deep nested chains multiply; large 1:N; concurrent requests exhaust DuckDB memory | Bounded only for SQL staging; resolver limits exist but are unwired; `MaxParallelSourceReads` not enforced | SEC-FED-08 |
+| T-6 | **Staging data at rest** | DuckDB spill and async job result files in clear text in `Path.GetTempPath()` and the scratch directory; post-masking clear-text columns can spill | **Yes** | SEC-FED-09 |
+| T-7 | **Audit gaps** | Source-2 reads without audit; audit failure ignored; key values or rows in audit; no correlation id across sources; GraphQL cross-source reads recorded once instead of per source | Resolver audits per target read (unwired); SQL federation audits per source | SEC-FED-10 |
+| T-8 | **Confused deputy and privilege widening by relation flag** | An admin enables `AllowCrossDataSource` and thereby exposes owner B's data through owner A's table | New surface | SEC-FED-11 |
+| T-9 | **Gate bypass** | A transport reaches federation without the gate: Flight `/info`, job submit, OLAP, GraphQL; typo in transport list silently denies or (with default expansion) silently allows | Yes for OLAP; Flight `/info` partly | SEC-FED-12 |
+| T-10 | **Information disclosure through errors and metadata** | Specific federation codes before authorization reveal table type or configuration; provenance lists unauthorized sources; upstream messages in responses | Generic today (good); new codes could weaken it | SEC-FED-03, SEC-FED-13 |
+| T-11 | **Injection through keys** | Parent key values (clear but attacker-influenced strings) concatenated into the child statement or the HTTP request | Child statement is compiled from AST with parameters; HTTP key parameter risk | SEC-FED-14 |
+| T-12 | **Stale authorization** | Cached schema or relation executability survives a flag, policy or consent change | New caches | SEC-FED-15 |
+| T-13 | **Consistency-based leakage** | Reading source 2 later than source 1 reveals a state change that the caller should not observe (TOCTOU between segments); a consent revoked between segment reads | Inherent | SEC-FED-16 (accepted, bounded) |
+
+### 12.2 Binding Conditions (SEC-FED-xx)
+
+Each condition is mandatory for Phase 4 and checked in Phase 5. Each lists a mandatory test.
+
+- **SEC-FED-01 Governed pipeline only.** Every source read, SQL or HTTP, in every consumer goes through the governed pipeline (decision, tenant predicate, row filters, masking, federated virtual filters). `StreamingRowFilterAstEvaluator`-style re-filtering of raw rows for cross-source reads is removed. `IGovernedSourceReader` has no raw API. *Test:* architecture test that no type outside the governed readers references `ICrossSourceRowReader`-style raw reads; row-filter, tenant, virtual-filter and consent denial on the child table each hide the child row (parity with a single-source read of the same child).
+- **SEC-FED-02 Clear join keys, both sides, before any read.** Parent and child key columns must be `Clear` in the caller's decision (not masked, not HMAC, not excluded, not hidden by column policy); the check precedes every read and also covers key columns used for relation filters. Failing returns `FEDERATION_KEY_NOT_CLEAR` only after authorization of both tables. *Test:* matrix of masking rule types (REDACT, HMAC, partial, hash) on parent key and child key for GraphQL, WebSQL join (SEC-JOIN-01 regression), OLAP facade.
+- **SEC-FED-03 Anti-oracle ordering and codes.** All tables authorized first; denial of any table yields the generic `ACCESS_DENIED`/`SQL_POLICY_DENIED` identical for "does not exist", "inactive" and "no consent". Specific `FEDERATION_*` codes only after full authorization. Response timing classes: no early return that skips the authorization of remaining tables. *Test:* identical bodies and statuses for unknown versus unauthorized child table; specific codes appear only for a fully authorized caller.
+- **SEC-FED-04 Indistinguishable misses.** A child that is missing, row-filtered, tenant-foreign, or consent-denied at row level resolves to `null`/empty with no extension, count or error difference. Table-level denial of the child fails the whole request with the generic code (as the parent). *Test:* same response for the three row-level cases; no `rows` or `count` in provenance that reveals filtered rows (provenance counts rows returned after governance only).
+- **SEC-FED-05 No NULL tenant pass, no service account.** Tenant predicate is applied by the compiler on every source read; the resolver's in-gateway tenant check is deleted. No federation read uses a credential other than the governed read connection configured for the source (and, where configured, the caller-delegated identity); no escalation to a privileged identity. *Test:* child rows with `NULL` tenant value are excluded; two tenants with overlapping keys get only their own children (GraphQL and SQL federation).
+- **SEC-FED-06 Per-request isolation.** No cross-request caching of source-2 rows, keys or lookup results; the per-operation access memo is keyed by (table, tenant, user sid) as today; schema cache key includes tenant where the schema is tenant-specific and federation state. *Test:* concurrent requests of two tenants/users never see each other's rows or schema fields; no static or singleton row holders (reflection test on the new types).
+- **SEC-FED-07 Staging directory isolation.** Spill and result files are per request/job, in a dedicated directory with owner-only permissions, never shared across tenants, names unguessable (GUID plus tenant partition). *Test:* permission bits (Unix) / ACL (Windows) assertion; path traversal attempt through job id or tenant string rejected.
+- **SEC-FED-08 Fan-out bounds and cost.** Enforced and tested: `MaxBatchSize` (also bounded by dialect bind limit and key column count), `MaxBatches`, cumulative `MaxNestedRows`, `MaxCrossSourceFilterKeys`, tree budget over the whole tree before any read, `MaxTableCount`, `MaxStagedRowsPerTable`/total rows/bytes, `MaxParallelSourceReads`, wall-clock timeout over authorization plus reads, per-user concurrency lease, cost reported to the quota middleware (`CostPerBatch`, `CostPerRow`). Exceed means `FEDERATION_LIMIT_EXCEEDED`, never truncation. *Test:* each limit exceeded individually and cumulatively across nested levels; a malicious page with 10,000 distinct keys cannot issue more than `MaxBatches` reads; timeout cancels outstanding reads.
+- **SEC-FED-09 No clear-text staging at rest.** DuckDB spill encrypted or disabled; async job results encrypted with an authenticated envelope; files owner-only; deleted on completion/expiry; cleanup failure is a metric and alert, not silent. `AsyncJob` is not in the default transports until this condition holds (`ProtectedStagingEnabled`). *Test:* spill directory contains no plaintext marker row after a forced spill; result file is not readable as CSV/JSON without the key; deletion after expiry; `AsyncJob` absent from defaults when protection is off.
+- **SEC-FED-10 Audit per source read, fail closed.** One `WebSqlCrossSourceSourceRead` (or successor) record per source read in every consumer, shared correlation id with the parent request record, containing source, table, consumer, batches, row counts, outcome; no keys, no rows, no SQL parameter values. Audit write failure denies the request (existing SQL federation behaviour extended to GraphQL). Denials after authorization (limit, key not clear) are audited. HMAC chain unchanged. *Test:* audit count equals source reads for each consumer; injected audit failure -> request denied and no data returned; audit payload contains no key or row values.
+- **SEC-FED-11 Relation flag governance.** Setting `AllowCrossDataSource` requires `GovernanceAdmin`, is audited with before/after and actor, goes through the existing four-eyes flow for MCP admin tools, requires owner approval of both tables when owners exist, bumps the epoch of both tables, invalidates the schema cache, and is tenant-scoped like the relation. Discovery/ingestion never sets or clears it. Default false. *Test:* non-admin 403; audit record; epoch bump; flag survives catalog re-ingestion; cross-tenant relation id returns the fixed 404.
+- **SEC-FED-12 Single gate for all transports; OLAP compiler path.** `FederationGate` is the only evaluator; called in execution and in every validate/submit/info path (Flight `/info`, async submit); OLAP uses the governed compiler and the SQL function allowlist, client DuckDB SQL is not executed; startup validation rejects unknown transport names; empty list denies all. *Test:* gate matrix for every transport and path; OLAP join over a masked column rejected; DuckDB-only function or `read_csv`/`COPY`/`ATTACH` through OLAP rejected; unknown transport name aborts startup.
+- **SEC-FED-13 Provenance and error disclosure.** Provenance lists only sources of tables the caller was authorized for, with counts after governance; fixed messages; upstream and database messages never in responses or logs (stable code and exception type only); non-production environments do not echo raw policy text on Arrow export. *Test:* response bodies for forced source failures contain no driver text; provenance excludes unauthorized sources; Arrow export in Development returns the fixed message.
+- **SEC-FED-14 Keys are data, never SQL.** Child statements are compiled from the AST with bound parameters typed from the child key column's catalog type; HTTP key lists are URL- or body-encoded by the connector's encoder with length limits and a key charset/format validation per column type; no string concatenation. *Test:* keys containing quotes, SQL fragments, `%`, CRLF, very long strings and Unicode confusables produce parameterised statements/encoded requests and no injection; oversized key rejected.
+- **SEC-FED-15 Invalidation and freshness.** Relation executability and the GraphQL schema are recomputed when the relation flag, the federation options, or the catalog changes; decisions are never cached across requests by the new code (the per-operation memo lives for the operation only). *Test:* flag off removes the field at the next schema build; consent revoked between two requests denies the second.
+- **SEC-FED-16 Consistency window accepted and bounded.** No global snapshot; the segment reads of one request run within one request timeout; the authorization of all tables happens before the first read and is not re-evaluated between segments (a revocation during the request window is accepted); documented in the feature doc and returned as `consistency: "per-source"` in provenance. *Test:* all tables authorized before the first read (order-of-calls test); documented limit.
+- **SEC-FED-17 Fail-closed defaults.** No decision, no metadata, unsupported source type, unknown dialect, missing reader for a source type, descriptor without key lookup: the relation is not advertised and a direct attempt fails with `FEDERATION_UNSUPPORTED_SOURCE` (after authorization). Option parse errors abort startup. *Test:* each missing prerequisite denies; no partial results.
+- **SEC-FED-18 Transport broadening review.** The widened default transport list is accepted only because SEC-FED-01..10 make governance transport-independent; AsyncJob and any future transport (`PgWire`) stay out of the default until their own conditions (SEC-FED-09, authentication/TLS for the wire protocol) are met. *Test:* default list unit test fails when a new transport name is added without an explicit decision entry.
+
+### 12.3 Mandatory Security Tests (summary, to register in the regression catalog)
+
+1. Row-filter, tenant, consent and virtual-filter parity between child read via federation and the same child read single-source (SEC-FED-01, 04, 05).
+2. Masking-type matrix on join keys across GraphQL, WebSQL, OLAP (SEC-FED-02).
+3. Unknown versus unauthorized table indistinguishability on every transport (SEC-FED-03).
+4. Fan-out and limit tests (SEC-FED-08).
+5. Staging at rest, permissions, encryption, cleanup (SEC-FED-07, 09).
+6. Audit counts, correlation, fail-closed audit, payload hygiene (SEC-FED-10).
+7. Relation flag authorization, audit, epoch, ingestion survival (SEC-FED-11).
+8. Gate coverage for every transport and path, OLAP bypass closed, startup validation (SEC-FED-12, 18).
+9. Error and provenance disclosure (SEC-FED-13).
+10. Key injection corpus (SEC-FED-14).
+11. Tenant isolation across two tenants and two sources (SEC-FED-05, 06).
+12. Authorization-before-read ordering (SEC-FED-16).
+
+### 12.4 Residual Risks (accepted)
+
+- Inter-segment consistency window (T-13) within one request timeout.
+- Per-source timing differences remain observable (single-source access has the same property).
+- Delegated per-user identity on source 2 (PLAN-SCALE-5000 `WP-SC-15/17`) is out of scope; when it lands, the governed readers inherit it because they use the governed connection factory.
+
+### 12.5 Verdict
+
+**APPROVED WITH CONDITIONS.** The architecture is sound because it removes the second policy engine (SEC-FED-01), keeps both strategies on the governed pipeline, and closes the OLAP bypass. Phase 4 may start once the work packages carry the conditions above; Phase 5 must verify SEC-FED-01, 02, 05, 09, 10 and 12 line by line (critical), the rest by tests. Any deviation from a binding condition returns the work to Phase 2.
 
 ## 13. Changelog
 
 - 2026-10-16: Phase 2 architecture and work packages, verified against `70b75e27`.
+- 2026-10-16: Phase 3 security review appended (SEC-FED-01..18), verdict APPROVED WITH CONDITIONS.
