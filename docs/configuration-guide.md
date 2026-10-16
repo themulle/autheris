@@ -1011,7 +1011,7 @@ Steuert die Verwaltung und Cluster-Synchronisation relationsbasierter Zeilenfilt
 | :--- | :--- | :--- | :--- |
 | `VirtualFilters:MaxRemovals` | `int` | `10` | Maximale Anzahl an Bindungen, die ein GitOps-Sync ohne `?force=true` entfernen darf. Das Entfernen erweitert die Sichtrechte des Berechtigten; `0` deaktiviert die Schranke. |
 | `VirtualFilters:GenerationCheckSeconds` | `int` | `5` | Intervall in Sekunden, in dem eine Gateway-Instanz die Generation mit der Datenbank abgleicht. `0` prüft bei jedem Zugriff. |
-| `RowFilter:SubqueryStrategy` | `enum` | `Exists` | SQL-Strategie für RLS-Unterabfragen: `Exists` (`EXISTS (SELECT 1 ...)`), `InCorrelated` oder `In`. |
+| `RowFilters:SubqueryStrategy` | `enum` | `Exists` | SQL strategy for row-filter subqueries built as SQL text: `Exists` (`EXISTS (SELECT 1 ...)`), `InCorrelated` or `In`. Applies to the REST data API, OLAP and federated staging, governed aggregations, procedures and change detection. **No effect on the governed SQL compiler** (WebSQL, Trino protocol, Arrow/Flight SQL, async jobs, SQL endpoints, MCP SQL tools), which always emits correlated policy subqueries; a non-default value is reported as a startup warning (`Configuration: Gateway:RowFilters:SubqueryStrategy ... has no effect ...`). |
 | `Logging:LogGeneratedSql` | `bool` | `false` | Diagnoseschalter zur Protokollierung generierter Ziel-SQL-Abfragen inklusive RLS- und Virtual-Filter-Prädikate. |
 
 ```json
@@ -1019,7 +1019,7 @@ Steuert die Verwaltung und Cluster-Synchronisation relationsbasierter Zeilenfilt
   "MaxRemovals": 10,
   "GenerationCheckSeconds": 5
 },
-"RowFilter": {
+"RowFilters": {
   "SubqueryStrategy": "Exists"
 },
 "Logging": {

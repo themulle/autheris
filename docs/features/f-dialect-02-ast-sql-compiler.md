@@ -386,7 +386,7 @@ Removed or inert settings:
 | `Gateway:WebSql:SqlRewriterEngine` | Removed; configuring it fails the start |
 | `Gateway:WebSql:PlanCache` | Removed; configuring the section fails the start. The engine template cache has a fixed size of 512 (section 2.3) |
 | `Gateway:Insecure:danger_bypass_websql_governance` | No effect; fails the start outside Development (DANGER switch) |
-| `RowFilters:SubqueryStrategy` | Ignored on the governed path; policy subqueries are always correlated |
+| `RowFilters:SubqueryStrategy` | Ignored on the governed path; policy subqueries are always correlated. A non-default value is reported as a startup warning; the setting still applies to row filters built as SQL text (REST, staging, aggregations, procedures) |
 
 ## 8. Verification
 
