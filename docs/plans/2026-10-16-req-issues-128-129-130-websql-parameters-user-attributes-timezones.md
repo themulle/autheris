@@ -103,6 +103,8 @@
 
 ### 2.7 Open owner questions
 
+> **Owner decision 2026-10-16 (Q-128-1, decided):** default list maximum **1000** values per parameter, configurable, hard cap = dialect bind budget minus 100. Owner context: the consuming platform's row-filter tables (for example crane lists) stay well below this limit. Q-128-2..5 remain open with the recommendations below as defaults.
+
 | ID | Question | PM recommendation |
 |---|---|---|
 | Q-128-1 | Default value of the list maximum? | 1000 (below the SQL Server budget of 2100 minus policy parameters), configurable, hard cap = dialect budget minus 100 |
@@ -204,6 +206,8 @@ Dependencies: `ICallerAttributeProvider` interface and the claim provider are de
 
 ### 3.7 Open owner questions
 
+> **Owner decision 2026-10-16 (Q-129-1, decided):** yes — #129 realises and **replaces `WP-SC-04`**; the `ICallerAttributeProvider` interface is defined here and adopted by `WP-SC-05`. Q-129-2..7 remain open with the recommendations below as defaults.
+
 | ID | Question | PM recommendation |
 |---|---|---|
 | Q-129-1 | Confirm that #129 realises and replaces `WP-SC-04` (scale plan row 22) and that the `ICallerAttributeProvider` interface is defined here and adopted by `WP-SC-05`? | Yes. One abstraction, SC-05 hosts the chain and the Graph/LDAPS providers later |
@@ -272,6 +276,12 @@ Depends on #128 (list binding, expander, budget accounting) and the `ParameterOr
 | AC-130-8 | Startup self-test failure disables the function and the use returns the stable error |
 
 ### 4.6 Open owner questions
+
+> **Owner decision 2026-10-16 (Q-130-1, Q-130-2, decided):**
+> - **Q-130-1:** argument order is the industry order **`convert_timezone(from_zone, to_zone, ts)`** (final; it cannot change after the first release). Rationale: generated SQL (also by AI agents) stays consistent with Snowflake, Redshift and Spark.
+> - **Q-130-2:** option **(A)** — the result is the local wall-clock plain timestamp in all dialects; an offset-carrying variant may follow later as a separate function. Rationale: applications display local time; a result without offset is least error-prone for non-developers.
+>
+> Q-130-3..5 remain open with the recommendations below as defaults.
 
 | ID | Question | PM recommendation |
 |---|---|---|

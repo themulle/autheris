@@ -293,6 +293,8 @@ All three are accepted as **P2 performance features with security impact (classi
 
 #### 7.1.8 Size, risks, open questions
 
+> **Owner decision 2026-10-16:** Q-8 decided — per-source opt-in `allow_key_set_import`, default off (see section 12).
+
 - **Size.** #122: L (about 1,400 LOC production incl. pushability tables, 1,800 tests). #123: XL (about 1,300 LOC production, 1,500 tests; depends on a governed compile entry point). #124: L (about 700 LOC production, 1,000 tests). Detail in PLAN-FED-01 section 4.11 and 6 (WP-FED-11..14).
 - **Risks.** R-9 a wrong pushability rule silently loses rows (mitigation: conservative table, on/off parity tests per dialect, kill switch). R-10 dialect drift (collation changes on a column after catalog ingestion; mitigation: pushability reads catalog type/collation info and treats unknown as not pushable). R-11 subtree semantics differ from the all-staged query (documented, source authoritative, owner accepts, Q-9). R-12 key-set amplification (bounds, cost). R-13 audit/analysis divergence from execution (one planner, analysis calls it).
 - **Open owner questions.**
@@ -455,6 +457,13 @@ Metrics per FR-19 on `GatewayDiagnostics`; per-source read span with `source`, `
 | R-8 | HTTP sources have no key-lookup capability | Descriptor must declare a key query parameter or the relation is not executable (not advertised) |
 
 ## 12. Open Owner Questions
+
+> **Owner decision 2026-10-16 (Q-1, Q-6, Q-8, decided):**
+> - **Q-1:** `CrossSource:Enabled` **stays off by default** (opt-in master switch).
+> - **Q-6:** `AllowCrossDataSource` requires approval by **both table owners (four-eyes)**. The same rule applies to co-location groups (Q-16). Rationale: linking, for example, telematics with finance data across two sources is sensitive.
+> - **Q-8:** sending clear key values of source A to source B requires the **per-source opt-in flag `allow_key_set_import`, default off** (fail closed, SQL only). Rationale: data flow between sources must be a deliberate choice.
+>
+> All other questions remain open with their recommendation as default.
 
 | ID | Question | PM recommendation |
 |---|---|---|

@@ -38,14 +38,34 @@
 | 1.4 | **Nightly SQL compiler gate G8 failing** (allocation ratio 1.27x, limit 1.25x, on `70b75e27`) | Regression in a release gate | S | n/a (bug) | Phase 2 done: [`PLAN-BUG-G8-01`](2026-10-16-plan-bug-g8-allocation-regression.md) (top hypothesis: mask-guard passes allocate on every query; PRs #108-#110 ruled out). Phase 3 done (approved with conditions SEC-G8-01/02: skip condition via `HasMaskingForTable`, no shared stack). Phase 4 in progress on `fix/g8-mask-guard-allocations` |
 | 1.5 | SQL Server Windows auth follow-ups (`REQ-BUG-NTLM-01` OPEN-1 18452 on the GSS path, OPEN-2 managed NTLM against a real server) | Waits for the reporter's probe with v1.1.16; becomes a bug item only if the probe fails | – | ✅ | Reporter feedback |
 
+### Owner decisions 2026-10-16 (recorded in the PRDs)
+
+| Question | Decision | Recorded in |
+|---|---|---|
+| Q-130-1 argument order | `convert_timezone(from_zone, to_zone, ts)` (final) | `REQ-SQL-130` §4.6 |
+| Q-130-2 result type | local wall-clock timestamp without offset; offset variant later as a separate function | `REQ-SQL-130` §4.6 |
+| Q-111-1 who may set `Full` | governance admins only; owners only `Hidden`/`Summary` | `REQ-GOV-111` §2.9, §8 |
+| Q-112-1 typed aggregation shape | typed group fields + list of typed aggregate values | `REQ-DATA-112` §3.8, §8 |
+| Q-112-2 `where: String` | removed immediately (Phase 2 checks for other GraphQL callers) | `REQ-DATA-112` §3.8, §8 |
+| Q-113-2 self-service scopes | `data.access.request` (request) and `data.access.review` (decide), separate | `REQ-GOV-113` §4.8, §8 |
+| Q-1 `CrossSource:Enabled` default | stays off | `REQ-FED-01` §12 |
+| Q-6 `AllowCrossDataSource` | both table owners approve (four-eyes); same rule for co-location groups (Q-16) | `REQ-FED-01` §12 |
+| Q-8 key values from source A to B | per-source opt-in `allow_key_set_import`, default off | `REQ-FED-01` §7.1.8, §12 |
+| Q-128-1 list maximum | 1000 per parameter, configurable | `REQ-SQL-128` §2.7 |
+| Q-129-1 #129 replaces `WP-SC-04` | yes | `REQ-GOV-129` §3.7, `PLAN-SCALE-5000` row 22 |
+
+Guiding rule (owner): rights are checked by the backend, not by the calling agent; an agent must never widen its own reach. All other open questions default to the PRD recommendation.
+
+**Consumer urgency (owner, 2026-10-16):** (1) SQL Server NTLM login via the managed `SspiContextProvider` (`REQ-BUG-NTLM-01` OPEN-2; delivered in v1.1.16, awaiting the probe against the real server); (2) a configurable row-filter strategy for WebSQL so `ORDER BY` with row filters does not time out → #107 moved to rank 2.1; (3) the catalog-build failure reason in the log — delivered in v1.1.16 (#133).
+
 ### Priority Wave 2: urgently missing features (small and medium)
 
 | Rank | Item | Size | Phase 1 (PM) | Next phase |
 |---:|---|:---:|:---:|---|
-| 2.1 | **#115** switches for the remaining read paths (REST data endpoint, MCP tool groups) — closes uncontrollable read paths | S | ✅ | Phase 2 |
-| 2.2 | **#128** list parameters (`IN`/`NOT IN`) — prerequisite of #129 and #131 | M | ✅ | Phase 2, Phase 3 |
-| 2.3 | **#130** governed time zone conversion | S-M | ✅ | Phase 2, Phase 3 (owner Q-130-1..5) |
-| 2.4 | **#107** row filter key-set cache: implementation of WP-A/B/C (contracts merged) — the real answer to `RowFilters:SubqueryStrategy` (#136) | M | ✅ | Phase 4 |
+| 2.1 | **#107** row filter key-set cache: implementation of WP-A/B/C (contracts merged) — the real answer to `RowFilters:SubqueryStrategy` (#136); **consumer-urgent:** WebSQL `ORDER BY` with row filters runs into timeouts without it | M | ✅ | Phase 4 |
+| 2.2 | **#115** switches for the remaining read paths (REST data endpoint, MCP tool groups) — closes uncontrollable read paths | S | ✅ | Phase 2 |
+| 2.3 | **#128** list parameters (`IN`/`NOT IN`) — prerequisite of #129 and #131 | M | ✅ | Phase 2, Phase 3 |
+| 2.4 | **#130** governed time zone conversion | S-M | ✅ | Phase 2, Phase 3 (Q-130-1/2 decided) |
 | 2.5 | **#111** persisted dataset tags and catalog visibility | M | ✅ | Phase 2 |
 | 2.6 | **#112** typed aggregations in GraphQL for read-only tokens | M | ✅ | Phase 2 |
 

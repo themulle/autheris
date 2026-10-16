@@ -117,6 +117,8 @@
 
 ### 2.9 Open questions for the owner
 
+> **Owner decision 2026-10-16 (Q-111-1, decided):** raising a dataset to `Full` is **governance-admin-only**; data owners and delegates may set only `Hidden` and `Summary`. Rationale: an owner (for example a business unit) may restrict access but not widen it without an external check.
+
 - **Q-111-1:** May a data owner raise a dataset to `Full` (columns visible to every tenant member without consent), or is that governance-admin-only (proposal: admin-only)?
 - **Q-111-2:** Should `Summary` be visible to the whole tenant, or optionally restricted to a group list per dataset (proposal: tenant-wide as in the issue; group scoping as a later extension)?
 - **Q-111-3:** Is `Catalog:DefaultVisibility = Summary` desired for a data source on first ingestion (data product marketplace), or stay `Hidden` until an owner decides (proposal: `Hidden`)?
@@ -198,6 +200,10 @@ Depends on nothing; precondition for REQ-GOV-113 (discovery flow) and depends on
 9. Query cost analysis rejects an aggregate query exceeding the cost limit.
 
 ### 3.8 Open questions for the owner
+
+> **Owner decision 2026-10-16 (Q-112-1, Q-112-2, decided):**
+> - **Q-112-1:** group columns as **typed fields** plus a **list of typed aggregate values** (`{ alias, decimalValue, intValue, stringValue, dateTimeValue }` or an equivalent typed shape chosen by the architect). Rationale: generated applications are TypeScript clients; typed fields avoid guessing.
+> - **Q-112-2:** `where: String` is **removed immediately** (breaking). The consuming platform uses WebSQL, OData and procedures, not GraphQL free-text `where`, and knows no caller; Phase 2 must still check for other GraphQL callers before the removal ships.
 
 - **Q-112-1:** Typed rows: is a per-table generated result type with alias-driven value fields acceptable (alias validated, fields registered per request is not possible in a static schema), or is a list of `{alias, value}` with a typed scalar sufficient? (Proposal: group columns as typed fields; aggregates as a typed list `{ alias, decimalValue, intValue, stringValue, dateTimeValue }` or one `AggregateValue` union.) Architect to propose, owner to confirm the client impact.
 - **Q-112-2:** Remove the `where: String` argument immediately (proposal, breaking) or keep it for one release behind an option?
@@ -298,6 +304,8 @@ Increment B:
 10. The approver cannot approve their own request (existing separation of duties still holds).
 
 ### 4.8 Open questions for the owner
+
+> **Owner decision 2026-10-16 (Q-113-2, decided):** two separate scopes — **`data.access.request`** (file and withdraw a request) and **`data.access.review`** (decide a request). `SelfServiceScopes` lists `data.access.request`; deciding requires `data.access.review` in addition to the approver role. Rationale: separation of requesting and deciding (four-eyes), matching the platform rule that publishing is separate from changing.
 
 - **Q-113-1:** Should app-only tokens (service principals) be allowed to file self-service requests on behalf of a person (no: proposed), or only delegated tokens with a person subject?
 - **Q-113-2:** Which scope name(s) will the consuming tool use for `SelfServiceScopes` (default empty)?
@@ -511,6 +519,8 @@ graph LR
 ---
 
 ## 8. Consolidated Open Questions (for the owner)
+
+> **Owner decision 2026-10-16:** Q-111-1 admin only; Q-112-1 typed group fields + typed aggregate value list; Q-112-2 remove `where: String` immediately; Q-113-2 scopes `data.access.request` / `data.access.review`. All other questions in this table remain open with their recommendation as default. Guiding rule (owner): rights are checked by the backend, not by the calling agent, and an agent must never widen its own reach.
 
 | ID | Question | Proposed default |
 |---|---|---|
