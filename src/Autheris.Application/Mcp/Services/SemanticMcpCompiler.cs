@@ -171,9 +171,15 @@ public sealed class SemanticMcpCompiler(
                 var hasDesc = !string.IsNullOrWhiteSpace(col.Description);
                 var hasLongDesc = !string.IsNullOrWhiteSpace(col.LongDescription);
                 // Issue #127: the resource is not level aware, so only descriptive meta keys are published (no accepted values, ranges, examples).
-                var docMeta = (col.Meta ?? new Dictionary<string, string>())
-                    .Where(kv => McpDatasetCatalog.DescriptiveMetaKeys.Contains(kv.Key))
-                    .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+                var docMeta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var (metaKey, metaValue) in col.Meta ?? new Dictionary<string, string>())
+                {
+                    if (McpDatasetCatalog.DescriptiveMetaKeys.Contains(metaKey))
+                    {
+                        docMeta[metaKey] = metaValue;
+                    }
+                }
+
                 var hasMeta = docMeta.Count > 0;
 
                 if (hasDesc || hasLongDesc || hasMeta)

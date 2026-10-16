@@ -13,6 +13,7 @@ using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using Shouldly;
@@ -315,6 +316,66 @@ public sealed class McpDatasetCatalogScopeLevelTests
         var description = await DescribeAsync(catalog, WithScopes());
 
         Json(description).ShouldNotContain("SENTINEL_");
+    }
+
+    // M1: a Clear column returns its raw meta values only when the profile layer publishes values.
+    [Fact]
+    public async Task Describe_RawMeta_ClearButSensitiveColumn_OmitsValueKeys()
+    {
+        var catalog = CreateCatalog(CreateTable(gradeSensitive: true), [Allow(IdClear, GradeClear)]);
+
+        var description = await DescribeAsync(catalog, WithScopes());
+
+        Json(description).ShouldNotContain("SENTINEL_");
+    }
+
+    [Fact]
+    public async Task Describe_RawMeta_ClearColumnWithActiveRowFilter_OmitsValueKeysUnderDefaultPolicy()
+    {
+        var table = CreateTable() with { ProfilePublicationPolicy = DatasetProfilePublicationPolicy.FormatAndEmptyShareOnly };
+        var catalog = CreateCatalog(table, [Allow(IdClear, GradeClear).WithFilters(RowFilter("1"))]);
+
+        var description = await DescribeAsync(catalog, WithScopes());
+
+        Json(description).ShouldNotContain("SENTINEL_");
+    }
+
+    // P1: meta keys differing only by case must not break the response and must stay descriptive-only.
+    [Fact]
+    public async Task Describe_RawMeta_CaseVariantKeys_DoNotThrow_AndValueKeysAreOmitted()
+    {
+        var table = CreateTable();
+        var grade = new TableColumn
+        {
+            ColumnName = "grade",
+            DataType = "varchar",
+            Meta = new Dictionary<string, string>
+            {
+                ["role"] = "dimension",
+                ["Role"] = "measure",
+                ["accepted_values"] = System.Text.Json.JsonSerializer.Serialize(SentinelValues)
+            }
+        };
+        var catalog = CreateCatalog(table with { Columns = [table.Columns[0], grade] }, [Allow(IdClear, GradeClear, Rule("grade", ColumnAccessLevel.Mask, ScopeA))]);
+
+        var description = await DescribeAsync(catalog, WithScopes(ScopeA));
+
+        Json(description).ShouldNotContain("SENTINEL_");
+        Grade(description).ShouldNotBeNull().Semantics.ShouldNotBeNull().RawMeta.ShouldNotBeNull().ContainsKey("role").ShouldBeTrue();
+    }
+
+    // M2 / AC-127-9: under the explicit MCP auth bypass the catalog baseline stays (Clear, Mask for sensitive columns).
+    [Fact]
+    public async Task Describe_McpAuthBypass_WithoutSid_KeepsBaseline()
+    {
+        var bypass = new GatewayOptions { Insecure = new InsecureGettingStartedOptions { danger_bypass_mcp_auth = true } };
+        var anonymous = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity());
+
+        var open = CreateCatalog(CreateTable(), [], gatewayOptions: bypass);
+        ShouldShowFullProfile(await DescribeAsync(open, anonymous));
+
+        var sensitive = CreateCatalog(CreateTable(gradeSensitive: true), [], gatewayOptions: bypass);
+        ShouldShowNoValues(await DescribeAsync(sensitive, anonymous));
     }
 
     // ST-11: access profile Strict is not modelled; the catalog reports Mask (no values) for a sensitive column.

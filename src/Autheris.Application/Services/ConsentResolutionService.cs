@@ -58,12 +58,9 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         {
             foreach (var colRule in c.ColumnRules)
             {
-                if (colRule.ApplicableScopes != null && colRule.ApplicableScopes.Count > 0)
+                if (!RuleAppliesToScopes(colRule, callerScopes))
                 {
-                    if (callerScopes == null || !colRule.ApplicableScopes.Any(s => callerScopes.Contains(s)))
-                    {
-                        continue;
-                    }
+                    continue;
                 }
 
                 if (colRule.AccessLevel == ColumnAccessLevel.Deny)
@@ -233,6 +230,13 @@ public sealed class ConsentResolutionService : IConsentResolutionService
     /// </summary>
     internal static ColumnAccessLevel ResolveConsentColumnLevel(Consent consent, string? column, IReadOnlySet<string>? callerScopes = null)
         => GetConsentColumnLevel(consent, column, callerScopes);
+
+    /// <summary>
+    /// True when the rule applies to a caller with <paramref name="callerScopes"/>: an unscoped rule always, a scope-specific rule
+    /// only when the caller holds one of its scopes (no scopes = does not apply).
+    /// </summary>
+    internal static bool RuleAppliesToScopes(ConsentColumnRule rule, IReadOnlySet<string>? callerScopes)
+        => !IsScopeSpecific(rule) || (callerScopes is { Count: > 0 } && rule.ApplicableScopes.Any(callerScopes.Contains));
 
     /// <summary>True when the rule only applies to callers holding one of its listed scopes.</summary>
     internal static bool IsScopeSpecific(ConsentColumnRule rule)

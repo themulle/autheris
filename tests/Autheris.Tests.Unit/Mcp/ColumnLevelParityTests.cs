@@ -75,12 +75,12 @@ public sealed class ColumnLevelParityTests
                 consents.Add(Allow(Rule("id", ColumnAccessLevel.Clear), Rule("grade", ColumnAccessLevel.Mask)));
                 break;
             case Shape.FilteredPlusUnfilteredMask:
-                consents.Add(Allow(primaryRules).WithFilters(RowFilter("[1]")));
+                consents.Add(Allow(primaryRules).WithFilters(RowFilter("1")));
                 consents.Add(Allow(Rule("id", ColumnAccessLevel.Clear), Rule("grade", ColumnAccessLevel.Mask)));
                 break;
             case Shape.TwoFiltered:
-                consents.Add(Allow(primaryRules).WithFilters(RowFilter("[1]")));
-                consents.Add(Allow(Rule("id", ColumnAccessLevel.Clear), Rule("grade", ColumnAccessLevel.Clear)).WithFilters(RowFilter("[2]")));
+                consents.Add(Allow(primaryRules).WithFilters(RowFilter("1")));
+                consents.Add(Allow(Rule("id", ColumnAccessLevel.Clear), Rule("grade", ColumnAccessLevel.Clear)).WithFilters(RowFilter("2")));
                 break;
             case Shape.RoleGrantee:
                 consents.Add(Allow(primaryRules).AsRole("analyst"));
@@ -100,6 +100,13 @@ public sealed class ColumnLevelParityTests
             ? Principal(roles: ["analyst"])
             : Principal(claimType, string.Join(' ', scopes), roles: ["analyst"]);
 
+    /// <summary>A Deny column rule for the column under test that applies to the caller scopes (hides the column in the catalog, SR15-52).</summary>
+    private static bool HasApplicableDenyRule(IEnumerable<Consent> consents, IReadOnlySet<string> scopes) =>
+        consents.SelectMany(c => c.ColumnRules).Any(r =>
+            r.AccessLevel == ColumnAccessLevel.Deny &&
+            r.ColumnName == "grade" &&
+            (r.ApplicableScopes.Count == 0 || r.ApplicableScopes.Any(scopes.Contains)));
+
     /// <summary>Observation class of a level on the profile channel: Deny = no profile or column, Mask = no values, Clear = values.</summary>
     private static ColumnAccessLevel Observe(McpDatasetColumn? column)
     {
@@ -118,9 +125,13 @@ public sealed class ColumnLevelParityTests
     {
         var mismatches = new List<string>();
         var checkedCases = 0;
+        var skipped = 0;
+        var skippedReasons = new List<string>();
+        var total = 0;
 
         foreach (var (baseLevel, scopeRule, scopes, shape, denyEffectMask, sensitive, claimType) in Cases())
         {
+            total++;
             var table = CreateTable(gradeSensitive: sensitive);
             var consents = BuildConsents(baseLevel, scopeRule, shape, denyEffectMask);
             var principal = PrincipalFor(scopes, claimType);
@@ -141,8 +152,10 @@ public sealed class ColumnLevelParityTests
                     null,
                     scopeSet.Count > 0 ? scopeSet : null);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                skippedReasons.Add(label + " :: " + ex.Message);
+                skipped++;
                 continue; // the oracle itself cannot evaluate this combination (for example an unsupported filter)
             }
 
@@ -159,7 +172,7 @@ public sealed class ColumnLevelParityTests
             catch (Autheris.Domain.Exceptions.TableNotFoundException)
             {
                 // Not visible at all: acceptable only when the data path denies the whole table or the column.
-                if (oracle != ColumnAccessLevel.Deny)
+                if (oracle != ColumnAccessLevel.Deny && !HasApplicableDenyRule(consents, scopeSet))
                 {
                     mismatches.Add($"{label}: table invisible but oracle={oracle}");
                 }
@@ -177,6 +190,11 @@ public sealed class ColumnLevelParityTests
                 mismatches.Add($"{label}: catalog={observed} oracle={oracle}");
             }
 
+            if (column == null && oracle != ColumnAccessLevel.Deny && !HasApplicableDenyRule(consents, scopeSet))
+            {
+                mismatches.Add($"{label}: column hidden without an applicable Deny rule and oracle={oracle}");
+            }
+
             // (b) query analysis, caller is target.
             var analysis = new QueryAnalysisService(MetadataRepository(table), ConsentRepository(consents));
             var result = await analysis.AnalyzeQueriesAsync(
@@ -188,7 +206,9 @@ public sealed class ColumnLevelParityTests
             }
         }
 
-        checkedCases.ShouldBeGreaterThan(500);
+        skipped.ShouldBe(0, "the oracle must evaluate every enumerated combination: " + skippedReasons.FirstOrDefault());
+        checkedCases.ShouldBe(total);
+        total.ShouldBe(4 * 4 * 4 * 5 * 2 * 2);
         mismatches.ShouldBeEmpty(string.Join('\n', mismatches.Take(20)));
     }
 

@@ -208,7 +208,8 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         bool canViewProfile = string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase) ||
                               table.ReleaseProfileToCatalogViewers;
 
-        var columnAccessLevels = ResolveColumnLevels(principal, table, activeConsents, isAdmin, isGranted: string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase));
+        var columnAccessLevels = ResolveColumnLevels(principal, table, activeConsents, isAdmin, isGranted: options?.Value.IsMcpAuthBypassed != true && string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase),
+            bypass: options?.Value.IsMcpAuthBypassed == true);
         var hasActiveRowFilters = HasActiveRowFilters(table, activeConsents);
         var effectiveProfileService = profileService ?? new Autheris.Application.Catalog.Profiling.ColumnValueProfileService();
         var sunsetRules = await LoadSunsettingRulesAsync(ct).ConfigureAwait(false);
@@ -242,7 +243,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
                     primaryKeys.Contains(c.ColumnName),
                     field?.Field,
                     field?.GraphQlType,
-                    RestrictSemantics(c, canViewProfile ? effectiveLevel : Autheris.Domain.Interfaces.ColumnAccessLevel.Deny),
+                    RestrictSemantics(c, canViewProfile ? effectiveLevel : Autheris.Domain.Interfaces.ColumnAccessLevel.Deny, valueProfile),
                     Deprecation: deprecation,
                     ValueProfile: valueProfile);
             })
@@ -413,27 +414,37 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
     internal static readonly HashSet<string> DescriptiveMetaKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "role", "unit", "business_name", "dbt_model", "openmetadata_urn", "long_description", "specification",
-        "deprecated_since", "sunset_date", "replacement_field", "deprecation_reason", "reason"
+        "deprecated_since", "sunset_date", "replacement_field", "deprecation_reason", "reason",
+        "pii", "is_pii", "sensitivity", "foreign_key_table", "foreign_key_column"
     };
 
     /// <summary>
-    /// Issue #127: the raw column meta is value-bearing (for example <c>accepted_values</c>), so it is returned in full only for a
-    /// <see cref="Autheris.Domain.Interfaces.ColumnAccessLevel.Clear"/> column. For every other level only descriptive keys remain.
+    /// Issue #127: the raw column meta is value-bearing (for example <c>accepted_values</c>). It is returned in full only for a
+    /// <see cref="Autheris.Domain.Interfaces.ColumnAccessLevel.Clear"/> column that is not sensitive and whose value profile publishes
+    /// values (the profile layer applies row filter, publication policy and small-table coarsening); in every other case only
+    /// <see cref="DescriptiveMetaKeys"/> remain (fail closed).
     /// </summary>
-    private static ColumnSemantics RestrictSemantics(TableColumn column, Autheris.Domain.Interfaces.ColumnAccessLevel level)
+    private static ColumnSemantics RestrictSemantics(TableColumn column, Autheris.Domain.Interfaces.ColumnAccessLevel level, ColumnValueProfile? profile)
     {
         var semantics = column.Semantics;
-        if (level == Autheris.Domain.Interfaces.ColumnAccessLevel.Clear)
+        var publishesValues = level == Autheris.Domain.Interfaces.ColumnAccessLevel.Clear &&
+                              !column.IsSensitive &&
+                              profile is { AllowedValues: not null } or { MinValue: not null } or { MaxValue: not null } or { SampleValues: not null };
+        if (publishesValues || column.Meta == null || column.Meta.Count == 0)
         {
             return semantics;
         }
 
-        return semantics with
+        var descriptive = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in column.Meta)
         {
-            RawMeta = column.Meta
-                .Where(kv => DescriptiveMetaKeys.Contains(kv.Key))
-                .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase)
-        };
+            if (DescriptiveMetaKeys.Contains(key))
+            {
+                descriptive[key] = value;
+            }
+        }
+
+        return semantics with { RawMeta = descriptive };
     }
 
     private static bool HasActiveRowFilters(TableMetadata table, IReadOnlyList<Consent> activeConsents) =>
@@ -456,7 +467,8 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         TableMetadata table,
         IReadOnlyList<Consent> activeConsents,
         bool isAdmin,
-        bool isGranted)
+        bool isGranted,
+        bool bypass)
     {
         Dictionary<string, Autheris.Domain.Interfaces.ColumnAccessLevel> levels;
         if (isAdmin)
@@ -472,7 +484,8 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
 
         try
         {
-            var userSid = principal.GetUserSid();
+            // The explicit (production-blocked) MCP auth bypass may have no SID: it keeps the catalog baseline (AC-127-9).
+            var userSid = principal.GetUserSid() ?? (bypass ? new Sid("MCP_AUTH_BYPASS") : (Sid?)null);
             if (userSid == null)
             {
                 levels = CatalogColumnAccessResolver.AllDeny(table);
@@ -578,7 +591,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
                 throw new GatewayForbiddenException("Synthetic sample rows require either an active table consent or ReleaseProfileToCatalogViewers enabled by the data owner.");
             }
 
-            var columnAccessLevels = ResolveColumnLevels(principal, table, activeConsents, isAdmin, isGranted);
+            var columnAccessLevels = ResolveColumnLevels(principal, table, activeConsents, isAdmin, isGranted: options?.Value.IsMcpAuthBypassed != true && isGranted, bypass: options?.Value.IsMcpAuthBypassed == true);
             var hasActiveRowFilters = HasActiveRowFilters(table, activeConsents);
             var generator = syntheticRowGenerator ?? new Autheris.Application.Catalog.Profiling.SyntheticSampleRowGenerator(profileService);
             var syntheticRows = generator.GenerateRows(table, rowCount, columnAccessLevels, hasActiveRowFilters);

@@ -113,21 +113,26 @@ public static class CatalogVisibility
             // Issue #127: scope-aware like the data path. A Deny column rule of any consent (SR15-52: also of an Allow consent) hides the
             // column only for callers it applies to (unscoped, or one of its scopes is held); an Allow consent shows it when its resolved level is not Deny.
             // callerScopes null or empty = base rules only (scope-only grants stay hidden, issue #116).
-            bool IsDenied(string column) =>
-                tableConsents.SelectMany(c => c.ColumnRules).Any(cr =>
-                    cr.AccessLevel == ColumnAccessLevel.Deny &&
-                    string.Equals(cr.ColumnName, column, StringComparison.OrdinalIgnoreCase) &&
-                    (!ConsentResolutionService.IsScopeSpecific(cr) ||
-                     (callerScopes is { Count: > 0 } && cr.ApplicableScopes.Any(callerScopes.Contains)))) ||
-                (table.ColumnMaskingRules != null &&
-                 table.ColumnMaskingRules.TryGetValue(column, out var maskingRule) &&
-                 string.Equals(maskingRule.RuleType, "DENY", StringComparison.OrdinalIgnoreCase));
+            var deniedColumns = tableConsents
+                .SelectMany(c => c.ColumnRules)
+                .Where(cr => cr.AccessLevel == ColumnAccessLevel.Deny && ConsentResolutionService.RuleAppliesToScopes(cr, callerScopes))
+                .Select(cr => cr.ColumnName)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            bool IsGranted(string column) =>
-                tableAllows.Any(c => ConsentResolutionService.ResolveConsentColumnLevel(c, column, callerScopes) != ColumnAccessLevel.Deny);
+            if (table.ColumnMaskingRules != null)
+            {
+                foreach (var (colName, rule) in table.ColumnMaskingRules)
+                {
+                    if (string.Equals(rule.RuleType, "DENY", StringComparison.OrdinalIgnoreCase))
+                    {
+                        deniedColumns.Add(colName);
+                    }
+                }
+            }
 
             var visibleColumns = table.Columns
-                .Where(c => !IsDenied(c.ColumnName) && IsGranted(c.ColumnName))
+                .Where(c => !deniedColumns.Contains(c.ColumnName) &&
+                            tableAllows.Any(a => ConsentResolutionService.ResolveConsentColumnLevel(a, c.ColumnName, callerScopes) != ColumnAccessLevel.Deny))
                 .ToList();
 
             visible.Add(table with { Columns = visibleColumns });

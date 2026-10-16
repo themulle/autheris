@@ -11,6 +11,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Logging;
 
 public sealed partial class QueryAnalysisService
 {
@@ -252,7 +253,11 @@ public sealed partial class QueryAnalysisService
     }
 
     /// <summary>Token scopes of the evaluated principal; <c>Scopes</c> is empty for an impersonated target.</summary>
-    private sealed record AnalysisScopeContext(IReadOnlySet<string> Scopes, bool TargetImpersonated);
+    private sealed record AnalysisScopeContext(IReadOnlySet<string> Scopes, bool TargetImpersonated)
+    {
+        /// <summary>Levels per table for the principal of this request (queries of one request run sequentially).</summary>
+        public Dictionary<TableIdentifier, IReadOnlyDictionary<string, ColumnAccessLevel>> LevelCache { get; } = new();
+    }
 
     private static ColumnAccessLevel ResolveEffectiveColumnAccess(
         TableColumn column,
@@ -281,6 +286,11 @@ public sealed partial class QueryAnalysisService
         IReadOnlyList<Consent> activeConsents,
         AnalysisScopeContext scopeContext)
     {
+        if (scopeContext.LevelCache.TryGetValue(table.Identifier, out var cached))
+        {
+            return cached;
+        }
+
         Dictionary<string, ColumnAccessLevel> levels;
         try
         {
@@ -312,16 +322,15 @@ public sealed partial class QueryAnalysisService
                 }
             }
         }
-        catch (OperationCanceledException)
+        catch (Exception ex)
         {
-            throw;
-        }
-        catch (Exception)
-        {
+            // Fail closed; only the table and the exception type are logged (no consent content, scopes or values).
+            _logger?.LogWarning("Column level prediction failed for {Table} ({ExceptionType}); all columns denied.", table.Identifier.ToString(), ex.GetType().Name);
             levels = CatalogColumnAccessResolver.AllDeny(table);
         }
 
         CatalogColumnAccessResolver.ApplyCatalogDenyRules(levels, table);
+        scopeContext.LevelCache[table.Identifier] = levels;
         return levels;
     }
 

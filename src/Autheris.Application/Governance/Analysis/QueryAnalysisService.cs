@@ -32,6 +32,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
     private readonly GatewayOptions _gatewayOptions;
     private readonly QueryAnalysisOptions _analysisOptions;
     private readonly Autheris.Domain.Interfaces.IConsentResolutionService _consentResolution;
+    private readonly Microsoft.Extensions.Logging.ILogger<QueryAnalysisService>? _logger;
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     public QueryAnalysisService(
@@ -43,7 +44,8 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         ISchemaSunsettingService? sunsettingService = null,
         IOptions<GatewayOptions>? gatewayOptions = null,
         QueryAnalysisOptions? analysisOptions = null,
-        Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null)
+        Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null,
+        Microsoft.Extensions.Logging.ILogger<QueryAnalysisService>? logger = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -51,6 +53,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         _dataOwnershipRepository = dataOwnershipRepository;
         // The default is the production resolver (stateless), never a weaker one (issue #127).
         _consentResolution = consentResolution ?? new Autheris.Application.Services.ConsentResolutionService();
+        _logger = logger;
         _accessProfileRepository = accessProfileRepository;
         _sunsettingService = sunsettingService;
         _gatewayOptions = gatewayOptions?.Value ?? new GatewayOptions();
@@ -70,13 +73,15 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         ISchemaSunsettingService? sunsettingService = null,
         IOptions<GatewayOptions>? gatewayOptions = null,
         QueryAnalysisOptions? analysisOptions = null,
-        Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null)
+        Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null,
+        Microsoft.Extensions.Logging.ILogger<QueryAnalysisService>? logger = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _dataOwnershipRepository = dataOwnershipRepository;
         // The default is the production resolver (stateless), never a weaker one (issue #127).
         _consentResolution = consentResolution ?? new Autheris.Application.Services.ConsentResolutionService();
+        _logger = logger;
         _accessProfileRepository = accessProfileRepository;
         _sunsettingService = sunsettingService;
         _gatewayOptions = gatewayOptions?.Value ?? new GatewayOptions();
@@ -451,14 +456,16 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         return !string.IsNullOrWhiteSpace(idClaim) ? new Sid(idClaim.Trim()) : (Sid?)null;
     }
 
+    /// <summary>
+    /// GovernanceAdmin or the canonical ClusterAdmin (same trust root as the catalog; ForwardAuth identities and tenant-prefixed
+    /// roles never qualify as ClusterAdmin).
+    /// </summary>
     internal static bool IsAdminPrincipal(ClaimsPrincipal principal)
     {
         var roles = principal.GetUserRoles();
         return roles.Contains("GovernanceAdmin") ||
-               roles.Contains("ClusterAdmin") ||
                principal.IsInRole("GovernanceAdmin") ||
-               principal.IsInRole("ClusterAdmin") ||
-               principal.IsInRole("admin");
+               Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
     }
 
     internal static bool HasSimulatePrivilege(ClaimsPrincipal principal)
