@@ -55,6 +55,7 @@
 | Q-8 key values from source A to B | per-source opt-in `allow_key_set_import`, default off | `REQ-FED-01` §7.1.8, §12 |
 | Q-128-1 list maximum | 1000 per parameter, configurable | `REQ-SQL-128` §2.7 |
 | Q-129-1 #129 replaces `WP-SC-04` | yes | `REQ-GOV-129` §3.7, `PLAN-SCALE-5000` row 22 |
+| O-7 tenancy mode (`PLAN-GOV-111` rev. 3) | new option `Gateway:Tenancy:Mode`, default `Multi` (fail closed for claim-less tokens); single-tenant deployments set `Single` — the consuming platform (Talos) runs single-tenant and sets `Single` on upgrade | `PLAN-GOV-111` (WP-0) |
 
 Guiding rule (owner): rights are checked by the backend, not by the calling agent; an agent must never widen its own reach. All other open questions default to the PRD recommendation.
 
