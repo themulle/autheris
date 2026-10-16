@@ -185,7 +185,7 @@ public sealed class DatasourceTestingServiceTests
     }
 
     [Fact]
-    public async Task TestConnection_SqlDatasource_ValidSelectOne_ReturnsSuccess()
+    public async Task TestConnection_SqlDatasource_WithoutConfiguredConnection_ReportsFailureInsteadOfFakeSuccess()
     {
         var sqlTable = new Table
         {
@@ -214,9 +214,11 @@ public sealed class DatasourceTestingServiceTests
 
         var result = await service.TestDatasourceAsync("sales.dbo.orders", new DatasourceTestRequest(), CreateAdminUser());
 
-        result.IsSuccess.ShouldBeTrue();
-        result.HttpStatusCode.ShouldBe(200);
+        // The SQL probe used to report success without opening a connection (host "sql-engine"); it now reports the real state.
+        result.IsSuccess.ShouldBeFalse();
+        result.HttpStatusCode.ShouldBeNull();
         result.Type.ShouldBe(DataSourceType.Sql);
+        result.Diagnostics.TargetHost.ShouldNotBe("sql-engine");
     }
 
     [Fact]

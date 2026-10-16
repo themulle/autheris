@@ -145,12 +145,14 @@ public sealed class SqlServerWindowsAuthOptions
     public string? ServicePrincipalName { get; init; }
 
     /// <summary>
-    /// Issue #102: Enables .NET's built-in managed NTLM implementation (<c>System.Net.Security.UseManagedNtlm</c>) together with a
-    /// per-connection <c>Microsoft.Data.SqlClient.SspiContextProvider</c> backed by <see cref="System.Net.Security.NegotiateAuthentication"/>.
-    /// Defaults to <c>true</c>, allowing NTLM authentication directly from .NET in Linux/Podman containers without requiring host
-    /// GSSAPI environment variables, while keeping <c>gss-ntlmssp</c> / <c>NTLM_USER_FILE</c> configured as fallback.
+    /// Issue #102: selects the NTLM path. <c>true</c> uses .NET's built-in managed NTLM (<c>System.Net.Security.UseManagedNtlm</c>) with a
+    /// per-connection <c>Microsoft.Data.SqlClient.SspiContextProvider</c> backed by <see cref="System.Net.Security.NegotiateAuthentication"/>
+    /// (no native library needed). <c>false</c> never sets the switch and never creates the provider, so SqlClient uses the native
+    /// GSSAPI stack (<c>gss-ntlmssp</c> / <c>NTLM_USER_FILE</c>). When not configured (<c>null</c>) the process environment variable
+    /// <c>DOTNET_System_Net_Security_UseManagedNtlm</c> decides (<c>true</c>/<c>1</c> or <c>false</c>/<c>0</c>); when that is unset or invalid, managed NTLM is used.
+    /// See <see cref="ManagedNtlmPolicy"/>.
     /// </summary>
-    public bool UseManagedNtlm { get; init; } = true;
+    public bool? UseManagedNtlm { get; init; }
 }
 
 /// <summary>Authentication modes of the Databricks Statement Execution client.</summary>
@@ -209,4 +211,30 @@ public static partial class DefaultSchemaPolicy
     private static partial System.Text.RegularExpressions.Regex Pattern();
 
     public static bool IsValid(string? schema) => schema is not null && Pattern().IsMatch(schema);
+}
+
+/// <summary>
+/// Single rule that selects between managed NTLM and the native GSSAPI (<c>gss-ntlmssp</c>) path for SQL Server Windows authentication:
+/// an explicit <see cref="SqlServerWindowsAuthOptions.UseManagedNtlm"/> wins; otherwise the environment variable
+/// <see cref="EnvironmentVariableName"/> (<c>true</c>/<c>1</c>/<c>false</c>/<c>0</c>) decides; otherwise managed NTLM is used.
+/// </summary>
+public static class ManagedNtlmPolicy
+{
+    public const string EnvironmentVariableName = "DOTNET_System_Net_Security_UseManagedNtlm";
+
+    public static bool Resolve(bool? configured, Func<string, string?>? getEnvVar = null)
+    {
+        if (configured is { } explicitValue)
+        {
+            return explicitValue;
+        }
+
+        string? raw = (getEnvVar ?? Environment.GetEnvironmentVariable)(EnvironmentVariableName)?.Trim();
+        if (string.Equals(raw, "false", StringComparison.OrdinalIgnoreCase) || raw == "0")
+        {
+            return false;
+        }
+
+        return true;
+    }
 }

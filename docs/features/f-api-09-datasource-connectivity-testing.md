@@ -101,3 +101,7 @@ curl -X POST "http://localhost:8080/api/v1/catalog/datasources/finance_db/test" 
   }
 }
 ```
+
+## SQL data sources
+
+For SQL data sources the endpoint opens a real connection through the configured connection factory (see [F-AUTH-04](f-auth-04-sqlserver-windows-auth-ntlm-kerberos.md#35-testing-a-sql-server-data-source)). Host and port come from the connection string, `ProbeDetails` contains `Dialect`, `AuthPath` and, on failure, a `Category`. TLS details are not determined and are not fabricated.

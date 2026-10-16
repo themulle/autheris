@@ -66,7 +66,7 @@ public static class SqlServerWindowsAuthConfigurator
         sspiContextProvider = null;
 
         var getEnvironmentVariable = getEnvVar ?? Environment.GetEnvironmentVariable;
-        var setEnvironmentVariable = setEnvVar ?? Environment.SetEnvironmentVariable;
+        var setEnvironmentVariable = setEnvVar ?? NativeEnvironment.Set;
 
         var builder = new SqlConnectionStringBuilder(options.ConnectionString);
         var winAuth = options.WindowsAuth;
@@ -116,7 +116,8 @@ public static class SqlServerWindowsAuthConfigurator
             if (!string.IsNullOrWhiteSpace(ambientNtlmFile))
             {
                 ValidateNtlmUserFile(ambientNtlmFile, logger, out var ambientDomain, out var ambientUser, out var ambientPassword);
-                if (!string.IsNullOrWhiteSpace(ambientUser) && !string.IsNullOrWhiteSpace(ambientPassword))
+                if (!string.IsNullOrWhiteSpace(ambientUser) && !string.IsNullOrWhiteSpace(ambientPassword) &&
+                    ManagedNtlmPolicy.Resolve(null, getEnvironmentVariable))
                 {
                     EnableManagedNtlmSwitch();
                     sspiContextProvider = new ManagedNtlmSspiContextProvider(
@@ -180,7 +181,7 @@ public static class SqlServerWindowsAuthConfigurator
         sspiContextProvider = null;
 
         var getEnvironmentVariable = getEnvVar ?? Environment.GetEnvironmentVariable;
-        var setEnvironmentVariable = setEnvVar ?? Environment.SetEnvironmentVariable;
+        var setEnvironmentVariable = setEnvVar ?? NativeEnvironment.Set;
 
         var effectiveMode = ResolveEffectiveMode(winAuth, getEnvironmentVariable);
         if (effectiveMode == SqlServerWindowsAuthMode.None)
@@ -266,7 +267,7 @@ public static class SqlServerWindowsAuthConfigurator
                 "SQL Server WindowsAuth (NTLM) requires either (Domain, Username, PasswordRef) or an existing NTLM_USER_FILE / NtlmUserFilePath.");
         }
 
-        if (winAuth.UseManagedNtlm && !string.IsNullOrWhiteSpace(username) && !string.IsNullOrWhiteSpace(resolvedPassword))
+        if (ManagedNtlmPolicy.Resolve(winAuth.UseManagedNtlm, getEnvironmentVariable) && !string.IsNullOrWhiteSpace(username) && !string.IsNullOrWhiteSpace(resolvedPassword))
         {
             EnableManagedNtlmSwitch();
             sspiContextProvider = new ManagedNtlmSspiContextProvider(
@@ -435,13 +436,58 @@ public static class SqlServerWindowsAuthConfigurator
     }
 
     /// <summary>
-    /// Classifies an exception thrown during <see cref="SqlConnection.OpenAsync(CancellationToken)"/> when <c>Integrated Security=true</c>
-    /// is active and wraps it with a clear, actionable diagnostic message (without leaking credentials).
+    /// Names the authentication path a data source uses: <c>SqlPassword</c>, <c>Integrated-ManagedNtlm</c>,
+    /// <c>Integrated-GSSAPI</c> (gss-ntlmssp / ambient GSSAPI) or <c>Integrated-Kerberos</c>. Never throws, never reads secrets.
     /// </summary>
+    public static string DescribeAuthPath(DataSourceConnectionOptions options, Func<string, string?>? getEnvVar = null)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var getEnvironmentVariable = getEnvVar ?? Environment.GetEnvironmentVariable;
+        var winAuth = options.WindowsAuth;
+        if (winAuth is { Mode: not SqlServerWindowsAuthMode.None })
+        {
+            if (ResolveEffectiveMode(winAuth, getEnvironmentVariable) == SqlServerWindowsAuthMode.Kerberos)
+            {
+                return "Integrated-Kerberos";
+            }
+
+            return ManagedNtlmPolicy.Resolve(winAuth.UseManagedNtlm, getEnvironmentVariable)
+                ? "Integrated-ManagedNtlm"
+                : "Integrated-GSSAPI";
+        }
+
+        bool integrated = false;
+        try
+        {
+            integrated = new SqlConnectionStringBuilder(options.ConnectionString).IntegratedSecurity;
+        }
+        catch (ArgumentException)
+        {
+            // malformed connection string: treated as not integrated
+        }
+
+        if (!integrated)
+        {
+            return "SqlPassword";
+        }
+
+        return !string.IsNullOrWhiteSpace(getEnvironmentVariable("NTLM_USER_FILE")) && ManagedNtlmPolicy.Resolve(null, getEnvironmentVariable)
+            ? "Integrated-ManagedNtlm"
+            : "Integrated-GSSAPI";
+    }
+
+    /// <summary>
+    /// Classifies an exception thrown during <see cref="SqlConnection.OpenAsync(CancellationToken)"/> when <c>Integrated Security=true</c>
+    /// is active and wraps it in a <see cref="SqlServerWindowsAuthException"/> with a clear, actionable, credential-free message.
+    /// </summary>
+    /// <param name="managedNtlmUsed">True when the connection used the managed NTLM <see cref="SspiContextProvider"/>.</param>
+    /// <param name="managedNtlmFailure">The failure recorded by that provider, when any.</param>
     public static Exception ClassifyOpenException(
         Exception exception,
         DataSourceConnectionOptions options,
-        Func<string, string?>? getEnvVar = null)
+        Func<string, string?>? getEnvVar = null,
+        bool managedNtlmUsed = false,
+        ManagedNtlmFailure? managedNtlmFailure = null)
     {
         ArgumentNullException.ThrowIfNull(exception);
         ArgumentNullException.ThrowIfNull(options);
@@ -466,6 +512,10 @@ public static class SqlServerWindowsAuthConfigurator
 
         var getEnvironmentVariable = getEnvVar ?? Environment.GetEnvironmentVariable;
         string msg = FullExceptionText(exception);
+        var sqlEx = FindSqlException(exception);
+        int? sqlNumber = sqlEx?.Number;
+        int? sqlState = sqlEx is null ? null : sqlEx.State;
+        int? sqlClass = sqlEx is null ? null : sqlEx.Class;
 
         // 1. Missing GSSAPI / gss-ntlmssp native library or mechanism
         if (msg.Contains("libgssapi_krb5", StringComparison.OrdinalIgnoreCase) ||
@@ -476,39 +526,79 @@ public static class SqlServerWindowsAuthConfigurator
              msg.Contains("Mechanismitched", StringComparison.OrdinalIgnoreCase)))
         {
             string ntlmFile = getEnvironmentVariable("NTLM_USER_FILE") ?? options.WindowsAuth?.NtlmUserFilePath ?? "<not set>";
-            return new InvalidOperationException(
+            return new SqlServerWindowsAuthException(
+                SqlServerWindowsAuthFailureCategory.GssapiUnavailable,
                 "SQL Server Windows Authentication (GSSAPI/NTLM) failed to acquire client credentials in container/Linux environment. " +
                 $"Ensure 'libgssapi-krb5-2' and 'gss-ntlmssp' are installed, '{GssMechConfigPath}' is readable by the container user, " +
                 $"and NTLM credentials are provided via NTLM_USER_FILE ('{ntlmFile}', format 'DOMAIN:USER:PASSWORD') or DataSources:Connections:<name>:WindowsAuth.",
-                exception);
+                exception,
+                sqlNumber, sqlState, sqlClass);
         }
 
-        // 2. Kerberos SPN / KDC / SSPI context failure
-        if (msg.Contains("Cannot generate SSPI context", StringComparison.OrdinalIgnoreCase) ||
+        // 2. SSPI context failure. With managed NTLM this is an NTLM problem (the managed provider returned false), not Kerberos/SPN.
+        bool sspiContextFailure = msg.Contains("Cannot generate SSPI context", StringComparison.OrdinalIgnoreCase);
+        if (managedNtlmUsed && sspiContextFailure)
+        {
+            string detail = managedNtlmFailure is null
+                ? "no failure details were recorded"
+                : $"step '{managedNtlmFailure.Step}'" +
+                  (managedNtlmFailure.StatusCode is not null ? $", NegotiateAuthentication status '{managedNtlmFailure.StatusCode}'" : string.Empty) +
+                  (managedNtlmFailure.ExceptionType is not null ? $", exception '{managedNtlmFailure.ExceptionType}'" : string.Empty);
+            return new SqlServerWindowsAuthException(
+                SqlServerWindowsAuthFailureCategory.NtlmNegotiation,
+                $"SQL Server Windows Authentication (managed NTLM) failed during NTLM negotiation ({detail}). " +
+                "This is not a Kerberos/SPN problem. Verify the domain, username and password secret, that the SQL Server accepts NTLM from this host, " +
+                "or set WindowsAuth.UseManagedNtlm=false to use gss-ntlmssp instead.",
+                exception,
+                sqlNumber, sqlState, sqlClass,
+                managedNtlmFailure?.StatusCode,
+                managedNtlmFailure?.Step,
+                managedNtlmFailure?.ExceptionType);
+        }
+
+        // 2b. Kerberos SPN / KDC failure
+        if (sspiContextFailure ||
             msg.Contains("Server not found in Kerberos database", StringComparison.OrdinalIgnoreCase) ||
             msg.Contains("KRB5", StringComparison.OrdinalIgnoreCase) ||
             msg.Contains("SPN", StringComparison.OrdinalIgnoreCase))
         {
-            return new InvalidOperationException(
+            return new SqlServerWindowsAuthException(
+                SqlServerWindowsAuthFailureCategory.KerberosNegotiation,
                 "SQL Server Windows Authentication failed during SSPI/Kerberos negotiation ('Cannot generate SSPI context' / SPN error). " +
                 "Verify that the SQL Server Service Principal Name (MSSQLSvc/<fqdn>:<port>@REALM) is registered in Active Directory, " +
                 "or use NTLM authentication via 'System.Net.Security.UseManagedNtlm' / 'gss-ntlmssp' (WindowsAuth.Mode = 'Ntlm').",
-                exception);
+                exception,
+                sqlNumber, sqlState, sqlClass);
         }
 
-        // 3. SQL Server Login failed (Error 18456 / 18452) — warn about AD account lockout!
-        if ((exception is SqlException sqlEx && (sqlEx.Number == 18456 || sqlEx.Number == 18452)) ||
+        // 3. SQL Server Login failed (Error 18456 / 18452) - warn about AD account lockout!
+        if (sqlNumber is 18456 or 18452 ||
             msg.Contains("Login failed for user", StringComparison.OrdinalIgnoreCase) ||
             msg.Contains("untrusted domain", StringComparison.OrdinalIgnoreCase))
         {
-            return new InvalidOperationException(
+            return new SqlServerWindowsAuthException(
+                SqlServerWindowsAuthFailureCategory.LoginRejected,
                 "SQL Server Windows Authentication login was rejected by the server (Error 18456/18452). " +
                 "WARNING: Repeated failed Windows authentication attempts can lock out the Active Directory service account! " +
                 "Verify the domain name, username, password secret, and that the AD account has CONNECT/LOGIN permission on the target SQL Server before retrying.",
-                exception);
+                exception,
+                sqlNumber, sqlState, sqlClass);
         }
 
         return exception;
+    }
+
+    private static SqlException? FindSqlException(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current is SqlException sql)
+            {
+                return sql;
+            }
+        }
+
+        return null;
     }
 
     public static SqlServerWindowsAuthMode ResolveEffectiveMode(
@@ -682,6 +772,7 @@ public sealed class ManagedNtlmSspiContextProvider : SspiContextProvider, IDispo
     private readonly string? _targetSpnOverride;
     private readonly string _package;
     private NegotiateAuthentication? _negotiateAuth;
+    private ManagedNtlmFailure? _lastFailure;
 
     public ManagedNtlmSspiContextProvider(
         NetworkCredential credential,
@@ -695,19 +786,29 @@ public sealed class ManagedNtlmSspiContextProvider : SspiContextProvider, IDispo
         SqlServerWindowsAuthConfigurator.EnableManagedNtlmSwitch();
     }
 
+    /// <summary>The most recent failure of <see cref="TryGenerateContext"/> (cleared when a new negotiation starts); never contains secrets.</summary>
+    public ManagedNtlmFailure? LastFailure => Volatile.Read(ref _lastFailure);
+
     protected override bool GenerateContext(
         ReadOnlySpan<byte> incomingBlob,
         IBufferWriter<byte> outgoingBlobWriter,
-        SspiAuthenticationParameters authParams)
+        SspiAuthenticationParameters authParams) =>
+        TryGenerateContext(incomingBlob, outgoingBlobWriter, authParams.Resource);
+
+    /// <summary>
+    /// Performs one negotiation step. An empty <paramref name="incomingBlob"/> starts a new negotiation (negotiate message);
+    /// a non-empty one is the server challenge. Failures are recorded in <see cref="LastFailure"/> instead of being swallowed.
+    /// </summary>
+    public bool TryGenerateContext(ReadOnlySpan<byte> incomingBlob, IBufferWriter<byte> outgoingBlobWriter, string? resource)
     {
+        string step = incomingBlob.IsEmpty ? ManagedNtlmFailure.NegotiateStep : ManagedNtlmFailure.ChallengeStep;
         try
         {
             if (incomingBlob.IsEmpty)
             {
+                Volatile.Write(ref _lastFailure, null);
                 _negotiateAuth?.Dispose();
-                string? targetName = !string.IsNullOrWhiteSpace(_targetSpnOverride)
-                    ? _targetSpnOverride
-                    : authParams.Resource;
+                string? targetName = !string.IsNullOrWhiteSpace(_targetSpnOverride) ? _targetSpnOverride : resource;
 
                 _negotiateAuth = new NegotiateAuthentication(new NegotiateAuthenticationClientOptions
                 {
@@ -719,12 +820,14 @@ public sealed class ManagedNtlmSspiContextProvider : SspiContextProvider, IDispo
 
             if (_negotiateAuth is null)
             {
+                Record(step, null, "InvalidOperationException", "No negotiation was started before the server challenge.");
                 return false;
             }
 
             byte[]? sendBuff = _negotiateAuth.GetOutgoingBlob(incomingBlob, out var statusCode);
             if (statusCode is not NegotiateAuthenticationStatusCode.Completed and not NegotiateAuthenticationStatusCode.ContinueNeeded)
             {
+                Record(step, statusCode.ToString(), null, null);
                 return false;
             }
 
@@ -735,15 +838,32 @@ public sealed class ManagedNtlmSspiContextProvider : SspiContextProvider, IDispo
 
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            // NegotiateAuthentication messages carry no credentials; the type and a bounded message are kept for diagnostics.
+            string message = ex.Message.Length > 300 ? ex.Message[..300] : ex.Message;
+            Record(step, null, ex.GetType().Name, message);
             return false;
         }
     }
+
+    private void Record(string step, string? statusCode, string? exceptionType, string? exceptionMessage) =>
+        Volatile.Write(ref _lastFailure, new ManagedNtlmFailure(step, statusCode, exceptionType, exceptionMessage));
 
     public void Dispose()
     {
         _negotiateAuth?.Dispose();
         _negotiateAuth = null;
     }
+}
+
+/// <summary>Why a managed NTLM negotiation step failed. Contains no credentials.</summary>
+/// <param name="Step"><c>negotiate</c> or <c>challenge</c>.</param>
+/// <param name="StatusCode">Name of the <see cref="NegotiateAuthenticationStatusCode"/>, when the step returned one.</param>
+/// <param name="ExceptionType">Exception type name, when the step threw.</param>
+/// <param name="ExceptionMessage">Bounded exception message, when the step threw.</param>
+public sealed record ManagedNtlmFailure(string Step, string? StatusCode, string? ExceptionType, string? ExceptionMessage)
+{
+    public const string NegotiateStep = "negotiate";
+    public const string ChallengeStep = "challenge";
 }

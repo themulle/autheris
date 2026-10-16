@@ -17,6 +17,8 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Autheris.Domain.Options;
 
 public sealed class DatasourceTestingService : IDatasourceTestingService
 {
@@ -32,6 +34,9 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
     private readonly IKeyVaultSecretProvider? _secretProvider;
     private readonly IHostEnvironment? _environment;
     private readonly ILogger<DatasourceTestingService> _logger;
+    private readonly ISqlConnectionFactory? _sqlConnectionFactory;
+    private readonly IOptions<GatewayOptions>? _gateway;
+    private readonly ISqlSourceDescriber? _sqlSourceDescriber;
 
     public DatasourceTestingService(
         ITableMetadataRepository metadataRepository,
@@ -39,8 +44,14 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
         IAuditLogRepository auditLogRepository,
         IKeyVaultSecretProvider? secretProvider = null,
         IHostEnvironment? environment = null,
-        ILogger<DatasourceTestingService>? logger = null)
+        ILogger<DatasourceTestingService>? logger = null,
+        ISqlConnectionFactory? sqlConnectionFactory = null,
+        IOptions<GatewayOptions>? gateway = null,
+        ISqlSourceDescriber? sqlSourceDescriber = null)
     {
+        _sqlConnectionFactory = sqlConnectionFactory;
+        _gateway = gateway;
+        _sqlSourceDescriber = sqlSourceDescriber;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
@@ -388,31 +399,137 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
         ClaimsPrincipal user,
         CancellationToken ct)
     {
+        string sourceName = table.Table.SourceName;
+        DataSourceConnectionOptions? connection = null;
+        if (_gateway?.Value.DataSources?.Connections is { } connections && !string.IsNullOrWhiteSpace(sourceName))
+        {
+            connections.TryGetValue(sourceName, out connection);
+        }
+
+        if (_sqlConnectionFactory is null || connection is null)
+        {
+            const string notConfigured = "The data source has no configured connection; nothing was tested.";
+            await AppendAuditAsync(datasourceId, user, isSuccess: false, notConfigured, ct).ConfigureAwait(false);
+            return new DatasourceTestResult(
+                DatasourceId: datasourceId,
+                Type: table.Table.DataSourceType,
+                IsSuccess: false,
+                HttpStatusCode: null,
+                LatencyMs: 0,
+                ErrorMessage: notConfigured,
+                Diagnostics: new DatasourceDiagnostics(
+                    TargetHost: string.Empty,
+                    TargetPort: 0,
+                    DnsResolutionSuccess: false,
+                    TlsHandshakeSuccess: false,
+                    TlsProtocolVersion: null,
+                    AuthHeaderApplied: false,
+                    SecretResolutionStatus: "Unknown",
+                    ProbeDetails: new Dictionary<string, string> { ["Category"] = "NotConfigured" }));
+        }
+
+        var description = _sqlSourceDescriber?.Describe(connection)
+            ?? new SqlSourceDescription(string.Empty, null, connection.Provider, "Unknown");
+        var details = new Dictionary<string, string>
+        {
+            ["Dialect"] = description.Dialect,
+            ["AuthPath"] = description.AuthPath
+        };
+
+        var timeout = request.Timeout ?? TimeSpan.FromSeconds(5);
+        if (timeout > TimeSpan.FromSeconds(15))
+        {
+            timeout = TimeSpan.FromSeconds(15);
+        }
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(timeout);
         var sw = Stopwatch.StartNew();
-        await Task.Yield();
-        sw.Stop();
+        try
+        {
+            await using var opened = await _sqlConnectionFactory.CreateOpenConnectionAsync(connection, cts.Token).ConfigureAwait(false);
+            sw.Stop();
+            await AppendAuditAsync(datasourceId, user, isSuccess: true, null, ct).ConfigureAwait(false);
 
-        var diagnostics = new DatasourceDiagnostics(
-            TargetHost: "sql-engine",
-            TargetPort: 1433,
-            DnsResolutionSuccess: true,
-            TlsHandshakeSuccess: true,
-            TlsProtocolVersion: "TLS 1.3",
+            return new DatasourceTestResult(
+                DatasourceId: datasourceId,
+                Type: table.Table.DataSourceType,
+                IsSuccess: true,
+                HttpStatusCode: null,
+                LatencyMs: Math.Max(1, sw.ElapsedMilliseconds),
+                ErrorMessage: null,
+                Diagnostics: BuildSqlDiagnostics(description, connected: true, details));
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            sw.Stop();
+            string timeoutMsg = $"Connection probe timed out after {timeout.TotalSeconds}s.";
+            details["Category"] = "Timeout";
+            await AppendAuditAsync(datasourceId, user, isSuccess: false, timeoutMsg, ct).ConfigureAwait(false);
+            return SqlFailure(datasourceId, table, sw, timeoutMsg, description, details);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            sw.Stop();
+            // Classified exceptions carry a credential-free message; any other driver message is redacted and only the type is reported.
+            var diagnostic = FindDiagnostic(ex);
+            string message;
+            if (diagnostic is Exception diagnosticException)
+            {
+                message = SecretScrubber.Redact(diagnosticException.Message);
+                details["Category"] = diagnostic.CategoryName;
+                foreach (var (key, value) in diagnostic.DiagnosticFields)
+                {
+                    details[key] = value;
+                }
+            }
+            else
+            {
+                message = SecretScrubber.Redact(ex.Message);
+                details["Category"] = "ConnectionFailed";
+                details["Exception"] = ex.GetType().Name;
+            }
+
+            _logger.LogWarning("Datasource test failed for {DatasourceId} ({Category}, {ExceptionType}).", datasourceId, details["Category"], ex.GetType().Name);
+            await AppendAuditAsync(datasourceId, user, isSuccess: false, message, ct).ConfigureAwait(false);
+            return SqlFailure(datasourceId, table, sw, message, description, details);
+        }
+    }
+
+    private static ISqlSourceDiagnosticException? FindDiagnostic(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current is ISqlSourceDiagnosticException diagnostic)
+            {
+                return diagnostic;
+            }
+        }
+
+        return null;
+    }
+
+    private static DatasourceDiagnostics BuildSqlDiagnostics(SqlSourceDescription description, bool connected, Dictionary<string, string> details) =>
+        new(
+            TargetHost: description.Host,
+            TargetPort: description.Port ?? 0,
+            DnsResolutionSuccess: connected,
+            TlsHandshakeSuccess: false, // not observable through the driver abstraction; reported as unknown (false, no protocol version)
+            TlsProtocolVersion: null,
             AuthHeaderApplied: false,
-            SecretResolutionStatus: "Resolved",
-            ProbeDetails: new Dictionary<string, string> { ["Dialect"] = "SQL" });
+            SecretResolutionStatus: connected ? "Resolved" : "Unknown",
+            ProbeDetails: details);
 
-        await AppendAuditAsync(datasourceId, user, isSuccess: true, null, ct).ConfigureAwait(false);
-
-        return new DatasourceTestResult(
+    private static DatasourceTestResult SqlFailure(
+        string datasourceId, TableMetadata table, Stopwatch sw, string message, SqlSourceDescription description, Dictionary<string, string> details) =>
+        new(
             DatasourceId: datasourceId,
             Type: table.Table.DataSourceType,
-            IsSuccess: true,
-            HttpStatusCode: 200,
-            LatencyMs: Math.Max(1, sw.ElapsedMilliseconds),
-            ErrorMessage: null,
-            Diagnostics: diagnostics);
-    }
+            IsSuccess: false,
+            HttpStatusCode: null,
+            LatencyMs: sw.ElapsedMilliseconds,
+            ErrorMessage: message,
+            Diagnostics: BuildSqlDiagnostics(description, connected: false, details));
 
     private async Task AppendAuditAsync(string datasourceId, ClaimsPrincipal user, bool isSuccess, string? error, CancellationToken ct)
     {

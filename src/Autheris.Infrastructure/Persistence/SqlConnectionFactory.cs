@@ -8,6 +8,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Oracle.ManagedDataAccess.Client;
 
@@ -19,6 +20,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
     private readonly IKeyVaultSecretProvider? _secrets;
     private readonly IHostEnvironment? _environment;
     private readonly IServiceProvider? _services;
+    private readonly Microsoft.Extensions.Logging.ILogger? _logger;
 
     public SqlConnectionFactory()
         : this(null, null)
@@ -41,6 +43,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
         _environment = environment;
         _secrets = secrets;
         _services = services;
+        _logger = services?.GetService<Microsoft.Extensions.Logging.ILogger<SqlConnectionFactory>>();
         _requireOracleTcps = environment is null || !environment.IsDevelopment();
     }
 
@@ -97,6 +100,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
         {
             // Issue #102: validate and configure Managed NTLM (System.Net.Security.UseManagedNtlm) / GSSAPI (gss-ntlmssp / libgssapi-krb5-2) before opening.
             connectionString = SqlServerWindowsAuthConfigurator.PrepareConnection(options, _secrets, _environment, out sqlServerSspiProvider);
+            LogAuthPathOnce(options);
         }
 
         DbConnection connection = dialect switch
@@ -117,7 +121,9 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             }
             catch (Exception openEx) when (dialect == DatabaseDialect.SqlServer)
             {
-                throw SqlServerWindowsAuthConfigurator.ClassifyOpenException(openEx, options);
+                var managedProvider = sqlServerSspiProvider as ManagedNtlmSspiContextProvider;
+                throw SqlServerWindowsAuthConfigurator.ClassifyOpenException(
+                    openEx, options, managedNtlmUsed: managedProvider is not null, managedNtlmFailure: managedProvider?.LastFailure);
             }
 
             if (connection is Npgsql.NpgsqlConnection pgConn)
@@ -207,6 +213,22 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             await connection.DisposeAsync().ConfigureAwait(false);
             throw;
         }
+    }
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<DataSourceConnectionOptions, object> LoggedAuthPaths = new();
+
+    /// <summary>Logs the SQL Server authentication path once per data source configuration (no secrets).</summary>
+    private void LogAuthPathOnce(DataSourceConnectionOptions options)
+    {
+        if (_logger is null || !LoggedAuthPaths.TryAdd(options, new object()))
+        {
+            return;
+        }
+
+        _logger.LogInformation(
+            "SQL Server data source authentication path: {AuthPath} (managed NTLM setting: {UseManagedNtlm}).",
+            SqlServerWindowsAuthConfigurator.DescribeAuthPath(options),
+            ManagedNtlmPolicy.Resolve(options.WindowsAuth?.UseManagedNtlm));
     }
 
     private async Task<DbConnection> CreateDatabricksConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct)
