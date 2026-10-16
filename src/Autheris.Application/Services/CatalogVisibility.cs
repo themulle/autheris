@@ -59,7 +59,8 @@ public static class CatalogVisibility
     public static IReadOnlyList<TableMetadata> FilterForSubject(
         IEnumerable<TableMetadata> allTables,
         IEnumerable<Consent> activeConsents,
-        TenantId tenantId)
+        TenantId tenantId,
+        IReadOnlySet<string>? callerScopes = null)
     {
         ArgumentNullException.ThrowIfNull(allTables);
         ArgumentNullException.ThrowIfNull(activeConsents);
@@ -109,34 +110,24 @@ public static class CatalogVisibility
             var tableConsents = consentsByTable.TryGetValue(table.Identifier, out var tc) ? tc : [];
             var tableAllows = tableConsents.Where(c => c.Effect == ConsentEffect.Allow).ToList();
 
-            var hasUnconstrainedAllow = tableAllows.Any(c => c.ColumnRules.Count == 0);
-            var explicitlyGrantedColumns = tableAllows
-                .SelectMany(c => c.ColumnRules)
-                // Fail closed (issue #116): scope-specific rules never make a column visible for every caller.
-                .Where(cr => cr.AccessLevel != ColumnAccessLevel.Deny && !ConsentResolutionService.IsScopeSpecific(cr))
-                .Select(cr => cr.ColumnName)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // Issue #127: scope-aware like the data path. A Deny column rule of any consent (SR15-52: also of an Allow consent) hides the
+            // column only for callers it applies to (unscoped, or one of its scopes is held); an Allow consent shows it when its resolved level is not Deny.
+            // callerScopes null or empty = base rules only (scope-only grants stay hidden, issue #116).
+            bool IsDenied(string column) =>
+                tableConsents.SelectMany(c => c.ColumnRules).Any(cr =>
+                    cr.AccessLevel == ColumnAccessLevel.Deny &&
+                    string.Equals(cr.ColumnName, column, StringComparison.OrdinalIgnoreCase) &&
+                    (!ConsentResolutionService.IsScopeSpecific(cr) ||
+                     (callerScopes is { Count: > 0 } && cr.ApplicableScopes.Any(callerScopes.Contains)))) ||
+                (table.ColumnMaskingRules != null &&
+                 table.ColumnMaskingRules.TryGetValue(column, out var maskingRule) &&
+                 string.Equals(maskingRule.RuleType, "DENY", StringComparison.OrdinalIgnoreCase));
 
-            var deniedColumns = tableConsents
-                .SelectMany(c => c.ColumnRules)
-                .Where(cr => cr.AccessLevel == ColumnAccessLevel.Deny)
-                .Select(cr => cr.ColumnName)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            if (table.ColumnMaskingRules != null)
-            {
-                foreach (var (colName, rule) in table.ColumnMaskingRules)
-                {
-                    if (string.Equals(rule.RuleType, "DENY", StringComparison.OrdinalIgnoreCase))
-                    {
-                        deniedColumns.Add(colName);
-                    }
-                }
-            }
+            bool IsGranted(string column) =>
+                tableAllows.Any(c => ConsentResolutionService.ResolveConsentColumnLevel(c, column, callerScopes) != ColumnAccessLevel.Deny);
 
             var visibleColumns = table.Columns
-                .Where(c => !deniedColumns.Contains(c.ColumnName) &&
-                            (hasUnconstrainedAllow || explicitlyGrantedColumns.Contains(c.ColumnName)))
+                .Where(c => !IsDenied(c.ColumnName) && IsGranted(c.ColumnName))
                 .ToList();
 
             visible.Add(table with { Columns = visibleColumns });
@@ -256,7 +247,8 @@ public static class CatalogVisibility
         var activeConsents = await consentRepository.GetAllActiveConsentsForSubjectsAsync(
             subjects, roles, DateTimeOffset.UtcNow, tenantId, ct).ConfigureAwait(false);
 
-        var visible = FilterForSubject(allTables, activeConsents, tenantId);
+        // Scopes from the claims overload, as the data path (TableAccessPolicy) reads them.
+        var visible = FilterForSubject(allTables, activeConsents, tenantId, Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims));
         return FilterByContract(visible, contract);
     }
 }

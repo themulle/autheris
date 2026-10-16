@@ -170,7 +170,11 @@ public sealed class SemanticMcpCompiler(
             {
                 var hasDesc = !string.IsNullOrWhiteSpace(col.Description);
                 var hasLongDesc = !string.IsNullOrWhiteSpace(col.LongDescription);
-                var hasMeta = col.Meta != null && col.Meta.Count > 0;
+                // Issue #127: the resource is not level aware, so only descriptive meta keys are published (no accepted values, ranges, examples).
+                var docMeta = (col.Meta ?? new Dictionary<string, string>())
+                    .Where(kv => McpDatasetCatalog.DescriptiveMetaKeys.Contains(kv.Key))
+                    .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+                var hasMeta = docMeta.Count > 0;
 
                 if (hasDesc || hasLongDesc || hasMeta)
                 {
@@ -202,7 +206,7 @@ public sealed class SemanticMcpCompiler(
                     {
                         sb.AppendLine("## dbt / OpenMetadata Meta");
                         sb.AppendLine("```json");
-                        sb.AppendLine(JsonSerializer.Serialize(col.Meta, CachedIndentedOptions));
+                        sb.AppendLine(JsonSerializer.Serialize(docMeta, CachedIndentedOptions));
                         sb.AppendLine("```");
                         sb.AppendLine();
                     }

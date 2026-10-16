@@ -13,6 +13,7 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Options;
 
 /// <summary>
@@ -30,6 +31,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
     private readonly ISchemaSunsettingService? _sunsettingService;
     private readonly GatewayOptions _gatewayOptions;
     private readonly QueryAnalysisOptions _analysisOptions;
+    private readonly Autheris.Domain.Interfaces.IConsentResolutionService _consentResolution;
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     public QueryAnalysisService(
@@ -40,12 +42,15 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         IAccessProfileRepository? accessProfileRepository = null,
         ISchemaSunsettingService? sunsettingService = null,
         IOptions<GatewayOptions>? gatewayOptions = null,
-        QueryAnalysisOptions? analysisOptions = null)
+        QueryAnalysisOptions? analysisOptions = null,
+        Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
         _dataOwnershipRepository = dataOwnershipRepository;
+        // The default is the production resolver (stateless), never a weaker one (issue #127).
+        _consentResolution = consentResolution ?? new Autheris.Application.Services.ConsentResolutionService();
         _accessProfileRepository = accessProfileRepository;
         _sunsettingService = sunsettingService;
         _gatewayOptions = gatewayOptions?.Value ?? new GatewayOptions();
@@ -64,11 +69,14 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         IAccessProfileRepository? accessProfileRepository = null,
         ISchemaSunsettingService? sunsettingService = null,
         IOptions<GatewayOptions>? gatewayOptions = null,
-        QueryAnalysisOptions? analysisOptions = null)
+        QueryAnalysisOptions? analysisOptions = null,
+        Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _dataOwnershipRepository = dataOwnershipRepository;
+        // The default is the production resolver (stateless), never a weaker one (issue #127).
+        _consentResolution = consentResolution ?? new Autheris.Application.Services.ConsentResolutionService();
         _accessProfileRepository = accessProfileRepository;
         _sunsettingService = sunsettingService;
         _gatewayOptions = gatewayOptions?.Value ?? new GatewayOptions();
@@ -112,6 +120,14 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         var sunsetRules = await LoadSunsettingRulesAsync(ct).ConfigureAwait(false);
         var isAdmin = IsAdminPrincipal(effectivePrincipal);
 
+        // Issue #127: the caller's own token scopes (claims overload, as the data path) are only known for the caller itself;
+        // an impersonated target carries no token, so its levels are predicted for the worst case (see ResolveTableColumnLevels).
+        var targetImpersonated = targetPrincipal != null &&
+            !string.Equals(callerSid.Value.Value, effectiveSid.Value, StringComparison.OrdinalIgnoreCase);
+        var scopeContext = new AnalysisScopeContext(
+            targetImpersonated ? new HashSet<string>(StringComparer.OrdinalIgnoreCase) : TokenAccessScope.GetScopeSet(callerPrincipal.Claims),
+            targetImpersonated);
+
         var diagnostics = new List<QueryValidationDiagnostic>();
         var outputColumns = new List<AnalyzedOutputColumn>();
         var outputColumnKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -132,6 +148,14 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
             var item = queries[i];
             var queryName = string.IsNullOrWhiteSpace(item.Name) ? $"query_{i + 1}" : item.Name!;
 
+            if (scopeContext.TargetImpersonated)
+            {
+                diagnostics.Add(new QueryValidationDiagnostic(
+                    QueryDiagnosticCodes.TargetScopesUnknown,
+                    "The token scopes of the target principal are unknown; the predicted column access assumes the strictest outcome with and without scope-specific consent rules.",
+                    QueryName: queryName));
+            }
+
             if (!string.IsNullOrWhiteSpace(item.GraphQlQuery))
             {
                 var gqlOutcome = await AnalyzeGraphQlItemAsync(
@@ -141,6 +165,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     effectivePrincipal,
                     effectiveSid.Value,
                     isAdmin,
+                    scopeContext,
                     activeConsents,
                     sunsetRules,
                     tableLookup,
@@ -170,6 +195,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     effectivePrincipal,
                     effectiveSid.Value,
                     isAdmin,
+                    scopeContext,
                     activeConsents,
                     sunsetRules,
                     tableLookup,
@@ -209,6 +235,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                         effectivePrincipal,
                         effectiveSid.Value,
                         isAdmin,
+                        scopeContext,
                         activeConsents,
                         sunsetRules,
                         tableLookup,
@@ -246,6 +273,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                         effectivePrincipal,
                         effectiveSid.Value,
                         isAdmin,
+                        scopeContext,
                         activeConsents,
                         sunsetRules,
                         tableLookup,
@@ -275,6 +303,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     effectivePrincipal,
                     effectiveSid.Value,
                     isAdmin,
+                    scopeContext,
                     activeConsents,
                     sunsetRules,
                     tableLookup,
