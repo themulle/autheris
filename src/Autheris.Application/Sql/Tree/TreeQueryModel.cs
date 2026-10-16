@@ -75,3 +75,9 @@ public sealed record CompiledTreeQuery(
     string Sql,
     IReadOnlyDictionary<string, object?> Parameters,
     IReadOnlyList<TreeHmacColumn> HmacColumns);
+
+/// <summary>
+/// A selected column that is masked for the caller. <see cref="Path"/> is the chain of relation response keys from the
+/// root level (empty for the root table); <see cref="Column"/> is the catalog spelling of the column.
+/// </summary>
+public sealed record TreeMaskedColumn(IReadOnlyList<string> Path, string Column);

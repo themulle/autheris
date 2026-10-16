@@ -355,10 +355,95 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
         return null;
     }
 
+    /// <summary>Request-scoped set of masked column keys ("rootAlias/relationAlias/column"), see <see cref="RegisterMaskedColumns"/>.</summary>
+    private const string MaskedColumnKeysContextKey = "AutherisMaskedColumnKeys";
+
+    /// <summary>
+    /// Splits a response path into its field names (list indexes dropped) and its documented pointer form,
+    /// e.g. customers[0].orders[1].amount -> (customers, orders, amount) and "/customers/0/orders/1/amount".
+    /// </summary>
+    private static (List<string> Names, string Pointer) DescribePath(HotChocolate.Path path)
+    {
+        var segments = new List<string>();
+        var names = new List<string>();
+        for (var current = path; current is not null && !current.IsRoot; current = current.Parent)
+        {
+            switch (current)
+            {
+                case HotChocolate.NamePathSegment named:
+                    segments.Add(named.Name);
+                    names.Add(named.Name);
+                    break;
+                case HotChocolate.IndexerPathSegment indexed:
+                    segments.Add(indexed.Index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    break;
+            }
+        }
+
+        segments.Reverse();
+        names.Reverse();
+        return (names, "/" + string.Join('/', segments));
+    }
+
+    private static string MaskedColumnKey(IEnumerable<string> names, string column) => string.Join('/', names) + "\u001f" + column;
+
+    /// <summary>
+    /// Remembers which selected columns the governed tree masks for the caller, per request and per root field, so the
+    /// column resolvers can report their response path into <c>extensions.maskedFields</c>.
+    /// </summary>
+    private static void RegisterMaskedColumns(IResolverContext ctx, IReadOnlyList<TreeMaskedColumn>? masked)
+    {
+        if (masked is null || masked.Count == 0)
+        {
+            return;
+        }
+
+        System.Collections.Concurrent.ConcurrentDictionary<string, byte> keys;
+        lock (ctx.ContextData)
+        {
+            if (!ctx.ContextData.TryGetValue(MaskedColumnKeysContextKey, out var existing) ||
+                existing is not System.Collections.Concurrent.ConcurrentDictionary<string, byte> found)
+            {
+                found = new System.Collections.Concurrent.ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+                ctx.ContextData[MaskedColumnKeysContextKey] = found;
+            }
+            keys = found;
+        }
+
+        foreach (var m in masked)
+        {
+            keys[MaskedColumnKey(m.Path.Prepend(ctx.ResponseName), m.Column)] = 0;
+        }
+    }
+
+    private static void RecordMaskedColumn(IResolverContext ctx, CatalogColumnField col)
+    {
+        if (!ctx.ContextData.TryGetValue(MaskedColumnKeysContextKey, out var keysObj) ||
+            keysObj is not System.Collections.Concurrent.ConcurrentDictionary<string, byte> keys ||
+            !ctx.ContextData.TryGetValue(Autheris.GraphQL.Interceptors.MaskedFieldsMiddleware.ContextKey, out var bagObj) ||
+            bagObj is not System.Collections.Concurrent.ConcurrentBag<string> bag)
+        {
+            return;
+        }
+
+        var (names, pointer) = DescribePath(ctx.Path);
+        if (names.Count == 0)
+        {
+            return;
+        }
+
+        names.RemoveAt(names.Count - 1);
+        if (keys.ContainsKey(MaskedColumnKey(names, col.ColumnName)))
+        {
+            bag.Add(pointer);
+        }
+    }
+
     private static object? ResolveColumnValue(IResolverContext ctx, CatalogColumnField col)
     {
         var parent = ctx.Parent<JsonElement>();
         if (parent.ValueKind != JsonValueKind.Object) return null;
+        RecordMaskedColumn(ctx, col);
         if (!parent.TryGetProperty(col.ColumnName, out var prop) && !parent.TryGetProperty(col.FieldName, out prop)) return null;
         if (prop.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined) return null;
 
@@ -502,6 +587,8 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
             var queryNode = GraphQlTreeBuilder.BuildTree(ctx, table, schema, maxResponseRows);
             using var doc = await treeService.ExecuteAsync(principal, queryNode, headers, opId, ctx.RequestAborted)
                 .ConfigureAwait(false);
+
+            RegisterMaskedColumns(ctx, treeService.GetMaskedColumns(principal, queryNode, opId));
 
             var root = doc.RootElement.Clone();
             if (root.ValueKind != JsonValueKind.Array)

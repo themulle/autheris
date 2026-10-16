@@ -29,8 +29,10 @@ Autheris provides a transport-neutral **Governed Aggregation Engine** (`IGoverne
 
 ```mermaid
 flowchart LR
-    Client["GraphQL / REST / MCP Client"] --> Endpoint["AnalyticsEndpoints / GraphQL"]
+    Client["REST / MCP Client"] --> Endpoint["AnalyticsEndpoints"]
+    GqlClient["GraphQL Client"] --> GqlField["&lt;table&gt;_aggregate<br/>(count only)"]
     Endpoint --> Service["GovernedAggregationService"]
+    GqlField --> Service
     Service --> Policy["ITableAccessPolicy<br/>(Consent, RLS, Column Masks)"]
     Service --> Cost["AggregationCostCalculator"]
     Service --> Planner["GovernedTableReadPlanner.PlanAggregate"]
@@ -124,6 +126,16 @@ Authorization: Bearer <token>
   }
 }
 ```
+
+### 4.2 GraphQL Aggregate Field (`<table>_aggregate`) - Scope
+
+The catalog-based GraphQL schema exposes `<table>_aggregate` for every table. It uses the same `GovernedAggregationService`, so row-level security, masked column rejection, the k-anonymity guard and the privacy budget apply identically. Its capabilities are deliberately narrower than the REST endpoint:
+
+- **Aggregate function:** only `COUNT`. `SUM`, `AVG`, `MIN`, `MAX` and `COUNT DISTINCT` are not available through GraphQL.
+- **Arguments:** `groupBy` (list of column names), `where` (a SQL-style filter expression passed as a string, not the typed `<table>_filter` input) and `limit` (default 100).
+- **Result type `AutherisAggregationResult`:** `count` (grand total), the guard metadata (`suppressed`, `suppressedGroupsCount`, `suppressedRowsCount`, `minimumGroupSize`, `mergedIntoOther`, `truncated`, `noiseApplied`) and `groupsJson`, a list of strings in which each group is serialized as a JSON document.
+
+Full aggregation (multiple aggregate functions, ordering, typed filters, structured group rows) is available only through `POST /api/v1/analytics/aggregate` (section 4.1).
 
 ---
 

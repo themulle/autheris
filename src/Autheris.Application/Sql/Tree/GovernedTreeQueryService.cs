@@ -31,6 +31,12 @@ public interface IGovernedTreeQueryService
         CancellationToken ct = default);
 
     /// <summary>
+    /// Lists the columns of <paramref name="root"/> that are masked for the caller, using the access decisions memoized
+    /// by a preceding <see cref="ExecuteAsync"/> of the same operation. Empty when nothing is masked or no decision exists.
+    /// </summary>
+    IReadOnlyList<TreeMaskedColumn> GetMaskedColumns(ClaimsPrincipal? principal, TreeQueryNode root, string operationId);
+
+    /// <summary>
     /// Cleans up any cached table access decisions, locks, and audit tracking for the given GraphQL operation.
     /// </summary>
     void ClearOperation(string operationId);
@@ -105,6 +111,42 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         _concurrencyGate = concurrencyGate;
         _logger = logger;
         _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
+    }
+
+    public IReadOnlyList<TreeMaskedColumn> GetMaskedColumns(ClaimsPrincipal? principal, TreeQueryNode root, string operationId)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        if (string.IsNullOrWhiteSpace(operationId))
+        {
+            return [];
+        }
+
+        var tenant = principal.GetTenantId().Value;
+        var userSid = principal.GetUserSid()?.Value;
+        if (string.IsNullOrWhiteSpace(userSid))
+        {
+            userSid = "anonymous";
+        }
+
+        if (!_memos.TryGetValue($"{operationId}|{tenant}|{userSid}", out var memo))
+        {
+            return [];
+        }
+
+        var columnsByTable = new Dictionary<TableIdentifier, List<string>>();
+        CollectColumns(root, columnsByTable);
+
+        var treeAccess = new Dictionary<TableIdentifier, TreeTableAccess>();
+        foreach (var table in columnsByTable.Keys)
+        {
+            if (!memo.AccessByTable.TryGetValue((table, tenant, userSid), out var access) || !access.Decision.IsAllowed)
+            {
+                return [];
+            }
+            treeAccess[table] = new TreeTableAccess(access.Metadata, access.Decision);
+        }
+
+        return TreeSqlCompiler.CollectMaskedColumns(root, treeAccess, _options.IsColumnMaskingDisabled);
     }
 
     public void ClearOperation(string operationId)
