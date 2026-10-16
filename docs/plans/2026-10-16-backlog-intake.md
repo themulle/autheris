@@ -13,7 +13,7 @@
 | BL-03 | Scale to 5,000 users with many tables and access rules | Architect and performance expert check whether access can be governed efficiently and performantly at this size, which technical changes are needed, and how system performance and scaling behave. Findings are then implemented. | `feat/scale-5000-users` | Analysis |
 | BL-04 | Table cache: cache tables or parts of tables inside Autheris | See section 2.1. | to be created | Intake |
 | BL-05 | Granular configuration per data source | See section 2.2. | to be created | Intake |
-| BL-06 | Tracing and logging via open standards | See section 2.3. | `feat/bl-06-open-telemetry` | Phase 2/3 |
+| BL-06 | Tracing and logging via open standards | See section 2.3. PRD: [`2026-10-16-req-bl-06-open-telemetry.md`](2026-10-16-req-bl-06-open-telemetry.md) (`REQ-OPS-BL06`). Plan + security review: [`2026-10-16-plan-bl-06-open-telemetry.md`](2026-10-16-plan-bl-06-open-telemetry.md) (`PLAN-OPS-BL06`, conditions `SEC-OT06-01..21`). | `feat/bl-06-open-telemetry` | Phase 3 done (approved with conditions), next Phase 4 (WP-0 contracts) |
 | BL-07 | PostgreSQL wire protocol endpoint | PG-compatible endpoint for BI tools; PRD `2026-10-16-req-postgres-wire-protocol-endpoint.md` on `feat/scale-5000-users`: conditional go, first verify BI tools via the existing Trino protocol. | `feat/scale-5000-users` (PRD) | PRD ready, decision pending |
 | BL-08 | C# DLL extension points for authentication and authorization | A C# DLL API callback must again be possible for special cases in authentication and authorization, so that custom checks (for example local AD groups) can be plugged in. Related: BL-03 Role-Resolver providers (WP-SC-05/13) and BL-01 I3 trust-listed plugin loading. | to be created | Intake |
 

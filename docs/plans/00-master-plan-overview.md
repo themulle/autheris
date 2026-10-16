@@ -44,6 +44,8 @@
 | [`2026-10-16-req-postgres-wire-protocol-endpoint.md`](2026-10-16-req-postgres-wire-protocol-endpoint.md)<br/>`REQ-PROTO-PGWIRE` | **PostgreSQL Wire Protocol Endpoint (PRD, Phase 1)** | Product-manager evaluation of pure C# simple-query server vs. Rust `pgwire` sidecar vs. native C# Extended Query implementation vs. existing Trino/Flight protocols; open-source alternatives and license (BSL 1.1) constraints; governed execution only, TLS + strong auth mandatory. | **PROPOSED** | Phase 0: validate BI clients on the existing Trino protocol; owner decision on PG-only clients. |
 | [`2026-10-16-req-issues-111-115-catalog-access-analytics.md`](2026-10-16-req-issues-111-115-catalog-access-analytics.md)<br/>`REQ-GOV-111` / `REQ-DATA-112` / `REQ-GOV-113` / `REQ-OBS-114` / `REQ-SEC-115` | **Issues #111-#115: Catalog Discovery, Read-Only Analytics, Self-Service Access, Caller Reporting, Read-Path Switches (PRD, Phase 1)** | #111 persisted dataset tags and `Hidden`/`Summary`/`Full` visibility (Summary never exposes columns); #112 typed `<table>_aggregate` and `queryMetrics` for read-only tokens plus persisted semantic manifest; #113 `SelfServiceScopes` allowlist (request/withdraw) and approver-chosen row filters on approval (two increments); #114 per-application consumer report with normalized, capped, untrusted caller labels (per-person view stays owner/delegate/admin only); #115 switches for the REST data endpoint and MCP tool groups. Dependencies on bugfix issues #117 and #118. | **PRD READY** | Phase 2 (`csharp-architect`): suggested order #115, #111 and #112, #113 A, #114, #113 B. |
 | [`2026-10-16-backlog-intake.md`](2026-10-16-backlog-intake.md)<br/>`BACKLOG-2026-10-16` | **Owner Backlog Intake 2026-10-16** | BL-01 CDC fan-out (#99), BL-02 row filter key-set cache (#107), BL-03 scale to 5,000 users (analysis), BL-04 table cache (CT/CDC/periodic/TTL refresh, transparent joins, disk persistence), BL-05 per-data-source configuration (cost, logging, …), BL-06 tracing and logging via open standards. | **INTAKE 📥** | BL-06 → BL-05 → BL-04 refined sequentially by the product manager. |
+| [`2026-10-16-backlog-intake.md`](2026-10-16-backlog-intake.md)<br/>`BACKLOG-2026-10-16` | **Owner Backlog Intake 2026-10-16** | BL-01 CDC fan-out (#99), BL-02 row filter key-set cache (#107), BL-03 scale to 5,000 users (analysis), BL-04 table cache (CT/CDC/periodic/TTL refresh, transparent joins, disk persistence), BL-05 per-data-source configuration (cost, logging, …), BL-06 tracing and logging via open standards (PRD [`2026-10-16-req-bl-06-open-telemetry.md`](2026-10-16-req-bl-06-open-telemetry.md), `REQ-OPS-BL06`). | **INTAKE 📥** | BL-06 Phases 1–3 done on `feat/bl-06-open-telemetry` (see BL-06 row), next Phase 4; then BL-05 → BL-04 refined sequentially by the product manager. |
+| [`2026-10-16-req-bl-06-open-telemetry.md`](2026-10-16-req-bl-06-open-telemetry.md)<br/>`REQ-OPS-BL06`<br/>Plan: [`2026-10-16-plan-bl-06-open-telemetry.md`](2026-10-16-plan-bl-06-open-telemetry.md) | **BL-06: Tracing, Metrics and Logging via OpenTelemetry** | OTLP for traces/metrics/logs, W3C Trace Context (baggage dropped, trust-aware sampler), Serilog replaced by the OpenTelemetry logging provider with one redaction point, fail-closed span/metric allow-lists, scrubbed SQL text/hash, W3C trace id in audit/problem details, gateway-owned `db` spans per source command, metric catalog (prometheus-net instrumentation removed), async span links, per-data-source policy hook for BL-05, Helm/collector example. Security review: approved with conditions `SEC-OT06-01..21`. | **PHASE 3 DONE 🔐** | Phase 4: WP-0 contracts (Dev B), then streams A (composition root, logs, deploy), B (policy hook, spans), C (metrics, async propagation); CDC links after BL-01 merge. |
 | [`README.md`](README.md)<br/>`PLAN-AGENT-GOV-DOCS-01` | **Agent Governance & English Documentation Standards** | Project-wide English documentation policy; `docs/plans/` as the plan repository; agent refinement lifecycle rules; root `AGENTS.md` & `CLAUDE.md`. | **COMPLETED & VERIFIED ✅** | Ongoing enforcement. |
 
 ---
@@ -68,6 +70,7 @@ flowchart TD
     R107["2026-10-15-req-issue-107-...md<br/>#107 row filter key-set cache"]
     FED1["2026-10-16-req-cross-source-all-consumers.md<br/>REQ-FED-01 cross-source all consumers"]
     BL["2026-10-16-backlog-intake.md<br/>BL-01..BL-06 owner requests"]
+    BL6["2026-10-16-plan-bl-06-open-telemetry.md<br/>BL-06 OpenTelemetry"]
 
     MP --> AG
     MP --> SR
@@ -80,6 +83,7 @@ flowchart TD
     MP --> R107
     MP --> FED1
     MP --> BL
+    BL --> BL6
     SR --> IR
     AR --> IR
     FT --> IR
