@@ -9,6 +9,8 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.GraphQL.Catalog;
+using Autheris.Tests.Unit.Sql.Tree;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -210,6 +212,205 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
 
         await Should.ThrowAsync<GatewayInvalidQueryException>(() => fixture.ExecuteAsync(new ClaimsPrincipal(), tree, null));
         fixture.Factory.Opened.ShouldBe(0);
+    }
+
+    private static TableMetadata MetaOf(
+        TableIdentifier id,
+        string sourceName,
+        string sourceType,
+        DataSourceType dataSourceType,
+        IReadOnlyDictionary<string, MaskingRule>? masking,
+        params (string Name, string Type)[] columns) => new()
+    {
+        Identifier = id,
+        Table = new Table { SourceName = sourceName, SchemaName = id.Schema, TableName = id.TableName, SourceType = sourceType, DataSourceType = dataSourceType },
+        PrimaryKeyColumns = ["id"],
+        Columns = columns.Select(c => new TableColumn { ColumnName = c.Name, DataType = c.Type }).ToList(),
+        ColumnMaskingRules = masking ?? new Dictionary<string, MaskingRule>()
+    };
+
+    private static readonly (string, string)[] AuthorColumns = [("id", "integer"), ("name", "text"), ("email", "text")];
+    private static readonly (string, string)[] ArticleColumns = [("id", "integer"), ("author_id", "integer"), ("title", "text")];
+
+    [Theory]
+    [MemberData(nameof(RelationExecutabilityTests.Cases), MemberType = typeof(RelationExecutabilityTests))]
+    public async Task GovernedTreeQueryService_UsesSharedPredicate(
+        string name,
+        string parentSource,
+        string childSource,
+        string childSourceType,
+        DataSourceType childDsType,
+        bool executable,
+        RelationExecutabilityTests.TreeOutcome outcome)
+    {
+        _ = name;
+        var authors = MetaOf(Authors, parentSource, "Sqlite", DataSourceType.Sql, null, AuthorColumns);
+        var articles = MetaOf(Articles, childSource, childSourceType, childDsType, null, ArticleColumns);
+
+        // Runtime: the tree service rejects exactly the cases the shared predicate rejects, with the unchanged errors.
+        var fixture = Create(a =>
+        {
+            a[Authors] = Allowed(authors);
+            a[Articles] = Allowed(articles);
+        });
+        var run = () => fixture.ExecuteAsync(new ClaimsPrincipal(), AuthorsWithArticles(), null);
+        switch (outcome)
+        {
+            case RelationExecutabilityTests.TreeOutcome.Runs:
+                using (await run())
+                {
+                }
+                fixture.Factory.Opened.ShouldBe(1);
+                break;
+            case RelationExecutabilityTests.TreeOutcome.AcrossSources:
+                (await Should.ThrowAsync<GatewayInvalidQueryException>(run)).Message.ShouldBe("Relations across data sources are not supported in one query.");
+                break;
+            case RelationExecutabilityTests.TreeOutcome.NotSql:
+                (await Should.ThrowAsync<GatewayInvalidQueryException>(run)).Message.ShouldContain("is not a SQL table");
+                break;
+            case RelationExecutabilityTests.TreeOutcome.DialectMismatch:
+                (await Should.ThrowAsync<InvalidOperationException>(run)).Message.ShouldContain("does not match the provider");
+                break;
+            case RelationExecutabilityTests.TreeOutcome.NoConnection:
+                (await Should.ThrowAsync<InvalidOperationException>(run)).Message.ShouldContain("has no database connection");
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(outcome));
+        }
+
+        if (outcome != RelationExecutabilityTests.TreeOutcome.Runs)
+        {
+            fixture.Factory.Opened.ShouldBe(0);
+        }
+
+        // Schema: the relation is exposed exactly when the predicate accepts the pair.
+        var metadata = Substitute.For<ITableMetadataRepository>();
+        metadata.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([authors, articles]);
+        var relations = Substitute.For<ITableRelationRepository>();
+        relations.GetRelationsForTableAsync(Authors, Arg.Any<CancellationToken>()).Returns([new TableRelation
+        {
+            RelationName = "articles",
+            ParentTableIdentifier = Authors,
+            ChildTableIdentifier = Articles,
+            Cardinality = RelationCardinality.OneToMany,
+            JoinKeysParent = ["id"],
+            JoinKeysChild = ["author_id"]
+        }]);
+        relations.GetRelationsForTableAsync(Articles, Arg.Any<CancellationToken>()).Returns([]);
+
+        var model = await CatalogSchemaModel.BuildAsync(metadata, relations);
+
+        model.Tables.Single(t => t.Identifier == Authors).Relations.Any().ShouldBe(executable);
+    }
+
+    [Fact]
+    public async Task Tree_MixedCaseSourceNames_ExecuteAsOneStatement_WithGovernancePerTable()
+    {
+        var titleMask = new Dictionary<string, MaskingRule> { ["title"] = new MaskingRule { RuleType = "REDACT" } };
+        var fixture = Create(a =>
+        {
+            a[Authors] = Allowed(MetaOf(Authors, "blog", "Sqlite", DataSourceType.Sql, null, AuthorColumns));
+            var articles = MetaOf(Articles, "BLOG", "Sqlite", DataSourceType.Sql, titleMask, ArticleColumns);
+            a[Articles] = Allowed(articles) with
+            {
+                Decision = TableAccessDecision.Allowed(
+                    Articles,
+                    new Dictionary<string, ColumnAccessLevel> { ["title"] = ColumnAccessLevel.Mask },
+                    rowFilterSql: "\"author_id\" = 1",
+                    hasUnconstrainedColumnAllow: true)
+            };
+        });
+
+        using var result = await fixture.ExecuteAsync(new ClaimsPrincipal(), AuthorsWithArticles(), null);
+
+        fixture.Factory.Opened.ShouldBe(1);
+        await fixture.Resolver.Received(1).ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Authors, Arg.Any<IReadOnlyList<string>?>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>());
+        await fixture.Resolver.Received(1).ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Articles, Arg.Any<IReadOnlyList<string>?>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>());
+        await fixture.Audit.Received(2).RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
+        var root = result.RootElement;
+        root.GetArrayLength().ShouldBe(2);
+        var firstArticles = root[0].GetProperty("articles").EnumerateArray().Select(x => x.GetProperty("title").GetString()).ToList();
+        firstArticles.Count.ShouldBe(2); // row filter keeps the articles of author 1
+        firstArticles.ShouldNotContain("A1"); // mask of the child table applies
+        firstArticles.ShouldNotContain("A2");
+        root[1].GetProperty("articles").GetArrayLength().ShouldBe(0); // row filter removes the articles of author 2
+    }
+
+    private static readonly TableIdentifier CrmArticles = new("crm", "main", "articles");
+
+    private static TreeQueryNode AuthorsWithCrmArticles() => new(Authors, ["id"])
+    {
+        Relations = [new TreeRelationNode("articles", ["id"], ["author_id"], true, new TreeQueryNode(CrmArticles, ["title"]) { OrderBy = [new TreeOrder("id")] })],
+        OrderBy = [new TreeOrder("id")]
+    };
+
+    [Fact]
+    public async Task Tree_CrossDomainSameSource_DeniedChild_FailsBeforeAnySql()
+    {
+        var fixture = Create(a =>
+        {
+            var child = MetaOf(CrmArticles, "blog", "Sqlite", DataSourceType.Sql, null, ArticleColumns);
+            a[CrmArticles] = Allowed(child) with { Decision = TableAccessDecision.Denied(CrmArticles, "no consent") };
+        });
+
+        var ex = await Should.ThrowAsync<GatewayForbiddenException>(() => fixture.ExecuteAsync(new ClaimsPrincipal(), AuthorsWithCrmArticles(), null));
+
+        ex.Message.ShouldBe("Access denied.");
+        fixture.Factory.Opened.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Tree_CrossDomainSameSource_AppliesRowFilterAndMaskOfTheChild()
+    {
+        var titleMask = new Dictionary<string, MaskingRule> { ["title"] = new MaskingRule { RuleType = "REDACT" } };
+        var fixture = Create(a =>
+        {
+            var child = MetaOf(CrmArticles, "blog", "Sqlite", DataSourceType.Sql, titleMask, ArticleColumns);
+            a[CrmArticles] = Allowed(child) with
+            {
+                Decision = TableAccessDecision.Allowed(
+                    CrmArticles,
+                    new Dictionary<string, ColumnAccessLevel> { ["title"] = ColumnAccessLevel.Mask },
+                    rowFilterSql: "\"author_id\" = 1",
+                    hasUnconstrainedColumnAllow: true)
+            };
+        });
+
+        using var result = await fixture.ExecuteAsync(new ClaimsPrincipal(), AuthorsWithCrmArticles(), null);
+
+        fixture.Factory.Opened.ShouldBe(1);
+        var root = result.RootElement;
+        var titles = root[0].GetProperty("articles").EnumerateArray().Select(x => x.GetProperty("title").GetString()).ToList();
+        titles.Count.ShouldBe(2);
+        titles.ShouldNotContain("A1");
+        titles.ShouldNotContain("A2");
+        root[1].GetProperty("articles").GetArrayLength().ShouldBe(0);
+    }
+
+    [Fact]
+    public void GovernedTreeQueryService_DoesNotDependOnTheUnwiredCrossSourceResolver()
+    {
+        // SEC-B75-05: nothing on the GraphQL or tree path may resolve the unwired resolver and its in-memory reader.
+        var forbidden = new[]
+        {
+            typeof(Autheris.Application.Data.Relations.ICrossSourceRelationResolver),
+            typeof(Autheris.Application.Data.Relations.ICrossSourceRowReader),
+            typeof(Autheris.Application.Data.Relations.CrossSourceRelationResolver),
+            typeof(Autheris.Application.Data.Relations.InMemoryCrossSourceRowReader)
+        };
+        var assemblies = new[] { typeof(GovernedTreeQueryService).Assembly, typeof(CatalogSchemaModel).Assembly };
+        var offenders = assemblies
+            .SelectMany(asm => asm.GetTypes())
+            .Where(t => t.Namespace is { } ns && (ns.StartsWith("Autheris.GraphQL", StringComparison.Ordinal) || ns.StartsWith("Autheris.Application.Sql.Tree", StringComparison.Ordinal)))
+            .Where(t => t.GetConstructors(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
+                .SelectMany(c => c.GetParameters())
+                .Any(p => forbidden.Contains(p.ParameterType)))
+            .Select(t => t.FullName)
+            .ToList();
+
+        offenders.ShouldBeEmpty();
     }
 
     [Fact]

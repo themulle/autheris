@@ -1,94 +1,50 @@
-# F-GOV-19: Governed Cross-Source GraphQL Relations & Batched Key Lookup
+# F-GOV-19: GraphQL Relation Exposure and Data Source Boundaries
 
 **Feature-ID:** F-GOV-19  
-**Category:** Federated Data Access & GraphQL Governance  
+**Category:** GraphQL Governance  
 **Components:**
-- Domain: [`TableModels.cs`](../../src/Autheris.Domain/Model/TableModels.cs) (`TableRelation.AllowCrossDataSource`)
-- Application: [`CrossSourceRelationModels.cs`](../../src/Autheris.Application/Data/Relations/CrossSourceRelationModels.cs), [`ICrossSourceRelationResolver.cs`](../../src/Autheris.Application/Data/Relations/ICrossSourceRelationResolver.cs), [`CrossSourceRelationResolver.cs`](../../src/Autheris.Application/Data/Relations/CrossSourceRelationResolver.cs)
+- Application: [`RelationExecutability.cs`](../../src/Autheris.Application/Sql/Tree/Federation/RelationExecutability.cs) (shared predicate), [`GovernedTreeQueryService.cs`](../../src/Autheris.Application/Sql/Tree/GovernedTreeQueryService.cs) (runtime enforcement)
+- GraphQL: [`CatalogSchemaModel.cs`](../../src/Autheris.GraphQL/Catalog/CatalogSchemaModel.cs) (relation fields of the generated schema)
+- Domain: [`TableModels.cs`](../../src/Autheris.Domain/Model/TableModels.cs) (`TableRelation`, `TableRelation.AllowCrossDataSource`)
 
 ---
 
-## 1. Executive Summary & Problem Statement
+## 1. Overview
 
-### 1.1 The Challenge
-In enterprise architectures, related business entities often reside in separate data sources (for example, `orders` in PostgreSQL and `customers` in SQL Server or an HTTP microservice). Naive cross-source joins either pull entire tables into gateway memory or bypass target-source row-level security and column masking.
+### 1.1 Behavior
+The generated GraphQL schema exposes a declared `TableRelation` as a field on both tables of the relation (forward field on the parent, reverse field `<parentTable>_by_<relation>` on the child) **only when the inner tree query service can run it as one governed statement**. A relation is exposed when both tables:
 
-### 1.2 The Solution
-Autheris supports **Declared Cross-Source Relations** (`AllowCrossDataSource = true`) in GraphQL and the governed relation resolver via **Batched Key Lookup**:
-- **No Full-Table Staging:** The gateway executes the root query on Source 1, extracts the distinct non-null join keys from the current page, and queries Source 2 using parameter-bounded `WHERE key IN (@p0, @p1, ...)` batches in both **many-to-one** and **one-to-many** directions.
-- **Clear-Key Requirement:** Join keys on both the parent table and the referenced child table must have `ColumnAccessLevel.Clear` for the caller; masked or denied join keys fail closed with `CROSS_SOURCE_RELATION_KEY_NOT_CLEAR`.
-- **Full Governance on Source 2:** Source 2 is queried under the caller's identity, enforcing table consent, RLS row filters, mandatory virtual filters, column masking, cost/row budgets, and dedicated audit logging.
-- **Bounded Filter Pushdown & Sort Guard:** Filtering the root table by a cross-source related field resolves matching keys on Source 2 first up to `MaxCrossSourceFilterKeys` (failing closed with `CROSS_SOURCE_FILTER_KEY_SET_EXCEEDED` when exceeded). Sorting the root query by a cross-source relation field fails closed with `CROSS_SOURCE_SORT_NOT_SUPPORTED`.
+- have the same `DataSourceType` (SQL),
+- name the same data source (`Table.SourceName`, compared case-insensitively, no trimming), and
+- use the same SQL dialect (`Table.SourceType`, aliases such as `postgres` and `PostgreSql` count as the same dialect; an unparseable dialect is never executable).
 
----
+Relations between tables of different data sources are **not part of the schema**: the field does not appear in the SDL or in introspection, and a query that selects it fails GraphQL validation (unknown field) before any data access. The MCP view of the schema (`search_catalog`, `query_graphql` document analysis) is derived from the same model and lists the same relations.
 
-## 2. Architecture & Request Lifecycle
+`TableRelation.AllowCrossDataSource` exists in the domain model but has no effect on the schema.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Client as GraphQL Client
-    participant Resolver as CrossSourceRelationResolver
-    participant S1 as Source 1 (e.g. PostgreSQL)
-    participant Policy as ITableAccessPolicy
-    participant S2 as Source 2 (e.g. SQL Server)
-    participant Audit as IAuditLogRepository
-
-    Client->>Resolver: Query orders { id customer { name } }
-    Resolver->>Policy: Verify Clear access on join keys (Source 1 & Source 2)
-    Resolver->>S1: Execute root page query (RLS applied)
-    S1-->>Resolver: Page of orders with distinct customer_ids
-    Resolver->>Policy: Evaluate caller access & RLS on Source 2 (customers)
-    Resolver->>S2: Batched WHERE id IN (@p0, @p1, ...) + Source 2 RLS
-    S2-->>Resolver: Matching authorized customer rows (masked)
-    Resolver->>Audit: Record dedicated Source 2 audit event
-    Resolver-->>Client: Merged GraphQL response (hidden Source 2 rows -> null/omitted)
-```
+### 1.2 Same source, different domain
+`TableIdentifier.Domain` is a catalog label, not a security boundary of the connection. Relations between tables of different domains that share one data source are exposed and run as one statement. Governance still applies per table: every table of the query is resolved and audited, a denial on any table fails the whole request with `Access denied.` before any SQL runs, and tenant filter, row filters and masks are compiled per table.
 
 ---
 
-## 3. Configuration & Options
+## 2. Architecture
 
-Enable cross-source traversal on a declared `TableRelation` (`AllowCrossDataSource: true`) and configure bounds via `CrossSourceRelationOptions`:
+`RelationExecutability.IsSameExecutionSource(parent, child)` is the single source of truth for the conditions above. It depends on catalog metadata only, never on the caller, so every authenticated caller sees the same schema.
 
-```json
-{
-  "CrossSourceRelations": {
-    "MaxBatchSize": 500,
-    "MaxNestedRowBudget": 5000,
-    "MaxCrossSourceFilterKeys": 1000
-  }
-}
-```
+- **Schema:** `CatalogSchemaModel.BuildAsync` calls the predicate for the (parent, child) pair of every relation in both directions and skips a failing relation before any field name is allocated. Names of the remaining relation fields therefore do not depend on omitted relations. The schema fingerprint covers the emitted relations only.
+- **Runtime:** `GovernedTreeQueryService` uses `RelationExecutability.HasSameSourceName` for its data source check, so schema and runtime compare source names with one implementation. Any relation that reaches the service across data sources (for example from a stale schema) is rejected fail-closed with `INVALID_QUERY_OPTION` ("Relations across data sources are not supported in one query."). The runtime additionally compares the catalog dialect with the provider of the data source connection, which depends on configuration.
 
 ---
 
-## 4. Usage Examples
+## 3. Observability
 
-### 4.1 GraphQL Query Traversing Cross-Source Relation
-
-```graphql
-query GetOrdersWithCrossSourceCustomer {
-  sales_public_orders(first: 25, where: { customer: { country: { eq: "DE" } } }) {
-    id
-    amount
-    customer {
-      id
-      companyName
-      country
-    }
-  }
-}
-```
+When a schema build omits relations, one Information line is logged per real rebuild: `GraphQL catalog schema: {Count} relation(s) between different data sources are not exposed; ...`. The line carries the count only, no table, relation or source names.
 
 ---
 
-## 5. Security, Zero-Trust & Fail-Closed Behavior
+## 4. Limitations
 
-| Condition | Error Code | Behavior |
-| :--- | :--- | :--- |
-| `AllowCrossDataSource` is `false` across distinct sources | `CROSS_SOURCE_RELATION_NOT_ENABLED` | Request is rejected before querying Source 2. |
-| Source or target join key is `Mask` or `Deny` | `CROSS_SOURCE_RELATION_KEY_NOT_CLEAR` | Request is rejected fail-closed so masked keys are never joined in cleartext. |
-| Cross-source filter matches $> \text{MaxCrossSourceFilterKeys}$ | `CROSS_SOURCE_FILTER_KEY_SET_EXCEEDED` | Request is rejected fail-closed rather than silently truncating filter keys. |
-| Root `orderBy` references a cross-source relation field | `CROSS_SOURCE_SORT_NOT_SUPPORTED` | Request is rejected because sorting across sources would require full-table materialization. |
-| Target row in Source 2 is excluded by Source 2 RLS | *(No error — anti-oracle)* | Resolves to `null` (many-to-one) or is omitted from the list (one-to-many), indistinguishable from a missing key. |
+- A tree query runs as one statement against one data source. Relations across data sources cannot be queried through GraphQL.
+- Relation fields cannot be used in `where` or `orderBy` arguments; the aggregate fields (`<table>_aggregate`) take free-text `groupBy` and `where` arguments that accept only columns of the table, so a relation path is rejected.
+- `CrossSourceRelationResolver` and `InMemoryCrossSourceRowReader` (batched key lookup building blocks) are registered but are not used by the GraphQL path.
+- The schema lists all active SQL tables and their relations to every authenticated caller; access is enforced at query time.

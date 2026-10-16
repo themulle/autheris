@@ -7,6 +7,7 @@ using System.Text.Json.Nodes;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Services;
+using Autheris.Application.Sql.Tree.Federation;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
@@ -271,7 +272,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             {
                 throw new GatewayInvalidQueryException($"The table '{access.Metadata.Identifier}' is not a SQL table and cannot be queried with relations.");
             }
-            if (!string.Equals(access.Metadata.Table.SourceName, sourceName, StringComparison.OrdinalIgnoreCase))
+            if (!RelationExecutability.HasSameSourceName(rootAccess.Metadata, access.Metadata))
             {
                 throw new GatewayInvalidQueryException("Relations across data sources are not supported in one query.");
             }

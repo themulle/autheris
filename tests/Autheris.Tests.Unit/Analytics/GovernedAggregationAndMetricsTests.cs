@@ -278,6 +278,61 @@ public sealed class GovernedAggregationAndMetricsTests
         ex.ColumnName.ShouldBe("discount_secret");
     }
 
+    [Theory]
+    [InlineData("groupBy")]
+    [InlineData("where")]
+    public async Task ExecuteAggregationAsync_RelationPathInFreeText_IsRejectedBeforeAnySql(string clauseKind)
+    {
+        // BUG #75 (SEC-B75-07): groupBy/where of the aggregate field are free text; a relation path such as partner.name
+        // (an omitted cross-source relation) is no column of the table and never reaches the data source.
+        var metadata = CreateOrdersMetadata(minGroupSize: 1);
+        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        metaRepo.GetTableMetadataAsync(OrdersTableId, Arg.Any<CancellationToken>()).Returns(metadata);
+
+        var principal = CreatePrincipal("S-1-5-21-ANALYST");
+        var decision = TableAccessDecision.Allowed(
+            OrdersTableId,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["category"] = ColumnAccessLevel.Clear,
+                ["amount"] = ColumnAccessLevel.Clear
+            });
+        var executor = new RecordingRowExecutor();
+        var service = new GovernedAggregationService(metadataRepository: metaRepo, dataSourceExecutors: [executor]);
+
+        var query = clauseKind == "groupBy"
+            ? new AggregationQuery(
+                OrdersTableId,
+                GroupBy: ["partner.name"],
+                Aggregates: [new AggregateSelection(AggregateFunction.Count)],
+                PreEvaluatedDecision: decision)
+            : new AggregationQuery(
+                OrdersTableId,
+                GroupBy: ["category"],
+                Aggregates: [new AggregateSelection(AggregateFunction.Count)],
+                Where: TableFilterClause.FromTrinoText("partner.name = 'x'", Array.Empty<string>()),
+                PreEvaluatedDecision: decision);
+
+        await Should.ThrowAsync<ArgumentException>(() => service.ExecuteAggregationAsync(principal, query));
+
+        executor.Calls.ShouldBe(0);
+    }
+
+    private sealed class RecordingRowExecutor : IDataSourceExecutor
+    {
+        public int Calls { get; private set; }
+
+        public DataSourceType SupportedType => DataSourceType.Sql;
+
+        public Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ExecuteAsync(
+            DataSourceExecutionContext context,
+            CancellationToken ct = default)
+        {
+            Calls++;
+            return Task.FromResult<IReadOnlyList<IReadOnlyDictionary<string, object?>>>([]);
+        }
+    }
+
     [Fact]
     public async Task ExecuteAggregationAsync_EnforcesMinGroupSizeSuppression_AndDifferencingSafeTotals()
     {

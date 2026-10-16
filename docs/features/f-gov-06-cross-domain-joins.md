@@ -13,7 +13,7 @@ Enterprises store interrelated data across disparate database engines—such as 
 
 ## 2. Business Value
 
-- **Breaks Down Enterprise Data Silos**: Enables unified GraphQL queries spanning Oracle, SQL Server, and PostgreSQL without data replication.
+- **Breaks Down Enterprise Data Silos**: Enables unified governed SQL queries spanning Oracle, SQL Server, and PostgreSQL without data replication. GraphQL relations are limited to tables of one data source (see F-GOV-19).
 - **Minimal Network and Database Load**: Only the minimal, pre-filtered subset of rows is retrieved from each database engine.
 - **Zero-Trust Across Engine Boundaries**: Each sub-query maintains independent tenant isolation and consent evaluation.
 
