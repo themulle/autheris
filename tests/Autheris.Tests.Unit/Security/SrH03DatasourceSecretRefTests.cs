@@ -46,7 +46,8 @@ public sealed class SrH03DatasourceSecretRefTests
     }
 
     private static CatalogDiscoveryService Discovery(IKeyVaultSecretProvider provider, IOpenApiIngestionService ingestion) =>
-        new(Substitute.For<ITableMetadataRepository>(), Substitute.For<IAuditLogRepository>(), Substitute.For<IRebacEvaluator>(),
+        new(Substitute.For<ITableMetadataRepository>(), Substitute.For<IAuditLogRepository>(), Substitute.For<Autheris.Application.Interfaces.IConsentRepository>(),
+            Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions()), Substitute.For<IRebacEvaluator>(),
             provider, ingestion, Substitute.For<ICatalogSearchEngine>(), NullLogger<CatalogDiscoveryService>.Instance);
 
     private static RequestContext Ctx() => new(new TenantId("tenant-a"), new Sid("admin"), Roles: ["GovernanceAdmin"]);

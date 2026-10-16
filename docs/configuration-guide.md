@@ -689,7 +689,10 @@ Ermöglicht die zentrale Anbindung an externe Unternehmens-Datenkataloge (**Micr
 | `SharedTables` | `List<string>` | `domain.schema.table` | `[]` | Tables visible in the GraphQL `catalog` to administrators and discovery users of every tenant, in addition to the tables the tenant holds a consent record on. |
 
 > [!NOTE]
-> **Tenant-scoped GraphQL catalog and `syncOpenMetadata`**: Outside the single-tenant deployment (`legacy-single-tenant`), the GraphQL `catalog` admin view and `AllowAuthenticatedCatalogDiscovery` are limited to tables on which the caller's tenant holds at least one consent record (Allow or Deny) or that are listed in `Catalog.SharedTables`. Only the canonical `ClusterAdmin` keeps the global view; `GovernanceAdmin` is tenant-scoped. `accessStatus` is computed from the caller's consents. `syncOpenMetadata` is available to the canonical `ClusterAdmin` (all tenants) and to `GovernanceAdmin` (own tenant only: tables mapped to that tenant via `OpenMetadata.ServiceDatabaseToTenantMap`); it returns warnings as stable codes with counts (for example `OM_TABLE_MAP_FAILED: 3`) and failures as the error code `SYNC_FAILED` without detail text. Full details are written to the server log.
+> **Tenant-scoped GraphQL catalog and `syncOpenMetadata`**: In `Gateway:Tenancy:Mode = Multi` (default), the tenant administrator view of the GraphQL `catalog` is limited to tables on which the caller's tenant holds at least one consent record (Allow or Deny) or that are listed in `Catalog.SharedTables`. Only the canonical `ClusterAdmin` keeps the global view; `GovernanceAdmin` is tenant-scoped. `accessStatus` is computed from the caller's consents. `syncOpenMetadata` is available to the canonical `ClusterAdmin` (all tenants) and to `GovernanceAdmin` (own tenant only: tables mapped to that tenant via `OpenMetadata.ServiceDatabaseToTenantMap`); it returns warnings as stable codes with counts (for example `OM_TABLE_MAP_FAILED: 3`) and failures as the error code `SYNC_FAILED` without detail text. Full details are written to the server log.
+
+> [!NOTE]
+> **`AllowAuthenticatedCatalogDiscovery` is deprecated and has no effect.** Every non-administrator (GraphQL, REST, MCP) sees only the tables and columns its consents allow; the flag no longer widens the catalog. A start-up warning is logged when it is set. The explicit `OpenSchema` mode is a separate operator opt-in and is unchanged.
 
 > [!NOTE]
 > **Sensitivity Classification Ranking (D-4 & ADR-010)**:
@@ -1084,6 +1087,28 @@ Maxima of individual grants (`User` / `ServicePrincipal` grantees and individual
   }
 }
 ```
+
+### 2.22 `Tenancy` (Deployment tenancy mode)
+
+Whether the deployment is single- or multi-tenant is a **deployment setting**. It is never inferred from a missing tenant claim in a token.
+
+| Key | Type | Range | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `Mode` | `string` | `Multi`, `Single` (names only, case-insensitive) | `Multi` (also when empty) | `Multi`: several tenants share the deployment. A principal without tenant claim is never an administrator: it takes the consent path only. `Single`: one tenant owns the deployment, tokens carry no tenant claim, and a `GovernanceAdmin` without tenant claim sees the whole catalog. Any other value fails start-up validation. |
+
+**Catalog caller classes.** Every catalog channel (REST `/api/v1/catalog/*`, GraphQL `catalog`, MCP tools and resources, `invoke_api`, Trino/Arrow/Iceberg metadata) decides the caller class from the authenticated principal only, through one resolver:
+
+| Caller | `Multi` | `Single` |
+| :--- | :--- | :--- |
+| Canonical `ClusterAdmin` (no forward-auth identity, no tenant-prefixed role) | whole catalog, all tenants | whole catalog |
+| `GovernanceAdmin` with a tenant claim | tables of its tenant (consent-derived ownership plus `Gateway:Catalog:SharedTables`) | same |
+| `GovernanceAdmin` without tenant claim | not an administrator: consent path only | whole catalog |
+| Everybody else | consent path: tables and columns allowed by the caller's active consents | same |
+| No principal, unauthenticated, invalid tenant claim | nothing | nothing |
+
+The tenant signal of the tenant administrator view is derived from consent records and is not a hard tenant boundary; a dedicated tenant-owner attribute for tables is a separate topic.
+
+**Start-up diagnostics.** The effective mode is logged at start: a Warning when `Mode` is not configured (single-tenant deployments must set `Single`), an Information entry when it is. At runtime a throttled Warning (once per principal and ten minutes) names the option when a principal that holds `GovernanceAdmin` has no tenant claim in `Multi` mode.
 
 ---
 

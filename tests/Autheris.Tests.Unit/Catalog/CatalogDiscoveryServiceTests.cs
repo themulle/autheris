@@ -30,9 +30,12 @@ public sealed class CatalogDiscoveryServiceTests
 
     private CatalogDiscoveryService CreateService(ICatalogSearchEngine? searchEngine = null)
     {
+        // Single-tenant deployment: a GovernanceAdmin without tenant claim is the unrestricted administrator view; ReBAC still intersects.
         return new CatalogDiscoveryService(
             _metadataRepository,
             _auditLogRepository,
+            Substitute.For<IConsentRepository>(),
+            Microsoft.Extensions.Options.Options.Create(Wp0.Options(Autheris.Domain.Options.TenancyMode.Single)),
             _rebacEvaluator,
             _secretProvider,
             _openApiIngestionService,
@@ -47,7 +50,7 @@ public sealed class CatalogDiscoveryServiceTests
         var service = CreateService();
         var tenant = new TenantId("tenant-a");
         var userSid = new Sid("user:alice");
-        var context = new RequestContext(tenant, userSid);
+        var context = new RequestContext(tenant, userSid, User: Wp0.User(userSid.Value, null, ["GovernanceAdmin"]));
 
         var tableAllowedId = new TableIdentifier("crm", "dbo", "customers");
         var tableDeniedId = new TableIdentifier("finance", "dbo", "salaries");
@@ -114,7 +117,7 @@ public sealed class CatalogDiscoveryServiceTests
         var service = CreateService();
         var tenant = new TenantId("tenant-a");
         var userSid = new Sid("user:alice");
-        var context = new RequestContext(tenant, userSid);
+        var context = new RequestContext(tenant, userSid, User: Wp0.User(userSid.Value, null, ["GovernanceAdmin"]));
 
         var tableAllowedId = new TableIdentifier("crm", "dbo", "customers");
         var tableDeniedId = new TableIdentifier("finance", "dbo", "salaries");
@@ -277,13 +280,13 @@ public sealed class CatalogDiscoveryServiceTests
         var service = CreateService();
         var tenant = new TenantId("tenant-a");
         var userSid = new Sid("user:alice");
-        var context = new RequestContext(tenant, userSid);
+        var context = new RequestContext(tenant, userSid, User: Wp0.User(userSid.Value, null, ["GovernanceAdmin"]));
 
         var tableId = new TableIdentifier("crm", "dbo", "customers");
         var table = new TableMetadata
         {
             Identifier = tableId,
-            Table = new Table { SchemaName = "dbo", TableName = "customers", DataSourceType = DataSourceType.HttpDeclarative, IsActive = true },
+            Table = new Table { SchemaName = "dbo", TableName = "customers", DataSourceType = DataSourceType.HttpDeclarative, IsActive = true, Description = "Customer accounts" },
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
         };
 
@@ -328,17 +331,23 @@ public sealed class CatalogDiscoveryServiceTests
         var service = CreateService();
         var tenant = new TenantId("tenant-a");
         var userSid = new Sid("user:alice");
-        var context = new RequestContext(tenant, userSid);
+        var context = new RequestContext(tenant, userSid, User: Wp0.User(userSid.Value, null, ["GovernanceAdmin"]));
 
         var tableId = new TableIdentifier("sales", "dbo", "orders");
         var table = new TableMetadata
         {
             Identifier = tableId,
             Table = new Table { SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.HttpDeclarative, IsActive = true },
-            Columns = [new TableColumn { ColumnName = "order_id", DataType = "int" }]
+            Columns = [new TableColumn { ColumnName = "order_id", DataType = "int" }, new TableColumn { ColumnName = "customer_id", DataType = "int" }]
+        };
+        var customers = new TableMetadata
+        {
+            Identifier = new TableIdentifier("sales", "dbo", "customers"),
+            Table = new Table { SchemaName = "dbo", TableName = "customers", DataSourceType = DataSourceType.HttpDeclarative, IsActive = true },
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
         };
 
-        _metadataRepository.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([table]);
+        _metadataRepository.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([table, customers]);
         _rebacEvaluator.IsEnabled.Returns(false);
 
         _searchEngine.IsIndexReady.Returns(true);
@@ -385,7 +394,7 @@ public sealed class CatalogDiscoveryServiceTests
         var service = CreateService();
         var tenant = new TenantId("tenant-a");
         var userSid = new Sid("user:alice");
-        var context = new RequestContext(tenant, userSid);
+        var context = new RequestContext(tenant, userSid, User: Wp0.User(userSid.Value, null, ["GovernanceAdmin"]));
 
         var tableId = new TableIdentifier("crm", "dbo", "leads");
         var table = new TableMetadata

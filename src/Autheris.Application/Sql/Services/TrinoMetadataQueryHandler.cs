@@ -49,12 +49,23 @@ public static class TrinoMetadataQueryHandler
         RegexOptions.IgnoreCase | RegexOptions.Compiled,
         RegexTimeout);
 
-    public static async Task<GovernedSqlResult?> TryExecuteAsync(
+    public static Task<GovernedSqlResult?> TryExecuteAsync(
         string? rawSql,
         ClaimsPrincipal user,
         TenantId tenantId,
         ITableMetadataRepository? metadataRepository,
         IConsentRepository? consentRepository = null,
+        CancellationToken ct = default)
+        => TryExecuteAsync(rawSql, user, tenantId, metadataRepository, consentRepository, gatewayOptions: null, ct);
+
+    /// <summary>Same as above with the deployment options (tenancy mode and shared tables) for the catalog visibility rule.</summary>
+    public static async Task<GovernedSqlResult?> TryExecuteAsync(
+        string? rawSql,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        ITableMetadataRepository? metadataRepository,
+        IConsentRepository? consentRepository,
+        Autheris.Domain.Options.GatewayOptions? gatewayOptions,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(rawSql) || metadataRepository == null)
@@ -85,7 +96,7 @@ public static class TrinoMetadataQueryHandler
         var sw = Stopwatch.StartNew();
         var allTables = await metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
         var activeTables = allTables.Where(t => t.Table.IsActive).ToList();
-        var visibleTables = await CatalogVisibility.VisibleTablesAsync(activeTables, user, tenantId, consentRepository, ct).ConfigureAwait(false);
+        var visibleTables = await CatalogVisibility.VisibleTablesAsync(activeTables, user, tenantId, consentRepository, contract: null, gatewayOptions?.Tenancy.EffectiveMode ?? Autheris.Domain.Options.TenancyMode.Multi, gatewayOptions?.Catalog.SharedTables, ct).ConfigureAwait(false);
 
         if (showCatalogsMatch.Success)
         {

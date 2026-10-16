@@ -10,13 +10,16 @@ using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Services;
 using Autheris.Application.Data.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.OData.Interfaces;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Universal dynamic API dispatcher and documentation service for MCP agents (ADR-02, ADR-04).
@@ -34,14 +37,17 @@ public sealed class ApiDispatcherService : IApiDispatcherService
     private readonly IGovernedSqlExecutionService? _sqlExecutionService;
     private readonly IDynamicOpenApiGenerator? _openApiGenerator;
     private readonly ILogger<ApiDispatcherService>? _logger;
+    private readonly TenancyMode _tenancyMode;
 
     public ApiDispatcherService(
         IGovernedDataQueryService? dataQueryService = null,
         ICatalogDiscoveryService? catalogDiscoveryService = null,
         IGovernedSqlExecutionService? sqlExecutionService = null,
         IDynamicOpenApiGenerator? openApiGenerator = null,
-        ILogger<ApiDispatcherService>? logger = null)
+        ILogger<ApiDispatcherService>? logger = null,
+        IOptions<GatewayOptions>? gatewayOptions = null)
     {
+        _tenancyMode = gatewayOptions?.Value.Tenancy.EffectiveMode ?? TenancyMode.Multi;
         _dataQueryService = dataQueryService;
         _catalogDiscoveryService = catalogDiscoveryService;
         _sqlExecutionService = sqlExecutionService;
@@ -152,6 +158,16 @@ public sealed class ApiDispatcherService : IApiDispatcherService
             if (_catalogDiscoveryService == null)
             {
                 return SerializeError("ServiceUnavailable", 503, "CatalogDiscoveryService is not registered.");
+            }
+
+            // Data sources disclose endpoint URLs and authentication state: administrator view only. The class comes from the
+            // principal through the canonical resolver; the anonymous default context resolves to "no caller".
+            var scope = CallerScopeResolver.Resolve(effectiveContext.User, _tenancyMode);
+            if (!CallerScopeResolver.IsAdminView(scope))
+            {
+                return SerializeError("Forbidden", 403, scope == CallerScope.Claimless && CallerScopeResolver.HoldsGovernanceAdminRole(effectiveContext.User)
+                    ? "Listing data sources requires an administrator with a tenant claim; single-tenant deployments must set Gateway:Tenancy:Mode=Single."
+                    : "Listing data sources requires a governance administrator.");
             }
 
             var datasources = await _catalogDiscoveryService.ListDatasourcesAsync(effectiveContext, ct).ConfigureAwait(false);

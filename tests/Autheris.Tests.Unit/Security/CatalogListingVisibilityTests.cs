@@ -80,14 +80,14 @@ public sealed class CatalogListingVisibilityTests
     private static ArrowFlightSqlServer Flight(IConsentRepository? consents) => new(
         Substitute.For<IArrowExportService>(),
         Tables(),
-        Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, AllowedDataSources = [Tenant] } }),
+        Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, AllowedDataSources = [Tenant] }, Tenancy = new TenancyOptions { Mode = "Single" }, Catalog = new DataCatalogOptions { SharedTables = [OrdersId.ToString(), SalariesId.ToString()] } }),
         NullLogger<ArrowFlightSqlServer>.Instance,
         consents);
 
     private static IcebergRestCatalogFederationService Iceberg(IConsentRepository? consents) => new(
         Substitute.For<IIcebergMetadataReader>(),
         Tables(),
-        Options.Create(new GatewayOptions()),
+        Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Single" } }),
         NullLogger<IcebergRestCatalogFederationService>.Instance,
         global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
         new ConsentResolutionService(),

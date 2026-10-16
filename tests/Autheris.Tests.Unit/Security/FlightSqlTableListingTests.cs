@@ -38,7 +38,7 @@ public sealed class FlightSqlTableListingTests
     {
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
-        var options = Options.Create(new GatewayOptions { WebSql = webSql });
+        var options = Options.Create(new GatewayOptions { WebSql = webSql, Tenancy = new TenancyOptions { Mode = "Single" } });
         return new ArrowFlightSqlServer(Substitute.For<IArrowExportService>(), repo, options, NullLogger<ArrowFlightSqlServer>.Instance);
     }
 

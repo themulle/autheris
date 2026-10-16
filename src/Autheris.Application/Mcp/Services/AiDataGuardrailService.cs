@@ -287,7 +287,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                 if (_consentRepository != null && !_options.Value.IsMcpAuthBypassed && !isAdmin)
                 {
                     var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
-                    var visibleTables = await McpCatalogVisibility.VisibleTablesAsync([meta], principal, _consentRepository, cancellationToken).ConfigureAwait(false);
+                    var visibleTables = await McpCatalogVisibility.VisibleTablesAsync([meta], principal, _consentRepository, _options.Value, cancellationToken).ConfigureAwait(false);
                     bool isVisible = visibleTables.Any(t =>
                         t.Identifier.Equals(resolvedTable.Value) ||
                         (string.Equals(t.Identifier.Domain, resolvedTable.Value.Domain, StringComparison.OrdinalIgnoreCase) &&
@@ -351,7 +351,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             {
                 var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
                 var allTables = _tableMetadataRepository != null ? await _tableMetadataRepository.GetAllTablesAsync(cancellationToken).ConfigureAwait(false) : Array.Empty<TableMetadata>();
-                var visibleTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepository, cancellationToken).ConfigureAwait(false);
+                var visibleTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepository, _options.Value, cancellationToken).ConfigureAwait(false);
                 var visibleKeys = visibleTables.Select(t => (Domain: t.Identifier.Domain.ToLowerInvariant(), Table: t.Identifier.TableName.ToLowerInvariant())).ToHashSet();
                 queries = queries.Where(q => visibleKeys.Contains((q.Domain.ToLowerInvariant(), q.TableName.ToLowerInvariant()))).ToList();
             }

@@ -18,12 +18,16 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
+using Autheris.Application.Services;
+using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
 
 public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
 {
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly IAuditLogRepository _auditLogRepository;
+    private readonly IConsentRepository _consentRepository;
+    private readonly GatewayOptions _gatewayOptions;
     private readonly IRebacEvaluator? _rebacEvaluator;
     private readonly IKeyVaultSecretProvider? _secretProvider;
     private readonly IOpenApiIngestionService? _openApiIngestionService;
@@ -32,9 +36,15 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     private readonly long _maxSpecDownloadBytes;
     private readonly IHttpClientFactory? _httpClientFactory;
 
+    /// <summary>
+    /// The consent repository and the gateway options are required: the caller class and the visible set depend on them, so a
+    /// missing dependency fails closed at construction instead of silently returning the unfiltered catalog.
+    /// </summary>
     public CatalogDiscoveryService(
         ITableMetadataRepository metadataRepository,
         IAuditLogRepository auditLogRepository,
+        IConsentRepository consentRepository,
+        IOptions<GatewayOptions> gatewayOptions,
         IRebacEvaluator? rebacEvaluator = null,
         IKeyVaultSecretProvider? secretProvider = null,
         IOpenApiIngestionService? openApiIngestionService = null,
@@ -46,6 +56,9 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         _maxSpecDownloadBytes = options?.Value.MaxSpecDownloadBytes ?? new CatalogDiscoveryOptions().MaxSpecDownloadBytes;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
+        _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
+        _gatewayOptions = (gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions))).Value
+            ?? throw new ArgumentNullException(nameof(gatewayOptions));
         _rebacEvaluator = rebacEvaluator;
         _secretProvider = secretProvider;
         _openApiIngestionService = openApiIngestionService;
@@ -54,60 +67,15 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         _httpClientFactory = httpClientFactory;
     }
 
+    private TenancyMode TenancyMode => _gatewayOptions.Tenancy.EffectiveMode;
+
     public async Task<IReadOnlyList<CatalogDatasetSummary>> ListDatasetsAsync(RequestContext context, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         ct.ThrowIfCancellationRequested();
 
-        var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
-        if (allTables.Count == 0)
-        {
-            return [];
-        }
-
-        if (_rebacEvaluator is not { IsEnabled: true })
-        {
-            return allTables.Select(table => new CatalogDatasetSummary(
-                DatasetId: table.Identifier.ToString(),
-                Domain: table.Identifier.Domain,
-                Schema: table.Identifier.Schema,
-                Table: table.Identifier.TableName,
-                SourceType: table.Table.DataSourceType.ToString(),
-                Sensitivity: table.Table.Sensitivity.ToString(),
-                Description: table.Table.Description,
-                IsActive: table.Table.IsActive
-            )).ToList();
-        }
-
-        var checkTasks = allTables.Select(async table =>
-        {
-            var checkReq = new RebacCheckRequest(
-                TenantId: context.TenantId.Value,
-                User: context.SubjectId.Value,
-                Relation: RebacTableGate.Relation,
-                Object: RebacTableGate.ObjectId(table.Identifier)
-            );
-
-            var checkResult = await _rebacEvaluator.CheckAsync(checkReq, ct).ConfigureAwait(false);
-            if (!checkResult.Allowed)
-            {
-                return null;
-            }
-
-            return new CatalogDatasetSummary(
-                DatasetId: table.Identifier.ToString(),
-                Domain: table.Identifier.Domain,
-                Schema: table.Identifier.Schema,
-                Table: table.Identifier.TableName,
-                SourceType: table.Table.DataSourceType.ToString(),
-                Sensitivity: table.Table.Sensitivity.ToString(),
-                Description: table.Table.Description,
-                IsActive: table.Table.IsActive
-            );
-        });
-
-        var results = await Task.WhenAll(checkTasks).ConfigureAwait(false);
-        return results.Where(r => r != null).Select(r => r!).ToList();
+        var (permitted, _) = await ResolvePermittedAsync(context, ct).ConfigureAwait(false);
+        return permitted.Select(ToSummary).ToList();
     }
 
     public async Task<CatalogDatasetDetail?> GetDatasetDetailAsync(TableIdentifier table, RequestContext context, CancellationToken ct = default)
@@ -115,26 +83,29 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         ArgumentNullException.ThrowIfNull(context);
         ct.ThrowIfCancellationRequested();
 
-        var metadata = await _metadataRepository.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
+        var scope = CallerScopeResolver.Resolve(context.User, TenancyMode);
+        if (scope == CallerScope.None)
+        {
+            return null;
+        }
+
+        var stored = await _metadataRepository.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
+        if (stored == null)
+        {
+            return null;
+        }
+
+        // An unknown table and one the caller may not see take the same path and answer null (404): no existence oracle.
+        var visible = await VisibleAsync([stored], context, scope, ct).ConfigureAwait(false);
+        var metadata = visible.FirstOrDefault(t => t.Identifier == stored.Identifier);
         if (metadata == null)
         {
             return null;
         }
 
-        if (_rebacEvaluator is { IsEnabled: true })
+        if (!await IsRebacAllowedAsync(table, context, ct).ConfigureAwait(false))
         {
-            var checkReq = new RebacCheckRequest(
-                TenantId: context.TenantId.Value,
-                User: context.SubjectId.Value,
-                Relation: RebacTableGate.Relation,
-                Object: RebacTableGate.ObjectId(table)
-            );
-
-            var checkResult = await _rebacEvaluator.CheckAsync(checkReq, ct).ConfigureAwait(false);
-            if (!checkResult.Allowed)
-            {
-                return null;
-            }
+            return null;
         }
 
         // SD-4: declared keys and indexes are reported only as a whole and only over the columns this response lists.
@@ -182,42 +153,40 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         ArgumentNullException.ThrowIfNull(context);
         ct.ThrowIfCancellationRequested();
 
-        var permitted = await ListDatasetsAsync(context, ct).ConfigureAwait(false);
+        var (permitted, all) = await ResolvePermittedAsync(context, ct).ConfigureAwait(false);
         var q = query?.Trim();
 
         if (string.IsNullOrWhiteSpace(q))
         {
             return permitted
-                .Where(d => string.IsNullOrWhiteSpace(domain) || string.Equals(d.Domain, domain, StringComparison.OrdinalIgnoreCase))
+                .Where(d => string.IsNullOrWhiteSpace(domain) || string.Equals(d.Identifier.Domain, domain, StringComparison.OrdinalIgnoreCase))
+                .Select(ToSummary)
                 .ToList();
         }
 
-        var permittedSet = new HashSet<TableIdentifier>(
-            permitted.Select(d => new TableIdentifier(d.Domain, d.Schema ?? "public", d.Table)));
-
         if (_searchEngine?.IsIndexReady == true)
         {
+            var permittedById = permitted.ToDictionary(t => t.Identifier);
+            var allById = all.ToDictionary(t => t.Identifier);
+            var terms = QueryTerms(q);
             var hits = _searchEngine.Search(
                 new CatalogSearchQuery(q, domain, Limit: 25, Mode: CatalogSearchMode.Hybrid),
-                tableId => permittedSet.Contains(tableId));
+                tableId => permittedById.ContainsKey(tableId));
 
-            return hits.Select(h => new CatalogDatasetSummary(
-                DatasetId: h.TableIdentifier.ToString(),
-                Domain: h.Domain ?? h.TableIdentifier.Domain,
-                Schema: h.TableIdentifier.Schema,
-                Table: h.TableIdentifier.TableName,
-                SourceType: "Catalog",
-                Sensitivity: h.Sensitivity ?? "NORMAL",
-                Description: h.Description,
-                IsActive: true
-            )).ToList();
+            // Result hygiene: rebuilt from the caller's filtered metadata; hits that exist only because of a hidden column are dropped.
+            return hits
+                .Select(h => ShapeHit(h, permittedById, allById, terms))
+                .Where(h => h != null)
+                .Select(h => ToSummary(permittedById[h!.TableIdentifier], "Catalog"))
+                .ToList();
         }
 
         return permitted
-            .Where(d => string.IsNullOrWhiteSpace(domain) || string.Equals(d.Domain, domain, StringComparison.OrdinalIgnoreCase))
-            .Where(d => d.Table.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                        d.Domain.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                        (d.Description != null && d.Description.Contains(q, StringComparison.OrdinalIgnoreCase)))
+            .Where(d => string.IsNullOrWhiteSpace(domain) || string.Equals(d.Identifier.Domain, domain, StringComparison.OrdinalIgnoreCase))
+            .Where(d => d.Identifier.TableName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                        d.Identifier.Domain.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                        (d.Table.Description != null && d.Table.Description.Contains(q, StringComparison.OrdinalIgnoreCase)))
+            .Select(ToSummary)
             .ToList();
     }
 
@@ -230,36 +199,41 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         ArgumentNullException.ThrowIfNull(context);
         ct.ThrowIfCancellationRequested();
 
-        var permitted = await ListDatasetsAsync(context, ct).ConfigureAwait(false);
-        var permittedSet = new HashSet<TableIdentifier>(
-            permitted.Select(d => new TableIdentifier(d.Domain, d.Schema ?? "public", d.Table)));
+        var (permitted, all) = await ResolvePermittedAsync(context, ct).ConfigureAwait(false);
+        var permittedById = permitted.ToDictionary(t => t.Identifier);
 
         if (_searchEngine?.IsIndexReady == true)
         {
-            return _searchEngine.Search(query, tableId => permittedSet.Contains(tableId));
+            var allById = all.ToDictionary(t => t.Identifier);
+            var terms = QueryTerms(query.QueryText);
+            return _searchEngine.Search(query, tableId => permittedById.ContainsKey(tableId))
+                .Select(h => ShapeHit(h, permittedById, allById, terms))
+                .Where(h => h != null)
+                .Select(h => h!)
+                .ToList();
         }
 
         var q = query.QueryText?.Trim();
         return permitted
-            .Where(d => string.IsNullOrWhiteSpace(query.DomainFilter) || string.Equals(d.Domain, query.DomainFilter, StringComparison.OrdinalIgnoreCase))
+            .Where(d => string.IsNullOrWhiteSpace(query.DomainFilter) || string.Equals(d.Identifier.Domain, query.DomainFilter, StringComparison.OrdinalIgnoreCase))
             .Where(d => string.IsNullOrWhiteSpace(q) ||
-                        d.Table.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                        d.Domain.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                        (d.Description != null && d.Description.Contains(q, StringComparison.OrdinalIgnoreCase)))
+                        d.Identifier.TableName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                        d.Identifier.Domain.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                        (d.Table.Description != null && d.Table.Description.Contains(q, StringComparison.OrdinalIgnoreCase)))
             .Take(query.Limit)
             .Select(d => new CatalogSearchHit(
-                TableIdentifier: new TableIdentifier(d.Domain, d.Schema ?? "public", d.Table),
-                DisplayName: $"{d.Domain}.{d.Table}",
-                Description: d.Description,
-                Domain: d.Domain,
-                Sensitivity: d.Sensitivity,
+                TableIdentifier: d.Identifier,
+                DisplayName: $"{d.Identifier.Domain}.{d.Identifier.TableName}",
+                Description: d.Table.Description,
+                Domain: d.Identifier.Domain,
+                Sensitivity: d.Table.Sensitivity.ToString(),
                 CombinedScore: 1.0,
                 Bm25Score: 1.0,
                 VectorScore: null,
                 MatchedTerms: string.IsNullOrWhiteSpace(q) ? [] : [q],
                 RelevantColumns: [],
                 RelatedJoinPaths: [],
-                SuggestedGraphQlField: $"{d.Domain}_{d.Table}"
+                SuggestedGraphQlField: $"{d.Identifier.Domain}_{d.Identifier.TableName}"
             ))
             .ToList();
     }
@@ -269,12 +243,23 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         ArgumentNullException.ThrowIfNull(context);
         ct.ThrowIfCancellationRequested();
 
+        // Administrator metadata (endpoint URLs, authentication state): only the administrator classes get an answer; everybody else
+        // (including a claim-less GovernanceAdmin in Multi mode) gets the empty list. A tenant-scoped GovernanceAdmin sees the data
+        // sources of the tables of its tenant-confined set, grouped per table, so a foreign table in the same domain never leaks its BaseUrl.
+        var scope = CallerScopeResolver.Resolve(context.User, TenancyMode);
+        if (!CallerScopeResolver.IsAdminView(scope))
+        {
+            CallerScopeDiagnostics.ReportIfClaimlessAdmin(_logger, context.User, scope);
+            return [];
+        }
+
         var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var tables = await VisibleAsync(allTables, context, scope, ct).ConfigureAwait(false);
 
         // Group by distinct endpoint base URL and domain
         var sources = new Dictionary<string, CatalogDatasourceSummary>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var table in allTables)
+        foreach (var table in tables)
         {
             var domain = table.Identifier.Domain;
             var endpoint = table.Table.HttpEndpoint;
@@ -301,6 +286,193 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         }
 
         return sources.Values.ToList();
+    }
+
+    /// <summary>
+    /// The tables the caller may discover (consent-based visibility, tenant-confined administrator view, ReBAC as an additional
+    /// intersection) together with the unfiltered catalog (only used to tell which columns a caller cannot see). Any failure of a
+    /// dependency yields the empty set, never the unfiltered catalog.
+    /// </summary>
+    private async Task<(IReadOnlyList<TableMetadata> Permitted, IReadOnlyList<TableMetadata> All)> ResolvePermittedAsync(RequestContext context, CancellationToken ct)
+    {
+        var scope = CallerScopeResolver.Resolve(context.User, TenancyMode);
+        CallerScopeDiagnostics.ReportIfClaimlessAdmin(_logger, context.User, scope);
+        if (scope == CallerScope.None)
+        {
+            return ([], []);
+        }
+
+        var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
+        if (allTables.Count == 0)
+        {
+            return ([], []);
+        }
+
+        var visible = await VisibleAsync(allTables, context, scope, ct).ConfigureAwait(false);
+        if (visible.Count == 0 || _rebacEvaluator is not { IsEnabled: true })
+        {
+            return (visible, allTables);
+        }
+
+        // ReBAC stays an additional filter: the result is the intersection of consent visibility and ReBAC, never a union.
+        var checks = visible.Select(async table =>
+        {
+            var allowed = await IsRebacAllowedAsync(table.Identifier, context, ct).ConfigureAwait(false);
+            return allowed ? table : null;
+        });
+
+        var results = await Task.WhenAll(checks).ConfigureAwait(false);
+        return (results.Where(t => t != null).Select(t => t!).ToList(), allTables);
+    }
+
+    private async Task<IReadOnlyList<TableMetadata>> VisibleAsync(
+        IReadOnlyList<TableMetadata> tables, RequestContext context, CallerScope scope, CancellationToken ct)
+    {
+        try
+        {
+            return await CatalogVisibility.VisibleTablesAsync(
+                tables,
+                context.User,
+                context.TenantId,
+                _consentRepository,
+                contract: null,
+                TenancyMode,
+                _gatewayOptions.Catalog.SharedTables,
+                ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Catalog visibility could not be evaluated (caller class {Scope}); answering with an empty catalog.", scope);
+            return [];
+        }
+    }
+
+    private async Task<bool> IsRebacAllowedAsync(TableIdentifier table, RequestContext context, CancellationToken ct)
+    {
+        if (_rebacEvaluator is not { IsEnabled: true })
+        {
+            return true;
+        }
+
+        var checkResult = await _rebacEvaluator.CheckAsync(
+            new RebacCheckRequest(
+                TenantId: context.TenantId.Value,
+                User: context.SubjectId.Value,
+                Relation: RebacTableGate.Relation,
+                Object: RebacTableGate.ObjectId(table)),
+            ct).ConfigureAwait(false);
+        return checkResult.Allowed;
+    }
+
+    private static CatalogDatasetSummary ToSummary(TableMetadata table) => ToSummary(table, table.Table.DataSourceType.ToString());
+
+    private static CatalogDatasetSummary ToSummary(TableMetadata table, string sourceType) => new(
+        DatasetId: table.Identifier.ToString(),
+        Domain: table.Identifier.Domain,
+        Schema: table.Identifier.Schema,
+        Table: table.Identifier.TableName,
+        SourceType: sourceType,
+        Sensitivity: table.Table.Sensitivity.ToString(),
+        Description: table.Table.Description,
+        IsActive: table.Table.IsActive);
+
+    private static IReadOnlyList<string> QueryTerms(string? query) =>
+        (query ?? string.Empty)
+            .Split(QuerySeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(t => t.Length > 0)
+            .Select(t => t.ToLowerInvariant())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+    private static readonly char[] QuerySeparators = [' ', '\t', '\r', '\n', ',', ';', '.', '(', ')', '"', '\'', '/', '\\', '-'];
+
+    /// <summary>
+    /// Result hygiene for one index hit (W0-C1). The index is built from the whole catalog including column names, so a hit
+    /// and everything derived from it is rebuilt from the caller's filtered metadata:
+    /// <c>RelevantColumns</c> only from visible columns, <c>MatchedTerms</c> only terms found in the identifier, the description or a visible
+    /// column, join paths only over visible tables and visible columns, description and sensitivity from the filtered row.
+    /// For a table with at least one non-visible column a hit that has no lexical match in visible text (a hit caused by a hidden
+    /// column, or a vector-only hit) is dropped; semantic-only recall is therefore reduced for column-restricted callers.
+    /// </summary>
+    private static CatalogSearchHit? ShapeHit(
+        CatalogSearchHit hit,
+        IReadOnlyDictionary<TableIdentifier, TableMetadata> permitted,
+        IReadOnlyDictionary<TableIdentifier, TableMetadata> all,
+        IReadOnlyList<string> queryTerms)
+    {
+        if (!permitted.TryGetValue(hit.TableIdentifier, out var visible))
+        {
+            return null;
+        }
+
+        var visibleColumnNames = visible.Columns.Select(c => c.ColumnName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var restricted = !all.TryGetValue(hit.TableIdentifier, out var full) ||
+                         full.Columns.Any(c => !visibleColumnNames.Contains(c.ColumnName));
+
+        IReadOnlyList<string> matchedTerms = hit.MatchedTerms;
+        if (restricted)
+        {
+            var text = VisibleText(visible);
+            matchedTerms = hit.MatchedTerms
+                .Where(t => !string.IsNullOrWhiteSpace(t) && text.Contains(t, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var lexical = matchedTerms.Count > 0 || queryTerms.Any(t => text.Contains(t, StringComparison.OrdinalIgnoreCase));
+            if (!lexical)
+            {
+                return null;
+            }
+        }
+
+        var relevantColumns = visible.Columns
+            .Where(c => matchedTerms.Any(term => c.ColumnName.Contains(term, StringComparison.OrdinalIgnoreCase)))
+            .Select(c => c.ColumnName)
+            .Take(5)
+            .ToList();
+
+        var relations = hit.RelatedJoinPaths
+            .Where(r => visibleColumnNames.Contains(r.FromColumn) &&
+                        permitted.TryGetValue(r.ToTable, out var target) &&
+                        IsColumnVisibleOrUnknown(r.ToColumn, target, all))
+            .ToList();
+
+        return hit with
+        {
+            Description = visible.Table.Description,
+            Sensitivity = visible.Table.Sensitivity?.ToString() ?? "NORMAL",
+            MatchedTerms = matchedTerms,
+            RelevantColumns = relevantColumns,
+            RelatedJoinPaths = relations
+        };
+    }
+
+    // A join column that exists in the target table but is not visible to the caller is removed; a convention-derived name the
+    // target does not have at all names nothing and discloses nothing.
+    private static bool IsColumnVisibleOrUnknown(string column, TableMetadata visibleTarget, IReadOnlyDictionary<TableIdentifier, TableMetadata> all)
+    {
+        if (visibleTarget.Columns.Any(c => string.Equals(c.ColumnName, column, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return all.TryGetValue(visibleTarget.Identifier, out var full) &&
+               !full.Columns.Any(c => string.Equals(c.ColumnName, column, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string VisibleText(TableMetadata table)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append(table.Identifier.Domain).Append(' ').Append(table.Identifier.Schema).Append(' ').Append(table.Identifier.TableName).Append(' ')
+          .Append(table.Table.Description).Append(' ');
+        foreach (var c in table.Columns)
+        {
+            sb.Append(c.ColumnName).Append(' ').Append(c.DataType).Append(' ').Append(c.Description).Append(' ');
+        }
+
+        return sb.ToString();
     }
 
     public async Task<DatasourceRegistrationResult> RegisterDatasourceAsync(DatasourceRegistrationRequest request, RequestContext context, CancellationToken ct = default)

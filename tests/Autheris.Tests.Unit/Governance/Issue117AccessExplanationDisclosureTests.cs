@@ -65,7 +65,7 @@ public sealed class Issue117AccessExplanationDisclosureTests
         ownership.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
             .Returns(owner);
 
-        return new Fixture(new EffectiveAccessExplanationService(tableRepo, consentRepo, resolution, ownership), ownership, resolution);
+        return new Fixture(new EffectiveAccessExplanationService(tableRepo, consentRepo, resolution, ownership, Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { Mode = "Single" } })), ownership, resolution);
     }
 
     private static TableAccessDecision DeniedDecision() => TableAccessDecision.Denied(Denied, "No active allow consent.");

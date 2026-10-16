@@ -521,14 +521,21 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
     private async Task<(IReadOnlyList<Consent> ActiveConsents, IReadOnlyList<ConsentRequest> PendingRequests, bool IsAdmin)> GetCallerConsentsAndRequestsAsync(ClaimsPrincipal principal, CancellationToken ct)
     {
         var roles = principal.GetUserRoles();
-        var isAdmin = roles.Contains("GovernanceAdmin") || Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        // The caller class comes from the canonical resolver; a claim-less GovernanceAdmin in Multi mode is no administrator.
+        var scope = Autheris.Application.Catalog.Services.CallerScopeResolver.Resolve(principal, options?.Value.Tenancy.EffectiveMode ?? TenancyMode.Multi);
+        if (logger != null)
+        {
+            Autheris.Application.Catalog.Services.CallerScopeDiagnostics.ReportIfClaimlessAdmin(logger, principal, scope);
+        }
+
+        var isAdmin = Autheris.Application.Catalog.Services.CallerScopeResolver.IsAdminView(scope);
         if (isAdmin)
         {
             return (Array.Empty<Consent>(), Array.Empty<ConsentRequest>(), true);
         }
 
         var userSid = principal.GetUserSid();
-        if (userSid == null)
+        if (userSid == null || scope == Autheris.Application.Catalog.Services.CallerScope.None)
         {
             return (Array.Empty<Consent>(), Array.Empty<ConsentRequest>(), false);
         }
@@ -586,9 +593,13 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
                 : CatalogVisibility.ComputeAccessStatus(table.Identifier, activeConsents, pendingRequests, isAdmin);
 
             bool isGranted = string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase);
-            if (!isGranted && !table.ReleaseProfileToCatalogViewers)
+
+            // Positive guard (fail closed): administrator view or an active table consent. The consent-less "released to catalog
+            // viewers" branch is closed in this change: the flag is not persisted and no tier marks a table as explicitly released.
+            // A later catalog-view tier adds a positive "Full" check as a third term; every other value stays refused.
+            if (!(isAdmin || isGranted))
             {
-                throw new GatewayForbiddenException("Synthetic sample rows require either an active table consent or ReleaseProfileToCatalogViewers enabled by the data owner.");
+                throw new GatewayForbiddenException("Synthetic sample rows require an active table consent.");
             }
 
             var columnAccessLevels = ResolveColumnLevels(principal, table, activeConsents, isAdmin, isGranted: options?.Value.IsMcpAuthBypassed != true && isGranted, bypass: options?.Value.IsMcpAuthBypassed == true);
@@ -791,7 +802,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         // SEC H-02: only the explicit (production-blocked) MCP auth bypass opens the whole catalog.
         return options?.Value.IsMcpAuthBypassed == true
             ? allTables
-            : await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepository, ct).ConfigureAwait(false);
+            : await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepository, options?.Value, ct).ConfigureAwait(false);
     }
 
     private static bool Matches(TableMetadata table, string search) =>

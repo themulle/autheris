@@ -282,7 +282,8 @@ public sealed class McpDatasetCatalogScopeLevelTests
     public async Task Describe_Admin_ForwardAuthClusterAdminRole_IsNotAdmin_CanonicalAdminsStayClear()
     {
         var table = CreateTable(DatasetVisibility.Summary, releaseProfileToCatalogViewers: true);
-        var catalog = CreateCatalog(table, [DenyEffect(Rule("grade", ColumnAccessLevel.Deny))]);
+        var catalog = CreateCatalog(table, [DenyEffect(Rule("grade", ColumnAccessLevel.Deny))],
+            gatewayOptions: Autheris.Tests.Unit.Catalog.Wp0.Options(Autheris.Domain.Options.TenancyMode.Multi, "sales.public.orders"));
 
         var forwardAuth = Principal(authenticationType: "ForwardAuth", roles: ["ClusterAdmin"]);
         Grade(await DescribeAsync(catalog, forwardAuth))!.ValueProfile.ShouldBeNull();

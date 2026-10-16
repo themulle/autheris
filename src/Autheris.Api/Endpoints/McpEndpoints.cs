@@ -182,6 +182,17 @@ public static class McpEndpoints
         new[] { "client_id", "appid", "azp" }.Any(t =>
             string.Equals(principal.FindFirst(t)?.Value, userSid, StringComparison.OrdinalIgnoreCase));
 
+    // Without a security context the raw role claims are used. The session principal is rebuilt with the "MCP" authentication type, which
+    // loses the ForwardAuth marker that ClusterAdminPolicy needs, so a ClusterAdmin claim of a non-canonical identity (forward-auth proxy
+    // headers) is dropped here, exactly as SecurityContextFactory partitions the roles.
+    private static List<string> RolesWithoutUntrustedClusterAdmin(ClaimsPrincipal principal)
+    {
+        var canonicalClusterAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        return principal.GetUserRoles()
+            .Where(r => canonicalClusterAdmin || !Autheris.Domain.Security.ClusterAdminPolicy.IsClusterAdminRole(r))
+            .ToList();
+    }
+
     internal static McpCaller ResolveCaller(HttpContext context, bool allowOpenMcp)
     {
         var principal = context.User;
@@ -209,7 +220,7 @@ public static class McpEndpoints
         }
 
         var roles = isAuthenticated
-            ? (securityContext != null ? securityContext.TenantRoles.Concat(securityContext.ClusterRoles).ToList() : principal.GetUserRoles().ToList())
+            ? (securityContext != null ? securityContext.TenantRoles.Concat(securityContext.ClusterRoles).ToList() : RolesWithoutUntrustedClusterAdmin(principal))
             : new List<string>();
         var groupSids = isAuthenticated
             ? (securityContext != null ? securityContext.GroupSids.Select(s => s.Value).ToList() : principal.GetGroupSids().Select(s => s.Value).ToList())

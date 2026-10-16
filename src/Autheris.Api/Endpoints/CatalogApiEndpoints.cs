@@ -6,14 +6,17 @@ using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Services;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Options;
 
 public static class CatalogApiEndpoints
 {
@@ -51,16 +54,32 @@ public static class CatalogApiEndpoints
         .RequireAuthorization()
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
+        // Data sources disclose endpoint base URLs and authentication state: administrators only. A tenant-scoped GovernanceAdmin
+        // is further confined to the tables of its tenant by the service. A GovernanceAdmin without tenant claim in Multi mode is
+        // answered with a stable 403 that names the option instead of a misleading empty list.
         group.MapGet("/datasources", async (
             ICatalogDiscoveryService discoveryService,
+            IOptions<GatewayOptions> gatewayOptions,
             HttpContext httpContext,
             CancellationToken ct) =>
         {
+            var scope = CallerScopeResolver.Resolve(httpContext.User, gatewayOptions.Value.Tenancy.EffectiveMode);
+            if (scope == CallerScope.Claimless && CallerScopeResolver.HoldsGovernanceAdminRole(httpContext.User))
+            {
+                return Results.Json(
+                    new
+                    {
+                        error = "TENANCY_MODE_CLAIMLESS_ADMIN",
+                        message = "The principal has no tenant claim and Gateway:Tenancy:Mode is Multi; single-tenant deployments must set Gateway:Tenancy:Mode=Single."
+                    },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+
             var context = CreateRequestContext(httpContext);
             var datasources = await discoveryService.ListDatasourcesAsync(context, ct);
             return Results.Ok(datasources);
         })
-        .RequireAuthorization()
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         group.MapPost("/datasources", RegisterDatasourceHandler)
