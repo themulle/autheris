@@ -47,6 +47,14 @@ public sealed class DataSourceConnectionOptions
     public bool ReadUncommitted { get; init; }
 
     /// <summary>
+    /// SQL Server only: circuit breaker against Active Directory / SQL login lockout. After a login failure (error 18456, 18452, 18451, a rejected
+    /// login or a credential-type NTLM failure) the factory refuses further connections of this data source, without contacting the server, for
+    /// this many seconds (fail closed). The block is per credential identity (connection string + WindowsAuth settings): a changed configuration
+    /// lifts it. Network and timeout failures never open it. Each replica has its own breaker. <c>0</c> disables the breaker. Default 300.
+    /// </summary>
+    [Range(0, 86400)] public int LoginFailureCooldownSeconds { get; init; } = 300;
+
+    /// <summary>
     /// Issue #107 (SEC-RF107-01): operator attestation that the dependent tables of correlated row filters are not filtered per user
     /// at this source (no source-native per-user RLS). The key-set cache key query runs with a tenant-only session; without this flag
     /// every correlated filter of the data source falls back to <c>EXISTS</c> (reason <c>SourceNotEligible</c>). Default false.

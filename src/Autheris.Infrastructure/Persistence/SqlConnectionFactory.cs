@@ -21,6 +21,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
     private readonly IHostEnvironment? _environment;
     private readonly IServiceProvider? _services;
     private readonly Microsoft.Extensions.Logging.ILogger? _logger;
+    private readonly SqlLoginCircuitBreaker _loginBreaker;
 
     public SqlConnectionFactory()
         : this(null, null)
@@ -38,12 +39,13 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
     /// (<see cref="DataSourceConnectionOptions.PasswordKeyVaultRef"/>, WP-F1). <paramref name="services"/> resolves the Databricks REST
     /// client (WP-X0j); without it a Databricks data source is refused (fail closed).
     /// </summary>
-    public SqlConnectionFactory(IHostEnvironment? environment, IKeyVaultSecretProvider? secrets, IServiceProvider? services = null)
+    public SqlConnectionFactory(IHostEnvironment? environment, IKeyVaultSecretProvider? secrets, IServiceProvider? services = null, TimeProvider? timeProvider = null)
     {
         _environment = environment;
         _secrets = secrets;
         _services = services;
         _logger = services?.GetService<Microsoft.Extensions.Logging.ILogger<SqlConnectionFactory>>();
+        _loginBreaker = new SqlLoginCircuitBreaker(timeProvider, _logger);
         _requireOracleTcps = environment is null || !environment.IsDevelopment();
     }
 
@@ -98,6 +100,8 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
         }
         else if (dialect == DatabaseDialect.SqlServer)
         {
+            // Lockout protection: while the login breaker is open nothing is resolved and the server is not contacted (fail closed).
+            _loginBreaker.ThrowIfOpen(options);
             // Issue #102: validate and configure Managed NTLM (System.Net.Security.UseManagedNtlm) / GSSAPI (gss-ntlmssp / libgssapi-krb5-2) before opening.
             connectionString = SqlServerWindowsAuthConfigurator.PrepareConnection(options, _secrets, _environment, out sqlServerSspiProvider);
             LogAuthPathOnce(options);
@@ -122,8 +126,15 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             catch (Exception openEx) when (dialect == DatabaseDialect.SqlServer)
             {
                 var managedProvider = sqlServerSspiProvider as ManagedNtlmSspiContextProvider;
-                throw SqlServerWindowsAuthConfigurator.ClassifyOpenException(
+                var classified = SqlServerWindowsAuthConfigurator.ClassifyOpenException(
                     openEx, options, managedNtlmUsed: managedProvider is not null, managedNtlmFailure: managedProvider?.LastFailure);
+                _loginBreaker.RecordFailure(options, classified);
+                throw classified;
+            }
+
+            if (dialect == DatabaseDialect.SqlServer)
+            {
+                _loginBreaker.RecordSuccess(options);
             }
 
             if (connection is Npgsql.NpgsqlConnection pgConn)

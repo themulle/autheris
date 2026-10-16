@@ -16,7 +16,46 @@ public sealed class SqlSourceDescriber : ISqlSourceDescriber
         bool sqlServer = resolved == DatabaseDialect.SqlServer;
         var (host, port) = ParseHostAndPort(options.ConnectionString);
         string authPath = sqlServer ? SqlServerWindowsAuthConfigurator.DescribeAuthPath(options) : "n/a";
-        return new SqlSourceDescription(host, port, dialect, authPath);
+        return new SqlSourceDescription(host, port, dialect, authPath, DescribeLogin(options, sqlServer));
+    }
+
+    /// <summary>Effective login name without the password: the configured Windows account, the SQL login or a marker for ambient credentials.</summary>
+    internal static string? DescribeLogin(DataSourceConnectionOptions options, bool sqlServer)
+    {
+        if (sqlServer && options.WindowsAuth is { Mode: not SqlServerWindowsAuthMode.None } winAuth)
+        {
+            var (domain, user) = SqlServerWindowsAuthConfigurator.NormalizeDomainAndUser(winAuth.Domain, winAuth.Username);
+            if (user is null)
+            {
+                return "(account from NTLM_USER_FILE)";
+            }
+
+            return domain is null ? user : $"{domain}\\{user}";
+        }
+
+        try
+        {
+            var builder = new DbConnectionStringBuilder { ConnectionString = options.ConnectionString };
+            foreach (var key in new[] { "User ID", "UID", "User Id", "Username", "User" })
+            {
+                if (builder.TryGetValue(key, out var value) && value is string text && !string.IsNullOrWhiteSpace(text))
+                {
+                    return text.Trim();
+                }
+            }
+
+            if (sqlServer && builder.TryGetValue("Integrated Security", out var integrated) &&
+                integrated is string flag && (flag.Equals("true", StringComparison.OrdinalIgnoreCase) || flag.Equals("sspi", StringComparison.OrdinalIgnoreCase)))
+            {
+                return "(ambient credentials)";
+            }
+        }
+        catch (ArgumentException)
+        {
+            // malformed connection string: login unknown
+        }
+
+        return null;
     }
 
     internal static (string Host, int? Port) ParseHostAndPort(string? connectionString)

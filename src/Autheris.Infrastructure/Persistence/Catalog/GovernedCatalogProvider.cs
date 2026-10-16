@@ -148,6 +148,14 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
             sqlException ??= current as Microsoft.Data.SqlClient.SqlException;
         }
 
+        if (diagnostic is SqlSourceLoginBlockedException blocked)
+        {
+            // The breaker already logged once at Warning when it opened; a blocked retry per query would only spam the log.
+            _logger.LogDebug("Catalog metadata load skipped for data source {DataSource}, table {Table}: login breaker open ({Remaining:F0} s remaining); the table is denied.",
+                dataSourceName, table.ToQualifiedName(), blocked.Remaining.TotalSeconds);
+            return;
+        }
+
         if (diagnostic is Exception diagnosticException)
         {
             string fields = string.Join(", ", diagnostic.DiagnosticFields.Select(static f => $"{f.Key}={f.Value}"));

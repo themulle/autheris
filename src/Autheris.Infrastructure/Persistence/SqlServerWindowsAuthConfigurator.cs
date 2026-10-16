@@ -276,6 +276,21 @@ public static class SqlServerWindowsAuthConfigurator
                 package: "NTLM");
         }
 
+        // Process-wide identity guard (only for the real native environment; injected setters are test doubles).
+        var registry = setEnvVar is null ? GssIdentityRegistry.Shared : null;
+        if (registry is not null)
+        {
+            if (sspiContextProvider is null && !string.IsNullOrWhiteSpace(username))
+            {
+                registry.Claim(domain, username);
+            }
+            else if (sspiContextProvider is not null && registry.HasClaim)
+            {
+                // Managed NTLM keeps credentials per connection; never overwrite the identity a GSS source relies on.
+                return;
+            }
+        }
+
         lock (SyncLock)
         {
             setEnvironmentVariable("NTLM_USER_FILE", Path.GetFullPath(ntlmFilePath));
@@ -344,7 +359,18 @@ public static class SqlServerWindowsAuthConfigurator
 
             // Write atomically via temp file in the same directory with 0600 permissions on Unix
             string tempPath = Path.Combine(targetDir, $".{DefaultGeneratedNtlmFileName}.{Guid.NewGuid():N}.tmp");
-            File.WriteAllText(tempPath, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            // The file is created with 0600 from the start (no window with umask permissions around the plaintext password).
+            var createOptions = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
+            if (!OperatingSystem.IsWindows())
+            {
+                createOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            }
+
+            using (var stream = new FileStream(tempPath, createOptions))
+            {
+                stream.Write(new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetBytes(content));
+            }
+
             TrySetUnixFilePermissions(tempPath);
             File.Move(tempPath, filePath, overwrite: true);
             TrySetUnixFilePermissions(filePath);
@@ -783,8 +809,19 @@ public sealed class ManagedNtlmSspiContextProvider : SspiContextProvider, IDispo
         _credential = credential;
         _targetSpnOverride = targetSpnOverride;
         _package = string.IsNullOrWhiteSpace(package) ? "NTLM" : package;
+        // SqlClient makes the SspiContextProvider part of the connection pool key and expects a stable identity per resource. A provider is
+        // created per open, so equality is by credential identity: equal credentials share a pool, different accounts or passwords never do.
+        _identity = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(
+            string.Join('\u001f', credential.Domain, credential.UserName, credential.Password, targetSpnOverride, _package))));
         SqlServerWindowsAuthConfigurator.EnableManagedNtlmSwitch();
     }
+
+    private readonly string _identity;
+
+    public override bool Equals(object? obj) =>
+        obj is ManagedNtlmSspiContextProvider other && string.Equals(_identity, other._identity, StringComparison.Ordinal);
+
+    public override int GetHashCode() => _identity.GetHashCode(StringComparison.Ordinal);
 
     /// <summary>The most recent failure of <see cref="TryGenerateContext"/> (cleared when a new negotiation starts); never contains secrets.</summary>
     public ManagedNtlmFailure? LastFailure => Volatile.Read(ref _lastFailure);

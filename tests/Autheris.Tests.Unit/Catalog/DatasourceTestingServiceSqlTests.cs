@@ -40,7 +40,7 @@ public sealed class DatasourceTestingServiceSqlTests
             {
                 Provider = "SqlServer",
                 ConnectionString = "Server=10.160.2.94,1433;Database=Secret_DB;Integrated Security=true;",
-                WindowsAuth = new SqlServerWindowsAuthOptions { Mode = SqlServerWindowsAuthMode.Ntlm, UseManagedNtlm = true }
+                WindowsAuth = new SqlServerWindowsAuthOptions { Mode = SqlServerWindowsAuthMode.Ntlm, UseManagedNtlm = true, Domain = "DOM", Username = "svc" }
             };
         }
 
@@ -63,7 +63,23 @@ public sealed class DatasourceTestingServiceSqlTests
         result.Diagnostics.TlsProtocolVersion.ShouldBeNull();
         result.Diagnostics.ProbeDetails["Dialect"].ShouldBe("SqlServer");
         result.Diagnostics.ProbeDetails["AuthPath"].ShouldBe("Integrated-ManagedNtlm");
+        result.Diagnostics.ProbeDetails["LoginName"].ShouldBe("DOM\\svc");
         result.Diagnostics.TargetHost.ShouldNotBe("sql-engine");
+    }
+
+    [Fact]
+    public async Task OpenBlockedByLoginBreaker_ReportsLoginBlockedWithRemainingTime()
+    {
+        _factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
+            .Returns<Task<DbConnection>>(_ => throw new SqlSourceLoginBlockedException(TimeSpan.FromSeconds(240), "LoginRejected, SqlNumber=18452"));
+
+        var result = await CreateService().TestDatasourceAsync(Source, new DatasourceTestRequest(), Admin());
+
+        result.IsSuccess.ShouldBeFalse();
+        result.ErrorMessage.ShouldNotBeNull().ShouldContain("blocked");
+        result.Diagnostics.ProbeDetails["Category"].ShouldBe("LoginBlocked");
+        result.Diagnostics.ProbeDetails["RemainingSeconds"].ShouldBe("240");
+        result.Diagnostics.ProbeDetails["LoginName"].ShouldBe("DOM\\svc");
     }
 
     [Fact]

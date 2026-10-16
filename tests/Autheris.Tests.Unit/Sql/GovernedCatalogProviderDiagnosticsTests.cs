@@ -37,7 +37,7 @@ public sealed class GovernedCatalogProviderDiagnosticsTests
         }
     }
 
-    private static async Task<CapturingLogger<GovernedCatalogProvider>> RunAsync(Exception failure, bool configured = true, string? mappedSource = null)
+    private static async Task<CapturingLogger<GovernedCatalogProvider>> RunAsync(Exception failure, bool configured = true, string? mappedSource = null, string provider = "SqlServer")
     {
         var governance = Substitute.For<IGovernanceRepository>();
         governance.GetTableMetadataAsync(Items, Arg.Any<CancellationToken>()).Returns(new TableMetadata
@@ -49,7 +49,7 @@ public sealed class GovernedCatalogProviderDiagnosticsTests
         var gateway = new GatewayOptions { DataSources = new SqlDataSourceOptions() };
         if (configured)
         {
-            gateway.DataSources.Connections[mappedSource ?? Source] = new DataSourceConnectionOptions { Provider = "SqlServer", ConnectionString = ConnectionString };
+            gateway.DataSources.Connections[mappedSource ?? Source] = new DataSourceConnectionOptions { Provider = provider, ConnectionString = ConnectionString };
         }
 
         var factory = Substitute.For<ISqlConnectionFactory>();
@@ -104,5 +104,24 @@ public sealed class GovernedCatalogProviderDiagnosticsTests
         text.ShouldNotContain("hunter2");
         text.ShouldNotContain("inner secret");
         text.ShouldNotContain("Secret_DB");
+    }
+
+    [Fact]
+    public async Task UnsupportedProvider_IsLoggedAsAdmissionDenial()
+    {
+        var logger = await RunAsync(new InvalidOperationException("unused"), provider: "NoSuchDb");
+
+        var text = logger.Entries.ShouldHaveSingleItem().Text;
+        text.ShouldContain("Catalog admission denied");
+        text.ShouldContain("NoSuchDb");
+        text.ShouldNotContain("Secret_DB");
+    }
+
+    [Fact]
+    public async Task LoginBreakerOpen_DoesNotLogWarningPerQuery()
+    {
+        var logger = await RunAsync(new SqlSourceLoginBlockedException(TimeSpan.FromSeconds(120), "LoginRejected, SqlNumber=18452"));
+
+        logger.Entries.ShouldNotContain(e => e.Level >= LogLevel.Warning);
     }
 }

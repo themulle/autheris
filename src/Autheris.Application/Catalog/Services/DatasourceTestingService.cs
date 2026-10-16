@@ -435,6 +435,10 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
             ["Dialect"] = description.Dialect,
             ["AuthPath"] = description.AuthPath
         };
+        if (description.LoginName is not null)
+        {
+            details["LoginName"] = description.LoginName;
+        }
 
         var timeout = request.Timeout ?? TimeSpan.FromSeconds(5);
         if (timeout > TimeSpan.FromSeconds(15))
