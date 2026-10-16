@@ -67,6 +67,48 @@ The audit subsystem decouples in-memory high-throughput hash chaining from asymm
 - A denial never depends on the audit outcome: `AccessAuditMiddleware` writes `DENY` records best-effort and every other decision as a required record (an unavailable store fails the request closed). A denial is never turned into an allow by an audit failure.
 - The ReBAC table gate keeps denying when its dependency fails, records `authz_dependency_failure_total`, and lets cancellation propagate.
 
+### 10. Batched Group Commit of Required Audit Writes
+- `IAuditWriter.RecordRequiredAsync` hands entries to the singleton `AuditGroupCommitSink`. Concurrent required writes are coalesced into batches: **one transaction, one chain-tail read and one anchor per batch** instead of one round trip and one global lock per row.
+- The ambient caller context is resolved on the request thread before the entry enters the sink (the drain loop has no request context).
+- Chain hashes are computed in memory from the single tail read; the rows are then written with multi-row `INSERT` statements (`AuditBatchInsertSql`, 13 parameters per row, well below the SQL Server limit of 2,100). The statement shape never influences the chain.
+- **Acknowledgement:** every caller awaits the durable commit of its own batch. A batch that contains a Tier-A event (security-critical mutation, administrative action or denial; everything except allowed query reads) is acknowledged only **after its anchor is written**. When the anchor cannot be persisted, the rows stay committed (the next batch anchors the tail) but the callers receive `AuditUnavailableException` (fail closed, `503`). Tier-B-only batches never fail on a late anchor.
+- A persistence failure faults every caller of the batch. Chain-violation admission (section 6) is applied per entry inside the batch.
+- Sink limits (built-in defaults, `AuditGroupCommitOptions`):
+
+  | Setting | Default | Meaning |
+  | :--- | :--- | :--- |
+  | `MaxBatchSize` | `64` | Maximum entries per transaction. |
+  | `MaxBatchDelayMs` | `5` | Maximum wait for more entries after the first one of a batch arrived. |
+  | `ChannelCapacity` | `4096` | Pending entries before callers are back-pressured (`BoundedChannelFullMode.Wait`). |
+
+- Best-effort writes (`RecordBestEffortAsync`) and the Tier-B query audit channel are unchanged.
+
+---
+
+### 11. Anchor Acknowledgement on the In-Transaction Path and Manifest Audit
+
+- The in-transaction audit path (consent grant, revoke, renewal, `ReplaceConsentsAsync`) is tied to the anchor like the batch path: after the commit, `OnTransactionCommitted` raises `AuditUnavailableException` when the anchor cannot be written. The rows stay committed and the chain stays linear; the caller is not acknowledged. The batch path additionally refuses to acknowledge a Tier-A batch when a chain violation is latched while it is being written (a violation latched before admission follows the configured `OnChainViolation` policy).
+- `ReplaceConsentsAsync(revoke, create, actor, reason, auditEntries)` writes the caller's audit entries (the manifest `GITOPS_CONSENT_APPLY` / `APPLIED` entries) in the same transaction, so a committed manifest always has its record and a later failure of the epoch invalidation cannot lose it.
+- Rollbacks use `CancellationToken.None`, so `OnTransactionRolledBack` always restores the in-memory chain state.
+- `AuditGroupCommitSink`: when a batch fails with anything other than `AuditUnavailableException`, its entries are retried one by one so a single bad entry fails only its own caller; if the drain loop dies, pending and later callers fail immediately with `AuditUnavailableException`.
+
+## Paged Audit Listing (`GET /api/v1/governance/audit`)
+
+Keyset-paged, newest-first listing of audit rows by chain sequence.
+
+| Query parameter | Description |
+| :--- | :--- |
+| `cursor` | Opaque continuation token from `nextCursor` (encodes the last sequence). A malformed cursor is `400 INVALID_CURSOR`. |
+| `pageSize` | Default 100, clamped to 1..500. |
+| `targetTable` | Restrict to one table. |
+| `actor` | Restrict to one actor SID. |
+| `since` | Only rows at or after this instant. |
+| `tenant` | Another tenant; honoured for `ClusterAdmin` only, otherwise `403`. |
+
+**Authorization:** `GovernanceAdmin`, `TenantAdmin`, `SecurityAuditor` and `PrivacyAdmin` read their tenant; a `DataOwner` reads only the audit of one table they own (`targetTable`). Every read writes a summarized `AUDIT_READ` event.
+
+Items carry `sequence`, `occurredAt`, `eventType`, `decision`, `actorSid`, `targetTable`, `targetColumn`, `traceId` and `tenantId`; the response carries `nextCursor` (null on the last page) and the effective `pageSize`. The grant listing `GET /api/v1/governance/grants` uses the same model ([F-GOV-11, section 7](f-gov-11-declarative-access-profiles.md#7-paged-grant-listing-get-apiv1governancegrants)).
+
 ---
 
 ## Configuration Example

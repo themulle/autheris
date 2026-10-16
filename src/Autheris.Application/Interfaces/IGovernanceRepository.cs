@@ -91,6 +91,46 @@ public interface IConsentRepository
     /// </summary>
     Task<IReadOnlyList<TableIdentifier>> GetTablesWithConsentsForTenantAsync(TenantId tenantId, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<TableIdentifier>>(Array.Empty<TableIdentifier>());
+
+    /// <summary>
+    /// WP-SC-02: active (non-revoked, in-window) consents of exactly one role grantee on one table within <paramref name="tenantId"/>.
+    /// Role consents carry no subject SID, so the subject-based lookup never returns them. The default filters
+    /// <see cref="GetAllActiveConsentsForSubjectsAsync(IEnumerable{Sid}, IEnumerable{string}?, DateTimeOffset?, TenantId?, CancellationToken)"/>;
+    /// persistence overrides it with an indexed query.
+    /// </summary>
+    async Task<IReadOnlyList<Consent>> GetActiveRoleConsentsAsync(
+        TableIdentifier table, string roleName, TenantId? tenantId, DateTimeOffset atTime, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(roleName);
+        var all = await GetAllActiveConsentsForSubjectsAsync(Array.Empty<Sid>(), new[] { roleName }, atTime, tenantId, ct).ConfigureAwait(false);
+        return all
+            .Where(c => c.GranteeType == GranteeType.Role
+                && c.TableIdentifier.Equals(table)
+                && string.Equals(c.RoleName, roleName, StringComparison.OrdinalIgnoreCase)
+                && (tenantId is null || c.TenantId == tenantId.Value))
+            .ToList();
+    }
+
+    /// <summary>
+    /// WP-SC-10: one keyset page of the consents of a tenant (ordered by id), including role and group grants, optionally filtered by
+    /// table and grantee. The tenant predicate is mandatory. Every persistence provider implements it with an indexed query; there is no
+    /// default, so a consent listing can never load every consent into memory.
+    /// </summary>
+    Task<Autheris.Application.Governance.Paging.ConsentPage> GetConsentPageAsync(
+        Autheris.Application.Governance.Paging.ConsentPageQuery query, CancellationToken ct = default);
+
+    /// <summary>
+    /// WP-SC-02: atomically revokes <paramref name="revokeConsentIds"/> and creates <paramref name="create"/> in ONE transaction
+    /// with ONE epoch bump per affected table. Either every change is applied or none. There is no non-atomic fallback and no default: every provider
+    /// must implement it transactionally, so a partial manifest can never be applied. <paramref name="auditEntries"/> are written in the SAME transaction (chain-linked, Tier-A anchored), so a committed change always has its audit record.
+    /// </summary>
+    Task ReplaceConsentsAsync(
+        IReadOnlyList<Guid> revokeConsentIds,
+        IReadOnlyList<Consent> create,
+        Sid actor,
+        string reason,
+        IReadOnlyList<AuditLogEntry>? auditEntries = null,
+        CancellationToken ct = default);
 }
 
 
@@ -115,6 +155,15 @@ public interface IAuditLogRepository
         TenantId? tenantId = null,
         CancellationToken ct = default);
     Task<bool> VerifyAuditHashChainAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// WP-SC-10: one keyset page over the audit chain (newest first, by chain sequence). Rows without a sequence number are never
+    /// listed. The default fails closed; every governance repository overrides it.
+    /// </summary>
+    Task<Autheris.Application.Governance.Paging.AuditLogPage> QueryAuditLogPageAsync(
+        Autheris.Application.Governance.Paging.AuditLogPageQuery query, CancellationToken ct = default)
+        => throw new NotSupportedException(
+            $"{GetType().Name} does not implement the audit cursor query; refusing an unbounded listing.");
 }
 
 public interface IPolicyEpochRepository

@@ -173,55 +173,36 @@ public sealed partial class TableAccessPolicy
         }
 
         var tenant = query.Tenant;
-        var subject = query.UserSid.Value;
-        if (string.IsNullOrWhiteSpace(subject))
+        if (string.IsNullOrWhiteSpace(query.UserSid.Value))
         {
             return null;
         }
 
-        IReadOnlyList<AccessProfile>? profiles = null;
-        if (_accessProfileCache != null)
+        // WP-SC-03: ONE lookup with every identity of the caller (SIDs, aliases), its groups and its roles. Group and role mappings only match through
+        // this call; the profile of the first SID must not hide the profiles of the other identities.
+        var users = new List<string> { query.UserSid.Value };
+        if (query.AllUserSids != null)
         {
-            profiles = await _accessProfileCache.GetProfilesAsync(tenant, subject, ct).ConfigureAwait(false);
-            if ((profiles == null || profiles.Count == 0) && query.AllUserSids != null && query.AllUserSids.Count > 0)
-            {
-                foreach (var altSid in query.AllUserSids)
-                {
-                    if (altSid.Value == subject) continue;
-                    var altProfiles = await _accessProfileCache.GetProfilesAsync(tenant, altSid.Value, ct).ConfigureAwait(false);
-                    if (altProfiles.Count > 0)
-                    {
-                        profiles = altProfiles;
-                        break;
-                    }
-                }
-            }
+            users.AddRange(query.AllUserSids.Select(s => s.Value));
         }
-        else if (_accessProfileRepository != null)
-        {
-            profiles = await _accessProfileRepository.GetProfilesForSubjectAsync(tenant, subject, ct).ConfigureAwait(false);
-            if ((profiles == null || profiles.Count == 0) && query.AllUserSids != null && query.AllUserSids.Count > 0)
-            {
-                foreach (var altSid in query.AllUserSids)
-                {
-                    if (altSid.Value == subject) continue;
-                    var altProfiles = await _accessProfileRepository.GetProfilesForSubjectAsync(tenant, altSid.Value, ct).ConfigureAwait(false);
-                    if (altProfiles.Count > 0)
-                    {
-                        profiles = altProfiles;
-                        break;
-                    }
-                }
-            }
-        }
+
+        var groups = query.GroupSids.Select(g => g.Value).ToList();
+        var roles = query.Roles.ToList();
+
+        IReadOnlyList<AccessProfile>? profiles = _accessProfileCache != null
+            ? await _accessProfileCache.GetProfilesForSubjectsAsync(tenant, users, groups, roles, ct).ConfigureAwait(false)
+            : await _accessProfileRepository!.GetProfilesForSubjectsAsync(tenant, users, groups, roles, ct).ConfigureAwait(false);
 
         if (profiles == null || profiles.Count == 0)
         {
             return null;
         }
 
+        // Most restrictive wins across ALL matched profiles (Strict, Default, Unmasked); the cached entry is re-checked for expiry on every use.
         var table = query.Metadata.Identifier;
         var now = DateTimeOffset.UtcNow;
-        return profiles.FirstOrDefault(p => p.IsActive(now) && p.MatchesTable(table));
+        return AccessProfileAssignmentRules
+            .Order(profiles.Where(p => p.IsActive(now) && p.MatchesTable(table)))
+            .FirstOrDefault();
     }
 }

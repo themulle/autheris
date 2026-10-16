@@ -34,7 +34,7 @@ public sealed class AccessPlanStoreTests
 
     private static AdminPlanAccessRequest Request() => new(
         DatasetId,
-        [new PrincipalAccessGrant("analyst_bob", new Dictionary<string, string> { ["id"] = "clear" }, null)],
+        [new PrincipalAccessGrant("analyst_bob", new Dictionary<string, string> { ["id"] = "clear" }, null, DateTimeOffset.UtcNow.AddDays(30))],
         "test");
 
     private static IKeyVaultSecretProvider SigningProvider()

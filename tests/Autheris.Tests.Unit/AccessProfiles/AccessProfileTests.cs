@@ -548,6 +548,14 @@ public sealed class AccessProfileTests
         fetched.AssignedSubjects.ShouldContain("david");
         fetched.AssignedSubjects.ShouldContain("S-1-5-21-DAVID-SQLITE");
 
+        // SEC-SC-04: an Unmasked assignment of a user without four-eyes approval is inactive, whatever the legacy list says.
+        (await sqliteRepo.GetProfilesForSubjectAsync(TenantLiebherr, "david")).ShouldBeEmpty();
+        await sqliteRepo.AssignProfileAsync(TenantLiebherr, "prof-david-sqlite", new AccessProfileAssignment
+        {
+            Subject = "david", ExpiresAt = DateTimeOffset.UtcNow.AddDays(20), CreatedBy = "admin@autheris.internal",
+            ApprovedBy = "owner@autheris.internal", Justification = "Four-eyes approved telemetry exception"
+        });
+
         // Lookup by Subject
         var davidProfiles = await sqliteRepo.GetProfilesForSubjectAsync(TenantLiebherr, "david");
         davidProfiles.Count.ShouldBe(1);
@@ -576,9 +584,11 @@ public sealed class AccessProfileTests
         IDistributedClusterStateProvider? clusterState = null,
         ITableMetadataRepository? metaRepo = null,
         IMemoryCache? memoryCache = null,
+        Autheris.Application.Policy.Interfaces.IAccessProfileCache? profileCache = null,
         params string[] roles)
     {
         var services = new ServiceCollection();
+        if (profileCache != null) services.AddSingleton(profileCache);
         services.AddLogging();
         services.AddAuditWriterOver(auditRepo ?? Substitute.For<IAuditLogRepository>());
         if (clusterState != null)
@@ -929,6 +939,61 @@ public sealed class AccessProfileTests
         profiles[0].MaskingMode.ShouldBe(MaskingPolicyMode.Default);
     }
 
+    private static async Task<InMemoryAccessProfileRepository> RepoWithPendingMappingAsync(MaskingPolicyMode mode, string createdBy)
+    {
+        var repo = new InMemoryAccessProfileRepository();
+        var profile = new AccessProfile { ProfileId = "prof-map", Name = "Mapping", TenantId = TenantLiebherr, MaskingMode = mode, TargetTables = ["tem.*"], CreatedBy = createdBy };
+        await repo.UpsertProfileAsync(profile);
+        await repo.AssignProfileAsync(TenantLiebherr, "prof-map", new AccessProfileAssignment { Subject = "AUT-Unmask", SubjectType = AccessProfileSubjectType.Group, CreatedBy = createdBy, Justification = "mapping" });
+        return repo;
+    }
+
+    [Fact]
+    public async Task SEC_SC_04_ApproveAssignment_ByASecondAdmin_ApprovesAuditsAndBumpsTheEpoch()
+    {
+        var repo = await RepoWithPendingMappingAsync(MaskingPolicyMode.Unmasked, "adm1");
+        var auditRepo = Substitute.For<IAuditLogRepository>();
+        var cache = Substitute.For<Autheris.Application.Policy.Interfaces.IAccessProfileCache>();
+        var context = CreateEndpointContext(callerSid: "adm2", callerName: "adm2", auditRepo: auditRepo, profileCache: cache);
+
+        var result = await GovernanceEndpoints.ApproveProfileAssignmentAsync("prof-map", new ApproveProfileAssignmentRequest { Subject = "AUT-Unmask", SubjectType = "Group" }, context, repo, CancellationToken.None);
+        var (status, _) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status200OK);
+        var stored = (await repo.GetProfileAsync(TenantLiebherr, "prof-map"))!.Assignments.Single();
+        stored.ApprovedBy.ShouldBe("adm2");
+        stored.ApprovedAt.ShouldNotBeNull();
+        await auditRepo.Received().RecordAuditEventAsync(Arg.Is<Autheris.Domain.Model.AuditLogEntry>(e => e.EventType == Autheris.Domain.Audit.AuditEventTypes.ConsentApproved), Arg.Any<CancellationToken>());
+        await cache.Received(1).InvalidateTenantAsync(TenantLiebherr, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SEC_SC_04_ApproveAssignment_ByTheCreator_IsForbidden_AndNothingChanges()
+    {
+        var repo = await RepoWithPendingMappingAsync(MaskingPolicyMode.Unmasked, "adm1");
+        var cache = Substitute.For<Autheris.Application.Policy.Interfaces.IAccessProfileCache>();
+        var context = CreateEndpointContext(callerSid: "adm1", callerName: "adm1", profileCache: cache);
+
+        var result = await GovernanceEndpoints.ApproveProfileAssignmentAsync("prof-map", new ApproveProfileAssignmentRequest { Subject = "AUT-Unmask", SubjectType = "Group" }, context, repo, CancellationToken.None);
+        var (status, _) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status403Forbidden);
+        (await repo.GetProfileAsync(TenantLiebherr, "prof-map"))!.Assignments.Single().ApprovedBy.ShouldBeNull();
+        await cache.DidNotReceiveWithAnyArgs().InvalidateTenantAsync(default, default);
+    }
+
+    [Fact]
+    public async Task SEC_SC_04_ApproveAssignment_WithoutGovernanceRole_IsForbidden()
+    {
+        var repo = await RepoWithPendingMappingAsync(MaskingPolicyMode.Default, "adm1");
+        var context = CreateEndpointContext(callerSid: "adm2", callerName: "adm2", roles: "Analyst");
+
+        var result = await GovernanceEndpoints.ApproveProfileAssignmentAsync("prof-map", new ApproveProfileAssignmentRequest { Subject = "AUT-Unmask", SubjectType = "Group" }, context, repo, CancellationToken.None);
+        var (status, _) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status403Forbidden);
+    }
+
     [Fact]
     public async Task GetProfiles_ReturnsListAndDetail()
     {
@@ -1028,5 +1093,75 @@ public sealed class AccessProfileTests
         var (status, _) = await ExecuteResultAsync(result, context);
 
         status.ShouldBe(StatusCodes.Status404NotFound);
+    }
+
+    [Fact]
+    public async Task BulkConsent_StoresTypedTimeBoundAssignmentThroughStrictAssignApi()
+    {
+        var repo = new InMemoryAccessProfileRepository();
+        var auditRepo = Substitute.For<IAuditLogRepository>();
+        var context = CreateEndpointContext(callerSid: "S-1-5-21-ADMIN", callerName: "admin", auditRepo: auditRepo);
+        var req = new BulkConsentRequest
+        {
+            Subject = "alice", SubjectType = "User", MaskingMode = "Default", Tables = ["tem.*"],
+            Justification = "Support case needs access to telemetry data", ValidDays = 7
+        };
+
+        var result = await GovernanceEndpoints.CreateBulkConsentAsync(req, context, repo, CancellationToken.None);
+        var (status, body) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status201Created, body);
+        var profile = (await repo.GetAllProfilesAsync(TenantLiebherr)).ShouldHaveSingleItem();
+        var assignment = profile.Assignments.ShouldHaveSingleItem();
+        assignment.Subject.ShouldBe("alice");
+        assignment.SubjectType.ShouldBe(AccessProfileSubjectType.User);
+        assignment.ExpiresAt.ShouldNotBeNull();
+        assignment.CreatedBy.ShouldBe("S-1-5-21-ADMIN");
+        await auditRepo.Received().RecordAuditEventAsync(Arg.Is<AuditLogEntry>(e => e.EventType == Autheris.Domain.Audit.AuditEventTypes.ConsentGranted), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task BulkConsent_GroupSubject_IsStoredAsGroupAssignment()
+    {
+        var repo = new InMemoryAccessProfileRepository();
+        var context = CreateEndpointContext();
+        var req = new BulkConsentRequest
+        {
+            Subject = "analysts", SubjectType = "Group", MaskingMode = "Default", Tables = ["tem.*"],
+            Justification = "Standing access for the analyst group", ValidDays = 30
+        };
+
+        var result = await GovernanceEndpoints.CreateBulkConsentAsync(req, context, repo, CancellationToken.None);
+        var (status, body) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status201Created, body);
+        var profile = (await repo.GetAllProfilesAsync(TenantLiebherr)).ShouldHaveSingleItem();
+        profile.Assignments.ShouldHaveSingleItem().SubjectType.ShouldBe(AccessProfileSubjectType.Group);
+    }
+
+    [Fact]
+    public async Task BulkConsent_AssignmentRejectedByRules_Returns400AndLeavesNoProfileBehind()
+    {
+        var inner = new InMemoryAccessProfileRepository();
+        var repo = Substitute.For<IAccessProfileRepository>();
+        repo.UpsertProfileAsync(Arg.Any<AccessProfile>(), Arg.Any<CancellationToken>())
+            .Returns(ci => inner.UpsertProfileAsync(ci.Arg<AccessProfile>()));
+        repo.DeleteProfileAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci => inner.DeleteProfileAsync(ci.Arg<TenantId>(), ci.Arg<string>()));
+        repo.AssignProfileAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<AccessProfileAssignment>(), Arg.Any<CancellationToken>())
+            .Returns<Task<AccessProfileAssignment>>(_ => throw new AccessProfileAssignmentRejectedException(AccessProfileAssignmentRules.TooLong, "too long"));
+        var context = CreateEndpointContext();
+        var req = new BulkConsentRequest
+        {
+            Subject = "alice", MaskingMode = "Default", Tables = ["tem.*"],
+            Justification = "Support case needs access to telemetry data", ValidDays = 7
+        };
+
+        var result = await GovernanceEndpoints.CreateBulkConsentAsync(req, context, repo, CancellationToken.None);
+        var (status, body) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        body.ShouldContain(AccessProfileAssignmentRules.TooLong);
+        (await inner.GetAllProfilesAsync(TenantLiebherr)).ShouldBeEmpty();
     }
 }

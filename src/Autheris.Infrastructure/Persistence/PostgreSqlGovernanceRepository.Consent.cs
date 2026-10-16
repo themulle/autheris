@@ -12,6 +12,13 @@ namespace Autheris.Infrastructure.Persistence;
 
 public partial class PostgreSqlGovernanceRepository
 {
+    /// <summary>
+    /// WP-SC-01: prefilter on the indexed upper-invariant grantee SID (<c>= ANY(array)</c>). Role consents and rows without a
+    /// normalised SID always pass; the C# filter on the loaded rows stays authoritative.
+    /// </summary>
+    internal const string SubjectPredicate =
+        " AND (c.grantee_type = 'Role' OR c.grantee_sid_norm IS NULL OR c.grantee_sid_norm = ANY(@subjects))";
+
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(
         IEnumerable<Sid> subjects,
         TableIdentifier table,
@@ -26,8 +33,10 @@ public partial class PostgreSqlGovernanceRepository
         TenantId? tenantId,
         CancellationToken ct = default)
     {
-        var subjectSet = subjects.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var subjectList = subjects.ToList();
+        var subjectSet = subjectList.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (subjectSet.Count == 0) return Array.Empty<Consent>();
+        var normalized = ConsentSubjectFilter.DistinctNormalized(subjectList);
 
         var consents = new List<Consent>();
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
@@ -41,7 +50,8 @@ public partial class PostgreSqlGovernanceRepository
                             FROM CONSENTS c
                             JOIN TABLES t ON c.table_id = t.id
                             WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
-                              AND c.is_revoked = 0" + tenantFilter;
+                              AND c.is_revoked = 0" + tenantFilter + SubjectPredicate;
+        cmd.Parameters.AddWithValue("@subjects", normalized);
         cmd.Parameters.AddWithValue("@domain", table.Domain);
         cmd.Parameters.AddWithValue("@schema", table.Schema);
         cmd.Parameters.AddWithValue("@table", table.TableName);
@@ -92,6 +102,7 @@ public partial class PostgreSqlGovernanceRepository
             }
         }
 
+        consents.RemoveAll(c => !c.IsActive(atTime) && !(c.Effect == ConsentEffect.Deny && c.ValidFrom > atTime)); // read-time clamp (WP-SC-16): never trust the raw valid_to
         await HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
         return consents;
     }
@@ -111,7 +122,9 @@ public partial class PostgreSqlGovernanceRepository
         CancellationToken ct = default)
     {
         var effectiveAt = atTime ?? DateTimeOffset.UtcNow;
-        var subjectList = subjects.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var subjectEnumerated = subjects.ToList();
+        var subjectList = subjectEnumerated.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var normalized = ConsentSubjectFilter.DistinctNormalized(subjectEnumerated);
         var roleSet = roles != null
             ? new HashSet<string>(roles, StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -127,7 +140,8 @@ public partial class PostgreSqlGovernanceRepository
                                    c.tenant_id
                             FROM CONSENTS c
                             JOIN TABLES t ON c.table_id = t.id
-                            WHERE c.is_revoked = 0" + tenantFilter;
+                            WHERE c.is_revoked = 0" + tenantFilter + SubjectPredicate;
+        cmd.Parameters.AddWithValue("@subjects", normalized);
         if (tenantId != null)
         {
             cmd.Parameters.AddWithValue("@tenantId", tenantId.Value.Value);
@@ -182,6 +196,7 @@ public partial class PostgreSqlGovernanceRepository
             }
         }
 
+        consents.RemoveAll(c => !c.IsActive(effectiveAt)); // read-time clamp (WP-SC-16): never trust the raw valid_to
         await HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
         return consents;
     }
@@ -370,122 +385,7 @@ public partial class PostgreSqlGovernanceRepository
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
-            var consentId = consent.Id == Guid.Empty ? Guid.NewGuid() : consent.Id;
-            var tableId = consent.TableId;
-
-            if (tableId == Guid.Empty)
-            {
-                await using var findTableCmd = conn.CreateCommand();
-                findTableCmd.Transaction = tx;
-                findTableCmd.CommandText = "SELECT id FROM TABLES WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table) LIMIT 1";
-                findTableCmd.Parameters.AddWithValue("@domain", consent.TableIdentifier.Domain);
-                findTableCmd.Parameters.AddWithValue("@schema", consent.TableIdentifier.Schema);
-                findTableCmd.Parameters.AddWithValue("@table", consent.TableIdentifier.TableName);
-                var idObj = await findTableCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-                if (idObj == null)
-                {
-                    throw new InvalidOperationException($"Cannot create consent: Target table '{consent.TableIdentifier}' does not exist in catalog.");
-                }
-                tableId = Guid.Parse(idObj.ToString()!);
-            }
-
-            var tenantIdStr = string.IsNullOrWhiteSpace(consent.TenantId.Value) ? TenantId.LegacySingleTenant.Value : consent.TenantId.Value;
-
-            await using (var cmd = conn.CreateCommand())
-            {
-                cmd.Transaction = tx;
-                cmd.CommandText = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, role_id, role_name, valid_from, valid_to, is_revoked, tenant_id)
-                                    VALUES (@id, @tid, @reqId, @effect, @granteeType, @granteeSid, @roleId, @roleName, @validFrom, @validTo, 0, @tenantId)";
-                cmd.Parameters.AddWithValue("@id", consentId.ToString());
-                cmd.Parameters.AddWithValue("@tid", tableId.ToString());
-                cmd.Parameters.AddWithValue("@reqId", (object?)consent.ConsentRequestId?.ToString() ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@effect", consent.Effect.ToString());
-                cmd.Parameters.AddWithValue("@granteeType", consent.GranteeType.ToString());
-                cmd.Parameters.AddWithValue("@granteeSid", (object?)consent.GranteeSid?.Value ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@roleId", (object?)consent.RoleId?.ToString() ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@roleName", (object?)consent.RoleName ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@validFrom", consent.ValidFrom.ToString("O"));
-                cmd.Parameters.AddWithValue("@validTo", consent.ValidTo.ToString("O"));
-                cmd.Parameters.AddWithValue("@tenantId", tenantIdStr);
-                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
-
-            foreach (var rule in consent.ColumnRules)
-            {
-                var ruleId = Guid.NewGuid();
-                await using var ruleCmd = conn.CreateCommand();
-                ruleCmd.Transaction = tx;
-                ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level, applicable_scopes)
-                                        VALUES (@id, @consentId, @colId, @colName, @level, @scopes)";
-                ruleCmd.Parameters.AddWithValue("@id", ruleId.ToString());
-                ruleCmd.Parameters.AddWithValue("@consentId", consentId.ToString());
-                ruleCmd.Parameters.AddWithValue("@colId", rule.TableColumnId.ToString());
-                ruleCmd.Parameters.AddWithValue("@colName", rule.ColumnName);
-                ruleCmd.Parameters.AddWithValue("@level", (int)rule.AccessLevel);
-                ruleCmd.Parameters.AddWithValue("@scopes", rule.ApplicableScopes != null && rule.ApplicableScopes.Count > 0 ? string.Join(",", rule.ApplicableScopes) : string.Empty);
-                await ruleCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
-
-            foreach (var filter in consent.RowFilters)
-            {
-                var filterId = Guid.NewGuid();
-                var hopsJson = filter.AdditionalHops != null && filter.AdditionalHops.Count > 0
-                    ? JsonSerializer.Serialize(filter.AdditionalHops)
-                    : null;
-
-                await using var filterCmd = conn.CreateCommand();
-                filterCmd.Transaction = tx;
-                filterCmd.CommandText = @"INSERT INTO CONSENT_ROW_FILTERS (
-                                            id, consent_id, filter_group, table_column_id, column_name, operator, value_type, value_json, value_source, user_attribute,
-                                            filter_type, dependent_table, dependent_table_alias, foreign_key_column, primary_key_column,
-                                            subquery_predicate_json, target_temporal_column, dependent_valid_from_column, dependent_valid_to_column,
-                                            target_table_alias, additional_hops_json
-                                        ) VALUES (
-                                            @id, @consentId, @fg, @colId, @colName, @op, @vType, @vJson, @vSource, @uAttr,
-                                            @ft, @dt, @dta, @fk, @pk, @sqp, @ttc, @dvfc, @dvtc, @tta, @hops
-                                        )";
-                filterCmd.Parameters.AddWithValue("@id", filterId.ToString());
-                filterCmd.Parameters.AddWithValue("@consentId", consentId.ToString());
-                filterCmd.Parameters.AddWithValue("@fg", filter.FilterGroup);
-                filterCmd.Parameters.AddWithValue("@colId", filter.TableColumnId.ToString());
-                filterCmd.Parameters.AddWithValue("@colName", filter.ColumnName);
-                filterCmd.Parameters.AddWithValue("@op", filter.Operator);
-                filterCmd.Parameters.AddWithValue("@vType", filter.ValueType);
-                filterCmd.Parameters.AddWithValue("@vJson", filter.ValueJson);
-                filterCmd.Parameters.AddWithValue("@vSource", filter.ValueSource);
-                filterCmd.Parameters.AddWithValue("@uAttr", (object?)filter.UserAttribute ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@ft", (int)filter.FilterType);
-                filterCmd.Parameters.AddWithValue("@dt", filter.DependentTable.HasValue ? (object)filter.DependentTable.Value.ToString() : DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@dta", (object?)filter.DependentTableAlias ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@fk", (object?)filter.ForeignKeyColumn ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@pk", (object?)filter.PrimaryKeyColumn ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@sqp", (object?)filter.SubqueryFilterPredicateJson ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@ttc", (object?)filter.TargetTemporalColumn ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@dvfc", (object?)filter.DependentValidFromColumn ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@dvtc", (object?)filter.DependentValidToColumn ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@tta", (object?)filter.TargetTableAlias ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@hops", (object?)hopsJson ?? DBNull.Value);
-                await filterCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
-
-            var auditEntry = new AuditLogEntry
-            {
-                TenantId = consent.TenantId,
-                EventType = "CONSENT_GRANTED",
-                ActorSid = consent.CreatedBySid ?? new Sid("SYSTEM"),
-                TargetTable = consent.TableIdentifier.ToString(),
-                Decision = "GRANTED",
-                TraceId = Guid.NewGuid().ToString("N"),
-                DetailsJson = JsonSerializer.Serialize(new
-                {
-                    ConsentId = consentId,
-                    GranteeType = consent.GranteeType.ToString(),
-                    GranteeSid = consent.GranteeSid?.Value,
-                    ValidFrom = consent.ValidFrom,
-                    ValidTo = consent.ValidTo
-                })
-            };
-            await RecordAuditEventAsync(auditEntry, tx, ct).ConfigureAwait(false);
+            var created = await InsertConsentCoreAsync(conn, tx, consent, ct).ConfigureAwait(false);
 
             await IncrementTableEpochInternalAsync(conn, tx, consent.TableIdentifier, ct).ConfigureAwait(false);
             await tx.CommitAsync(ct).ConfigureAwait(false);
@@ -494,31 +394,155 @@ public partial class PostgreSqlGovernanceRepository
             _metadataCache.TryRemove(consent.TableIdentifier.ToString().ToLowerInvariant(), out _);
             await _epochValidationService.InvalidateEpochAsync(consent.TableIdentifier, ct).ConfigureAwait(false);
 
-            return new Consent
-            {
-                Id = consentId,
-                TableId = tableId,
-                TableIdentifier = consent.TableIdentifier,
-                ConsentRequestId = consent.ConsentRequestId,
-                Effect = consent.Effect,
-                GranteeType = consent.GranteeType,
-                GranteeSid = consent.GranteeSid,
-                RoleId = consent.RoleId,
-                RoleName = consent.RoleName,
-                ValidFrom = consent.ValidFrom,
-                ValidTo = consent.ValidTo,
-                IsRevoked = consent.IsRevoked,
-                TenantId = consent.TenantId,
-                ColumnRules = consent.ColumnRules,
-                RowFilters = consent.RowFilters
-            };
+            return created;
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
             OnTransactionRolledBack(tx);
             throw;
         }
+    }
+
+    /// <summary>Inserts the consent row, its column rules and row filters and the grant audit entry inside <paramref name="tx"/>. Neither bumps the epoch nor commits.</summary>
+    private async Task<Consent> InsertConsentCoreAsync(NpgsqlConnection conn, NpgsqlTransaction tx, Consent consent, CancellationToken ct)
+    {
+        var consentId = consent.Id == Guid.Empty ? Guid.NewGuid() : consent.Id;
+        var tableId = consent.TableId;
+
+        if (tableId == Guid.Empty)
+        {
+            await using var findTableCmd = conn.CreateCommand();
+            findTableCmd.Transaction = tx;
+            findTableCmd.CommandText = "SELECT id FROM TABLES WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table) LIMIT 1";
+            findTableCmd.Parameters.AddWithValue("@domain", consent.TableIdentifier.Domain);
+            findTableCmd.Parameters.AddWithValue("@schema", consent.TableIdentifier.Schema);
+            findTableCmd.Parameters.AddWithValue("@table", consent.TableIdentifier.TableName);
+            var idObj = await findTableCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+            if (idObj == null)
+            {
+                throw new InvalidOperationException($"Cannot create consent: Target table '{consent.TableIdentifier}' does not exist in catalog.");
+            }
+            tableId = Guid.Parse(idObj.ToString()!);
+        }
+
+        var tenantIdStr = string.IsNullOrWhiteSpace(consent.TenantId.Value) ? TenantId.LegacySingleTenant.Value : consent.TenantId.Value;
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, grantee_sid_norm, role_id, role_name, valid_from, valid_to, is_revoked, tenant_id)
+                                VALUES (@id, @tid, @reqId, @effect, @granteeType, @granteeSid, @sidNorm, @roleId, @roleName, @validFrom, @validTo, 0, @tenantId)";
+            cmd.Parameters.AddWithValue("@id", consentId.ToString());
+            cmd.Parameters.AddWithValue("@tid", tableId.ToString());
+            cmd.Parameters.AddWithValue("@reqId", (object?)consent.ConsentRequestId?.ToString() ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@effect", consent.Effect.ToString());
+            cmd.Parameters.AddWithValue("@granteeType", consent.GranteeType.ToString());
+            cmd.Parameters.AddWithValue("@granteeSid", (object?)consent.GranteeSid?.Value ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@sidNorm", ConsentSubjectFilter.NormalizeParameter((object?)consent.GranteeSid?.Value ?? DBNull.Value));
+            cmd.Parameters.AddWithValue("@roleId", (object?)consent.RoleId?.ToString() ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@roleName", (object?)consent.RoleName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@validFrom", consent.ValidFrom.ToString("O"));
+            cmd.Parameters.AddWithValue("@validTo", consent.ValidTo.ToString("O"));
+            cmd.Parameters.AddWithValue("@tenantId", tenantIdStr);
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        foreach (var rule in consent.ColumnRules)
+        {
+            var ruleId = Guid.NewGuid();
+            await using var ruleCmd = conn.CreateCommand();
+            ruleCmd.Transaction = tx;
+            ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level, applicable_scopes)
+                                    VALUES (@id, @consentId, @colId, @colName, @level, @scopes)";
+            ruleCmd.Parameters.AddWithValue("@id", ruleId.ToString());
+            ruleCmd.Parameters.AddWithValue("@consentId", consentId.ToString());
+            ruleCmd.Parameters.AddWithValue("@colId", rule.TableColumnId.ToString());
+            ruleCmd.Parameters.AddWithValue("@colName", rule.ColumnName);
+            ruleCmd.Parameters.AddWithValue("@level", (int)rule.AccessLevel);
+            ruleCmd.Parameters.AddWithValue("@scopes", rule.ApplicableScopes != null && rule.ApplicableScopes.Count > 0 ? string.Join(",", rule.ApplicableScopes) : string.Empty);
+            await ruleCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        foreach (var filter in consent.RowFilters)
+        {
+            var filterId = Guid.NewGuid();
+            var hopsJson = filter.AdditionalHops != null && filter.AdditionalHops.Count > 0
+                ? JsonSerializer.Serialize(filter.AdditionalHops)
+                : null;
+
+            await using var filterCmd = conn.CreateCommand();
+            filterCmd.Transaction = tx;
+            filterCmd.CommandText = @"INSERT INTO CONSENT_ROW_FILTERS (
+                                        id, consent_id, filter_group, table_column_id, column_name, operator, value_type, value_json, value_source, user_attribute,
+                                        filter_type, dependent_table, dependent_table_alias, foreign_key_column, primary_key_column,
+                                        subquery_predicate_json, target_temporal_column, dependent_valid_from_column, dependent_valid_to_column,
+                                        target_table_alias, additional_hops_json
+                                    ) VALUES (
+                                        @id, @consentId, @fg, @colId, @colName, @op, @vType, @vJson, @vSource, @uAttr,
+                                        @ft, @dt, @dta, @fk, @pk, @sqp, @ttc, @dvfc, @dvtc, @tta, @hops
+                                    )";
+            filterCmd.Parameters.AddWithValue("@id", filterId.ToString());
+            filterCmd.Parameters.AddWithValue("@consentId", consentId.ToString());
+            filterCmd.Parameters.AddWithValue("@fg", filter.FilterGroup);
+            filterCmd.Parameters.AddWithValue("@colId", filter.TableColumnId.ToString());
+            filterCmd.Parameters.AddWithValue("@colName", filter.ColumnName);
+            filterCmd.Parameters.AddWithValue("@op", filter.Operator);
+            filterCmd.Parameters.AddWithValue("@vType", filter.ValueType);
+            filterCmd.Parameters.AddWithValue("@vJson", filter.ValueJson);
+            filterCmd.Parameters.AddWithValue("@vSource", filter.ValueSource);
+            filterCmd.Parameters.AddWithValue("@uAttr", (object?)filter.UserAttribute ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@ft", (int)filter.FilterType);
+            filterCmd.Parameters.AddWithValue("@dt", filter.DependentTable.HasValue ? (object)filter.DependentTable.Value.ToString() : DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@dta", (object?)filter.DependentTableAlias ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@fk", (object?)filter.ForeignKeyColumn ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@pk", (object?)filter.PrimaryKeyColumn ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@sqp", (object?)filter.SubqueryFilterPredicateJson ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@ttc", (object?)filter.TargetTemporalColumn ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@dvfc", (object?)filter.DependentValidFromColumn ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@dvtc", (object?)filter.DependentValidToColumn ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@tta", (object?)filter.TargetTableAlias ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@hops", (object?)hopsJson ?? DBNull.Value);
+            await filterCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        var auditEntry = new AuditLogEntry
+        {
+            TenantId = consent.TenantId,
+            EventType = "CONSENT_GRANTED",
+            ActorSid = consent.CreatedBySid ?? new Sid("SYSTEM"),
+            TargetTable = consent.TableIdentifier.ToString(),
+            Decision = "GRANTED",
+            TraceId = Guid.NewGuid().ToString("N"),
+            DetailsJson = JsonSerializer.Serialize(new
+            {
+                ConsentId = consentId,
+                GranteeType = consent.GranteeType.ToString(),
+                GranteeSid = consent.GranteeSid?.Value,
+                ValidFrom = consent.ValidFrom,
+                ValidTo = consent.ValidTo
+            })
+        };
+        await RecordAuditEventAsync(auditEntry, tx, ct).ConfigureAwait(false);
+
+        return new Consent
+        {
+            Id = consentId,
+            TableId = tableId,
+            TableIdentifier = consent.TableIdentifier,
+            ConsentRequestId = consent.ConsentRequestId,
+            Effect = consent.Effect,
+            GranteeType = consent.GranteeType,
+            GranteeSid = consent.GranteeSid,
+            RoleId = consent.RoleId,
+            RoleName = consent.RoleName,
+            ValidFrom = consent.ValidFrom,
+            ValidTo = consent.ValidTo,
+            IsRevoked = consent.IsRevoked,
+            TenantId = consent.TenantId,
+            ColumnRules = consent.ColumnRules,
+            RowFilters = consent.RowFilters
+        };
     }
 
     public async Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default)
@@ -531,7 +555,7 @@ public partial class PostgreSqlGovernanceRepository
             cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                        c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
                                        c.is_revoked, t.source_name, t.schema_name, t.table_name,
-                                       c.tenant_id
+                                       c.tenant_id, c.renewal_count
                                 FROM CONSENTS c
                                 JOIN TABLES t ON c.table_id = t.id
                                 WHERE c.id = @id";
@@ -559,7 +583,8 @@ public partial class PostgreSqlGovernanceRepository
                     ValidFrom = DateTimeOffset.Parse(reader.GetString(8), System.Globalization.CultureInfo.InvariantCulture),
                     ValidTo = DateTimeOffset.Parse(reader.GetString(9), System.Globalization.CultureInfo.InvariantCulture),
                     IsRevoked = reader.GetInt32(10) == 1,
-                    TenantId = reader.IsDBNull(14) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(14))
+                    TenantId = reader.IsDBNull(14) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(14)),
+                    RenewalCount = reader.GetInt32(15)
                 };
             }
         }
@@ -665,7 +690,7 @@ public partial class PostgreSqlGovernanceRepository
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
             OnTransactionRolledBack(tx);
             throw;
         }
@@ -748,7 +773,7 @@ public partial class PostgreSqlGovernanceRepository
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
             OnTransactionRolledBack(tx);
             throw;
         }
@@ -770,7 +795,7 @@ public partial class PostgreSqlGovernanceRepository
         cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                    c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
                                    c.is_revoked, t.source_name, t.schema_name, t.table_name,
-                                   c.tenant_id
+                                   c.tenant_id, c.renewal_count
                             FROM CONSENTS c
                             JOIN TABLES t ON c.table_id = t.id
                             WHERE c.is_revoked = 0 AND c.valid_to <= @threshold";
@@ -799,7 +824,8 @@ public partial class PostgreSqlGovernanceRepository
                     ValidFrom = DateTimeOffset.Parse(reader.GetString(8), System.Globalization.CultureInfo.InvariantCulture),
                     ValidTo = DateTimeOffset.Parse(reader.GetString(9), System.Globalization.CultureInfo.InvariantCulture),
                     IsRevoked = reader.GetInt32(10) == 1,
-                    TenantId = reader.IsDBNull(14) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(14))
+                    TenantId = reader.IsDBNull(14) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(14)),
+                    RenewalCount = reader.GetInt32(15)
                 };
                 consents.Add(consent);
             }
@@ -813,6 +839,7 @@ public partial class PostgreSqlGovernanceRepository
     {
         TableIdentifier? tableId = null;
         TenantId extendTenant = TenantId.LegacySingleTenant;
+        var newValidFrom = DateTimeOffset.UtcNow;
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
@@ -820,7 +847,7 @@ public partial class PostgreSqlGovernanceRepository
             await using (var getCmd = conn.CreateCommand())
             {
                 getCmd.Transaction = tx;
-                getCmd.CommandText = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id
+                getCmd.CommandText = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.valid_from
                                        FROM CONSENTS c
                                        JOIN TABLES t ON c.table_id = t.id
                                        WHERE c.id = @id
@@ -834,15 +861,18 @@ public partial class PostgreSqlGovernanceRepository
                     {
                         extendTenant = new TenantId(reader.GetString(3));
                     }
+
+                    newValidFrom = ConsentSubjectFilter.RenewalPeriodStart(reader.GetString(4), DateTimeOffset.UtcNow);
                 }
             }
 
             await using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = tx;
-                cmd.CommandText = "UPDATE CONSENTS SET valid_to = @validTo WHERE id = @id";
+                cmd.CommandText = "UPDATE CONSENTS SET valid_to = @validTo, valid_from = @validFrom, renewal_count = renewal_count + 1 WHERE id = @id";
                 cmd.Parameters.AddWithValue("@id", consentId.ToString());
                 cmd.Parameters.AddWithValue("@validTo", newValidTo.ToString("O"));
+                cmd.Parameters.AddWithValue("@validFrom", newValidFrom.ToString("O"));
                 await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
@@ -869,7 +899,7 @@ public partial class PostgreSqlGovernanceRepository
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
             OnTransactionRolledBack(tx);
             throw;
         }
@@ -1288,7 +1318,7 @@ public partial class PostgreSqlGovernanceRepository
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
             OnTransactionRolledBack(tx);
             throw;
         }
@@ -1382,7 +1412,7 @@ public partial class PostgreSqlGovernanceRepository
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
             OnTransactionRolledBack(tx);
             throw;
         }
@@ -1470,13 +1500,14 @@ public partial class PostgreSqlGovernanceRepository
             await using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = tx;
-                cmd.CommandText = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, role_name, valid_from, valid_to, is_revoked, tenant_id)
-                                    VALUES (@id, @tid, @reqId, 'ALLOW', @granteeType, @granteeSid, @roleName, @validFrom, @validTo, 0, @tenantId)";
+                cmd.CommandText = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, grantee_sid_norm, role_name, valid_from, valid_to, is_revoked, tenant_id)
+                                    VALUES (@id, @tid, @reqId, 'ALLOW', @granteeType, @granteeSid, @sidNorm, @roleName, @validFrom, @validTo, 0, @tenantId)";
                 cmd.Parameters.AddWithValue("@id", consentId.ToString());
                 cmd.Parameters.AddWithValue("@tid", req.TableId.ToString());
                 cmd.Parameters.AddWithValue("@reqId", requestId.ToString());
                 cmd.Parameters.AddWithValue("@granteeType", req.RequestedGranteeType.ToString());
                 cmd.Parameters.AddWithValue("@granteeSid", (object?)granteeSid?.Value ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@sidNorm", ConsentSubjectFilter.NormalizeParameter((object?)granteeSid?.Value ?? DBNull.Value));
                 cmd.Parameters.AddWithValue("@roleName", (object?)roleName ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@validFrom", DateTimeOffset.UtcNow.ToString("O"));
                 cmd.Parameters.AddWithValue("@validTo", req.RequestedValidTo.ToString("O"));
@@ -1544,7 +1575,7 @@ public partial class PostgreSqlGovernanceRepository
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
             OnTransactionRolledBack(tx);
             throw;
         }

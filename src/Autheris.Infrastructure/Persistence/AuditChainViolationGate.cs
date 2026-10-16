@@ -20,6 +20,21 @@ internal static class AuditChainViolationGate
         options?.OnChainViolation ?? (isDevOrTest ? AuditChainViolationPolicy.AlertOnly : AuditChainViolationPolicy.DenyDataAccess);
 
     /// <summary>Tier-A: security-critical mutations, admin actions and denied requests (synchronous, fail-closed). Everything but allowed query reads.</summary>
+    /// <summary>True when at least one entry of the batch is Tier-A (its acknowledgement requires commit and anchor).</summary>
+    internal static bool AnyTierA(IReadOnlyList<AuditLogEntry> batch)
+    {
+        ArgumentNullException.ThrowIfNull(batch);
+        for (int i = 0; i < batch.Count; i++)
+        {
+            if (IsTierA(batch[i]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     internal static bool IsTierA(AuditLogEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);

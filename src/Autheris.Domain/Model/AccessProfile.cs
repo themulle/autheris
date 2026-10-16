@@ -13,13 +13,52 @@ public sealed class AccessProfile
     public List<string> TargetTables { get; init; } = []; // z. B. ["*.*"] oder ["tem.gps_position", "md.*"]
     public string? RowFilterPredicate { get; set; }      // z. B. "status != 'DELIVERED'"
     public List<string> AssignedSubjects { get; init; } = []; // SIDs oder Benutzernamen (z. B. ["david"])
+    /// <summary>WP-SC-03: the typed assignments (users, groups, roles) with their approvals and expiry. <see cref="AssignedSubjects"/> lists the same subjects as plain strings.</summary>
+    public List<AccessProfileAssignment> Assignments { get; init; } = [];
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? ValidTo { get; init; }
     public string? Justification { get; init; }
     public string? CreatedBy { get; init; }
 
-    public bool IsActive(DateTimeOffset at) =>
-        ValidTo == null || ValidTo.Value > at;
+    /// <summary>
+    /// WP-SC-16: expiry after the read-time clamp. A profile with typed assignments (as loaded for a caller: its effective, matched ones) stays active while ANY
+    /// assignment is effective, so it ends at the latest <see cref="AccessProfileAssignmentRules.EffectiveUntil"/> of its assignments (null when one never lapses),
+    /// never later than <see cref="ValidTo"/>. The loaded profile is cached, so every assignment expiry (individual cap, 24 h break-glass approval window,
+    /// 90-day recertification of an <c>Unmasked</c> mapping) is re-checked at use. A legacy profile without assignments is bounded by its creation date.
+    /// </summary>
+    public DateTimeOffset? EffectiveValidTo
+    {
+        get
+        {
+            if (Assignments.Count == 0)
+            {
+                return IndividualGrantLimits.EffectiveProfileValidTo(MaskingMode, CreatedAt, ValidTo);
+            }
+
+            DateTimeOffset? latest = DateTimeOffset.MinValue;
+            foreach (var a in Assignments)
+            {
+                if (AccessProfileAssignmentRules.EffectiveUntil(this, a) is not { } until)
+                {
+                    latest = null;
+                    break;
+                }
+
+                if (until > latest)
+                {
+                    latest = until;
+                }
+            }
+
+            return latest is { } l && ValidTo is { } v && v < l ? v : latest ?? ValidTo;
+        }
+    }
+
+    public bool IsActive(DateTimeOffset at)
+    {
+        var effective = EffectiveValidTo;
+        return effective == null || effective.Value > at;
+    }
 
     public bool MatchesTable(TableIdentifier table)
     {

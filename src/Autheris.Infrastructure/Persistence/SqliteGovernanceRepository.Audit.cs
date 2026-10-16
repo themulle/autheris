@@ -366,6 +366,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
 
     internal void OnTransactionCommitted(SqliteTransaction tx)
     {
+        Exception? anchorFailure = null;
         if (_pendingAuditTxStates.TryRemove(tx, out var state))
         {
             lock (_pendingAuditTxStates)
@@ -387,8 +388,15 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
                 catch (Exception ex)
                 {
                     _logger?.LogError(ex, "Failed to persist the external audit chain anchor (seq {Sequence}).", state.LastSeq);
+                    anchorFailure = ex;
                 }
             }
+        }
+
+        // M1: the rows are committed, but the Tier-A mutation (consent grant/revoke, manifest apply) is not acknowledged without its anchor.
+        if (anchorFailure != null)
+        {
+            throw new AuditUnavailableException("The audit chain anchor could not be persisted; the change is not acknowledged (fail-closed).", anchorFailure);
         }
     }
 
@@ -427,6 +435,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
 
     private async Task RecordAuditEventsBatchInternalAsync(SqliteConnection conn, IReadOnlyList<AuditLogEntry> batch, CancellationToken ct, SqliteTransaction? existingTx = null)
     {
+        var violationAtStart = Volatile.Read(ref _auditChainViolation); // M1: only a violation latched DURING this write blocks the acknowledgement
         if (batch.Count == 0) return;
 
         SqliteTransaction? ownedTx = null;
@@ -437,6 +446,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             tx = ownedTx;
         }
 
+        Exception? anchorFailure = null;
         try
         {
             // SEC H-17: the DB tail is compared with the in-memory reference instead of being adopted blindly.
@@ -482,25 +492,8 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
                 lastEntryHash = _lastAuditHash;
             }
 
-            using var cmd = conn.CreateCommand();
-            cmd.Transaction = tx;
-            cmd.CommandText = @"INSERT INTO AUDIT_LOG_ENTRIES (id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq)
-                                VALUES (@id, @occ, @event, @actor, @target, @col, @dec, @trace, @det, @prev, @hash, @tenantId, @seq)";
-
-            var pId = cmd.Parameters.Add("@id", SqliteType.Text);
-            var pOcc = cmd.Parameters.Add("@occ", SqliteType.Text);
-            var pEvent = cmd.Parameters.Add("@event", SqliteType.Text);
-            var pActor = cmd.Parameters.Add("@actor", SqliteType.Text);
-            var pTarget = cmd.Parameters.Add("@target", SqliteType.Text);
-            var pCol = cmd.Parameters.Add("@col", SqliteType.Text);
-            var pDec = cmd.Parameters.Add("@dec", SqliteType.Text);
-            var pTrace = cmd.Parameters.Add("@trace", SqliteType.Text);
-            var pDet = cmd.Parameters.Add("@det", SqliteType.Text);
-            var pPrev = cmd.Parameters.Add("@prev", SqliteType.Text);
-            var pHash = cmd.Parameters.Add("@hash", SqliteType.Text);
-            var pTenantId = cmd.Parameters.Add("@tenantId", SqliteType.Text);
-            var pSeq = cmd.Parameters.Add("@seq", SqliteType.Integer);
-
+            // WP-PF-04: hashes are computed in memory from the single tail read, then the rows are written with multi-row inserts.
+            var sequenced = new List<(AuditLogEntry Entry, long Seq)>(batch.Count);
             foreach (var entry in batch)
             {
                 lastSequence++;
@@ -518,24 +511,35 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
                     entry.TraceId,
                     entry.DetailsJson,
                     entry.TenantId.Value);
+                sequenced.Add((entry, lastSequence));
+                lastEntryHash = entry.EntryHash;
+            }
 
-                pId.Value = entry.Id.ToString();
-                pOcc.Value = entry.OccurredAt.ToString("O");
-                pEvent.Value = entry.EventType;
-                pActor.Value = entry.ActorSid.Value;
-                pTarget.Value = entry.TargetTable;
-                pCol.Value = (object?)entry.TargetColumn ?? DBNull.Value;
-                pDec.Value = entry.Decision;
-                pTrace.Value = entry.TraceId;
-                pDet.Value = entry.DetailsJson;
-                pPrev.Value = entry.PrevHash;
-                pHash.Value = entry.EntryHash;
-                pTenantId.Value = entry.TenantId.Value;
-                pSeq.Value = lastSequence;
+            for (int offset = 0; offset < sequenced.Count; offset += AuditBatchInsertSql.MaxRowsPerStatement)
+            {
+                int count = Math.Min(AuditBatchInsertSql.MaxRowsPerStatement, sequenced.Count - offset);
+                using var cmd = conn.CreateCommand();
+                cmd.Transaction = tx;
+                cmd.CommandText = AuditBatchInsertSql.Build(count);
+                for (int k = 0; k < count; k++)
+                {
+                    var (entry, seq) = sequenced[offset + k];
+                    cmd.Parameters.Add($"@id{k}", SqliteType.Text).Value = entry.Id.ToString();
+                    cmd.Parameters.Add($"@occ{k}", SqliteType.Text).Value = entry.OccurredAt.ToString("O");
+                    cmd.Parameters.Add($"@event{k}", SqliteType.Text).Value = entry.EventType;
+                    cmd.Parameters.Add($"@actor{k}", SqliteType.Text).Value = entry.ActorSid.Value;
+                    cmd.Parameters.Add($"@target{k}", SqliteType.Text).Value = entry.TargetTable;
+                    cmd.Parameters.Add($"@col{k}", SqliteType.Text).Value = (object?)entry.TargetColumn ?? DBNull.Value;
+                    cmd.Parameters.Add($"@dec{k}", SqliteType.Text).Value = entry.Decision;
+                    cmd.Parameters.Add($"@trace{k}", SqliteType.Text).Value = entry.TraceId;
+                    cmd.Parameters.Add($"@det{k}", SqliteType.Text).Value = entry.DetailsJson;
+                    cmd.Parameters.Add($"@prev{k}", SqliteType.Text).Value = entry.PrevHash;
+                    cmd.Parameters.Add($"@hash{k}", SqliteType.Text).Value = entry.EntryHash;
+                    cmd.Parameters.Add($"@tenantId{k}", SqliteType.Text).Value = entry.TenantId.Value;
+                    cmd.Parameters.Add($"@seq{k}", SqliteType.Integer).Value = seq;
+                }
 
                 await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-
-                lastEntryHash = entry.EntryHash;
             }
 
             if (ownedTx != null)
@@ -562,6 +566,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
                     catch (Exception ex)
                     {
                         _logger?.LogError(ex, "Failed to persist the external audit chain anchor (seq {Sequence}).", lastSequence);
+                        anchorFailure = ex;
                     }
                 }
             }
@@ -615,6 +620,20 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         finally
         {
             ownedTx?.Dispose();
+        }
+
+        // WP-PF-04 / SEC-SC-08: a batch containing a Tier-A event is acknowledged only after its anchor is written. The rows are
+        // committed (the chain stays linear and the next batch anchors the tail), but the caller fails closed instead of being acknowledged.
+        // Tier-B-only batches (channel processor) never fail on a late anchor; the next batch anchors the tail.
+        // M1: a chain violation latched DURING this write means no anchor was written; the Tier-A event is then not acknowledged (a violation latched before admission follows the configured policy: Tier-A is written marked).
+        if (anchorFailure == null && violationAtStart == null && Volatile.Read(ref _auditChainViolation) != null && ViolationPolicy != AuditChainViolationPolicy.AlertOnly)
+        {
+            anchorFailure = new InvalidOperationException("The audit hash chain is latched as violated; no anchor was written.");
+        }
+
+        if (anchorFailure != null && AuditChainViolationGate.AnyTierA(batch))
+        {
+            throw new AuditUnavailableException("The audit chain anchor could not be persisted; the event is not acknowledged (fail-closed).", anchorFailure);
         }
     }
 
@@ -726,6 +745,77 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             }
             return list;
         }
+    }
+
+    public async Task<Autheris.Application.Governance.Paging.AuditLogPage> QueryAuditLogPageAsync(
+        Autheris.Application.Governance.Paging.AuditLogPageQuery query, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        await FlushAuditChannelAsync(ct).ConfigureAwait(false);
+        var size = query.EffectivePageSize;
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        using var cmd = scope.Connection.CreateCommand();
+        var sql = new StringBuilder(@"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column,
+                                             decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq
+                                      FROM AUDIT_LOG_ENTRIES
+                                      WHERE seq IS NOT NULL");
+        if (query.Tenant is { } tenant)
+        {
+            sql.Append(" AND tenant_id = @tenantId");
+            cmd.Parameters.AddWithValue("@tenantId", tenant.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.TargetTable))
+        {
+            sql.Append(" AND LOWER(target_table) = LOWER(@targetTable)");
+            cmd.Parameters.AddWithValue("@targetTable", query.TargetTable);
+        }
+
+        if (query.Actor is { } actor && !string.IsNullOrWhiteSpace(actor.Value))
+        {
+            sql.Append(" AND actor_sid = @actorSid");
+            cmd.Parameters.AddWithValue("@actorSid", actor.Value);
+        }
+
+        if (query.Since is { } since)
+        {
+            sql.Append(" AND occurred_at >= @since");
+            cmd.Parameters.AddWithValue("@since", since.ToString("O"));
+        }
+
+        if (query.BeforeSequence is { } before)
+        {
+            sql.Append(" AND seq < @before");
+            cmd.Parameters.AddWithValue("@before", before);
+        }
+
+        sql.Append(" ORDER BY seq DESC LIMIT @lim");
+        cmd.Parameters.AddWithValue("@lim", size + 1);
+        cmd.CommandText = sql.ToString();
+
+        var items = new List<AuditLogEntry>(size + 1);
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            items.Add(new AuditLogEntry
+            {
+                Id = Guid.Parse(reader.GetString(0)),
+                OccurredAt = DateTimeOffset.Parse(reader.GetString(1)),
+                EventType = reader.GetString(2),
+                ActorSid = new Sid(reader.GetString(3)),
+                TargetTable = reader.GetString(4),
+                TargetColumn = reader.IsDBNull(5) ? null : reader.GetString(5),
+                Decision = reader.GetString(6),
+                TraceId = reader.GetString(7),
+                DetailsJson = reader.GetString(8),
+                PrevHash = reader.GetString(9),
+                EntryHash = reader.GetString(10),
+                TenantId = reader.IsDBNull(11) ? TenantId.LegacySingleTenant : (TenantId.TryParse(reader.GetString(11), out var tid) ? tid : TenantId.LegacySingleTenant),
+                ChainSequence = reader.GetInt64(12)
+            });
+        }
+
+        return AuditPageSlicer.Slice(items, size);
     }
 
     public async Task<bool> VerifyAuditHashChainAsync(CancellationToken ct = default)

@@ -44,9 +44,9 @@ public sealed class AccessPlanBindingAndBoundsTests
             hostEnvironment: env,
             timeProvider: _time);
 
-    private static AdminPlanAccessRequest Request() => new(
+    private AdminPlanAccessRequest Request() => new(
         DatasetId,
-        [new PrincipalAccessGrant("analyst_bob", new Dictionary<string, string> { ["id"] = "clear" }, null)],
+        [new PrincipalAccessGrant("analyst_bob", new Dictionary<string, string> { ["id"] = "clear" }, null, _time.GetUtcNow().AddDays(30))],
         "test");
 
     private async Task<string> ConfirmAsync(AccessPlanningService service, string planId, string adminSid)

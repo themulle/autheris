@@ -106,6 +106,8 @@ Ermöglicht direkte Authentifizierung via `Authorization: Basic <base64>` für G
 | `Users[].Roles` | `List<string>` | Rollen-Array | `[]` | Zugewiesene Rollen (`DataConsumer`, `DataOwner`, `GovernanceAdmin`). |
 | `Users[].UserSid` | `string` | SID-Format | `""` | Zugeordnete Windows-User-SID (z. B. `S-1-5-21-CONSUMER-1`). |
 | `Users[].GroupSids` | `List<string>` | SID-Array | `[]` | Zugeordnete Windows-Gruppen-SIDs. |
+| `SuccessCacheSeconds` | `int` | `>= 0` | `30` | Lifetime of a verified-credential marker; spares the password hash on repeated requests. `0` disables it. |
+| `MarkerKeyRef` | `string?` | Secret reference | `null` | Secret (via the key vault secret provider) that keys the **cluster-shared** verified marker in Redis (HMAC bound to the credential version). Unset: the marker is per replica. See [F-AUTH-DX](features/f-auth-dx-basic-auth-session.md#behaviour-and-security). |
 
 > [!IMPORTANT]
 > **Sicherheits-Invariante für Produktion**:
@@ -365,7 +367,9 @@ Steuert den L1 In-Memory Cache, L2 Redis und die Konsistenzprüfung.
 | :--- | :--- | :--- | :--- | :--- |
 | `FailClosedOnSensitiveTables` | `bool` | `true \| false` | `true` | Zero-Trust: Bei Nichterreichbarkeit des Epochen-Stores wird der Zugriff auf sensible Tabellen blockiert. |
 | `DegradedMaxStalenessSeconds` | `int` | `1 .. 300` | `30` | Maximale Staleness für unkritische Tabellen bei Redis-Ausfall. |
-| `PipelinedMGetEnabled` | `bool` | `true \| false` | `true` | Nutzt Redis Batch-Pipelining zur Reduktion von Roundtrips. |
+| `PipelinedMGetEnabled` | `bool` | `true \| false` | `true` | Reads the epochs of several tables as concurrent single-key `GET`s pipelined over one connection (no multi-key `MGET`, so it works on Redis Cluster without `CROSSSLOT`). `false` reads them one after another. |
+| `LocalStalenessBudgetMilliseconds` | `int` | `0 .. 250` | `150` | How long a replica may reuse an epoch read from Redis for **non-sensitive** tables of Autheris-enforced sources. Always 0 for highly sensitive tables and delegated sources; `0` disables the budget. See [F-OPS-02, section 4.5](features/f-ops-02-high-availability-kubernetes-helm.md#45-replica-aware-request-features). |
+| `MaxLocalEpochEntries` | `int` | — | `50000` | Upper bound of locally cached epochs for the staleness budget. |
 
 ```json
 "Caching": {
@@ -384,7 +388,8 @@ Steuert den L1 In-Memory Cache, L2 Redis und die Konsistenzprüfung.
   "EpochValidation": {
     "FailClosedOnSensitiveTables": true,
     "DegradedMaxStalenessSeconds": 30,
-    "PipelinedMGetEnabled": true
+    "PipelinedMGetEnabled": true,
+    "LocalStalenessBudgetMilliseconds": 150
   }
 }
 ```
@@ -877,6 +882,18 @@ Das Gateway integriert Casbin für feingranulare Autorisierungs- und Row-Level-S
 }
 ```
 
+#### `Casbin:DecisionCache` (Decision Cache & Policy Epoch)
+
+| Key | Type | Range | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `Capacity` | `int` | `100 .. 1000000` | `100000` | Maximum cached decisions per node (sharded LRU). |
+| `ShareAcrossUsers` | `bool` | `true \| false` | `true` | Users matching exactly the same rules share one decision when no candidate rule reads a user-specific input; never for delegated sources. `false` is the kill switch (every decision keyed by user; restart required). |
+| `TtlSeconds` | `int` | `1 .. 3600` | `60` | Maximum age of a cached decision. |
+| `EpochCheckSeconds` | `int` | `1 .. TtlSeconds` | `5` | Interval of cluster policy epoch reads per tenant. |
+| `UnavailableBackoffMilliseconds` | `int` | `100 .. 10000` | `1000` | Cache bypass after a failed epoch read. |
+
+Details: [F-SEC-06](features/f-sec-06-casbin-decision-cache-policy-epoch.md).
+
 #### Startup Validation & Model Contract (Probes M1–M8, W1–W6)
 
 To prevent security vulnerabilities from model misconfigurations (such as syntax errors, parentheses/operator precedence bugs like `g(r.sub, p.sub) && r.tenant == p.tenant || p.tenant == "*"` bypassing subject and object checks, or missing `sub_rule` evaluation), the gateway validates Casbin models **by behavior on an isolated throw-away enforcer** rather than superficial text matching (`CasbinModelContract.Verify`):
@@ -1012,8 +1029,38 @@ Steuert die Verwaltung und Cluster-Synchronisation relationsbasierter Zeilenfilt
 
 ---
 
+### 2.21 `Governance:IndividualGrants` (Time-Bound Individual Grants)
 
+Maxima of individual grants (`User` / `ServicePrincipal` grantees and individual access profile assignments). Every value can only **shorten** the built-in ceiling; a value above the ceiling or below 1 aborts startup. Group and role grants are standing and not affected. Details and error codes: [F-GOV-22](features/f-gov-22-time-bound-individual-grants.md).
 
+| Key | Type | Range | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `RegularMaxDays` | `int` | `1 .. 180` | `180` | Regular data. Also the read-time clamp of user consents. |
+| `SensitiveMaxDays` | `int` | `1 .. 90` | `90` | Sensitive / PII tables (unclassifiable tables count as sensitive). |
+| `UnmaskedMaxDays` | `int` | `1 .. 30` | `30` | Individual `Unmasked` access. |
+| `PrivilegedMaxDays` | `int` | `1 .. 7` | `7` | Individual privileged functional rights. |
+| `BreakGlassMaxHours` | `int` | `1 .. 72` | `72` | Break-glass exceptions. |
+| `ServicePrincipalMaxDays` | `int` | `1 .. 365` | `365` | Service principals as direct grantees. Also their read-time clamp. |
+| `CustomerRegularMaxDays` | `int` | `1 .. 90` | `90` | Regular data for customer-realm users. |
+| `AllowCustomerUnmasked` | `bool` | | `false` | Allows individual `Unmasked` grants in customer realms. |
+| `AllowCustomerPrivileged` | `bool` | | `false` | Allows individual privileged grants in customer realms. |
+| `RoleConversionHintAfterRenewals` | `int` | `1 .. 10` | `2` | Renewals after which a conversion to a group/role mapping is suggested. |
+| `CampaignRequiredAfterRenewals` | `int` | `1 .. 10` | `3` | Renewals after which a direct extension is refused and a campaign decision is required. |
+
+```json
+"Governance": {
+  "IndividualGrants": {
+    "RegularMaxDays": 180,
+    "SensitiveMaxDays": 90,
+    "UnmaskedMaxDays": 30,
+    "PrivilegedMaxDays": 7,
+    "BreakGlassMaxHours": 72,
+    "ServicePrincipalMaxDays": 365
+  }
+}
+```
+
+---
 
 ## 3. Deployment & Umgebungsvariablen
 

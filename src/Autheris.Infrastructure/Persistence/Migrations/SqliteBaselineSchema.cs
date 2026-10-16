@@ -106,6 +106,7 @@ internal sealed class SqliteBaselineSchema
                 effect TEXT NOT NULL,
                 grantee_type TEXT NOT NULL,
                 grantee_sid TEXT,
+                grantee_sid_norm TEXT,
                 role_id TEXT,
                 role_name TEXT,
                 valid_from TEXT NOT NULL,
@@ -114,7 +115,8 @@ internal sealed class SqliteBaselineSchema
                 revoked_by_sid TEXT,
                 revoked_at TEXT,
                 revoke_reason TEXT,
-                tenant_id TEXT NOT NULL DEFAULT 'legacy-single-tenant'
+                tenant_id TEXT NOT NULL DEFAULT 'legacy-single-tenant',
+                renewal_count INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS CONSENT_COLUMN_RULES (
@@ -235,6 +237,19 @@ internal sealed class SqliteBaselineSchema
             CREATE UNIQUE INDEX IF NOT EXISTS UX_POLICY_EPOCHS_NATURAL
                 ON POLICY_EPOCHS (domain, schema_name, table_name);
 
+            -- WP-SC-01: indexes of the consent query. grantee_sid_norm is the upper-invariant grantee SID written by the repository
+            -- (case-insensitive subject match); rows without it (NULL) are always candidates, the C# filter stays authoritative.
+            CREATE INDEX IF NOT EXISTS ix_consents_tenant_table ON CONSENTS (tenant_id, table_id, is_revoked);
+            CREATE INDEX IF NOT EXISTS ix_consents_tenant_grantee ON CONSENTS (tenant_id, grantee_sid_norm, is_revoked);
+            CREATE INDEX IF NOT EXISTS ix_consents_tenant_role ON CONSENTS (tenant_id, role_name);
+            CREATE INDEX IF NOT EXISTS ix_consent_column_rules_consent ON CONSENT_COLUMN_RULES (consent_id);
+            CREATE INDEX IF NOT EXISTS ix_consent_row_filters_consent ON CONSENT_ROW_FILTERS (consent_id);
+            CREATE INDEX IF NOT EXISTS ix_column_masking_rules_column ON COLUMN_MASKING_RULES (table_column_id);
+            CREATE INDEX IF NOT EXISTS ix_role_members_member ON ROLE_MEMBERS (member_sid);
+            CREATE INDEX IF NOT EXISTS ix_table_owners_owner ON TABLE_OWNERS (data_owner_id);
+            CREATE INDEX IF NOT EXISTS ix_tables_natural_ci
+                ON TABLES (source_name COLLATE NOCASE, schema_name COLLATE NOCASE, table_name COLLATE NOCASE);
+
             CREATE TABLE IF NOT EXISTS TABLE_RELATIONS (
                 id TEXT PRIMARY KEY,
                 parent_table_id TEXT NOT NULL,
@@ -312,12 +327,19 @@ internal sealed class SqliteBaselineSchema
                 subject_type TEXT NOT NULL DEFAULT 'User',
                 assigned_at TEXT NOT NULL,
                 expires_at TEXT,
-                PRIMARY KEY (tenant_id, profile_id, subject),
+                subject_norm TEXT,
+                created_by TEXT,
+                approved_by TEXT,
+                approved_at TEXT,
+                justification TEXT,
+                kind TEXT NOT NULL DEFAULT 'Standard',
+                renewal_count INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (tenant_id, profile_id, subject_type, subject),
                 FOREIGN KEY (tenant_id, profile_id) REFERENCES ACCESS_PROFILES (tenant_id, profile_id) ON DELETE CASCADE
             );
 
             CREATE INDEX IF NOT EXISTS IX_ACCESS_PROFILE_ASSIGNMENTS_SUBJECT 
-                ON ACCESS_PROFILE_ASSIGNMENTS(tenant_id, subject);
+                ON ACCESS_PROFILE_ASSIGNMENTS(tenant_id, subject_type, subject_norm);
 
             CREATE TABLE IF NOT EXISTS VIRTUAL_FILTER_GENERATION (
                 id INTEGER PRIMARY KEY CHECK (id = 1),

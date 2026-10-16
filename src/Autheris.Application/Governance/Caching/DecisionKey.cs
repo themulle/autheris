@@ -38,9 +38,11 @@ internal readonly struct DecisionKey : IEquatable<DecisionKey>
         KeyValuePair<string, string?>[] attributes,
         string[] columns,
         string[]? tableColumns,
-        bool isCacheable)
+        bool isCacheable,
+        ulong[]? matchBits = null)
     {
         IsCacheable = isCacheable;
+        MatchBits = matchBits;
         Epoch = epoch;
         Tenant = tenant;
         UserSid = userSid;
@@ -55,6 +57,15 @@ internal readonly struct DecisionKey : IEquatable<DecisionKey>
         TableColumns = tableColumns;
 
         var hash = new HashCode();
+        hash.Add(matchBits is not null);
+        if (matchBits is not null)
+        {
+            foreach (var word in matchBits)
+            {
+                hash.Add(word);
+            }
+        }
+
         hash.Add(epoch);
         hash.Add(tenant, StringComparer.Ordinal);
         hash.Add(userSid, StringComparer.Ordinal);
@@ -79,6 +90,16 @@ internal readonly struct DecisionKey : IEquatable<DecisionKey>
 
         _hash = hash.ToHashCode();
     }
+
+    /// <summary>
+    /// WP-PF-09: non-null for a shape-shared key. The bit i says whether the subjects of the request match the subject of candidate
+    /// rule i, so two users that match exactly the same candidate rules (and read no user-specific input) share one entry. The key
+    /// then carries no user, group set or client IP; <see cref="CreateShared"/> documents when that is allowed.
+    /// </summary>
+    public ulong[]? MatchBits { get; }
+
+    /// <summary>True for a shape-shared key (never equal to a per-user key).</summary>
+    public bool IsShared => MatchBits is not null;
 
     public long Epoch { get; }
 
@@ -133,9 +154,45 @@ internal readonly struct DecisionKey : IEquatable<DecisionKey>
             cacheable);
     }
 
+    /// <summary>
+    /// Builds the shape-shared key (WP-PF-09 / SEC-SC-09). The caller must have established that no candidate rule references the
+    /// user, its aliases or groups (beyond the match bits), the client IP or time, and that the request is not for a delegated source.
+    /// The attributes and the purpose are part of the key only when a candidate rule reads them.
+    /// </summary>
+    public static DecisionKey CreateShared(long epoch, SecurityEvaluationContext context, string action, string table, ulong[] matchBits, bool includeContext)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(action);
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(matchBits);
+
+        var cacheable = true;
+        var attributes = includeContext ? SortedAttributes(context.Attributes, out cacheable) : NoAttributes;
+        return new DecisionKey(
+            epoch,
+            context.Tenant.Value,
+            string.Empty,
+            table,
+            action,
+            includeContext ? context.PurposeId : null,
+            null,
+            context.TargetDialect,
+            NoStrings,
+            attributes,
+            SortedStrings(context.RequestedColumns),
+            context.TableColumns is null ? null : SortedStrings(context.TableColumns),
+            cacheable,
+            matchBits);
+    }
+
     public bool Equals(DecisionKey other)
     {
         if (_hash != other._hash || Epoch != other.Epoch || TargetDialect != other.TargetDialect)
+        {
+            return false;
+        }
+
+        if (IsShared != other.IsShared || (IsShared && !MatchBits.AsSpan().SequenceEqual(other.MatchBits)))
         {
             return false;
         }

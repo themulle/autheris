@@ -103,12 +103,19 @@ Lease TTLs are enforced by the store. Fencing seeds and the webhook outbox ([F-E
 
 ### 4.5 Replica-Aware Request Features
 
-Two request-path features share state through the cluster state store when the topology is cluster-wide:
+Request-path features share state through the cluster state store (or the Redis cache) when the topology is cluster-wide:
 
 | Feature | Shared state | Replica behaviour |
 | :--- | :--- | :--- |
 | Async query jobs ([F-DATA-07](f-data-07-async-query-jobs.md#6-multi-replica-behaviour)) | Job records `asyncjob:{tenant}:{jobId}` (no SQL text, no absolute paths), cancel tombstones `asyncjob:{tenant}:{jobId}:cancel`, channel `asyncjob:cancel` | Status and cancel work on every replica. Result download of another replica's job needs a shared ReadWriteMany scratch volume (`Gateway:AsyncJobs:SharedScratchDirectory`); otherwise it answers `503` with `ASYNC_JOB_RESULT_NODE_LOCAL` and clients need sticky routing. Concurrency and queue caps apply per node. Jobs are not resumed after node loss; they are reported `Failed` (`job owner node lost`). While the store is unavailable, submits and requests for jobs owned by another replica answer `503`. |
 | Casbin decision cache ([F-SEC-06](f-sec-06-casbin-decision-cache-policy-epoch.md)) | Counters `policy:epoch:{tenant}` and `policy:epoch:*`, hint channel `policy:epoch:changed` | A policy change on one replica makes every replica re-read its own policy file and discard cached decisions within `min(TtlSeconds, EpochCheckSeconds + reload time)`. All replicas must load the same policy file; programmatic rules stay node-local. While the store is unavailable the decision cache is bypassed. |
+
+| Consent epochs (`EpochValidationService`) | Counters `{InstanceName}epoch:{table}` per governed table, invalidation channel `Caching:Redis:InvalidationChannel` | A consent change bumps the table epoch; cached consent decisions of other replicas whose epoch differs are discarded. See "Consent epoch reads on Redis Cluster" below. |
+| Basic-auth verified marker ([F-AUTH-DX](f-auth-dx-basic-auth-session.md#behaviour-and-security)) | Keys `autheris:basicok:{hmac}` with the `SuccessCacheSeconds` lifetime | Only with `Authentication:BasicAuth:MarkerKeyRef`. A client pays the password hash once per cluster; any cache error falls back to per-replica verification. |
+
+**Consent epoch reads on Redis Cluster.** Epochs of several tables are read with **single-key `GET`s only**, issued together and pipelined by the multiplexer over one connection per node. A multi-key `MGET` would raise `CROSSSLOT` on Redis Cluster, because the epoch keys of different tables hash to different slots; single-key reads work identically on standalone Redis, Garnet and Redis Cluster without hash tags. `Caching:EpochValidation:PipelinedMGetEnabled` (default `true`) selects the concurrent pipelined reads; `false` reads the keys one after another. Any read error marks the affected tables invalid (fail closed).
+
+**Local staleness budget.** `Caching:EpochValidation:LocalStalenessBudgetMilliseconds` (default `150`, range 0..250) lets a replica reuse an epoch it read from Redis within that many milliseconds for **non-sensitive** tables of Autheris-enforced sources, saving one Redis round trip per request; epoch pub/sub normally delivers invalidations earlier. The budget is always **0** for highly sensitive tables (flagged by the caller or by the metadata lookup, which fails closed when metadata is missing) and for delegated sources, and a locally cached epoch older than the highest epoch already seen from Redis is never used. `MaxLocalEpochEntries` (default 50,000) bounds the local epoch cache. Set the budget to `0` to read Redis on every check.
 
 The Helm chart writes async job results to `/tmp/autheris-jobs` on the pod's `/tmp` `emptyDir` (`Gateway__AsyncJobs__ScratchDirectory`); `tmpVolume.sizeLimit` bounds that volume. The chart does not provision a shared volume.
 

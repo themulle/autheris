@@ -89,7 +89,8 @@ public sealed class AdminMcpTwoPhaseTests
                         ["customer_email"] = "mask",   // Sensitive PII masked
                         ["total_amount"] = "clear"
                     },
-                    RowFilter: "country = 'DE'")
+                    RowFilter: "country = 'DE'",
+                    ValidUntil: DateTimeOffset.UtcNow.AddDays(30))
             },
             Reason: "Q4 financial audit");
 
@@ -148,7 +149,7 @@ public sealed class AdminMcpTwoPhaseTests
         var service = _service;
         var planRequest = new AdminPlanAccessRequest(
             DatasetId: DatasetId,
-            Grants: [new("user_carol", new Dictionary<string, string> { ["id"] = "clear" })],
+            Grants: [new("user_carol", new Dictionary<string, string> { ["id"] = "clear" }, null, DateTimeOffset.UtcNow.AddDays(30))],
             Reason: "Maintenance");
 
         var planResult = await service.PlanAccessAsync(planRequest, AdminSid);
@@ -174,7 +175,7 @@ public sealed class AdminMcpTwoPhaseTests
         var service = _service;
         var planRequest = new AdminPlanAccessRequest(
             DatasetId: DatasetId,
-            Grants: [new("analyst_bob", new Dictionary<string, string> { ["id"] = "clear", ["total_amount"] = "clear" })],
+            Grants: [new("analyst_bob", new Dictionary<string, string> { ["id"] = "clear", ["total_amount"] = "clear" }, null, DateTimeOffset.UtcNow.AddDays(30))],
             Reason: "Authorized financial report");
 
         var planResult = await service.PlanAccessAsync(planRequest, AdminSid);
@@ -195,7 +196,7 @@ public sealed class AdminMcpTwoPhaseTests
 
         // ReBAC mutation verification
         await _rebacStore.Received(1).AddTuplesAsync(
-            Arg.Is<IEnumerable<RebacTuple>>(tuples => tuples.Any(t => t.User.Contains("analyst_bob"))),
+            Arg.Is<IEnumerable<RebacTuple>>(tuples => tuples.Any(t => t.User.Contains("analyst_bob")) && tuples.All(t => t.ExpiresAt != null)),
             Arg.Any<CancellationToken>());
 
         // WORM Audit Entry verification
@@ -266,7 +267,7 @@ public sealed class AdminMcpTwoPhaseTests
         var plan = await service.PlanAccessAsync(
             new AdminPlanAccessRequest(
                 DatasetId,
-                [new PrincipalAccessGrant("analyst_bob", new Dictionary<string, string> { ["id"] = "clear" }, null)],
+                [new PrincipalAccessGrant("analyst_bob", new Dictionary<string, string> { ["id"] = "clear" }, null, DateTimeOffset.UtcNow.AddDays(30))],
                 "tenant scoping"),
             AdminSid,
             "tenant-a");
@@ -420,7 +421,7 @@ public sealed class AdminMcpTwoPhaseTests
                 datasetId = DatasetId,
                 grants = new object[]
                 {
-                    new { principal = "analyst_bob", columns = new Dictionary<string, string> { ["customer_name"] = "clear" } }
+                    new { principal = "analyst_bob", columns = new Dictionary<string, string> { ["customer_name"] = "clear" }, validUntil = DateTimeOffset.UtcNow.AddDays(30) }
                 },
                 reason = "Quarterly compliance review"
             }));
@@ -442,7 +443,7 @@ public sealed class AdminMcpTwoPhaseTests
         const string colonAdminSid = "user:david:governance_admin";
         var planRequest = new AdminPlanAccessRequest(
             DatasetId: DatasetId,
-            Grants: [new("user_eve", new Dictionary<string, string> { ["id"] = "clear" })],
+            Grants: [new("user_eve", new Dictionary<string, string> { ["id"] = "clear" }, null, DateTimeOffset.UtcNow.AddDays(30))],
             Reason: "ReBAC colon SID test");
 
         var planResult = await _service.PlanAccessAsync(planRequest, colonAdminSid);

@@ -9,6 +9,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Governance.Grants;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -34,14 +35,17 @@ public sealed class ConsentRequestService : IConsentRequestService
     private readonly IIdempotencyStore? _idempotencyStore;
     private readonly IConsentRequestDispatcher? _dispatcher;
     private readonly IOptions<GatewayOptions>? _gatewayOptions;
+    private readonly IGrantPolicy _grantPolicy;
 
     public ConsentRequestService(
         ITableMetadataRepository metadataRepository,
         IConsentApprovalRepository approvalRepository,
         IIdempotencyStore? idempotencyStore = null,
         IConsentRequestDispatcher? dispatcher = null,
-        IOptions<GatewayOptions>? gatewayOptions = null)
+        IOptions<GatewayOptions>? gatewayOptions = null,
+        IGrantPolicy? grantPolicy = null)
     {
+        _grantPolicy = grantPolicy ?? new GrantPolicy();
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _approvalRepository = approvalRepository ?? throw new ArgumentNullException(nameof(approvalRepository));
         _idempotencyStore = idempotencyStore;
@@ -99,6 +103,22 @@ public sealed class ConsentRequestService : IConsentRequestService
         // R-GQL-9: same ClusterAdmin exception as approve, reject and revoke.
         var tenantId = ResolveTenantId(principal, command.ContextTenant, isCrossTenantAdmin);
 
+        // WP-SC-16: a user request is an individual grant; its duration is bounded by the class of the table (fail closed).
+        var now = DateTimeOffset.UtcNow;
+        var grantDecision = _grantPolicy.Evaluate(new GrantRequest(
+            GranteeType.User,
+            userSid.Value,
+            GrantKind.Consent,
+            now.AddDays(durationDays),
+            now,
+            GrantClassifier.Classify([meta]),
+            Requester: userSid.Value,
+            Justification: justification));
+        if (!grantDecision.Allowed)
+        {
+            throw new ConsentRequestException(grantDecision.ErrorCode ?? GrantErrorCodes.Indeterminate, grantDecision.Reason);
+        }
+
         bool isItsmEnabled = _dispatcher != null && (_gatewayOptions?.Value.Itsm.Enabled == true);
 
         var request = new ConsentRequest
@@ -109,7 +129,7 @@ public sealed class ConsentRequestService : IConsentRequestService
             RequestedGranteeType = GranteeType.User,
             RequestedGranteeRef = userSid.Value,
             BusinessJustification = justification.Trim(),
-            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(durationDays),
+            RequestedValidTo = now.AddDays(durationDays),
             Status = isItsmEnabled ? "PENDING_EXTERNAL_APPROVAL" : "PENDING",
             TenantId = tenantId,
             RequesterIdentifiers = ExtractPrincipalIdentifiers(principal, userSid.Value)

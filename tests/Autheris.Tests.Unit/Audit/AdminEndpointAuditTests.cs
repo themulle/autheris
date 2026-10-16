@@ -72,7 +72,36 @@ public sealed class AdminEndpointAuditTests
             new TokenRevocationEndpoints.RevokeTokenRequest("alice", null), AdminContext(), revocation, AuditWriterTestServices.Over(DownStore()), default));
     }
 
-    private static RebacTuple Tuple() => new("home", "user:alice", "viewer", "table:sales.public.orders");
+    private static RebacTuple Tuple() => new("home", "user:alice", "viewer", "table:sales.public.orders") { ExpiresAt = DateTimeOffset.UtcNow.AddDays(30) };
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(400)]
+    public async Task SEC_SC_20_RebacTupleAdd_IndividualUserTuple_NeedsAnExpiryWithinTheMaximum(int? days)
+    {
+        var context = AdminContext();
+        var store = Substitute.For<IRebacStore>();
+        var tuple = new RebacTuple("home", "user:alice", "viewer", "table:sales.public.orders") { ExpiresAt = days is { } d ? DateTimeOffset.UtcNow.AddDays(d) : null };
+
+        var result = await RebacEndpoints.AddTuplesAsync([tuple], context.Request, store, Substitute.For<IRebacEvaluator>(), AuditWriterTestServices.Over(CancellationAwareRepo()));
+
+        ((IStatusCodeHttpResult)result).StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+        await store.DidNotReceiveWithAnyArgs().AddTupleAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task SEC_SC_20_RebacTupleAdd_StructuralAndUsersetTuples_AreNotIndividualGrants()
+    {
+        var context = AdminContext();
+        var store = Substitute.For<IRebacStore>();
+        var evaluator = Substitute.For<IRebacEvaluator>();
+        evaluator.InvalidateTenantCacheAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        RebacTuple[] standing = [new("home", "group:eng#member", "viewer", "table:sales.public.orders"), new("home", "schema:sales.public", "parent", "table:sales.public.orders")];
+
+        var result = await RebacEndpoints.AddTuplesAsync([.. standing], context.Request, store, evaluator, AuditWriterTestServices.Over(CancellationAwareRepo()));
+
+        ((IStatusCodeHttpResult)result).StatusCode.ShouldBe(StatusCodes.Status200OK);
+    }
 
     [Fact]
     public async Task RebacTupleAdd_AuditStoreDown_Returns503()

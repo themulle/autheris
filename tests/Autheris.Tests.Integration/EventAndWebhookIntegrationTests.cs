@@ -95,7 +95,7 @@ public sealed class EventAndWebhookIntegrationTests : IClassFixture<WebApplicati
             DatasetId: "crm.customers",
             Grants:
             [
-                new PrincipalAccessGrant("david", new Dictionary<string, string> { ["email"] = "clear" })
+                new PrincipalAccessGrant("david", new Dictionary<string, string> { ["email"] = "clear" }, null, DateTimeOffset.UtcNow.AddDays(30))
             ],
             Reason: "Customer onboarding verification");
 

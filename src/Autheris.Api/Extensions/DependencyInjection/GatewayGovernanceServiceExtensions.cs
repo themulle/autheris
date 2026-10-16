@@ -74,22 +74,19 @@ public static class GatewayGovernanceServiceExtensions
         {
             RegisterGovernanceAggregateStores<PostgreSqlGovernanceRepository, PostgreSqlGovernanceMigrationRunner>(
                 services,
-                cdcWebhooksEnabled,
-                useRepositoryAccessProfiles: false);
+                cdcWebhooksEnabled);
         }
         else if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.SqlServer))
         {
             RegisterGovernanceAggregateStores<SqlServerGovernanceRepository, SqlServerGovernanceMigrationRunner>(
                 services,
-                cdcWebhooksEnabled,
-                useRepositoryAccessProfiles: false);
+                cdcWebhooksEnabled);
         }
         else
         {
             RegisterGovernanceAggregateStores<SqliteGovernanceRepository, SqliteGovernanceMigrationRunner>(
                 services,
-                cdcWebhooksEnabled,
-                useRepositoryAccessProfiles: true);
+                cdcWebhooksEnabled);
         }
 
         // WP-ARC-A-11: durable, fenced CDC watermarks live in the governance database (the extension registers no store).
@@ -155,6 +152,12 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IDifferentialPrivacyEngine, DifferentialPrivacyEngine>();
         services.AddSingleton<IEuAiActAuditExporter, EuAiActAuditExporter>();
         services.AddSingleton<Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService, Autheris.Application.Governance.Services.EffectiveAccessExplanationService>();
+        services.AddOptions<Autheris.Domain.Options.IndividualGrantOptions>() // WP-SC-16
+            .Configure<Microsoft.Extensions.Configuration.IConfiguration>((o, cfg) =>
+                Microsoft.Extensions.Configuration.ConfigurationBinder.Bind(cfg.GetSection(Autheris.Domain.Options.IndividualGrantOptions.SectionName), o))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        Autheris.Application.Governance.Grants.IndividualGrantServiceCollectionExtensions.AddIndividualGrantPolicy(services);
         services.AddSingleton<Autheris.Application.Governance.Interfaces.IDeclarativeConsentApplyService, Autheris.Application.Governance.Services.DeclarativeConsentApplyService>();
 
         // ITSM orchestration (dispatcher, recertification, outbox workers)
@@ -191,8 +194,7 @@ public static class GatewayGovernanceServiceExtensions
 
     private static void RegisterGovernanceAggregateStores<TRepository, TMigrationRunner>(
         IServiceCollection services,
-        bool cdcWebhooksEnabled,
-        bool useRepositoryAccessProfiles)
+        bool cdcWebhooksEnabled)
         where TRepository : class,
             IGovernanceStoreInitializer,
             IGovernanceRepository,
@@ -225,14 +227,8 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IWebhookOutbox>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IVirtualFilterRepository>(sp => sp.GetRequiredService<TRepository>());
-        if (useRepositoryAccessProfiles)
-        {
-            services.AddSingleton<IAccessProfileRepository>(sp => (IAccessProfileRepository)sp.GetRequiredService<TRepository>());
-        }
-        else
-        {
-            services.AddSingleton<IAccessProfileRepository, InMemoryAccessProfileRepository>();
-        }
+        // WP-SC-03: every engine persists access profiles; the in-memory repository is a test double only.
+        services.AddSingleton<IAccessProfileRepository>(sp => (IAccessProfileRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<TRepository>());
         if (cdcWebhooksEnabled)

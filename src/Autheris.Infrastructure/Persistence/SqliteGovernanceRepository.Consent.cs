@@ -27,30 +27,30 @@ public partial class SqliteGovernanceRepository
         TenantId? tenantId,
         CancellationToken ct = default)
     {
-        var subjectSet = subjects.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var subjectList = subjects.ToList();
+        var subjectSet = subjectList.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (subjectSet.Count == 0) return Array.Empty<Consent>();
+        var normalized = ConsentSubjectFilter.DistinctNormalized(subjectList);
 
         await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
         var conn = scope.Connection;
         {
-            var consents = new List<Consent>();
-            using (var cmd = conn.CreateCommand())
+            var byId = new Dictionary<Guid, Consent>();
+            foreach (var chunk in ConsentSubjectFilter.Chunks(normalized))
             {
-                var tenantFilter = tenantId != null ? " AND c.tenant_id = @tenantId" : "";
-                cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
-                                           c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
-                                           c.is_revoked, c.revoked_by_sid, c.revoked_at, c.revoke_reason,
-                                           c.tenant_id
-                                    FROM CONSENTS c
-                                    JOIN TABLES t ON c.table_id = t.id
-                                    WHERE t.source_name = @domain COLLATE NOCASE AND t.schema_name = @schema COLLATE NOCASE AND t.table_name = @table COLLATE NOCASE
-                                      AND c.is_revoked = 0" + tenantFilter;
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = BuildSubjectConsentSql(chunk.Count, tenantId != null);
                 cmd.Parameters.AddWithValue("@domain", table.Domain);
                 cmd.Parameters.AddWithValue("@schema", table.Schema);
                 cmd.Parameters.AddWithValue("@table", table.TableName);
                 if (tenantId != null)
                 {
                     cmd.Parameters.AddWithValue("@tenantId", tenantId.Value.Value);
+                }
+
+                for (var i = 0; i < chunk.Count; i++)
+                {
+                    cmd.Parameters.AddWithValue("@s" + i, chunk[i]);
                 }
 
                 using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -74,9 +74,12 @@ public partial class SqliteGovernanceRepository
                         continue;
                     }
 
-                    var consent = new Consent
+                    var id = Guid.Parse(reader.GetString(0));
+                    if (byId.ContainsKey(id)) continue;
+
+                    byId[id] = new Consent
                     {
-                        Id = Guid.Parse(reader.GetString(0)),
+                        Id = id,
                         TableId = Guid.Parse(reader.GetString(1)),
                         TableIdentifier = table,
                         ConsentRequestId = reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
@@ -90,15 +93,34 @@ public partial class SqliteGovernanceRepository
                         IsRevoked = reader.GetInt32(10) == 1,
                         TenantId = reader.IsDBNull(14) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(14))
                     };
-                    consents.Add(consent);
                 }
             }
 
+            var consents = byId.Values.ToList();
+
+            consents.RemoveAll(c => !c.IsActive(atTime) && !(c.Effect == ConsentEffect.Deny && c.ValidFrom > atTime)); // read-time clamp (WP-SC-16): never trust the raw valid_to
             // Hydrate column rules & row filters in batch (K-01)
             await HydrateConsentsBatchAsync(conn, consents, ct);
 
             return consents;
         }
+    }
+
+    /// <summary>
+    /// WP-SC-01: the indexed subject/table consent query. The filter on <c>grantee_sid_norm</c> is a prefilter only (role consents and
+    /// rows without a normalised SID always pass); the C# filter on the loaded rows stays authoritative.
+    /// </summary>
+    internal static string BuildSubjectConsentSql(int subjectCount, bool withTenant)
+    {
+        var tenantFilter = withTenant ? " AND c.tenant_id = @tenantId" : "";
+        return @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
+                                           c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
+                                           c.is_revoked, c.revoked_by_sid, c.revoked_at, c.revoke_reason,
+                                           c.tenant_id
+                                    FROM CONSENTS c
+                                    JOIN TABLES t ON c.table_id = t.id
+                                    WHERE t.source_name = @domain COLLATE NOCASE AND t.schema_name = @schema COLLATE NOCASE AND t.table_name = @table COLLATE NOCASE
+                                      AND c.is_revoked = 0" + tenantFilter + ConsentSubjectFilter.InListPredicate(subjectCount);
     }
 
     public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(
@@ -116,7 +138,9 @@ public partial class SqliteGovernanceRepository
         CancellationToken ct = default)
     {
         var effectiveAt = atTime ?? DateTimeOffset.UtcNow;
-        var subjectList = subjects.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var subjectEnumerated = subjects.ToList();
+        var subjectList = subjectEnumerated.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var normalized = ConsentSubjectFilter.DistinctNormalized(subjectEnumerated);
         var roleSet = roles != null
             ? new HashSet<string>(roles, StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -124,20 +148,19 @@ public partial class SqliteGovernanceRepository
         await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
         var conn = scope.Connection;
         {
-            var consents = new List<Consent>();
-            using (var cmd = conn.CreateCommand())
+            var byId = new Dictionary<Guid, Consent>();
+            foreach (var chunk in ConsentSubjectFilter.Chunks(normalized))
             {
-                var tenantFilter = tenantId != null ? " AND c.tenant_id = @tenantId" : "";
-                cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
-                                           c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
-                                           c.is_revoked, t.source_name, t.schema_name, t.table_name,
-                                           c.tenant_id
-                                    FROM CONSENTS c
-                                    JOIN TABLES t ON c.table_id = t.id
-                                    WHERE c.is_revoked = 0" + tenantFilter;
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = BuildAllConsentsSql(chunk.Count, tenantId != null);
                 if (tenantId != null)
                 {
                     cmd.Parameters.AddWithValue("@tenantId", tenantId.Value.Value);
+                }
+
+                for (var i = 0; i < chunk.Count; i++)
+                {
+                    cmd.Parameters.AddWithValue("@s" + i, chunk[i]);
                 }
 
                 using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -165,12 +188,15 @@ public partial class SqliteGovernanceRepository
                         continue;
                     }
 
+                    var id = Guid.Parse(reader.GetString(0));
+                    if (byId.ContainsKey(id)) continue;
+
                     var domain = reader.GetString(11);
                     var tableIdentifier = new TableIdentifier(domain, reader.GetString(12), reader.GetString(13));
 
-                    var consent = new Consent
+                    byId[id] = new Consent
                     {
-                        Id = Guid.Parse(reader.GetString(0)),
+                        Id = id,
                         TableId = Guid.Parse(reader.GetString(1)),
                         TableIdentifier = tableIdentifier,
                         ConsentRequestId = reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
@@ -184,15 +210,29 @@ public partial class SqliteGovernanceRepository
                         IsRevoked = reader.GetInt32(10) == 1,
                         TenantId = reader.IsDBNull(14) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(14))
                     };
-                    consents.Add(consent);
                 }
             }
 
+            var consents = byId.Values.ToList();
+
+            consents.RemoveAll(c => !c.IsActive(effectiveAt)); // read-time clamp (WP-SC-16): never trust the raw valid_to
             // Hydrate column rules & row filters in batch (K-01)
             await HydrateConsentsBatchAsync(conn, consents, ct);
 
             return consents;
         }
+    }
+
+    internal static string BuildAllConsentsSql(int subjectCount, bool withTenant)
+    {
+        var tenantFilter = withTenant ? " AND c.tenant_id = @tenantId" : "";
+        return @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
+                                           c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
+                                           c.is_revoked, t.source_name, t.schema_name, t.table_name,
+                                           c.tenant_id
+                                    FROM CONSENTS c
+                                    JOIN TABLES t ON c.table_id = t.id
+                                    WHERE c.is_revoked = 0" + tenantFilter + ConsentSubjectFilter.InListPredicate(subjectCount);
     }
 
     /// <summary>
@@ -790,13 +830,14 @@ public partial class SqliteGovernanceRepository
             using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = tx;
-                cmd.CommandText = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, role_id, role_name, valid_from, valid_to, is_revoked, tenant_id)
-                                    VALUES (@id, @tid, @reqId, 'Allow', @type, @sid, @roleId, @roleName, @from, @to, 0, @tenantId)";
+                cmd.CommandText = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, grantee_sid_norm, role_id, role_name, valid_from, valid_to, is_revoked, tenant_id)
+                                    VALUES (@id, @tid, @reqId, 'Allow', @type, @sid, @sidNorm, @roleId, @roleName, @from, @to, 0, @tenantId)";
                 cmd.Parameters.AddWithValue("@id", consentId.ToString());
                 cmd.Parameters.AddWithValue("@tid", req.TableId.ToString());
                 cmd.Parameters.AddWithValue("@reqId", req.Id.ToString());
                 cmd.Parameters.AddWithValue("@type", req.RequestedGranteeType.ToString());
                 cmd.Parameters.AddWithValue("@sid", isRole ? DBNull.Value : (object)req.RequestedGranteeRef);
+                cmd.Parameters.AddWithValue("@sidNorm", ConsentSubjectFilter.NormalizeParameter(isRole ? DBNull.Value : (object)req.RequestedGranteeRef));
                 cmd.Parameters.AddWithValue("@roleId", DBNull.Value);
                 cmd.Parameters.AddWithValue("@roleName", isRole ? (object)req.RequestedGranteeRef : DBNull.Value);
                 cmd.Parameters.AddWithValue("@from", DateTimeOffset.UtcNow.ToString("O"));
@@ -1245,99 +1286,7 @@ public partial class SqliteGovernanceRepository
         var conn = scope.Connection;
         {
             using var tx = conn.BeginTransaction();
-
-            using var cmd = conn.CreateCommand();
-            cmd.Transaction = tx;
-            cmd.CommandText = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, role_id, role_name, valid_from, valid_to, is_revoked, tenant_id)
-                                VALUES (@id, @tid, @reqId, @effect, @type, @sid, @roleId, @roleName, @from, @to, 0, @tenantId)";
-            cmd.Parameters.AddWithValue("@id", consent.Id.ToString());
-            cmd.Parameters.AddWithValue("@tid", consent.TableId.ToString());
-            cmd.Parameters.AddWithValue("@reqId", (object?)consent.ConsentRequestId?.ToString() ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@effect", consent.Effect.ToString());
-            cmd.Parameters.AddWithValue("@type", consent.GranteeType.ToString());
-            cmd.Parameters.AddWithValue("@sid", (object?)consent.GranteeSid?.Value ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@roleId", (object?)consent.RoleId?.ToString() ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@roleName", (object?)consent.RoleName ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@from", consent.ValidFrom.ToString("O"));
-            cmd.Parameters.AddWithValue("@to", consent.ValidTo.ToString("O"));
-            cmd.Parameters.AddWithValue("@tenantId", (object?)consent.TenantId.Value ?? TenantId.LegacySingleTenant.Value);
-
-            await cmd.ExecuteNonQueryAsync(ct);
-
-            foreach (var rule in consent.ColumnRules)
-            {
-                using var ruleCmd = conn.CreateCommand();
-                ruleCmd.Transaction = tx;
-                ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level, applicable_scopes)
-                                        VALUES (@id, @cid, @tcid, @col, @lvl, @scopes)";
-                ruleCmd.Parameters.AddWithValue("@id", rule.Id.ToString());
-                ruleCmd.Parameters.AddWithValue("@cid", consent.Id.ToString());
-                ruleCmd.Parameters.AddWithValue("@tcid", rule.TableColumnId.ToString());
-                ruleCmd.Parameters.AddWithValue("@col", rule.ColumnName);
-                ruleCmd.Parameters.AddWithValue("@lvl", (int)rule.AccessLevel);
-                ruleCmd.Parameters.AddWithValue("@scopes", rule.ApplicableScopes != null && rule.ApplicableScopes.Count > 0 ? string.Join(",", rule.ApplicableScopes) : string.Empty);
-                await ruleCmd.ExecuteNonQueryAsync(ct);
-            }
-
-            foreach (var filter in consent.RowFilters)
-            {
-                using var filterCmd = conn.CreateCommand();
-                filterCmd.Transaction = tx;
-                filterCmd.CommandText = @"INSERT INTO CONSENT_ROW_FILTERS (
-                    id, consent_id, filter_group, table_column_id, column_name, operator, value_type, value_json, value_source, user_attribute,
-                    filter_type, dependent_table, dependent_table_alias, foreign_key_column, primary_key_column,
-                    subquery_predicate_json, target_temporal_column, dependent_valid_from_column, dependent_valid_to_column,
-                    target_table_alias, additional_hops_json)
-                VALUES (
-                    @id, @cid, @grp, @tcid, @col, @op, @type, @json, @src, @attr,
-                    @ftype, @deptbl, @depalias, @fkcol, @pkcol,
-                    @subpred, @ttemp, @dvfrom, @dvto,
-                    @talias, @hops)";
-                filterCmd.Parameters.AddWithValue("@id", filter.Id.ToString());
-                filterCmd.Parameters.AddWithValue("@cid", consent.Id.ToString());
-                filterCmd.Parameters.AddWithValue("@grp", filter.FilterGroup);
-                filterCmd.Parameters.AddWithValue("@tcid", filter.TableColumnId.ToString());
-                filterCmd.Parameters.AddWithValue("@col", filter.ColumnName);
-                filterCmd.Parameters.AddWithValue("@op", filter.Operator);
-                filterCmd.Parameters.AddWithValue("@type", filter.ValueType);
-                filterCmd.Parameters.AddWithValue("@json", filter.ValueJson);
-                filterCmd.Parameters.AddWithValue("@src", filter.ValueSource);
-                filterCmd.Parameters.AddWithValue("@attr", (object?)filter.UserAttribute ?? DBNull.Value);
-
-                filterCmd.Parameters.AddWithValue("@ftype", (int)filter.FilterType);
-                filterCmd.Parameters.AddWithValue("@deptbl", filter.DependentTable.HasValue ? (object)filter.DependentTable.Value.ToString() : DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@depalias", (object?)filter.DependentTableAlias ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@fkcol", (object?)filter.ForeignKeyColumn ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@pkcol", (object?)filter.PrimaryKeyColumn ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@subpred", (object?)filter.SubqueryFilterPredicateJson ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@ttemp", (object?)filter.TargetTemporalColumn ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@dvfrom", (object?)filter.DependentValidFromColumn ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@dvto", (object?)filter.DependentValidToColumn ?? DBNull.Value);
-                filterCmd.Parameters.AddWithValue("@talias", (object?)filter.TargetTableAlias ?? DBNull.Value);
-                var hopsJson = filter.AdditionalHops != null ? System.Text.Json.JsonSerializer.Serialize(filter.AdditionalHops) : null;
-                filterCmd.Parameters.AddWithValue("@hops", (object?)hopsJson ?? DBNull.Value);
-
-                await filterCmd.ExecuteNonQueryAsync(ct);
-            }
-
-            var auditEntry = new AuditLogEntry
-            {
-                TenantId = consent.TenantId,
-                EventType = "CONSENT_GRANTED",
-                ActorSid = consent.CreatedBySid ?? new Sid("SYSTEM"),
-                TargetTable = consent.TableIdentifier.ToString(),
-                Decision = "GRANTED",
-                TraceId = Guid.NewGuid().ToString("N"),
-                DetailsJson = JsonSerializer.Serialize(new
-                {
-                    ConsentId = consent.Id,
-                    GranteeType = consent.GranteeType.ToString(),
-                    GranteeSid = consent.GranteeSid?.Value,
-                    ValidFrom = consent.ValidFrom,
-                    ValidTo = consent.ValidTo
-                })
-            };
-            await RecordAuditEventInternalAsync(conn, auditEntry, ct, tx);
+            await InsertConsentCoreAsync(conn, tx, consent, ct);
 
             await IncrementTableEpochInternalAsync(conn, consent.TableIdentifier, tx, ct);
             await tx.CommitAsync(ct);
@@ -1348,6 +1297,105 @@ public partial class SqliteGovernanceRepository
 
             return consent;
         }
+    }
+
+    /// <summary>Inserts the consent row, its column rules and row filters and the grant audit entry inside <paramref name="tx"/>. Neither bumps the epoch nor commits.</summary>
+    private async Task InsertConsentCoreAsync(SqliteConnection conn, SqliteTransaction tx, Consent consent, CancellationToken ct)
+    {
+
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, grantee_sid_norm, role_id, role_name, valid_from, valid_to, is_revoked, tenant_id)
+                            VALUES (@id, @tid, @reqId, @effect, @type, @sid, @sidNorm, @roleId, @roleName, @from, @to, 0, @tenantId)";
+        cmd.Parameters.AddWithValue("@id", consent.Id.ToString());
+        cmd.Parameters.AddWithValue("@tid", consent.TableId.ToString());
+        cmd.Parameters.AddWithValue("@reqId", (object?)consent.ConsentRequestId?.ToString() ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@effect", consent.Effect.ToString());
+        cmd.Parameters.AddWithValue("@type", consent.GranteeType.ToString());
+        cmd.Parameters.AddWithValue("@sid", (object?)consent.GranteeSid?.Value ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@sidNorm", ConsentSubjectFilter.NormalizeParameter((object?)consent.GranteeSid?.Value ?? DBNull.Value));
+        cmd.Parameters.AddWithValue("@roleId", (object?)consent.RoleId?.ToString() ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@roleName", (object?)consent.RoleName ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@from", consent.ValidFrom.ToString("O"));
+        cmd.Parameters.AddWithValue("@to", consent.ValidTo.ToString("O"));
+        cmd.Parameters.AddWithValue("@tenantId", (object?)consent.TenantId.Value ?? TenantId.LegacySingleTenant.Value);
+
+        await cmd.ExecuteNonQueryAsync(ct);
+
+        foreach (var rule in consent.ColumnRules)
+        {
+            using var ruleCmd = conn.CreateCommand();
+            ruleCmd.Transaction = tx;
+            ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level, applicable_scopes)
+                                    VALUES (@id, @cid, @tcid, @col, @lvl, @scopes)";
+            ruleCmd.Parameters.AddWithValue("@id", rule.Id.ToString());
+            ruleCmd.Parameters.AddWithValue("@cid", consent.Id.ToString());
+            ruleCmd.Parameters.AddWithValue("@tcid", rule.TableColumnId.ToString());
+            ruleCmd.Parameters.AddWithValue("@col", rule.ColumnName);
+            ruleCmd.Parameters.AddWithValue("@lvl", (int)rule.AccessLevel);
+            ruleCmd.Parameters.AddWithValue("@scopes", rule.ApplicableScopes != null && rule.ApplicableScopes.Count > 0 ? string.Join(",", rule.ApplicableScopes) : string.Empty);
+            await ruleCmd.ExecuteNonQueryAsync(ct);
+        }
+
+        foreach (var filter in consent.RowFilters)
+        {
+            using var filterCmd = conn.CreateCommand();
+            filterCmd.Transaction = tx;
+            filterCmd.CommandText = @"INSERT INTO CONSENT_ROW_FILTERS (
+                id, consent_id, filter_group, table_column_id, column_name, operator, value_type, value_json, value_source, user_attribute,
+                filter_type, dependent_table, dependent_table_alias, foreign_key_column, primary_key_column,
+                subquery_predicate_json, target_temporal_column, dependent_valid_from_column, dependent_valid_to_column,
+                target_table_alias, additional_hops_json)
+            VALUES (
+                @id, @cid, @grp, @tcid, @col, @op, @type, @json, @src, @attr,
+                @ftype, @deptbl, @depalias, @fkcol, @pkcol,
+                @subpred, @ttemp, @dvfrom, @dvto,
+                @talias, @hops)";
+            filterCmd.Parameters.AddWithValue("@id", filter.Id.ToString());
+            filterCmd.Parameters.AddWithValue("@cid", consent.Id.ToString());
+            filterCmd.Parameters.AddWithValue("@grp", filter.FilterGroup);
+            filterCmd.Parameters.AddWithValue("@tcid", filter.TableColumnId.ToString());
+            filterCmd.Parameters.AddWithValue("@col", filter.ColumnName);
+            filterCmd.Parameters.AddWithValue("@op", filter.Operator);
+            filterCmd.Parameters.AddWithValue("@type", filter.ValueType);
+            filterCmd.Parameters.AddWithValue("@json", filter.ValueJson);
+            filterCmd.Parameters.AddWithValue("@src", filter.ValueSource);
+            filterCmd.Parameters.AddWithValue("@attr", (object?)filter.UserAttribute ?? DBNull.Value);
+
+            filterCmd.Parameters.AddWithValue("@ftype", (int)filter.FilterType);
+            filterCmd.Parameters.AddWithValue("@deptbl", filter.DependentTable.HasValue ? (object)filter.DependentTable.Value.ToString() : DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@depalias", (object?)filter.DependentTableAlias ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@fkcol", (object?)filter.ForeignKeyColumn ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@pkcol", (object?)filter.PrimaryKeyColumn ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@subpred", (object?)filter.SubqueryFilterPredicateJson ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@ttemp", (object?)filter.TargetTemporalColumn ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@dvfrom", (object?)filter.DependentValidFromColumn ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@dvto", (object?)filter.DependentValidToColumn ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@talias", (object?)filter.TargetTableAlias ?? DBNull.Value);
+            var hopsJson = filter.AdditionalHops != null ? System.Text.Json.JsonSerializer.Serialize(filter.AdditionalHops) : null;
+            filterCmd.Parameters.AddWithValue("@hops", (object?)hopsJson ?? DBNull.Value);
+
+            await filterCmd.ExecuteNonQueryAsync(ct);
+        }
+
+        var auditEntry = new AuditLogEntry
+        {
+            TenantId = consent.TenantId,
+            EventType = "CONSENT_GRANTED",
+            ActorSid = consent.CreatedBySid ?? new Sid("SYSTEM"),
+            TargetTable = consent.TableIdentifier.ToString(),
+            Decision = "GRANTED",
+            TraceId = Guid.NewGuid().ToString("N"),
+            DetailsJson = JsonSerializer.Serialize(new
+            {
+                ConsentId = consent.Id,
+                GranteeType = consent.GranteeType.ToString(),
+                GranteeSid = consent.GranteeSid?.Value,
+                ValidFrom = consent.ValidFrom,
+                ValidTo = consent.ValidTo
+            })
+        };
+        await RecordAuditEventInternalAsync(conn, auditEntry, ct, tx);
     }
 
     public async Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default)
@@ -1361,7 +1409,7 @@ public partial class SqliteGovernanceRepository
                 cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                            c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
                                            c.is_revoked, c.revoked_by_sid, c.revoked_at, c.revoke_reason,
-                                           t.source_name, t.schema_name, t.table_name, c.tenant_id
+                                           t.source_name, t.schema_name, t.table_name, c.tenant_id, c.renewal_count
                                     FROM CONSENTS c
                                     JOIN TABLES t ON c.table_id = t.id
                                     WHERE c.id = @id";
@@ -1394,7 +1442,8 @@ public partial class SqliteGovernanceRepository
                         RevokedBySid = reader.IsDBNull(11) ? (Sid?)null : new Sid(reader.GetString(11)),
                         RevokedAt = reader.IsDBNull(12) ? null : DateTimeOffset.Parse(reader.GetString(12)),
                         RevokeReason = reader.IsDBNull(13) ? null : reader.GetString(13),
-                        TenantId = reader.IsDBNull(17) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(17))
+                        TenantId = reader.IsDBNull(17) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(17)),
+                        RenewalCount = reader.GetInt32(18)
                     };
                 }
             }
@@ -1504,7 +1553,7 @@ public partial class SqliteGovernanceRepository
             cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                        c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
                                        c.is_revoked, c.revoked_by_sid, c.revoked_at, c.revoke_reason,
-                                       c.tenant_id, t.source_name, t.schema_name, t.table_name
+                                       c.tenant_id, t.source_name, t.schema_name, t.table_name, c.renewal_count
                                 FROM CONSENTS c
                                 JOIN TABLES t ON c.table_id = t.id
                                 WHERE c.is_revoked = 0
@@ -1546,7 +1595,8 @@ public partial class SqliteGovernanceRepository
                     ValidFrom = validFrom,
                     ValidTo = validTo,
                     IsRevoked = isRevoked,
-                    TenantId = tenantId
+                    TenantId = tenantId,
+                    RenewalCount = reader.GetInt32(18)
                 });
             }
             return consents;
@@ -1560,9 +1610,10 @@ public partial class SqliteGovernanceRepository
         {
             TableIdentifier? tableId = null;
             TenantId extendTenant = TenantId.LegacySingleTenant;
+            var newValidFrom = DateTimeOffset.UtcNow;
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id
+                cmd.CommandText = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.valid_from
                                     FROM CONSENTS c
                                     JOIN TABLES t ON c.table_id = t.id
                                     WHERE c.id = @id";
@@ -1570,6 +1621,7 @@ public partial class SqliteGovernanceRepository
                 using var reader = await cmd.ExecuteReaderAsync(ct);
                 if (await reader.ReadAsync(ct))
                 {
+                    newValidFrom = ConsentSubjectFilter.RenewalPeriodStart(reader.GetString(4), DateTimeOffset.UtcNow);
                     tableId = new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
                     if (!reader.IsDBNull(3))
                     {
@@ -1581,9 +1633,10 @@ public partial class SqliteGovernanceRepository
             using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"UPDATE CONSENTS
-                                    SET valid_to = @validTo
+                                    SET valid_to = @validTo, valid_from = @validFrom, renewal_count = renewal_count + 1
                                     WHERE id = @id";
                 cmd.Parameters.AddWithValue("@id", consentId.ToString());
+                cmd.Parameters.AddWithValue("@validFrom", newValidFrom.ToString("O"));
                 cmd.Parameters.AddWithValue("@validTo", newValidTo.ToString("O"));
                 await cmd.ExecuteNonQueryAsync(ct);
             }

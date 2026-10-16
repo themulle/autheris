@@ -33,11 +33,47 @@
           "name": "expires_at",
           "type": "TIMESTAMP WITH TIME ZONE",
           "family": "datetime"
+        },
+        {
+          "name": "subject_norm",
+          "type": "CHARACTER VARYING(256)",
+          "family": "string"
+        },
+        {
+          "name": "created_by",
+          "type": "CHARACTER VARYING(256)",
+          "family": "string"
+        },
+        {
+          "name": "approved_by",
+          "type": "CHARACTER VARYING(256)",
+          "family": "string"
+        },
+        {
+          "name": "approved_at",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "family": "datetime"
+        },
+        {
+          "name": "justification",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "kind",
+          "type": "CHARACTER VARYING(32)",
+          "family": "string"
+        },
+        {
+          "name": "renewal_count",
+          "type": "INTEGER",
+          "family": "integer"
         }
       ],
       "primaryKey": [
         "tenant_id",
         "profile_id",
+        "subject_type",
         "subject"
       ],
       "indexes": [
@@ -46,7 +82,8 @@
           "unique": false,
           "columns": [
             "tenant_id",
-            "subject"
+            "subject_type",
+            "subject_norm"
           ]
         }
       ]
@@ -468,7 +505,15 @@
       "primaryKey": [
         "id"
       ],
-      "indexes": []
+      "indexes": [
+        {
+          "name": "ix_column_masking_rules_column",
+          "unique": false,
+          "columns": [
+            "table_column_id"
+          ]
+        }
+      ]
     },
     {
       "name": "consent_column_rules",
@@ -507,7 +552,15 @@
       "primaryKey": [
         "id"
       ],
-      "indexes": []
+      "indexes": [
+        {
+          "name": "ix_consent_column_rules_consent",
+          "unique": false,
+          "columns": [
+            "consent_id"
+          ]
+        }
+      ]
     },
     {
       "name": "consent_requests",
@@ -714,7 +767,15 @@
       "primaryKey": [
         "id"
       ],
-      "indexes": []
+      "indexes": [
+        {
+          "name": "ix_consent_row_filters_consent",
+          "unique": false,
+          "columns": [
+            "consent_id"
+          ]
+        }
+      ]
     },
     {
       "name": "consents",
@@ -746,6 +807,11 @@
         },
         {
           "name": "grantee_sid",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "grantee_sid_norm",
           "type": "TEXT",
           "family": "string"
         },
@@ -793,12 +859,43 @@
           "name": "tenant_id",
           "type": "TEXT",
           "family": "string"
+        },
+        {
+          "name": "renewal_count",
+          "type": "INTEGER",
+          "family": "integer"
         }
       ],
       "primaryKey": [
         "id"
       ],
       "indexes": [
+        {
+          "name": "ix_consents_tenant_grantee",
+          "unique": false,
+          "columns": [
+            "tenant_id",
+            "grantee_sid_norm",
+            "is_revoked"
+          ]
+        },
+        {
+          "name": "ix_consents_tenant_role",
+          "unique": false,
+          "columns": [
+            "tenant_id",
+            "role_name"
+          ]
+        },
+        {
+          "name": "ix_consents_tenant_table",
+          "unique": false,
+          "columns": [
+            "tenant_id",
+            "table_id",
+            "is_revoked"
+          ]
+        },
         {
           "name": "ux_consents_request",
           "unique": true,
@@ -1048,7 +1145,15 @@
       "primaryKey": [
         "id"
       ],
-      "indexes": []
+      "indexes": [
+        {
+          "name": "ix_role_members_member",
+          "unique": false,
+          "columns": [
+            "member_sid"
+          ]
+        }
+      ]
     },
     {
       "name": "roles",
@@ -1237,6 +1342,13 @@
         "id"
       ],
       "indexes": [
+        {
+          "name": "ix_table_owners_owner",
+          "unique": false,
+          "columns": [
+            "data_owner_id"
+          ]
+        },
         {
           "name": "ux_table_owners_natural",
           "unique": true,
@@ -1448,6 +1560,15 @@
         "id"
       ],
       "indexes": [
+        {
+          "name": "ix_tables_natural_ci",
+          "unique": false,
+          "columns": [
+            "(expression)",
+            "(expression)",
+            "(expression)"
+          ]
+        },
         {
           "name": "ux_tables_natural",
           "unique": true,

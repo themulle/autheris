@@ -32,6 +32,7 @@ public static partial class GovernanceEndpoints
         app.MapPost("/api/v1/consents/bulk", CreateBulkConsentAsync).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
         app.MapGet("/api/v1/profiles", GetProfilesAsync).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         app.MapGet("/api/v1/profiles/{id}", GetProfileByIdAsync).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+        app.MapPost("/api/v1/profiles/{id}/assignments/approve", ApproveProfileAssignmentAsync).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
         app.MapDelete("/api/v1/profiles/{id}", DeleteProfileAsync).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         // Issue #40: GitOps / Declarative Consent & Row Filter Import API
@@ -43,6 +44,12 @@ public static partial class GovernanceEndpoints
 
         return app;
     }
+}
+
+public sealed class ApproveProfileAssignmentRequest
+{
+    public string? Subject { get; set; }
+    public string? SubjectType { get; set; }
 }
 
 public sealed class BulkConsentRequest
