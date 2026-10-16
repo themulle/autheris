@@ -9,6 +9,22 @@ public record EpochCheck(TableIdentifier Table, long CachedEpoch, bool IsHighlyS
 public interface IEpochValidationService
 {
     Task<bool> IsEpochValidAsync(TableIdentifier table, long cachedEpoch, CancellationToken ct = default);
+
+    /// <summary>
+    /// Single-table validation that honours <see cref="EpochCheck.IsDelegatedSource"/> (WP-PF-07, SEC-SC-05): a delegated (OBO) source gets zero staleness budget.
+    /// TODO(callers): <c>ConsentCacheService</c> still validates with the overload above because the cached envelope does not carry the delegation flag; pass it once it does.
+    /// </summary>
+    async Task<bool> IsEpochValidAsync(TableIdentifier table, long cachedEpoch, bool isDelegatedSource, CancellationToken ct = default)
+    {
+        if (!isDelegatedSource)
+        {
+            return await IsEpochValidAsync(table, cachedEpoch, ct).ConfigureAwait(false);
+        }
+
+        var results = await AreEpochsValidAsync([new EpochCheck(table, cachedEpoch, false, IsDelegatedSource: true)], ct).ConfigureAwait(false);
+        return results.TryGetValue(table, out var valid) && valid;
+    }
+
     Task InvalidateEpochAsync(TableIdentifier table, CancellationToken ct = default);
     Task<long> GetCurrentEpochAsync(TableIdentifier table, CancellationToken ct = default);
     Task<IReadOnlyDictionary<TableIdentifier, long>> GetCurrentEpochsAsync(IEnumerable<TableIdentifier> tables, CancellationToken ct = default);

@@ -52,6 +52,24 @@ public sealed class IndividualGrantClampTests : IDisposable
     }
 
     [Fact]
+    public void SEC_SC_20_LegacyPermanentDeny_StillDenies_EvenWithARoleAllow()
+    {
+        var table = new TableIdentifier("d", "s", "t");
+        var now = DateTimeOffset.UtcNow;
+        var deny = new Consent
+        {
+            TableIdentifier = table, Effect = ConsentEffect.Deny, GranteeType = GranteeType.User, GranteeSid = new Sid("S-1-5-21-X"),
+            ValidFrom = now.AddDays(-400), ValidTo = now.AddYears(50)
+        };
+        var roleAllow = new Consent { TableIdentifier = table, GranteeType = GranteeType.Role, RoleName = "analyst", ValidFrom = now.AddDays(-400), ValidTo = now.AddYears(1) };
+
+        var decision = new Autheris.Application.Services.ConsentResolutionService().ResolveAccess(
+            new Sid("S-1-5-21-X"), new HashSet<Sid>(), new HashSet<string> { "analyst" }, table, [deny, roleAllow]);
+
+        decision.IsAllowed.ShouldBeFalse();
+    }
+
+    [Fact]
     public void SEC_SC_20_GrantPolicy_DenyConsent_NeedsNoExpiryAndNoMaximum()
     {
         var policy = new Autheris.Application.Governance.Grants.GrantPolicy();
@@ -63,6 +81,20 @@ public sealed class IndividualGrantClampTests : IDisposable
         d.Allowed.ShouldBeTrue();
         d.MaxValidTo.ShouldBeNull();
         policy.Evaluate(r with { Effect = ConsentEffect.Allow }).Allowed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void SEC_SC_20_DecisionCacheTtl_IsBoundedByTheClampedExpiry_NotByTheRawValidTo()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var clamped = new Consent
+        {
+            GranteeType = GranteeType.User, GranteeSid = new Sid("S-1-5-21-X"), ValidFrom = now.AddDays(-180).AddMinutes(2), ValidTo = now.AddYears(5)
+        };
+
+        var ttl = Autheris.Application.Services.ConsentResolutionService.ComputeDecisionCacheTtl(false, [clamped], now);
+
+        ttl.ShouldBeLessThanOrEqualTo(TimeSpan.FromMinutes(2));
     }
 
     [Fact]

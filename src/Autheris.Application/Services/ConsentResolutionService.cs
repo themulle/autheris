@@ -140,7 +140,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
     }
 
     /// <summary>
-    /// SEC (Low): Cache lifetime of a consent decision. Bounded by the earliest <c>ValidTo</c> of the consents the decision
+    /// SEC (Low): Cache lifetime of a consent decision. Bounded by the earliest <c>EffectiveValidTo</c> (after the read-time clamp of individual grants, WP-SC-16) of the consents the decision
     /// was derived from, so an expired consent is never served from the cache.
     /// </summary>
     public static TimeSpan ComputeDecisionCacheTtl(bool isHighlySensitive, IReadOnlyList<Consent> consents, DateTimeOffset now)
@@ -155,8 +155,8 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         }
 
         var earliestExpiry = consents
-            .Where(c => c.ValidTo > now && c.ValidFrom <= now)
-            .Select(c => c.ValidTo - now)
+            .Where(c => c.EffectiveValidTo > now && c.ValidFrom <= now)
+            .Select(c => c.EffectiveValidTo - now)
             .DefaultIfEmpty(ttl)
             .Min();
 

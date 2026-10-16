@@ -115,4 +115,19 @@ public sealed class EpochStalenessBudgetTests
 
         (await Check(service))[Table].ShouldBeFalse();
     }
+
+    [Fact]
+    public async Task SEC_SC_05_SingleTableValidation_HonoursTheDelegatedSourceFlag_WithZeroBudget()
+    {
+        var (service, db, _, _) = Create();
+        (await Check(service))[Table].ShouldBeTrue(); // fills the local budget entry
+        await db.Received(1).StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
+
+        (await ((IEpochValidationService)service).IsEpochValidAsync(Table, 3, isDelegatedSource: false)).ShouldBeTrue();
+        await db.Received(1).StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
+
+        (await ((IEpochValidationService)service).IsEpochValidAsync(Table, 3, isDelegatedSource: true)).ShouldBeTrue();
+        await db.Received(2).StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
+        (await ((IEpochValidationService)service).IsEpochValidAsync(Table, 2, isDelegatedSource: true)).ShouldBeFalse();
+    }
 }

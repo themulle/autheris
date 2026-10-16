@@ -43,6 +43,10 @@ public sealed class AuditGroupCommitSink : IAsyncDisposable, IDisposable
     private readonly CancellationTokenSource _shutdownCts = new();
     private readonly Task _drainLoopTask;
     private int _disposed;
+    private volatile Exception? _drainFault;
+
+    /// <summary>Test seam: invoked once per collected batch inside the drain loop (a throwing hook simulates a dying loop).</summary>
+    internal Action<int>? OnBatchCollected { get; set; }
 
     public AuditGroupCommitSink(
         IAuditLogRepository repository,
@@ -75,10 +79,24 @@ public sealed class AuditGroupCommitSink : IAsyncDisposable, IDisposable
         ArgumentNullException.ThrowIfNull(entry);
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 
+        // L4: a dead drain loop must fail callers immediately instead of letting them wait for a batch nobody will flush.
+        if (_drainFault is { } fault)
+        {
+            throw new Autheris.Application.Audit.AuditUnavailableException("The audit group-commit loop stopped (fail-closed).", fault);
+        }
+
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var item = new PendingAuditItem(entry, tcs);
 
-        await _channel.Writer.WriteAsync(item, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _channel.Writer.WriteAsync(item, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ChannelClosedException ex) when (_drainFault is not null)
+        {
+            throw new Autheris.Application.Audit.AuditUnavailableException("The audit group-commit loop stopped (fail-closed).", ex);
+        }
+
         await tcs.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -124,6 +142,7 @@ public sealed class AuditGroupCommitSink : IAsyncDisposable, IDisposable
                     }
                 }
 
+                OnBatchCollected?.Invoke(batch.Count);
                 if (batch.Count > 0)
                 {
                     await FlushBatchAsync(batch, entries, shutdownToken).ConfigureAwait(false);
@@ -137,10 +156,30 @@ public sealed class AuditGroupCommitSink : IAsyncDisposable, IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unexpected error in AuditGroupCommitSink drain loop.");
+            _drainFault = ex;
+            _channel.Writer.TryComplete(ex); // new callers fail at once
         }
         finally
         {
-            // Drain any remaining queued items before exiting so callers never hang.
+            // Drain any remaining queued items before exiting so callers never hang. A dead loop (L4) fails them, including the batch it was
+            // holding, with AuditUnavailableException instead of persisting through a faulted pipeline.
+            if (_drainFault is { } dead)
+            {
+                var unavailable = new Autheris.Application.Audit.AuditUnavailableException("The audit group-commit loop stopped (fail-closed).", dead);
+                foreach (var held in batch)
+                {
+                    held.Completion.TrySetException(unavailable);
+                }
+
+                while (_channel.Reader.TryRead(out var queued))
+                {
+                    queued.Completion.TrySetException(unavailable);
+                }
+
+                batch.Clear();
+                entries.Clear();
+            }
+
             batch.Clear();
             entries.Clear();
             while (_channel.Reader.TryRead(out var remaining))
@@ -182,6 +221,16 @@ public sealed class AuditGroupCommitSink : IAsyncDisposable, IDisposable
                 batch[i].Completion.TrySetCanceled(oce.CancellationToken);
             }
         }
+        catch (Exception ex) when (batch.Count > 1 && ex is not Autheris.Application.Audit.AuditUnavailableException)
+        {
+            // L4: the batch transaction rolled back as a whole, so one bad entry must not fail the other callers: retry entry by entry.
+            // AuditUnavailableException is excluded on purpose (rows may already be committed, a retry would duplicate them).
+            _logger.LogWarning(ex, "Audit group-commit batch of {BatchCount} entries failed; isolating entry by entry.", batch.Count);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                await FlushSingleAsync(batch[i], cancellationToken).ConfigureAwait(false);
+            }
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to persist audit group-commit batch of {BatchCount} entries (fail-closed).", batch.Count);
@@ -189,6 +238,24 @@ public sealed class AuditGroupCommitSink : IAsyncDisposable, IDisposable
             {
                 batch[i].Completion.TrySetException(ex);
             }
+        }
+    }
+
+    private async Task FlushSingleAsync(PendingAuditItem item, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _repository.RecordAuditEventsAsync([item.Entry], cancellationToken).ConfigureAwait(false);
+            item.Completion.TrySetResult();
+        }
+        catch (OperationCanceledException oce)
+        {
+            item.Completion.TrySetCanceled(oce.CancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to persist audit entry {EntryId} (fail-closed).", item.Entry.Id);
+            item.Completion.TrySetException(ex);
         }
     }
 
