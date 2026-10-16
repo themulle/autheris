@@ -65,24 +65,24 @@ Guiding rule (owner): rights are checked by the backend, not by the calling agen
 
 | Rank | Item | Size | Phase 1 (PM) | Next phase |
 |---:|---|:---:|:---:|---|
-| 2.1 | **#107** row filter key-set cache: implementation of WP-A/B/C (contracts merged) — the real answer to `RowFilters:SubqueryStrategy` (#136); **consumer-urgent:** WebSQL `ORDER BY` with row filters runs into timeouts without it | M | ✅ | Phase 4 |
-| 2.2 | **#115** switches for the remaining read paths (REST data endpoint, MCP tool groups) — closes uncontrollable read paths | S | ✅ | Phase 2 |
-| 2.3 | **#128** list parameters (`IN`/`NOT IN`) — prerequisite of #129 and #131 | M | ✅ | Phase 2, Phase 3 |
-| 2.4 | **#130** governed time zone conversion | S-M | ✅ | Phase 2, Phase 3 (Q-130-1/2 decided) |
-| 2.5 | **#111** persisted dataset tags and catalog visibility | M | ✅ | Phase 2 |
-| 2.6 | **#112** typed aggregations in GraphQL for read-only tokens | M | ✅ | Phase 2 |
+| 2.1 | **#107** row filter key-set cache: implementation of WP-A/B/C (contracts merged) — the real answer to `RowFilters:SubqueryStrategy` (#136); **consumer-urgent:** WebSQL `ORDER BY` with row filters runs into timeouts without it | M | ✅ | Phase 4 (steps I-1..I-3) |
+| 2.2 | **#115** switches for the remaining read paths (REST data endpoint, MCP tool groups) — closes uncontrollable read paths | S | ✅ | Phase 4 (step I-4) |
+| 2.3 | **#128** list parameters (`IN`/`NOT IN`) — prerequisite of #129 and #131 | M | ✅ | Phase 4 (step I-5) |
+| 2.4 | **#130** governed time zone conversion | S-M | ✅ | Phase 4 (step I-6) |
+| 2.5 | **#111** persisted dataset tags and catalog visibility | M | ✅ | Phase 4 (steps B-1 security fix, then I-7) |
+| 2.6 | **#112** typed aggregations in GraphQL for read-only tokens | M | ✅ | Phase 4 (steps B-2 security fix, then I-8) |
 
 ### Priority Wave 3: feature completion (medium and large)
 
 | Rank | Item | Size | Phase 1 (PM) | Next phase |
 |---:|---|:---:|:---:|---|
-| 3.1 | `REQ-FED-01` INC-6: #122 predicate pushdown, #124 key-set filters, #123 same-source subtrees (cross-source usable at volume) | L | ✅ | Phase 4 (security reviewed) |
-| 3.2 | `REQ-FED-01` INC-1..INC-5: federation contract, GraphQL cross-source relations, HTTP sources | L | ✅ | Phase 4 (security reviewed) |
-| 3.3 | **#113** access requests with read-only tokens (increment A, then B) | M | ✅ | Phase 2 |
-| 3.4 | **#114** consumers per calling application | M | ✅ | Phase 2 |
-| 3.5 | **#129** row filters on caller attributes (replaces `WP-SC-04`, after #128) | L | ✅ | Phase 2, dedicated Phase 3 |
-| 3.6 | **#131** bound parameters in federated queries (`WP-FED-15`) | S-M | ✅ | Phase 3 |
-| 3.7 | **BL-06** OpenTelemetry tracing, metrics and logging | L | ✅ | Phase 4 (security reviewed) |
+| 3.1 | `REQ-FED-01` INC-6: #122 predicate pushdown, #124 key-set filters, #123 same-source subtrees (cross-source usable at volume) | L | ✅ | Phase 4 (steps I-14..I-17) |
+| 3.2 | `REQ-FED-01` INC-1..INC-5: federation contract, GraphQL cross-source relations, HTTP sources | L | ✅ | Phase 4 (steps B-0 security fix, I-9..I-13, I-18..I-21) |
+| 3.3 | **#113** access requests with read-only tokens (increment A, then B) | M | ✅ | Phase 4 (steps B-3 security fix, I-22, I-24) |
+| 3.4 | **#114** consumers per calling application | M | ✅ | Phase 4 (step I-23) |
+| 3.5 | **#129** row filters on caller attributes (replaces `WP-SC-04`, after #128) | L | ✅ | Phase 4 (step I-25) |
+| 3.6 | **#131** bound parameters in federated queries (`WP-FED-15`) | S-M | ✅ | Phase 4 (step I-26) |
+| 3.7 | **BL-06** OpenTelemetry tracing, metrics and logging | L | ✅ | Phase 4 (steps I-27..I-30) |
 
 ### Priority Wave 4: larger add-ons
 
@@ -103,7 +103,7 @@ Guiding rule (owner): rights are checked by the backend, not by the calling agen
 
 | Plan / Category Document | Topic & Scope | Open Requirements & Components | Status | Next Milestone |
 |---|---|---|:---:|---|
-| [`2026-10-16-plan-waves-2-3-delivery.md`](2026-10-16-plan-waves-2-3-delivery.md)<br/>`PLAN-DELIVERY-W23` | **Delivery tracker for Priority Waves 2 and 3** | Owner rule: plan everything first (Phase 2 plans P-1..P-10, then Phase 3 reviews S-1..S-10, one agent at a time), then one developer implements steps I-1..I-30 sequentially, each with Phase 5 and Phase 6 before the next. Per-item gate status for #107, #115, #128, #130, #111, #112, `REQ-FED-01` INC-1..6, #113, #114, #129, #131, BL-06; `PLAN-FED-01` needs a delta plan after PRs #139/#140. | **PLANNING PENDING 📋** | Phase 2 plan for #128 (P-1). |
+| [`2026-10-16-plan-waves-2-3-delivery.md`](2026-10-16-plan-waves-2-3-delivery.md)<br/>`PLAN-DELIVERY-W23` | **Delivery tracker for Priority Waves 2 and 3** | Owner rule: plan everything first (Phase 2 plans P-1..P-10, then Phase 3 reviews S-1..S-10, one agent at a time), then one developer implements steps I-1..I-30 sequentially, each with Phase 5 and Phase 6 before the next. Per-item gate status for #107, #115, #128, #130, #111, #112, `REQ-FED-01` INC-1..6, #113, #114, #129, #131, BL-06; `PLAN-FED-01` delta plan done. Gate G-PLAN passed 2026-10-16 (all plans and reviews APPROVED WITH CONDITIONS); final sequence: security bugfixes B-0..B-3 first, then I-1..I-30. | **PLANNING COMPLETE ✅ (G-PLAN passed)** | Phase 4: step B-0 (federated audit error-text fix). |
 | [`2026-10-16-plan-bug-127-value-profile-scope-rules.md`](2026-10-16-plan-bug-127-value-profile-scope-rules.md)<br/>`PLAN-BUG-127` | **Priority 1.1 – Bug #127 fix plan** | Delete the two scope-blind column-level computations (`McpDatasetCatalog`, `QueryAnalysisService`) and use `IConsentResolutionService.ResolveAccess(..., callerScopes)` + `TableAccessDecision.GetEffectiveColumnAccess`; catalog baseline kept for denied decisions; fail closed to `Mask`; parity matrix test. One work package, S. | **IN REVIEW 🔍 – PR #141** | Merge; follow-up: none blocking. |
 | [`2026-10-16-plan-sec-olap-federation-gate.md`](2026-10-16-plan-sec-olap-federation-gate.md)<br/>`PLAN-SEC-OLAP-01` | **Priority 1.2 – OLAP cross-source security fix** | Confirmed by code reading: `POST /api/v1/olap/query` joins sources with `CrossSource` disabled and no analysis of client SQL (rows are masked before staging, so no plaintext oracle). Minimal fix: `FederationGate` with transport `Olap` (fail closed, cross-source requests only), masked-column guardrails on client SQL, `MaskedColumns` passed to the engine, dead `CrossSourceOptions` removed, `AllowedTransports` validated at startup; takes over parts of `WP-FED-01`; full facade stays `WP-FED-05`. 3 WPs, ~310 prod / ~510 test LOC. Breaking: cross-source OLAP needs `Olap` in `AllowedTransports`. | **IN REVIEW 🔍 – PR #140** | Merge; follow-ups: tests T3-19, T3-27 (Virtual Filters through OLAP, required before `Olap` is recommended), T3-28..30, truncation indicator (owner), allowlist widening, `OlapStagingService` refactor. |
 | [`2026-10-16-plan-bug-75-graphql-relation-schema-gating.md`](2026-10-16-plan-bug-75-graphql-relation-schema-gating.md)<br/>`PLAN-BUG-75-GATING` | **Priority 1.3 – Stop advertising unusable cross-source GraphQL relations** | Confirmed: `CatalogSchemaModel` emits every relation; runtime rejects cross-source ones with `INVALID_QUERY_OPTION`. Fix: `RelationExecutability.IsSameExecutionSource` (source type + `SourceName`) guards before field-name allocation; resolver stub kept for `WP-FED-06`; F-GOV-19 doc correction. ~130 prod / ~330 test LOC. | **IN REVIEW 🔍 – PR #139** | Merge. |

@@ -2,7 +2,7 @@
 
 **Document ID:** `PLAN-DELIVERY-W23`
 **Date:** 2026-10-16
-**Status:** IN PROGRESS (planning sequence not started)
+**Status:** PLANNING COMPLETE - gate G-PLAN passed 2026-10-16 (all Phase 2 plans and Phase 3 reviews carry a final verdict); Phase 4 next with step B-0 (security bugfixes first, section 4)
 **Parent Plan:** [00-master-plan-overview.md](00-master-plan-overview.md) (section 0)
 **Author / Lead:** Delivery Project Manager & Workflow Orchestrator
 
@@ -42,23 +42,23 @@ Findings that matter for planning:
 
 ## 3. Status table
 
-Legend: Phase 1 = PRD; P2 = architect plan; P3 = security review. "To write" means the planning sequence (section 5) produces it.
+Legend: PRD = Phase 1; P2 = architect plan; P3 = security review (final verdict = last "Phase 3 ..." section of the plan file). AWC = APPROVED WITH CONDITIONS. All plan files are in this directory.
 
-| Rank | Item | PRD | Phase 2 plan | Phase 3 review | Implementation branch / PR | Status |
+| Rank | Item | PRD | Phase 2 plan | Phase 3 final verdict | Implementation steps | Status |
 |---:|---|---|---|---|---|---|
-| 2.1 | #107 row filter key-set cache (WP-A/B/C) | [`REQ-GOV-107`](2026-10-15-req-issue-107-row-filter-key-set-cache.md) | done: [`PLAN-GOV-107`](2026-10-15-plan-issue-107-row-filter-key-set-cache.md) | done, approved with conditions `SEC-RF107-01..16` (section 12 of the plan) | contracts: PR #108 merged; WP-A/B/C: not started | Planning complete; implementation pending (I-1..I-3) |
-| 2.2 | #115 read-path switches | [`REQ-SEC-115`](2026-10-16-req-issues-111-115-catalog-access-analytics.md) | to write: `2026-10-16-plan-issue-115-read-path-switches.md` | to write (same file) | not started | Planning pending |
-| 2.3 | #128 list parameters | [`REQ-SQL-128`](2026-10-16-req-issues-128-129-130-websql-parameters-user-attributes-timezones.md) | to write: `2026-10-16-plan-issue-128-list-parameters.md` | to write (same file) | not started | Planning pending |
-| 2.4 | #130 governed time zone conversion | `REQ-SQL-130` (same PRD) | to write: `2026-10-16-plan-issue-130-convert-timezone.md` | to write (same file) | not started | Planning pending |
-| 2.5 | #111 dataset tags and catalog visibility | `REQ-GOV-111` (bundle 111-115 PRD) | to write: `2026-10-16-plan-issue-111-dataset-tags-catalog-visibility.md` | to write (same file) | not started | Planning pending |
-| 2.6 | #112 typed aggregations in GraphQL | `REQ-DATA-112` (bundle 111-115 PRD) | to write: `2026-10-16-plan-issue-112-typed-aggregations-graphql.md` | to write (same file) | not started | Planning pending |
-| 3.1 | REQ-FED-01 INC-6: #122 / #124 / #123 (`WP-FED-11..14`) | [`REQ-FED-01`](2026-10-16-req-cross-source-all-consumers.md) section 7.1 | done: `PLAN-FED-01` section 4.11 (delta check in P-10) | done: section 12.6, approved with conditions `SEC-FED-19..34` | not started | Planning complete; P-10 delta check pending |
-| 3.2 | REQ-FED-01 INC-1..INC-5 (`WP-FED-01..10`) | `REQ-FED-01` | done: `PLAN-FED-01`; stale after PR #139/#140, delta plan to write: `2026-10-16-plan-fed-01-delta-after-wave-1.md` | done: section 12 (`SEC-FED-01..18`); delta review to write (same delta file) | not started | Planning complete; delta plan and review pending |
-| 3.3 | #113 access requests, increment A then B | `REQ-GOV-113` (bundle 111-115 PRD) | to write: `2026-10-16-plan-issue-113-self-service-access-requests.md` (one plan, two increments) | to write (same file) | not started | Planning pending |
-| 3.4 | #114 consumers per calling application | `REQ-OBS-114` (bundle 111-115 PRD) | to write: `2026-10-16-plan-issue-114-consumers-per-application.md` | to write (same file) | not started | Planning pending |
-| 3.5 | #129 row filters on caller attributes (replaces `WP-SC-04`) | `REQ-GOV-129` (128-130 PRD) | to write: `2026-10-16-plan-issue-129-caller-attribute-row-filters.md` | to write (same file; dedicated review, required by the PRD) | not started | Planning pending |
-| 3.6 | #131 bound parameters in federated queries (`WP-FED-15`) | `REQ-FED-01` section 7.2 (part #131) | brief only: `PLAN-FED-01` section 4.12; detailed plan to write: `2026-10-16-plan-issue-131-federated-bound-parameters.md` | placeholder only (12.7); review to write (same file) | not started | Planning pending |
-| 3.7 | BL-06 OpenTelemetry | [`REQ-OPS-BL06`](2026-10-16-req-bl-06-open-telemetry.md) | done: [`PLAN-OPS-BL06`](2026-10-16-plan-bl-06-open-telemetry.md) | done: section 10, approved with conditions `SEC-OT06-01..21` | not started | Planning complete; implementation pending |
+| 2.1 | #107 row filter key-set cache (WP-A/B/C) | [`REQ-GOV-107`](2026-10-15-req-issue-107-row-filter-key-set-cache.md) | done: [`PLAN-GOV-107`](2026-10-15-plan-issue-107-row-filter-key-set-cache.md) | AWC (section 12.5, `SEC-RF107-01..16`) | I-1..I-3 (contracts: PR #108 merged) | Planning complete; Phase 4 next (I-1) |
+| 2.2 | #115 read-path switches | [`REQ-SEC-115`](2026-10-16-req-issues-111-115-catalog-access-analytics.md) | done: [`plan-issue-115`](2026-10-16-plan-issue-115-read-path-switches.md) | AWC (`C-115-1..12`, `ST-115-01..24`) | I-4 | Planning complete; Phase 4 pending |
+| 2.3 | #128 list parameters | [`REQ-SQL-128`](2026-10-16-req-issues-128-129-130-websql-parameters-user-attributes-timezones.md) | done: [`plan-issue-128`](2026-10-16-plan-issue-128-list-parameters.md) | AWC (section 14, `SEC-128-01..14`, C-1..C-16, M-1..M-18) | I-5 | Planning complete; Phase 4 pending |
+| 2.4 | #130 governed time zone conversion | `REQ-SQL-130` (same PRD) | done: [`plan-issue-130`](2026-10-16-plan-issue-130-convert-timezone.md) | AWC (`BC-130-1..14`, 18 security tests) | I-6 | Planning complete; Phase 4 pending |
+| 2.5 | #111 dataset tags and catalog visibility | `REQ-GOV-111` (bundle 111-115 PRD) | done: [`plan-issue-111`](2026-10-16-plan-issue-111-dataset-tags-catalog-visibility.md) (rev. 3) | narrow re-review rev. 3: **WP-0 AWC** (`W0-C1..C11`), **#111 WP-1..6 AWC** (`F-C1..C10`) | B-1 (WP-0 security fix), I-7 | Planning complete; Phase 4 pending (B-1 first) |
+| 2.6 | #112 typed aggregations in GraphQL | `REQ-DATA-112` (bundle 111-115 PRD) | done: [`plan-issue-112`](2026-10-16-plan-issue-112-typed-aggregations-graphql.md) | AWC (`SEC-112-01..12`, C-1..C-11, B-1..B-8, M-1..M-6); standalone WP-0 required | B-2 (WP-0 = tracker label I-6b), I-8 | Planning complete; Phase 4 pending (B-2 first) |
+| 3.1 | REQ-FED-01 INC-6: #122 / #124 / #123 (`WP-FED-11..14`) | [`REQ-FED-01`](2026-10-16-req-cross-source-all-consumers.md) section 7.1 | done: `PLAN-FED-01` 4.11 plus delta | AWC (section 12.6 `SEC-FED-19..34`; delta review `DELTA-13`) | I-14..I-17 | Planning complete; Phase 4 pending |
+| 3.2 | REQ-FED-01 INC-1..INC-5 (`WP-FED-01..10`) | `REQ-FED-01` | done: `PLAN-FED-01` plus [`PLAN-FED-01-DELTA`](2026-10-16-plan-fed-01-delta-after-wave-1.md) | AWC (section 12 `SEC-FED-01..18`; delta review `SEC-FED-DELTA-01..14`, D-1..D-5) | B-0 (S-0 bugfix), I-9..I-13, I-18..I-21 | Planning complete; Phase 4 pending (B-0 first) |
+| 3.3 | #113 access requests, WP-0 then A then B | `REQ-GOV-113` (bundle 111-115 PRD) | done: [`plan-issue-113`](2026-10-16-plan-issue-113-self-service-access-requests.md) (rev. 2) | narrow re-review rev. 2: **WP-0 AWC**, **A AWC**, **B AWC** (`SEC-113-R2-01..11`, W-9..W-14, T-S31..T-S36) | B-3 (WP-0), I-22 (A), I-24 (B) | Planning complete; Phase 4 pending (B-3 first) |
+| 3.4 | #114 consumers per calling application | `REQ-OBS-114` (bundle 111-115 PRD) | done: [`plan-issue-114`](2026-10-16-plan-issue-114-consumers-per-application.md) | AWC (`SEC-114-01..12`, C-114-1..12) | I-23 | Planning complete; Phase 4 pending |
+| 3.5 | #129 row filters on caller attributes (replaces `WP-SC-04`) | `REQ-GOV-129` (128-130 PRD) | done: [`plan-issue-129`](2026-10-16-plan-issue-129-caller-attribute-row-filters.md) | AWC, dedicated review (`BC-129-01..16`, `ST-129-01..24`) | I-25 | Planning complete; Phase 4 pending |
+| 3.6 | #131 bound parameters in federated queries (`WP-FED-15`) | `REQ-FED-01` section 7.2 | done: [`plan-issue-131`](2026-10-16-plan-issue-131-federated-bound-parameters.md) | AWC (section 14, `SEC-131-01..`, B-15, M-15); `SEC-131-04` split out as B-0 | I-26 | Planning complete; Phase 4 pending |
+| 3.7 | BL-06 OpenTelemetry | [`REQ-OPS-BL06`](2026-10-16-req-bl-06-open-telemetry.md) | done: [`PLAN-OPS-BL06`](2026-10-16-plan-bl-06-open-telemetry.md) | AWC (section 10.5, `SEC-OT06-01..21`) | I-27..I-30 | Planning complete; Phase 4 pending |
 
 Out of scope here: `WP-FED-16` (#132) is rank 4.3 (wave 4); the #131 plan must not depend on it.
 
@@ -69,53 +69,105 @@ Out of scope here: `WP-FED-16` (#132) is rank 4.3 (wave 4); the #131 plan must n
 - #131 gets its own plan file rather than extending `PLAN-FED-01` further (that file is already very large); `PLAN-FED-01` 4.12 and 12.7 get a pointer sentence from the new plan (the architect adds it).
 - #122/#123/#124 stay one planned unit (`WP-FED-11..14`, already reviewed together).
 
-## 4. Implementation sequence (Phase 4 to 6, strictly one at a time, only after G-PLAN)
+### 3.2 Gate G-PLAN result (2026-10-16): PASSED
 
-Each line is one branch and one PR unless noted. "Shared" lists files that make the order matter.
+Every item has a Phase 2 plan and a final Phase 3 verdict of APPROVED WITH CONDITIONS. No item is CHANGES REQUIRED any more (the earlier CHANGES REQUIRED verdicts of #111 rev. 1/2 and #113 B rev. 1 were closed by revision 3 / revision 2 and the narrow re-reviews). Binding conditions are carried either by a plan revision or verbatim in the Phase 4 brief; the Phase 5 reviewer checks them line by line.
 
-| Step | Item (package) | Depends on | Shared files / conflict note | Size |
-|---:|---|---|---|:---:|
-| I-1 | #107 WP-A: settings, persistence, admin (contracts merged) | PR #108 | baseline DDL x3 + shapes, repositories, `DatabaseOptions.cs`, `ConsentModels.cs` | M |
-| I-2 | #107 WP-B: engine key-query compiler and substitution | I-1 | `src/TrinoSqlEngine/Governance`, `GovernancePolicyFactory` | M |
-| I-3 | #107 WP-C: runtime, cache, epochs, integration | I-2 | epochs, `RlsOptions.cs` | M |
-| I-4 | #115 read-path switches | none | `RestApiOptions.cs`, MCP tool registry, `DatasetDataEndpoints.cs` | S |
-| I-5 | #128 list parameters | none | `WebSqlParameterValues.cs`, `SqlEndpointLoader.cs`, `SqlEmitterContext.cs`, `CompiledSql.cs` | M |
-| I-6 | #130 `convert_timezone` | none (interacts with #123 function scope later) | `SqlFunctionAllowlists.cs`, dialect generators, `DialectCapabilityTable.cs` | S-M |
-| I-7 | #111 dataset tags and catalog visibility | #117/#118 (merged) | baseline DDL x3 + shapes, repositories, `CatalogVisibility.cs`, MCP catalog | M |
-| I-8 | #112 typed aggregations and typed `queryMetrics` | I-7 (catalog persistence pattern; PRD says independent, order chosen to avoid DDL conflicts) | `CatalogSchemaModel.cs`, baseline DDL x3 (semantic manifest) | M |
-| I-9 | `PLAN-FED-01` INC-1: `WP-FED-01`, `WP-FED-02` (gate remainder after PR #140, error contract) | I-4 (options), delta plan | `RestApiOptions.cs`, error mappers across protocols | M |
-| I-10 | INC-2a: `WP-FED-03` SQL federation hardening | I-9 | `CrossSourcePlanner.cs`, `FederatedStagingService.cs`, `GovernedSqlExecutionService.cs` | M |
-| I-11 | INC-2b: `WP-FED-04` staging and results at rest | I-9 | `DuckDbOlapEngine.cs`, `AsyncQueryJobBackgroundWorker.cs` | M |
-| I-12 | INC-2c: `WP-FED-05` OLAP facade | I-10, I-11 | `DuckDbOlapEndpoints.cs`, `OlapStagingService.cs` | M |
-| I-13 | INC-3a: `WP-FED-06` governed source reader and resolver rewrite | I-9, I-10 | `src/Autheris.Application/Data/Relations/*` | L |
-| I-14 | INC-6a: `WP-FED-11` (#122 pushdown) | I-10 | `CrossSourcePlanner.cs` | L |
-| I-15 | INC-6b: `WP-FED-12` options, hints, audit, analysis | I-14 | baseline DDL x3 + shapes, `TableModels.cs`, `QueryAnalysisService.Sql.cs` | L |
-| I-16 | INC-6c: `WP-FED-14` (#124 key-set filters; merges before 13) | I-13, I-15 | `FederatedStagingService.cs`, `KeyPredicate.cs` | M |
-| I-17 | INC-6d: `WP-FED-13` (#123 same-source subtrees) | I-15, I-16 | `CrossSourcePlanner.cs`, `GovernedSqlExecutionService.cs` | L |
-| I-18 | INC-3b: `WP-FED-07` relation declaration and admin | none (placed here to keep DDL changes serial) | baseline DDL x3 + shapes, `TableModels.cs`, repositories | M |
-| I-19 | INC-3c: `WP-FED-08` GraphQL splitter and schema gating | I-13, I-18 | `CatalogSchemaModel.cs`, `CatalogGraphQlTypeModule.cs` | L |
-| I-20 | INC-4: `WP-FED-09` HTTP sources and relation filters in GraphQL | I-10, I-19 | `FederatedStagingService.cs`, `CatalogSchemaModel.cs` | M |
-| I-21 | INC-5: `WP-FED-10` remaining integration and parity tests, Phase 6 doc corrections (#125) | I-20 | `tests/Autheris.Tests.Integration/Federation/*` | M |
-| I-22 | #113 increment A | I-7 | `ConsentModels.cs`, access request endpoints, MCP tools | M |
-| I-23 | #114 consumers per application | I-22 (shared normalisation helper) | audit schema (baseline DDL x3), `CallerContext` | M |
-| I-24 | #113 increment B | I-3 (#107 typed filters), I-22 | `ConsentModels.cs`, consent approval flow | L |
-| I-25 | #129 caller-attribute row filters (replaces `WP-SC-04`) | I-5 (#128), I-3 (#107) | `ConsentModels.cs`, `RlsOptions.cs`, `DatabaseOptions.cs`, SQL emitter context | L |
-| I-26 | #131 `WP-FED-15` bound parameters in federated queries | I-5, I-14, I-15 | `CrossSourcePlanner.cs`, `PushedClauseBuilder.cs`, `FederatedDuckDbExecutionService.cs` | S-M |
-| I-27 | BL-06 `WP-0` contracts | none; last on purpose (touches composition root, logging, metrics everywhere) | `Program.cs`, logging, metrics | M |
-| I-28 | BL-06 stream A: composition root, logs, deploy | I-27 | as above | L |
-| I-29 | BL-06 stream B: policy hook, spans | I-28 | gateway command path | M |
-| I-30 | BL-06 stream C: metrics, async propagation (CDC links stay with BL-01) | I-29 | `GatewayDiagnostics`, async workers | M |
+| Item / increment | Phase 2 | Final Phase 3 verdict |
+|---|---|---|
+| #107 (WP-A/B/C) | yes | AWC (`SEC-RF107-01..07` release-blocking) |
+| #115 | yes | AWC |
+| #128 | yes | AWC |
+| #130 | yes | AWC |
+| #111 WP-0 (`fix/catalog-schema-disclosure`) | yes (rev. 3) | AWC (re-review rev. 3) |
+| #111 WP-1..WP-6 | yes (rev. 3) | AWC; starts only after WP-0 merged and after #115 |
+| #112 WP-0 (aggregation privacy bugfixes, `I-6b`) | yes | AWC (P3.3, W0-1..W0-8) |
+| #112 feature | yes | AWC; only after WP-0 merged |
+| `PLAN-FED-01` INC-1..INC-6 plus delta | yes | AWC (delta review, binding points 1-4 in P3.10) |
+| #113 WP-0 | yes (rev. 2) | AWC (narrow re-review) |
+| #113 A | yes | AWC; after WP-0 and #111 |
+| #113 B | yes | AWC; after #107 complete and A |
+| #114 | yes | AWC |
+| #129 | yes | AWC |
+| #131 | yes | AWC |
+| BL-06 | yes | AWC |
+
+Not blocking Phase 4 (recorded, default taken; owner confirmation is due at the step named):
+
+- Merge of **B-1** (#111 WP-0) needs the owner's acknowledgement of the behaviour changes O-1, O-5, O-6, O-7 including the single-tenant migration instruction (`Gateway:Tenancy:Mode=Single`, default is `Multi`; claim-less GovernanceAdmins are demoted otherwise).
+- **B-3** (#113 WP-0): confirm O-9 (app-only tokens can no longer decide consent requests); **I-22/I-24**: confirm O-8 and the O-3 deferral of group templates.
+- **I-8** (#112): owner answers O-4 (drop `suppressedRowsCount` from the GraphQL result, recommended) and O-5 (`GraphQL:Aggregation:MaxFieldsPerOperation`, default 3). Follow-up issue recommended for typed filters on REST/MCP (O-2).
+- **I-23** (#114): open a separate tracked item for the audit retention purge job (O-4/O-9); #114 does not depend on it.
+- #130 owner flags F-1..F-4 are accepted as recommended in the review (section 7); Q-130-1/2 fixed.
+- Several plans (#115, #128, #130, #131, #129, #112, #114) are not re-issued as a revision 2: the architect folds the binding conditions in at the start of the step or the developer receives them verbatim (decision of the review verdicts); the lead includes the condition list in the Phase 4 brief.
+
+Q-6 (both table owners approve `AllowCrossDataSource`, `SEC-FED-DELTA-12`): cannot be implemented on the current model. `TableMetadata` has only `OwnerTenantId` (a tenant), `DataOwner` is a global role, and `AllowCrossDataSource` is init-only and not persisted, so every table currently counts as "without owner" and the flag cannot be enabled (fail closed, safe). The review makes the per-table owner model a binding part of `WP-FED-07` (step **I-18**): tenant-scoped per-table owner designation (principal SID or group) set through an audited path; approval per (relation id, parent epoch, child epoch); distinct principals; `GovernanceAdmin` plus both owner approvals; unreadable store evaluates `false`; epoch bump invalidates; audit, schema cache invalidation. Consequences: I-18 grows from M to L (DDL x3 plus shapes, owner admin path); before I-18 starts the architect adds a short addendum to the `WP-FED-07` spec (check whether the existing table owner/delegate approver records used by #113/#114 can be reused). It does **not** block Phase 4 start nor I-9..I-17 (SQL-text federation does not use the relation flag). It **does** gate GraphQL cross-source relations: `WP-FED-08` (I-19) depends on I-18, and relations stay hidden (PR #139 gating) and unusable until the owner model is merged. No owner decision is needed, only the architect addendum.
+
+## 4. Implementation sequence (final; Phase 4 to 6, strictly one at a time)
+
+Rules: one branch and one PR per step; every branch is created from the `main` that contains the previous step (G-SHARED). Owner rule "security bugs first": steps B-0..B-3 are standalone bugfix PRs without feature dependencies and run before any feature. Then #107 first among features (owner priority), then the rest. Plan labels in brackets are the names used inside the reviews. Size S/M/L as in the plans.
+
+### 4.1 Security bugfixes first
+
+| Step | Branch | Content (source) | Depends on | Size |
+|---|---|---|---|:---:|
+| B-0 | `fix/federated-audit-error-text` | `SEC-FED-DELTA-01` = `SEC-131-04`: the federated failure audit stores `ex.Message` for every non-gateway exception (`FederatedDuckDbExecutionService.cs:630`); fixed text from the reason code only, plus test. Live when `CrossSource:Enabled=true`; audit cannot be redacted afterwards, so it goes first. Add the statement-level checks "table functions, session properties, inline functions, zero tables, NATURAL/LATERAL" (delta P3.7, about 40 LOC) only if trivial, otherwise they stay in I-10. | none | S (about 30 prod / 80 test LOC) |
+| B-1 | `fix/catalog-schema-disclosure` | #111 WP-0 [tracker label I-6a]: REST/MCP/search/`datasources`/GraphQL-flag catalog disclosure across tenants and consent, `CallerScopeResolver`, `Gateway:Tenancy:Mode` (default `Multi`), conditions `W0-C1..C11`, tests `T-W0-1..16`. Widest live exposure (default configuration). Merge needs owner acknowledgement (section 3.2). | none | M |
+| B-2 | `fix/aggregation-privacy-hardening` | #112 WP-0 [tracker label I-6b]: `W0-1..W0-8`: `min_group_size` override may only raise (SEC-112-02), request `where` column check with metric filters (SEC-112-01), row-cap error, uniform column errors, `suppressedRowsCount`, `OTHER` row nulls, DP budget rules, reduced `GET /dbt/metrics` projection. | B-1 (`Gateway:Tenancy:Mode`, tenant passing) | M |
+| B-3 | `fix/issue-113-wp0-decision-hardening` | #113 WP-0: app-only token approval bypass of the person four-eyes, `IGrantPolicy` before the approval step, `status` guards x3 engines (conditions `SEC-113-R2-01..03`, W-1..W-14). Opt-in precondition (`AppOnlyTokens=ReadWrite`), hence after B-1/B-2. | none | S (about 230 prod / 480 test LOC) |
+
+Not split out as standalone (decided by the reviews, so they sit inside the named feature step): default spill `MaxTempDirectorySize=0B` ships with I-10 (it affects a working OLAP feature; owner is told); pre-authorization denials and the rewriter's `Enabled` branching ship inside I-9 (before any widening). If the owner enables `CrossSource` in any environment before I-9 merges, the router/rewriter part must become an extra bugfix before I-9. Wave-2 plan-level defects found in the reviews that are not live today (for example SEC-128-01 empty-list DML hazard) are feature conditions, not bugfixes.
+
+### 4.2 Features
+
+| Step | Branch (suggested) | Item (package) | Depends on | Shared files / conflict note | Size |
+|---:|---|---|---|---|:---:|
+| I-1 | `feat/issue-107-wp-a` | #107 WP-A: settings, persistence, admin (contracts merged) | PR #108, B-1 merged | baseline DDL x3 + shapes, repositories, `DatabaseOptions.cs`, `ConsentModels.cs` | M |
+| I-2 | `feat/issue-107-wp-b` | #107 WP-B: key-query compiler and substitution | I-1 | `src/TrinoSqlEngine/Governance`, `GovernancePolicyFactory` | M |
+| I-3 | `feat/issue-107-wp-c` | #107 WP-C: runtime, cache, epochs, integration | I-2 | epochs, `RlsOptions.cs` | M |
+| I-4 | `feat/issue-115-read-path-switches` | #115 read-path switches (conditions `C-115-1..12`; the options class lives in `RestApiOptions.cs`, which holds `WebSqlOptions` etc.) | none | `RestApiOptions.cs`, MCP tool registry, `DatasetDataEndpoints.cs` | S |
+| I-5 | `feat/issue-128-list-parameters` | #128 list parameters (C-1..C-16 incl. running-total cap in the shared expander, `FederatedDuckDbExecutionService` guard) | none | `WebSqlParameterValues.cs`, `SqlEndpointLoader.cs`, `SqlEmitterContext.cs`, `CompiledSql.cs` | M |
+| I-6 | `feat/issue-130-convert-timezone` | #130 `convert_timezone` (BC-130-1..14); additional shared files: `RowPolicyFactory.cs`, `PolicyParserSetup.cs`, `RestApiOptions` validator, `FederatedDuckDbExecutionService.cs` (read-only check) | none | `SqlFunctionAllowlists.cs`, dialect generators, `DialectCapabilityTable.cs` | S-M |
+| I-7 | `feat/issue-111-dataset-tags-visibility` | #111 WP-1..WP-6 dataset tags and catalog visibility (F-C1..F-C10) | B-1, I-4 | baseline DDL x3 + shapes, repositories, `CatalogVisibility.cs`, MCP catalog | M |
+| I-8 | `feat/issue-112-typed-aggregations` | #112 typed aggregations and typed `queryMetrics` (rev. 2 conditions C-2..C-11, B-1..B-8, M-1..M-6) | B-2, I-7 | `CatalogSchemaModel.cs`, baseline DDL x3 (semantic manifest) | M |
+| I-9 | `feat/fed-inc1-gate-and-error-contract` | `PLAN-FED-01` INC-1: `WP-FED-01` remainder plus `WP-FED-02` plus gate wiring after `AuthorizeAllTablesAsync`; `FederationDeniedException` / `FederationSourceException` split, one code and one text for disabled/not allowed, option validator (explicit `AsyncJob` without protection fails startup), pre-authorization denials moved behind authorization | B-0, I-4 | `RestApiOptions.cs`, error mappers across protocols | M |
+| I-10 | `feat/fed-inc2a-sql-federation-hardening` | `WP-FED-03`: shared per-tenant and global lease (after authorization and gate, released in `finally`), spill default `MaxTempDirectorySize=0B`, `FEDERATION_SOURCE_ERROR` without driver text, federated-path checks (table functions, NATURAL/LATERAL, `MaxSqlLength`), `Rest` consumer inventory test; default list widens to `Mcp`, `SqlEndpoints`, `FlightSql`, `ArrowExport` only at the end of the PR; `Rest` only after the inventory test | I-9 | `CrossSourcePlanner.cs`, `FederatedStagingService.cs`, `GovernedSqlExecutionService.cs` | M |
+| I-11 | `feat/fed-inc2c-olap-facade` | `WP-FED-05` OLAP facade (swapped with at-rest per the delta); "port first, delete last": the `SEC-FED-DELTA-05` control table is the merge gate, `ValidateUserSql` kept as generated-text verifier, `Olap` added to the default list in the last commit | I-9, I-10 | `DuckDbOlapEndpoints.cs`, `OlapStagingService.cs` | M |
+| I-12 | `feat/fed-inc2b-staging-at-rest` | `WP-FED-04` staging and results at rest (encrypted spill or disabled, `ProtectedStagingEnabled`, then `AsyncJob` in the default list) | I-9 | `DuckDbOlapEngine.cs`, `AsyncQueryJobBackgroundWorker.cs` | M |
+| I-13 | `feat/fed-inc3a-governed-source-reader` | `WP-FED-06` governed source reader, resolver rewrite, single `IsSameExecutionSource` | I-9, I-10 | `src/Autheris.Application/Data/Relations/*` | L |
+| I-14 | `feat/fed-inc6a-pushdown` | `WP-FED-11` (#122 pushdown) | I-10 | `CrossSourcePlanner.cs` | L |
+| I-15 | `feat/fed-inc6b-options-hints-audit` | `WP-FED-12` options, hints, audit, analysis (adds `DELTA-13`: `allow_key_set_import` default false) | I-14 | baseline DDL x3 + shapes, `TableModels.cs`, `QueryAnalysisService.Sql.cs` | L |
+| I-16 | `feat/fed-inc6c-key-set-filters` | `WP-FED-14` (#124 key-set filters) | I-13, I-15 | `FederatedStagingService.cs`, `KeyPredicate.cs` | M |
+| I-17 | `feat/fed-inc6d-same-source-subtrees` | `WP-FED-13` (#123 same-source subtrees; #130/#131 hooks) | I-15, I-16 | `CrossSourcePlanner.cs`, `GovernedSqlExecutionService.cs` | L |
+| I-18 | `feat/fed-inc3b-relation-declaration` | `WP-FED-07` relation declaration and admin **including the per-table owner model for Q-6** (`SEC-FED-DELTA-12`); needs the architect addendum first | none (placed here to keep DDL changes serial) | baseline DDL x3 + shapes, `TableModels.cs`, repositories | L |
+| I-19 | `feat/fed-inc3c-graphql-splitter` | `WP-FED-08` GraphQL splitter and schema gating (extend `RelationExecutability`; `GraphQl` in the default list only after the drift test is green) | I-13, I-18 | `CatalogSchemaModel.cs`, `CatalogGraphQlTypeModule.cs` | L |
+| I-20 | `feat/fed-inc4-http-sources` | `WP-FED-09` HTTP sources and relation filters in GraphQL | I-10, I-19 | `FederatedStagingService.cs`, `CatalogSchemaModel.cs` | M |
+| I-21 | `feat/fed-inc5-integration-parity` | `WP-FED-10` remaining integration and parity tests, Phase 6 doc corrections (#125) | I-20 | `tests/Autheris.Tests.Integration/Federation/*` | M |
+| I-22 | `feat/issue-113-a-self-service-requests` | #113 increment A (conditions `SEC-113-01..13`, R2-04..06) | B-3, I-7 | `ConsentModels.cs`, access request endpoints, MCP tools | M |
+| I-23 | `feat/issue-114-consumers-per-application` | #114 consumers per application (C-114-1..12) | I-22 (order only; no code dependency) | audit schema (baseline DDL x3), `CallerContext` | M |
+| I-24 | `feat/issue-113-b-approval-configuration` | #113 increment B (`SEC-113-R2-07..11`, T-S33..T-S36) | I-3, I-22 | `ConsentModels.cs`, consent approval flow | L |
+| I-25 | `feat/issue-129-caller-attribute-row-filters` | #129 (replaces `WP-SC-04`; `BC-129-01..16`) | I-5, I-3 | `ConsentModels.cs`, `RlsOptions.cs`, `DatabaseOptions.cs`, SQL emitter context | L |
+| I-26 | `feat/issue-131-federated-bound-parameters` | #131 `WP-FED-15` (conditions of section 14 incl. validation after authorization and before key-source reads) | I-5, I-14, I-15 (I-17 for the subtree hand-off; `WP-1/2` may be pulled forward after I-10 by the owner) | `CrossSourcePlanner.cs`, `PushedClauseBuilder.cs`, `FederatedDuckDbExecutionService.cs` | S-M |
+| I-27 | `feat/bl06-wp0-contracts` | BL-06 `WP-0` contracts | none; last on purpose | `Program.cs`, logging, metrics | M |
+| I-28 | `feat/bl06-a-composition-logs-deploy` | BL-06 stream A | I-27 | as above | L |
+| I-29 | `feat/bl06-b-policy-hook-spans` | BL-06 stream B | I-28 | gateway command path | M |
+| I-30 | `feat/bl06-c-metrics-async` | BL-06 stream C (CDC links stay with BL-01) | I-29 | `GatewayDiagnostics`, async workers | M |
+
+Execution order: B-0, B-1, B-2, B-3, I-1, I-2, ... I-30 (numeric). The corrected FED order of the delta review applies: B-0 -> I-9 -> I-10 (lease, spill `0B`, `Rest` inventory) -> I-11 facade -> I-12 at rest.
 
 Ordering notes:
 
-- Ranks 3.1 and 3.2 are interleaved on purpose: `WP-FED-14` needs the key-batching contract of `WP-FED-06` and `WP-FED-11..14` follow `WP-FED-03` (same files), so INC-6 sits between INC-3a and INC-3b/c. This follows `PLAN-FED-01` 6.1 and the owner preference for volume relief before GraphQL non-SQL relations. The delta plan (P-10) confirms or changes this order.
-- INC-1..INC-5 are split into separate PRs per work package group (I-9 to I-21). Each PR carries its own integration cases from `WP-FED-10`; I-21 is the remainder. INC-1..5 is large (about 5,350 production and 8,000 test LOC plus INC-6 3,600 / 4,700); no PR is allowed to combine two increments.
+- #107 is the first feature step because of the owner priority; the four bugfixes are small, independent of it and do not touch its files except B-1 (catalog) which has no shared file with I-1.
+- Ranks 3.1 and 3.2 stay interleaved: `WP-FED-14` needs the key-batching contract of `WP-FED-06`; `WP-FED-11..14` follow `WP-FED-03` (same files); INC-6 sits between INC-3a and INC-3b/c (confirmed by the delta review).
+- The INC-1..INC-5 split into separate PRs (I-9..I-21) stands; no PR may combine two increments. The staged transport widening follows `SEC-FED-DELTA-02`: each transport is added only in the step named above.
 - #113 B and #114 follow the PRD order (A, #114, B); #113 B waits for #107 being complete.
-- #129 sits after #128 and #107 and before #131; #131 sits after INC-6 (needs `WP-FED-11`/`12`) and #128.
-- BL-06 runs as four sequential PRs; the PRD's "Dev B / streams in parallel" becomes serial.
-- Every step: Phase 4 (single TDD developer), lead builds and tests (Release, warnings as errors, `DOTNET_USE_POLLING_FILE_WATCHER=true` for integration tests in WSL), Phase 5 reviewer, Phase 6 documentation (feature doc, README, master plan row and status in this tracker), then the next step.
+- #129 sits after #128 and #107; #131 after INC-6 and #128.
+- BL-06 runs as four sequential PRs; the PRD's parallel streams become serial.
+- Every step: Phase 4 (single TDD developer), lead builds and tests (Release, warnings as errors, `DOTNET_USE_POLLING_FILE_WATCHER=true` for integration tests in WSL), Phase 5 reviewer, Phase 6 documentation (feature doc, README, master plan row, this tracker), then the next step. Bugfix steps B-0..B-3 need Phase 5 and a short Phase 6 note (release notes), no new feature doc.
 
-## 5. Planning sequence (Phase 2 then Phase 3, strictly sequential)
+## 5. Planning sequence (Phase 2 then Phase 3, strictly sequential) - COMPLETED 2026-10-16
+
+All of P-1..P-10 and S-1..S-10 are done (including revisions and narrow re-reviews of #111, #113 and the delta); results in section 3.
 
 All Phase 2 plans first (P-1..P-10), then all Phase 3 reviews (S-1..S-10). Each review is appended to the plan file it reviews (convention of the existing plans). The architect and the security expert work on one file at a time.
 
@@ -155,12 +207,15 @@ After S-10 the tracker status of every planned item is set to "Planning complete
 
 ## 6. Blockers and risks
 
-- **No owner decision blocks Phase 2.** All decisions needed are recorded in the master plan table; the remaining open questions (Q-128-2..5, Q-129-2..7, Q-114-4, Q-111/112/113 leftovers) default to the PRD recommendation.
-- #131 is only blocked by P-1/S-1 (sequence, not decision).
-- The `PLAN-FED-01` delta (P-10) is a risk for the estimate of INC-1..INC-5: after PR #140 some of `WP-FED-01`/`WP-FED-05` is delivered; sizes shrink, but the order may change.
+- **No blocker for Phase 4.** No plan is CHANGES REQUIRED; no open owner decision blocks the start of B-0.
+- Owner confirmations are due at merge or step start (section 3.2): B-1 behaviour changes (O-1, O-5, O-6, O-7, single-tenant migration), B-3 O-9, I-8 O-4/O-5, I-22/I-24 O-8/O-3.
+- Q-6 owner model (`SEC-FED-DELTA-12`) is a design gap that lands in I-18 (L); needs an architect addendum before I-18 and gates GraphQL cross-source relations (I-19..I-21), not the SQL federation steps.
+- Live bugs are only reachable under conditions (B-0: `CrossSource:Enabled=true`; B-3: `AppOnlyTokens=ReadWrite`); B-1 and B-2 are live in default configuration.
+- If `CrossSource` is enabled in any environment before I-9 merges, split the pre-authorization denial fix out of I-9 as an extra bugfix.
 - Wave 4 `#132` (`WP-FED-16`) shares `SubtreeExtractor.cs` with `WP-FED-13` and must not be planned into this delivery.
-- Long single-agent chain: 10 plans + 10 reviews + 30 implementation steps. Progress of every step is tracked in the section 3 table (columns branch/PR and status); update it after each step.
+- Long single-agent chain: 4 bugfix PRs plus 30 feature steps. Progress of every step is tracked in the section 3 table; update it after each step.
 
 ## 7. Changelog
 
 - 2026-10-16: Tracker created (gate verification, planning and implementation sequences).
+- 2026-10-16: Planning complete. Section 3 holds final Phase 2/3 verdicts, section 3.2 the G-PLAN result (passed), section 4 the final implementation sequence (security bugfixes B-0..B-3 first, I-9..I-12 re-ordered per the FED delta review, I-18 enlarged by the Q-6 owner model).
