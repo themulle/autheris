@@ -12,6 +12,12 @@ namespace Autheris.Infrastructure.Persistence;
 
 public partial class SqlServerGovernanceRepository
 {
+    /// <summary>
+    /// Test seam (WP-0, SEC-113-R2-03): runs inside the decision transaction between the status read under the lock and the guarded
+    /// status UPDATE, so a test can change the status where no concurrent writer can be injected. Always null in production.
+    /// </summary>
+    internal Func<System.Data.Common.DbConnection, System.Data.Common.DbTransaction, CancellationToken, Task>? ConsentStatusUpdateSeam { get; set; }
+
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(
         IEnumerable<Sid> subjects,
         TableIdentifier table,
@@ -1289,14 +1295,7 @@ public partial class SqlServerGovernanceRepository
             // (GraphQL: with column snapshot) or calls ActivateConsentAsync (ITSM). Review E-9: ITSM keeps its second step.
             string newStatus = ConsentApprovalPolicy.StatusAfterApproval(requiresFourEyes, stepNumber, isExternalItsmApproval, tableSensitivity);
 
-            await using (var updateReq = conn.CreateCommand())
-            {
-                updateReq.Transaction = tx;
-                updateReq.CommandText = "UPDATE CONSENT_REQUESTS SET status = @status WHERE id = @id";
-                updateReq.Parameters.AddWithValue("@status", newStatus);
-                updateReq.Parameters.AddWithValue("@id", requestId.ToString());
-                await updateReq.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
+            await ApplyGuardedStatusAsync(conn, tx, requestId, newStatus, currentStatus, ct).ConfigureAwait(false);
 
             req.Status = newStatus;
             var auditEntry = ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_APPROVAL_STEP", "APPROVED", newStatus, itsmApproverAccount, null);
@@ -1328,6 +1327,34 @@ public partial class SqlServerGovernanceRepository
         cmd.Parameters.AddWithValue("@schema", table.Schema);
         cmd.Parameters.AddWithValue("@table", table.TableName);
         return Convert.ToInt64(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false)) > 0;
+    }
+
+    /// <summary>
+    /// Status guard of the approve step and the reject path (WP-0): the UPDATE only matches while the request still has the status read under
+    /// the row lock of this transaction. Zero rows throw, and the caller rolls the transaction back (no step row, no audit entry, no status change).
+    /// </summary>
+    private async Task ApplyGuardedStatusAsync(System.Data.Common.DbConnection conn, System.Data.Common.DbTransaction tx, Guid requestId, string newStatus, string expectedStatus, CancellationToken ct)
+    {
+        if (ConsentStatusUpdateSeam is { } seam)
+        {
+            await seam(conn, tx, ct).ConfigureAwait(false);
+        }
+
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = ConsentApprovalPolicy.GuardedStatusUpdateSql;
+        AddParameter(cmd, "@st", newStatus);
+        AddParameter(cmd, "@id", requestId.ToString());
+        AddParameter(cmd, "@expected", expectedStatus);
+        ConsentApprovalPolicy.EnsureTransitionApplied(await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false), requestId);
+    }
+
+    private static void AddParameter(System.Data.Common.DbCommand cmd, string name, string value)
+    {
+        var parameter = cmd.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value;
+        cmd.Parameters.Add(parameter);
     }
 
     public Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default) =>
@@ -1384,13 +1411,7 @@ public partial class SqlServerGovernanceRepository
                 await stepInsert.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
-            await using (var updateReq = conn.CreateCommand())
-            {
-                updateReq.Transaction = tx;
-                updateReq.CommandText = "UPDATE CONSENT_REQUESTS SET status = 'REJECTED' WHERE id = @id";
-                updateReq.Parameters.AddWithValue("@id", requestId.ToString());
-                await updateReq.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
+            await ApplyGuardedStatusAsync(conn, tx, requestId, "REJECTED", currentStatus, ct).ConfigureAwait(false);
 
             req.Status = "REJECTED";
             var auditEntry = ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_REQUEST_REJECTED", "REJECTED", "REJECTED", null, reason);

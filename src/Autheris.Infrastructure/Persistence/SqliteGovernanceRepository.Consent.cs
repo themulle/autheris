@@ -13,6 +13,12 @@ namespace Autheris.Infrastructure.Persistence;
 
 public partial class SqliteGovernanceRepository
 {
+    /// <summary>
+    /// Test seam (WP-0, SEC-113-R2-03): runs inside the decision transaction between the status read under the lock and the guarded
+    /// status UPDATE, so a test can change the status where no concurrent writer can be injected. Always null in production.
+    /// </summary>
+    internal Func<System.Data.Common.DbConnection, System.Data.Common.DbTransaction, CancellationToken, Task>? ConsentStatusUpdateSeam { get; set; }
+
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(
         IEnumerable<Sid> subjects,
         TableIdentifier table,
@@ -1186,14 +1192,7 @@ public partial class SqliteGovernanceRepository
             }
 
             // Update status
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.Transaction = tx;
-                cmd.CommandText = @"UPDATE CONSENT_REQUESTS SET status = @st WHERE id = @id";
-                cmd.Parameters.AddWithValue("@st", newStatus);
-                cmd.Parameters.AddWithValue("@id", requestId.ToString());
-                await cmd.ExecuteNonQueryAsync(ct);
-            }
+            await ApplyGuardedStatusAsync(conn, tx, requestId, newStatus, currentStatus, ct);
 
             req.Status = newStatus;
             await RecordAuditEventInternalAsync(conn,
@@ -1203,6 +1202,26 @@ public partial class SqliteGovernanceRepository
             OnTransactionCommitted(tx);
             return req;
         }
+    }
+
+    /// <summary>
+    /// Status guard of the approve step and the reject path (WP-0): the UPDATE only matches while the request still has the status read under
+    /// the write gate. Zero rows throw, the caller's transaction is disposed without commit (no step row, no audit entry, no status change).
+    /// </summary>
+    private async Task ApplyGuardedStatusAsync(SqliteConnection conn, SqliteTransaction tx, Guid requestId, string newStatus, string expectedStatus, CancellationToken ct)
+    {
+        if (ConsentStatusUpdateSeam is { } seam)
+        {
+            await seam(conn, tx, ct);
+        }
+
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = ConsentApprovalPolicy.GuardedStatusUpdateSql;
+        cmd.Parameters.AddWithValue("@st", newStatus);
+        cmd.Parameters.AddWithValue("@id", requestId.ToString());
+        cmd.Parameters.AddWithValue("@expected", expectedStatus);
+        ConsentApprovalPolicy.EnsureTransitionApplied(await cmd.ExecuteNonQueryAsync(ct), requestId);
     }
 
     public Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default) =>
@@ -1261,13 +1280,7 @@ public partial class SqliteGovernanceRepository
                 await cmd.ExecuteNonQueryAsync(ct);
             }
 
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.Transaction = tx;
-                cmd.CommandText = @"UPDATE CONSENT_REQUESTS SET status = 'REJECTED' WHERE id = @id";
-                cmd.Parameters.AddWithValue("@id", requestId.ToString());
-                await cmd.ExecuteNonQueryAsync(ct);
-            }
+            await ApplyGuardedStatusAsync(conn, tx, requestId, "REJECTED", currentStatus, ct);
 
             req.Status = "REJECTED";
             await RecordAuditEventInternalAsync(conn,

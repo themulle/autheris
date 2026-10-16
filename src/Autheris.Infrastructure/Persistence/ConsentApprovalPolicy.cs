@@ -97,6 +97,22 @@ internal static class ConsentApprovalPolicy
                string.Equals(stored, NormalizeApprover(approverSid.Value), StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// WP-0 (P-3 part 2, SEC-113-R2-03): the guarded status transition of the approve step and the reject path on every engine. <c>@expected</c>
+    /// is the status read under the row lock of the same transaction (never a literal), so <c>PENDING_SECOND_APPROVAL</c> and the ITSM
+    /// <c>PENDING_EXTERNAL_APPROVAL</c> step keep working and a status changed in between matches no row.
+    /// </summary>
+    public const string GuardedStatusUpdateSql = "UPDATE CONSENT_REQUESTS SET status = @st WHERE id = @id AND status = @expected";
+
+    /// <summary>Zero affected rows: the caller rolls the transaction back (step, audit, status) and the decision answers ACCESS_REQUEST_NOT_PENDING.</summary>
+    public static void EnsureTransitionApplied(int affectedRows, Guid requestId)
+    {
+        if (affectedRows != 1)
+        {
+            throw new Autheris.Application.Governance.ConsentRequests.ConsentRequestStatusConflictException(requestId);
+        }
+    }
+
     public static void EnsureApprovableStatus(Guid requestId, string? status, bool isExternalItsmApproval)
     {
         bool isExternal = string.Equals(status, PendingExternal, StringComparison.OrdinalIgnoreCase);

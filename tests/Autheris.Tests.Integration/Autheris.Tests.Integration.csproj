@@ -33,6 +33,7 @@
     <ProjectReference Include="..\..\src\Autheris.Api\Autheris.Api.csproj" />
     <ProjectReference Include="..\Autheris.Tests.Common\Autheris.Tests.Common.csproj" />
     <Compile Include="..\Autheris.Tests.Unit\AccessProfiles\AccessProfileRepositoryContractBase.cs" Link="AccessProfileRepositoryContractBase.cs" />
+    <Compile Include="..\Autheris.Tests.Unit\ConsentRequests\ConsentDecisionStatusGuardContractBase.cs" Link="ConsentDecisionStatusGuardContractBase.cs" />
     <ProjectReference Include="..\..\src\Autheris.Extensions\Autheris.Extensions.csproj" />
   </ItemGroup>
 

@@ -138,6 +138,9 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IRowFilterSqlBuilder, RowFilterSqlBuilder>();
         services.AddSingleton<IConsentResolutionService, ConsentResolutionService>();
         services.AddSingleton<IIdentitySubjectResolver, IdentitySubjectResolver>();
+        // WP-0 (PLAN-GOV-113): only a person decides consent requests. The resolvers resolve the guard with GetRequiredService (no fallback).
+        services.AddSingleton<Autheris.Application.Governance.ConsentRequests.IConsentDecisionGuard, Autheris.Application.Governance.ConsentRequests.ConsentDecisionGuard>();
+        services.AddSingleton<Autheris.Application.Governance.ConsentRequests.IConsentDecisionDenialRecorder, Autheris.Application.Governance.ConsentRequests.ConsentDecisionDenialRecorder>();
         services.AddSingleton<IKeyVaultSecretProvider, DefaultEnvironmentSecretProvider>();
         services.AddSingleton<IColumnMaskingProvider, ColumnMaskingProvider>();
 
