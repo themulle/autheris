@@ -5,7 +5,7 @@
 **Input:** [PRD REQ-GOV-113, section 4](2026-10-16-req-issues-111-115-catalog-access-analytics.md) (FR-113-1..14, SI-113-1..6, AC 1..10, Q-113-1..5, section 8 owner decision Q-113-2)
 **Branch:** WP-0 `fix/issue-113-wp0-decision-hardening` (standalone security PR, first, from `main`, see Revision 2), increment A `feat/issue-113-a-self-service-requests`, increment B `feat/issue-113-b-approval-configuration` (both from `main` after their predecessors, see section 5); planning base `c78edbf5`
 **Parent Plan:** [00-master-plan-overview.md](00-master-plan-overview.md); requirement `REQ-GOV-113`; delivery tracker [PLAN-DELIVERY-W23](2026-10-16-plan-waves-2-3-delivery.md) (step P-8, implementation steps I-22 and I-24)
-**Status:** PROPOSED rev. 2 (A: conditions integrated; B: awaiting narrow re-review). Phase 3 of revision 1 is recorded at the end of this file (A APPROVED WITH CONDITIONS SEC-113-01..13, B CHANGES REQUIRED SEC-113-14..22); revision 2 integrates the A conditions, creates the standalone WP-0 (security bugs first) and redesigns B (see "Revision 2 - response to Phase 3").
+**Status:** PROPOSED rev. 2 (Phase 3 narrow re-review done, 2026-10-16: WP-0 APPROVED WITH CONDITIONS, A APPROVED WITH CONDITIONS, B APPROVED WITH CONDITIONS; binding conditions SEC-113-R2-01..11 and tests W-9..W-14, T-S31..T-S36 at the end of this file). The first Phase 3 review (A SEC-113-01..13, B SEC-113-14..22) is recorded below it; revision 2 integrated the A conditions, created the standalone WP-0 (security bugs first) and redesigned B (see "Revision 2 - response to Phase 3"). The architect folds the R2 conditions and the stale-text cleanup (SEC-113-R2-05) into the plan before the respective Phase 4.
 
 **Binding rules applied:** the `0001` baseline DDL of SQLite, PostgreSQL and SQL Server is extended in place, the `0001` checksum constants stay unchanged, the shape snapshots under `src/Autheris.Infrastructure/Persistence/Migrations/Shape/` and their tests are updated (the way #107 added `TABLE_ROW_FILTER_STRATEGIES`); no upgrade or repair migrations; fail closed; rights are checked by the backend from the authenticated principal, never from request content or the calling agent; **an agent must never widen its own reach**: a read-only token may only request and withdraw, never decide; **owner decision Q-113-2: two separate scopes**, `data.access.request` (file and withdraw a request; this is what `SelfServiceScopes` lists) and `data.access.review` (decide a request; required in addition to the approver role), separating requesting from deciding (four-eyes); Q-113-1 (no app-only tokens), Q-113-3 (templates only for non-admin owners), Q-113-4 (templates via admin API plus manifest, manifest wins), Q-113-5 (requester-group template) is **deferred out of B in revision 2** (SEC-113-15, see Revision 2) and the others follow the PRD recommendation; every approval created by this plan goes through `IGrantPolicy`; Phase-4 developer is Sonnet, **one sequential developer**, A first, B after #107.
 
@@ -466,6 +466,7 @@ Size: A = M (matches the PRD, driven by the three-engine repositories and the MC
 | 1 | 2026-10-16 | Initial Phase 2 plan (PROPOSED) for increments A and B, based on `c78edbf5`. Records owner decision Q-113-2 (scopes `data.access.request` / `data.access.review`). |
 | 1 (Phase 3) | 2026-10-16 | Appended the Phase 3 security review (step S-8): verification of the pre-existing issues, SEC-113-01..22, binding conditions per increment, mandatory security tests T-S1..T-S28, recommendations for O-1..O-7. Verdicts: A APPROVED WITH CONDITIONS, B CHANGES REQUIRED. Plan body unchanged; the architect folds the conditions into revision 2. |
 | 2 | 2026-10-16 | Revision 2 (PROPOSED: A conditions integrated, B awaiting narrow re-review): section "Revision 2 - response to Phase 3" with SEC-113-01..22 mapping; new standalone WP-0 (app-only approval bypass of person-based four-eyes, policy before step, status guards), A integrates SEC-113-01..13 (agent-class decision denial, mandatory resolver guard before the classifier, no auto-approve for agent requests, one scope reader, canonical person key, text hygiene, sub-caps, transactional audit), B redesigned: blocked proposal instead of fallback, group templates dropped from B, validator parity, forced four-eyes, hash inputs, ITSM freeze. Phase 3 section untouched. |
+| 2 (Phase 3 narrow re-review) | 2026-10-16 | Appended the narrow Phase 3 re-review of revision 2: WP-0 verified against the code (no other decision path; W-3 assumption needs a shared person predicate), closure of SEC-113-01..13 and 14..22 checked, new findings SEC-113-R2-01..11, binding conditions per WP-0/A/B, tests W-9..W-14 and T-S31..T-S36. Verdicts: WP-0, A, B each APPROVED WITH CONDITIONS. Plan body and revision 2 section untouched. |
 
 ---
 
@@ -722,3 +723,119 @@ Severity scale: Critical / High / Medium / Low. "A" and "B" give the increment t
 |---|---|---|
 | **A** (self-service request and withdraw, decision guard, MCP tools) | **APPROVED WITH CONDITIONS** | Design is sound and fail-closed: closed root-field allowlist, request/review scope split, person gate, tenant-scoped withdrawal with identical answers. Binding conditions: SEC-113-01..13 (section P3.4, A items 1-11). Highest risks: agent-class token holding the review scope (01), missing resolver-level guard when the pipeline opens (02), auto-approve of agent requests (07), approve/withdraw race (11). No standalone WP-0 required; optional narrow WP-0 for P-3 (1)+(2) and the P-4 guard. |
 | **B** (approver-chosen row filters and column levels, templates, atomic approval) | **CHANGES REQUIRED** | The fallback to the unfiltered built-in default on any template, resolution or validation failure (SEC-113-14) and the weak trust source for group templates (SEC-113-15) are design-level fail-open behaviours; the plan must be revised (revision 2) and narrowly re-reviewed. SEC-113-12 (B part) and -16..-22 are binding. Start only after #107 and A are merged. |
+
+
+## Phase 3 Narrow Re-Review (rev. 2, 2026-10-16)
+
+**Reviewer:** `csharp-security-expert`. **Base:** worktree `plan-w23` at `876374ee`; every code claim below was re-read at the lines named. **Scope:** WP-0 (R2.1), the closure of SEC-113-01..13 in the design of A, and the redesign of B for SEC-113-14..22 plus O-8/O-9. Closed items of the first review are not re-litigated. Where the body of sections 1-11 and "Revision 2" disagree, "Revision 2" and this section govern (see SEC-113-R2-05).
+
+### R3.1 WP-0: is it complete for the live app-only approval bypass?
+
+**Bypass confirmed and the fix is directionally complete.** Verified: `ApproveConsentRequestAsync` (`MutationTypes.cs:222`) and `RejectConsentRequestAsync` (`:385`) take the approver from `GetAuthenticatedUserSid` (`:49-69`), which uses `GetUserSid()` and falls back to `appid`/`client_id`/`azp` (`Sid.cs:32-34`); the only gate is the claim test `GovernanceAdmin` (`:259`); the read-only middleware does not stop an app-only token when `AppOnlyTokens=ReadWrite` (`EntraTokenPolicy.cs:70`, default `ReadOnly`, `JwtOptions.cs:198`). The policy block with `GetService ... ?? new GrantPolicy()` sits at `:313-337`, after `ApproveConsentRequestStepAsync` (`:293`). All as described in R2.1.
+
+**Other decision paths (checked, none bypasses a resolver-level guard):**
+
+| Path | Result |
+|---|---|
+| REST | No endpoint approves or rejects a request: `ApproveConsentRequestStepAsync`/`RejectConsentRequestAsync` have callers only in `MutationTypes.cs` and `ItsmWebhookHandler.cs:373,389`. |
+| MCP | No approve/reject tool exists (`Mcp/` and `McpEndpoints.cs` contain no consent decision code). A curated tool whose `TargetGraphQLOperation` is `approveConsentRequest` still runs the same resolver, which reads the HTTP principal (`GatewayMcpQueryExecutor.cs:150-160` note SEC M-17), so the resolver guard applies. |
+| ITSM webhook | Signed, calls the repository directly with a typed actor (`ItsmWebhookHandler.cs:373-398`); not reachable with an Autheris token; the repository status/ownership/four-eyes checks stay. Correctly untouched by WP-0 (W-7). It has no `IGrantPolicy` at activation (B part of SEC-113-12), unchanged by this plan until B. |
+| Auto-approve | `ConsentRequestService.cs:140-142` activates only under the insecure flag; no decider identity; A-20 covers agent requests. |
+| Manifest, OpenMetadata sync, governance admin REST | Create consents directly (`OpenMetadataSyncService.cs:505`, `DeclarativeConsentApplyService`) and are not request decisions. An `AppOnlyTokens=ReadWrite` application with `GovernanceAdmin` can still use the governance admin REST by the operator's explicit choice. WP-0 closes the **request-approval** bypass of person-based four-eyes, not that operator opt-in; O-9 must say so. |
+
+**W-3 assumption (interactive schemes keep working): holds for Basic, Kerberos and ForwardAuth, does not hold unconditionally for delegated Entra and ADFS tokens.** `IdentitySubjectResolver.cs:80-99`: a principal with `appid`/`client_id`/`azp` and **none** of `ClaimTypes.Upn`, `upn`, `ClaimTypes.Email`, `preferred_username`, raw `unique_name` is classified `ServicePrincipal` (step 3, before the `oid` user branch at `:102`). Basic, Kerberos and ForwardAuth set no application claim (`ForwardAuthAuthenticationHandler.cs:192-295`, Basic handler) and fall to step 5/6 as users. A delegated Entra v2 token always carries `azp`; if the tenant does not emit `preferred_username`/`upn`/`email` for it, or an ADFS token carries only `unique_name` (which JwtBearer maps to `ClaimTypes.Name`, a claim the resolver does not test), the approver is classified as a service principal and the WP-0 guard would lock out a legitimate approver. mTLS principals (`authType = Certificate`, `:46-60`) are always `ServicePrincipal` and will be denied. The plan's "stop and report" rule would catch this only if the tests use realistic claim shapes (SEC-113-R2-01).
+
+### R3.2 Findings of this re-review
+
+| ID | Sev. | Scope | Finding | Required resolution |
+|---|---|---|---|---|
+| SEC-113-R2-01 | Medium | WP-0, A-4 item 2 | The non-person predicate "`ResolveSubject(...).Type != User`" misclassifies delegated tokens that have `azp` but no human-name claim (and certificate subjects). Fail-closed but an availability regression for approvers, and the same predicate is reused by A-4 item 2. | One shared predicate `IsDecisionPerson(principal)` used by WP-0 and A-4: deny when `idtyp=app`, or when the resolver says `ServicePrincipal` **and** the principal carries no delegated scope claim (`scp` or its mapped URI; app-only tokens never carry one). A delegated token with `scp` and `oid`/SID but no human-name claim may decide. Certificate subjects stay denied and are named in O-9. A-2 (self-service filing) stays stricter and keeps its own gate. |
+| SEC-113-R2-02 | Low-Med | WP-0 | (a) `ResolveSubject` maps an unauthenticated or null principal to `SubjectType.User` ("anonymous", `IdentitySubjectResolver.cs:13-22`): the guard would pass it and rely on the later `GetAuthenticatedUserSid` throw; (b) the moved `IGrantPolicy` call keeps `GetService ... ?? new GrantPolicy()`, i.e. a missing registration silently applies default limits instead of the operator's `IndividualGrantOptions`; (c) a Tier-A denial entry per attempt lets a looping caller flood the FailClosed audit chain, and an audit failure must not turn a denial into a 500 or an allow. | (a) the guard itself denies a null or unauthenticated principal; (b) `GetRequiredService<IGrantPolicy>`, no fallback (same rule as A-4 for guards); metadata `null` stays `Sensitive` via `GrantClassifier.Classify`, verified by test; (c) aggregate denials per principal and minute from WP-0 on (first Tier-A `CONSENT_DENIED`, rest metric only), the denial is returned even if the audit write throws. |
+| SEC-113-R2-03 | Low | WP-0 | The guard `AND status = @expected` must use the status read **under the lock** (`currentStatus`, e.g. `SqliteGovernanceRepository.Consent.cs:1056-1062,1192`), not a literal `PENDING`, otherwise `PENDING_SECOND_APPROVAL` and the ITSM `PENDING_EXTERNAL_APPROVAL` step break. PostgreSQL (`FOR UPDATE`, `:1210,1372`) and SQL Server (`UPDLOCK, ROWLOCK, HOLDLOCK`, `:1200,1362`) already serialise the status row, so "inject between read and UPDATE" (W-6) is not reproducible there. | `@expected` = value read under the lock, same on approve (including ITSM) and reject. W-6 on PostgreSQL/SQL Server uses two concurrent callers (exactly one terminal outcome) plus a seam test that the guarded `UPDATE` returns 0 rows for a stale expected value; on SQLite the injection works. |
+| SEC-113-R2-04 | Low | A | The partial unique index (C-4) covers every submission, including Role/Group-grantee and different-duration requests of the same person for the same table, and a violation under concurrency must not surface as a 500. Returning "the existing request id" for a request with different parameters could make an agent believe its parameters (shorter `ValidTo`) were accepted. | A duplicate answers `ACCESS_REQUEST_ALREADY_OPEN` with the stored request's id, status, grantee and `RequestedValidTo` (never the new parameters as accepted); the unique-violation of all three engines is caught and mapped to the same answer (no row, no ticket, no second audit entry); the index predicate is tested on SQL Server (filtered index with `IN`) in the shape snapshots; document the collision with `BundledConsentRequestService` or exclude non-User grantees from the index. |
+| SEC-113-R2-05 | Low | A | The body still contradicts revision 2: test 17 and WP-A4 describe "compensates a submission (request deleted)", section 7 repeats it and still lists "mixed request/review token" instead of agent-class scope. A developer following the red test list would implement the superseded design (SEC-113-13). | Before Phase 4 the architect replaces test 17, the WP-A4 row and the section 7 rows by the rev. 2 wording (single transaction, agent-class denial). Until then T-S18 and A-10 rev. 2 are the binding text. |
+| SEC-113-R2-06 | Low | A | Self-approval across IdPs: an agent token (Entra, `oid`, `upn`) and the same person's interactive Kerberos/Basic session (`primarysid`/name) share no identifier unless the Entra token carries `onprem_sid` or the data-owner id mapping (`ResolveRequesterOwnerIds`) links them. T-S9 only covers an interactive token with `oid` + `primarysid` + `upn`. | Add the mixed-IdP test (below). Where no shared identifier exists the residual is documented in O-1 (an agent must not hold credentials usable as the person's interactive channel) rather than claimed closed. |
+| SEC-113-R2-07 | Medium | B | (a) `proposalHash` and the step-2 re-validation use "a hash of the live table metadata (column names, types, sensitivity)". The built-in snapshot levels depend on `is_sensitive` **and the presence of masking rules** (`ConsentColumnSnapshot.AccessLevelFor`, `SqliteGovernanceRepository.Consent.cs:861-884`), and on `requires_four_eyes`/table sensitivity. A masking rule added after step 1 would leave the frozen level at `Clear` for a now-masked column without a drift signal. (b) A-13 lists the re-checks inside the activation transaction but not the metadata-hash comparison. | The metadata hash covers per column: name, type, `is_sensitive`, masking-rule presence/level, plus table sensitivity rank and `requires_four_eyes`. It is **recomputed inside the activation transaction** (live rows read in the same transaction as the status check) and compared with the frozen `metadata_hash`; mismatch rolls back with `PROPOSAL_CHANGED`. |
+| SEC-113-R2-08 | Medium | B | `BUILTIN` is defined as "no template at all". A failing template lookup (repository exception, timeout, tenant-predicate error) is indistinguishable from "none" unless stated, and a table with unset or unknown `SensitivityRank` could compare as below the ceiling. | "No template" requires a **successful** lookup that returned zero rows; any lookup failure is `BLOCKED` (Error log, reason class `LOOKUP_FAILED`). An unset, unknown or unparsable sensitivity is treated as above the ceiling. Add both to R2.5 test 27/T-S20. |
+| SEC-113-R2-09 | Medium | B | ITSM freeze (A-17) activates when "the recomputed hash equals the frozen hash". That proves integrity of the frozen row only. If an admin tightens the dataset-default template, or table metadata/masking changes, while the ticket is open (days), the webhook activates the **older, more permissive** configuration the change board saw. | At activation compare the frozen template id and revision and the frozen `metadata_hash` with the live values (inside the activation transaction); any difference leaves the request `PENDING_EXTERNAL_APPROVAL`, alerts, and the documented terminal path is reject and re-request (reject works in that status, `SqliteGovernanceRepository.Consent.cs:1215-1222`). |
+| SEC-113-R2-10 | Low | B | "Always a second distinct approver" for free-form/override is not specific about the class of the second approver. Step 2 by a non-admin owner conflicts with "non-admin may approve only an unchanged TEMPLATE/BUILTIN proposal". | Define: the second approver may be any authorized approver (owner, delegate or admin) who confirms the **stored** configuration by hash; distinct from the first under every identifier and from the requester; an admin cannot give both steps; a non-admin can never alter it. |
+| SEC-113-R2-11 | Info | B | O-4 lets ITSM approvals activate the unfiltered built-in snapshot for a dataset **without any template above the ceiling**, while the GraphQL path blocks the same case (O-8). The asymmetry is by design (the change board sees "no row filter" in the ticket) but is a weaker path. The default ceiling `Internal` also turns existing owner approvals of Confidential datasets into `CONFIGURATION_BLOCKED` on upgrade. | State the asymmetry in O-4. At startup log one Warning with the count of tables above the ceiling without a template; release note for O-8. |
+
+### R3.3 Increment A: are SEC-113-01..13 closed in the design?
+
+| ID | Status | Basis |
+|---|---|---|
+| 01 | CLOSED | A-4 item 4 (any `ReadOnlyScopes`/`SelfServiceScopes` scope denies `Decide`, marker or not); T-S1/T-S2. Depends on SEC-113-R2-01 for item 2. |
+| 02 | CLOSED | WP-0 guard first, `IConsentActorPolicy` in the first WP-A3 commit, middleware second, classifier last and inert when `SelfServiceScopes` is empty; `GetRequiredService`; T-S5/T-S6 in the first red commit. W-4/W-8 must be retargeted, not deleted, when the guard is composed. |
+| 03 | CLOSED | one `TokenScopes.Read`, resource-prefix startup rule, `IsSameScope` on the same normaliser. Note: reading `scope` additionally changes classification for non-Entra tokens that carry only `scope`; covered by T-S3. |
+| 04, 05 | CLOSED | `GetPersonSid()` = `oid`/on-prem SID only; stored identifier set always contains it; residual across IdPs: SEC-113-R2-06. |
+| 06 | CLOSED | unconditional, WP-0 first. |
+| 07 | CLOSED | A-20 including startup rule. |
+| 08 | CLOSED | one `UntrustedText.Normalize`. Note: applying it to `justification` of full-token clients rejects control characters they could send today; normalise CR and TAB (to LF and space) instead of rejecting for `justification`, reject the rest. |
+| 09 | CLOSED WITH NOTE | sub-caps and index present; see SEC-113-R2-04. |
+| 10 | CLOSED | order input, visibility, limits, grant policy; same text and path; table id removed from the non-approver message. |
+| 11 | CLOSED | WP-0 guard plus A withdraw guard and `WITHDRAWN`; see SEC-113-R2-03. |
+| 12 (A part) | CLOSED | policy before the step (WP-0) with SEC-113-R2-02(b). |
+| 13 | CLOSED WITH NOTE | single transaction and hash/length fields in A-10 rev. 2; stale body text: SEC-113-R2-05. |
+
+### R3.4 Increment B: SEC-113-14..22 and O-8/O-9
+
+| ID | Status | Basis |
+|---|---|---|
+| 14 | CLOSED WITH CONDITION | `TEMPLATE`/`BUILTIN`/`BLOCKED`, no fallback, admin override audited, forced four-eyes. Condition: SEC-113-R2-08. |
+| 15 | CLOSED | group templates removed (no `group_key`, no resolver, no `ROLE_MEMBERS` read; T-S21 negative test); entry criteria for a later increment recorded. |
+| 16 | CLOSED | canonical operator and column, no silent filter drop, `FILTER_NOT_RESTRICTIVE`, fixed `ValueType`, no input text in messages, shared operator constant. |
+| 17 | CLOSED WITH CONDITION | admin claims plus forced second approver; tenant scope in `Multi` mode. Condition: SEC-113-R2-10. |
+| 18 | CLOSED WITH CONDITION | request id, tenant, requester key, `ValidTo` in the hash, step-2 re-validation. Conditions: SEC-113-R2-07 (hash contents and transactional recheck). |
+| 19 | CLOSED | audit with hashes, tenant predicate, validator on every read, manifest-wins with audit and `409`. |
+| 20 | CLOSED WITH CONDITION | dataset-default only if valid, freeze at dispatch, summary in the ticket. Condition: SEC-113-R2-09. |
+| 21, 22 | CLOSED | preview scope and legacy overload equivalence as specified. |
+| 12 (B part) | CLOSED | repository second line re-derives the class and maximum from metadata; null/oversized `ValidTo` refused; atomic activation (A-13). Phase 4 must inject `IndividualGrantOptions` into the repository second line (no default fallback). |
+| O-8 | ACCEPT | with SEC-113-R2-11 (Warning, release note, asymmetry text). |
+| O-9 | ACCEPT | text to add: certificate (mTLS) subjects can no longer decide; delegated tokens are judged by SEC-113-R2-01; an operator-enabled `ReadWrite` administrative app keeps its governance admin REST access (not a request decision). |
+
+### R3.5 Final binding conditions for Phase 4
+
+**WP-0 (`fix/issue-113-wp0-decision-hardening`)**
+1. Implement SEC-113-R2-01 (shared `IsDecisionPerson`), SEC-113-R2-02 (a, b, c) and SEC-113-R2-03. The guard is the first statement of both resolvers, before `GetAuthenticatedUserSid`, idempotency lookup and any repository call.
+2. `IConsentDecisionGuard` and `IGrantPolicy` are resolved with `GetRequiredService`; no `?? new` anywhere in the two resolvers.
+3. Policy evaluation moves before `ApproveConsentRequestStepAsync` on every approve call (first and second step); a denial writes nothing and leaves the request `PENDING`/`PENDING_SECOND_APPROVAL` and rejectable. A failure after the step (consent creation) is logged at Error with ids only and recoverable by the existing `ActivateConsentAsync` (`status = 'APPROVED'` path); document it as the residual until B.
+4. Status guard on SQLite, PostgreSQL and SQL Server for approve (including the ITSM step) and reject; zero rows rolls back step, audit and status.
+5. W-3 uses real post-JwtBearer-mapping claim shapes (see tests); if any shipped scheme still classifies as a service principal after the shared predicate, stop and report; never loosen the guard further.
+6. Release note and O-9 text as in R3.4. No source change outside the files listed in R2.1 (plus the guard's interface/DI registration).
+
+**Increment A**
+1. All conditions SEC-113-01..13 as integrated, plus SEC-113-R2-04, -05, -06 and the `justification` CR/TAB normalisation.
+2. A-4 item 2 uses the same `IsDecisionPerson` predicate as WP-0; the guard's tests W-1..W-8 are retargeted to `IConsentActorPolicy`, not removed.
+3. A must not ship before WP-0 and #111 I-7 (unchanged).
+
+**Increment B (Phase 4 may start after #107 and A are merged)**
+1. SEC-113-R2-07 (metadata hash contents, recomputed inside the activation transaction), -08 (lookup failure and unknown sensitivity are `BLOCKED`), -09 (ITSM activation compares template revision and metadata hash with live values), -10 (second-approver class).
+2. The repository second line receives `IndividualGrantOptions` explicitly; no default-option fallback.
+3. SEC-113-R2-11: O-4 text, startup Warning, release note.
+4. No new filter dialect and no `USER_ATTRIBUTE` on approval (unchanged).
+
+### R3.6 Additional mandatory tests (red first)
+
+| ID | Test |
+|---|---|
+| W-9 | The same approver submits two concurrent first-step approvals on a four-eyes table (three engines): exactly one step row, the second answers `ACCESS_REQUEST_NOT_PENDING`; two different approvers concurrently on the second step: one terminal outcome |
+| W-10 | Null and unauthenticated principal: denied by the guard itself (not by the later SID check) and writes no repository call |
+| W-11 | Delegated Entra token with `scp`, `oid`, `azp` and **no** `upn`/`preferred_username`/`email`: outcome pinned to SEC-113-R2-01 (allowed for an owner/admin approver); `idtyp=app` and `azp`-only tokens without `scp`: denied |
+| W-12 | ADFS-style and Entra-style principals built **after** JwtBearer claim mapping (`ClaimTypes.Upn`, `ClaimTypes.Name` from `unique_name`, mapped `scp`/`objectidentifier` URIs): approve and reject work for owner, delegate and admin |
+| W-13 | mTLS `Certificate` principal and `ServiceAccount`/client-credential principal with `GovernanceAdmin`: denied; denial audit aggregated (second denial in the same minute writes no second Tier-A entry); audit-writer failure still returns `DECISION_NOT_PERMITTED` |
+| W-14 | `IGrantPolicy` missing from DI makes both resolvers throw; configured stricter `IndividualGrantOptions` are honoured on the pre-step evaluation |
+| T-S31 | Concurrent duplicate submission (same person, same table): one row, second call gets `ACCESS_REQUEST_ALREADY_OPEN` with the stored parameters, no second ticket or audit entry, on all three engines |
+| T-S32 | Mixed IdP: Entra agent token (`oid`, `upn`) requests; Kerberos/Basic session of the same person (data-owner id link present, and absent) approves: rejected when linked, residual documented when not |
+| T-S33 | Masking rule added or sensitivity changed between step 1 and step 2, and between the last check and commit (failure injection inside the transaction): `PROPOSAL_CHANGED`, nothing activated |
+| T-S34 | Template lookup throws or times out: `BLOCKED`, never `BUILTIN`; table with unset sensitivity is above the ceiling |
+| T-S35 | ITSM: template tightened (new revision) or masking changed after dispatch: webhook leaves the request `PENDING_EXTERNAL_APPROVAL` and alerts; reject then works |
+| T-S36 | Forced four-eyes: second step by owner (non-admin) confirming the stored override hash succeeds; by the same person under another claim spelling or by the requester fails; non-admin cannot change the configuration |
+
+### R3.7 Verdicts
+
+| Scope | Verdict | Basis |
+|---|---|---|
+| **WP-0** | **APPROVED WITH CONDITIONS** | The live approval bypass is real and the planned fix (guard first, policy before step, status guard, no change of the ITSM path) closes it for the GraphQL decision path; no other decision path exists. Binding: SEC-113-R2-01..03, W-9..W-14. Highest risk: the non-person predicate locking out legitimate delegated or ADFS approvers (R2-01). |
+| **A** | **APPROVED WITH CONDITIONS** | SEC-113-01..13 are closed in the design; remaining conditions SEC-113-R2-04..06 and the stale-text cleanup. Starts after WP-0 and #111 I-7. |
+| **B** | **APPROVED WITH CONDITIONS** | The fail-open fallback and the group-template trust source are gone; the remaining issues are specification gaps, not design faults: SEC-113-R2-07..11 and tests T-S33..T-S36. Phase 4 of B starts after #107 and A are merged. |
