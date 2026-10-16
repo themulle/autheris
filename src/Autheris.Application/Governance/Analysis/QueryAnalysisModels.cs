@@ -16,6 +16,9 @@ public static class QueryDiagnosticCodes
     public const string UnknownColumn = "UNKNOWN_COLUMN";
     public const string MaskedColumnInFilter = "MASKED_COLUMN_IN_FILTER";
     public const string ReferencedTablesMismatch = "REFERENCED_TABLES_MISMATCH";
+
+    /// <summary>Informational: the analysis target is another principal whose token scopes are unknown (issue #127).</summary>
+    public const string TargetScopesUnknown = "TARGET_SCOPES_UNKNOWN";
 }
 
 /// <summary>

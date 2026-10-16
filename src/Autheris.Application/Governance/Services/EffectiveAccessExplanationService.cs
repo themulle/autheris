@@ -62,7 +62,8 @@ public sealed class EffectiveAccessExplanationService(
 
         var groupSids = principal.GetGroupSids();
         var allUserSids = principal.GetAllUserSids();
-        var callerScopes = TokenAccessScope.GetScopeSet(principal);
+        // Claims overload, as the data path: it also reads a plain 'scope' claim (issue #127).
+        var callerScopes = TokenAccessScope.GetScopeSet(principal.Claims);
 
         var subjects = (allUserSids != null && allUserSids.Count > 0 ? allUserSids : [userSid.Value])
             .Concat(groupSids)
