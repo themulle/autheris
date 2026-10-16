@@ -31,9 +31,11 @@ public sealed class RedisLeaseTests : IAsyncLifetime, IDisposable
         {
             EndPoints = { $"127.0.0.1:{port}" },
             AbortOnConnectFail = false,
-            ConnectTimeout = 2000,
-            SyncTimeout = 2000,
-            AsyncTimeout = 2000,
+            // Generous timeouts: the unit suite runs thousands of tests in parallel on CI runners and a busy
+            // thread pool must not turn a slow reply from the embedded server into a timeout.
+            ConnectTimeout = 10000,
+            SyncTimeout = 10000,
+            AsyncTimeout = 10000,
         });
         _provider = CreateProvider(_mux);
     }
@@ -97,8 +99,7 @@ public sealed class RedisLeaseTests : IAsyncLifetime, IDisposable
         stale.ShouldNotBeNull();
         // Simulate expiry plus takeover through direct key manipulation of the same resource.
         var db = _mux!.GetDatabase();
-        var keys = _mux.GetServer(_mux.GetEndPoints()[0]).Keys(pattern: "*lease:{job}");
-        foreach (var key in keys)
+        await foreach (var key in _mux.GetServer(_mux.GetEndPoints()[0]).KeysAsync(pattern: "*lease:{job}"))
         {
             await db.KeyDeleteAsync(key);
         }
@@ -118,7 +119,7 @@ public sealed class RedisLeaseTests : IAsyncLifetime, IDisposable
         var oldToken = first!.Token;
         await first.DisposeAsync();
         var db = _mux!.GetDatabase();
-        foreach (var key in _mux.GetServer(_mux.GetEndPoints()[0]).Keys(pattern: "*lease:{job}*"))
+        await foreach (var key in _mux.GetServer(_mux.GetEndPoints()[0]).KeysAsync(pattern: "*lease:{job}*"))
         {
             await db.KeyDeleteAsync(key); // the store restarted without persistence
         }

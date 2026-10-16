@@ -31,7 +31,7 @@ Cross-domain analytical queries joining disparate data sources (e.g. relational 
 1. Rejects more than `MaxTableCount` distinct tables (`400`).
 2. Applies the tenant and global data-source allowlists before any access decision or read (`403`).
 3. Takes one access decision per table (ReBAC when enabled, consents, Casbin, row filters) without exposing policy details (`403`).
-4. Reads every table through the governed reader (row filter, masking applied exactly once) and enforces `MaxStagedRowsPerTable` and `MaxTotalStagedRows` (`400`).
+4. Reads every table through the governed reader (row filter, masking applied exactly once) and enforces `MaxStagedRowsPerTable` and `MaxTotalStagedRows` (`400`). The predicates of the analytical query are not pushed to the sources: each table is staged with all rows the caller may see, and filtering happens in DuckDB. A table with more visible rows than `MaxStagedRowsPerTable` therefore fails the request even when the query would select only a few of them.
 5. Writes the required audits `OLAP_TABLE_STAGED` (per table) and `OLAP_QUERY` through `IAuditWriter`; an unavailable audit store rejects the request with `503`.
 6. Runs the query in DuckDB and returns the result.
 
