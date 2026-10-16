@@ -274,16 +274,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
             }
 
             // Determine masked columns for DuckDB VARCHAR schema mapping
-            var maskedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var col in req.Metadata.Columns)
-            {
-                var access = req.Decision.GetColumnAccess(col.ColumnName);
-                if (access == ColumnAccessLevel.Mask ||
-                    (req.Metadata.ColumnMaskingRules != null && req.Metadata.ColumnMaskingRules.ContainsKey(col.ColumnName) && access != ColumnAccessLevel.Clear))
-                {
-                    maskedColumns.Add(col.ColumnName);
-                }
-            }
+            var maskedColumns = MaskedColumnSet.For(req.Metadata, req.Decision);
 
             stagedSources.Add(new OlapTableSource(
                 Table: req.Metadata.Identifier,

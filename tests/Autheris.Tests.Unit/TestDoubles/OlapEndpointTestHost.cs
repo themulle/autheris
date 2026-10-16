@@ -38,7 +38,8 @@ internal static class OlapEndpointTestHost
     {
         var service = new OlapStagingService(
             engine, metadataRepository, connectorRegistry, accessResolver, maskingProvider, gatewayOptions,
-            httpContext.RequestServices is null ? new RequestScopedAuditWriter(httpContext) : httpContext.RequestServices.GetRequiredService<IAuditWriter>(), NullLogger<OlapStagingService>.Instance);
+            httpContext.RequestServices is null ? new RequestScopedAuditWriter(httpContext) : httpContext.RequestServices.GetRequiredService<IAuditWriter>(), NullLogger<OlapStagingService>.Instance,
+            new Autheris.Application.Federation.FederationGate(gatewayOptions), NSubstitute.Substitute.For<TrinoSqlEngine.ISqlEngine>(), new OlapRequestLimiter(gatewayOptions));
         return DuckDbOlapEndpoints.HandleOlapQueryAsync(httpContext, service, gatewayOptions, loggerFactory);
     }
 

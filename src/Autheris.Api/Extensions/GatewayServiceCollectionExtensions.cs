@@ -146,6 +146,10 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<IValidateOptions<GatewayOptions>, GatewayResilienceOptionsValidator>();
         services.AddSingleton<IValidateOptions<GatewayOptions>, CdcStreamOptionsValidator>();
         services.AddSingleton<IValidateOptions<GatewayOptions>>(sp =>
+            new CrossSourceOptionsValidator(
+                configuration,
+                sp.GetService<Microsoft.Extensions.Logging.ILogger<CrossSourceOptionsValidator>>()));
+        services.AddSingleton<IValidateOptions<GatewayOptions>>(sp =>
             new Autheris.Api.Extensions.DependencyInjection.GatewayEmptyListConfigurationValidator(
                 configuration,
                 sp.GetService<Microsoft.Extensions.Logging.ILogger<Autheris.Api.Extensions.DependencyInjection.GatewayEmptyListConfigurationValidator>>()));

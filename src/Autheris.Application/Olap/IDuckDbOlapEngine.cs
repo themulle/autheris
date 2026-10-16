@@ -19,7 +19,9 @@ public sealed record OlapQueryRequest(
     string Sql,
     IReadOnlyList<OlapTableSource> Sources,
     int? Limit = null,
-    IReadOnlyList<BoundParameter>? Parameters = null);
+    IReadOnlyList<BoundParameter>? Parameters = null,
+    bool CrossSource = false,
+    bool AllowNonEquiJoins = false);
 
 public sealed record OlapQueryResult(
     IReadOnlyList<string> Columns,

@@ -120,7 +120,11 @@ public static class DuckDbOlapEndpoints
         }
         else if (outcome.Details != null)
         {
-            await httpContext.Response.WriteAsJsonAsync(new { error = outcome.Error, details = outcome.Details }, ct);
+            await httpContext.Response.WriteAsJsonAsync(new { error = outcome.Error, code = outcome.ErrorCode, details = outcome.Details }, ct);
+        }
+        else if (outcome.ErrorCode != null)
+        {
+            await httpContext.Response.WriteAsJsonAsync(new { error = outcome.Error, code = outcome.ErrorCode }, ct);
         }
         else
         {

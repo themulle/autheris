@@ -81,4 +81,16 @@ public sealed class DuckDbOlapOptions
 
     public int QueryTimeoutSeconds { get; init; } = 60;
     public int MaxThreads { get; init; } = 2;
+
+    /// <summary>Maximum estimated bytes staged from one table (default 64MB). Applies to every OLAP request; cross-source requests use the smaller of this and the CrossSource value.</summary>
+    public long MaxStagedBytesPerTable { get; init; } = 64L * 1024 * 1024;
+
+    /// <summary>Maximum estimated bytes staged across all tables of one request (default 256MB). Cross-source requests use the smaller of this and the CrossSource value.</summary>
+    public long MaxTotalStagedBytes { get; init; } = 256L * 1024 * 1024;
+
+    /// <summary>Maximum concurrent OLAP requests of one tenant (default 2); further requests are answered with 429.</summary>
+    public int MaxConcurrentQueriesPerTenant { get; init; } = 2;
+
+    /// <summary>Maximum length of the client SQL text in characters (default 32768).</summary>
+    public int MaxSqlLength { get; init; } = 32768;
 }

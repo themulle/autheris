@@ -388,6 +388,7 @@ public sealed class CutoverArchitectureTests
         // -- the allowed exceptions of §28.9 (the text comes from the typed IR / the compiler, never from a client string) --
         ("Autheris.Application.Sql.Tree.GovernedTreeQueryService", "§28.9 OQ-GQL: executes compiled.Sql of the GraphQL tree compiler"),
         ("Autheris.Application.Olap.DuckDbOlapEngine", "§28.9 DuckDB staging: runs on the in-process staged copy, after the governed fetch"),
+        ("Autheris.Application.Olap.OlapSqlInspector", "DuckDB parse-only (json_serialize_sql): the client text is passed as a quoted literal to the parser of a throw-away in-memory database; nothing is executed or staged"),
         ("Autheris.Application.VirtualFilters.Federation.SqlVirtualFilterKeySetProvider", "virtual-filter key set: the query is rendered from the typed key-source definition"),
         // -- statements of the gateway itself (no client text) --
         ("Autheris.Application.Services.DbSessionContextInitializer", "fixed session-initialisation statements (tenant and user session context)"),
