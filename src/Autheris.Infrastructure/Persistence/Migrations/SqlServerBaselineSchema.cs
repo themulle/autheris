@@ -153,7 +153,10 @@ CREATE TABLE dbo.CONSENT_ROW_FILTERS (
     dependent_valid_from_column NVARCHAR(256) NULL,
     dependent_valid_to_column NVARCHAR(256) NULL,
     target_table_alias NVARCHAR(256) NULL,
-    additional_hops_json NVARCHAR(MAX) NULL
+    additional_hops_json NVARCHAR(MAX) NULL,
+    key_set_strategy INT NULL,
+    key_set_duration_seconds INT NULL,
+    key_set_max_keys INT NULL
 );
 
 IF OBJECT_ID(N'dbo.POLICY_EPOCHS', N'U') IS NULL
@@ -557,6 +560,17 @@ CREATE TABLE dbo.TABLE_INDEX_COLUMNS (
 );
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_TABLE_INDEX_COLUMNS_COLUMN' AND object_id = OBJECT_ID(N'dbo.TABLE_INDEX_COLUMNS'))
     CREATE UNIQUE INDEX UX_TABLE_INDEX_COLUMNS_COLUMN ON dbo.TABLE_INDEX_COLUMNS (index_id, table_column_id);
+
+-- Issue #107: object-level row filter evaluation strategy (key-set cache); separate from TABLES because ingestion upserts rewrite TABLES
+IF OBJECT_ID(N'dbo.TABLE_ROW_FILTER_STRATEGIES', N'U') IS NULL
+CREATE TABLE dbo.TABLE_ROW_FILTER_STRATEGIES (
+    table_id NVARCHAR(128) NOT NULL PRIMARY KEY,
+    strategy INT NULL,
+    duration_seconds INT NULL,
+    max_keys INT NULL,
+    updated_by NVARCHAR(256) NOT NULL,
+    updated_at NVARCHAR(64) NOT NULL
+);
 ");
 
             // Append-only audit table (a table owner can still drop the trigger; the runtime login should only

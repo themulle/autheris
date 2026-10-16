@@ -57,4 +57,22 @@ public sealed class GovernanceSchemaShapeSnapshotTests
         shape.Tables.Select(t => t.Name).ShouldContain("TABLE_INDEX_COLUMNS");
         shape.Tables.ShouldAllBe(t => t.Columns.Count > 0);
     }
+
+    [Theory]
+    [InlineData("sqlite", "TABLE_ROW_FILTER_STRATEGIES", "CONSENT_ROW_FILTERS")]
+    [InlineData("postgresql", "table_row_filter_strategies", "consent_row_filters")]
+    [InlineData("sqlserver", "TABLE_ROW_FILTER_STRATEGIES", "CONSENT_ROW_FILTERS")]
+    public void EmbeddedSnapshot_CoversTheRowFilterStrategyTable(string engine, string strategies, string rowFilters)
+    {
+        var shape = GovernanceSchemaShapeLoader.LoadEmbedded(engine);
+
+        var table = shape.Tables.Single(t => t.Name == strategies);
+        table.Columns.Select(c => c.Name).ShouldBe(["table_id", "strategy", "duration_seconds", "max_keys", "updated_by", "updated_at"]);
+        table.PrimaryKey.ShouldBe(["table_id"]);
+
+        var filters = shape.Tables.Single(t => t.Name == rowFilters);
+        filters.Columns.Select(c => c.Name).ShouldContain("key_set_strategy");
+        filters.Columns.Select(c => c.Name).ShouldContain("key_set_duration_seconds");
+        filters.Columns.Select(c => c.Name).ShouldContain("key_set_max_keys");
+    }
 }

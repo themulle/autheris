@@ -102,4 +102,31 @@ public sealed class VirtualFilterOptions
 public sealed class RowFilterOptions
 {
     public RowFilterSubqueryStrategy SubqueryStrategy { get; set; } = RowFilterSubqueryStrategy.Exists;
+
+    /// <summary>Issue #107: key-set cache strategy for correlated row filters (<c>Gateway:RowFilters:KeySetCache</c>).</summary>
+    public RowFilterKeySetCacheOptions KeySetCache { get; init; } = new();
+}
+
+/// <summary>
+/// Issue #107 global defaults and caps of the key-set cache strategy. Ranges (validated at startup, runtime values above a lowered cap are clamped):
+/// <c>1 s &lt;= DefaultDuration &lt;= MaxDuration &lt;= 24 h</c>, <c>1 &lt;= MaxKeys &lt;= 10,000</c>, <c>0 &lt;= BindParameterReserve &lt;= 1,000</c>,
+/// <c>1 &lt;= MaxConcurrentKeyQueries &lt;= 64</c>, <c>SizeLimitBytes &gt; 0</c>, <c>KeyQueryTimeout &gt; 0</c>.
+/// </summary>
+public sealed class RowFilterKeySetCacheOptions
+{
+    public const int MaxKeysCeiling = 10_000;
+    public const int BindParameterReserveCeiling = 1_000;
+    public const int MaxConcurrentKeyQueriesCeiling = 64;
+    public static readonly TimeSpan MinDuration = TimeSpan.FromSeconds(1);
+    public static readonly TimeSpan DurationCeiling = TimeSpan.FromHours(24);
+
+    public RowFilterEvaluationStrategy DefaultStrategy { get; init; } = RowFilterEvaluationStrategy.Exists;
+    public TimeSpan DefaultDuration { get; init; } = TimeSpan.FromMinutes(5);
+    public TimeSpan MaxDuration { get; init; } = TimeSpan.FromHours(1);
+    public int MaxKeys { get; init; } = 2000;
+    public long SizeLimitBytes { get; init; } = 64L * 1024 * 1024;
+    public TimeSpan KeyQueryTimeout { get; init; } = TimeSpan.FromSeconds(5);
+    public int BindParameterReserve { get; init; } = 256;
+    /// <summary>SEC-RF107-13: concurrent key query loads per node.</summary>
+    public int MaxConcurrentKeyQueries { get; init; } = 4;
 }

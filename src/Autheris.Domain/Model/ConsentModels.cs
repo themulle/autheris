@@ -63,6 +63,11 @@ public sealed class ConsentRowFilter
     public string? DependentValidToColumn { get; init; }
     public string? TargetTableAlias { get; init; }
     public IReadOnlyList<SubqueryJoinHop>? AdditionalHops { get; init; }
+
+    // Issue #107: key-set cache evaluation settings of this rule (null = inherit object/global). Serialized in ConsentRowFilterRecipe.
+    public RowFilterEvaluationStrategy? KeySetStrategy { get; init; }
+    public int? KeySetDurationSeconds { get; init; }
+    public int? KeySetMaxKeys { get; init; }
 }
 
 public sealed class Consent

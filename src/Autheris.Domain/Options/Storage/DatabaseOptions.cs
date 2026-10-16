@@ -47,6 +47,13 @@ public sealed class DataSourceConnectionOptions
     public bool ReadUncommitted { get; init; }
 
     /// <summary>
+    /// Issue #107 (SEC-RF107-01): operator attestation that the dependent tables of correlated row filters are not filtered per user
+    /// at this source (no source-native per-user RLS). The key-set cache key query runs with a tenant-only session; without this flag
+    /// every correlated filter of the data source falls back to <c>EXISTS</c> (reason <c>SourceNotEligible</c>). Default false.
+    /// </summary>
+    public bool KeySetCacheAllowed { get; init; }
+
+    /// <summary>
     /// Oracle only (WP-F1, CR-ADG-08): Key Vault reference of the database password. Outside Development the connection string
     /// must not contain a plaintext <c>Password</c>; the factory injects the resolved secret when it opens the connection.
     /// </summary>

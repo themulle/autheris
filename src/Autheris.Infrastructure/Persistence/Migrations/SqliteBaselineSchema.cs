@@ -147,7 +147,10 @@ internal sealed class SqliteBaselineSchema
                 dependent_valid_from_column TEXT,
                 dependent_valid_to_column TEXT,
                 target_table_alias TEXT,
-                additional_hops_json TEXT
+                additional_hops_json TEXT,
+                key_set_strategy INTEGER NULL,
+                key_set_duration_seconds INTEGER NULL,
+                key_set_max_keys INTEGER NULL
             );
 
             CREATE TABLE IF NOT EXISTS POLICY_EPOCHS (
@@ -479,6 +482,16 @@ internal sealed class SqliteBaselineSchema
                 PRIMARY KEY (index_id, column_ordinal)
             );
             CREATE UNIQUE INDEX IF NOT EXISTS UX_TABLE_INDEX_COLUMNS_COLUMN ON TABLE_INDEX_COLUMNS (index_id, table_column_id);
+
+            -- Issue #107: object-level row filter evaluation strategy (key-set cache); separate from TABLES because ingestion upserts rewrite TABLES
+            CREATE TABLE IF NOT EXISTS TABLE_ROW_FILTER_STRATEGIES (
+                table_id TEXT PRIMARY KEY,
+                strategy INTEGER NULL,
+                duration_seconds INTEGER NULL,
+                max_keys INTEGER NULL,
+                updated_by TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
         ";
         cmd.ExecuteNonQuery();
 
