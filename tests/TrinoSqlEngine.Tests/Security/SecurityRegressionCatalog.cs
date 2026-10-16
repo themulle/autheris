@@ -164,6 +164,8 @@ internal static class SecurityRegressionCatalog
             },
             Note: "Gateway, catalog and governance-storage controls; no SQL compiler path. The plan ids SEC-94-01..15 share this row."),
         new("SEC-06", LegacyIdKind.Application, "client tier is not granted by a substring of the key", Array.Empty<string>(), new[] { "Autheris.Tests.Unit/ClientTierResolverSecurityTests.cs" }),
+        new("SEC-112", LegacyIdKind.Application, "PLAN-DATA-112 review findings (SEC-112-NN): governed aggregation privacy hardening", Array.Empty<string>(), new[] { "Autheris.Tests.Unit/Analytics/AggregationPrivacyHardeningTests.cs", "Autheris.Tests.Unit/Analytics/DifferentialPrivacyNoiseAndGraphQlMetricsTests.cs" }),
+        new("SEC-131", LegacyIdKind.Application, "PLAN-FED-131 review findings (SEC-131-NN): federated failure audit without driver text", Array.Empty<string>(), new[] { "Autheris.Tests.Unit/VirtualFilters/Federation/FederatedFailureAuditHygieneTests.cs" }),
         new("SEC-007", LegacyIdKind.NotAControl, "test data of an ingress/egress test (not a finding ID)", Array.Empty<string>(), new[] { "Autheris.Tests.Unit/IngressEgressTests.cs" }),
         new("SEC-882", LegacyIdKind.NotAControl, "a ticket key in ITSM client tests (not a finding ID)", Array.Empty<string>(), new[] { "Autheris.Tests.Unit/ItsmClientsAndRecertificationTests.cs", "Autheris.Extensions.Tests/ItsmClientTests.cs" }),
         new("SR15-06", LegacyIdKind.Application, "four-eyes approval of virtual filters and access profiles", Array.Empty<string>(), new[] { Vf + "VirtualFilterFourEyesApprovalTests.cs" }),
