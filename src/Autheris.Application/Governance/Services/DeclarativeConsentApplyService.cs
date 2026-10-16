@@ -146,6 +146,18 @@ public sealed class DeclarativeConsentApplyService(
                 .Where(c => c.IsActive(now) && c.TenantId == tenantId && MatchesGrantee(c, granteeType, granteeSid, roleName))
                 .ToList();
 
+            // Issue #116: scope-only column rules never grant access (fail closed); surface that as a non-blocking warning.
+            if (policy.ColumnRules != null)
+            {
+                foreach (var scopeOnlyColumn in policy.ColumnRules
+                    .GroupBy(r => r.ColumnName, StringComparer.OrdinalIgnoreCase)
+                    .Where(g => g.All(r => r.ApplicableScopes != null && r.ApplicableScopes.Count > 0))
+                    .Select(g => g.Key))
+                {
+                    details.Add($"WARNING: Column '{scopeOnlyColumn}' of '{tableId}' -> '{policy.GranteeRef}' has only scope-specific rules; without a rule that applies to all scopes it stays denied for callers whose scopes are not listed (add a rule without scopes to set the base level).");
+                }
+            }
+
             // Check if existing consent matches desired policy
             var matchingConsent = activeExisting.FirstOrDefault(c => IsIdentical(c, effect, policy, individual ? policy.ValidUntil : null));
             if (matchingConsent != null)

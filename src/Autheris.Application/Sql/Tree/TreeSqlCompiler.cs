@@ -68,6 +68,57 @@ public static partial class TreeSqlCompiler
         return new CompiledTreeQuery(sql, context.Parameters, context.HmacColumns);
     }
 
+    /// <summary>
+    /// Lists the selected columns that <see cref="Compile"/> masks for the caller (same decision, same column
+    /// resolution), so that transports can report them (GraphQL <c>extensions.maskedFields</c>). Columns that are unknown
+    /// or denied are skipped here; <see cref="Compile"/> rejects them.
+    /// </summary>
+    public static IReadOnlyList<TreeMaskedColumn> CollectMaskedColumns(
+        TreeQueryNode root,
+        IReadOnlyDictionary<TableIdentifier, TreeTableAccess> access,
+        bool maskingDisabled = false)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        ArgumentNullException.ThrowIfNull(access);
+
+        var result = new List<TreeMaskedColumn>();
+        if (maskingDisabled)
+        {
+            return result;
+        }
+
+        CollectMasked(root, access, [], result);
+        return result;
+    }
+
+    private static void CollectMasked(
+        TreeQueryNode node,
+        IReadOnlyDictionary<TableIdentifier, TreeTableAccess> access,
+        IReadOnlyList<string> path,
+        List<TreeMaskedColumn> result)
+    {
+        if (!access.TryGetValue(node.Table, out var tableAccess))
+        {
+            return;
+        }
+
+        foreach (var requested in node.Columns)
+        {
+            var column = tableAccess.Metadata.GetColumn(requested?.Trim() ?? string.Empty)?.ColumnName;
+            if (column != null &&
+                tableAccess.Decision.GetEffectiveColumnAccess(column, tableAccess.Metadata) == ColumnAccessLevel.Mask &&
+                !result.Any(m => string.Equals(m.Column, column, StringComparison.Ordinal) && m.Path.SequenceEqual(path, StringComparer.Ordinal)))
+            {
+                result.Add(new TreeMaskedColumn(path, column));
+            }
+        }
+
+        foreach (var relation in node.Relations)
+        {
+            CollectMasked(relation.Child, access, path.Append(relation.ResponseKey).ToArray(), result);
+        }
+    }
+
     private static int Depth(TreeQueryNode node) =>
         1 + (node.Relations.Count == 0 ? 0 : node.Relations.Max(r => Depth(r.Child)));
 

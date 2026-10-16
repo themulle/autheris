@@ -293,7 +293,7 @@ Autheris provides its own decoupled semantic schema grounding for AI agents via 
 
 1. **Register Table in Governance Catalog**: Add entry in `TABLES` table with `CATALOG_NAME`, `SCHEMA_NAME`, and `TABLE_NAME`.
 2. **Define Columns and Types**: Add column specifications in `TABLE_COLUMNS`.
-3. **Configure Hot Chocolate Dynamic Type**: Handled automatically by `DynamicTableType` which inspects catalog metadata, applies scalar conversions, and hooks field masking.
+3. **Configure Hot Chocolate Dynamic Type**: Handled automatically by `CatalogGraphQlTypeModule`, which builds the GraphQL types from catalog metadata, applies scalar conversions, and reports masked fields in `extensions.maskedFields`.
 4. **Grant Consent**: Ensure the calling SID has an active `ALLOW` consent for the table before querying, otherwise Zero Trust will return `FORBIDDEN`.
 
 ---

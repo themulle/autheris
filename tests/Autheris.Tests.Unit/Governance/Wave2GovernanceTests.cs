@@ -209,7 +209,8 @@ public sealed class Wave2GovernanceTests
 
         // Assert
         explanation.Decision.ShouldBe("ALLOWED");
-        explanation.ActiveRowFilters.ShouldContain("country = 'US'");
+        explanation.ActiveRowFilters.ShouldNotContain("country = 'US'"); // issue #117: no SQL for ordinary callers
+        explanation.ActiveRowFilters.Count.ShouldBe(1);
         explanation.MaskedColumns.ShouldContain("email");
         explanation.DeniedColumns.ShouldContain("ssn");
         explanation.AllowedColumns.ShouldContain("id");
