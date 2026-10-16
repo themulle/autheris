@@ -187,9 +187,9 @@ public static class McpEndpoints
     // headers) is dropped here, exactly as SecurityContextFactory partitions the roles.
     private static List<string> RolesWithoutUntrustedClusterAdmin(ClaimsPrincipal principal)
     {
-        var canonicalClusterAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        var canonicalClusterAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
         return principal.GetUserRoles()
-            .Where(r => canonicalClusterAdmin || !Autheris.Domain.Security.ClusterAdminPolicy.IsClusterAdminRole(r))
+            .Where(r => canonicalClusterAdmin || !ClusterAdminPolicy.IsClusterAdminRole(r))
             .ToList();
     }
 

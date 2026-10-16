@@ -62,6 +62,9 @@ public sealed class McpCatalogChannelsWp0Tests
     private static async Task<string> ReadAsync(Harness h, McpSessionContext session, string uri) =>
         (await h.Resources.ReadAsync(uri, session)).Text;
 
+    // Table rows of the datasources resource (one per data source), independent of wording.
+    private static int DatasourceRows(string markdown) => markdown.Split('\n').Count(l => l.StartsWith("| `", StringComparison.Ordinal));
+
     private static Task<string> ToolAsync(Harness h, McpSessionContext session, string tool, string args = "{}") =>
         h.Tools.ExecuteToolAsync(new McpToolDefinition(tool, "t", "{}", tool), args, session);
 
@@ -142,8 +145,8 @@ public sealed class McpCatalogChannelsWp0Tests
         (await ToolAsync(h, claimlessAdmin, McpDatasetTools.ListDatasources)).ShouldContain("Gateway:Tenancy:Mode=Single");
         (await ToolAsync(h, cluster, McpDatasetTools.ListDatasources)).ShouldContain("a.internal");
 
-        (await ReadAsync(h, user, "autheris://catalog/datasources")).ShouldNotContain("data source");
-        (await ReadAsync(h, cluster, "autheris://catalog/datasources")).ShouldContain("data source");
+        DatasourceRows(await ReadAsync(h, user, "autheris://catalog/datasources")).ShouldBe(0);
+        DatasourceRows(await ReadAsync(h, cluster, "autheris://catalog/datasources")).ShouldBe(2);
 
         (await h.Dispatcher.InvokeApiAsync("/api/v1/catalog/datasources", "GET", context: Wp0.Context(Wp0.User("S-A-USER", "tenant-a"))))
             .ShouldContain("\"status\": 403");

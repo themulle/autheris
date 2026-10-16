@@ -136,7 +136,7 @@ public sealed class CatalogDiscoveryConsentVisibilityTests
 
     // T-W0-8
     [Fact]
-    public async Task Detail_UnknownInactiveAndUnconsentedDataset_AreAllNull()
+    public async Task Detail_UnknownUnconsentedAndInactiveUnconsentedDataset_AreAllNull()
     {
         var inactive = Wp0.Table("sales", "retired", "Retired", active: false);
         var repo = Wp0.Consents(Wp0.Allow(OrdersA.Identifier, "S-A-USER", Wp0.TenantA));

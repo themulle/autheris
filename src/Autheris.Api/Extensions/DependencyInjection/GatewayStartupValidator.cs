@@ -599,14 +599,6 @@ public static class GatewayStartupValidator
     }
 
     /// <summary>
-    /// SEC-ADG-28 (X1): <c>WebSql:SqlRewriterEngine</c> was the switch between the legacy string rewriter and the AST compiler. There is
-    /// one path now and no runtime switch (rollback is a revert), so a configured value fails the start in every environment:
-    /// warn-and-ignore would let an operator believe in a kill switch that does not exist. The configured value is never echoed.
-    /// </summary>
-    /// <summary>
-    /// SR-L-02 / G-4: outside Development <c>Gateway:Hosting:AllowedHosts</c> must be set and must not be the bare wildcard.
-    /// </summary>
-    /// <summary>
     /// Reports the effective tenancy mode (Warning when it is the default, Information when explicit) and the deprecation of the
     /// <c>Catalog:AllowAuthenticatedCatalogDiscovery</c> flag, which no longer widens any catalog view.
     /// </summary>
@@ -644,6 +636,14 @@ public static class GatewayStartupValidator
         }
     }
 
+    /// <summary>
+    /// SEC-ADG-28 (X1): <c>WebSql:SqlRewriterEngine</c> was the switch between the legacy string rewriter and the AST compiler. There is
+    /// one path now and no runtime switch (rollback is a revert), so a configured value fails the start in every environment:
+    /// warn-and-ignore would let an operator believe in a kill switch that does not exist. The configured value is never echoed.
+    /// </summary>
+    /// <summary>
+    /// SR-L-02 / G-4: outside Development <c>Gateway:Hosting:AllowedHosts</c> must be set and must not be the bare wildcard.
+    /// </summary>
     public static void ValidateAllowedHosts(GatewayOptions options, IHostEnvironment environment)
     {
         ArgumentNullException.ThrowIfNull(options);

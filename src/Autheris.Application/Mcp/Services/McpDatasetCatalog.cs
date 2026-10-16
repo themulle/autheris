@@ -16,6 +16,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Autheris.Domain.Options;
 using static Autheris.Application.Mcp.Services.McpDatasetTools;
+using Autheris.Application.Catalog.Services;
 
 /// <summary>
 /// MCP dataset tools (list_datasets, describe_dataset, sample_rows). Visibility follows the GraphQL catalog
@@ -522,20 +523,20 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
     {
         var roles = principal.GetUserRoles();
         // The caller class comes from the canonical resolver; a claim-less GovernanceAdmin in Multi mode is no administrator.
-        var scope = Autheris.Application.Catalog.Services.CallerScopeResolver.Resolve(principal, options?.Value.Tenancy.EffectiveMode ?? TenancyMode.Multi);
+        var scope = CallerScopeResolver.Resolve(principal, options?.Value.Tenancy.EffectiveMode ?? TenancyMode.Multi);
         if (logger != null)
         {
-            Autheris.Application.Catalog.Services.CallerScopeDiagnostics.ReportIfClaimlessAdmin(logger, principal, scope);
+            CallerScopeDiagnostics.ReportIfClaimlessAdmin(logger, principal, scope);
         }
 
-        var isAdmin = Autheris.Application.Catalog.Services.CallerScopeResolver.IsAdminView(scope);
+        var isAdmin = CallerScopeResolver.IsAdminView(scope);
         if (isAdmin)
         {
             return (Array.Empty<Consent>(), Array.Empty<ConsentRequest>(), true);
         }
 
         var userSid = principal.GetUserSid();
-        if (userSid == null || scope == Autheris.Application.Catalog.Services.CallerScope.None)
+        if (userSid == null || scope == CallerScope.None)
         {
             return (Array.Empty<Consent>(), Array.Empty<ConsentRequest>(), false);
         }

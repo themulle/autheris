@@ -23,7 +23,7 @@ public sealed class CatalogSearchColumnOracleTests
 
     private static readonly TableMetadata Customers = Wp0.Table("crm", "customers", "Customer master data", ["id", "name", "ssn_hash"]);
     private static readonly TableMetadata Orders = WithForeignKey(
-        Wp0.Table("crm", "orders", "Order headers", ["order_id", "buyer_ref", "secret_ref"]),
+        Wp0.Table("crm", "orders", "Order headers", ["order_id", "buyer_ref", "secret_ref", "customer_id"]),
         ("buyer_ref", "customers", "id"),
         ("secret_ref", "customers", "ssn_hash"));
 
@@ -54,7 +54,7 @@ public sealed class CatalogSearchColumnOracleTests
     [
         // ssn_hash and secret_ref are not granted: they must stay invisible in every search output.
         Wp0.Allow(Customers.Identifier, Sid, Wp0.TenantA, "id", "name"),
-        Wp0.Allow(Orders.Identifier, Sid, Wp0.TenantA, "order_id", "buyer_ref")
+        Wp0.Allow(Orders.Identifier, Sid, Wp0.TenantA, "order_id", "buyer_ref", "customer_id")
     ];
 
     private static string Everything(IEnumerable<CatalogSearchHit> hits) => System.Text.Json.JsonSerializer.Serialize(hits);
@@ -122,6 +122,7 @@ public sealed class CatalogSearchColumnOracleTests
             new CatalogSearchQuery("order headers", Mode: CatalogSearchMode.KeywordBm25, Limit: 10, ExpandRelations: true), context);
 
         var orders = hits.First(h => h.TableIdentifier.TableName == "orders");
+        // customer_id is visible but its convention-derived target column (customers.customer_id) is not a visible column: dropped as well.
         orders.RelatedJoinPaths.Select(r => r.FromColumn).ShouldBe(["buyer_ref"]);
         orders.RelatedJoinPaths.Select(r => r.ToColumn).ShouldBe(["id"]);
         Everything(hits).ShouldNotContain("ssn_hash");

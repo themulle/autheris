@@ -14,6 +14,7 @@ using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 
 /// <summary>
 /// Handles Trino wire-protocol metadata introspection queries (<c>SHOW CATALOGS</c>, <c>SHOW SCHEMAS</c>,
@@ -65,7 +66,7 @@ public static class TrinoMetadataQueryHandler
         TenantId tenantId,
         ITableMetadataRepository? metadataRepository,
         IConsentRepository? consentRepository,
-        Autheris.Domain.Options.GatewayOptions? gatewayOptions,
+        GatewayOptions? gatewayOptions,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(rawSql) || metadataRepository == null)
@@ -96,7 +97,7 @@ public static class TrinoMetadataQueryHandler
         var sw = Stopwatch.StartNew();
         var allTables = await metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
         var activeTables = allTables.Where(t => t.Table.IsActive).ToList();
-        var visibleTables = await CatalogVisibility.VisibleTablesAsync(activeTables, user, tenantId, consentRepository, contract: null, gatewayOptions?.Tenancy.EffectiveMode ?? Autheris.Domain.Options.TenancyMode.Multi, gatewayOptions?.Catalog.SharedTables, ct).ConfigureAwait(false);
+        var visibleTables = await CatalogVisibility.VisibleTablesAsync(activeTables, user, tenantId, consentRepository, contract: null, gatewayOptions?.Tenancy.EffectiveMode ?? TenancyMode.Multi, gatewayOptions?.Catalog.SharedTables, ct).ConfigureAwait(false);
 
         if (showCatalogsMatch.Success)
         {

@@ -1110,6 +1110,18 @@ The tenant signal of the tenant administrator view is derived from consent recor
 
 **Start-up diagnostics.** The effective mode is logged at start: a Warning when `Mode` is not configured (single-tenant deployments must set `Single`), an Information entry when it is. At runtime a throttled Warning (once per principal and ten minutes) names the option when a principal that holds `GovernanceAdmin` has no tenant claim in `Multi` mode.
 
+#### Breaking changes / upgrade notes
+
+> **Upgrade note: single-tenant installations must set `Gateway:Tenancy:Mode=Single` before upgrading.** The default is `Multi`.
+
+- A `GovernanceAdmin` without tenant claim in `Multi` mode is no administrator any more and loses the administrator view in the catalog (REST, GraphQL, MCP), Trino/WebSQL metadata, Arrow Flight SQL, Iceberg REST catalog and the effective-access explanation.
+- Deployments with ReBAC enabled now need a consent **and** a ReBAC permission to discover a dataset (intersection).
+- `GET /api/v1/catalog/datasources` and its MCP equivalents are administrator-only.
+- `AllowAuthenticatedCatalogDiscovery` has no effect.
+- `sample_rows(synthetic: true)` needs the administrator view or an active table consent.
+- Search recall is reduced for column-restricted callers.
+- Known limitation: the tenant-scoped administrator sees only the tables on which its tenant holds a consent plus `Gateway:Catalog:SharedTables`.
+
 ---
 
 ## 3. Deployment & Umgebungsvariablen

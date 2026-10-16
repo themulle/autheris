@@ -141,11 +141,11 @@ public sealed class McpResourceProvider : IMcpResourceProvider
                 GroupSids: (session.GroupSids ?? []).Select(g => new Sid(g)).ToArray(),
                 Roles: roles,
                 Tenant: new TenantId(session.TenantId),
-                IsGovernanceAdmin: roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase),
-                IsClusterAdmin: roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase)),
+                IsGovernanceAdmin: false,
+                IsClusterAdmin: false),
             session.SessionId);
 
-        // The discovery service decides the caller class from the principal only (never from the role strings above), so the
+        // The administrator flags above are deliberately false: the discovery service decides the caller class from the principal only, so the
         // principal is built exactly as for the MCP tools. The synthetic anonymous MCP client keeps the empty principal (nothing visible).
         var sid = session.UserSid ?? session.ServicePrincipalId;
         if (string.Equals(sid, AnonymousMcpClientSid, StringComparison.OrdinalIgnoreCase))

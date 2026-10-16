@@ -12,6 +12,7 @@ using HotChocolate;
 using HotChocolate.Types;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
+using Autheris.Application.Catalog.Services;
 
 namespace Autheris.GraphQL.Types;
 
@@ -399,10 +400,10 @@ public sealed class Query
         // Caller class from the one canonical resolver: only the canonical ClusterAdmin keeps the global view; a GovernanceAdmin is
         // tenant-scoped (in Gateway:Tenancy:Mode=Single without tenant claim it is unrestricted; a claim-less principal in Multi mode is no
         // administrator). AllowAuthenticatedCatalogDiscovery no longer widens anything: every non-administrator takes the consent path.
-        var callerScope = Autheris.Application.Catalog.Services.CallerScopeResolver.Resolve(
-            principal, options?.Value?.Tenancy?.EffectiveMode ?? Autheris.Domain.Options.TenancyMode.Multi);
-        var isClusterAdmin = callerScope == Autheris.Application.Catalog.Services.CallerScope.Global;
-        var isGovernanceAdmin = callerScope is Autheris.Application.Catalog.Services.CallerScope.Unrestricted or Autheris.Application.Catalog.Services.CallerScope.Tenant;
+        var callerScope = CallerScopeResolver.Resolve(
+            principal, options?.Value?.Tenancy?.EffectiveMode ?? TenancyMode.Multi);
+        var isClusterAdmin = callerScope == CallerScope.Global;
+        var isGovernanceAdmin = callerScope is CallerScope.Unrestricted or CallerScope.Tenant;
         var isAdmin = isClusterAdmin || isGovernanceAdmin;
 
         var allTables = await metadataRepository.GetAllTablesAsync(ct);

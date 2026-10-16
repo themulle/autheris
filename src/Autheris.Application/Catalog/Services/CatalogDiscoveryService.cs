@@ -388,7 +388,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
-    private static readonly char[] QuerySeparators = [' ', '\t', '\r', '\n', ',', ';', '.', '(', ')', '"', '\'', '/', '\\', '-'];
+    private static readonly char[] QuerySeparators = [' ', '\t', '\r', '\n', ',', ';', '.', '(', ')', '"', '\'', '/', '\\', '-', '_', ':'];
 
     /// <summary>
     /// Result hygiene for one index hit (W0-C1). The index is built from the whole catalog including column names, so a hit
@@ -416,11 +416,11 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         IReadOnlyList<string> matchedTerms = hit.MatchedTerms;
         if (restricted)
         {
-            var text = VisibleText(visible);
+            var text = VisibleTokens(visible);
             matchedTerms = hit.MatchedTerms
-                .Where(t => !string.IsNullOrWhiteSpace(t) && text.Contains(t, StringComparison.OrdinalIgnoreCase))
+                .Where(t => !string.IsNullOrWhiteSpace(t) && text.Contains(t))
                 .ToList();
-            var lexical = matchedTerms.Count > 0 || queryTerms.Any(t => text.Contains(t, StringComparison.OrdinalIgnoreCase));
+            var lexical = matchedTerms.Count > 0 || queryTerms.Any(text.Contains);
             if (!lexical)
             {
                 return null;
@@ -436,7 +436,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         var relations = hit.RelatedJoinPaths
             .Where(r => visibleColumnNames.Contains(r.FromColumn) &&
                         permitted.TryGetValue(r.ToTable, out var target) &&
-                        IsColumnVisibleOrUnknown(r.ToColumn, target, all))
+                        target.Columns.Any(c => string.Equals(c.ColumnName, r.ToColumn, StringComparison.OrdinalIgnoreCase)))
             .ToList();
 
         return hit with
@@ -449,20 +449,9 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         };
     }
 
-    // A join column that exists in the target table but is not visible to the caller is removed; a convention-derived name the
-    // target does not have at all names nothing and discloses nothing.
-    private static bool IsColumnVisibleOrUnknown(string column, TableMetadata visibleTarget, IReadOnlyDictionary<TableIdentifier, TableMetadata> all)
-    {
-        if (visibleTarget.Columns.Any(c => string.Equals(c.ColumnName, column, StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
-
-        return all.TryGetValue(visibleTarget.Identifier, out var full) &&
-               !full.Columns.Any(c => string.Equals(c.ColumnName, column, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static string VisibleText(TableMetadata table)
+    // Whole tokens of the visible text (identifier, description, visible columns with type and description), split like the query terms
+    // and additionally on underscores, so a short term never matches inside an unrelated hidden-column word.
+    private static HashSet<string> VisibleTokens(TableMetadata table)
     {
         var sb = new System.Text.StringBuilder();
         sb.Append(table.Identifier.Domain).Append(' ').Append(table.Identifier.Schema).Append(' ').Append(table.Identifier.TableName).Append(' ')
@@ -472,8 +461,16 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             sb.Append(c.ColumnName).Append(' ').Append(c.DataType).Append(' ').Append(c.Description).Append(' ');
         }
 
-        return sb.ToString();
+        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in sb.ToString().Split(TokenSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            tokens.Add(t);
+        }
+
+        return tokens;
     }
+
+    private static readonly char[] TokenSeparators = [' ', '\t', '\r', '\n', ',', ';', '.', '(', ')', '"', '\'', '/', '\\', '-', '_', ':'];
 
     public async Task<DatasourceRegistrationResult> RegisterDatasourceAsync(DatasourceRegistrationRequest request, RequestContext context, CancellationToken ct = default)
     {

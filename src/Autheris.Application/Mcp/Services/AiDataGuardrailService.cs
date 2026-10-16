@@ -1,6 +1,7 @@
 namespace Autheris.Application.Mcp.Services;
 
 using System;
+using Autheris.Application.Catalog.Services;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -91,6 +92,12 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         _eventBus = eventBus;
         _sqlEngine = sqlEngine;
     }
+
+    // Canonical caller class (never role strings): only the global and the unrestricted administrator skip the catalog visibility check;
+    // a tenant-scoped administrator is confined by it, a claim-less GovernanceAdmin in Multi mode is no administrator.
+    private bool IsUnrestrictedCatalogCaller(McpSessionContext session) =>
+        CallerScopeResolver.Resolve(McpProtocolHandler.BuildPrincipalFromSession(session), _options.Value.Tenancy.EffectiveMode)
+            is CallerScope.Global or CallerScope.Unrestricted;
 
     public async ValueTask<McpToolCallResult> ExecuteToolWithGuardrailAsync(
         McpToolCallRequest request,
@@ -281,8 +288,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
 
             if (meta?.Table.RequiresFourEyes == true)
             {
-                var roles = sessionContext.Roles ?? [];
-                bool isAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) || roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
+                bool isAdmin = IsUnrestrictedCatalogCaller(sessionContext);
 
                 if (_consentRepository != null && !_options.Value.IsMcpAuthBypassed && !isAdmin)
                 {
@@ -344,8 +350,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
 
             var queries = await _goldenQueryService.GetGoldenQueriesAsync(domain, tableName, cancellationToken).ConfigureAwait(false);
             var isMcpAuthBypassed = _options.Value.IsMcpAuthBypassed;
-            var roles = sessionContext.Roles ?? [];
-            bool isAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) || roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
+            bool isAdmin = IsUnrestrictedCatalogCaller(sessionContext);
 
             if (_consentRepository != null && !isMcpAuthBypassed && !isAdmin)
             {
