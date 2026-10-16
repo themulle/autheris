@@ -7,6 +7,7 @@ using System.Text.Json.Nodes;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Services;
+using Autheris.Application.Sql.Tree.Federation;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
@@ -262,7 +263,9 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             resolved[table] = access;
         }
 
-        // 2. One SQL data source, provider dialect == catalog dialect.
+        // 2. One SQL data source, provider dialect == catalog dialect. The source-name rule is shared with the schema
+        //    (RelationExecutability.IsSameExecutionSource); the type and dialect checks stay separate here so that each
+        //    failure keeps its own exception and message. Together they are never more permissive than the schema predicate.
         var rootAccess = resolved[root.Table];
         var sourceName = rootAccess.Metadata.Table.SourceName;
         foreach (var access in resolved.Values)
@@ -271,7 +274,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             {
                 throw new GatewayInvalidQueryException($"The table '{access.Metadata.Identifier}' is not a SQL table and cannot be queried with relations.");
             }
-            if (!string.Equals(access.Metadata.Table.SourceName, sourceName, StringComparison.OrdinalIgnoreCase))
+            if (!RelationExecutability.HasSameSourceName(rootAccess.Metadata, access.Metadata))
             {
                 throw new GatewayInvalidQueryException("Relations across data sources are not supported in one query.");
             }

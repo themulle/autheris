@@ -332,13 +332,249 @@ public sealed class CatalogSchemaModelTests
         Assert.Equal(["id"], Assert.Single(model.Tables).Columns.Select(c => c.ColumnName));
     }
 
+    // BUG #75: relations between tables the tree service cannot run as one statement are not exposed.
+
+    private static readonly TableIdentifier PartnerId = new("crm", "dbo", "partners");
+    private static readonly TableIdentifier ContactId = new("sales", "dbo", "contacts");
+
+    private static TableRelation Relation(string name, TableIdentifier parent, TableIdentifier child, bool allowCrossDataSource = false) => new()
+    {
+        RelationName = name,
+        ParentTableIdentifier = parent,
+        ChildTableIdentifier = child,
+        Cardinality = RelationCardinality.OneToMany,
+        JoinKeysParent = ["id"],
+        JoinKeysChild = ["partner_id"],
+        AllowCrossDataSource = allowCrossDataSource
+    };
+
+    private static TableMetadata RelTable(TableIdentifier id, string sourceName, string dialect = "PostgreSql") =>
+        CreateTable(id, dialect: dialect, sourceName: sourceName, columns:
+        [
+            new TableColumn { ColumnName = "id", DataType = "int" },
+            new TableColumn { ColumnName = "partner_id", DataType = "int" }
+        ]);
+
+    private static async Task<CatalogSchemaModel> BuildWithRelationsAsync(
+        IReadOnlyList<TableMetadata> tables,
+        IReadOnlyList<TableRelation> relations,
+        Microsoft.Extensions.Logging.ILogger? logger = null)
+    {
+        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var relRepo = Substitute.For<ITableRelationRepository>();
+        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(tables);
+        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(ci => relations.Where(r => r.ParentTableIdentifier == ci.ArgAt<TableIdentifier>(0)).ToList());
+        return await CatalogSchemaModel.BuildAsync(metaRepo, relRepo, logger);
+    }
+
+    private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger
+    {
+        public List<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
+    }
+
+    [Fact]
+    public async Task BuildAsync_CrossSourceForwardRelation_IsOmitted()
+    {
+        var model = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg2")],
+            [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.Empty(Assert.Single(model.Tables, t => t.Identifier == PartnerId).Relations);
+    }
+
+    [Fact]
+    public async Task BuildAsync_CrossSourceReverseRelation_IsOmitted()
+    {
+        var model = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg2")],
+            [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.Empty(Assert.Single(model.Tables, t => t.Identifier == ContactId).Relations);
+    }
+
+    [Fact]
+    public async Task BuildAsync_CrossSourceRelationWithAllowFlag_IsStillOmitted()
+    {
+        // Interim rule: the flag has no effect on the schema until the federated path exists.
+        var model = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg2")],
+            [Relation("contacts", PartnerId, ContactId, allowCrossDataSource: true)]);
+
+        Assert.All(model.Tables, t => Assert.Empty(t.Relations));
+    }
+
+    [Fact]
+    public async Task BuildAsync_SameSourceDifferentDomain_RelationIsKept()
+    {
+        var model = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg1")],
+            [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.Single(Assert.Single(model.Tables, t => t.Identifier == PartnerId).Relations);
+        Assert.Single(Assert.Single(model.Tables, t => t.Identifier == ContactId).Relations);
+    }
+
+    [Fact]
+    public async Task BuildAsync_SourceNameComparison_IsCaseInsensitive()
+    {
+        var model = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "PG1"), RelTable(ContactId, "pg1")],
+            [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.Single(Assert.Single(model.Tables, t => t.Identifier == PartnerId).Relations);
+    }
+
+    [Fact]
+    public async Task BuildAsync_EmptySourceNameOnBothSides_IsSameSource()
+    {
+        // Documents the decision: empty equals empty (the runtime then fails closed with "has no database connection").
+        var model = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, ""), RelTable(ContactId, "")],
+            [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.Single(Assert.Single(model.Tables, t => t.Identifier == PartnerId).Relations);
+    }
+
+    [Fact]
+    public async Task BuildAsync_EmptyVersusNonEmptySourceName_IsOmitted()
+    {
+        // An empty name is never a wildcard for another source.
+        var model = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, ""), RelTable(ContactId, "pg1")],
+            [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.All(model.Tables, t => Assert.Empty(t.Relations));
+    }
+
+    [Fact]
+    public async Task BuildAsync_SameSourceNameDifferentDialect_IsOmitted()
+    {
+        var model = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "pg1", dialect: "PostgreSql"), RelTable(ContactId, "pg1", dialect: "SqlServer")],
+            [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.All(model.Tables, t => Assert.Empty(t.Relations));
+    }
+
+    [Fact]
+    public async Task BuildAsync_OmittedCrossSourceRelation_DoesNotConsumeFieldNames()
+    {
+        var otherId = new TableIdentifier("crm", "dbo", "others");
+        var model = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg2"), RelTable(otherId, "pg1")],
+            [Relation("profile", PartnerId, ContactId), Relation("profile", PartnerId, otherId)]);
+
+        var field = Assert.Single(Assert.Single(model.Tables, t => t.Identifier == PartnerId).Relations);
+        Assert.Equal("profile", field.FieldName);
+        Assert.Equal(otherId, field.TargetTableIdentifier);
+    }
+
+    [Fact]
+    public async Task BuildAsync_MixedRelations_OnlyCrossSourceOmitted()
+    {
+        var sameId = new TableIdentifier("crm", "dbo", "others");
+        var model = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg2"), RelTable(sameId, "pg1")],
+            [Relation("contacts", PartnerId, ContactId), Relation("others", PartnerId, sameId)]);
+
+        var forward = Assert.Single(Assert.Single(model.Tables, t => t.Identifier == PartnerId).Relations);
+        Assert.Equal(sameId, forward.TargetTableIdentifier);
+        Assert.Empty(Assert.Single(model.Tables, t => t.Identifier == ContactId).Relations);
+        Assert.Single(Assert.Single(model.Tables, t => t.Identifier == sameId).Relations);
+    }
+
+    [Fact]
+    public async Task Fingerprint_AddingOmittedCrossSourceRelation_DoesNotChangeIt_ButSameSourceRelationDoes()
+    {
+        var tables = new[] { RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg2") };
+        var none = await BuildWithRelationsAsync(tables, []);
+        var crossSource = await BuildWithRelationsAsync(tables, [Relation("contacts", PartnerId, ContactId)]);
+        var sameSource = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg1")],
+            [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.Equal(none.Fingerprint(), crossSource.Fingerprint());
+        Assert.NotEqual(none.Fingerprint(), sameSource.Fingerprint());
+    }
+
+    [Fact]
+    public async Task Fingerprint_ChangesWhenTableMovesToOtherSource()
+    {
+        var relations = new[] { Relation("contacts", PartnerId, ContactId) };
+        var before = await BuildWithRelationsAsync([RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg1")], relations);
+        var after = await BuildWithRelationsAsync([RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg2")], relations);
+
+        Assert.NotEqual(before.Fingerprint(), after.Fingerprint());
+    }
+
+    [Fact]
+    public async Task BuildAsync_OmittedRelations_LogsCountOnceWithoutNames()
+    {
+        var logger = new CapturingLogger();
+
+        await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "secret_source_a"), RelTable(ContactId, "secret_source_b")],
+            [Relation("secret_relation", PartnerId, ContactId)],
+            logger);
+
+        var entry = Assert.Single(logger.Entries, e => e.Message.Contains("relation(s)", StringComparison.Ordinal));
+        Assert.Equal(Microsoft.Extensions.Logging.LogLevel.Information, entry.Level);
+        Assert.Contains("1 relation(s)", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret_relation", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret_source", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("partners", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("contacts", entry.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BuildAsync_NoOmittedRelations_LogsNothingAboutRelations()
+    {
+        var logger = new CapturingLogger();
+
+        await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg1")],
+            [Relation("contacts", PartnerId, ContactId)],
+            logger);
+
+        Assert.DoesNotContain(logger.Entries, e => e.Message.Contains("relation(s)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GraphQlAssembly_DoesNotReadAllowCrossDataSource()
+    {
+        // C-3: the flag has no effect on the schema until the federation gate exists.
+        var root = AppContext.BaseDirectory;
+        var dir = new DirectoryInfo(root);
+        while (dir != null && !Directory.Exists(Path.Combine(dir.FullName, "src", "Autheris.GraphQL")))
+        {
+            dir = dir.Parent;
+        }
+
+        Assert.NotNull(dir);
+        var offenders = Directory.EnumerateFiles(Path.Combine(dir.FullName, "src", "Autheris.GraphQL"), "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Where(f => File.ReadAllText(f).Contains("AllowCrossDataSource", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.Empty(offenders);
+    }
+
     private static TableMetadata CreateTable(
         TableIdentifier id,
         bool isActive = true,
         DataSourceType dsType = DataSourceType.Sql,
         string dialect = "PostgreSql",
         IReadOnlyList<TableColumn>? columns = null,
-        IReadOnlyDictionary<string, MaskingRule>? columnMaskingRules = null)
+        IReadOnlyDictionary<string, MaskingRule>? columnMaskingRules = null,
+        string sourceName = "")
     {
         return new TableMetadata
         {
@@ -346,6 +582,7 @@ public sealed class CatalogSchemaModelTests
             Table = new Table
             {
                 IsActive = isActive,
+                SourceName = sourceName,
                 SourceType = dialect,
                 DataSourceType = dsType
             },

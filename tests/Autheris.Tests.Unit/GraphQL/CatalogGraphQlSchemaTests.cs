@@ -621,4 +621,118 @@ public sealed class CatalogGraphQlSchemaTests
         Assert.Equal("id", order.Column);
         Assert.True(order.Descending);
     }
+    // BUG #75: relations between tables of different data sources are not part of the schema.
+
+    private void UseCatalogWithSources(string customersSource, string ordersSource)
+    {
+        TableMetadata Table(TableIdentifier id, string source, params string[] columns) => new()
+        {
+            Identifier = id,
+            Table = new Table { IsActive = true, SourceType = "PostgreSql", SourceName = source, DataSourceType = DataSourceType.Sql },
+            Columns = columns.Select(c => new TableColumn { ColumnName = c, DataType = "int" }).ToList(),
+            PrimaryKeyColumns = ["id"]
+        };
+
+        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([Table(_custTableId, customersSource, "id", "name"), Table(_orderTableId, ordersSource, "order_id", "customer_id")]);
+    }
+
+    private static string TypeBlock(string sdl, string typeName)
+    {
+        var start = sdl.IndexOf($"type {typeName} ", StringComparison.Ordinal);
+        Assert.True(start >= 0, $"type {typeName} not found in SDL");
+        var end = sdl.IndexOf("\n}", start, StringComparison.Ordinal);
+        return sdl[start..end];
+    }
+
+    [Fact]
+    public async Task Schema_SameSourceRelation_IsInSdl()
+    {
+        UseCatalogWithSources("pg1", "pg1");
+        var executor = await CreateExecutorAsync();
+
+        Assert.Contains("orders(", TypeBlock(executor.Schema.ToString(), "sales_dbo_customers"));
+    }
+
+    [Fact]
+    public async Task Schema_CrossSourceRelation_AbsentFromSdlAndQueryFailsValidation()
+    {
+        UseCatalogWithSources("pg1", "pg2");
+        var executor = await CreateExecutorAsync();
+        var sdl = executor.Schema.ToString();
+
+        Assert.DoesNotContain("orders", TypeBlock(sdl, "sales_dbo_customers"));
+        Assert.DoesNotContain("customers_by_orders", TypeBlock(sdl, "sales_dbo_orders"));
+
+        var result = await executor.ExecuteAsync("query { sales_dbo_customers { id orders { order_id } } }");
+
+        Assert.Contains("errors", result.ToJson());
+    }
+
+    [Fact]
+    public async Task Schema_OmittedRelation_QueryFailsValidationAndNeverReachesTreeService()
+    {
+        UseCatalogWithSources("secret_pg1", "secret_pg2");
+        var executor = await CreateExecutorAsync();
+
+        var result = await executor.ExecuteAsync("query { sales_dbo_customers { id orders { order_id } } }");
+        var json = result.ToJson();
+
+        Assert.Contains("errors", json);
+        Assert.DoesNotContain("secret_pg", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("sales_dbo_orders", json, StringComparison.Ordinal);
+        await _treeService.DidNotReceive().ExecuteAsync(
+            Arg.Any<ClaimsPrincipal>(), Arg.Any<TreeQueryNode>(), Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Schema_AggregateAndSubscriptionTypes_HaveNoRelationFields()
+    {
+        UseCatalogWithSources("pg1", "pg1");
+        var executor = await CreateExecutorAsync();
+        var sdl = executor.Schema.ToString();
+
+        Assert.Contains("orders(", TypeBlock(sdl, "sales_dbo_customers")); // the relation exists on the object type only
+        Assert.DoesNotContain("orders", TypeBlock(sdl, "AutherisAggregationResult"));
+        var aggregateStart = sdl.IndexOf("sales_dbo_customers_aggregate(", StringComparison.Ordinal);
+        Assert.True(aggregateStart >= 0);
+        var aggregateField = sdl[aggregateStart..sdl.IndexOf(')', aggregateStart)];
+        Assert.Contains("groupBy", aggregateField);
+        Assert.Contains("where: String", aggregateField);
+        Assert.DoesNotContain("orders", aggregateField);
+        if (sdl.Contains("type Subscription ", StringComparison.Ordinal))
+        {
+            Assert.DoesNotContain("orders", TypeBlock(sdl, "Subscription"));
+        }
+    }
+
+    [Fact]
+    public async Task Schema_IsIdenticalForAllCallers()
+    {
+        UseCatalogWithSources("pg1", "pg2");
+        var alice = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "alice"), new Claim("tenant_id", "T1")], "TestAuth")) };
+        var bob = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "bob"), new Claim("tenant_id", "T2")], "TestAuth")) };
+
+        var aliceSdl = (await CreateExecutorAsync(alice)).Schema.ToString();
+        var bobSdl = (await CreateExecutorAsync(bob)).Schema.ToString();
+
+        Assert.Equal(aliceSdl, bobSdl);
+    }
+
+    [Fact]
+    public async Task Schema_StaleRelationField_IsRejectedByTheRuntimeCheck()
+    {
+        // Stale schema between rebuilds (fail closed): the old schema still lists the field, the real tree service rejects it.
+        UseCatalogWithSources("pg1", "pg1");
+        var executor = await CreateExecutorAsync();
+        Assert.Contains("orders(", TypeBlock(executor.Schema.ToString(), "sales_dbo_customers"));
+
+        _treeService.ExecuteAsync(
+                Arg.Any<ClaimsPrincipal>(), Arg.Any<TreeQueryNode>(), Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns<JsonDocument>(_ => throw new GatewayInvalidQueryException("Relations across data sources are not supported in one query."));
+
+        var result = await executor.ExecuteAsync("query { sales_dbo_customers { id orders { order_id } } }");
+
+        Assert.Contains("errors", result.ToJson());
+    }
 }

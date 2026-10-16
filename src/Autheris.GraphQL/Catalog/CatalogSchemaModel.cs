@@ -1,5 +1,6 @@
 using System.Text;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Sql.Tree.Federation;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
@@ -227,7 +228,9 @@ public sealed partial class CatalogSchemaModel
             relationsByTable[builder.Metadata.Identifier] = rels ?? Array.Empty<TableRelation>();
         }
 
-        // Map relations
+        // Map relations. A relation between tables the tree service cannot run as one statement (different data source or
+        // dialect) is not exposed: it would be advertised and then always fail. Omitted before any field name is allocated.
+        var omittedRelations = 0;
         var finalTables = new List<CatalogTableType>();
 
         foreach (var (meta, typeName, queryFieldName, filterTypeName, orderTypeName, columns) in tableBuilders)
@@ -247,6 +250,11 @@ public sealed partial class CatalogSchemaModel
                     if (rel.JoinKeysParent == null || rel.JoinKeysParent.Count == 0 ||
                         rel.JoinKeysChild == null || rel.JoinKeysChild.Count == 0)
                     {
+                        continue;
+                    }
+                    if (!RelationExecutability.IsSameExecutionSource(meta, targetTable.Metadata))
+                    {
+                        omittedRelations++;
                         continue;
                     }
 
@@ -298,6 +306,12 @@ public sealed partial class CatalogSchemaModel
                     {
                         continue;
                     }
+                    if (!RelationExecutability.IsSameExecutionSource(other.Metadata, meta))
+                    {
+                        // Already counted by the forward loop of the parent table; a parent that is not in tableBuilders
+                        // (inactive or not SQL) emits no relation at all, so nothing is lost by not counting here.
+                        continue;
+                    }
 
                     // Reverse: IsList is opposite (e.g. parent-to-child 1:N -> child-to-parent N:1 -> IsList = false)
                     var isList = rel.Cardinality != RelationCardinality.OneToMany;
@@ -333,6 +347,14 @@ public sealed partial class CatalogSchemaModel
                 meta,
                 columns,
                 relations));
+        }
+
+        if (omittedRelations > 0)
+        {
+            // Counts only: the line is emitted on every real rebuild and must not carry catalog names.
+            logger?.LogInformation(
+                "GraphQL catalog schema: {Count} relation(s) between different data sources or dialects are not exposed; cross-source GraphQL relations are not delivered yet.",
+                omittedRelations);
         }
 
         return new CatalogSchemaModel(finalTables);
