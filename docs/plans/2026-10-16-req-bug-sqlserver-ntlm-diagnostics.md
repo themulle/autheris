@@ -52,10 +52,10 @@ Each criterion maps to a unit test (all in `tests/Autheris.Tests.Unit`).
 |----|---------------------|------|
 | AC-1 | `UseManagedNtlm=false` creates no provider and never sets the switch. | `SqlServerWindowsAuthConfiguratorTests.PrepareConnection_UseManagedNtlmFalse_CreatesNoProviderAndDoesNotSetSwitch` |
 | AC-2 | Unset option follows `DOTNET_System_Net_Security_UseManagedNtlm`; an explicit option wins. | `ManagedNtlmPolicy_ExplicitOptionWinsOverEnvironmentVariable`, `PrepareConnection_OptionUnsetAndEnvironmentFalse_UsesGssPath` |
-| AC-3 | A managed NTLM failure is recorded with step, status and exception type, never with secrets. | `SqlServerWindowsAuthConfiguratorTests` (provider failure tests) |
-| AC-4 | A managed NTLM "Cannot generate SSPI context" is classified `NtlmNegotiation`, not Kerberos. | `SqlServerWindowsAuthConfiguratorTests` (classification tests) |
-| AC-5 | The catalog logs classified reason, missing connection and every silent admission denial. | `GovernedCatalogProviderDiagnosticsTests` |
-| AC-6 | GSS environment variables are set natively on Linux/macOS. | `SqlServerWindowsAuthConfiguratorTests` (native environment tests) |
+| AC-3 | A managed NTLM failure is recorded with step, status and exception type, never with secrets. | `SqlServerWindowsAuthConfiguratorTests.ManagedNtlmProvider_InvalidChallengeBlob_ReturnsFalseAndRecordsFailure` |
+| AC-4 | A managed NTLM "Cannot generate SSPI context" is classified `NtlmNegotiation`, not Kerberos. | `SqlServerWindowsAuthConfiguratorTests.ClassifyOpenException_SspiContextWithManagedNtlm_ReturnsNtlmNegotiationWithRecordedStatus` (and `..WithoutManagedNtlm_ReturnsKerberosNegotiationCategory`) |
+| AC-5 | The catalog logs classified reason, missing connection and every silent admission denial. | `GovernedCatalogProviderDiagnosticsTests` (classified, missing connection, unclassified, unsupported provider, breaker-open without Warning) |
+| AC-6 | GSS environment variables are set natively on Linux/macOS. | `SqlServerWindowsAuthConfiguratorTests.NativeEnvironment_Set_IsVisibleToNativeGetenv_OnUnix` |
 | AC-7 | The SQL probe opens a real connection, reports real host/port/auth path and a classified failure without secrets; not-configured fails without a fabricated host. | `DatasourceTestingServiceSqlTests` |
 | AC-8 (R-3) | The probe returns the effective login name (`DOMAIN\user` or SQL login, never a password). | `DatasourceTestingServiceSqlTests.OpenSucceeds_...`, `SqlLoginCircuitBreakerTests.Describer_ReportsEffectiveLoginWithoutPassword` |
 | AC-9 (R-3) | After a login failure the probe is refused with a clear message and remaining time, without contacting the server. | `DatasourceTestingServiceSqlTests.OpenBlockedByLoginBreaker_...`, `SqlLoginCircuitBreakerTests` |
@@ -73,3 +73,44 @@ Each criterion maps to a unit test (all in `tests/Autheris.Tests.Unit`).
 ### 1.6 Testing gap and proposal: opt-in integration test against a real SQL Server
 
 Managed NTLM has not been verified against a real Windows SQL Server. Proposal: an integration test in `tests/Autheris.Tests.Integration` (trait `RealSqlServerAuth`) that is skipped unless these environment variables are set: `AUTHERIS_IT_MSSQL_HOST`, `AUTHERIS_IT_MSSQL_PORT`, `AUTHERIS_IT_MSSQL_DOMAIN`, `AUTHERIS_IT_MSSQL_USER`, `AUTHERIS_IT_MSSQL_PASSWORD_FILE` (a `file:` secret under a temp secrets directory). It builds a `DataSourceConnectionOptions` for both paths (managed NTLM, `UseManagedNtlm=false`), opens one connection each through `SqlConnectionFactory`, runs `SELECT SUSER_SNAME()` and asserts the expected `DOMAIN\user`. Hard rules: never in CI, exactly one attempt per path (no retries; the breaker makes a second attempt fail closed), failure output only the classified category. Not implemented in this track (needs an AD-joined test server); tracked as follow-up.
+
+## 2. Phase 2: Design (csharp-architect)
+
+### 2.1 Chosen design
+
+| Concern | Design |
+|---------|--------|
+| Path selection | `ManagedNtlmPolicy.Resolve(bool? configured, getEnv)` in `Autheris.Domain.Options` is the single rule: explicit option, else `DOTNET_System_Net_Security_UseManagedNtlm` (`false`/`0` selects GSS), else managed NTLM. Used by the configurator, `DescribeAuthPath` and the factory log. |
+| Failure model | `SqlServerWindowsAuthException` (Infrastructure, derives from `InvalidOperationException` for compatibility) with category and non-secret fields. `ManagedNtlmSspiContextProvider` records `ManagedNtlmFailure`; `SqlConnectionFactory` passes it to `ClassifyOpenException`. |
+| Cross-layer contract | `ISqlSourceDiagnosticException` (`CategoryName`, `DiagnosticFields`), `SqlSourceNotConfiguredException`, `SqlSourceLoginBlockedException`, `SqlSourceDescription` and `ISqlSourceDescriber` live in `Autheris.Application/Interfaces/ISqlSourceDiagnostics.cs`. |
+| Native environment | `NativeEnvironment` (Infrastructure, `LibraryImport` `setenv`/`getenv`, `AllowUnsafeBlocks`) updates the managed and the native copy under a lock; unchanged values are not rewritten. |
+| Probe | `DatasourceTestingService.TestSqlDatasourceAsync` opens a connection through `ISqlConnectionFactory` (the same factory as queries), describes host/port/auth path/login through `ISqlSourceDescriber`, redacts messages with `SecretScrubber`, maps `ISqlSourceDiagnosticException` to `ProbeDetails`. |
+| Lockout protection (R-3, R-4) | `SqlLoginCircuitBreaker` inside `SqlConnectionFactory` (SQL Server dialect). One breaker therefore covers catalog build, query execution and the probe. Keyed by a SHA-256 fingerprint of provider, connection string, `PasswordKeyVaultRef` and all `WindowsAuth` fields (never a resolved secret); checked before `PrepareConnection`, so no secret is resolved and no server contact happens while open. Opens on 18456/18452/18451, `LoginRejected` and credential-type NTLM statuses (`InvalidCredentials`, `UnknownCredentials`, `CredentialsExpired`); closes on success, expiry or a changed fingerprint. Per-replica, in memory (no cluster abstraction needed for this track). Option `DataSources:Connections:<name>:LoginFailureCooldownSeconds` (default 300, `0` disables). |
+| Process-global GSS identity | `GssIdentityRegistry`: the first GSS-path source claims `(domain, user)`; a different account is refused (`SecurityException`, fail closed). Managed NTLM sources do not overwrite the environment once a GSS identity exists. |
+
+Non-login failures (network, timeout, DNS) do not open the breaker: they do not increment AD counters, and blocking on them would turn short outages into 5-minute outages. This is a decision, not an omission.
+
+Logging: the breaker logs one Warning when it opens (reason, cool-down). Blocked retries in the catalog log at Debug, so every query does not repeat a Warning. The factory logs the auth path once per data source configuration.
+
+### 2.2 Layering check
+
+`Autheris.Application` does not reference `Autheris.Infrastructure`. The Application layer only knows the interfaces and exception types in `ISqlSourceDiagnostics.cs`; `SqlServerWindowsAuthException`, `SqlSourceDescriber`, `NativeEnvironment`, `SqlLoginCircuitBreaker` and `GssIdentityRegistry` are Infrastructure; `ManagedNtlmPolicy` and the options are Domain. `DatasourceTestingService` detects classified failures by walking the inner-exception chain for `ISqlSourceDiagnosticException`, not by an Infrastructure type. This satisfies the intent of the architecture tests (`ISqlConnectionFactory` is the established Application port for the same purpose; the lead's run of the architecture suite, 110/110, covers it). `SqlSourceDescriber` is registered in `GatewayStorageServiceExtensions` next to `ISqlConnectionFactory`.
+
+### 2.3 Alternatives rejected
+
+| Alternative | Reason |
+|-------------|--------|
+| Only set the variables in the container (`ENV NTLM_USER_FILE=...`) | Per-data-source credentials cannot be expressed in one image-level variable; does not fix RC-1/RC-2/RC-3 and gives no diagnostics. |
+| `execve` self-restart or wrapper script to inject the environment | Fragile, breaks hosting model, still process-global. |
+| Per-connection GSS isolation through a separate process | Disproportionate; managed NTLM already provides per-connection credentials. |
+| Always forcing managed NTLM (remove the GSS path) | The reporter needs gss-ntlmssp for comparison and some servers/policies require it; the path stays selectable. |
+| Rate-limiting the probe endpoint only (HTTP rate limiter) | Does not protect the catalog and query paths, which retry on every query. A breaker at the factory covers all callers and keys by credential identity. |
+| Cluster-wide breaker (Redis) | Not trivially available for this scope; each replica has its own breaker (documented, owner question Q-3). |
+
+### 2.4 Compatibility
+
+- `SqlServerWindowsAuthOptions.UseManagedNtlm` changes from `bool` (default `true`) to `bool?`. Existing configuration files with `true`/`false` bind unchanged. Unset now follows the environment variable; since all images set it to `true`, the image default is unchanged.
+- `DatasourceTestingService` constructor gains optional trailing parameters (`ISqlConnectionFactory?`, `IOptions<GatewayOptions>?`, `ISqlSourceDescriber?`); existing callers compile. Behaviour change: the SQL probe now fails when it cannot connect (previously always success). The result shape is unchanged; `HttpStatusCode` is `null` for SQL probes.
+- `SqlConnectionFactory` gains an optional trailing `TimeProvider?` constructor parameter.
+- `DataSourceConnectionOptions.LoginFailureCooldownSeconds` is new with a safe default. A data source that fails to log in is now blocked for 300 s per replica: intended, documented, switchable.
+- `SqlSourceDescription` gains an optional trailing `LoginName`.
