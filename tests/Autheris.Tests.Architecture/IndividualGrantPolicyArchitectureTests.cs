@@ -11,7 +11,7 @@ namespace Autheris.Tests.Architecture;
 public class IndividualGrantPolicyArchitectureTests
 {
     private static readonly Regex GrantWriter = new(
-        @"\.(CreateConsentAsync|ExtendConsentExpiryAsync|ReplaceConsentsAsync|UpsertProfileAsync|ActivateConsentAsync|ActivateConsentForAutoApproveAsync|CreateConsentRequestAsync)\(",
+        @"\.(CreateConsentAsync|ExtendConsentExpiryAsync|ReplaceConsentsAsync|UpsertProfileAsync|ActivateConsentAsync|ActivateConsentForAutoApproveAsync|CreateConsentRequestAsync|AddTupleAsync|AddTuplesAsync)\(",
         RegexOptions.Compiled);
 
     /// <summary>Files that write grants without calling the policy, each with the reason it is safe.</summary>
@@ -21,6 +21,12 @@ public class IndividualGrantPolicyArchitectureTests
             "System reconcile of consents derived from OpenMetadata rules; short validity refreshed on each run and covered by the read-time clamp.",
         ["Autheris.Extensions/Itsm/ItsmWebhookHandler.cs"] =
             "Activates a request whose duration was validated by IGrantPolicy at submission; no new expiry is introduced.",
+        ["Autheris.Api/Extensions/DependencyInjection/RebacSeedHostedService.cs"] =
+            "Operator-configured seed tuples (Rebac.SeedTuples / development defaults) written at startup; not a runtime grant path.",
+        ["Autheris.Extensions/DataCatalog/DataCatalogSyncService.cs"] =
+            "Writes only structural 'parent' tuples (schema/domain hierarchy); no user grant.",
+        ["Autheris.Extensions/Dbt/DbtMetadataIngestionService.cs"] =
+            "Writes only structural 'parent' tuples (schema/domain hierarchy); no user grant.",
     };
 
     [Fact]
@@ -38,7 +44,8 @@ public class IndividualGrantPolicyArchitectureTests
             }
 
             var text = File.ReadAllText(file);
-            if (!GrantWriter.IsMatch(text))
+            var matches = GrantWriter.Matches(text);
+            if (matches.Count == 0)
             {
                 continue;
             }
@@ -49,14 +56,86 @@ public class IndividualGrantPolicyArchitectureTests
                 continue;
             }
 
-            if (!text.Contains("GrantPolicy", StringComparison.Ordinal))
+            // Per call site: the enclosing method (or, for an expression-bodied member, the statement) must itself consult the policy.
+            foreach (Match m in matches)
             {
-                offenders.Add(rel);
+                var scope = EnclosingMethodText(text, m.Index);
+                if (!ConsultsPolicy.IsMatch(scope))
+                {
+                    var line = text.AsSpan(0, m.Index).Count('\n') + 1;
+                    offenders.Add($"{rel}:{line} {m.Value.Trim('.', '(')}");
+                }
             }
         }
 
         offenders.ShouldBeEmpty("These files write grants but never consult IGrantPolicy (WP-SC-16). Call the policy or allowlist with a reason.");
         seenAllowlisted.Count.ShouldBe(Allowlist.Count, "A stale allowlist entry no longer writes grants; remove it.");
+    }
+
+    [Fact]
+    public void SEC_SC_20_Scanner_IsPerCallSite_NotPerFileText()
+    {
+        const string code = """
+            class Svc(IGrantPolicy policy)
+            {
+                Task Guarded() { policy.Evaluate(new GrantRequest()); return repo.CreateConsentAsync(c); }
+                Task Unguarded() { return repo.CreateConsentAsync(c); }
+                Task Nested() { foreach (var x in xs) { if (x) { repo.AddTupleAsync(x); } } }
+            }
+            """;
+        var matches = GrantWriter.Matches(code);
+
+        matches.Count.ShouldBe(3);
+        ConsultsPolicy.IsMatch(EnclosingMethodText(code, matches[0].Index)).ShouldBeTrue();
+        ConsultsPolicy.IsMatch(EnclosingMethodText(code, matches[1].Index)).ShouldBeFalse("GrantPolicy elsewhere in the file must not satisfy another method");
+        ConsultsPolicy.IsMatch(EnclosingMethodText(code, matches[2].Index)).ShouldBeFalse();
+    }
+
+    private static readonly Regex ConsultsPolicy = new(@"GrantPolicy|GrantRequest\b|EnsureGrantsAllowed", RegexOptions.Compiled);
+
+    private static readonly Regex TypeHeader = new(@"\b(class|struct|record|interface|enum|namespace)\b", RegexOptions.Compiled);
+
+    /// <summary>Text of the outermost non-type block enclosing <paramref name="index"/> (the method body); the whole file when there is none.</summary>
+    internal static string EnclosingMethodText(string text, int index)
+    {
+        var open = new Stack<int>();
+        for (var i = 0; i < index; i++)
+        {
+            if (text[i] == '{')
+            {
+                open.Push(i);
+            }
+            else if (text[i] == '}' && open.Count > 0)
+            {
+                open.Pop();
+            }
+        }
+
+        // Outermost first.
+        foreach (var start in open.Reverse())
+        {
+            var headerStart = Math.Max(text.LastIndexOfAny([';', '}', '{'], Math.Max(start - 1, 0)) + 1, 0);
+            var header = text.Substring(headerStart, start - headerStart);
+            if (TypeHeader.IsMatch(header))
+            {
+                continue;
+            }
+
+            var depth = 0;
+            for (var i = start; i < text.Length; i++)
+            {
+                if (text[i] == '{') depth++;
+                else if (text[i] == '}' && --depth == 0)
+                {
+                    return header + text[start..(i + 1)];
+                }
+            }
+        }
+
+        // Not inside a block: expression-bodied member; use the statement.
+        var from = text.LastIndexOfAny([';', '}'], index) + 1;
+        var to = text.IndexOf(';', index);
+        return text[from..(to < 0 ? text.Length : to + 1)];
     }
 
     private static IEnumerable<string> EnumerateSources(string root) =>

@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Audit;
+using Autheris.Application.Governance.Grants;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -78,7 +79,7 @@ public static class RebacEndpoints
 
     /// <summary>Adds tuples. The audit is fail-closed (an unavailable store surfaces as 503 through the exception handler) and non-cancelable.</summary>
     internal static async Task<IResult> AddTuplesAsync(
-        List<RebacTuple> tuples, HttpRequest request, IRebacStore store, IRebacEvaluator evaluator, IAuditWriter auditWriter)
+        List<RebacTuple> tuples, HttpRequest request, IRebacStore store, IRebacEvaluator evaluator, IAuditWriter auditWriter, IGrantPolicy? grantPolicy = null)
     {
         var secContext = EndpointSecurity.GetSecurityContext(request.HttpContext);
         if (!secContext.HasAnyRole(GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin))
@@ -116,6 +117,26 @@ public static class RebacEndpoints
             }
         }
 
+        // WP-SC-16: a tuple for an individual user is a time-bound individual grant (explicit ExpiresAt within the class maximum).
+        // Usersets (group#member) and structural tuples (parent) are standing and not limited.
+        var policy = grantPolicy ?? new GrantPolicy();
+        var now = DateTimeOffset.UtcNow;
+        var requester = request.HttpContext.User.GetUserSid()?.Value;
+        foreach (var t in tuples)
+        {
+            if (!IsIndividualUserTuple(t))
+            {
+                continue;
+            }
+
+            var decision = policy.Evaluate(new GrantRequest(
+                GranteeType.User, t.User.Trim(), GrantKind.RebacTuple, t.ExpiresAt, now, Requester: requester));
+            if (!decision.Allowed)
+            {
+                return Results.BadRequest(new { error = decision.Reason, errorCode = decision.ErrorCode, maxValidTo = decision.MaxValidTo });
+            }
+        }
+
         foreach (var t in tuples)
         {
             await store.AddTupleAsync(t, request.HttpContext.RequestAborted).ConfigureAwait(false);
@@ -133,6 +154,9 @@ public static class RebacEndpoints
 
         return Results.Ok(new { status = "Tuples added", count = tuples.Count });
     }
+
+    private static bool IsIndividualUserTuple(RebacTuple t) =>
+        t.User.Trim().StartsWith("user:", StringComparison.OrdinalIgnoreCase) && !t.User.Contains('#', StringComparison.Ordinal);
 
     internal static async Task<IResult> RemoveTupleAsync(
         RebacTuple tuple, HttpRequest request, IRebacStore store, IRebacEvaluator evaluator, IAuditWriter auditWriter)
@@ -190,7 +214,8 @@ public static class RebacEndpoints
             HttpRequest request,
             IRebacStore store,
             IRebacEvaluator evaluator,
-            IAuditWriter auditWriter) => AddTuplesAsync(tuples, request, store, evaluator, auditWriter));
+            IAuditWriter auditWriter,
+            IGrantPolicy? grantPolicy) => AddTuplesAsync(tuples, request, store, evaluator, auditWriter, grantPolicy));
 
         // DELETE /api/v1/rebac/tuples - Remove relationship tuple
         group.MapDelete("/tuples", (

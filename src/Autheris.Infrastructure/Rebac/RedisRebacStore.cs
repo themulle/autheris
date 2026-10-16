@@ -74,12 +74,13 @@ public sealed class RedisRebacStore : IRebacStore
         var db = _multiplexer.GetDatabase();
         var entries = await db.HashGetAllAsync(TenantKey(tenant)).ConfigureAwait(false);
 
+        var now = DateTimeOffset.UtcNow;
         var result = new List<RebacTuple>(entries.Length);
         foreach (var entry in entries)
         {
             if (entry.Value.IsNullOrEmpty) continue;
             var t = JsonSerializer.Deserialize<RebacTuple>(entry.Value.ToString(), JsonOptions);
-            if (t is null) continue;
+            if (t is null || t.IsExpired(now)) continue; // WP-SC-16: an expired tuple is absent (fail closed)
 
             // Defense in depth: never return a tuple whose embedded tenant differs from the partition.
             if (!string.Equals(NormalizeTenant(t.TenantId), tenant, StringComparison.OrdinalIgnoreCase)) continue;
