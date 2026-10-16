@@ -1,7 +1,7 @@
 # Plan: Scale to 5,000 Users (Governance + Performance + Identity), Phase 2 and Phase 3
 
 **Document ID:** `PLAN-SCALE-5000`
-**Date:** 2026-10-16 (rev. 3: Q4 corrected to time-bound individual grants; connector-agnostic delegation incl. SQL Server)
+**Date:** 2026-10-16 (rev. 3: Q4 corrected to time-bound individual grants; connector-agnostic delegation incl. SQL Server; rev. 4: on-prem AD groups pushed via SCIM instead of LDAPS pull, section 1.7)
 **Status:** PROPOSED. Wave 1 is ready for Phase 4 once the owner approves the LOC estimates (section 9). Wave 2 is defined by
 the owner decisions. Two packages need a dedicated Phase-3 re-review before Phase 4 (section 8.3).
 **Author:** Solution Architect (Phase 2), Security Expert (Phase 3, section 8)
@@ -36,8 +36,8 @@ the owner decisions. Two packages need a dedicated Phase-3 re-review before Phas
 | Q | Decision (English rendering of Appendix A) | Effect on this plan |
 | :--- | :--- | :--- |
 | Q1 IdP | **Microsoft Entra ID** (OIDC / SAML 2.0) for authentication, MFA and Conditional Access. Tokens carry **identity claims only** (UPN, mail, object id). They carry no groups, so the group-overage problem disappears. | Group and role information no longer comes from the token. A **Role-Resolver** supplies it (`WP-SC-05`, redefined). Overage handling is dropped. |
-| Q2 SCIM | **Yes, as core standard, per mode.** Entra → Databricks: full SCIM (users and groups) for Unity Catalog. Entra → Autheris: **user** provisioning on. **Group** provisioning is off in mode *Hybrid* and on in mode *Pure Entra ID*. | New SCIM 2.0 receiver (`WP-SC-07`, redefined), with Users always and Groups per realm. Deprovisioning triggers an **immediate lock**. |
-| Q3 Attributes | **3-layer model.** (1) Identity: Entra ID (name, UPN, mail). (2) App function rights: on-prem AD DS / LDAP (Hybrid) or Entra App Roles (Cloud). (3) Data access rights: **Databricks Unity Catalog** (RLS mapping tables). | Autheris resolves layer 2 only, through the Role-Resolver. For Databricks, layer 3 is enforced **in Databricks** through OBO (`WP-SC-15`, new). `WP-SC-04` (`USER_ATTRIBUTE`) becomes necessary only for Autheris-enforced sources (SQL Server/PG/Oracle/customers). |
+| Q2 SCIM | **(Corrected in rev. 4, §1.7: group provisioning is on in both modes.)** **Yes, as core standard, per mode.** Entra → Databricks: full SCIM (users and groups) for Unity Catalog. Entra → Autheris: **user** provisioning on. **Group** provisioning is off in mode *Hybrid* and on in mode *Pure Entra ID*. | New SCIM 2.0 receiver (`WP-SC-07`, redefined), with Users always and Groups per realm. Deprovisioning triggers an **immediate lock**. |
+| Q3 Attributes | **(Layer 2 transport corrected in rev. 4, §1.7: on-prem AD groups are pushed via SCIM, not pulled via LDAPS.)** **3-layer model.** (1) Identity: Entra ID (name, UPN, mail). (2) App function rights: on-prem AD DS / LDAP (Hybrid) or Entra App Roles (Cloud). (3) Data access rights: **Databricks Unity Catalog** (RLS mapping tables). | Autheris resolves layer 2 only, through the Role-Resolver. For Databricks, layer 3 is enforced **in Databricks** through OBO (`WP-SC-15`, new). `WP-SC-04` (`USER_ATTRIBUTE`) becomes necessary only for Autheris-enforced sources (SQL Server/PG/Oracle/customers). |
 | Q4 Per-user grants | **Corrected 2026-10-16 (§1.5):** individual per-user grants **remain possible, but only time-bound**. There are no standing or permanent per-user grants. Standing access is based on roles and groups. Databricks RLS uses dynamic filters (`current_user()`, mapping tables). | `WP-SC-16` is reworked into a **time-bound individual grant policy**: a mandatory expiry on every per-user grant on every grant path, with maximum durations per realm and sensitivity, renewal rules, four-eyes approval where it applies, auto-expiry, audit, and inclusion in campaigns. C1 is revisited. |
 | Q5 Recertification | **Risk-based.** Every 90 days: privileged roles, admin rights, sensitive RLS assignments. Every 365 days: regular business roles. **Event-driven:** immediate lock trigger via SCIM when a user leaves. | `WP-SC-08` gets fixed defaults. The SCIM lock lives in `WP-SC-07`. Scope split in 1.4 (Autheris recertifies its *mappings*; membership is recertified at the IdP/AD). |
 | Q6 ReBAC | Not addressed by the owner. | Recommendation unchanged: native indexed store (`WP-PF-11`). OpenFGA only if ReBAC becomes a primary grant path. Role-based standing access makes this less likely. |
@@ -45,11 +45,11 @@ the owner decisions. Two packages need a dedicated Phase-3 re-review before Phas
 **Data flow (owner):**
 1. Login at Entra ID (identity claims only).
 2. SCIM lifecycle Entra → Autheris and Entra → Databricks.
-3. Autheris reads the user's AD groups by user key over **LDAPS** and maps them to UI and functional rights (for example "may export").
+3. ~~Autheris reads the user's AD groups by user key over **LDAPS**~~ **(rev. 4, §1.7)** The user's on-prem AD groups are **pushed** to Autheris via SCIM `/Groups` (by Entra provisioning for synced groups, or by an on-prem push agent), and Autheris maps them to UI and functional rights (for example "may export").
 4. Autheris passes the user token via **OAuth 2.0 On-Behalf-Of** to Databricks, which evaluates `current_user()` with native row-level security and column masking. Unity Catalog holds the full audit trail.
 
 **Modular Role-Resolver, two operating modes (owner):**
-- *Group / Hybrid* (current): identity via Entra SCIM (users only); app roles via an on-prem AD/LDAP connector; data RLS in Databricks via token delegation.
+- *Group / Hybrid* (current): identity via Entra SCIM (users); app roles from on-prem AD groups **pushed via SCIM `/Groups`** (rev. 4, §1.7; replaces the on-prem AD/LDAP pull connector); data RLS in Databricks via token delegation.
 - *Pure Entra ID* (future / SaaS): identity via SCIM (users and groups); app roles via Entra App Roles, or Entra security groups from the SCIM payload or the Graph API; data RLS as above.
 
 ### 1.2 Current State of Authentication (verified in code, 2026-10-16)
@@ -107,6 +107,27 @@ queries" rule of issue #94).
 
 ---
 
+### 1.7 Owner Decision: On-Prem AD Groups Are Pushed via SCIM (2026-10-16, rev. 4)
+
+German original (Appendix A): "die lokalen gruppen hätte ich per externem dienst an autheris geschickt. dieser muss evtl. bei uns im lan unter windows laufen um zugriff zu erhalten. scim ist daher als standard eventuell gut".
+
+**Binding:**
+- Autheris does **not** pull from on-prem AD. Autheris may run outside the corporate LAN (Kubernetes, cloud) and must not need an inbound path or LDAPS access to domain controllers.
+- On-prem group membership reaches Autheris as a **push** over the standard SCIM 2.0 `/Groups` (and `/Users`) endpoint of `WP-SC-07`. The connection is outbound-only from the LAN.
+- **Group provisioning is on in the Hybrid mode as well** (corrects Q2). The SCIM-provisioned store is the authoritative group source of the workforce realm in both modes (`GroupSource = Scim`).
+- Two supported push sources, same endpoint:
+  1. **Entra provisioning** (preferred when AD groups are already synced to Entra by Entra Connect / Cloud Sync): the Autheris enterprise app provisions users and assigned groups. Known limits: only groups assigned to the app, nested groups are not flattened, incremental cycle about 40 minutes (deactivation is processed with priority but is not instant).
+  2. **On-prem push agent** (when nested or non-synced local groups are needed): a Windows service in the LAN reads AD (transitive membership) and acts as a SCIM client. It is a separate deliverable (`WP-SC-18`, optional) and needs no Autheris-specific protocol.
+- The deprovisioning lock (Q5) follows from the same channel: `active=false` / `DELETE` from either source triggers the `WP-SC-07` lock.
+
+**Alternatives considered and rejected:**
+- *LDAPS pull from Autheris* (rev. 3): needs network reach from Autheris into the LAN, a bind account and an inbound firewall rule; does not fit a cloud/Kubernetes deployment.
+- *Groups in ForwardAuth headers from an upstream proxy* (existing `ForwardAuth` scheme): solves per-request roles only. It cannot lock users with live sessions, cannot stop work that runs without a request (CDC receivers, webhooks, async jobs, PATs, time-bound grants), and gives no user directory for grants before first login, reports or recertification. It stays supported as a realm `GroupSource = Header` for deployments that accept these limits.
+
+**Effects:** `WP-SC-05` drops `LdapsRoleProvider` from the default set (kept only as an optional provider for deployments where Autheris runs inside the LAN); `ScimStoreRoleProvider` serves both modes. `WP-SC-07` gets `/Groups` for the workforce realm and the hardening in `SEC-SC-14` (rev. 4). `WP-SC-14` four-eyes approval applies to every mapping of a pushed group to a privileged right.
+
+---
+
 ## 2. Merge Hotspots with Parallel Branches
 
 | Branch | Overlap | Rule |
@@ -141,8 +162,8 @@ queries" rule of issue #94).
 | Order | WP | Source | Title | Effort | Lane | Re-review |
 | ---: | :--- | :--- | :--- | :---: | :---: | :--- |
 | 13 | `WP-SC-13` **new** | Owner Q1 + follow-up | **Identity realm registry**: multi-issuer validation, per-realm claim mapping / user key / tenant binding / provisioning mode / RBAC and recert profile; existing schemes migrated as realms | M–L | C | **yes** |
-| 14 | `WP-SC-05` **redefined** | Owner Q1/Q3, Gov H2 | **Role-Resolver** abstraction + providers: LDAPS (AD DS), Entra App Roles (token), Graph (groups/app roles/attributes, also for customer directories), SCIM-provisioned store, static mapping; resolver chain per realm; bounded caching | M–L | C | no (conditions) |
-| 15 | `WP-SC-07` **redefined** | Owner Q2/Q5, Gov H1/H6 | **SCIM 2.0 receiver** per realm (Users always, Groups per realm), **deprovisioning lock** (immediate), JIT provisioning for realms without SCIM, `revoke-all`/`transfer`, group owners with inheritance | M | A + C | no (conditions) |
+| 14 | `WP-SC-05` **redefined** | Owner Q1/Q3, Gov H2 | **Role-Resolver** abstraction + providers: SCIM-provisioned store (default for the workforce realm in both modes, rev. 4), Entra App Roles (token), Graph (groups/app roles/attributes, also for customer directories), static mapping, optional LDAPS (AD DS, only when Autheris runs inside the LAN); resolver chain per realm; bounded caching | M–L | C | no (conditions) |
+| 15 | `WP-SC-07` **redefined** | Owner Q2/Q5, Gov H1/H6 | **SCIM 2.0 receiver** per realm (Users always, Groups per realm; workforce realm Groups on in both modes, rev. 4), **deprovisioning lock** (immediate), JIT provisioning for realms without SCIM, `revoke-all`/`transfer`, group owners with inheritance | M | A + C | no (conditions) |
 | 16 | `WP-SC-14` **new** | Owner Q3 (layer 2) | **Functional-rights mapping**: resolved groups/app roles → Autheris functional rights (`GatewayRole` + feature rights such as `Export`, `Mcp.Admin`) and → grantees of Access Policies; four-eyes, audited, recertified | M | B | no (conditions) |
 | 17 | `WP-SC-15` **(rev. 3)** | Owner Q3 (layer 3), §1.6, C2/C3/C5/C6 | **Connector-agnostic delegated enforcement** (`IDelegationCapability` per connector, declared capabilities, coarse gate, cache rules, 107 cross-validation) + **Databricks OBO** as first implementation | M–L | B | **yes** |
 | 17a | `WP-SC-17` **new (rev. 3)** | §1.6 | **SQL Server delegation**: Entra OBO access token (Azure SQL / SQL Server 2022+), Autheris-asserted `SESSION_CONTEXT` mode, per-user pool partitioning, connection lifetime ≤ token expiry; Kerberos constrained delegation as an optional spike | M | B | **yes** (with SC-15) |
@@ -309,10 +330,10 @@ Unchanged from rev. 1 (performance analysis H-3, B-3, H-2.2, M-3, H-6):
 
 - **Contracts:** `IRoleResolver.ResolveAsync(ResolvedIdentity id, IdentityRealm realm, ct) → RoleResolution { Groups, AppRoles, Attributes, Source, ResolvedAt, ExpiresAt }`. `IRoleProvider` is chained per realm. Results are merged as a union of groups and roles. Attributes are merged first-wins, and conflicts are logged.
 - **Providers:**
-  - `LdapsRoleProvider`: S.DS.Protocols, LDAPS only (StartTLS or 636; certificate validation required; plain LDAP refused). User lookup by `userPrincipalName`, `objectGUID` or `mail` mapped from the Entra user key. Transitive groups via `tokenGroups` or the matching-rule-in-chain OID `1.2.840.113556.1.4.1941`. A read-only service account with its secret in the key vault. Paged queries.
+  - `LdapsRoleProvider` (**optional since rev. 4**, not in the default chain; only for deployments where Autheris can reach the domain controllers): S.DS.Protocols, LDAPS only (StartTLS or 636; certificate validation required; plain LDAP refused). User lookup by `userPrincipalName`, `objectGUID` or `mail` mapped from the Entra user key. Transitive groups via `tokenGroups` or the matching-rule-in-chain OID `1.2.840.113556.1.4.1941`. A read-only service account with its secret in the key vault. Paged queries.
   - `EntraAppRoleProvider`: reads `roles` from the validated token (app roles are signed, small and not subject to overage). Used in Pure Entra mode.
   - `GraphRoleProvider`: Microsoft.Graph `transitiveMemberOf`, `appRoleAssignments` and selected extension attributes, for the workforce directory (Pure Entra) **and for customer directories** (External ID/B2C tenants, each with its own app registration and least-privilege application permissions). Uses `$batch`, honours `Retry-After`, and has a circuit breaker.
-  - `ScimStoreRoleProvider`: groups from the SCIM-provisioned store (`WP-SC-07`, Pure Entra mode).
+  - `ScimStoreRoleProvider`: groups from the SCIM-provisioned store (`WP-SC-07`). **Default group source of the workforce realm in both modes (rev. 4, §1.7).** Membership pushed by Entra provisioning or the on-prem push agent.
   - `StaticMappingRoleProvider`: configuration or `ROLES`/`ROLE_MEMBERS` (`WP-SC-12`), for Basic/PAT and test realms.
 - **Caching:** a bounded per-replica cache keyed by `(realm, userKey)`. TTL is 15 min for workforce and 5 min for customers (configurable, max 60). Invalidated by SCIM events and by the lock. A cluster-wide L2 entry (HMAC-framed like the consent L2) prevents a Graph or LDAP stampede across replicas.
 - **Failure handling (fail closed):** a provider failure or an open circuit means the result is **no groups or roles from that provider**. A cached result is used only within its TTL, never beyond. There is a metric plus a PII-free log entry.
@@ -325,6 +346,7 @@ Unchanged from rev. 1 (performance analysis H-3, B-3, H-2.2, M-3, H-6):
 ### WP-SC-07: SCIM receiver, lock, JIT, lifecycle (Lane C endpoints, Lane A store)
 
 - **Endpoint:** `/scim/v2/{realmId}/Users` and `/Groups` (Groups only if the realm enables them), plus `/ServiceProviderConfig`, `/Schemas` and `/ResourceTypes`. This is the RFC 7643/7644 subset that the Entra provisioning service uses: `GET` with `filter=userName eq …` / `externalId eq …`, `POST`, `PATCH` (replace/add/remove, including `active`), `PUT` and `DELETE`.
+- **Groups for the workforce realm (rev. 4):** `/Groups` is enabled in the Hybrid mode too. Membership changes (PATCH `members` add/remove) invalidate the resolver cache of every affected user key through the same cluster pub/sub as the lock. Group `externalId` and display name are stored; mappings (`WP-SC-14`) reference the stable `externalId` (or AD `objectGUID`/SID sent by the push agent), never the display name.
 - **Authentication:** a dedicated `Scim` scheme per realm. Either a bearer **secret** (key vault, stored as SHA-256, two active secrets for rotation, constant-time compare) or OAuth client credentials from a configured issuer with the `scim.provision` role. It is **never** reachable with user tokens. Optional IP allowlist (Azure `AzureActiveDirectory` service tag). Rate limited.
 - **Store (Lane A, baselines + shapes):** `IDENTITY_USERS` (realm, user_key, externalId, userName, active, deactivated_at), `IDENTITY_GROUPS`, `IDENTITY_GROUP_MEMBERS`, `IDENTITY_LOCKS` (realm, user_key, reason, locked_at, source). Indexed by `(realm, user_key)` and `(realm, externalId)`.
 - **Deprovisioning lock (event-driven, owner Q5):** `active=false` or `DELETE` triggers, in one transaction:
@@ -467,9 +489,9 @@ Conditions rewritten in rev. 2 are marked **(rev. 2)**. New conditions are **(ne
 | `SEC-SC-09` **(rev. 2)** | PF-06, PF-09, SC-15 | Eviction only produces misses, and no decision is cached without epoch and tenant. A shape-shared entry is used only when no input references the user, aliases, IP or unshared attributes, **and never on `Delegated*` sources**, where the key always includes the realm-qualified user key. A property-based separation test is required. |
 | `SEC-SC-10` | PF-08 | The Basic marker is a keyed HMAC with a credential version, never derived from the plaintext alone. It is invalidated on password change, lock, disablement and revocation. Failures hit the limiter. PATs are hashed, scoped, expiring and audited, **bound to a realm, and re-resolve roles at use (no frozen privileges)**. |
 | `SEC-SC-11` **(rev. 2)** | SC-04 | Attribute values are always bound parameters. Attributes come only from the realm's resolver chain or verified token claims, never from request headers, query or body. Missing, empty or over-cardinality values are fail-closed. The values are part of the cache shape. `AstSecurityVisitor.cs` stays unchanged. |
-| `SEC-SC-12` **(rev. 2)** | SC-05 | **LDAPS only** (certificate validation on, no simple bind over plaintext, no `ldap://`). Read-only least-privilege bind account. Graph application permissions are least privilege per directory (`User.Read.All`, `GroupMember.Read.All`, `AppRoleAssignment.Read.All` read only; never `Directory.ReadWrite.*`), with secrets or certificates from the key vault. A provider failure or open circuit means **no** roles or groups from that provider; cached results are never used past their TTL (max 60 min, default 15 workforce / 5 customer). Token-borne `groups`/`roles` are ignored when `GroupSource ≠ Token`. Resolved identifiers are realm-namespaced. LDAP filters escape user input (RFC 4515), and lookup keys come from validated claims only. Logs are free of PII. |
+| `SEC-SC-12` **(rev. 2; applies only if the optional LDAPS provider is used, rev. 4)** | SC-05 | **LDAPS only** (certificate validation on, no simple bind over plaintext, no `ldap://`). Read-only least-privilege bind account. Graph application permissions are least privilege per directory (`User.Read.All`, `GroupMember.Read.All`, `AppRoleAssignment.Read.All` read only; never `Directory.ReadWrite.*`), with secrets or certificates from the key vault. A provider failure or open circuit means **no** roles or groups from that provider; cached results are never used past their TTL (max 60 min, default 15 workforce / 5 customer). Token-borne `groups`/`roles` are ignored when `GroupSource ≠ Token`. Resolved identifiers are realm-namespaced. LDAP filters escape user input (RFC 4515), and lookup keys come from validated claims only. Logs are free of PII. |
 | `SEC-SC-13` | SC-06 | Dry-run stored with the approval. Four-eyes for policies matching sensitive objects or granting Clear. Deny overrides. H-11 blending preserved. Unclassified columns are masked. Policy-set epoch on selector/tag change. **Group/role grantees only**. On `Delegated*` sources the policy acts as a gate only and never relaxes source-side restrictions. |
-| `SEC-SC-14` **(rev. 2)** | SC-07 | **SCIM authentication is isolated:** a dedicated scheme per realm; user tokens are rejected; the secret is stored hashed with constant-time compare and supports two-secret rotation (or client credentials with a dedicated role); rate limits and an optional source allowlist; every operation is Tier-A audited. SCIM can create, update and deactivate identities and groups but **never grants permissions** (it never writes consents, policies or functional-right mappings). **Deprovisioning lock:** effective on the next request on every replica (pub/sub plus a lock check in the auth middleware); a lock-store outage → 503; reactivation needs an explicit SCIM `active=true` and an audit event. A SCIM call in realm A cannot touch realm B. JIT provisioning creates identities only. |
+| `SEC-SC-14` **(rev. 2, extended rev. 4)** | SC-07 | **(rev. 4)** Because the SCIM credential can change group membership and thereby rights, it is treated as privileged: one credential per push source (Entra provisioning, push agent) with its own audit identity; mTLS or bearer secret plus an IP allowlist on the LAN egress NAT or the Azure service tag; every group create/delete and membership change is audited (Tier-A for groups mapped to privileged rights); a membership change never grants a right on its own, only through a four-eyes-approved mapping (`WP-SC-14`); a mass change (configurable, e.g. > 10 % of members of a privileged group in one cycle) is held and alerted. **SCIM authentication is isolated:** a dedicated scheme per realm; user tokens are rejected; the secret is stored hashed with constant-time compare and supports two-secret rotation (or client credentials with a dedicated role); rate limits and an optional source allowlist; every operation is Tier-A audited. SCIM can create, update and deactivate identities and groups but **never grants permissions** (it never writes consents, policies or functional-right mappings). **Deprovisioning lock:** effective on the next request on every replica (pub/sub plus a lock check in the auth middleware); a lock-store outage → 503; reactivation needs an explicit SCIM `active=true` and an audit event. A SCIM call in realm A cannot touch realm B. JIT provisioning creates identities only. |
 | `SEC-SC-15` | SC-08 | Unanswered items are revoked, never extended. Decisions only by authorised owners or delegates, never by the grantee. Archival keeps audit references verifiable. **(rev. 2)** Cadence: 90 days privileged / 365 days regular, plus event-driven items from SCIM locks and privileged mover events. |
 | `SEC-SC-16` | SC-10, PF-10 | Admin and entitlement queries for GovernanceAdmin (tenant) and owners (own tables), keyset paging, audited. Per-tenant catalog snapshot. **(rev. 2)** Reports never cross realms or tenants; customer admins see only their own realm. |
 | `SEC-SC-17` | PF-11, SC-12 | Equivalence proof before cut-over. Database-stored Casbin rules are four-eyes and audited. |
@@ -543,8 +565,9 @@ Conditions rewritten in rev. 2 are marked **(rev. 2)**. New conditions are **(ne
 | WP | Prod LOC | Test LOC | Files new | Files changed | Notes |
 | :--- | ---: | ---: | ---: | ---: | :--- |
 | SC-13 realm registry | 1,200 | 1,600 | 9 | 9 | multi-scheme setup, compatibility mapping, validators |
-| SC-05 Role-Resolver + 5 providers | 1,500 | 1,700 | 16 | 5 | LDAPS ≈ 300, Graph ≈ 350, chain/cache ≈ 300 |
-| SC-07 SCIM + lock + JIT + lifecycle + owners | 1,600 | 1,900 | 14 | 10 | SCIM ≈ 700, store 3 engines ≈ 450, lock ≈ 200 |
+| SC-05 Role-Resolver + providers | 1,200 | 1,400 | 13 | 5 | rev. 4: LDAPS provider optional and not estimated (≈ 300 / 300 if built); Graph ≈ 350, chain/cache ≈ 300 |
+| SC-07 SCIM + lock + JIT + lifecycle + owners | 1,750 | 2,100 | 15 | 10 | SCIM ≈ 700, store 3 engines ≈ 450, lock ≈ 200; rev. 4: workforce groups, cache invalidation per membership change, mass-change hold ≈ 150 |
+| SC-18 on-prem push agent (optional, rev. 4) | 600 | 500 | 6 | 0 | Windows worker service: AD transitive groups → SCIM client; only if Entra provisioning is not sufficient |
 | SC-14 functional rights | 700 | 900 | 7 | 12 | many endpoint policy edits |
 | SC-15 delegated enforcement (connector-agnostic) + Databricks OBO | 1,050 | 1,300 | 10 | 10 | capability layer ≈ 100, MSAL ≈ 250, policy branch ≈ 200, cache bypasses ≈ 200 |
 | SC-17 SQL Server delegation (token + asserted identity) | 800 | 1,000 | 5 | 6 | pool partitioner ≈ 200, credential provider ≈ 200; **KCD spike excluded** (est. 600 / 700 if pursued) |
@@ -561,10 +584,10 @@ Conditions rewritten in rev. 2 are marked **(rev. 2)**. New conditions are **(ne
 | SC-12 ABAC in store, roles | 600 | 800 | 4 | 5 | |
 | PF-13 partitioned audit chains | 1,200 | 1,500 | 4 | 6 | after re-review |
 | PF-14 streaming | 1,800 | 2,000 | 6 | 14 | |
-| **Wave 2 total** | **≈ 20,250** | **≈ 24,200** | **124** | **142** | about 44,450 LOC |
-| of which identity + delegation (SC-13/05/07/14/15/17) | 6,850 | 8,400 | 61 | 52 | the owner-driven core |
+| **Wave 2 total** | **≈ 20,100** | **≈ 24,100** | **122** | **142** | about 44,200 LOC (rev. 4; excludes optional SC-18) |
+| of which identity + delegation (SC-13/05/07/14/15/17) | 6,700 | 8,300 | 59 | 52 | the owner-driven core (rev. 4) |
 
-**Overall (rev. 3):** about 24,100 production LOC and about 29,150 test LOC (about 53,250 in total). With three Sonnet lanes, Wave 1 takes about 2–3 weeks and the
+**Overall (rev. 4):** about 23,950 production LOC and about 29,050 test LOC (about 53,000 in total, excluding the optional push agent SC-18). With three Sonnet lanes, Wave 1 takes about 2–3 weeks and the
 identity core of Wave 2 about 5–6 weeks (including the two re-reviews). The rest of Wave 2 adds about 6–8 weeks and can be cut
 according to measured need (load test LT-1..8).
 
@@ -597,3 +620,5 @@ Follow-up (owner, 2026-10-16): "auth ist aber sehr flexibel. wir haben auch oaut
 Correction to Q4 (owner, 2026-10-16): "einzelrechte müssen möglich sein - aber eben nur zeitlich beschränkt".
 
 Delegation scope (owner, 2026-10-16): "rechte/obo primär bei databricks - jedoch auch richtung sql server denkbar".
+
+Group transport (owner, 2026-10-16, rev. 4): "die lokalen gruppen hätte ich per externem dienst an autheris geschickt. dieser muss evtl. bei uns im lan unter windows laufen um zugriff zu erhalten. scim ist daher als standard eventuell gut".
