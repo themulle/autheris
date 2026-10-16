@@ -103,6 +103,27 @@ Not blocking Phase 4 (recorded, default taken; owner confirmation is due at the 
 
 Q-6 (both table owners approve `AllowCrossDataSource`, `SEC-FED-DELTA-12`): cannot be implemented on the current model. `TableMetadata` has only `OwnerTenantId` (a tenant), `DataOwner` is a global role, and `AllowCrossDataSource` is init-only and not persisted, so every table currently counts as "without owner" and the flag cannot be enabled (fail closed, safe). The review makes the per-table owner model a binding part of `WP-FED-07` (step **I-18**): tenant-scoped per-table owner designation (principal SID or group) set through an audited path; approval per (relation id, parent epoch, child epoch); distinct principals; `GovernanceAdmin` plus both owner approvals; unreadable store evaluates `false`; epoch bump invalidates; audit, schema cache invalidation. Consequences: I-18 grows from M to L (DDL x3 plus shapes, owner admin path); before I-18 starts the architect adds a short addendum to the `WP-FED-07` spec (check whether the existing table owner/delegate approver records used by #113/#114 can be reused). It does **not** block Phase 4 start nor I-9..I-17 (SQL-text federation does not use the relation flag). It **does** gate GraphQL cross-source relations: `WP-FED-08` (I-19) depends on I-18, and relations stay hidden (PR #139 gating) and unusable until the owner model is merged. No owner decision is needed, only the architect addendum.
 
+## 3.5 Delivery progress and handoff (2026-10-16)
+
+Delivery mode (owner): one developer, strictly sequential; branches are **stacked** (each step branches from the previous step) and pushed when a step is done; PRs target the previous step's branch. Subagent models: architects on Opus, all other roles on Sonnet.
+
+| Step | Branch | PR | Base | Phase 4 | Phase 5 code review | State |
+|---|---|---|---|:---:|:---:|---|
+| Planning | `docs/waves-2-3-planning` | #144 | `main` | – | – | pushed, ready to merge |
+| B-0 | `fix/federated-audit-error-text` | #145 | `main` | ✅ | ✅ (findings addressed) | pushed, done |
+| B-1 | `fix/catalog-schema-disclosure` | #147 | B-0 | ✅ | ✅ (findings addressed) | pushed, done |
+| B-2 | `fix/aggregation-privacy-hardening` | #148 | B-1 | ✅ | ⏳ **pending** | pushed; next action: Phase 5 review, address findings, push |
+| B-3 | `fix/issue-113-wp0-decision-hardening` | – | B-2 | – | – | not started |
+| I-1.. | see section 4 | – | – | – | – | not started |
+
+**Resume on another machine:** `git fetch`, check out `fix/aggregation-privacy-hardening`, run the Phase 5 code review for B-2 (PR #148), address findings, then create `fix/issue-113-wp0-decision-hardening` from it for B-3 (PLAN-GOV-113 WP-0 with the binding conditions of its narrow re-review). Build like CI before every push: `dotnet build Autheris.sln -c Release -p:AutherisIncludeTestAuth=true -warnaserror`; tests with `-c Release -p:AutherisIncludeTestAuth=true` and `DOTNET_USE_POLLING_FILE_WATCHER=true` in WSL.
+
+**Notes:**
+- `DistributedLeaseTests.LastConfirmedAt_IsTheTimeTheExtendWasSent` is a known timing flake (seen on several branches); unrelated to these steps.
+- B-2 residuals (to fold into I-8 or a follow-up): MCP `list_metrics`/`describe_metric` and the GraphQL metric list still read the legacy semantic partition; `queryMetrics` results still include full metric definitions.
+- Pending CI change `ci/release-reuse-ci-result` (release workflow reuses the CI result) cannot be pushed with the current token (needs the `workflow` scope). It is saved as `implementation/pending/ci-release-reuse-ci-result.patch`; apply with `git am` on a branch from `main` and push with a token that has `workflow` scope.
+- Owner confirmations still due: see section 3.2 (B-1 O-1/O-5/O-6/O-7 acknowledged by the owner for O-7; B-3 O-9; I-8 O-4/O-5; I-22/I-24 O-8, O-3).
+
 ## 4. Implementation sequence (final; Phase 4 to 6, strictly one at a time)
 
 Rules: one branch and one PR per step; every branch is created from the `main` that contains the previous step (G-SHARED). Owner rule "security bugs first": steps B-0..B-3 are standalone bugfix PRs without feature dependencies and run before any feature. Then #107 first among features (owner priority), then the rest. Plan labels in brackets are the names used inside the reviews. Size S/M/L as in the plans.
