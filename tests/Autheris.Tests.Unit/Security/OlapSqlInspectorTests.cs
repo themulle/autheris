@@ -86,6 +86,41 @@ public sealed class OlapSqlInspectorTests
         Should.NotThrow(() => OlapSqlInspector.EnforceTextFloor("SELECT DATE '2020-01-01', date'2020-01-02' FROM t", 100));
     }
 
+    [Theory]
+    [InlineData("SELECT 'e'")]
+    [InlineData("SELECT 'a e' AS x")]
+    [InlineData("SELECT 'Dr. E' AS x")]
+    [InlineData("SELECT 'it''s e' AS x")]
+    [InlineData("SELECT \"e\" FROM t")]
+    [InlineData("SELECT DATE '2020-01-01'")]
+    public void TextFloor_AcceptsLiteralsThatEndInTheLetterE(string sql)
+    {
+        Should.NotThrow(() => OlapSqlInspector.EnforceTextFloor(sql, 100));
+    }
+
+    [Theory]
+    [InlineData("SELECT E'x'")]
+    [InlineData("SELECT x, e'x'")]
+    [InlineData("SELECT 'a' || E'b'")]
+    [InlineData("SELECT U&'x'")]
+    [InlineData("SELECT u&\"x\" FROM t")]
+    [InlineData("SELECT 'a''' , E'b'")]
+    public void TextFloor_RejectsEscapePrefixesOutsideLiterals(string sql)
+    {
+        Should.Throw<OlapSqlRejectedException>(() => OlapSqlInspector.EnforceTextFloor(sql, 100));
+    }
+
+    [Fact]
+    public void ParseDatabase_IsSandboxed_AndParsingNeedsNoExtensionInstallOrAutoload()
+    {
+        (OlapSqlInspector.ReadParseDatabaseSetting("autoload_known_extensions") ?? "").ToLowerInvariant().ShouldBe("false");
+        (OlapSqlInspector.ReadParseDatabaseSetting("autoinstall_known_extensions") ?? "").ToLowerInvariant().ShouldBe("false");
+        (OlapSqlInspector.ReadParseDatabaseSetting("enable_external_access") ?? "").ToLowerInvariant().ShouldBe("false");
+
+        // json_serialize_sql lives in the statically linked json extension: with autoload off the parse still works.
+        OlapSqlInspector.Inspect("SELECT 1").StatementCount.ShouldBe(1);
+    }
+
     // ---- T3-04: blocklist and bounded functions ----
 
     [Theory]
@@ -220,6 +255,16 @@ public sealed class OlapSqlInspectorTests
         var inspection = OlapSqlInspector.Inspect(sql);
 
         Should.Throw<OlapSqlRejectedException>(() => OlapSqlPolicy.EnforceCrossSource(inspection, ["a"], allowNonEquiJoins: false));
+    }
+
+    [Theory]
+    [InlineData("WITH orders AS (SELECT * FROM orders) SELECT * FROM orders")]
+    [InlineData("WITH ORDERS AS (SELECT 1 AS id) SELECT id FROM orders")]
+    public void CteNamedLikeAStagedTable_IsRejected(string sql)
+    {
+        var inspection = OlapSqlInspector.Inspect(sql);
+
+        Should.Throw<OlapSqlRejectedException>(() => OlapSqlPolicy.EnforceCrossSource(inspection, ["orders"], allowNonEquiJoins: false));
     }
 
     [Fact]

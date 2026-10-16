@@ -48,9 +48,8 @@ public sealed class OlapStagingService(
     ISqlEngine sqlEngine,
     IOlapRequestLimiter requestLimiter) : IOlapStagingService
 {
-    private const int DefaultMaxSqlLength = 32768;
-    private const long DefaultMaxStagedBytesPerTable = 64L * 1024 * 1024;
-    private const long DefaultMaxTotalStagedBytes = 256L * 1024 * 1024;
+    // Throttle for capacity-refusal audit records: one per tenant per minute (a refusal flood must not flood the audit store).
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> LastCapacityAudit = new(StringComparer.OrdinalIgnoreCase);
 
     // Same token guards as the SQL federation path; comments, escape strings and non-ASCII identifiers are not accepted.
     private static readonly SqlTokenSecurityOptions AnalysisTokenOptions = new()
@@ -202,11 +201,45 @@ public sealed class OlapStagingService(
             return new OlapStagingOutcome(status, message, isDev ? detail : null, ErrorCode: code);
         }
 
+        // A refusal because of the concurrency cap is audited at most once per tenant and minute.
+        async Task<OlapStagingOutcome> CapacityRefusalAsync(bool crossSourceRequest, int tableCount, string target)
+        {
+            logger.LogWarning("OLAP request refused: concurrency limit reached.");
+            long now = Environment.TickCount64;
+            if (LastCapacityAudit.Count > 1000)
+            {
+                LastCapacityAudit.Clear();
+            }
+
+            bool audit = false;
+            LastCapacityAudit.AddOrUpdate(
+                tenantId.Value,
+                _ => { audit = true; return now; },
+                (_, last) =>
+                {
+                    if (now - last >= 60_000)
+                    {
+                        audit = true;
+                        return now;
+                    }
+
+                    return last;
+                });
+            if (audit)
+            {
+                return await DenyAsync(
+                    429, "OLAP_CAPACITY", "OLAP capacity limit reached. Please retry later.", "CAPACITY",
+                    crossSourceRequest, tableCount, target).ConfigureAwait(false);
+            }
+
+            return new OlapStagingOutcome(429, "OLAP capacity limit reached. Please retry later.", ErrorCode: "OLAP_CAPACITY");
+        }
+
         // BC-OLAP-01 / BC-OLAP-15: the SQL text is bounded and parsed by DuckDB before any table is resolved.
         OlapSqlInspection inspection;
         try
         {
-            OlapSqlInspector.EnforceTextFloor(command.Sql, options.MaxSqlLength > 0 ? options.MaxSqlLength : DefaultMaxSqlLength);
+            OlapSqlInspector.EnforceTextFloor(command.Sql, options.MaxSqlLength);
             inspection = OlapSqlInspector.Inspect(command.Sql);
             OlapSqlPolicy.EnforceAll(inspection);
         }
@@ -226,7 +259,7 @@ public sealed class OlapStagingService(
         {
             if (command.TableNames != null && command.TableNames.Count > 0)
             {
-                int maxTableCount = options.MaxTableCount > 0 ? options.MaxTableCount : 10;
+                int maxTableCount = options.MaxTableCount;
                 var requested = command.TableNames
                     .Where(t => !string.IsNullOrWhiteSpace(t))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -314,16 +347,13 @@ public sealed class OlapStagingService(
                 lease = await requestLimiter.TryAcquireAsync(tenantId.Value, token).ConfigureAwait(false);
                 if (lease == null)
                 {
-                    logger.LogWarning("OLAP request refused: concurrency limit reached.");
-                    return await DenyAsync(
-                        429, "OLAP_CAPACITY", "OLAP capacity limit reached. Please retry later.", "CAPACITY",
-                        crossSource, distinct.Count, targetList).ConfigureAwait(false);
+                    return await CapacityRefusalAsync(crossSource, distinct.Count, targetList).ConfigureAwait(false);
                 }
 
-                long maxBytesPerTable = Smaller(options.MaxStagedBytesPerTable, DefaultMaxStagedBytesPerTable, crossSource ? crossOptions.MaxStagedBytesPerTable : 0);
-                long maxTotalBytes = Smaller(options.MaxTotalStagedBytes, DefaultMaxTotalStagedBytes, crossSource ? crossOptions.MaxTotalStagedBytes : 0);
+                long maxBytesPerTable = Smaller(options.MaxStagedBytesPerTable, crossSource ? crossOptions.MaxStagedBytesPerTable : 0);
+                long maxTotalBytes = Smaller(options.MaxTotalStagedBytes, crossSource ? crossOptions.MaxTotalStagedBytes : 0);
                 int totalStagedRows = 0;
-                int maxTotalStagedRows = options.MaxTotalStagedRows > 0 ? options.MaxTotalStagedRows : 500000;
+                int maxTotalStagedRows = options.MaxTotalStagedRows;
 
                 foreach (var table in distinct)
                 {
@@ -340,7 +370,7 @@ public sealed class OlapStagingService(
 
                     // Architecture 2 / SQL2-5: the governed reader applies the row filter when the connector did not push it
                     // down, masks exactly once (SQL2-4) and checks the staging capacity before rows are kept (SQL2-2).
-                    List<IReadOnlyDictionary<string, object?>> maskedRows;
+                    IReadOnlyList<IReadOnlyDictionary<string, object?>> maskedRows;
                     try
                     {
                         var read = await GovernedConnectorReader.ReadAsync(
@@ -354,7 +384,7 @@ public sealed class OlapStagingService(
                                 MaxRows: options.MaxStagedRowsPerTable,
                                 MaxBytes: maxBytesPerTable),
                             token).ConfigureAwait(false);
-                        maskedRows = read.Rows.ToList();
+                        maskedRows = read.Rows;
                     }
                     catch (ConnectorRowLimitExceededException)
                     {
@@ -409,6 +439,13 @@ public sealed class OlapStagingService(
                         command, sources, crossSource, crossOptions.AllowNonEquiJoins, stagedCounts, totalStagedBytes, sourceLabels,
                         sqlHash, sqlLength, traceId, tenantId.Value, actorSid.Value, isDev, TryAuditAsync, AuditFailure),
                     token).ConfigureAwait(false);
+            }
+
+            // A request without tables takes the lease too: the engine work is bounded the same way.
+            lease = await requestLimiter.TryAcquireAsync(tenantId.Value, token).ConfigureAwait(false);
+            if (lease == null)
+            {
+                return await CapacityRefusalAsync(false, 0, string.Empty).ConfigureAwait(false);
             }
 
             return await ExecuteQueryAsync(
@@ -494,17 +531,17 @@ public sealed class OlapStagingService(
             return new OlapStagingOutcome(
                 ex.Code == OlapSqlRejectedException.ColumnPolicy ? 403 : 400, ex.Message, isDev ? ex.Message : null, ErrorCode: ex.Code);
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("MaxStagedRowsPerTable", StringComparison.OrdinalIgnoreCase))
+        catch (InvalidOperationException ex) when (HasCode(ex, DuckDbOlapEngine.CodeStagedRows))
         {
             logger.LogWarning(ex, "Max staged rows limit exceeded in OLAP query.");
             return new OlapStagingOutcome(400, ex.Message);
         }
-        catch (SecurityException ex) when (ex.Message.Contains("capacity", StringComparison.OrdinalIgnoreCase))
+        catch (SecurityException ex) when (HasCode(ex, DuckDbOlapEngine.CodeCapacity))
         {
             logger.LogWarning(ex, "OLAP engine concurrency limit reached.");
             return new OlapStagingOutcome(429, "OLAP capacity limit reached. Please retry later.");
         }
-        catch (SecurityException ex) when (ex.Message.Contains("memory size", StringComparison.OrdinalIgnoreCase))
+        catch (SecurityException ex) when (HasCode(ex, DuckDbOlapEngine.CodeResultSize))
         {
             logger.LogWarning(ex, "OLAP query result byte budget exceeded.");
             return new OlapStagingOutcome(400, isDev ? ex.Message : "OLAP query result exceeded maximum allowed memory size.");
@@ -536,11 +573,12 @@ public sealed class OlapStagingService(
         };
     }
 
-    private static long Smaller(long configured, long fallback, long crossSourceValue)
-    {
-        long value = configured > 0 ? configured : fallback;
-        return crossSourceValue > 0 ? Math.Min(value, crossSourceValue) : value;
-    }
+    private static bool HasCode(Exception ex, string code) =>
+        ex.Data[DuckDbOlapEngine.ErrorCodeKey] is string actual && string.Equals(actual, code, StringComparison.Ordinal);
+
+    // Options are validated at start-up (all limits > 0), so no fallback values are needed here.
+    private static long Smaller(long configured, long crossSourceValue) =>
+        crossSourceValue > 0 ? Math.Min(configured, crossSourceValue) : configured;
 
     /// <summary>
     /// Resolves and authorizes one requested table. Returns <c>(null, null)</c> when a bare name needs the catalog list first
@@ -652,7 +690,7 @@ public sealed class OlapStagingService(
                 403, "OLAP_CROSS_SOURCE_DENIED", FederationGate.DeniedMessage, "FEDERATION_GATE", ex.Message);
         }
 
-        int maxTables = crossOptions.MaxTableCount > 0 ? crossOptions.MaxTableCount : 5;
+        int maxTables = crossOptions.MaxTableCount;
         if (tables.Count > maxTables)
         {
             return new PhaseBDenial(

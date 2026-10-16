@@ -644,4 +644,36 @@ public sealed class OlapFederationGateTests
 
         second.ShouldNotBeNull();
     }
+
+    [Fact]
+    public async Task Limiter_RemovesIdleTenantEntries()
+    {
+        var limiter = new OlapRequestLimiter(Options.Create(new GatewayOptions { DuckDbOlap = new DuckDbOlapOptions() }));
+
+        for (int i = 0; i < 50; i++)
+        {
+            using var lease = await limiter.TryAcquireAsync("tenant-" + i, CancellationToken.None);
+            lease.ShouldNotBeNull();
+        }
+
+        limiter.TrackedTenants.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task RequestWithoutTableNames_AlsoTakesTheLease()
+    {
+        var olap = new DuckDbOlapOptions { Enabled = true, MaxConcurrentQueriesPerTenant = 1, MaxConcurrentQueries = 2, MaxMemory = "256MB", MaxThreads = 1 };
+        var options = Options.Create(new GatewayOptions { DuckDbOlap = olap, WebSql = new WebSqlOptions() });
+        var limiter = new OlapRequestLimiter(options);
+        var sut = new OlapStagingService(
+            new DuckDbOlapEngine(options, NullLogger<DuckDbOlapEngine>.Instance),
+            Substitute.For<ITableMetadataRepository>(), Substitute.For<IAutherisConnectorRegistry>(), Substitute.For<ICrossDomainAccessResolver>(),
+            Substitute.For<IColumnMaskingProvider>(), options, Substitute.For<IAuditWriter>(), NullLogger<OlapStagingService>.Instance,
+            new FederationGate(options), FastSqlEngine.Default, limiter);
+
+        using var held = await limiter.TryAcquireAsync("tenant-1", CancellationToken.None);
+        var outcome = await sut.ExecuteAsync(User(), Caller(), new OlapQueryCommand("SELECT 1"), isDevelopment: false, "t", CancellationToken.None);
+
+        outcome.StatusCode.ShouldBe(429);
+    }
 }

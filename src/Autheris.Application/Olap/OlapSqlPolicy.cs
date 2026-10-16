@@ -93,6 +93,13 @@ public static class OlapSqlPolicy
         }
 
         var visible = new HashSet<string>(stagedNames, StringComparer.OrdinalIgnoreCase);
+
+        // A CTE named like a staged table shadows it for part of the statement; reject instead of reasoning about scopes.
+        if (inspection.CteNames.Any(visible.Contains))
+        {
+            throw Construct();
+        }
+
         foreach (var table in inspection.BaseTables)
         {
             var name = table.StartsWith("main.", StringComparison.OrdinalIgnoreCase) ? table["main.".Length..] : table;

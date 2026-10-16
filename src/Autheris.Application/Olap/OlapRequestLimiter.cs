@@ -1,7 +1,7 @@
 namespace Autheris.Application.Olap;
 
 using System;
-using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Domain.Options;
@@ -22,7 +22,10 @@ public interface IOlapRequestLimiter
 public sealed class OlapRequestLimiter : IOlapRequestLimiter, IDisposable
 {
     private readonly SemaphoreSlim _global;
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _tenants = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _gate = new();
+
+    // Active leases per tenant; an entry is removed when its count returns to zero, so the map is bounded by the concurrent requests.
+    private readonly Dictionary<string, int> _tenants = new(StringComparer.OrdinalIgnoreCase);
     private readonly int _perTenant;
     private readonly TimeSpan _globalWait;
 
@@ -30,20 +33,37 @@ public sealed class OlapRequestLimiter : IOlapRequestLimiter, IDisposable
     {
         ArgumentNullException.ThrowIfNull(options);
         var olap = options.Value.DuckDbOlap ?? new DuckDbOlapOptions();
-        int global = Math.Clamp(olap.MaxConcurrentQueries > 0 ? olap.MaxConcurrentQueries : 4, 1, 64);
-        _perTenant = Math.Clamp(olap.MaxConcurrentQueriesPerTenant > 0 ? olap.MaxConcurrentQueriesPerTenant : 2, 1, global);
-        _globalWait = TimeSpan.FromSeconds(Math.Min(10, olap.QueryTimeoutSeconds > 0 ? olap.QueryTimeoutSeconds : 10));
+        int global = Math.Clamp(olap.MaxConcurrentQueries, 1, 64);
+        _perTenant = Math.Clamp(olap.MaxConcurrentQueriesPerTenant, 1, global);
+        _globalWait = TimeSpan.FromSeconds(Math.Min(10, Math.Max(1, olap.QueryTimeoutSeconds)));
         _global = new SemaphoreSlim(global, global);
+    }
+
+    /// <summary>Number of tenants that currently hold at least one lease (for tests).</summary>
+    internal int TrackedTenants
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _tenants.Count;
+            }
+        }
     }
 
     public async Task<IDisposable?> TryAcquireAsync(string tenantId, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
-        var tenant = _tenants.GetOrAdd(tenantId, _ => new SemaphoreSlim(_perTenant, _perTenant));
 
-        if (!await tenant.WaitAsync(TimeSpan.Zero, ct).ConfigureAwait(false))
+        lock (_gate)
         {
-            return null;
+            _tenants.TryGetValue(tenantId, out int active);
+            if (active >= _perTenant)
+            {
+                return null;
+            }
+
+            _tenants[tenantId] = active + 1;
         }
 
         bool globalTaken = false;
@@ -55,23 +75,34 @@ public sealed class OlapRequestLimiter : IOlapRequestLimiter, IDisposable
         {
             if (!globalTaken)
             {
-                tenant.Release();
+                ReleaseTenant(tenantId);
             }
         }
 
-        return globalTaken ? new Lease(_global, tenant) : null;
+        return globalTaken ? new Lease(this, tenantId) : null;
     }
 
-    public void Dispose()
+    private void ReleaseTenant(string tenantId)
     {
-        _global.Dispose();
-        foreach (var tenant in _tenants.Values)
+        lock (_gate)
         {
-            tenant.Dispose();
+            if (_tenants.TryGetValue(tenantId, out int active))
+            {
+                if (active <= 1)
+                {
+                    _tenants.Remove(tenantId);
+                }
+                else
+                {
+                    _tenants[tenantId] = active - 1;
+                }
+            }
         }
     }
 
-    private sealed class Lease(SemaphoreSlim global, SemaphoreSlim tenant) : IDisposable
+    public void Dispose() => _global.Dispose();
+
+    private sealed class Lease(OlapRequestLimiter owner, string tenantId) : IDisposable
     {
         private int _released;
 
@@ -79,8 +110,8 @@ public sealed class OlapRequestLimiter : IOlapRequestLimiter, IDisposable
         {
             if (Interlocked.Exchange(ref _released, 1) == 0)
             {
-                tenant.Release();
-                global.Release();
+                owner.ReleaseTenant(tenantId);
+                owner._global.Release();
             }
         }
     }

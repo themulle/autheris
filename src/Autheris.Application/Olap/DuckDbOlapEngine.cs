@@ -39,6 +39,18 @@ public static class OlapStagedNames
 
 public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
 {
+    /// <summary>Key of <see cref="Exception.Data"/> that carries one of the <c>Code*</c> values for limit failures (typed mapping, no message matching).</summary>
+    public const string ErrorCodeKey = "OlapErrorCode";
+    public const string CodeStagedRows = "STAGED_ROWS";
+    public const string CodeCapacity = "CAPACITY";
+    public const string CodeResultSize = "RESULT_SIZE";
+
+    private static TException WithCode<TException>(TException ex, string code) where TException : Exception
+    {
+        ex.Data[ErrorCodeKey] = code;
+        return ex;
+    }
+
     private readonly DuckDbOlapOptions _options;
     private readonly ILogger<DuckDbOlapEngine>? _logger;
     private readonly SemaphoreSlim _concurrencySemaphore;
@@ -101,8 +113,8 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
             {
                 if (src.GovernedRows.Count > _options.MaxStagedRowsPerTable)
                 {
-                    throw new InvalidOperationException(
-                        $"MaxStagedRowsPerTable limit exceeded. Table '{src.Table}' has {src.GovernedRows.Count} rows, limit is {_options.MaxStagedRowsPerTable}.");
+                    throw WithCode(new InvalidOperationException(
+                        $"MaxStagedRowsPerTable limit exceeded. Table '{src.Table}' has {src.GovernedRows.Count} rows, limit is {_options.MaxStagedRowsPerTable}."), CodeStagedRows);
                 }
             }
         }
@@ -117,7 +129,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         var waitTimeout = TimeSpan.FromSeconds(Math.Min(10, _options.QueryTimeoutSeconds > 0 ? _options.QueryTimeoutSeconds : 10));
         if (!await _concurrencySemaphore.WaitAsync(waitTimeout, cts.Token).ConfigureAwait(false))
         {
-            throw new System.Security.SecurityException("OLAP engine is at maximum concurrent query capacity. Please retry later.");
+            throw WithCode(new System.Security.SecurityException("OLAP engine is at maximum concurrent query capacity. Please retry later."), CodeCapacity);
         }
 
         // SG-01: Session-isolated temporary directory to prevent cross-session spill leakage
@@ -239,8 +251,8 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
 
                     if (currentResultBytes > maxResultBytes)
                     {
-                        throw new System.Security.SecurityException(
-                            $"OLAP query result exceeded maximum allowed memory size of {maxResultBytes} bytes.");
+                        throw WithCode(new System.Security.SecurityException(
+                            $"OLAP query result exceeded maximum allowed memory size of {maxResultBytes} bytes."), CodeResultSize);
                     }
 
                     rows.Add(row);

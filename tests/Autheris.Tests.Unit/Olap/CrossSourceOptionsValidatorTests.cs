@@ -8,6 +8,7 @@ using Autheris.Application.Federation;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
@@ -166,5 +167,52 @@ public sealed class CrossSourceOptionsValidatorTests
     {
         SqlTransports.All.ShouldContain(SqlTransports.Olap);
         SqlTransports.All.Distinct(StringComparer.OrdinalIgnoreCase).Count().ShouldBe(SqlTransports.All.Count);
+    }
+
+    // ---- BC-OLAP-18 warnings ----
+
+    private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger<CrossSourceOptionsValidator>
+    {
+        public System.Collections.Generic.List<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Entries.Add((logLevel, formatter(state, exception)));
+    }
+
+    private static Microsoft.Extensions.Configuration.IConfiguration Config(params (string Key, string Value)[] values) =>
+        new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(values.Select(v => new System.Collections.Generic.KeyValuePair<string, string?>(v.Key, v.Value)))
+            .Build();
+
+    [Theory]
+    [InlineData("MaxMemory")]
+    [InlineData("MaxTempDirectorySize")]
+    public void LegacyCrossSourceKeys_LogAWarning(string key)
+    {
+        var logger = new CapturingLogger();
+        var validator = new CrossSourceOptionsValidator(Config(($"Gateway:WebSql:CrossSource:{key}", "256MB")), logger);
+
+        validator.Validate(null, new GatewayOptions()).Succeeded.ShouldBeTrue();
+
+        logger.Entries.ShouldContain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains(key, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void OlapListedWhileFederationDisabled_LogsAWarning_AndNoWarningWhenEnabled()
+    {
+        var logger = new CapturingLogger();
+        var validator = new CrossSourceOptionsValidator(Config(), logger);
+
+        validator.Validate(null, WithCross(new CrossSourceOptions { Enabled = false, AllowedTransports = ["Olap"] }));
+        logger.Entries.ShouldContain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains("Olap", StringComparison.Ordinal));
+
+        var quiet = new CapturingLogger();
+        new CrossSourceOptionsValidator(Config(), quiet).Validate(null, WithCross(new CrossSourceOptions { Enabled = true, AllowedTransports = ["Olap"] }));
+        quiet.Entries.ShouldBeEmpty();
     }
 }

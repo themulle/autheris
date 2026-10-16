@@ -56,6 +56,10 @@ For **cross-source** requests the statement is additionally limited by a code-he
 - cross joins, comma joins without a predicate and non-equi joins are rejected unless `WebSql:CrossSource:AllowNonEquiJoins` is `true`;
 - the text must parse in the gateway SQL dialect (`400 OLAP_SQL_NOT_ANALYZABLE`), and a join or filter on a masked or denied column is rejected (`403 OLAP_COLUMN_POLICY`). Columns masked with the `HMAC` rule remain joinable, exactly as in WebSQL; `HASH` and `HMAC_SHA256` are rejected.
 
+Restrictions that apply to every request: the SQL text may not contain a backslash, an `E'..'` escape string or a `U&'..'` / `U&".."` unicode-escape string outside a quoted literal (literals such as `'e'` or `'Dr. E'` are fine), and DuckDB's parser, not a text scan, decides the statement count. The text is parsed before admission on a shared, sandboxed parse database (no extension install or autoload, no external access, one thread, 64MB); the engine parses again on its own sandboxed session, which is the authoritative check before staging. A CTE named like a staged table is rejected in cross-source statements.
+
+Known residual: the serialized DuckDB AST does not expose correlation, so `LATERAL` is rejected by keyword only. A derived table that references an outer table without the keyword (for example `JOIN (SELECT ... a.x ...) ON true`) is not detected; it can only reach data that is already staged, masked and authorized.
+
 The column guardrail is a policy-consistency control, not a confidentiality boundary. The boundary is that masking and column denial are applied before rows are staged into DuckDB. The OLAP endpoint is "gated and bounded"; client DuckDB SQL is still executed inside the sandbox for single-source and for cross-source statements that pass the checks.
 
 ---

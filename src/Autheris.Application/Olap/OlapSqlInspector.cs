@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Security;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading;
 using DuckDB.NET.Data;
 
 /// <summary>A client SQL text that the OLAP endpoint rejects. <see cref="Code"/> is stable and safe to return; the message is generic.</summary>
@@ -39,7 +40,8 @@ public sealed record OlapSqlInspection(
     IReadOnlyList<string> Functions,
     IReadOnlyList<string> TableFunctions,
     IReadOnlyList<string> BaseTables,
-    IReadOnlySet<string> Constructs);
+    IReadOnlySet<string> Constructs,
+    IReadOnlySet<string> CteNames);
 
 /// <summary>
 /// Validates client SQL with the DuckDB parser (<c>json_serialize_sql</c>: only a single <c>SELECT</c> can be serialized, every parse
@@ -61,12 +63,6 @@ public static class OlapSqlInspector
     public const string ConstructCrossJoin = "CROSS_JOIN";
     public const string ConstructNonEquiJoin = "NON_EQUI_JOIN";
 
-    // Prefix characters that change how DuckDB lexes the following quote: E'..' (backslash escapes), U&'..' (unicode escapes).
-    private static readonly Regex EscapeStringPrefix = new(
-        @"(?<![A-Za-z0-9_$])(?:[eE]'|[uU]&['""])",
-        RegexOptions.CultureInvariant,
-        TimeSpan.FromMilliseconds(250));
-
     private static readonly Regex LateralKeyword = new(
         @"\blateral\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
@@ -84,7 +80,7 @@ public static class OlapSqlInspector
             throw new OlapSqlRejectedException(OlapSqlRejectedException.Invalid, "The SQL statement is not valid for the OLAP endpoint.");
         }
 
-        if (sql.Contains('\0') || sql.Contains('\\') || EscapeStringPrefix.IsMatch(sql))
+        if (sql.Contains('\0') || sql.Contains('\\') || HasEscapeStringPrefix(sql))
         {
             throw new OlapSqlRejectedException(
                 OlapSqlRejectedException.Invalid,
@@ -92,12 +88,96 @@ public static class OlapSqlInspector
         }
     }
 
-    /// <summary>Parses <paramref name="sql"/> on a throw-away in-memory DuckDB database.</summary>
+    /// <summary>
+    /// True when an <c>E'..'</c> or <c>U&amp;'..'</c> / <c>U&amp;".."</c> prefix appears OUTSIDE a quoted region. Quoted regions are
+    /// skipped (a doubled quote stays inside), so literals such as <c>'e'</c> or <c>'Dr. E'</c> are not mistaken for prefixes.
+    /// </summary>
+    internal static bool HasEscapeStringPrefix(string sql)
+    {
+        char quote = '\0';
+        for (int i = 0; i < sql.Length; i++)
+        {
+            char c = sql[i];
+            if (quote != '\0')
+            {
+                if (c == quote)
+                {
+                    if (i + 1 < sql.Length && sql[i + 1] == quote)
+                    {
+                        i++; // doubled quote: still inside the literal
+                    }
+                    else
+                    {
+                        quote = '\0';
+                    }
+                }
+
+                continue;
+            }
+
+            if (c is not ('\'' or '"'))
+            {
+                continue;
+            }
+
+            if (c == '\'' && i >= 1 && (sql[i - 1] is 'e' or 'E') && (i < 2 || !IsIdentifierChar(sql[i - 2])))
+            {
+                return true;
+            }
+
+            if (i >= 2 && sql[i - 1] == '&' && (sql[i - 2] is 'u' or 'U') && (i < 3 || !IsIdentifierChar(sql[i - 3])))
+            {
+                return true;
+            }
+
+            quote = c;
+        }
+
+        return false;
+    }
+
+    private static bool IsIdentifierChar(char c) => char.IsLetterOrDigit(c) || c is '_' or '$';
+
+    // One long-lived, sandboxed database used only to parse client SQL before admission. No extension install or autoload, no
+    // external access, one thread and a small memory limit; every request parses on its own connection to this database.
+    private static readonly Lazy<DuckDBConnection> ParseDatabase = new(CreateParseDatabase, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    private static DuckDBConnection CreateParseDatabase()
+    {
+        var connection = new DuckDBConnection("DataSource=:memory:");
+        connection.Open();
+        using var setup = connection.CreateCommand();
+        setup.CommandText =
+            "SET autoinstall_known_extensions = false; SET autoload_known_extensions = false; SET enable_external_access = false; " +
+            "PRAGMA max_memory = '64MB'; PRAGMA threads = 1; SET lock_configuration = true;";
+        setup.ExecuteNonQuery();
+        return connection;
+    }
+
+    /// <summary>Parses <paramref name="sql"/> on a connection to the shared sandboxed parse database (nothing is executed or staged).</summary>
     public static OlapSqlInspection Inspect(string sql)
     {
-        using var connection = new DuckDBConnection("DataSource=:memory:");
-        connection.Open();
+        using var connection = ParseDatabase.Value.Duplicate();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            connection.Open();
+        }
+
         return Inspect(connection, sql);
+    }
+
+    /// <summary>Reads a setting of the parse database (used to prove the sandbox in tests).</summary>
+    internal static string? ReadParseDatabaseSetting(string name)
+    {
+        using var connection = ParseDatabase.Value.Duplicate();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            connection.Open();
+        }
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT value FROM duckdb_settings() WHERE name = '" + name.Replace("'", "''", StringComparison.Ordinal) + "'";
+        return cmd.ExecuteScalar()?.ToString();
     }
 
     /// <summary>Parses <paramref name="sql"/> with the parser of the given connection; nothing is executed or staged.</summary>
@@ -148,7 +228,7 @@ public static class OlapSqlInspector
                 collector.Constructs.Add(ConstructLateral);
             }
 
-            return new OlapSqlInspection(count, collector.Functions, collector.TableFunctions, collector.BaseTables, collector.Constructs);
+            return new OlapSqlInspection(count, collector.Functions, collector.TableFunctions, collector.BaseTables, collector.Constructs, collector.CteNameSet);
         }
         catch (JsonException)
         {
@@ -168,6 +248,8 @@ public static class OlapSqlInspector
         public List<string> BaseTables { get; } = [];
 
         public HashSet<string> Constructs { get; } = new(StringComparer.Ordinal);
+
+        public HashSet<string> CteNameSet => _cteNames;
 
         public void AddCte(string name) => _cteNames.Add(name);
 
