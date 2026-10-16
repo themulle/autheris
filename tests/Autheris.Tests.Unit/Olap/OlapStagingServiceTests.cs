@@ -63,7 +63,9 @@ public sealed class OlapStagingServiceTests
             WebSql = new WebSqlOptions { AllowedDataSources = ["sales"] },
             DuckDbOlap = new DuckDbOlapOptions { Enabled = true }
         });
-        var sut = new OlapStagingService(engine, meta, registry, resolver, Substitute.For<IColumnMaskingProvider>(), options, audit, NullLogger<OlapStagingService>.Instance);
+        var sut = new OlapStagingService(
+            engine, meta, registry, resolver, Substitute.For<IColumnMaskingProvider>(), options, audit, NullLogger<OlapStagingService>.Instance,
+            new Autheris.Application.Federation.FederationGate(options), TrinoSqlEngine.FastSqlEngine.Default, new OlapRequestLimiter(options));
         return new Fixture(sut, audit, engine, resolver, registry);
     }
 

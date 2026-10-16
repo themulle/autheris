@@ -66,9 +66,10 @@ public sealed class CrossSourceOptions
     public bool Enabled { get; init; } = false;
     /// <summary>
     /// Transport opt-in for federated (cross-source) queries. Valid names are the constants of <c>SqlTransports</c>:
-    /// WebSql, Trino, Rest, Mcp, ArrowExport, FlightSql, SqlEndpoints and AsyncJob. When not configured, only WebSql and
-    /// Trino are allowed; every other channel (including AsyncJob) is rejected on federated queries unless listed here.
-    /// An explicitly empty list allows no transport (fail-closed).
+    /// WebSql, Trino, Rest, Mcp, ArrowExport, FlightSql, SqlEndpoints, AsyncJob and Olap; an unknown name aborts the start.
+    /// When not configured, only WebSql and Trino are allowed; every other channel (including AsyncJob and Olap) is rejected
+    /// on federated queries unless listed here. A configured list replaces the default entirely. An explicitly empty list
+    /// allows no transport (fail-closed).
     /// Nullable on purpose: the configuration binder appends to pre-filled lists, so a non-empty default could not be narrowed.
     /// </summary>
     public List<string>? AllowedTransports { get; init; }
@@ -82,9 +83,12 @@ public sealed class CrossSourceOptions
     public int MaxTotalStagedRows { get; init; } = 200000;
     public long MaxStagedBytesPerTable { get; init; } = 32 * 1024 * 1024;
     public long MaxTotalStagedBytes { get; init; } = 128 * 1024 * 1024;
-    public string MaxMemory { get; init; } = "256MB";
-    public string MaxTempDirectorySize { get; init; } = "0B";
     public int TimeoutSeconds { get; init; } = 30;
+
+    /// <summary>
+    /// Upper bound (1..16) on parallel source reads. Currently staging reads sources sequentially, which trivially satisfies the bound.
+    /// DuckDB memory and spill limits are configured with <c>Gateway:DuckDbOlap:MaxMemory</c> and <c>MaxTempDirectorySize</c>.
+    /// </summary>
     public int MaxParallelSourceReads { get; init; } = 4;
     public bool AllowNonEquiJoins { get; init; } = false;
 

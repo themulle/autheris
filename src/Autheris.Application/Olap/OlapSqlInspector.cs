@@ -1,0 +1,382 @@
+namespace Autheris.Application.Olap;
+
+using System;
+using System.Collections.Generic;
+using System.Security;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using DuckDB.NET.Data;
+
+/// <summary>A client SQL text that the OLAP endpoint rejects. <see cref="Code"/> is stable and safe to return; the message is generic.</summary>
+public sealed class OlapSqlRejectedException : SecurityException
+{
+    public const string Invalid = "OLAP_SQL_INVALID";
+    public const string NotAnalyzable = "OLAP_SQL_NOT_ANALYZABLE";
+    public const string ConstructNotAllowed = "OLAP_SQL_CONSTRUCT_NOT_ALLOWED";
+    public const string ColumnPolicy = "OLAP_COLUMN_POLICY";
+
+    public OlapSqlRejectedException(string code, string message)
+        : base(message)
+    {
+        Code = code;
+    }
+
+    public OlapSqlRejectedException(string code, string message, Exception innerException)
+        : base(message, innerException)
+    {
+        Code = code;
+    }
+
+    public string Code { get; }
+}
+
+/// <summary>
+/// What DuckDB's own parser found in a client statement (taken from <c>json_serialize_sql</c>, so it is the grammar that later
+/// executes the text): number of statements, called functions, table functions, referenced base tables and risky constructs.
+/// </summary>
+public sealed record OlapSqlInspection(
+    int StatementCount,
+    IReadOnlyList<string> Functions,
+    IReadOnlyList<string> TableFunctions,
+    IReadOnlyList<string> BaseTables,
+    IReadOnlySet<string> Constructs);
+
+/// <summary>
+/// Validates client SQL with the DuckDB parser (<c>json_serialize_sql</c>: only a single <c>SELECT</c> can be serialized, every parse
+/// failure is an error) instead of a text scanner, and extracts the AST facts that the cross-source policy needs.
+/// </summary>
+public static class OlapSqlInspector
+{
+    public const string ConstructNaturalJoin = "NATURAL_JOIN";
+    public const string ConstructPositionalJoin = "POSITIONAL_JOIN";
+    public const string ConstructLateral = "LATERAL";
+    public const string ConstructTableSample = "TABLESAMPLE";
+    public const string ConstructColumns = "COLUMNS";
+    public const string ConstructStarExclude = "STAR_EXCLUDE";
+    public const string ConstructStarReplace = "STAR_REPLACE";
+    public const string ConstructStarOutsideSelectList = "STAR_OUTSIDE_SELECT_LIST";
+    public const string ConstructPositionalReference = "POSITIONAL_REFERENCE";
+    public const string ConstructGroupByAll = "GROUP_BY_ALL";
+    public const string ConstructQualify = "QUALIFY";
+    public const string ConstructCrossJoin = "CROSS_JOIN";
+    public const string ConstructNonEquiJoin = "NON_EQUI_JOIN";
+
+    // Prefix characters that change how DuckDB lexes the following quote: E'..' (backslash escapes), U&'..' (unicode escapes).
+    private static readonly Regex EscapeStringPrefix = new(
+        @"(?<![A-Za-z0-9_$])(?:[eE]'|[uU]&['""])",
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromMilliseconds(250));
+
+    private static readonly Regex LateralKeyword = new(
+        @"\blateral\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+        TimeSpan.FromMilliseconds(250));
+
+    /// <summary>
+    /// Text-level floor that runs before any parser: length, NUL, backslash, <c>E'..'</c> and <c>U&amp;'..'</c> strings are rejected, so
+    /// no later text scan can be desynchronised from DuckDB's lexing by an escape sequence.
+    /// </summary>
+    public static void EnforceTextFloor(string sql, int maxLength)
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+        if (string.IsNullOrWhiteSpace(sql) || (maxLength > 0 && sql.Length > maxLength))
+        {
+            throw new OlapSqlRejectedException(OlapSqlRejectedException.Invalid, "The SQL statement is not valid for the OLAP endpoint.");
+        }
+
+        if (sql.Contains('\0') || sql.Contains('\\') || EscapeStringPrefix.IsMatch(sql))
+        {
+            throw new OlapSqlRejectedException(
+                OlapSqlRejectedException.Invalid,
+                "Escape strings and backslashes are prohibited in OLAP queries.");
+        }
+    }
+
+    /// <summary>Parses <paramref name="sql"/> on a throw-away in-memory DuckDB database.</summary>
+    public static OlapSqlInspection Inspect(string sql)
+    {
+        using var connection = new DuckDBConnection("DataSource=:memory:");
+        connection.Open();
+        return Inspect(connection, sql);
+    }
+
+    /// <summary>Parses <paramref name="sql"/> with the parser of the given connection; nothing is executed or staged.</summary>
+    public static OlapSqlInspection Inspect(DuckDBConnection connection, string sql)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(sql);
+
+        string? json;
+        try
+        {
+            using var cmd = connection.CreateCommand();
+
+            // A plain literal: backslash is no escape in DuckDB (and the text floor already rejected it), only the quote is doubled.
+            cmd.CommandText = "SELECT json_serialize_sql('" + sql.Replace("'", "''", StringComparison.Ordinal) + "')";
+            json = cmd.ExecuteScalar() as string;
+        }
+        catch (DuckDBException)
+        {
+            throw new OlapSqlRejectedException(OlapSqlRejectedException.Invalid, "The SQL statement is not valid for the OLAP endpoint.");
+        }
+
+        if (string.IsNullOrEmpty(json))
+        {
+            throw new OlapSqlRejectedException(OlapSqlRejectedException.Invalid, "The SQL statement is not valid for the OLAP endpoint.");
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 512 });
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                (root.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.True) ||
+                !root.TryGetProperty("statements", out var statements) ||
+                statements.ValueKind != JsonValueKind.Array)
+            {
+                throw new OlapSqlRejectedException(OlapSqlRejectedException.Invalid, "The SQL statement is not valid for the OLAP endpoint.");
+            }
+
+            int count = statements.GetArrayLength();
+            var collector = new Collector();
+            Walk(statements, null, collector);
+            collector.Finish();
+
+            // The serialized AST does not mark LATERAL (correlation is resolved at bind time), so the keyword is detected in the text.
+            if (LateralKeyword.IsMatch(sql))
+            {
+                collector.Constructs.Add(ConstructLateral);
+            }
+
+            return new OlapSqlInspection(count, collector.Functions, collector.TableFunctions, collector.BaseTables, collector.Constructs);
+        }
+        catch (JsonException)
+        {
+            throw new OlapSqlRejectedException(OlapSqlRejectedException.Invalid, "The SQL statement is not valid for the OLAP endpoint.");
+        }
+    }
+
+    private sealed class Collector
+    {
+        private readonly HashSet<string> _cteNames = new(StringComparer.OrdinalIgnoreCase);
+        private readonly List<string> _rawBaseTables = [];
+
+        public List<string> Functions { get; } = [];
+
+        public List<string> TableFunctions { get; } = [];
+
+        public List<string> BaseTables { get; } = [];
+
+        public HashSet<string> Constructs { get; } = new(StringComparer.Ordinal);
+
+        public void AddCte(string name) => _cteNames.Add(name);
+
+        public void AddBaseTable(string qualifiedName) => _rawBaseTables.Add(qualifiedName);
+
+        public void Finish()
+        {
+            foreach (var table in _rawBaseTables)
+            {
+                // A reference to a CTE of the statement is not a reference to a staged table.
+                if (!_cteNames.Contains(table))
+                {
+                    BaseTables.Add(table.ToLowerInvariant());
+                }
+            }
+        }
+    }
+
+    private static void Walk(JsonElement element, string? parentKey, Collector collector)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                InspectObject(element, parentKey, collector);
+                foreach (var property in element.EnumerateObject())
+                {
+                    Walk(property.Value, property.Name, collector);
+                }
+
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    Walk(item, parentKey, collector);
+                }
+
+                break;
+        }
+    }
+
+    private static void InspectObject(JsonElement obj, string? parentKey, Collector c)
+    {
+        var cls = GetString(obj, "class");
+        var type = GetString(obj, "type");
+
+        // CTE map entries: {"key": "name", "value": {...}}
+        if (parentKey == "map" && GetString(obj, "key") is { Length: > 0 } cteName && obj.TryGetProperty("value", out _))
+        {
+            c.AddCte(cteName);
+        }
+
+        if (cls is "FUNCTION" or "WINDOW")
+        {
+            var name = GetString(obj, "function_name");
+            bool isOperator = cls == "FUNCTION" && GetBool(obj, "is_operator");
+            if (!isOperator && name is { Length: > 0 })
+            {
+                var schema = GetString(obj, "schema");
+                c.Functions.Add((string.IsNullOrEmpty(schema) ? name : schema + "." + name).ToLowerInvariant());
+            }
+        }
+        else if (cls == "STAR")
+        {
+            if (GetBool(obj, "columns"))
+            {
+                c.Constructs.Add(ConstructColumns);
+            }
+
+            if (HasItems(obj, "exclude_list"))
+            {
+                c.Constructs.Add(ConstructStarExclude);
+            }
+
+            if (HasItems(obj, "replace_list"))
+            {
+                c.Constructs.Add(ConstructStarReplace);
+            }
+
+            if (parentKey is not ("select_list" or "children"))
+            {
+                c.Constructs.Add(ConstructStarOutsideSelectList);
+            }
+        }
+        else if (cls == "POSITIONAL_REFERENCE")
+        {
+            c.Constructs.Add(ConstructPositionalReference);
+        }
+
+        switch (type)
+        {
+            case "BASE_TABLE":
+                if (GetString(obj, "table_name") is { Length: > 0 } table)
+                {
+                    var schema = GetString(obj, "schema_name");
+                    var catalog = GetString(obj, "catalog_name");
+                    var qualified = string.IsNullOrEmpty(schema) ? table : schema + "." + table;
+                    c.AddBaseTable(string.IsNullOrEmpty(catalog) ? qualified : catalog + "." + qualified);
+                }
+
+                break;
+            case "TABLE_FUNCTION":
+                if (obj.TryGetProperty("function", out var fn) && fn.ValueKind == JsonValueKind.Object &&
+                    GetString(fn, "function_name") is { Length: > 0 } tableFunction)
+                {
+                    c.TableFunctions.Add(tableFunction.ToLowerInvariant());
+                }
+                else
+                {
+                    c.TableFunctions.Add("?");
+                }
+
+                break;
+            case "JOIN":
+                InspectJoin(obj, c);
+                break;
+        }
+
+        if (GetBool(obj, "lateral"))
+        {
+            c.Constructs.Add(ConstructLateral);
+        }
+
+        if (obj.TryGetProperty("sample", out var sample) && sample.ValueKind == JsonValueKind.Object)
+        {
+            c.Constructs.Add(ConstructTableSample);
+        }
+
+        if (obj.TryGetProperty("qualify", out var qualify) && qualify.ValueKind == JsonValueKind.Object)
+        {
+            c.Constructs.Add(ConstructQualify);
+        }
+
+        if (string.Equals(GetString(obj, "aggregate_handling"), "FORCE_AGGREGATES", StringComparison.Ordinal))
+        {
+            c.Constructs.Add(ConstructGroupByAll);
+        }
+    }
+
+    private static void InspectJoin(JsonElement join, Collector c)
+    {
+        switch (GetString(join, "ref_type"))
+        {
+            case "NATURAL":
+                c.Constructs.Add(ConstructNaturalJoin);
+                break;
+            case "POSITIONAL":
+                c.Constructs.Add(ConstructPositionalJoin);
+                break;
+            case "DEPENDENT":
+                c.Constructs.Add(ConstructLateral);
+                break;
+            case "CROSS":
+                c.Constructs.Add(ConstructCrossJoin);
+                break;
+            case "REGULAR":
+                if (join.TryGetProperty("condition", out var condition) && condition.ValueKind == JsonValueKind.Object &&
+                    IsNonEquiCondition(condition))
+                {
+                    c.Constructs.Add(ConstructNonEquiJoin);
+                }
+
+                break;
+        }
+    }
+
+    // An equi join condition is a conjunction (AND) of equality comparisons; anything else (range, OR, function) is non-equi.
+    private static bool IsNonEquiCondition(JsonElement condition)
+    {
+        var cls = GetString(condition, "class");
+        var type = GetString(condition, "type");
+        if (cls == "CONJUNCTION")
+        {
+            if (type != "CONJUNCTION_AND" || !condition.TryGetProperty("children", out var children) || children.ValueKind != JsonValueKind.Array)
+            {
+                return true;
+            }
+
+            foreach (var child in children.EnumerateArray())
+            {
+                if (child.ValueKind != JsonValueKind.Object || IsNonEquiCondition(child))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        return !(cls == "COMPARISON" && type is "COMPARE_EQUAL" or "COMPARE_NOT_DISTINCT_FROM");
+    }
+
+    private static string? GetString(JsonElement obj, string name) =>
+        obj.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private static bool GetBool(JsonElement obj, string name) =>
+        obj.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
+
+    private static bool HasItems(JsonElement obj, string name)
+    {
+        if (!obj.TryGetProperty(name, out var value))
+        {
+            return false;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.Array => value.GetArrayLength() > 0,
+            JsonValueKind.Object => value.EnumerateObject().MoveNext(),
+            _ => false
+        };
+    }
+}

@@ -16,6 +16,27 @@ using Microsoft.Extensions.Options;
 
 namespace Autheris.Application.Olap;
 
+/// <summary>The names under which a staged table is visible in the DuckDB session: the table name and, when distinct, the <c>domain_table</c> view.</summary>
+public static class OlapStagedNames
+{
+    public static IReadOnlyList<string> For(OlapTableSource source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        var clean = DuckDbOlapEngine.SanitizeIdentifier(!string.IsNullOrWhiteSpace(source.StagingTableName) ? source.StagingTableName : source.Table.TableName);
+        var names = new List<string> { clean };
+        if (string.IsNullOrWhiteSpace(source.StagingTableName) && !string.IsNullOrWhiteSpace(source.Table.Domain))
+        {
+            var view = DuckDbOlapEngine.SanitizeIdentifier($"{source.Table.Domain}_{source.Table.TableName}");
+            if (!string.Equals(view, clean, StringComparison.OrdinalIgnoreCase))
+            {
+                names.Add(view);
+            }
+        }
+
+        return names;
+    }
+}
+
 public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
 {
     private readonly DuckDbOlapOptions _options;
@@ -51,12 +72,19 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(query);
-        return ExecuteOlapQueryAsync(new OlapQueryRequest(query.Sql, sources, limit, query.Parameters), ct);
+
+        // Gateway-compiled SQL (all values bound): not client text, so the client-text floor and the client AST policy do not apply.
+        return ExecuteCoreAsync(new OlapQueryRequest(query.Sql, sources, limit, query.Parameters), trustedGeneratedSql: true, ct);
     }
 
-    public async Task<OlapQueryResult> ExecuteOlapQueryAsync(
+    public Task<OlapQueryResult> ExecuteOlapQueryAsync(
         OlapQueryRequest request,
-        CancellationToken ct = default)
+        CancellationToken ct = default) => ExecuteCoreAsync(request, trustedGeneratedSql: false, ct);
+
+    private async Task<OlapQueryResult> ExecuteCoreAsync(
+        OlapQueryRequest request,
+        bool trustedGeneratedSql,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Sql);
@@ -64,7 +92,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         var sw = Stopwatch.StartNew();
 
         // 1. Early validation of SQL before any staging or connection allocation
-        ValidateUserSql(request.Sql, request.Sources, request.Parameters?.Count);
+        ValidateUserSql(request.Sql, request.Sources, request.Parameters?.Count, enforceTextFloor: !trustedGeneratedSql);
 
         // SEC-OLAP-02: Enforce MaxStagedRowsPerTable limits before opening DuckDB
         if (request.Sources != null)
@@ -110,8 +138,26 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
                 int threads = Math.Clamp(_options.MaxThreads, 1, 8);
                 var normalizedTempDir = sessionTempDir.Replace('\\', '/').Replace("'", "''");
 
-                setupCmd.CommandText = $"SET temp_directory = '{normalizedTempDir}'; PRAGMA max_temp_directory_size = '{maxTempSize}'; SET enable_external_access = false; PRAGMA max_memory = '{maxMem}'; PRAGMA threads = {threads}; SET lock_configuration = true;";
+                setupCmd.CommandText = BuildSetupSql(normalizedTempDir, maxTempSize, maxMem, threads);
                 await setupCmd.ExecuteNonQueryAsync(cts.Token).ConfigureAwait(false);
+            }
+
+            // BC-OLAP-01/02: DuckDB's own parser decides what the text is (statement count, functions, tables, constructs).
+            // Cross-source requests additionally get the function allowlist and the construct blocklist. Runs before any staging.
+            if (!trustedGeneratedSql)
+            {
+                var inspection = OlapSqlInspector.Inspect(connection, request.Sql);
+                OlapSqlPolicy.EnforceAll(inspection);
+                if (request.CrossSource)
+                {
+                    var stagedNames = new List<string>();
+                    foreach (var staged in request.Sources ?? [])
+                    {
+                        stagedNames.AddRange(OlapStagedNames.For(staged));
+                    }
+
+                    OlapSqlPolicy.EnforceCrossSource(inspection, stagedNames, request.AllowNonEquiJoins);
+                }
             }
 
             // Stage all authorized source tables into the transient DuckDB session
@@ -221,6 +267,13 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         }
     }
 
+    /// <summary>
+    /// Sandbox statements: session temp directory and limits, extension autoinstall/autoload off (BC-OLAP-09c), no external access,
+    /// then the configuration is locked. The order matters: the locks come last.
+    /// </summary>
+    internal static string BuildSetupSql(string normalizedTempDir, string maxTempSize, string maxMem, int threads) =>
+        $"SET temp_directory = '{normalizedTempDir}'; PRAGMA max_temp_directory_size = '{maxTempSize}'; SET autoinstall_known_extensions = false; SET autoload_known_extensions = false; SET enable_external_access = false; PRAGMA max_memory = '{maxMem}'; PRAGMA threads = {threads}; SET lock_configuration = true;";
+
     private static async Task StageTableAsync(
         DuckDBConnection connection,
         OlapTableSource source,
@@ -324,7 +377,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         return first.Keys.Select(k => new TableColumn { ColumnName = k, DataType = "string" }).ToList();
     }
 
-    private static string SanitizeIdentifier(string identifier)
+    internal static string SanitizeIdentifier(string identifier)
     {
         if (string.IsNullOrWhiteSpace(identifier)) return "col";
         var cleaned = Regex.Replace(identifier, @"[^a-zA-Z0-9_]", "_");
@@ -332,10 +385,15 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         return cleaned;
     }
 
+    private static readonly Regex MemorySizePattern = new(@"^(\d+)\s*(MB|GB|TB|B)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(250));
+
+    /// <summary>True when <paramref name="mem"/> is a size the engine accepts (for example <c>512MB</c>); the start-up validator rejects anything else.</summary>
+    public static bool IsValidMemorySize(string? mem) => !string.IsNullOrWhiteSpace(mem) && MemorySizePattern.IsMatch(mem.Trim());
+
     private static string SanitizeMemoryString(string? mem)
     {
         if (string.IsNullOrWhiteSpace(mem)) return "1GB";
-        var match = Regex.Match(mem.Trim(), @"^(\d+)\s*(MB|GB|TB|B)$", RegexOptions.IgnoreCase);
+        var match = MemorySizePattern.Match(mem.Trim());
         return match.Success ? match.Value.ToUpperInvariant() : "1GB";
     }
 
@@ -402,11 +460,25 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         }
     }
 
-    private static void ValidateUserSql(string sql, IReadOnlyList<OlapTableSource>? sources, int? boundParameterCount = null)
+    private static void ValidateUserSql(string sql, IReadOnlyList<OlapTableSource>? sources, int? boundParameterCount = null, bool enforceTextFloor = true)
     {
         if (string.IsNullOrWhiteSpace(sql))
         {
             throw new ArgumentException("SQL query cannot be empty.", nameof(sql));
+        }
+
+        // BC-OLAP-01 floor: backslashes, E'..' and U&'..' strings are rejected before any text scan, because DuckDB lexes them
+        // differently from the quote scanners below. The authoritative checks use DuckDB's parser (OlapSqlInspector).
+        if (enforceTextFloor)
+        {
+            try
+            {
+                OlapSqlInspector.EnforceTextFloor(sql, 0);
+            }
+            catch (OlapSqlRejectedException ex)
+            {
+                throw new System.Security.SecurityException(ex.Message);
+            }
         }
 
         // SG-24: Prohibit dollar quoting ($$...$$) and dollar variables to eliminate lexer and quote bypasses

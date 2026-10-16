@@ -836,12 +836,20 @@ Die Dataset-Tools `list_datasets`, `describe_dataset`, `query_graphql` und `samp
 
 | Schlüssel | Typ | Wertebereich | Standard | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
-| `DuckDbOlap:Enabled` | `bool` | `true \| false` | `false` | Aktiviert die eingebettete In-Memory DuckDB-Vektorengine (`F-DATA-03`). |
+| `DuckDbOlap:Enabled` | `bool` | `true \| false` | `true` | Aktiviert die eingebettete In-Memory DuckDB-Vektorengine (`F-DATA-03`). |
 | `DuckDbOlap:MaxMemory` | `string` | z. B. `"512MB"`, `"2GB"` | `"1GB"` | Maximale RAM-Quota pro DuckDB-Session (`PRAGMA max_memory`). |
-| `DuckDbOlap:MaxThreads` | `int` | `1 .. 32` | `2` | Maximale Thread-Anzahl für parallele SIMD-Ausführung. |
+| `DuckDbOlap:MaxThreads` | `int` | `1 .. 8` | `2` | Maximale Thread-Anzahl für parallele SIMD-Ausführung. |
 | `DuckDbOlap:MaxStagedRowsPerTable` | `int` | `1000 .. 5000000` | `250000` | Obergrenze gestagter Zeilen pro temporärer Quelltabelle. |
 | `DuckDbOlap:MaxResultRows` | `int` | `1 ..` | `50000` | Obergrenze der Zeilen eines OLAP-Ergebnisses; ein kleineres `limit` der Anfrage bleibt erhalten. |
-| `DuckDbOlap:QueryTimeoutSeconds` | `int` | `1 .. 300` | `30` | Timeout für analytische In-Memory DuckDB-Abfragen. |
+| `DuckDbOlap:QueryTimeoutSeconds` | `int` | `1 .. 300` | `60` | Timeout for analytical in-memory DuckDB queries; it also covers authorization and the source reads of the request. |
+| `DuckDbOlap:MaxTempDirectorySize` | `string` | e.g. `"256MB"`, `"0B"` | `"256MB"` | Maximum size of the session spill directory (`PRAGMA max_temp_directory_size`). Authoritative for all DuckDB sessions; `WebSql:CrossSource:MaxTempDirectorySize` was removed. |
+| `DuckDbOlap:MaxTableCount` | `int` | `1 ..` | `10` | Maximum distinct tables of one request. |
+| `DuckDbOlap:MaxTotalStagedRows` | `int` | `1 ..` | `500000` | Maximum staged rows across all tables of one request. |
+| `DuckDbOlap:MaxStagedBytesPerTable` | `long` | `1 ..` | `67108864` | Maximum estimated bytes staged from one table (every request). |
+| `DuckDbOlap:MaxTotalStagedBytes` | `long` | `1 ..` | `268435456` | Maximum estimated bytes staged by one request (every request). |
+| `DuckDbOlap:MaxConcurrentQueries` | `int` | `1 .. 64` | `4` | Global cap on concurrent OLAP requests. |
+| `DuckDbOlap:MaxConcurrentQueriesPerTenant` | `int` | `1 ..` | `2` | Per-tenant cap on concurrent OLAP requests (`429` when exceeded). |
+| `DuckDbOlap:MaxSqlLength` | `int` | `1 ..` | `32768` | Maximum length of the client SQL text. |
 | `ArrowExport:Enabled` | `bool` | `true \| false` | `false` | Aktiviert den binären Zero-Copy Apache Arrow Export (`F-DATA-04`). |
 | `ArrowExport:BatchSize` | `int` | `100 .. 100000` | `10000` | Zeilenanzahl pro gestreamtem Arrow-RecordBatch. |
 | `ArrowExport:MaxRowsPerExport` | `int` | `1000 .. 10000000` | `1000000` | Maximale Zeilenanzahl pro Export-Vorgang. |
@@ -861,6 +869,21 @@ Die Dataset-Tools `list_datasets`, `describe_dataset`, `query_graphql` und `samp
 }
 ```
 
+
+#### `WebSql:CrossSource` (federation switch and limits)
+
+| Key | Type | Range | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `WebSql:CrossSource:Enabled` | `bool` | `true \| false` | `false` | Federation switch. When `false`, requests that join several data sources are denied on every transport, including OLAP. |
+| `WebSql:CrossSource:AllowedTransports` | `string[]` | `WebSql`, `Trino`, `Rest`, `Mcp`, `ArrowExport`, `FlightSql`, `SqlEndpoints`, `AsyncJob`, `Olap` (case-insensitive) | `["WebSql", "Trino"]` | Transports that may run cross-source queries. A configured list replaces the default entirely (list every transport you need); an empty list allows none. `Olap` is never implied: add it explicitly to allow cross-source requests on `POST /api/v1/olap/query`. An unknown or blank name aborts the start. A start-up warning is logged when `Olap` is listed while `Enabled` is `false`. |
+| `WebSql:CrossSource:MaxTableCount` | `int` | `1 ..` | `5` | Maximum distinct tables of a cross-source request. |
+| `WebSql:CrossSource:MaxStagedRowsPerTable` / `MaxTotalStagedRows` | `int` | `1 ..` | `50000` / `200000` | Row budgets of the SQL federation. |
+| `WebSql:CrossSource:MaxStagedBytesPerTable` / `MaxTotalStagedBytes` | `long` | `1 ..` | `33554432` / `134217728` | Byte budgets; the OLAP endpoint uses the smaller of these and the `DuckDbOlap` values for cross-source requests. |
+| `WebSql:CrossSource:TimeoutSeconds` | `int` | `1 ..` | `30` | Timeout of the SQL federation. |
+| `WebSql:CrossSource:MaxParallelSourceReads` | `int` | `1 .. 16` | `4` | Upper bound on parallel source reads (reads are currently sequential). |
+| `WebSql:CrossSource:AllowNonEquiJoins` | `bool` | `true \| false` | `false` | Permits cross joins and non-equi joins in cross-source statements (SQL federation and OLAP). |
+
+`WebSql:CrossSource:MaxMemory` and `WebSql:CrossSource:MaxTempDirectorySize` were removed; they never had an effect. Use `DuckDbOlap:MaxMemory` and `DuckDbOlap:MaxTempDirectorySize`. A start-up warning is logged when the old keys are still present. Non-positive limits, an unparsable `DuckDbOlap:MaxMemory` or `MaxTempDirectorySize`, `MaxConcurrentQueries` or `MaxConcurrentQueriesPerTenant` below 1, and `MaxThreads` outside `1 .. 8` abort the start.
 
 ### 2.18 `Casbin` (ABAC/RBAC Policy Engine & Model-Contract)
 

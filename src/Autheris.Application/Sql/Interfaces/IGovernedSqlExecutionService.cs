@@ -10,7 +10,7 @@ using Autheris.Domain.Common;
 
 /// <summary>
 /// Transport names carried in <see cref="GovernedSqlQueryRequest.Transport"/>. Cross-source (federated) execution is only
-/// allowed for transports listed in WebSql.CrossSource.AllowedTransports (default: WebSql, Trino); every other
+/// allowed for transports listed in WebSql.CrossSource.AllowedTransports (default: WebSql, Trino; never Olap); every other
 /// transport must be opted in explicitly.
 /// </summary>
 public static class SqlTransports
@@ -23,6 +23,13 @@ public static class SqlTransports
     public const string FlightSql = "FlightSql";
     public const string SqlEndpoints = "SqlEndpoints";
     public const string AsyncJob = "AsyncJob";
+
+    /// <summary>The in-memory DuckDB OLAP endpoint (<c>POST /api/v1/olap/query</c>). Never part of the default allowed list.</summary>
+    public const string Olap = "Olap";
+
+    /// <summary>Every registered transport name; <c>WebSql:CrossSource:AllowedTransports</c> entries are validated against it at start-up.</summary>
+    public static IReadOnlyList<string> All { get; } =
+        [WebSql, Trino, Rest, Mcp, ArrowExport, FlightSql, SqlEndpoints, AsyncJob, Olap];
 }
 
 /// <param name="PlannedTableRead">
