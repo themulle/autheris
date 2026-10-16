@@ -158,4 +158,35 @@ public sealed class SqlLoginCircuitBreakerTests
         a.Equals(otherPassword).ShouldBeFalse();
         a.Equals(otherUser).ShouldBeFalse();
     }
+
+    [Fact]
+    public void MaterializeNtlmUserFile_UnchangedEntry_IsNotRewrittenAndKeepsMode()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "autheris-ntlm-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string path = SqlServerWindowsAuthConfigurator.MaterializeNtlmUserFile("DOM", "svc", "pw", dir);
+            var firstWrite = File.GetLastWriteTimeUtc(path);
+            Thread.Sleep(20);
+
+            SqlServerWindowsAuthConfigurator.MaterializeNtlmUserFile("DOM", "svc", "pw", dir).ShouldBe(path);
+
+            File.GetLastWriteTimeUtc(path).ShouldBe(firstWrite);
+            File.ReadAllText(path).ShouldBe("DOM:svc:pw\n");
+            if (OperatingSystem.IsLinux())
+            {
+                File.GetUnixFileMode(path).ShouldBe(UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+
+            SqlServerWindowsAuthConfigurator.MaterializeNtlmUserFile("DOM", "svc", "pw2", dir);
+            File.ReadAllText(path).ShouldBe("DOM:svc:pw2\n");
+        }
+        finally
+        {
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+        }
+    }
 }

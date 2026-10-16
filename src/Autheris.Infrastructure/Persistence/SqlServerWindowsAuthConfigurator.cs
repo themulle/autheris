@@ -338,6 +338,8 @@ public static class SqlServerWindowsAuthConfigurator
             TrySetUnixDirectoryPermissions(targetDir);
 
             var lines = new List<string>();
+            int matching = 0;
+            bool entryUnchanged = false;
             if (File.Exists(filePath))
             {
                 foreach (var existing in File.ReadAllLines(filePath, Encoding.UTF8))
@@ -347,15 +349,27 @@ public static class SqlServerWindowsAuthConfigurator
                         continue;
                     }
 
-                    if (!existing.StartsWith(entryKey, StringComparison.OrdinalIgnoreCase))
+                    if (existing.StartsWith(entryKey, StringComparison.OrdinalIgnoreCase))
+                    {
+                        matching++;
+                        entryUnchanged = string.Equals(existing, newLine, StringComparison.Ordinal);
+                    }
+                    else
                     {
                         lines.Add(existing);
                     }
                 }
             }
 
+            entryUnchanged &= matching == 1;
             lines.Add(newLine);
             string content = string.Join('\n', lines) + "\n";
+
+            // Every connection open prepares the file; when the entry is already present and unchanged the file is not rewritten.
+            if (entryUnchanged)
+            {
+                return filePath;
+            }
 
             // Write atomically via temp file in the same directory with 0600 permissions on Unix
             string tempPath = Path.Combine(targetDir, $".{DefaultGeneratedNtlmFileName}.{Guid.NewGuid():N}.tmp");

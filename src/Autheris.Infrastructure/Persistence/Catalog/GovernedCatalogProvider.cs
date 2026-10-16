@@ -136,6 +136,23 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
         return new InMemoryTableCatalog(entries, defaultSchema);
     }
 
+    // A failing source is retried on every cache miss (once per table); the Warning is limited to once per data source and reason
+    // within this window so a down source does not flood the log. Suppressed repeats are logged at Debug.
+    private static readonly long WarnWindowMs = 30_000;
+    private readonly ConcurrentDictionary<string, long> _lastLoadWarning = new(StringComparer.Ordinal);
+
+    private LogLevel NextLoadFailureLevel(string key)
+    {
+        long now = Environment.TickCount64;
+        if (_lastLoadWarning.TryGetValue(key, out long previous) && now - previous < WarnWindowMs)
+        {
+            return LogLevel.Debug;
+        }
+
+        _lastLoadWarning[key] = now;
+        return LogLevel.Warning;
+    }
+
     private void LogLoadFailure(string dataSourceName, TableIdentifier table, Exception ex)
     {
         ISqlSourceDiagnosticException? diagnostic = null;
@@ -159,15 +176,16 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
         if (diagnostic is Exception diagnosticException)
         {
             string fields = string.Join(", ", diagnostic.DiagnosticFields.Select(static f => $"{f.Key}={f.Value}"));
-            _logger.LogWarning(
+            _logger.Log(NextLoadFailureLevel($"{dataSourceName}|{diagnostic.CategoryName}"),
                 "Catalog metadata load failed for data source {DataSource}, table {Table}: {Message} [Category={Category}; {Fields}]; the table is denied.",
                 dataSourceName, table.ToQualifiedName(), diagnosticException.Message, diagnostic.CategoryName, fields);
             return;
         }
 
-        _logger.LogWarning(
+        string chain = string.Join(" -> ", types);
+        _logger.Log(NextLoadFailureLevel($"{dataSourceName}|{chain}"),
             "Catalog metadata load failed for data source {DataSource}, table {Table} ({ExceptionTypes}{SqlDetails}); the table is denied.",
-            dataSourceName, table.ToQualifiedName(), string.Join(" -> ", types),
+            dataSourceName, table.ToQualifiedName(), chain,
             sqlException is null ? string.Empty : $"; SqlNumber={sqlException.Number}, SqlState={sqlException.State}, SqlClass={sqlException.Class}");
     }
 
