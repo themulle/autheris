@@ -3,7 +3,7 @@
 **Document ID:** `PLAN-BUG-G8-01` (revision 1, 2026-10-16)
 **Phase:** 2 (Solution Architect, `csharp-architect`, performance focus)
 **Parent Plan:** [00-master-plan-overview.md](../../doc/plan/00-master-plan-overview.md) (priority item 1.4)
-**Status:** PROPOSED
+**Status:** PROPOSED (Phase 3 security review 2026-10-16: APPROVED WITH CONDITIONS, see section 9)
 **Scope:** root-cause analysis and fix plan. No source, benchmark, baseline or gate change is part of this document.
 
 ---
@@ -147,3 +147,102 @@ The affected guards are second lines of defence (primary protection is the mask 
 | WP-G8-4 | Owner decision on baseline re-freeze (option B) only if A cannot reach the target | XS |
 
 Overall size: **S**. Phase 3 review can be short (guard equivalence, section 7). No documentation under `docs/features/` changes; the master plan row 1.4 stays the status tracker.
+
+---
+
+## Phase 3 Security Review (2026-10-16)
+
+**Reviewer role:** `csharp-security-expert` (Phase 3). Static review only: no source change, build, benchmark or test run. All references are file:line in `src/TrinoSqlEngine` at the head of this worktree.
+
+### 9.1 Threat Model
+
+| Asset | Threat | Relevant control |
+|---|---|---|
+| Masked columns (Nullify, Redact, PartialMask, Hmac, GeoJitter, Constant) | Raw or inferable values leave through an aggregate, `GROUP BY` or a whole-row reference (`SELECT t`, `to_json(t)`) | Primary: mask rewrite in `AstSecurityVisitor` plus `SecurityCoverageVerifier`. Second line: `EnsureNoMaskedColumnsInAggregatesAndGrouping`, `EnsureNoWholeRowReferencesInProjections` (`AstSecurityVisitor.MaskGuards.cs:~246-330`) |
+| Guard soundness under optimization | A "fast path" skips a guard although a mask is reachable (fail open), or a shared work stack is corrupted so part of the tree is never inspected (silent fail open) | Fail-closed rule: unknown state means run the guard |
+| Cross-request isolation | State of one compile (tables, derived sources, CTE scope, stack) leaks into another compile or thread | One `AstSecurityVisitor` per compile (`GovernedSqlCompiler.cs:179`); `FastSqlEngine` itself is shared across threads in production |
+| Coverage proof independence | The verifier is the independent proof that the injector did its job. Replacing its generic reflection walk with a hand-written one can silently shrink what it sees | `SecurityCoverageVerifier.cs:255,470` use `AstReflection.Walk`, which visits every property marked `Descend` (`AstReflection.cs:82-110`) |
+| Gate integrity | Raising a limit or re-freezing a baseline to make the nightly green hides a regression | `MaxAllocationRatio` 1.25, regression 10 % (`BenchModel.cs:31,33`) |
+
+Out of scope and unaffected: SQL injection surface, parameter binding, token security, the pooled parse hand-off (see SEC-G8-06).
+
+### 9.2 Verified Plan Claims
+
+| Plan claim | Verdict | Evidence |
+|---|---|---|
+| Both mask guards run on every `QuerySpecification` | Confirmed | `AstSecurityVisitor.Select.cs:151-152`; defaults true at `AstSecurityVisitorOptions.cs:47,53` |
+| Each guard rebuilds `tables`/`derived` | Confirmed, three times per spec | `Select.cs:125-127`, `MaskGuards.cs:246-249`, `:303-305`; `CollectDerivedMaskedSources` additionally allocates a `HashSet` per derived source via `CollectMaskedOutputColumns` (`MaskGuards.cs:~420-470`) |
+| `_maskGuardStack` is a safe pattern to copy | **Wrong as stated** | See SEC-G8-02 |
+| Skip when `TablesWithMaskedColumns` is empty and no derived masked source | **Not equivalent, fail-open under a legal configuration** | See SEC-G8-01 |
+| "`null` keeps the guard active" (section 7) | Inapplicable | `TablesWithMaskedColumns` is non-nullable with an empty default (`AstSecurityVisitorOptions.cs:26`, `CompileRequest.cs:47`); the `!= null` tests at `MaskGuards.cs:61,93,608` are always true. "Unknown" has to be modelled differently (SEC-G8-01) |
+| Visitor is single-use per compile | Confirmed | `GovernedSqlCompiler.cs:179`; the pooled hand-off covers only parsing (`FastSqlEngine.cs:246-330`), the visitor runs on the caller thread afterwards |
+| Guards run before the recursion into children | Confirmed | `Select.cs:151-154`: guards, then `base.VisitQuerySpecification` |
+| Verifier closure walks are policy-only paths | Confirmed | `Tables.cs:78`, `Expressions.cs:254` run only for policy predicates and DML targets; `SecurityCoverageVerifier.cs:255` only with masked sources; `:470` only for masked projections |
+
+### 9.3 Findings
+
+**SEC-G8-01 (High): the skip condition in H1.2 is not equivalent to the guards' own trigger.**
+Evidence: the guards decide per table via `HasMaskingForTable` (`AstSecurityVisitor.Support.cs:209-226`), which is true when the table is in the caller-supplied `TablesWithMaskedColumns` **or** when the typed mask provider reports a mask for any cataloged column (`MaskedColumns.HasMask`). The aggregate path additionally asks `HasMask(table, col)` and `HasMask(qualifier, col)` (`MaskGuards.cs:50-56`) and, when `TablesWithMaskedColumns` is non-empty, rejects any column whose name is masked in any listed table (`:61-72`), which is what catches a correlated outer-table column inside a subquery. `IColumnMaskProvider` has no enumeration (`Governance/PolicyProviders.cs:19-24`), so "no masks exist" cannot be read from it. The plan's expression (`TablesWithMaskedColumns is { Count: > 0 } || derived.Count > 0`) looks only at the caller-supplied set. `CompileRequest.Policy.TablesWithMaskedColumns` defaults to `FrozenSet.Empty` (`CompileRequest.cs:47`) and is a public init property; `GovernancePolicyFactory.cs:159` fills it consistently, but a library caller can provide `Masks` with an empty set. Today the guards fire for such a caller; with the plan's skip they would not.
+Required change: the skip must be computed from exactly the inputs the guards use, evaluated at the visit of each `QuerySpecification` (never at construction):
+skip only if (a) `TablesWithMaskedColumns.Count == 0`, (b) `derived.Count == 0` for this spec in the current CTE scope, and (c) `HasMaskingForTable(table) == false` for every table of `tables`. Any other state (a `TableColumns` or `HasMask` call that throws, an unresolvable table, a lateral or subquery source whose output cannot be analysed) means run the guard. Cache the per-table `HasMaskingForTable` result in a per-visitor dictionary keyed by normalized name (its `TableColumns` callback allocates a `List` per call, `GovernedSqlCompiler.cs:299`, so an uncached skip test would itself be an allocation source).
+Residual semantic delta to document: the qualifier probe `HasMask(qualifier, col)` (`MaskGuards.cs:54-56`) can reject a query whose FROM table is unmasked but whose qualifier happens to name another masked catalog table. After the skip that rejection disappears. This only removes an over-rejection, but the differential tests must pin the decision (keep behavior by including "qualifier is a catalog table name" in the run-the-guard condition, or record the accepted difference explicitly in the PR). Default: keep behavior.
+
+**SEC-G8-02 (High, silent fail-open if implemented as written): sharing one work stack across the new guards corrupts the traversal.**
+Evidence: `EnsureNoMaskedColumnsInAggregatesAndGrouping` iterates its own `stack` over the projections and calls `CheckAggregationScope` from inside that loop (`MaskGuards.cs:~268-282`), which calls `CheckNoMaskedColumnReferences` and `CheckNoDerivedMaskedColumnReferences`; both do `_maskGuardStack ??= ...; stack.Clear(); stack.Push(scope)` (`MaskGuards.cs:43-45`, `:180-182`). If the outer projection loop used the same `_maskGuardStack` (the plan's "hoist one reusable per-visitor stack", H1.1), the first aggregate found clears the pending projection items, the loop ends, and every later projection is never inspected. No exception, no test failure for single-projection queries.
+Required change: the outer projection traversal must use a stack that no callee touches (a second dedicated field, or a stack passed down explicitly with an owner rule). Rule for Phase 4: one field per live traversal, a guard method may only reuse a field that no callee on its call path clears, documented in a comment on each field. Whole-row guard (`:303-330`) calls only `HasMaskingForTable` and `TableColumns` in its loop, so it may share a stack with the aggregate guard's outer loop only because the two never nest; keep it that way and assert it (SEC-G8-T4).
+
+**SEC-G8-03 (Medium): shared `tables`/`derived` lists must be per-spec values, not visitor state that survives into nested specs.**
+Evidence: `derived` depends on the CTE scope at the moment of the visit (`_cteMaskedColumns.Peek()`, `MaskGuards.cs:~398-415`, `CollectMaskedOutputColumns` pushes and pops scopes at `:~430-460`) and on `IsCte` (`Support.cs:~204-209`). A nested `QuerySpecification` (subquery, CTE body, set-operation branch, lateral) is visited by `base.VisitQuerySpecification` (`Select.cs:154`) after the guards, but `CollectMaskedOutputColumns` itself recurses over nested bodies while building `derived`.
+Required change: compute `tables`/`derived` once per visit of a spec, consume them for all three guards before calling `base.VisitQuerySpecification`, and never read them after it. If pooled lists are used they are cleared at entry of the visit and are not reentered between collection and last use (no `Visit*` call may sit between them). Do not cache across specs and never at constructor time, because mask-carrying CTEs appear while the With clause is visited. A query-level "no masks anywhere" flag computed up front is forbidden for the same reason (masked derived columns originate in inner specs).
+
+**SEC-G8-04 (High, applies to the verifier change): replacing `AstReflection.Walk/Collect` must not reduce coverage.**
+Evidence: the reflection walk visits every `SqlNode`, `IEnumerable` and `ITuple` below the root, including nested `SelectStatement` bodies (`AstReflection.cs:82-110`). The visitor-side `PushChildren` is hand-written with an `EnumerateChildren` fallback (`Support.cs:~22-172`) and the aggregate guard deliberately stops at `SelectStatement` (`MaskGuards.cs:~265`). `VerifyNoWholeRowOfMaskedSource` (`SecurityCoverageVerifier.cs:255-272`) and the raw-leak check (`:470-480`) currently descend into scalar subqueries inside a projection item; a `PushChildren`-based replacement would stop there or miss node types added later.
+Required change: keep reflection-complete descent. Acceptable replacements: `AstReflection.Children<TState>` with a `static` lambda and explicit stack, or a non-capturing `Walk<TState>(node, state, Func<object, TState, bool>)` overload that preserves the same type filter, the `ExecutionStackGuard.Ensure()` call (`AstReflection.cs:85`) and the `Descend` property filter. Not acceptable: the visitor's `PushChildren`, `EnumerateChildren`, or any switch over a closed type list in the verifier. Keep the early-exit semantics (`return !wholeRow` at `:268`; `MaskExpression` returns false so mask arguments are not scanned, `:472`). `Collect<T>().Any(...)` in `Tables.cs:78` and `Expressions.cs:254` may become an early-exit finder only if it keeps the same "any depth, any property" reach (a correlated reference to `RowFilterAliases.Target` nested in a policy subquery must still be found). The static `AccessorsOf` cache is a `ConcurrentDictionary` and stays; no new static mutable walker state.
+
+**SEC-G8-05 (Medium): state lifetime and exceptions for any new reusable field.**
+Evidence: the existing `_maskGuardStack` is cleared at entry, not on exit (`MaskGuards.cs:44`), which is sufficient because an exception aborts the compile and the visitor is discarded (`GovernedSqlCompiler.cs:179`). Nothing guards against a future caller reusing the visitor or catching a `SecurityException` and continuing (for example `CheckAggregationScope` rethrows as `MaskedAggregationException`, `:286-292`, so an exception does cross the guard).
+Required change: all new reusable collections are instance fields of `AstSecurityVisitor`, cleared on entry (stale data must never be readable), never `static`, `[ThreadStatic]`, `ObjectPool`-backed, or stored on `FastSqlEngine`, `GovernedSqlCompiler` or the options record. Do not add a try/finally clear as a substitute for entry clearing. Add a comment that the visitor is single-use and not thread-safe, and a test (SEC-G8-T6) that fails if a visitor instance is reused.
+
+**SEC-G8-06 (Info): pooled parse hand-off is not part of the shared-state risk, but must stay that way.**
+Evidence: `FastSqlEngine.RunWithParseBudget` (`FastSqlEngine.cs:246-330`) hands only parse work to a pooled thread and returns the parse tree; parser objects come from `ParserPooledObjectPolicy`. The visitor and the verifier run later on the caller thread with per-compile instances. H2 trims (lazy negative cache, static message) are acceptable but must not move any visitor or guard state onto the engine (the engine is shared across threads in production).
+
+**SEC-G8-07 (Medium): "no gate limit raise" is correct; re-freeze must be evidence-gated.**
+Evidence: `BenchModel.cs:31,33`, plan section 4. Raising `MaxAllocationRatio` would weaken a control to make a failing check pass and the 3.6 % headroom at 0.5KB (126,969 B vs 131,612 B) would recur.
+Required change (binding): options A is the only path without sign-off. A re-freeze of the AST side of `benchmarks/baselines/sql-compiler-legacy.json` is permitted only if all hold: (1) the bisect (plan 5.2) shows the delta comes from `57ec8294`/`4748354b` guard code that SEC-G8-01 to 05 prove cannot be made cheaper without weakening it, or from pure runtime drift on `72c767bc` itself (H3); (2) the full security test set of 9.5 is green on the same commit; (3) the owner approves in the PR, with before/after bytes for all three buckets; (4) legacy numbers untouched; (5) no limit is changed in the same PR. A guard that is skipped, weakened or made conditional in order to fit the baseline is never an acceptable way to hit the target. `MaxAllocationRatio` and `MaxAllocationRegressionAgainstBaseline` stay as they are.
+
+**SEC-G8-08 (Low, pre-existing, not a blocker): correlated references depend on the caller-supplied set.**
+Evidence: a masked outer column inside an aggregate of a nested spec is found only through the `TablesWithMaskedColumns` name loop (`MaskGuards.cs:61-72`), not through the inner spec's own FROM. Not changed by this fix, but it is a reason the skip must keep `TablesWithMaskedColumns.Count > 0` as run-the-guard (SEC-G8-01 (a)). Recommend a separate follow-up to derive that set from the typed masks instead of trusting the caller.
+
+**Not affected (verified):** HMAC and pseudonymised columns are ordinary masks for `HasMask`/`HasMaskingForTable` (no per-kind branch), so no special case is needed; column-level DENY is a catalog admission concern (`AdmittedTableCatalog`), it is not a mask and neither guard covers it, so the skip must not be justified by "column is denied"; DML guards (`RejectMaskedColumnsInDml`) and the predicate guard (`Select.cs:122-148`) are not touched by H1.2.
+
+### 9.4 Binding Conditions for Phase 4
+
+1. Implement the skip exactly as in SEC-G8-01: evaluated per spec at visit time, run the guard unless every condition for skipping is positively established. Any exception or null from `TableColumns`/`HasMask` while evaluating the skip means run the guard.
+2. Never derive the skip from `TablesWithMaskedColumns` alone; `HasMaskingForTable` (including catalog masks) is mandatory, with a per-visitor per-table cache.
+3. A traversal stack that is live in a loop must not be cleared by any callee (SEC-G8-02). Document the owner of each stack field.
+4. `tables`/`derived` are computed once per spec visit and consumed before `base.VisitQuerySpecification` (SEC-G8-03). No visitor-construction-time or cross-spec flag.
+5. Verifier and `Tables.cs`/`Expressions.cs` replacements keep reflection-complete reach and the same early-exit semantics (SEC-G8-04). Do not use `PushChildren`/`EnumerateChildren` there.
+6. Reusable state lives only in the per-compile visitor instance, is cleared on entry, and is never static, thread-static, pooled or engine-held (SEC-G8-05, 06).
+7. No gate, threshold or option default changes; `RejectMaskedColumnsInAggregates` and `RejectWholeRowReferencesInSelect` stay default true and keep their meaning. No new `CompilerHooks`/`SecurityControl` bypass.
+8. Baseline re-freeze only under SEC-G8-07. The PR description must contain before/after bytes per bucket and the list of security tests run.
+9. One commit for the skip, separate from the allocation-only refactors, so a review and a mutation run can attribute results.
+
+### 9.5 Mandatory Security Tests (Phase 4, category `SqlGate` so Stryker G7 and the PR gates run them)
+
+- **SEC-G8-T1 differential, before/after:** run the existing guard corpus (SR-L-24 `tests/TrinoSqlEngine.Tests/Compiler/SelectWholeRowMaskTests.cs`, aggregate and GROUP BY suites incl. `tests/Autheris.Tests.Unit/Analytics/GovernedAggregationAndMetricsTests.cs`, `tests/TrinoSqlEngine.Tests/Ast/AstSecurityVisitorDmlTests.cs`, the `Autheris.Tests.SqlCompilerGate` differential and golden results) on the base commit and the fix commit and assert identical accept/reject and identical exception type (`MaskedAggregationException` vs `SecurityException`) per input. Add a small table-driven test that keeps the pre-change guard as a test-only reference implementation (copy of the old methods in the test project) and compares reject/accept on a generated set of queries.
+- **SEC-G8-T2 skip-equivalence matrix**, each with a masked and an unmasked variant, asserting reject where the old guard rejected: plain table; alias; schema-qualified name; derived table (subquery in FROM); CTE (plain, nested, recursive, CTE masked column re-exposed under an alias or `ColumnAliases`); scalar/`IN`/`EXISTS` subquery with a correlated masked outer column inside an aggregate; set operations (`UNION`/`INTERSECT`/`EXCEPT` with a masked branch on the right); `LATERAL` and `JOIN ... USING`; table function or `VALUES` sources (must run the guard or provably have no masks); `SELECT *`, `t.*`, `to_json(t)`, `COUNT(t.*)`; window functions with a masked column in `PARTITION BY`/`ORDER BY`; ordered-aggregate `ORDER BY` and `FILTER`; `GROUP BY ROLLUP/CUBE/GROUPING SETS`; each `MaskKind` including `Hmac`; a view-like catalog entry; a policy with predicate subqueries over another table.
+- **SEC-G8-T3 provider inconsistency (fail closed):** `Masks` reports a mask for a FROM table while `TablesWithMaskedColumns` is empty, and the reverse (set non-empty, provider empty). Both must behave exactly as before the change. This test fails on the plan's literal skip expression.
+- **SEC-G8-T4 stack ownership (SEC-G8-02):** a query whose first projection is an aggregate over an unmasked column and whose second and third projections are aggregates or whole-row references over masked columns must still be rejected; same with the masked item first, middle and last, with 1, 2 and 50 projections.
+- **SEC-G8-T5 no-state-leak:** the same visitor options compiled repeatedly on one engine with alternating masked/unmasked queries (a masked query after an unmasked one must reject; an unmasked query after a masked one must accept) and with a rejecting query followed by an accepted one.
+- **SEC-G8-T6 concurrency:** N (at least 16) tasks sharing one `FastSqlEngine`/`GovernedSqlCompiler` for 10 s, randomly interleaving masked and unmasked queries, asserting every masked query is rejected, every clean query accepted, results identical to a single-threaded run, no exception other than the expected security ones. Reflection or analyzer check that `AstSecurityVisitor` has no static mutable fields and that the visitor is not reachable from engine fields. Reuse of a visitor instance for a second `Visit` must throw or be covered by a documented single-use assertion.
+- **SEC-G8-T7 verifier coverage (SEC-G8-04):** for `VerifyNoWholeRowOfMaskedSource` and the raw-leak check, a negative test per nesting form (the offending reference inside a scalar subquery, `CASE`, function argument, cast, row value, array constructor) that must still throw `SecurityCoverageException`. Add a structural test that every concrete `SqlNode` subtype is reached by the replacement walker (generate one instance per subtype through reflection and assert it is visited) so coverage cannot shrink when node types are added.
+- **SEC-G8-T8 mutation:** Stryker G7 over `**/Ast/Visitors/AstSecurityVisitor*.cs` and `**/Ast/Security/*.cs` (`stryker-config.json`), break threshold 85 %, plus the requirement that no new surviving mutant exists in the skip condition and the guard entry checks (a mutant that turns the skip into "always skip" or removes `HasMaskingForTable` from it must be killed by T2/T3). The Stryker report diff against the base commit is part of the PR.
+- **SEC-G8-T9 allocation guard:** the PR-time allocation test from section 6 runs for the unmasked path; add a second assertion on a masked-table compile that the guards still run (the guard is observable, for example through a rejection) so the allocation test cannot be satisfied by skipping.
+
+### 9.6 Verdict
+
+**APPROVED WITH CONDITIONS.** The root-cause direction (guard allocations, H1) and Option A (no limit change) are sound. The plan as written is **not safe to implement literally**: the skip expression omits catalog-derived masks (SEC-G8-01) and the "hoisted shared stack" would let a callee clear the live projection traversal (SEC-G8-02). Phase 4 may start once the binding conditions in 9.4 are accepted; the nine tests in 9.5 gate the merge. Re-run Phase 3 only if the skip condition or the verifier walk design deviates from 9.3.
+
+## Changelog
+
+- 2026-10-16: Phase 3 security review added (section 9): verdict APPROVED WITH CONDITIONS, findings SEC-G8-01 to SEC-G8-08, binding conditions and mandatory tests SEC-G8-T1 to T9. Status updated.

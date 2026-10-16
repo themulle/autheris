@@ -5,7 +5,7 @@
 **Input:** [REQ-FED-01](2026-10-16-req-cross-source-all-consumers.md) (matrix row 5, FR-7, AC-7, rejected anti-pattern 8), [PLAN-FED-01](2026-10-16-plan-cross-source-all-consumers.md) (4.7 WP-FED-07, 4.8 WP-FED-08), issue #75 / F-GOV-19
 **Branch:** `fix/bug-75-graphql-relation-schema-gating` (base `main` `83853479`)
 **Parent Plans:** [00-master-plan-overview.md](00-master-plan-overview.md), [PLAN-FED-01](2026-10-16-plan-cross-source-all-consumers.md)
-**Status:** PROPOSED (Phase 2 complete; next: Phase 3 security review, then Phase 4 TDD)
+**Status:** PROPOSED, Phase 3 security review done: APPROVED WITH CONDITIONS (next: Phase 4 TDD with conditions C-1..C-6 of the Phase 3 section)
 
 **Binding project rules applied:** fail closed; Autheris is not in production, so a breaking schema change is allowed; no migrations (nothing persistent changes); CI stays fast; Phase-4 TDD developers are Sonnet; documentation in English; `docs/` carries no progress notes (the F-GOV-19 correction is a Phase 6 task and describes current behaviour only).
 
@@ -191,3 +191,82 @@ Single developer, strict order: (1) tests 1-3, 6, 7, 10, 12, 13 red; (2) `Relati
 | Revision | Date | Change |
 |---|---|---|
 | 1 | 2026-10-16 | Initial Phase 2 plan (PROPOSED) |
+| 1.1 | 2026-10-16 | Phase 3 security review appended (APPROVED WITH CONDITIONS, SEC-B75-01..07) |
+
+
+---
+
+## Phase 3 Security Review (2026-10-16)
+
+**Reviewer:** `csharp-security-expert`. **Code base:** worktree at `83853479` plus plan commit. All claims below verified against the code.
+
+### Threat model
+
+| Asset | Threat | Relevance to this fix |
+|---|---|---|
+| Governance of cross-table reads (consent, row filters, masks, tenant filter per table) | A relation between two tables of different data sources executed as one statement or as an ungoverned lookup (federation gate bypass, REQ-FED-01 FR-7) | Core. The fix must never make such an execution possible and must not diverge from the runtime rule. |
+| Catalog topology | Schema or error text as an existence/topology oracle (which tables share a source, which relations exist) | Low. The schema is global (not per caller): `BuildAsync` takes `GetAllTablesAsync` filtered by `IsActive` and `DataSourceType.Sql` only (`CatalogSchemaModel.cs:111,118`), so every authenticated caller already sees all tables and relations. Omission applies equally to all callers and depends on catalog metadata only. It adds no oracle: a missing field says only "not a same-source relation", derivable from nothing the caller could not already infer from the table list. |
+| Availability / consistency | Schema advertising unrunnable relations; stale schema | Medium-low; fail closed. |
+| Dead code | Registered but unused resolver/reader resolved later by mistake | Low, see SEC-B75-05. |
+
+Direction of the change is fail closed: it only removes schema fields, and the runtime backstop stays (`GovernedTreeQueryService.cs:268-277`).
+
+### Verification of the specific questions
+
+1. **Predicate vs runtime check.** The runtime check compares only `Metadata.Table.SourceName` with `OrdinalIgnoreCase` against the ROOT table's name, for every table of the tree (`GovernedTreeQueryService.cs:267-277`), after a per-access `DataSourceType == Sql` check (`:270-273`). Because every pair in a tree is compared against the same root, "all equal root" is equivalent to pairwise equality, so a pairwise predicate `DataSourceType` + `SourceName` (OrdinalIgnoreCase) matches the check for single hops and for multi-hop chains (A(pg1)->B(pg1)->C(pg2) is omitted at B->C, and could never run). No case where the schema hides something the runtime accepts. **But the runtime applies a third condition the predicate lacks:** `access.Metadata.Dialect != dialect` of the connection provider throws `InvalidOperationException` (`:292-298`). Two tables with the same `SourceName` but different `Table.SourceType` (dialect) therefore pass the predicate and fail at runtime (see SEC-B75-01). Also `SourceName` empty on both sides is "equal" and the runtime then throws "has no database connection" (`:279-283`); that is fail closed but advertised (SEC-B75-03).
+2. **Case-insensitivity / bypass.** The connection map is `new(StringComparer.OrdinalIgnoreCase)` (`src/Autheris.Domain/Options/Storage/DatabaseOptions.cs:23`), so `PG1` and `pg1` resolve to the SAME connection at runtime (`GovernedTreeQueryService.cs:279`); two distinct connections that differ only by case cannot exist. Every other source-name comparison in the code base is also OrdinalIgnoreCase (`GovernedSqlRewriter.cs:432,441`, `GovernancePolicyFactory.cs:86,204`, `GovernedCatalogProvider.cs:267`, `CrossSourceRelationResolver.cs:59`). Treating names that differ only by case as one source is therefore correct and cannot cause a cross-connection join. Whitespace or Unicode variants are not normalised anywhere, they compare as different and are omitted (safe direction).
+3. **Single source of truth.** Required. Today the runtime check is inline (`:274`) and the plan keeps it inline plus a parity test. A parity test alone does not prevent drift. See SEC-B75-02: the runtime must call the same predicate.
+4. **Cross-domain relations on one connection.** Governed: `columnsByTable` is collected for every table of the tree and each table goes through `ResolveOnceAsync` + `AuditOnceAsync`; one denial fails the whole query with "Access denied." before any SQL (`:244-260`); tenant filter, masks and row filters are compiled per table (step 3, `:300ff`). Domain is a catalog label, not a security boundary of the connection, so keeping these relations is not a bypass. Using `IsCrossDataSource` (with `Domain`) would remove working, governed relations, so A-1 is right.
+5. **Per caller or global; oracle.** Global (see threat model). Omission leaks nothing new. Showing the relations leaks relation names and join column names of tables the caller may not read; that is a pre-existing property (type names, column names and relations of all active SQL tables are in the schema) and unchanged by this fix. Recommend tracking it separately (SEC-B75-06).
+6. **Cache invalidation.** `Fingerprint()` hashes emitted relations and per-table type, columns (`CatalogSchemaModel.cs:61-83`); it does NOT hash `SourceName`. Because the guard decides emission from `SourceName`, a table moved to another source changes the emitted relations and therefore the fingerprint. The version-provider short circuit (`CatalogGraphQlTypeModule.cs:70-78`) skips the fingerprint check when the catalog version is unchanged, which is correct as long as a catalog edit bumps the version (existing behaviour). A stale schema between rebuilds is rejected at runtime (fail closed). OK.
+7. **Introspection, persisted queries, aggregates, subscriptions, MCP.** Relation fields are emitted only from `table.Relations` (`CatalogGraphQlTypeModule.cs:234-253`); `_aggregate` has only `groupBy`/`where` string arguments and a fixed result type (`:272-278`) and no relation path in the schema; MCP map reads `entry.Relations` from a model built by `BuildAsync` (`Mcp/CatalogGraphQlMap.cs:196,46,146`). Persisted/stored documents are validated against the current schema, so an omitted field fails validation (A-7). All consistent. Residual gap: aggregate `groupBy`/`where` are free strings; whether they accept dotted relation paths is not covered by this fix (SEC-B75-07).
+8. **Unwired resolver and stub reader (Q-2).** `rg` over `src` shows the only non-test references to `ICrossSourceRelationResolver`/`ICrossSourceRowReader`/`InMemoryCrossSourceRowReader` are the two DI lines (`DataApiServiceExtensions.cs:25-26`); nothing in `Autheris.GraphQL`, MCP or REST resolves them, the `GovernedTreeQueryService` constructor does not take them. The in-memory reader returns only seeded rows (empty in production). A future developer injecting the resolver would get an in-memory reader returning an empty set: no ungoverned data, but also a silent false "no related rows" (a correctness trap, not a leak). Risk is low but non-zero and is removed by WP-FED-06 (SEC-B75-05).
+9. **Logging (Q-3).** Count-only line is PII-free and consistent with the existing line at `CatalogSchemaModel.cs:125` (which logs names). Fine.
+
+### Findings
+
+| ID | Severity | Evidence | Finding and required change |
+|---|---|---|---|
+| SEC-B75-01 | Medium | Predicate (plan A-1) vs `GovernedTreeQueryService.cs:292-298`; `TableModels.cs:37,92` (`Dialect` derives from `Table.SourceType`) | The predicate omits the dialect condition the runtime also enforces. Same `SourceName`, different `SourceType` is advertised and then fails with `InvalidOperationException` (not even a GatewayException, so a 500-class error). Not a bypass, but the predicate's doc comment claims "exact condition checked". **Change:** `IsSameExecutionSource` additionally requires equal `Table.SourceType` (OrdinalIgnoreCase) or equal parsed `Dialect`. Add it to parity test 14. |
+| SEC-B75-02 | Medium | Runtime check inline at `GovernedTreeQueryService.cs:268-277`; plan A-4 keeps it inline | Two copies of the rule can drift (the plan's own top risk). **Change:** the tree service must call `RelationExecutability` (single source of truth) for the type + source check, keeping the existing exception types and messages byte-identical (`GatewayInvalidQueryException`, same texts). The dialect-vs-provider check at `:292-298` stays (it depends on the connection). This is a small edit and does not conflict with WP-FED-08 (which only extends the predicate). Update plan sections 3 and A-4 ("Not modified: GovernedTreeQueryService.cs" no longer holds). |
+| SEC-B75-03 | Low | `TableModels.cs:38` default `string.Empty`; `GovernedTreeQueryService.cs:279-283` | Empty/whitespace `SourceName` on both sides is "same source" and the runtime then fails with "no database connection". Existing fixtures rely on the empty default, so the predicate must keep treating empty==empty as equal. **Change:** none to the predicate; add a test pinning empty==empty as same (documents the decision) and note the runtime fail-closed error. Never treat `null`/empty as "wildcard equal to any source" (empty vs non-empty must be different). |
+| SEC-B75-04 | Low | Plan test 8, `CatalogSchemaModel` guards | Case-insensitive treatment is correct (verified above), but it must be pinned by a test that mixed case is the SAME source and that the runtime accepts the same pair (see S-3). Guards must also never cache or normalise the name beyond `OrdinalIgnoreCase` (no `ToLower` culture variants, no trimming). |
+| SEC-B75-05 | Low | `DataApiServiceExtensions.cs:25-26` | Registered-but-unused resolver with in-memory stub reader. Not exploitable now. **Change:** keep as planned (Q-2) plus the remarks in A-6; additionally add an architecture/guard test that no type in `Autheris.GraphQL`, the MCP assembly or `GovernedTreeQueryService` depends on `ICrossSourceRelationResolver` (reflection on constructor parameters), so a later accidental wiring fails CI. WP-FED-06 must remove the in-memory reader from production DI. |
+| SEC-B75-06 | Info (pre-existing, out of scope) | `CatalogSchemaModel.cs:111-118` | Schema is global: relation and join-column names of tables a caller cannot read are visible to every authenticated caller. Not worsened by this fix. **Recommendation:** open a backlog item (per-caller schema or documented stance); do not mix into this fix. |
+| SEC-B75-07 | Low | `CatalogGraphQlTypeModule.cs:272-278` | `_aggregate(groupBy: [String], where: String)` are free-text; the plan only pins "no relation fields in the type". **Change:** add one test that `groupBy`/`where` containing a relation path of an omitted cross-source relation (for example `partner.name`) is rejected by the aggregate path (existing column validation) and never reaches SQL; if it unexpectedly resolves, raise as a blocking defect. |
+
+### Binding conditions for Phase 4
+
+- **C-1** (SEC-B75-01) Predicate = `DataSourceType` equal AND `Table.SourceType` equal AND `Table.SourceName` equal, all `OrdinalIgnoreCase`/ordinal-ignore-case as appropriate, no `Domain`.
+- **C-2** (SEC-B75-02) `GovernedTreeQueryService` calls the same predicate; messages and exception types unchanged; existing tree tests pass unedited.
+- **C-3** `AllowCrossDataSource` is not referenced anywhere in `src/Autheris.GraphQL` after the change (grep test or review check); no gate or option is read in the guard.
+- **C-4** Guards sit before name allocation, forward and reverse use the same predicate on the (parent, child) pair in that orientation (plan A-2). The predicate is symmetric, so orientation errors cannot flip the result, but tests 1/2 must cover both directions.
+- **C-5** Log line carries counts only (no table, relation or source names); do not add the names later at Information level.
+- **C-6** (SEC-B75-05) DI guard test for the unwired resolver; no change to DI registrations in this fix.
+
+### Mandatory security tests (in addition to plan section 4)
+
+- **S-1** `RelationExecutability_DifferentDialectSameSourceName_NotExecutable` plus runtime counterpart: tree service on such a pair still fails closed (parity, SEC-B75-01).
+- **S-2** `GovernedTreeQueryService_UsesSharedPredicate`: for the table-driven set of test 14 (including `PG1` vs `pg1`, empty vs empty, empty vs non-empty, different `DataSourceType`) the schema omits exactly when the tree service throws the "across data sources" error, and keeps exactly when it proceeds past the source check. Driven by one data table so the two cannot diverge.
+- **S-3** `Tree_MixedCaseSourceNames_ExecuteAsOneStatement`: `PG1` and `pg1` pair runs against ONE connection (assert one connection lookup, one statement) and consent/row filter/mask of both tables are applied.
+- **S-4** `Tree_CrossDomainSameSource_AppliesGovernancePerTable`: deny on the child table of a cross-domain same-source relation yields "Access denied." with no SQL executed; row filter and mask of the child apply.
+- **S-5** `Schema_OmittedRelation_QueryFailsValidationAndNeverReachesTreeService`: a query naming an omitted field produces a validation error; `GovernedTreeQueryService` mock is never invoked; the error text contains neither relation name, target table nor source name.
+- **S-6** `Schema_IsIdenticalForAllCallers`: two principals with different access get the same SDL (pins "no per-caller oracle").
+- **S-7** `Fingerprint_ChangesWhenTableMovesToOtherSource` (relation set changes -> fingerprint changes), and a stale-schema case: field still present in an old schema, runtime rejects with the existing error (fail closed).
+- **S-8** `CrossSourceRelationResolver_NotInjectedByGraphQlOrTreePath` (SEC-B75-05) and SEC-B75-07 aggregate relation-path test.
+- **S-9** `MCP_SearchCatalog_DoesNotListOmittedRelation` (test 12) also asserts the MCP GraphQL map text contains no name of the omitted target type.
+
+### Recommendations for open questions
+
+- **Q-1** Confirm the narrower predicate. Ground truth for "same execution unit" is the runtime check, which does not consider `Domain`; a later federated path may still want `Domain` for key-clearness, but that is a separate concern and must not be encoded in the schema predicate. Align PLAN-FED-01 4.8 to `IsSameExecutionSource` (not `!IsCrossDataSource`) and add the dialect condition (C-1).
+- **Q-2** Keep the registration (default) with C-6. Removal is also acceptable security-wise but offers no extra protection since nothing resolves it.
+- **Q-3** Keep Information (counts only, once per real rebuild). Verified the module passes `_logger` only at the real build (`CatalogGraphQlTypeModule.cs:137`) while the change check and MCP map pass `null` (`:85`, `CatalogGraphQlMap.cs:196`), so no per-poll noise.
+
+### Missed by the architect
+
+- The dialect condition in the runtime check (SEC-B75-01) and the need for a shared predicate call in the runtime (SEC-B75-02).
+- The empty-`SourceName` equality semantics (SEC-B75-03) and the aggregate free-text path (SEC-B75-07).
+
+### Verdict
+
+**APPROVED WITH CONDITIONS.** The design is fail closed and cannot widen access. Phase 4 may start once C-1..C-6 and tests S-1..S-9 are incorporated; no further Phase 3 round is needed unless the owner rejects C-2 (shared predicate in the runtime), in which case re-review.

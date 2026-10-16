@@ -5,7 +5,7 @@
 **Input:** [REQ-FED-01](2026-10-16-req-cross-source-all-consumers.md) (findings 4 and 5, matrix row 17, D-1, D-7, D-11, FR-2, FR-13, AC-4, R-5, Q-2) and [PLAN-FED-01](2026-10-16-plan-cross-source-all-consumers.md) (sections 3, 4.1 WP-FED-01, 4.5 WP-FED-05, security conditions SEC-FED-02, 08, 12, 17)
 **Parent Plans:** [00-master-plan-overview.md](00-master-plan-overview.md), [PLAN-FED-01](2026-10-16-plan-cross-source-all-consumers.md)
 **Branch:** `fix/sec-olap-federation-gate` (separately mergeable, independent of `feat/cross-source-all-consumers`)
-**Status:** PROPOSED (Phase 2 draft; Phase 3 review pending, see section 11 for the focus list)
+**Status:** PHASE 3 REVIEWED - APPROVED WITH CONDITIONS (2026-10-16). Phase 4 may start only with the binding conditions BC-OLAP-01 to BC-OLAP-18 of the Phase 3 Security Review (last section) folded into WP-SO-1..3.
 
 **Binding project rules applied:** `.NET 10`, C# 13; fail closed; least privilege on sources; no upgrade migrations (this plan needs no schema change); all text English; Phase-4 TDD developers are Sonnet; subagents only implement, the lead builds and tests once (Release, warnings as errors, before the push).
 
@@ -357,3 +357,200 @@ Merge-order guidance for the PLAN-FED-01 branch: this plan merges first; WP-FED-
 ## 12. Changelog
 
 - 2026-10-16: Rev. 1. Phase 2 plan drafted from the code verification (section 1) of finding 4/5 of REQ-FED-01. Scope: minimal gate and guardrails now, full OLAP facade (WP-FED-05) deferred.
+- 2026-10-16: Phase 3 security review appended (APPROVED WITH CONDITIONS): findings SEC-OLAP-01 to SEC-OLAP-14, binding conditions BC-OLAP-01 to BC-OLAP-18, mandatory tests T3-01 to T3-30, owner-question recommendations. Plan text above is unchanged; where a binding condition contradicts sections 2 to 7, the condition wins.
+
+---
+
+## Phase 3 Security Review (2026-10-16)
+
+**Reviewer:** `csharp-security-expert` (Phase 3). **Method:** code reading of commit `2b4006d0` plus the plan; nothing was built, run or fuzzed. Every claim below carries a file:line; claims about DuckDB or Trino grammar behaviour that come from product documentation rather than from this repository are marked **[verify]** and must be proven by a red test in Phase 4 before the corresponding mitigation is considered done.
+
+**Verdict: APPROVED WITH CONDITIONS.** The architecture (gate first, facade later, three-phase flow, shared gate and validator in their final homes) is sound and the High finding it targets is real. The plan is not sufficient on its own: the review found one pre-existing bypass of the engine blocklist that also affects single-source requests (SEC-OLAP-01), a guardrail design that DuckDB-only syntax defeats (SEC-OLAP-02), and several gaps in classification, resource bounding, error text and audit. Phase 4 may start once binding conditions BC-OLAP-01 to BC-OLAP-18 are part of WP-SO-1..3. Where a condition contradicts sections 2 to 7, the condition wins.
+
+### P3.1 Threat model
+
+**Assets.** (A1) Rows of every source the caller is not allowed to combine (operator decision `CrossSource.Enabled=false`). (A2) Plaintext behind masked, HMAC and denied columns. (A3) Existence of tables, columns and rows the caller may not see. (A4) Gateway memory, CPU and temp disk, and fairness between tenants. (A5) Integrity and completeness of the audit trail.
+
+**Actor.** An authenticated tenant user (or, in the Quickstart profile, an unauthenticated caller, `DuckDbOlapEndpoints.cs:53-54`) who is authorised for some tables, controls the whole `sql` string and the `tableNames` list, and wants to (a) join or aggregate across sources without the gate, (b) learn masked/denied values or metadata, (c) exhaust resources, (d) escape the DuckDB sandbox.
+
+**Trust boundaries.** (1) HTTP body to `OlapStagingService` (`OlapStagingService.cs:90-102`). (2) Catalog and access resolution to connector read (`:107-193`). (3) Governed rows to the DuckDB session; masking and denial are applied before this boundary (`GovernedConnectorReader.cs:131-134`, `ProjectRow` `:227-253`). This is the confidentiality boundary for A2. It is a strong invariant and it is the reason single-source OLAP is tolerable. It is not a statement about the client SQL. (4) Client SQL to the DuckDB engine (`DuckDbOlapEngine.cs:405-510` blocklist, sandbox `:113`).
+
+| ID | Threat | Entry | Plan coverage |
+|---|---|---|---|
+| T-O1 | Cross-source join with the switch off | two `tableNames` of different sources | gate (Phase B); depends on classification key (SEC-OLAP-04) |
+| T-O2 | Classification evasion | label/case/alias/same-table-twice, non-SQL types, name collisions | partly; SEC-OLAP-04 |
+| T-O3 | Blocklist bypass, multi-statement, sandbox escape | client SQL | not covered; SEC-OLAP-01, 03 |
+| T-O4 | Guardrail bypass by parser differential | DuckDB-only syntax that Trino parses as something harmless | covered by R-2 only in prose; SEC-OLAP-02 |
+| T-O5 | Inference on masked columns (equality, range, LIKE, aggregate) | client SQL on staged masked values | bounded (values are masked before staging); SEC-OLAP-02, 10 |
+| T-O6 | Existence oracle (tables, denied columns, gate text) | error text, staged column names, ordering | partly; SEC-OLAP-05, 07, 11 |
+| T-O7 | Resource exhaustion (rows, bytes, Cartesian, slots, temp, timeout) | single request or request flood | row caps only; SEC-OLAP-06 |
+| T-O8 | Audit gaps (denials, failures, SQL identity) | any | partly; SEC-OLAP-08 |
+| T-O9 | Operator mis-configuration (silent default, dead options, typo) | configuration | validator planned; SEC-OLAP-12 |
+
+### P3.2 What was verified and holds
+
+- The plan's section 1 evidence is accurate where checked: the endpoint checks only `Enabled`, authentication and a non-empty `sql` (`DuckDbOlapEndpoints.cs:36-79`); the service reads no cross-source option and interleaves authorization and the governed read per table (`OlapStagingService.cs:107-222`); `OlapTableSource` is built without `MaskedColumns` (`:221`); the engine takes only `DuckDbOlap:*` limits (`DuckDbOlapEngine.cs:113`).
+- Masking precedes staging and denied columns are stripped before the rows reach DuckDB (`GovernedConnectorReader.cs:131-134`, `:227-241`); sensitive catalog columns are masked unless an explicit Clear rule exists (`:233-237`). The plan's statement that no plaintext equality oracle exists on a masked value is correct. HASH, HMAC and HMAC_SHA256 are all keyed (`MaskingRule.cs:55`), so a candidate-plaintext probe such as `WHERE h = sha256('x')` does not work. The one trust assumption is the connector self-attestation `InDbColumnMaskingExecuted` (`GovernedConnectorReader.cs:131`), which is withheld for HTTP sources (`:110`).
+- The gate message design (fixed text, after full authorization) is the right shape for SEC-FED-03.
+
+### P3.3 Findings
+
+| ID | Severity | Title |
+|---|---|---|
+| SEC-OLAP-01 | **High** | Engine blocklist can be desynchronised from DuckDB lexing by escape strings (also single-source) |
+| SEC-OLAP-02 | **High** | The Trino-analyzer guardrail is bypassable with DuckDB-only syntax and a function denylist is not enough |
+| SEC-OLAP-03 | Medium | Blocklist, not allowlist; reachable functions and extension autoload are unbounded |
+| SEC-OLAP-04 | Medium | The cross-source classification key is weaker than the physical-source identity |
+| SEC-OLAP-05 | Medium | Denied columns are staged by name and returned as NULL columns (existence oracle, also single-source) |
+| SEC-OLAP-06 | Medium | Resource bounds: no byte cap, no per-tenant concurrency, reads outside the timeout and the semaphore |
+| SEC-OLAP-07 | Medium | Guardrail, analyzer and gate error text must be generic outside Development |
+| SEC-OLAP-08 | Medium | Audit: denials, failed queries and SQL identity are not on record |
+| SEC-OLAP-09 | Low-Medium | Phase C exceptions escape the outcome mapping |
+| SEC-OLAP-10 | Low | HMAC exemption: accepted for parity, but inconsistent rule-type set |
+| SEC-OLAP-11 | Medium | Bare table-name resolution is ambiguous and non-deterministic; early return skips authorization of the remaining tables |
+| SEC-OLAP-12 | Low | Startup validation does not cover `DuckDbOlapOptions`; silent defaults |
+| SEC-OLAP-13 | Low | `IsActive` and Virtual Filter coverage of OLAP-staged tables are unverified |
+| SEC-OLAP-14 | Info | Single-source OLAP: acceptable residual, with conditions |
+
+**SEC-OLAP-01 (High) - blocklist desync via escape strings.** `ValidateUserSql` decides "single statement", "inside quotes", the keyword set and the first keyword from a quote-toggling scan that treats `'` and `"` as simple toggles and states that "backslash is no escape" (`DuckDbOlapEngine.cs:425-451`, `ExtractTokens` `:584`, `StripSqlComments` `:636`, `NormalizeQuotedIdentifiers` `:512`). DuckDB inherits PostgreSQL string syntax: `E'\''` is one string containing a quote **[verify]**. For the input `SELECT E'\'' ; <statement> ...` the scanner sees an even number of quotes only by accident of position: after the third apostrophe it believes the following text is quoted, so a `;` and the keywords `ATTACH`, `COPY`, `SET`, `LOAD`, `INSTALL`, `PRAGMA`, `CALL`, `CREATE` (the token check skips quoted text, `:584-630`) are invisible to the check, while DuckDB executes them as code. The regex pass for `read_*`, `glob`, `duckdb_*` still runs on the whole text (`:499-505`, `:570`), which limits the damage; keyword-only constructs (second statement, `CREATE MACRO`, `CREATE TABLE AS`, `SET`, `LOAD`, `INSTALL`, `CALL`) are the exposed set. DuckDB.NET runs multi-statement text **[verify]**. Containment today is the sandbox (`enable_external_access=false`, `lock_configuration`, `:113`), not the validator, so the impact is bounded to in-memory DDL and resource abuse unless extension loading is reachable (SEC-OLAP-03). It matters beyond the plan because it applies to every OLAP request and it undermines the claim in section 4.2 that the "existing blocklist stays in place for all requests (defence in depth)". *Required change:* BC-OLAP-01.
+
+**SEC-OLAP-02 (High) - guardrail differential and the function denylist.** The plan treats the gateway analyzer as the guardrail input for DuckDB text. Verified gaps:
+1. The analyzer records join columns only from `JoinCriteria` (`SqlQueryAnalyzer.cs:271-274`) and from `=` comparisons with identifiers on both sides (`:276-300`). `NATURAL JOIN` has no criteria, so it joins on every same-named column, masked ones included, with no reference recorded. The SQL path has the same hole today; for OLAP it is reachable.
+2. Filter references come from WHERE, HAVING, ORDER BY and aggregate FILTER (`:221-235`, `:397-406`). Star expressions are the issue: DuckDB `COLUMNS(*)`, `COLUMNS('regex')`, `* EXCLUDE`, `* REPLACE`, `#1` positional references, `GROUP BY ALL`, `ORDER BY ALL` select or compare columns without naming them **[verify]**. Trino's grammar accepts `COLUMNS(*)` and `COLUMNS('x')` as an ordinary function call with `*` or a string argument, so the analyzer parses the statement successfully, records `columns` as a function name and records no column. The fail-closed rule "unparsable means reject" therefore does not trigger, and `WHERE COLUMNS(*) = 'x'` passes SEC-FILTER-01.
+3. `SqlFunctionPolicy` is a **denylist** in the SQL path (`FederatedDuckDbExecutionService.cs:266-267`, comment "G-9: the denylist only"). Reusing it for DuckDB text allows every DuckDB-only function that is not on the list (`columns`, `query`, `query_table`, `json_*`, `list_*`, `lpad`, ...). SEC-FED-12 explicitly requires an allowlist for the OLAP path.
+4. Alias trick (benign): `FROM a SEMI JOIN b ON ...` and `ASOF`/`ANTI` are read by the Trino grammar as an alias plus a normal join, so the ON columns are still captured. `POSITIONAL JOIN` has no ON and fails the Trino parse. No bypass, but the corpus test must pin this.
+5. CTE shadowing differs only in the safe direction: the analyzer matches CTE names case-sensitively on folded keys (`:180-185`, `:475`), DuckDB case-insensitively, so the analyzer can only over-report tables.
+
+What a bypass buys is bounded, because the values are already masked (P3.2): equality joins and filters on REDACT constants (Cartesian amplification), on partial masks (the visible part the caller already has) and on HMAC pseudonyms (allowed anyway, SEC-OLAP-10). The finding is High because the plan presents the analyzer as the control that makes cross-source OLAP "governed", and because the same differential would defeat any later table or function check built on it. *Required change:* BC-OLAP-02, BC-OLAP-03.
+
+**SEC-OLAP-03 (Medium) - blocklist instead of allowlist; extension autoload.** The function and keyword lists are finite (`DuckDbOlapEngine.cs:461-496`, `:570-573`). Not blocked and callable: `query('SELECT ...')` and `query_table(...)` (execute or resolve text at run time, invisible to any table or column analysis; DuckDB restricts `query` to SELECT **[verify]**), `json_execute_serialized_sql`, `getvariable`, `current_database`, `version`, `information_schema.*`, and every memory-heavy scalar (`lpad('x', 2000000000)`, `list_*`, `unnest` over a list of a huge `repeat`; `repeat` and `range` are blocked, `lpad` is not). The setup does not set `autoinstall_known_extensions=false` or `autoload_known_extensions=false` (`:113`); whether `enable_external_access=false` fully prevents INSTALL/LOAD and autoload of `httpfs` is **[verify]**. Defence in depth costs one line. *Required change:* BC-OLAP-01, BC-OLAP-09.
+
+**SEC-OLAP-04 (Medium) - classification key.** The plan uses `SourceName ?? Domain` (section 2.3), mirroring the router (`CrossSourceQueryRouter.cs:84`, `:109-132`, case-insensitive set). Gaps:
+- The physical reader is chosen by `connectorRegistry.TryGetConnectorForTable(meta.Identifier)` (`OlapStagingService.cs:155`), which keys on **Domain** and the connector id, with a default-sql fallback (`InMemoryConnectorRegistry.cs:49-69`), not on `SourceName`. Two tables with different domains and the same `SourceName` label would be classified as one source while being read through two connectors. `SourceName` selects the connection inside a connector (`CatalogGovernanceRatchet.cs:117-119`, `SqlConnector.cs:188`), so the classification must include the connector identity.
+- Case: the classifier must use `StringComparer.OrdinalIgnoreCase` like the router; the plan does not state it (section 2.3 only says "distinct").
+- `HttpPlugin`, `LakehouseIceberg`, `LakehouseDelta` tables are rejected as unsupported by the SQL router (`CrossSourceQueryRouter.cs:112`), but OLAP admits any non-default connector (`OlapStagingService.cs:155-159`). The plan classifies them cross-source (gate) and then reads them with the gate open. Parity requires the same rejection.
+- Dedupe is on the raw request string (`:93-96`). `orders` and `dom.orders` resolve to the same table and are staged twice; the second `CREATE TABLE` fails (`DuckDbOlapEngine.cs:253`). Different tables whose sanitised names collide (`a-b` and `a_b`, `SanitizeIdentifier` `:327`; table `x_y` versus view `x_y` from domain `x`, `:263-267`) fail the same way at best, and at worst give the plan's "map reference to staged table by name" step (section 4.2) an ambiguous target and apply the wrong table's guardrail.
+- The same-table-twice and alias evasion are harmless for the gate (the set of resolved tables decides), but harmful for budgets (double count) and mapping.
+- The staged set, not the SQL text, determines what data DuckDB can touch, so a caller cannot reach a source by naming it only in the SQL. The classification is on the resolved `tableNames`, which is correct and should stay the only input.
+
+*Required change:* BC-OLAP-04, BC-OLAP-05, BC-OLAP-06.
+
+**SEC-OLAP-05 (Medium) - denied column names are staged and returned.** `StageTableAsync` builds the DuckDB table from all catalog columns (`DuckDbOlapEngine.cs:230-252`) while `ProjectRow` omits denied columns (`GovernedConnectorReader.cs:227-229`) and the engine inserts NULL for them (`DuckDbOlapEngine.cs:301`). `SELECT *` therefore returns the names of denied columns as all-NULL columns, and a binder error lists "candidate bindings". The SQL path answers a denied column like a non-existent one (SEC-X1-05, `GovernedSqlExecutionService.cs:344-347`). Plan section 1.4 says denied columns "give no signal"; the values give none, the names do. *Required change:* BC-OLAP-08.
+
+**SEC-OLAP-06 (Medium) - resource bounds.**
+- Only row caps exist for staging (`OlapStagingService.cs:188-192` sets `MaxRows` only; `GovernedRowPolicy.MaxBytes` exists, `GovernedConnectorReader.cs:196-203`, but is unset). 250,000 rows of wide text fill gateway memory. The byte check runs after the whole raw read is in memory (`:120-122`, `:137-160`), so it is a post-hoc cap; the row cap is enforced per batch (`:153-156`). The plan adds byte caps for cross-source only.
+- The concurrency semaphore is global and engine-side (`DuckDbOlapEngine.cs:90`, default 4): one tenant can occupy all slots for the 60 s timeout repeatedly and starve the others. It is taken after the source reads, so unlimited concurrent requests can already hold up to 500,000 staged rows each in gateway memory.
+- The timeout (`:83-86`) starts inside the engine; source reads and authorization are not covered.
+- A single-source `CROSS JOIN` of two 250k-row tables, `lpad` and similar are bounded only by `max_memory`, `max_temp_directory_size`, threads=2 and the 60 s interrupt (`:113`). That is adequate per query and inadequate under fan-in (point 2).
+- The result is silently truncated at `MaxResultRows`/`MaxResultBytes` with `totalRows = rows.Count` (`:205`), so the caller cannot tell.
+
+*Required change:* BC-OLAP-09.
+
+**SEC-OLAP-07 (Medium) - error text.** The guardrail messages name column, table and rule (`GovernedSqlExecutionService.cs:323`, `:338`), and a Deny-level column raises `WebSqlTableDeniedException` with that text (`:347`), which defeats the "denied looks nonexistent" intent if the mapper passes the message. The OLAP endpoint returns `outcome.Error`/`Details` as is (`DuckDbOlapEndpoints.cs:121-129`) and, in Development and Quickstart, the raw engine message (`OlapStagingService.cs:262-266`, `DuckDbOlapEndpoints.cs:110-112`). Plan note 9 asks the question; the answer is BC-OLAP-10.
+
+**SEC-OLAP-08 (Medium) - audit.** Audit records exist for staged tables and successful queries, always `Decision = "ALLOW"` (`OlapStagingService.cs:62-83`, `:208-218`, `:230-242`). Not on record: gate denial, guardrail denial, unanalysable SQL, failed execution after the tables were already audited as staged, and the SQL itself (only a SHA-256, `:60`). SEC-FED-10 requires audited denials after authorization and a shared correlation id. *Required change:* BC-OLAP-11.
+
+**SEC-OLAP-09 (Low-Medium) - unhandled Phase C exceptions.** The governed read sits inside a `try` that catches only `ConnectorRowLimitExceededException` (`OlapStagingService.cs:182-199`); a `GatewayForbiddenException` from `EnsureInMemoryFilterIsEnforceable` (`InMemoryRowFilterEvaluator.cs:22-29`), a `GatewaySecurityException` from the byte limit, a connector fault or a staging-name collision propagates out of `ExecuteAsync` because the outer `try` begins at `:225`. The endpoint has no handler around the call (`DuckDbOlapEndpoints.cs:82`). Fail-closed holds (no data), but status and body are whatever the global handler produces. *Required change:* BC-OLAP-12.
+
+**SEC-OLAP-10 (Low) - HMAC exemption.** Parity with WebSQL is acceptable (details in P3.5, Q4 of section 11). The rule-type sets differ: `MaskingRule.IsHmac` accepts `HMAC`, `HMAC_SHA256`, `HASH` (`MaskingRule.cs:55`), the guardrail exempts only `HMAC` (`GovernedSqlExecutionService.cs:302`), so the other two are rejected in joins. That is fail-closed and inconsistent; do not widen it in this change, document it, and test both outcomes.
+
+**SEC-OLAP-11 (Medium) - bare names and early return.** A bare name is resolved with `GetAllTablesAsync(...).FirstOrDefault` by table name or qualified name (`OlapStagingService.cs:116-119`): with the same table name in two domains the result depends on catalog order, so the caller (and the classifier) may get another table than intended, and the list is not tenant-scoped in this code. The authorization loop returns on the first denial (`:122-153`), which the plan keeps ("Any denial returns the existing generic 403/404 immediately", section 4.1 Phase A). SEC-FED-03 (parent plan line 463) requires no early return that skips authorization of the remaining tables. *Required change:* BC-OLAP-05, BC-OLAP-07.
+
+**SEC-OLAP-12 (Low) - options.** `DuckDbOlapOptions` is not validated: `SanitizeMemoryString` silently replaces an unparsable value with `1GB` (`DuckDbOlapEngine.cs:335-340`), counts of 0 or less fall back to defaults in code (`OlapStagingService.cs:92`, `:105`), and `MaxConcurrentQueries <= 0` is untested. Plan section 4.4 validates only `CrossSourceOptions`. *Required change:* BC-OLAP-14.
+
+**SEC-OLAP-13 (Low) - unverified items.** (a) The router rejects inactive tables (`CrossSourceQueryRouter.cs:106`, `!meta.Table.IsActive`); `OlapStagingService.cs:122` only checks `meta == null`. Whether `ResolveAccessAsync` denies inactive tables is not verified. (b) The OLAP read passes no `VirtualFilterEnforcement` (`:188-193`). For tables that attest pushdown the predicate rides in `CombinedRowFilterSql`; for in-memory filtering `MandatoryRowPredicateSql` makes the read fail closed (`InMemoryRowFilterEvaluator.cs:25-29`). Whether a pushdown connector can report `RlsPushdownExecuted` without applying the virtual-filter predicate is not verified here. Both need a Phase 4 test (T3-26, T3-27).
+
+**SEC-OLAP-14 (Info) - single-source.** Acceptable as a time-boxed residual because the confidentiality boundary is mask-before-stage (P3.2) and the sandbox contains the engine. It is acceptable only with the all-request hardening in BC-OLAP-01, 08, 09, 10, 12, 15 and the autoload switches. Without them the single-source path still has SEC-OLAP-01, 05 and 06.
+
+### P3.4 Binding conditions for Phase 4
+
+Each condition is a gate for the named work package; the lead checks them in the review of Phase 5.
+
+- **BC-OLAP-01 (WP-SO-2, all requests).** Fix SEC-OLAP-01 before adding the gate to the same method. Floor: reject any statement text containing a backslash, an `E`/`e` string prefix before a quote, a `U&` prefix, or any quote character class not handled by the scanner, and keep `$` rejected; count statements with a scanner that is a superset of DuckDB's lexing. Preferred (and required for cross-source): validate with DuckDB's own parser, e.g. `json_serialize_sql` on the sandbox connection before staging (single `SELECT` only, any parse failure rejects), and take statement count, table references and function names from that AST instead of text. Keep the token blocklist as a second layer. Proof: T3-01 to T3-04.
+- **BC-OLAP-02 (WP-SO-3, cross-source).** The guardrail input must not be the only control. For cross-source requests require all of: `StatementType == Select`; `TableFunctionCalls` empty; `HasSessionProperties` and `HasInlineFunctionDefinitions` false; every entry of `FunctionCalls` on an explicit **OLAP function allowlist** held in code and unit-tested (aggregates, `coalesce`, `cast`, date/string basics; new names are added by code change, not configuration); reject `columns`, `query`, `query_table` and every unknown name. The deny-only `SqlFunctionPolicy` call of the SQL path is not sufficient and must not be copied. Prefer DuckDB-AST function extraction (BC-OLAP-01) so the allowlist applies to what DuckDB runs.
+- **BC-OLAP-03 (WP-SO-3).** Reject in cross-source SQL: `NATURAL` joins (add a minimal additive analyzer flag, or reject the token outside quotes as the floor), `LATERAL`, `TABLESAMPLE`, star expressions with `COLUMNS`, `EXCLUDE`/`REPLACE`, positional `#n`, `GROUP BY ALL`, `ORDER BY ALL`, `QUALIFY`, set operations over tables of different sources are allowed only if every branch passes the same checks. Anything the analyzer cannot parse is rejected. The plan, release note and feature doc state that the column guardrail is a **policy-consistency control, not a confidentiality boundary**; the boundary is masking before staging, and a regression test pins that (T3-13).
+- **BC-OLAP-04 (WP-SO-2).** Classify by the resolved identity `(connector.ConnectorId, SourceName ?? Domain)` with `OrdinalIgnoreCase`: more than one distinct connector id or more than one distinct source label means cross-source; any non-`Sql` type means cross-source. `CrossSourceClassifier.IsCrossSource` takes the resolved triples, not only `TableMetadata`.
+- **BC-OLAP-05 (WP-SO-2, all requests).** Dedupe on the resolved `TableIdentifier` (case-insensitive) before budgets and staging. Compute all staged names (table and `domain_table` view) up front; any collision after `SanitizeIdentifier`, case-insensitive, rejects with the generic denial before any read. A bare name matching more than one table in the catalog is rejected with the same generic text as not found (never first-match). Resolution and the allowlist step must not reveal whether the second candidate exists.
+- **BC-OLAP-06 (WP-SO-2).** Cross-source requests reject `HttpPlugin`, `LakehouseIceberg`, `LakehouseDelta` with the router's text, after authorization; verify and enforce `IsActive` (T3-26).
+- **BC-OLAP-07 (WP-SO-2).** Phase A evaluates every requested table (metadata, allowlist, access, connector) before returning a denial, then returns the denial of the first failing table in request order with today's text; no connector call, `GetSplitsAsync` or `ReadAsync` before Phase A and Phase B are complete. T3-05 proves it with recording fakes.
+- **BC-OLAP-08 (WP-SO-2, all requests).** Stage only columns whose `decision.GetColumnAccess` is not `Deny`; a denied name must behave as an unknown column. Pass `MaskedColumns` for the rest (plan 4.3).
+- **BC-OLAP-09 (WP-SO-2, all requests).** (a) Add `DuckDbOlap:MaxStagedBytesPerTable` and `MaxTotalStagedBytes` (defaults sized so the existing row defaults cannot exceed gateway memory, e.g. 64 MB and 256 MB), applied to **every** request via `GovernedRowPolicy.MaxBytes` plus a running total; cross-source uses the smaller of the `CrossSource` and `DuckDbOlap` values. (b) Take an OLAP lease (global and per-tenant cap, per-tenant default 1 to 2) **before** the first connector read, and start the request timeout before Phase A so it covers authorization and reads. (c) Add `SET autoinstall_known_extensions=false; SET autoload_known_extensions=false;` (and `allow_community_extensions=false` if the pinned DuckDB version has it) before `lock_configuration`, and keep `enable_external_access=false`. (d) Return a truncation indicator or a 400 when the result row or byte cap is hit instead of a silent cut, as a response-field decision for the owner (additive field only).
+- **BC-OLAP-10 (WP-SO-2/3).** Outside Development and Quickstart, gate denial, guardrail denial, unanalysable SQL, unsupported type and name collision return fixed generic bodies with stable codes; table, column and rule names never appear. A Deny-level column returns the same body as an unknown column. The Quickstart `details = ex.Message` path stays Development-grade only and is called out in the docs.
+- **BC-OLAP-11 (WP-SO-2).** Write one **required** audit record for every denial after authorization (`OLAP_DENIED`, `Decision = "DENY"`, reason code, `crossSource`, table count, `sqlSha256`, `traceId`). If that write fails, the request is still denied (a failed audit write must never turn a denial into an allow); log and count it. Add `crossSource`, `transport = "Olap"`, the distinct source labels and connector ids, and staged bytes to `OLAP_QUERY`; add an `OLAP_QUERY_FAILED` record when execution fails after tables were audited as staged; all records share `traceId` as correlation id. Keep SQL text out of the audit; keep the hash and add the SQL length.
+- **BC-OLAP-12 (WP-SO-2).** Wrap Phase C so `GatewayForbiddenException`, `GatewaySecurityException`, connector faults and staging errors map to 403, 400 or 502 with generic bodies; no exception escapes `ExecuteAsync`.
+- **BC-OLAP-13 (WP-SO-1).** Gate contract as in plan section 3, plus: blank transport denied, empty list denies all, `Olap` is never in the default list in this change (see Q1). `FederationGate` is a singleton reading `IOptions<GatewayOptions>` (not a snapshot taken at construction).
+- **BC-OLAP-14 (WP-SO-1).** Extend the validator to `DuckDbOlapOptions`: counts and caps greater than 0, `MaxConcurrentQueries >= 1`, `MaxThreads` in 1..8 or rejected (the engine clamps silently, `DuckDbOlapEngine.cs:110`), `MaxMemory`/`MaxTempDirectorySize` must parse with the engine's own pattern, otherwise startup fails instead of using `1GB`.
+- **BC-OLAP-15 (WP-SO-3, all requests).** Bound the request: maximum SQL length (default 32 KB) and `SqlTokenSecurityOptions` for the analyzer, applied before any table resolution; reject beyond it with a generic 400.
+- **BC-OLAP-16 (WP-SO-2).** The cross-source table limit counts resolved distinct tables after BC-OLAP-05 and is checked before any read (plan 4.1 Phase B is correct; the count input changes).
+- **BC-OLAP-17 (WP-SO-3).** Keep HMAC parity with WebSQL as the plan says; do not widen the exemption to `HASH`/`HMAC_SHA256`; the test matrix pins current outcomes for all five mask types and for ABAC mask without a rule.
+- **BC-OLAP-18 (WP-SO-1).** Log a startup warning when the legacy keys `WebSql:CrossSource:MaxMemory` or `MaxTempDirectorySize` are present in configuration (the binder ignores them silently), and a warning when `AllowedTransports` contains `Olap` while `CrossSource.Enabled` is false.
+
+### P3.5 Mandatory security tests (red first, in addition to the plan's section 7)
+
+Engine and validator (all requests)
+- T3-01 `E'\''`-prefixed escape string followed by `;` and a second statement is rejected (statement count), and a second statement hidden after it is never executed.
+- T3-02 `E'...'` followed by `ATTACH`, `COPY`, `INSTALL`, `LOAD`, `SET`, `PRAGMA`, `CALL`, `CREATE MACRO` is rejected for each keyword.
+- T3-03 Nested block comment `/* /* */ DROP ... */` and unterminated comment forms are rejected or neutral; line comment before `;`.
+- T3-04 The 23 existing blocklist tests plus `query('...')`, `query_table`, `json_execute_serialized_sql`, `getvariable`, `lpad('x',2000000000)`, quoted-identifier function names, mixed case, unicode lookalikes, `information_schema` access: each is rejected or bounded (documented outcome per case).
+- T3-05 Ordering: fake connectors record every call; a request whose second table is denied, ambiguous, colliding, inactive or unsupported produces zero connector calls, and the response is the same with the gate on or off.
+- T3-06 Autoload: after setup, `SELECT * FROM <extension-backed function>` (for example a `json` or `httpfs`-only function not present in the build) fails without any network or file access; the two autoload settings are `false` in `duckdb_settings()` equivalent (read in a test connection).
+- T3-07 Staged column list: a denied column is absent from `SELECT *`, produces the unknown-column error text for `SELECT secret`, and the binder error does not list it.
+- T3-08 Byte caps: one wide table above `MaxStagedBytesPerTable` and two tables above the total are rejected for single-source and cross-source.
+- T3-09 Concurrency: a tenant at its lease cap is refused (429) while a second tenant is served; leases are released on exception, cancellation, timeout and audit failure; the source read happens only while holding the lease.
+- T3-10 Timeout covers a slow fake connector (read longer than the timeout is cancelled).
+- T3-11 Staging-name collisions (`a-b`/`a_b`, table `x_y` vs view `x_y`, same table via `orders` and `dom.orders`) produce the generic rejection before any read; ambiguous bare name produces the same body as not found.
+- T3-12 Phase C exceptions (forbidden from filter evaluator, byte-limit exception, connector fault) return mapped generic statuses, no exception escapes.
+
+Guardrails and classification (cross-source)
+- T3-13 Invariant: staged values of REDACT, PARTIAL, HASH, HMAC, ABAC-masked and denied columns equal the governed reader output (no plaintext in the DuckDB session) under `IsColumnMaskingDisabled=false`.
+- T3-14 Differential corpus, each rejected with the generic body and zero reads: `WHERE COLUMNS(*) = 'x'`, `COLUMNS('^ss')`, `* EXCLUDE (a)`, `* REPLACE`, `#1`, `GROUP BY ALL`, `ORDER BY ALL`, `NATURAL JOIN`, `LATERAL`, `TABLESAMPLE`, `QUALIFY`, nested comments, `E''` strings, `a SEMI JOIN b ON ...` (accepted only if every ON column passes), `a ASOF JOIN b` (same), `POSITIONAL JOIN` (rejected by parse).
+- T3-15 Function allowlist: each allowlisted function passes; `columns`, `query`, `list_*` not on the list, `lpad` and an unknown name are rejected; the list is a code constant and a test asserts it contains no entry from the blocklists.
+- T3-16 Reference mapping: alias, schema-qualified, `domain_table` view name, quoted mixed-case name, CTE with the same name as a staged table; each maps to exactly one staged table or is rejected.
+- T3-17 Classification: same `SourceName` with different case is one source; same `SourceName`, different connector id is cross-source; `SourceName == null` with different domains is cross-source; one `HttpDeclarative` table alone is cross-source; `HttpPlugin`/Lakehouse are rejected after authorization; same table twice is one table.
+- T3-18 Gate denial body and status are byte-identical for disabled and transport-not-allowed, contain no table name, and are identical whether the second table exists or not for a caller authorized for both.
+- T3-19 Timing class: the number of metadata, allowlist and access calls is the same for a request denied on its first table and one denied on its last.
+- T3-20 Cartesian: `CROSS JOIN` and a non-equi join in `ON` (and a comma join with no predicate) are rejected unless `AllowNonEquiJoins`.
+- T3-21 Guardrail messages and codes outside Development contain no column, table or rule name; a Deny-level column answers like an unknown column.
+
+Audit and configuration
+- T3-22 `OLAP_DENIED` exists for gate denial, guardrail denial, unanalysable SQL; audit failure on a denial still returns the denial.
+- T3-23 `OLAP_QUERY` carries `crossSource`, `transport`, sources, bytes, `traceId`; failed execution after staging writes `OLAP_QUERY_FAILED`; no SQL text or row value in any record.
+- T3-24 Validator: `DuckDbOlapOptions` zero, negative, unparsable memory string, `MaxConcurrentQueries` 0 abort startup; legacy `MaxMemory` key and `Olap` without `Enabled` log the warnings.
+- T3-25 `FederationGate` reads live options (change after construction takes effect) and is thread-safe.
+
+Residual checks from SEC-OLAP-13
+- T3-26 An inactive table requested through OLAP is denied.
+- T3-27 A table covered by a Virtual Filter is either filtered or denied through OLAP, for a pushdown-capable connector and for an in-memory one; no row outside the predicate appears.
+
+Integration (one more than the plan's one)
+- T3-28 Two SQLite sources, default config: HTTP 403 and zero rows; with `Enabled=true` and `Olap` listed: 200 for an equi-join, 403/400 for `NATURAL JOIN` and `COLUMNS(*)`.
+- T3-29 Mixed-case `tableNames` and duplicate spellings do not change the gate outcome.
+- T3-30 Fan-in: ten concurrent cross-source requests from one tenant keep gateway memory under the configured byte budget times the lease cap and do not starve a second tenant.
+
+### P3.6 Recommendations for the owner questions (section 11)
+
+1. **Default of `Olap` in `AllowedTransports`: keep it out.** Fail closed, as the plan chose. Do not let PLAN-FED-01's default expansion add `Olap` until the facade (WP-FED-05) lands and BC-OLAP-01 to 03 are green; adding it earlier makes "enable federation" silently enable the weakest cross-source path. The upgrade note must say explicitly that setting the list replaces the default.
+2. **Reject unanalysable cross-source SQL: yes, and tighten it.** Rejecting is the right fail-closed behaviour, but it is not enough alone because the Trino grammar accepts DuckDB constructs (SEC-OLAP-02). The combination "gateway parse succeeds, function allowlist passes, construct blocklist passes" is the minimum; DuckDB-AST validation (BC-OLAP-01 preferred) is the strong form. If BC-OLAP-02 and 03 cannot be delivered together with the gate, the fallback is to ship WP-SO-1 and WP-SO-2 and **deny all cross-source OLAP** (return 403 even when the gate is open, behind a documented internal switch default off) until WP-SO-3 is complete; do not ship an open gate with the guardrail missing, because operators will read it as governed. WP-SO-3 is therefore a merge prerequisite for allowing `Olap`.
+3. **Single-source on the DuckDB dialect until the facade: confirm**, with BC-OLAP-01, 08, 09, 10, 12, 15 and the autoload settings applying to all requests (SEC-OLAP-14). The residual is the unbounded function surface inside the sandbox, mitigated by the sandbox settings, by the mask-before-stage invariant and by the all-request bounds.
+4. **Remove `MaxMemory` and `MaxTempDirectorySize` now: confirm.** They never had an effect, so removal changes no enforcement. Add the startup warning for the legacy keys (BC-OLAP-18) so an operator who believed they were bounded learns that `DuckDbOlap:*` is what counts.
+
+Plan security notes (section 11, items 1 to 9) answered:
+- Note 1 (ordering): partly. The plan's flow is right but returns early on the first denial and the bare-name ambiguity is open (BC-OLAP-05, 07).
+- Note 2 (existence oracle): the gate text is safe if it follows full authorization; additionally generic bodies (BC-OLAP-10), no ambiguity reject before authorization, and equal call counts (T3-19).
+- Note 3 (differential): see SEC-OLAP-02; the refusal list is BC-OLAP-03.
+- Note 4 (HMAC): accept parity with WebSQL for this change. Cross-source pseudonym correlation inside one tenant is the stated purpose of a tenant-scoped HMAC and the operator opted in twice (`Enabled` and `Olap`). The stricter SEC-FED-02 rule (keys must be Clear) stays for GraphQL relations. Record `crossSource` and the HMAC-join fact in the audit so the choice is reviewable; revisit when the facade lands.
+- Note 5 (Virtual Filter): not verified here; T3-27 is mandatory (SEC-OLAP-13).
+- Note 6 (audit): yes, denial audit is required (BC-OLAP-11); it is about 40 lines rather than the plan's 20 because of the failed-execution record.
+- Note 7 (`danger_disable_column_masking`): guardrails and gate must not depend on it; T3-13 runs both settings. With masking disabled the confidentiality boundary is gone by design (Development only, `GatewaySecurityOptionsValidator.cs:103`).
+- Note 8 (option removal): confirmed, no enforcement is removed; the new validator can only tighten (BC-OLAP-14 is the one place it changes silent defaults into startup failures, to be listed in the release note).
+- Note 9 (response text): generic outside Development (BC-OLAP-10).
+
+### P3.7 SEC-FED-12 "accepted interim gap"
+
+SEC-FED-12 requires that the OLAP path use the governed compiler and a function allowlist and that client DuckDB SQL is not executed. After this plan the third part remains unmet for single-source and for cross-source text that passes the checks.
+
+**Assessment: acceptable as an interim residual, under four conditions.** (1) The new cross-source controls are real controls: the gate and BC-OLAP-02/03 (allowlist) are in place, not only the analyzer call. (2) The all-request hardening (BC-OLAP-01, 08, 09, 10, 12, 15 and the autoload settings) is delivered, because those close holes that exist today independently of the facade. (3) The gap is recorded as open security debt in `doc/plan/00-master-plan-overview.md` with WP-FED-05 as its closing item and a target release; Phase 6 must not describe OLAP as "SEC-FED-12 compliant" or "governed" in `docs/features/f-data-03-duckdb-olap.md`, only as "gated and bounded". (4) `Olap` stays out of the default `AllowedTransports` until the facade lands (Q1). With these, the interim is better than the status quo on every axis and does not weaken any other transport; without condition (1) or (2) it is a change of label, not of exposure.
+
+### P3.8 Verdict
+
+**APPROVED WITH CONDITIONS.** Phase 4 starts with WP-SO-1 as planned. WP-SO-2 must include BC-OLAP-01, 04 to 09, 11 and 12 (BC-OLAP-01 first, because it changes the method the gate is added to). WP-SO-3 must include BC-OLAP-02, 03, 10, 15, 17 and the differential corpus T3-14; it is a merge prerequisite for allowing `Olap` in `AllowedTransports`. All tests T3-01 to T3-30 are mandatory and are written red first. The Phase 5 reviewer checks each BC against the diff. Items marked **[verify]** are assumptions about DuckDB or Trino grammar behaviour and must be turned into evidence by the first red tests; if a test shows the assumption false, the corresponding condition is downgraded in the Phase 4 log with the test as evidence, not silently dropped.
