@@ -494,7 +494,9 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
                 details["Exception"] = ex.GetType().Name;
             }
 
-            _logger.LogWarning("Datasource test failed for {DatasourceId} ({Category}, {ExceptionType}).", datasourceId, details["Category"], ex.GetType().Name);
+            // The id comes from the route: strip line breaks so it cannot forge log entries (CodeQL log injection).
+            var safeDatasourceId = datasourceId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+            _logger.LogWarning("Datasource test failed for {DatasourceId} ({Category}, {ExceptionType}).", safeDatasourceId, details["Category"], ex.GetType().Name);
             await AppendAuditAsync(datasourceId, user, isSuccess: false, message, ct).ConfigureAwait(false);
             return SqlFailure(datasourceId, table, sw, message, description, details);
         }
@@ -563,7 +565,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to append datasource testing audit log for {DatasourceId}", datasourceId);
+            _logger.LogError(ex, "Failed to append datasource testing audit log for {DatasourceId}", datasourceId.Replace("\r", string.Empty).Replace("\n", string.Empty));
         }
     }
 }
