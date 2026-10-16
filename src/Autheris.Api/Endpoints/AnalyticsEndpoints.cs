@@ -128,6 +128,20 @@ public static class AnalyticsEndpoints
                 "Aggregation or grouping on a masked column is not permitted.",
                 httpContext);
         }
+        catch (AggregationColumnUnavailableException ex)
+        {
+            SafeErrorResults.LogFailure(httpContext, ex, AggregationColumnUnavailableException.ErrorCodeConst);
+            return SafeErrorResults.Problem(
+                StatusCodes.Status403Forbidden,
+                AggregationColumnUnavailableException.ErrorCodeConst,
+                AggregationColumnUnavailableException.FixedMessage,
+                httpContext);
+        }
+        catch (AggregationRowCapExceededException ex)
+        {
+            SafeErrorResults.LogFailure(httpContext, ex, AggregationRowCapExceededException.ErrorCodeConst);
+            return SafeErrorResults.BadRequest(AggregationRowCapExceededException.ErrorCodeConst, AggregationRowCapExceededException.FixedMessage, httpContext);
+        }
         catch (GatewayInvalidQueryException ex)
         {
             SafeErrorResults.LogFailure(httpContext, ex, ex.ErrorCode);
@@ -197,6 +211,20 @@ public static class AnalyticsEndpoints
                 "Metric measure or dimension references a column that is masked for the caller.",
                 httpContext);
         }
+        catch (AggregationColumnUnavailableException ex)
+        {
+            SafeErrorResults.LogFailure(httpContext, ex, AggregationColumnUnavailableException.ErrorCodeConst);
+            return SafeErrorResults.Problem(
+                StatusCodes.Status403Forbidden,
+                AggregationColumnUnavailableException.ErrorCodeConst,
+                AggregationColumnUnavailableException.FixedMessage,
+                httpContext);
+        }
+        catch (AggregationRowCapExceededException ex)
+        {
+            SafeErrorResults.LogFailure(httpContext, ex, AggregationRowCapExceededException.ErrorCodeConst);
+            return SafeErrorResults.BadRequest(AggregationRowCapExceededException.ErrorCodeConst, AggregationRowCapExceededException.FixedMessage, httpContext);
+        }
         catch (GatewayInvalidQueryException ex)
         {
             SafeErrorResults.LogFailure(httpContext, ex, ex.ErrorCode);
@@ -227,12 +255,13 @@ public static class AnalyticsEndpoints
     {
         var metrics = await semanticCatalog.ListMetricsAsync(
             string.IsNullOrWhiteSpace(dataset) ? null : dataset,
+            EndpointSecurity.GetRequestTenant(httpContext),
             ct).ConfigureAwait(false);
         return Results.Ok(new
         {
             manifestVersion = semanticCatalog.ManifestVersion,
             total = metrics.Count,
-            metrics
+            metrics = SemanticMetricCatalogProjection.Project(metrics, httpContext.User)
         });
     }
 

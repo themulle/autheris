@@ -165,6 +165,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             ValidateOrderByClause(query.OrderBy, groupByColumns, resolvedAggregates, metadata, decision);
             if (_analyticsOptions.Privacy.Noise.Enabled)
             {
+                ValidateAggregatesForNoise(resolvedAggregates);
                 ValidateMeasureBoundsForNoise(resolvedAggregates, metadata);
             }
         }
@@ -250,9 +251,10 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
                     }
 
                     var combinedRows = smallBuckets.SelectMany(b => b.Rows).ToList();
-                    mergedOtherBucket = combinedRows.Count > 0
+                    var mergedRaw = combinedRows.Count > 0
                         ? ComputeBucketFromRows(otherKey, combinedRows, resolvedAggregates, metadata, isMergedOther: true)
                         : MergePreAggregatedBuckets(otherKey, smallBuckets, resolvedAggregates, isMergedOther: true);
+                    mergedOtherBucket = WithoutNonMergeableValues(mergedRaw, resolvedAggregates);
 
                     mergedIntoOther = true;
                 }
@@ -271,6 +273,34 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             }
         }
 
+        bool noiseApplied = false;
+        double? epsilonConsumed = null;
+        double? remainingEpsilon = null;
+
+        if (_analyticsOptions.Privacy.Noise.Enabled)
+        {
+            // WP-0 (SEC-112-03): noise is applied before ordering and the limit cut, so order and cut follow the noised values and never
+            // reveal the order of the true values.
+            var toPerturb = new List<ComputedBucket>(survivingBuckets);
+            if (mergedOtherBucket != null)
+            {
+                toPerturb.Add(mergedOtherBucket);
+            }
+
+            var (noisyBuckets, consumed, remaining) = await ApplyDifferentialPrivacyNoiseAsync(
+                userSid,
+                toPerturb,
+                resolvedAggregates,
+                metadata,
+                effectiveMinGroupSize,
+                ct).ConfigureAwait(false);
+            survivingBuckets = noisyBuckets.Where(b => !b.IsMergedOther).ToList();
+            mergedOtherBucket = noisyBuckets.FirstOrDefault(b => b.IsMergedOther);
+            noiseApplied = true;
+            epsilonConsumed = consumed;
+            remainingEpsilon = remaining;
+        }
+
         var orderedBuckets = OrderBuckets(survivingBuckets, query.OrderBy, groupByColumns, resolvedAggregates);
         if (mergedOtherBucket != null)
         {
@@ -283,37 +313,21 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             orderedBuckets = orderedBuckets.Take(requestedLimit).ToList();
         }
 
-        bool noiseApplied = false;
-        double? epsilonConsumed = null;
-        double? remainingEpsilon = null;
-
-        if (_analyticsOptions.Privacy.Noise.Enabled)
-        {
-            var (noisyBuckets, consumed, remaining) = await ApplyDifferentialPrivacyNoiseAsync(
-                userSid,
-                orderedBuckets,
-                resolvedAggregates,
-                metadata,
-                effectiveMinGroupSize,
-                ct).ConfigureAwait(false);
-            orderedBuckets = noisyBuckets;
-            noiseApplied = true;
-            epsilonConsumed = consumed;
-            remainingEpsilon = remaining;
-        }
-
         var visibleGroupRows = orderedBuckets.Select(b => b.ToGroupRow()).ToList();
 
         // Differencing protection (#37): Totals are computed strictly over the surviving visible groups.
         var totalsRow = ComputeDifferencingSafeTotals(orderedBuckets, resolvedAggregates, metadata);
 
+        // WP-0 (SEC-112-04): the exact number of suppressed rows can be the exact size of a single group below k, so it is gated by the same
+        // option as the groups count and is never returned next to noised values. The true values stay in the audit entry below.
         int exposedSuppressedGroups = _analyticsOptions.Privacy.ExposeSuppressedGroupsCount ? suppressedGroupsCount : 0;
+        long exposedSuppressedRows = _analyticsOptions.Privacy.ExposeSuppressedGroupsCount && !noiseApplied ? suppressedRowsCount : 0;
         var resultMetadata = new AggregationMetadata(
             MinimumGroupSize: effectiveMinGroupSize,
             Strategy: effectiveStrategy,
             Suppressed: suppressed,
             SuppressedGroupsCount: exposedSuppressedGroups,
-            SuppressedRowsCount: suppressedRowsCount,
+            SuppressedRowsCount: exposedSuppressedRows,
             MergedIntoOther: mergedIntoOther,
             Truncated: truncated,
             NoiseApplied: noiseApplied,
@@ -356,6 +370,29 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
     }
 
     private readonly ConcurrentDictionary<string, double> _fallbackBudgetConsumed = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// WP-0 (SEC-112-03): with noise enabled the client controls the aggregate list, so repeated identical aggregates (independent noise draws that average
+    /// out) and un-noised <c>MIN</c>/<c>MAX</c> values are rejected before any data is read.
+    /// </summary>
+    private static void ValidateAggregatesForNoise(IReadOnlyList<AggregateSelection> aggregates)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var agg in aggregates)
+        {
+            if (agg.Function is AggregateFunction.Min or AggregateFunction.Max)
+            {
+                throw new GatewayInvalidQueryException(
+                    "MIN and MAX aggregates are not available while differential privacy noise is enabled.", "AGGREGATION_ARGUMENT_INVALID");
+            }
+
+            if (!seen.Add($"{agg.Function}:{agg.Column}"))
+            {
+                throw new GatewayInvalidQueryException(
+                    "Repeating an aggregate function over the same column is not available while differential privacy noise is enabled.", "AGGREGATION_ARGUMENT_INVALID");
+            }
+        }
+    }
 
     private void ValidateMeasureBoundsForNoise(IReadOnlyList<AggregateSelection> aggregates, TableMetadata metadata)
     {
@@ -404,22 +441,25 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         double epsilon = _analyticsOptions.Privacy.Noise.Epsilon > 0 ? _analyticsOptions.Privacy.Noise.Epsilon : 1.0;
         double dailyBudget = _analyticsOptions.Privacy.Noise.DailyBudgetEpsilon > 0 ? _analyticsOptions.Privacy.Noise.DailyBudgetEpsilon : 10.0;
 
+        // WP-0 (SEC-112-03): every noised value spends epsilon (sequential composition): one draw per column aggregate plus one for the row count.
+        double charge = epsilon * (aggregates.Count(a => a.Column != null) + 1);
+
         double consumedEpsilon;
         double remainingEpsilon;
         if (_dpEngine != null)
         {
             var perturbRes = await _dpEngine.PerturbAsync(
-                new DifferentialPrivacyPerturbationRequest(userSid.Value, 0.0, Epsilon: epsilon, Sensitivity: 1.0), ct).ConfigureAwait(false);
+                new DifferentialPrivacyPerturbationRequest(userSid.Value, 0.0, Epsilon: charge, Sensitivity: 1.0), ct).ConfigureAwait(false);
             consumedEpsilon = perturbRes.ConsumedEpsilon;
             remainingEpsilon = perturbRes.RemainingEpsilon;
         }
         else
         {
             var dayKey = $"{userSid.Value}:{DateTimeOffset.UtcNow:yyyyMMdd}";
-            double newTotal = _fallbackBudgetConsumed.AddOrUpdate(dayKey, epsilon, (_, prev) => prev + epsilon);
+            double newTotal = _fallbackBudgetConsumed.AddOrUpdate(dayKey, charge, (_, prev) => prev + charge);
             if (newTotal > dailyBudget + 1e-9)
             {
-                _fallbackBudgetConsumed.AddOrUpdate(dayKey, 0.0, (_, prev) => Math.Max(0.0, prev - epsilon));
+                _fallbackBudgetConsumed.AddOrUpdate(dayKey, 0.0, (_, prev) => Math.Max(0.0, prev - charge));
                 throw new PrivacyBudgetExhaustedException(userSid.Value, newTotal, dailyBudget);
             }
             consumedEpsilon = newTotal;

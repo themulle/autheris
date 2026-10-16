@@ -1106,6 +1106,8 @@ Whether the deployment is single- or multi-tenant is a **deployment setting**. I
 | Everybody else | consent path: tables and columns allowed by the caller's active consents | same |
 | No principal, unauthenticated, invalid tenant claim | nothing | nothing |
 
+**Semantic metric catalog.** The in-memory semantic catalog (dbt semantic manifest, `GET /api/extensions/dbt/metrics`, metric queries) is partitioned per tenant. In `Multi` mode a tenant sees only its own partition; in `Single` mode a tenant without its own partition falls back to the legacy partition that principals without tenant claim import into. `GET /api/extensions/dbt/metrics` and `GET /api/v1/analytics/metrics` return the full metric definition (filter template, type parameters, meta) only to `GovernanceAdmin` and `DbtAdmin`; everybody else gets name, type, label, description and unit.
+
 The tenant signal of the tenant administrator view is derived from consent records and is not a hard tenant boundary; a dedicated tenant-owner attribute for tables is a separate topic.
 
 **Start-up diagnostics.** The effective mode is logged at start: a Warning when `Mode` is not configured (single-tenant deployments must set `Single`), an Information entry when it is. At runtime a throttled Warning (once per principal and ten minutes) names the option when a principal that holds `GovernanceAdmin` has no tenant claim in `Multi` mode.
@@ -1121,6 +1123,8 @@ The tenant signal of the tenant administrator view is derived from consent recor
 - `sample_rows(synthetic: true)` needs the administrator view or an active table consent.
 - Search recall is reduced for column-restricted callers.
 - Known limitation: the tenant-scoped administrator sees only the tables on which its tenant holds a consent plus `Gateway:Catalog:SharedTables`.
+- Semantic metrics imported without tenant (legacy partition) are no longer visible to tenants with a tenant claim in `Multi` mode; re-import the manifest with a token of the owning tenant, or set `Mode=Single`.
+- The semantic manifest import (`POST /api/extensions/dbt/semantic-manifest`) writes into the tenant of the caller's token.
 
 ---
 

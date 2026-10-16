@@ -786,6 +786,20 @@ public sealed class AnalyticsQueryExtensions
                 .SetMessage(ex.Message)
                 .Build());
         }
+        catch (AggregationColumnUnavailableException)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode(AggregationColumnUnavailableException.ErrorCodeConst)
+                .SetMessage(AggregationColumnUnavailableException.FixedMessage)
+                .Build());
+        }
+        catch (AggregationRowCapExceededException ex)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode(AggregationRowCapExceededException.ErrorCodeConst)
+                .SetMessage(ex.Message)
+                .Build());
+        }
         catch (GatewayInvalidQueryException ex)
         {
             throw new GraphQLException(ErrorBuilder.New()

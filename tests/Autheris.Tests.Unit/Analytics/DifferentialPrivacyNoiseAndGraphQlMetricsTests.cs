@@ -166,8 +166,9 @@ public sealed class DifferentialPrivacyNoiseAndGraphQlMetricsTests
 
         result.NoiseApplied.ShouldBeTrue();
         result.Metadata.NoiseApplied.ShouldBeTrue();
-        result.Metadata.EpsilonConsumed.ShouldBe(1.5);
-        result.Metadata.RemainingEpsilon.ShouldBe(8.5);
+        // WP-0 (SEC-112-03): two column aggregates (sum, avg) plus the row count are noised, so 3 x 1.5 is charged.
+        result.Metadata.EpsilonConsumed.ShouldBe(4.5);
+        result.Metadata.RemainingEpsilon.ShouldBe(5.5);
         result.Groups.Count.ShouldBe(2);
 
         var eu = result.Groups.Single(g => Equals(g.GroupKey["region"], "EU"));
@@ -224,8 +225,9 @@ public sealed class DifferentialPrivacyNoiseAndGraphQlMetricsTests
         second.Groups[0].Aggregates["sum_amount"].ShouldBe(first.Groups[0].Aggregates["sum_amount"]);
 
         var budget = await dpEngine.GetBudgetAsync("S-1-5-21-DP-CACHED");
-        budget.ConsumedEpsilon.ShouldBe(2.0);
-        budget.RemainingEpsilon.ShouldBe(4.0);
+        // One column aggregate plus the row count: 2 x 2.0, charged once (the second call is a cache hit).
+        budget.ConsumedEpsilon.ShouldBe(4.0);
+        budget.RemainingEpsilon.ShouldBe(2.0);
     }
 
     [Fact]

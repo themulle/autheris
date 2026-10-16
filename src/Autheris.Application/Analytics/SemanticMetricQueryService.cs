@@ -109,12 +109,12 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
                 throw new ArgumentException("Metric name must not be empty.", nameof(request));
             }
 
-            var metric = await _catalogService.GetMetricAsync(rawName.Trim(), ct).ConfigureAwait(false)
+            var metric = await _catalogService.GetMetricAsync(rawName.Trim(), tenantId, ct).ConfigureAwait(false)
                 ?? throw new KeyNotFoundException($"Metric '{rawName}' was not found in the semantic catalog.");
             resolvedMetrics[metric.Name] = metric;
         }
 
-        var allModels = await _catalogService.ListSemanticModelsAsync(ct).ConfigureAwait(false);
+        var allModels = await _catalogService.ListSemanticModelsAsync(tenantId, ct).ConfigureAwait(false);
         DbtSemanticModel? targetModel = null;
         var requiredMeasures = new Dictionary<string, DbtMeasure>(StringComparer.OrdinalIgnoreCase);
         int? metricOrMeasureMinGroupSize = null;
