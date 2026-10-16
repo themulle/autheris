@@ -517,7 +517,7 @@ public static partial class GovernanceEndpoints
                     ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
                     Decision = "DENY",
                     TraceId = context.TraceIdentifier,
-                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason = ex.Message, tenant = tenantId.Value, profileId = id, subject })
+                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason = ex.GetType().Name, tenant = tenantId.Value, profileId = id, subject })
                 }, CancellationToken.None).ConfigureAwait(false);
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             }

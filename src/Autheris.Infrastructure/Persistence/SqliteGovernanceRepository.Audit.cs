@@ -391,11 +391,6 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
                     anchorFailure = ex;
                 }
             }
-
-            if (anchorFailure == null && Volatile.Read(ref _auditChainViolation) != null && ViolationPolicy != AuditChainViolationPolicy.AlertOnly)
-            {
-                anchorFailure = new InvalidOperationException("The audit hash chain is latched as violated; no anchor was written.");
-            }
         }
 
         // M1: the rows are committed, but the Tier-A mutation (consent grant/revoke, manifest apply) is not acknowledged without its anchor.
@@ -440,6 +435,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
 
     private async Task RecordAuditEventsBatchInternalAsync(SqliteConnection conn, IReadOnlyList<AuditLogEntry> batch, CancellationToken ct, SqliteTransaction? existingTx = null)
     {
+        var violationAtStart = Volatile.Read(ref _auditChainViolation); // M1: only a violation latched DURING this write blocks the acknowledgement
         if (batch.Count == 0) return;
 
         SqliteTransaction? ownedTx = null;
@@ -629,8 +625,8 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         // WP-PF-04 / SEC-SC-08: a batch containing a Tier-A event is acknowledged only after its anchor is written. The rows are
         // committed (the chain stays linear and the next batch anchors the tail), but the caller fails closed instead of being acknowledged.
         // Tier-B-only batches (channel processor) never fail on a late anchor; the next batch anchors the tail.
-        // M1: a chain violation latched meanwhile means no anchor was written; a Tier-A event is never acknowledged then (except in the dev AlertOnly policy).
-        if (anchorFailure == null && Volatile.Read(ref _auditChainViolation) != null && ViolationPolicy != AuditChainViolationPolicy.AlertOnly)
+        // M1: a chain violation latched DURING this write means no anchor was written; the Tier-A event is then not acknowledged (a violation latched before admission follows the configured policy: Tier-A is written marked).
+        if (anchorFailure == null && violationAtStart == null && Volatile.Read(ref _auditChainViolation) != null && ViolationPolicy != AuditChainViolationPolicy.AlertOnly)
         {
             anchorFailure = new InvalidOperationException("The audit hash chain is latched as violated; no anchor was written.");
         }
