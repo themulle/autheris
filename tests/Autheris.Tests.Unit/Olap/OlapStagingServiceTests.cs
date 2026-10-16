@@ -2,6 +2,7 @@ namespace Autheris.Tests.Unit.Olap;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -46,7 +47,7 @@ public sealed class OlapStagingServiceTests
         ICrossDomainAccessResolver Resolver,
         IAutherisConnectorRegistry Registry);
 
-    private static Fixture Create(TableAccessDecision decision)
+    private static Fixture Create(TableAccessDecision decision, Microsoft.Extensions.Logging.ILogger<OlapStagingService>? logger = null)
     {
         var meta = Substitute.For<ITableMetadataRepository>();
         meta.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(Meta);
@@ -64,7 +65,7 @@ public sealed class OlapStagingServiceTests
             DuckDbOlap = new DuckDbOlapOptions { Enabled = true }
         });
         var sut = new OlapStagingService(
-            engine, meta, registry, resolver, Substitute.For<IColumnMaskingProvider>(), options, audit, NullLogger<OlapStagingService>.Instance,
+            engine, meta, registry, resolver, Substitute.For<IColumnMaskingProvider>(), options, audit, logger ?? NullLogger<OlapStagingService>.Instance,
             new Autheris.Application.Federation.FederationGate(options), TrinoSqlEngine.FastSqlEngine.Default, new OlapRequestLimiter(options));
         return new Fixture(sut, audit, engine, resolver, registry);
     }
@@ -148,5 +149,22 @@ public sealed class OlapStagingServiceTests
         outcome.StatusCode.ShouldBe(StatusCodes.Status503ServiceUnavailable);
         outcome.Result.ShouldBeNull();
         await f.Engine.DidNotReceiveWithAnyArgs().ExecuteOlapQueryAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task UnexpectedFailureQuotingAValue_IsNotLoggedAboveDebug_WithTheTypeAndCode()
+    {
+        // SEC-FED-DELTA-01: exception text can quote staged data values.
+        const string sentinel = "SENTINEL-customer-4711-secret-value";
+        var logs = new List<(Microsoft.Extensions.Logging.LogLevel Level, string Message)>();
+        var f = Create(TableAccessDecision.Denied(Orders, "x"), new Autheris.Tests.Unit.VirtualFilters.Federation.ListLogger<OlapStagingService>(logs));
+        f.Resolver.ResolveAccessAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns<TableAccessDecision>(_ => throw new InvalidOperationException($"ORA-00001: duplicate value '{sentinel}'"));
+
+        var outcome = await f.Sut.ExecuteAsync(User(), Caller(), Command("sales.public.orders"), isDevelopment: false, "trace-1", CancellationToken.None);
+
+        outcome.StatusCode.ShouldBeGreaterThanOrEqualTo(400);
+        logs.Where(l => l.Level >= Microsoft.Extensions.Logging.LogLevel.Information).ShouldAllBe(l => !l.Message.Contains(sentinel));
+        logs.ShouldContain(l => l.Level >= Microsoft.Extensions.Logging.LogLevel.Warning && l.Message.Contains(nameof(InvalidOperationException)));
     }
 }

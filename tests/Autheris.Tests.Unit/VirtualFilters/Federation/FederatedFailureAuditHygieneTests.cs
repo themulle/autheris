@@ -109,4 +109,23 @@ public sealed class FederatedFailureAuditHygieneTests
         logs.Where(l => l.Level >= LogLevel.Information).ShouldAllBe(l => !l.Message.Contains(Sentinel));
         logs.ShouldContain(l => l.Level >= LogLevel.Warning && l.Message.Contains(exceptionType.Name) && l.Message.Contains("trace-b0"));
     }
+
+    [Theory]
+    [InlineData(500)]
+    [InlineData(400)]
+    public async Task SqlErrorResponse_LogsOnlyTypeAndCodeAboveDebug(int status)
+    {
+        var logs = new List<(LogLevel Level, string Message)>();
+        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        context.Response.Body = new System.IO.MemoryStream();
+        context.TraceIdentifier = "trace-b0";
+        var exception = new TimeoutException($"timeout near value '{Sentinel}'");
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(exception, out var mapped).ShouldBeTrue();
+
+        await Autheris.Api.Endpoints.SqlErrorResponse.WriteAsync(
+            context, exception, mapped with { Status = status }, new ListLogger<object>(logs), "Test", System.Threading.CancellationToken.None);
+
+        logs.Where(l => l.Level >= LogLevel.Information).ShouldAllBe(l => !l.Message.Contains(Sentinel));
+        logs.ShouldContain(l => l.Level >= LogLevel.Warning && l.Message.Contains(nameof(TimeoutException)) && l.Message.Contains("trace-b0"));
+    }
 }

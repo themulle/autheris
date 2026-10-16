@@ -1,5 +1,6 @@
 namespace Autheris.Application.Sql.Services;
 
+using Autheris.Application.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -188,7 +189,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         }
         catch (SecurityException secEx)
         {
-            _logger?.LogWarning(secEx, "WebSQL statement rejected by SQL analyzer.");
+            _logger?.Warning(secEx, "WebSQL statement rejected by SQL analyzer.");
             throw new WebSqlPolicyException("The SQL statement uses a construct that is not permitted by the WebSQL security policy.", secEx);
         }
         catch (OperationCanceledException timeoutEx) when (!ct.IsCancellationRequested && timeoutEx.InnerException is TimeoutException)
@@ -644,7 +645,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         }
         catch (Exception ex) when (ex is SecurityException or TrinoSqlEngine.Ast.Builder.AstBuildException)
         {
-            _logger?.LogWarning(ex, "WebSQL statement rejected by the SQL compiler.");
+            _logger?.Warning(ex, "WebSQL statement rejected by the SQL compiler.");
             throw;
         }
 

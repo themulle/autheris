@@ -1,5 +1,6 @@
 namespace Autheris.Application.Olap;
 
+using Autheris.Application.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -269,7 +270,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogError(ex, "Federated staging audit write failed for table {Table}; failing closed.", req.Metadata.Identifier);
+                _logger.Error(ex, "Federated staging audit write failed for table {Table}; failing closed.", req.Metadata.Identifier);
                 throw new InvalidOperationException($"Audit logging failed for table '{req.Metadata.Identifier}'; federated staging aborted.", ex);
             }
 

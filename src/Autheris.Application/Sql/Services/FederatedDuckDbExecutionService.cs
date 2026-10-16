@@ -1,5 +1,6 @@
 namespace Autheris.Application.Sql.Services;
 
+using Autheris.Application.Common;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -552,7 +553,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         }
         catch (Exception auditEx)
         {
-            _logger?.LogError(auditEx, "Failed to record start audit for cross-source query.");
+            _logger?.Error(auditEx, "Failed to record start audit for cross-source query.");
             throw new InvalidOperationException("Audit logging failure during cross-source query execution.", auditEx);
         }
     }
@@ -646,7 +647,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         catch (Exception auditEx)
         {
             // Do not mask the original failure, but never lose a denial silently (SEC-22).
-            _logger?.LogError(auditEx, "Failed to record the failure audit of a cross-source query; the original error is rethrown.");
+            _logger?.Error(auditEx, "Failed to record the failure audit of a cross-source query; the original error is rethrown.");
         }
     }
 

@@ -1,5 +1,6 @@
 namespace Autheris.Application.Sql.Services;
 
+using Autheris.Application.Common;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -253,7 +254,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         if (session.ExecutionTask.IsFaulted)
         {
             var ex = session.ExecutionTask.Exception?.InnerException ?? session.ExecutionTask.Exception;
-            _logger?.LogError(ex, "WebSQL async execution faulted for statement {StatementId}", session.StatementId);
+            _logger?.Error(ex, "WebSQL async execution faulted for statement {StatementId}", session.StatementId);
             return new StatementExecutionStatus(session.StatementId, "FAILED", null, null, null, SanitizeErrorMessage(ex), elapsedMillis);
         }
 
