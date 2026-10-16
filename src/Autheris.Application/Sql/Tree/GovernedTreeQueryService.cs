@@ -263,7 +263,9 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             resolved[table] = access;
         }
 
-        // 2. One SQL data source, provider dialect == catalog dialect.
+        // 2. One SQL data source, provider dialect == catalog dialect. The source-name rule is shared with the schema
+        //    (RelationExecutability.IsSameExecutionSource); the type and dialect checks stay separate here so that each
+        //    failure keeps its own exception and message. Together they are never more permissive than the schema predicate.
         var rootAccess = resolved[root.Table];
         var sourceName = rootAccess.Metadata.Table.SourceName;
         foreach (var access in resolved.Values)

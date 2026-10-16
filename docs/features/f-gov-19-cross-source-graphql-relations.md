@@ -38,7 +38,7 @@ Relations between tables of different data sources are **not part of the schema*
 
 ## 3. Observability
 
-When a schema build omits relations, one Information line is logged per real rebuild: `GraphQL catalog schema: {Count} relation(s) between different data sources are not exposed; ...`. The line carries the count only, no table, relation or source names.
+When a schema build omits relations, one Information line is logged per real rebuild: `GraphQL catalog schema: {Count} relation(s) between different data sources or dialects are not exposed; ...`. The line carries the count only, no table, relation or source names.
 
 ---
 

@@ -308,7 +308,8 @@ public sealed partial class CatalogSchemaModel
                     }
                     if (!RelationExecutability.IsSameExecutionSource(other.Metadata, meta))
                     {
-                        // Already counted by the forward loop of the parent table.
+                        // Already counted by the forward loop of the parent table; a parent that is not in tableBuilders
+                        // (inactive or not SQL) emits no relation at all, so nothing is lost by not counting here.
                         continue;
                     }
 
@@ -352,7 +353,7 @@ public sealed partial class CatalogSchemaModel
         {
             // Counts only: the line is emitted on every real rebuild and must not carry catalog names.
             logger?.LogInformation(
-                "GraphQL catalog schema: {Count} relation(s) between different data sources are not exposed; cross-source GraphQL relations are not delivered yet.",
+                "GraphQL catalog schema: {Count} relation(s) between different data sources or dialects are not exposed; cross-source GraphQL relations are not delivered yet.",
                 omittedRelations);
         }
 
