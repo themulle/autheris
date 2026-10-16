@@ -129,6 +129,8 @@ Behavioural contracts:
 
 ### 4.1 Federation gate, options and startup validation (WP-FED-01)
 
+> **Note (2026-10-16):** the gate type, `AllowedTransports` startup validation and the removal of the dead `CrossSourceOptions` (`MaxMemory`, `MaxTempDirectorySize`) are delivered early by the security fix [`PLAN-SEC-OLAP-01`](2026-10-16-plan-sec-olap-federation-gate.md) (priority 1.2); WP-FED-01 builds on it and must not duplicate it.
+
 - `CrossSourceOptions.AllowedTransports` stays nullable; effective list = configured list, else `FederationTransports.DefaultAllowed(...)`: `WebSql, Trino, Rest, Mcp, ArrowExport, FlightSql, SqlEndpoints, GraphQl, Olap`, plus `AsyncJob` only when `CrossSource.ProtectedStagingEnabled` is true (set by WP-04 once at-rest protection is active; default true after WP-04 lands, so the feature flag exists only to sequence delivery and is removed in Phase 6 if redundant).
 - `IValidateOptions<CrossSourceOptions>`: unknown transport names abort startup; empty list is allowed (deny all); `MaxBatchSize`, `MaxBatches`, `MaxNestedRows`, `MaxCrossSourceFilterKeys` ranges; removes `MaxMemory`, `MaxTempDirectorySize` (PRD D-11).
 - `FederationGate` is registered as a singleton; `FederatedDuckDbExecutionService.ExecuteFederatedInternalAsync` and `ValidateAsync` (both, closing the Flight `/info` gap) and the GraphQL decorator call it. Because `FederatedDuckDbExecutionService` is also owned by WP-03, WP-01 only creates the gate and options; WP-03 wires it.
@@ -155,6 +157,8 @@ Behavioural contracts:
 
 ### 4.5 OLAP facade (WP-FED-05)
 
+> **Note (2026-10-16):** the interim OLAP gate and masked-column guardrails come first in [`PLAN-SEC-OLAP-01`](2026-10-16-plan-sec-olap-federation-gate.md); WP-FED-05 replaces that interim path with the facade.
+
 - `POST /api/v1/olap/query {sql, tableNames[], limit}` keeps its route and body. Handler builds a `GovernedSqlQueryRequest(sql, Transport: FederationTransports.Olap, RowLimit: limit)` and calls `IGovernedSqlExecutionService`; the SQL dialect is the gateway's SQL (same as WebSQL), not raw DuckDB SQL. `tableNames` is ignored with response header `Warning: 299 - "tableNames is deprecated"`. Single-source SQL runs single-source; multi-source routes to the federation (gate applies).
 - `OlapStagingService` and the client-SQL validation in `DuckDbOlapEngine.ValidateUserSql` are no longer reachable from the endpoint; they are kept only if still referenced by the federated executor (Phase 4 removes dead code, Phase 5 reviews). The endpoint now requires authorization (`RequireAuthorization()`), removing the inline identity check except under the Quickstart profile.
 
@@ -176,6 +180,8 @@ Behavioural contracts:
 - Catalog ingestion upserts must not overwrite the flag (the flag is stored on the relation row written by admin, not by discovery; discovery upsert keeps the existing value).
 
 ### 4.8 GraphQL splitter and schema gating (WP-FED-08)
+
+> **Note (2026-10-16):** omitting non-executable cross-source relation fields is delivered early by [`PLAN-BUG-75-GATING`](2026-10-16-plan-bug-75-graphql-relation-schema-gating.md) (`RelationExecutability.IsSameExecutionSource`, compares source type and `SourceName`, not `Domain`); WP-FED-08 extends that predicate with `AllowCrossDataSource` and the federation gate.
 
 - **Schema gating (`CatalogSchemaModel`)**: `AddForward/Reverse` relation fields are emitted only if `!IsCrossDataSource` **or** (`AllowCrossDataSource` and `IFederationGate.IsEnabledFor("GraphQL")`). The schema cache key includes the federation state. This removes the "advertised but broken" behaviour (AC-7). MCP `search_catalog`/`describe_dataset` read the same predicate through a shared `RelationExecutability` helper (placed in `Application/Federation`, owned by WP-08; MCP files consume it).
 - **Splitter (`FederatedTreeQueryService.ExecuteAsync`)**:
