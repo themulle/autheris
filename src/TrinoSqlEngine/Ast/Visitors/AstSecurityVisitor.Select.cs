@@ -118,13 +118,15 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     public override SqlNode VisitQuerySpecification(QuerySpecification node)
     {
+        // The table and derived-source lists are computed once per visit and consumed by every guard below, before the recursion into
+        // the children: nested specifications refill the same fields, so nothing may read them after base.VisitQuerySpecification.
+        PrepareSpecSources(node);
+
         // Fail-Closed Predicate Guard: Check WHERE, HAVING, and JOIN conditions for masked columns
         if (_options.RejectMaskedColumnsInPredicates && node.From != null)
         {
-            var tables = new List<(string TableName, string? Alias)>();
-            CollectTableSources(node.From, tables);
-            var derived = new List<(string SourceName, string? Alias, HashSet<string> MaskedColumns)>();
-            CollectDerivedMaskedSources(node.From, derived);
+            var tables = _specTables;
+            var derived = _specDerived;
 
             if (node.Where != null)
             {
@@ -148,10 +150,20 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             CheckDerivedJoinConditions(node.From, derived);
         }
 
-        EnsureNoMaskedColumnsInAggregatesAndGrouping(node);
-        EnsureNoWholeRowReferencesInProjections(node);
+        // The sources are not read after this call: base.VisitQuerySpecification re-enters this method for nested specifications.
+        bool maskedScope = EnsureProjectionMaskGuards(node);
+        if (!maskedScope)
+            return base.VisitQuerySpecification(node);
 
-        return base.VisitQuerySpecification(node);
+        _maskedScopeDepth++;
+        try
+        {
+            return base.VisitQuerySpecification(node);
+        }
+        finally
+        {
+            _maskedScopeDepth--;
+        }
     }
 
     private static Expression ClampLimit(Expression? existingLimit, long maxRows)
