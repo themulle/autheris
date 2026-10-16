@@ -85,6 +85,13 @@ The audit subsystem decouples in-memory high-throughput hash chaining from asymm
 
 ---
 
+### 11. Anchor Acknowledgement on the In-Transaction Path and Manifest Audit
+
+- The in-transaction audit path (consent grant, revoke, renewal, `ReplaceConsentsAsync`) is tied to the anchor like the batch path: after the commit, `OnTransactionCommitted` raises `AuditUnavailableException` when the anchor cannot be written or a chain violation is latched (outside the dev `AlertOnly` policy). The rows stay committed and the chain stays linear; the caller is not acknowledged. The batch path likewise never acknowledges a Tier-A batch once a violation is latched.
+- `ReplaceConsentsAsync(revoke, create, actor, reason, auditEntries)` writes the caller's audit entries (the manifest `GITOPS_CONSENT_APPLY` / `APPLIED` entries) in the same transaction, so a committed manifest always has its record and a later failure of the epoch invalidation cannot lose it.
+- Rollbacks use `CancellationToken.None`, so `OnTransactionRolledBack` always restores the in-memory chain state.
+- `AuditGroupCommitSink`: when a batch fails with anything other than `AuditUnavailableException`, its entries are retried one by one so a single bad entry fails only its own caller; if the drain loop dies, pending and later callers fail immediately with `AuditUnavailableException`.
+
 ## Paged Audit Listing (`GET /api/v1/governance/audit`)
 
 Keyset-paged, newest-first listing of audit rows by chain sequence.
