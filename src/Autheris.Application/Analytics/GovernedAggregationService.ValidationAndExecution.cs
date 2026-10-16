@@ -221,6 +221,9 @@ public sealed partial class GovernedAggregationService
         return result;
     }
 
+    [System.Text.RegularExpressions.GeneratedRegex(@"@[A-Za-z_][A-Za-z0-9_]*", System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    private static partial System.Text.RegularExpressions.Regex ParameterPlaceholderRegex();
+
     private static void ValidateWhereClause(
         TableFilterClause? where,
         TableMetadata metadata,
@@ -231,14 +234,29 @@ public sealed partial class GovernedAggregationService
             return;
         }
 
-        // WP-0 (SEC-112-01): the referenced-column set is a union, never a replacement. A clause that arrives with a partial set (for example
-        // a metric filter combined with a request predicate) is still checked against every identifier of its text. Parameterised clauses carry
-        // bound parameter names in the text (@gq1), so the text heuristic is only a second line for clauses without parameters or without a set.
+        // WP-0 (SEC-112-01): the referenced-column set is a union, never a replacement. The text of the predicate is always scanned as well
+        // (defence in depth), so a clause that arrives with a partial set (for example a metric filter combined with a request predicate)
+        // is checked against every identifier of its text. Placeholders of bound parameters (@gq1) are not identifiers and are removed first; an @name without a bound parameter is still checked.
+        // A clause that carries both a column set and bound parameters is generated text: there only identifiers that resolve to a table
+        // column are added, so SQL keywords and function names in the generated text are not mistaken for unknown columns.
         var referenced = new HashSet<string>(where.ReferencedColumns ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-        if ((referenced.Count == 0 || where.Parameters.Count == 0) && !string.IsNullOrWhiteSpace(where.SqlPredicate))
+        bool hadExplicitSet = referenced.Count > 0;
+        if (!string.IsNullOrWhiteSpace(where.SqlPredicate))
         {
-            foreach (var col in DataApiFilterTranslator.ExtractReferencedColumns(where.SqlPredicate, metadata))
+            // Only placeholders that name a bound parameter are removed; any other @name keeps its identifier and is checked.
+            var parameters = where.Parameters;
+            var text = parameters.Count == 0
+                ? where.SqlPredicate
+                : ParameterPlaceholderRegex().Replace(
+                    where.SqlPredicate,
+                    m => parameters.ContainsKey(m.Value[1..]) || parameters.ContainsKey(m.Value) ? " " : m.Value);
+            foreach (var col in DataApiFilterTranslator.ExtractReferencedColumns(text, metadata))
             {
+                if (hadExplicitSet && where.Parameters.Count > 0 && metadata.GetColumn(col) == null)
+                {
+                    continue;
+                }
+
                 referenced.Add(col);
             }
         }

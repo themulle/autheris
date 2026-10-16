@@ -272,9 +272,8 @@ public sealed partial class SemanticMetricQueryService
         {
             sqlParts.Add(requestWhere.SqlPredicate);
             var requestClause = requestWhere;
-            trinoParts.Add(resolve => requestClause.TrinoSqlFactory != null
-                ? requestClause.GetTrinoPredicate(resolve)
-                : requestClause.SqlPredicate);
+            // The Trino text is always composed through GetTrinoPredicate (which fails closed without a Trino factory), never from SqlPredicate.
+            trinoParts.Add(resolve => requestClause.GetTrinoPredicate(resolve));
 
             foreach (var c in requestWhere.ReferencedColumns)
             {
@@ -322,7 +321,9 @@ public sealed partial class SemanticMetricQueryService
             return null;
         }
 
-        if (sqlParts.Count == 1 && requestWhere != null)
+        // The request clause is returned as is only when it is the sole contributor; a lone metric filter must never be dropped.
+        bool requestContributed = requestWhere != null && !string.IsNullOrWhiteSpace(requestWhere.SqlPredicate);
+        if (sqlParts.Count == 1 && requestContributed)
         {
             return requestWhere;
         }

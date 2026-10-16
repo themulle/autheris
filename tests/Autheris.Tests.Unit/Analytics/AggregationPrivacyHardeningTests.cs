@@ -9,6 +9,9 @@ using System.Threading.Tasks;
 using Autheris.Application.Analytics;
 using Autheris.Application.Data.Services;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Policy;
+using Autheris.Domain.Security;
+using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -391,7 +394,12 @@ public sealed class AggregationPrivacyHardeningTests
         ex.Message.ShouldBe("The requested column is not available for aggregation.");
         ex.Message.ShouldNotContain(column);
         executor.Calls.ShouldBe(0);
-        audit.Entries.ShouldAllBe(e => e.DetailsJson == null || !e.DetailsJson.Contains(column + "'"));
+        // The audit reason is the same fixed text for unknown and denied columns and carries no column name.
+        var denial = audit.Entries.Last(e => e.DetailsJson != null);
+        using var details = System.Text.Json.JsonDocument.Parse(denial.DetailsJson!);
+        var reasons = details.RootElement.GetProperty("reasons").EnumerateArray().Select(r => r.GetString()).ToList();
+        reasons.ShouldBe(["The requested column is not available for aggregation."]);
+        reasons.ShouldAllBe(r => !r!.Contains(column));
     }
 
     // ---------------------------------------------------------------- W0-5 / SEC-112-04 / T-S-06
@@ -651,5 +659,325 @@ public sealed class AggregationPrivacyHardeningTests
             PrincipalWithRole("Analyst", tenant: "tenant-a"),
             new MetricQueryRequest(["only_a"])));
         ownerFailure.ShouldNotBeOfType<KeyNotFoundException>();
+    }
+
+    // ---------------------------------------------------------------- review fixes (W0-4 message, W0-6 noise, W0-2 union, W0-3 gateway branch)
+
+    private static ClaimsPrincipal AnalystPrincipal => CreatePrincipal();
+
+    private static async Task<(SemanticMetricQueryService Service, CapturingAuditLogRepository Audit)> CreateMetricServiceAsync(
+        bool tablePresent,
+        IUnifiedPolicyDecisionPoint? pdp = null)
+    {
+        var catalog = new Autheris.Application.Dbt.Services.InMemorySemanticCatalog();
+        var model = new DbtSemanticModel(
+            "orders_model",
+            "orders",
+            "sales.public.orders",
+            [],
+            [new DbtMeasure("total_revenue", "sum", "amount", null)],
+            []);
+        var metric = new DbtMetric("mrr", "simple", null, null, null, "{ \"measure\": \"total_revenue\" }", [], ["total_revenue"],
+            new Dictionary<string, string> { ["model"] = "orders_model" });
+        await catalog.RegisterManifestAsync(new DbtSemanticManifest([model], [metric], "1.0"), new TenantId("tenant-a"));
+
+        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(tablePresent ? [CreateOrdersMetadata()] : []);
+        if (tablePresent)
+        {
+            metaRepo.GetTableMetadataAsync(OrdersTableId, Arg.Any<CancellationToken>()).Returns(CreateOrdersMetadata());
+        }
+
+        var audit = new CapturingAuditLogRepository();
+        var service = new SemanticMetricQueryService(
+            catalog,
+            Substitute.For<IGovernedAggregationService>(),
+            metaRepo,
+            audit,
+            pdp: pdp);
+        return (service, audit);
+    }
+
+    [Fact]
+    public async Task QueryMetricsAsync_DeniedTableAndMissingTable_AreIndistinguishableAndNameNothing()
+    {
+        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
+        pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
+            .Returns(TableAccessDecision.Denied(OrdersTableId, "secret-denial-reason"));
+
+        var (denied, deniedAudit) = await CreateMetricServiceAsync(tablePresent: true, pdp);
+        var (missing, missingAudit) = await CreateMetricServiceAsync(tablePresent: false);
+
+        var deniedEx = await Should.ThrowAsync<GatewaySecurityException>(() => denied.QueryMetricsAsync(AnalystPrincipal, new MetricQueryRequest(["mrr"])));
+        var missingEx = await Should.ThrowAsync<GatewaySecurityException>(() => missing.QueryMetricsAsync(AnalystPrincipal, new MetricQueryRequest(["mrr"])));
+
+        deniedEx.GetType().ShouldBe(missingEx.GetType());
+        deniedEx.ErrorCode.ShouldBe(missingEx.ErrorCode);
+        deniedEx.ErrorCode.ShouldBe("FORBIDDEN");
+        deniedEx.Message.ShouldBe(missingEx.Message);
+        deniedEx.Message.ShouldBe("Access denied.");
+        foreach (var text in new[] { deniedEx.Message, missingEx.Message })
+        {
+            text.ShouldNotContain("mrr");
+            text.ShouldNotContain("orders");
+            text.ShouldNotContain("secret-denial-reason");
+        }
+
+        // The true reasons stay in the audit trail.
+        deniedAudit.Entries.ShouldContain(e => e.DetailsJson != null && e.DetailsJson.Contains("secret-denial-reason"));
+        missingAudit.Entries.ShouldContain(e => e.DetailsJson != null && e.DetailsJson.Contains("not found"));
+    }
+
+    [Fact]
+    public async Task ExecuteAggregationAsync_DeniedTable_MessageHasNeitherTableNameNorReasons_AuditKeepsThem()
+    {
+        var (service, _, audit) = CreateService(DepartmentRows(("A", 3, 1m)), new AnalyticsOptions());
+
+        var ex = await Should.ThrowAsync<GatewayForbiddenException>(() => service.ExecuteAggregationAsync(
+            CreatePrincipal(),
+            new AggregationQuery(
+                OrdersTableId,
+                GroupBy: ["department"],
+                PreEvaluatedDecision: TableAccessDecision.Denied(OrdersTableId, "secret-denial-reason"))));
+
+        ex.Message.ShouldBe("Access denied.");
+        ex.Message.ShouldNotContain("orders");
+        ex.Message.ShouldNotContain("secret-denial-reason");
+        audit.Entries.ShouldContain(e => e.DetailsJson != null && e.DetailsJson.Contains("secret-denial-reason"));
+    }
+
+    [Fact]
+    public async Task ExecuteAggregationAsync_NoiseOnWithMergeIntoOther_KeepsNullForCountDistinctAndAvgOnTheMergedRow()
+    {
+        var options = NoiseOptions();
+        options.Privacy.DefaultMinGroupSize = 3;
+        options.Privacy.SuppressionMode = SmallGroupStrategy.MergeIntoOther;
+
+        var rows = DepartmentRows(("Big", 4, 100m), ("S1", 1, 1m), ("S2", 2, 50m));
+        var (service, _, _) = CreateService(rows, options);
+
+        var result = await service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
+            OrdersTableId,
+            GroupBy: ["department"],
+            Aggregates:
+            [
+                new AggregateSelection(AggregateFunction.Count, null, "cnt"),
+                new AggregateSelection(AggregateFunction.Avg, "amount", "avg_amount"),
+                new AggregateSelection(AggregateFunction.CountDistinct, "amount", "distinct_amount")
+            ],
+            PreEvaluatedDecision: CreateDecision()));
+
+        result.NoiseApplied.ShouldBeTrue();
+        result.MergedIntoOther.ShouldBeTrue();
+        var other = result.Groups.Single(g => g.IsMergedOther);
+        other.Aggregates["avg_amount"].ShouldBeNull();
+        other.Aggregates["distinct_amount"].ShouldBeNull();
+        result.Groups.Single(g => !g.IsMergedOther).Aggregates["avg_amount"].ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void CombineMetricFiltersWithWhere_RequestClauseWithoutTrinoBuilder_FailsClosedInsteadOfUsingSqlPredicate()
+    {
+        var metric = new DbtMetric("m", "simple", null, null, "status = 'open'", null, [], [], new Dictionary<string, string>());
+        var request = new TableFilterClause("amount > 5", new Dictionary<string, object?>(), ["amount"]);
+
+        var combined = SemanticMetricQueryService.CombineMetricFiltersWithWhere([metric], request, CreateOrdersMetadata());
+
+        combined.ShouldNotBeNull();
+        Should.Throw<NotSupportedException>(() => combined!.GetTrinoPredicate());
+    }
+
+    [Fact]
+    public void CombineMetricFiltersWithWhere_BlankRequestClauseAndOneMetricFilter_KeepsTheMetricFilter()
+    {
+        var metric = new DbtMetric("m", "simple", null, null, "status = 'open'", null, [], [], new Dictionary<string, string>());
+        var request = new TableFilterClause(" ", new Dictionary<string, object?>(), []);
+
+        var combined = SemanticMetricQueryService.CombineMetricFiltersWithWhere([metric], request, CreateOrdersMetadata());
+
+        combined.ShouldNotBeNull();
+        combined!.SqlPredicate.ShouldContain("status = 'open'");
+        combined.ReferencedColumns.ShouldContain("status");
+        combined.GetTrinoPredicate().ShouldContain("status = 'open'");
+    }
+
+    [Fact]
+    public async Task ExecuteAggregationAsync_ClauseWithSetAndParameters_StillChecksTheTextForDeniedColumns()
+    {
+        var (service, executor, _) = CreateService(DepartmentRows(("A", 3, 1m)), new AnalyticsOptions());
+        var where = new TableFilterClause("status = @gq1 AND denied_col = 'y'", new Dictionary<string, object?> { ["gq1"] = "x" }, ["status"])
+        {
+            TrinoSqlFactory = _ => "status = @gq1 AND denied_col = 'y'"
+        };
+
+        await Should.ThrowAsync<AggregationColumnUnavailableException>(() => service.ExecuteAggregationAsync(
+            CreatePrincipal(),
+            new AggregationQuery(OrdersTableId, GroupBy: ["department"], Where: where, PreEvaluatedDecision: CreateDecision())));
+        executor.Calls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task ExecuteAggregationAsync_ParameterisedClause_PlaceholdersAreNotMistakenForColumns()
+    {
+        var (service, _, _) = CreateService(DepartmentRows(("A", 3, 1m)), new AnalyticsOptions());
+        var where = new TableFilterClause("status = @gq1", new Dictionary<string, object?> { ["gq1"] = "x" }, ["status"])
+        {
+            TrinoSqlFactory = _ => "status = @gq1"
+        };
+
+        // The placeholder name gq1 is not a column; the query is accepted (no AGGREGATION_COLUMN_UNAVAILABLE).
+        await Should.NotThrowAsync(() => service.ExecuteAggregationAsync(
+            CreatePrincipal(),
+            new AggregationQuery(OrdersTableId, GroupBy: ["department"], Where: where, PreEvaluatedDecision: CreateDecision())));
+    }
+
+    [Fact]
+    public async Task ExecuteAggregationAsync_AtNameWithoutBoundParameter_IsStillCheckedAsAColumn()
+    {
+        var (service, executor, _) = CreateService(DepartmentRows(("A", 3, 1m)), new AnalyticsOptions());
+        var where = new TableFilterClause("@denied_col = 'y'", new Dictionary<string, object?>(), [])
+        {
+            TrinoSqlFactory = _ => "@denied_col = 'y'"
+        };
+
+        // Only placeholders of bound parameters are removed before the text scan; an unbound @name keeps its identifier.
+        await Should.ThrowAsync<AggregationColumnUnavailableException>(() => service.ExecuteAggregationAsync(
+            CreatePrincipal(),
+            new AggregationQuery(OrdersTableId, GroupBy: ["department"], Where: where, PreEvaluatedDecision: CreateDecision())));
+        executor.Calls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task ExecuteAggregationAsync_GatewayExecutionBranchReturningExactlyTheRowCap_FailsClosed()
+    {
+        var rows = new List<IReadOnlyDictionary<string, object?>>(100_000);
+        var row = new Dictionary<string, object?> { ["department"] = "A", ["amount"] = 1m };
+        for (int i = 0; i < 100_000; i++)
+        {
+            rows.Add(row);
+        }
+
+        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        metaRepo.GetTableMetadataAsync(OrdersTableId, Arg.Any<CancellationToken>()).Returns(CreateOrdersMetadata());
+        var gateway = Substitute.For<IGatewayExecutionService>();
+        gateway.ExecuteTableQueryAsync(Arg.Any<ClaimsPrincipal?>(), OrdersTableId, Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
+            .Returns((rows, CreateDecision()));
+        var service = new GovernedAggregationService(
+            metaRepo,
+            new CapturingAuditLogRepository(),
+            gatewayExecutionService: gateway,
+            analyticsOptions: Options.Create(new AnalyticsOptions()),
+            dpEngine: null);
+
+        var ex = await Should.ThrowAsync<GatewaySecurityException>(() => service.ExecuteAggregationAsync(
+            CreatePrincipal(),
+            new AggregationQuery(OrdersTableId, GroupBy: ["department"], PreEvaluatedDecision: CreateDecision())));
+
+        ex.ErrorCode.ShouldBe("AGGREGATION_ROW_CAP_EXCEEDED");
+    }
+
+    [Fact]
+    public async Task ExecuteAggregationAsync_PreAggregatedMergeIntoOther_NullsMinMaxCountDistinctAndAvg()
+    {
+        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        metaRepo.GetTableMetadataAsync(OrdersTableId, Arg.Any<CancellationToken>()).Returns(CreateOrdersMetadata());
+        var sql = Substitute.For<IGovernedSqlExecutionService>();
+        IReadOnlyDictionary<string, object?> SqlRow(string dept, long n, decimal min, decimal max) => new Dictionary<string, object?>
+        {
+            ["department"] = dept,
+            [GovernedTableReadPlanner.GroupCountColumnAlias] = n,
+            ["cnt"] = n,
+            ["sum_amount"] = min + max,
+            ["avg_amount"] = (min + max) / 2,
+            ["min_amount"] = min,
+            ["max_amount"] = max,
+            ["distinct_amount"] = n
+        };
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> sqlRows = [SqlRow("Big", 5, 100m, 200m), SqlRow("S1", 1, 1m, 1m), SqlRow("S2", 2, 5000m, 9999m)];
+        sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(new GovernedSqlResult("select", [], sqlRows, sqlRows.Count, 1));
+        var service = new GovernedAggregationService(
+            metaRepo,
+            new CapturingAuditLogRepository(),
+            sqlExecutionService: sql,
+            analyticsOptions: Options.Create(new AnalyticsOptions
+            {
+                Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = 3, SuppressionMode = SmallGroupStrategy.MergeIntoOther }
+            }),
+            dpEngine: null);
+
+        var result = await service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
+            OrdersTableId,
+            GroupBy: ["department"],
+            Aggregates:
+            [
+                new AggregateSelection(AggregateFunction.Count, null, "cnt"),
+                new AggregateSelection(AggregateFunction.Sum, "amount", "sum_amount"),
+                new AggregateSelection(AggregateFunction.Avg, "amount", "avg_amount"),
+                new AggregateSelection(AggregateFunction.Min, "amount", "min_amount"),
+                new AggregateSelection(AggregateFunction.Max, "amount", "max_amount"),
+                new AggregateSelection(AggregateFunction.CountDistinct, "amount", "distinct_amount")
+            ],
+            PreEvaluatedDecision: CreateDecision()));
+
+        result.MergedIntoOther.ShouldBeTrue();
+        var other = result.Groups.Single(g => g.IsMergedOther);
+        other.Aggregates["cnt"].ShouldBe(3L);
+        other.Aggregates["sum_amount"].ShouldBe(15001m);
+        other.Aggregates["avg_amount"].ShouldBeNull();
+        other.Aggregates["min_amount"].ShouldBeNull();
+        other.Aggregates["max_amount"].ShouldBeNull();
+        other.Aggregates["distinct_amount"].ShouldBeNull();
+        result.Totals!.Aggregates["min_amount"].ShouldBeNull();
+        result.Totals.Aggregates["max_amount"].ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteAggregationAsync_NoiseOn_OrderAndLimitFollowTheNoisedValues()
+    {
+        // Deterministic noise: the first sampled bucket (group A, true count 6) gets +100, the second (group B, true count 8) gets -5.
+        var queue = new Queue<double>([100.0, -5.0]);
+        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        metaRepo.GetTableMetadataAsync(OrdersTableId, Arg.Any<CancellationToken>()).Returns(CreateOrdersMetadata());
+        var service = new GovernedAggregationService(
+            metaRepo,
+            new CapturingAuditLogRepository(),
+            dataSourceExecutors: [new RowExecutor(DepartmentRows(("A", 6, 1m), ("B", 8, 1m)))],
+            analyticsOptions: Options.Create(NoiseOptions()),
+            dpEngine: null)
+        {
+            NoiseSampler = _ => queue.Dequeue()
+        };
+
+        var result = await service.ExecuteAggregationAsync(CreatePrincipal("S-1-5-21-ORDER"), new AggregationQuery(
+            OrdersTableId,
+            GroupBy: ["department"],
+            OrderBy: [new TableOrderBy("count", true)],
+            Limit: 1,
+            PreEvaluatedDecision: CreateDecision()));
+
+        // Without noise B (8) would lead; with the noised counts A (106) leads and the limit keeps A only.
+        result.Metadata.Truncated.ShouldBeTrue();
+        result.Groups.Count.ShouldBe(1);
+        result.Groups[0].GroupKey["department"].ShouldBe("A");
+        result.Groups[0].Count.ShouldBe(106);
+    }
+
+    [Theory]
+    [InlineData("AGGREGATION_COLUMN_UNAVAILABLE")]
+    [InlineData("AGGREGATION_ROW_CAP_EXCEEDED")]
+    public async Task McpQueryMetrics_CarriesTheAggregationErrorCodes(string code)
+    {
+        var service = Substitute.For<ISemanticMetricQueryService>();
+        GatewaySecurityException thrown = code == "AGGREGATION_COLUMN_UNAVAILABLE"
+            ? new AggregationColumnUnavailableException()
+            : new AggregationRowCapExceededException();
+        service.QueryMetricsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<MetricQueryRequest>(), Arg.Any<CancellationToken>())
+            .Returns<Task<MetricQueryResult>>(_ => throw thrown);
+
+        var json = await Autheris.Application.Mcp.Services.McpSemanticTools.ExecuteQueryMetricsAsync(
+            service, CreatePrincipal(), "{\"metrics\":[\"mrr\"]}");
+
+        json.ShouldContain(code);
     }
 }

@@ -37,6 +37,12 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
 {
     public const string OtherBucketLabel = "OTHER";
 
+    /// <summary>Fixed caller-facing message for a denied table; carries neither the table name nor the denial reasons.</summary>
+    internal const string DeniedMessage = "Access denied.";
+
+    /// <summary>Test seam: replaces the Laplace sampler (argument is the scale) used for differential privacy noise.</summary>
+    internal Func<double, double>? NoiseSampler { get; init; }
+
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly IUnifiedPolicyDecisionPoint? _pdp;
     private readonly ITableAccessResolver? _accessResolver;
@@ -148,8 +154,9 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
                 ["reasons"] = decision.DeniedReasons
             }, ct).ConfigureAwait(false);
 
-            throw new GatewayForbiddenException(
-                $"Access to table '{query.Table.ToQualifiedName()}' denied: {string.Join("; ", decision.DeniedReasons)}");
+            // WP-0 (W0-4): the caller-facing message is fixed. The table name and the denial reasons stay in the audit entry above, so a denied
+            // table is not distinguishable from a missing one by message content.
+            throw new GatewayForbiddenException(DeniedMessage);
         }
 
         int effectiveMinGroupSize = ResolveEffectiveMinGroupSize(query, metadata);
@@ -377,7 +384,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
     /// </summary>
     private static void ValidateAggregatesForNoise(IReadOnlyList<AggregateSelection> aggregates)
     {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<(AggregateFunction Function, string Column)>(new FunctionColumnComparer());
         foreach (var agg in aggregates)
         {
             if (agg.Function is AggregateFunction.Min or AggregateFunction.Max)
@@ -386,12 +393,21 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
                     "MIN and MAX aggregates are not available while differential privacy noise is enabled.", "AGGREGATION_ARGUMENT_INVALID");
             }
 
-            if (!seen.Add($"{agg.Function}:{agg.Column}"))
+            if (!seen.Add((agg.Function, agg.Column ?? string.Empty)))
             {
                 throw new GatewayInvalidQueryException(
                     "Repeating an aggregate function over the same column is not available while differential privacy noise is enabled.", "AGGREGATION_ARGUMENT_INVALID");
             }
         }
+    }
+
+    private sealed class FunctionColumnComparer : IEqualityComparer<(AggregateFunction Function, string Column)>
+    {
+        public bool Equals((AggregateFunction Function, string Column) x, (AggregateFunction Function, string Column) y) =>
+            x.Function == y.Function && string.Equals(x.Column, y.Column, StringComparison.OrdinalIgnoreCase);
+
+        public int GetHashCode((AggregateFunction Function, string Column) obj) =>
+            HashCode.Combine(obj.Function, StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Column));
     }
 
     private void ValidateMeasureBoundsForNoise(IReadOnlyList<AggregateSelection> aggregates, TableMetadata metadata)
@@ -469,7 +485,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         var noisyBuckets = new List<ComputedBucket>(buckets.Count);
         foreach (var bucket in buckets)
         {
-            long countDelta = (long)Math.Round(SampleLaplace(1.0 / epsilon));
+            long countDelta = (long)Math.Round(SampleNoise(1.0 / epsilon));
             if (countDelta == 0) countDelta = 1L;
             long noisyCount = Math.Max(1L, bucket.Count + countDelta);
 
@@ -486,6 +502,13 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
                     continue;
                 }
 
+                // WP-0 (W0-6): the merged OTHER row keeps null for the non-mergeable aggregates on every path, noise included.
+                if (bucket.IsMergedOther && agg.Function is AggregateFunction.CountDistinct or AggregateFunction.Avg)
+                {
+                    noisyAggs[alias] = null;
+                    continue;
+                }
+
                 switch (agg.Function)
                 {
                     case AggregateFunction.Count:
@@ -493,7 +516,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
                         long rawCnt = noisyAggs.TryGetValue(alias, out var cv) && cv != null
                             ? Convert.ToInt64(cv, CultureInfo.InvariantCulture)
                             : bucket.Count;
-                        long cDelta = (long)Math.Round(SampleLaplace(1.0 / epsilon));
+                        long cDelta = (long)Math.Round(SampleNoise(1.0 / epsilon));
                         if (cDelta == 0) cDelta = 1L;
                         noisyAggs[alias] = Math.Max(0L, rawCnt + cDelta);
                         break;
@@ -502,7 +525,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
                         var sumBounds = ResolveMeasureBounds(metadata, agg.Column);
                         double sumSens = Math.Max(0.01, sumBounds.Max - sumBounds.Min);
                         decimal rawSum = noisyAggs.TryGetValue(alias, out var sv) && sv != null ? ToDecimal(sv) : 0m;
-                        decimal sumNoise = Math.Round((decimal)SampleLaplace(sumSens / epsilon), 4);
+                        decimal sumNoise = Math.Round((decimal)SampleNoise(sumSens / epsilon), 4);
                         if (sumNoise == 0m) sumNoise = 0.01m;
                         noisyAggs[alias] = rawSum + sumNoise;
                         noisySums[agg.Column] = rawSum + sumNoise;
@@ -512,7 +535,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
                         var avgBounds = ResolveMeasureBounds(metadata, agg.Column);
                         double avgSens = Math.Max(0.01, (avgBounds.Max - avgBounds.Min) / Math.Max(1, effectiveMinGroupSize));
                         decimal rawAvg = noisyAggs.TryGetValue(alias, out var av) && av != null ? ToDecimal(av) : 0m;
-                        decimal avgNoise = Math.Round((decimal)SampleLaplace(avgSens / epsilon), 4);
+                        decimal avgNoise = Math.Round((decimal)SampleNoise(avgSens / epsilon), 4);
                         if (avgNoise == 0m) avgNoise = 0.01m;
                         noisyAggs[alias] = rawAvg + avgNoise;
                         noisyAvgs[agg.Column] = rawAvg + avgNoise;
@@ -526,6 +549,8 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
 
         return (noisyBuckets, consumedEpsilon, remainingEpsilon);
     }
+
+    private double SampleNoise(double scale) => NoiseSampler != null ? NoiseSampler(scale) : SampleLaplace(scale);
 
     private static double SampleLaplace(double scale)
     {

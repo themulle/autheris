@@ -327,28 +327,23 @@ public sealed partial class GovernedAggregationService
     /// are not safe to publish (the extreme of the union can be the value of a single suppressed row), so they are returned as <c>null</c>.
     /// The raw rows stay on the bucket for the differencing-safe totals.
     /// </summary>
-    private static ComputedBucket WithoutNonMergeableValues(ComputedBucket bucket, IReadOnlyList<AggregateSelection> aggregates)
+    private static ComputedBucket WithoutNonMergeableValues(ComputedBucket bucket, IReadOnlyList<AggregateSelection> aggregates) =>
+        bucket with { Aggregates = NullNonMergeable(bucket.Aggregates, aggregates), Avg = EmptyValues(), Min = EmptyValues(), Max = EmptyValues() };
+
+    private static AggregationGroupRow WithoutNonMergeableValues(AggregationGroupRow row, IReadOnlyList<AggregateSelection> aggregates) =>
+        row with { Aggregates = NullNonMergeable(row.Aggregates, aggregates), Avg = EmptyValues(), Min = EmptyValues(), Max = EmptyValues() };
+
+    private static Dictionary<string, object?> EmptyValues() => new(StringComparer.OrdinalIgnoreCase);
+
+    private static Dictionary<string, object?> NullNonMergeable(IReadOnlyDictionary<string, object?> source, IReadOnlyList<AggregateSelection> aggregates)
     {
-        var values = new Dictionary<string, object?>(bucket.Aggregates, StringComparer.OrdinalIgnoreCase);
+        var values = new Dictionary<string, object?>(source, StringComparer.OrdinalIgnoreCase);
         foreach (var agg in aggregates.Where(a => IsNonMergeable(a.Function)))
         {
             values[agg.EffectiveAlias] = null;
         }
 
-        var empty = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        return bucket with { Aggregates = values, Avg = empty, Min = empty, Max = empty };
-    }
-
-    private static AggregationGroupRow WithoutNonMergeableValues(AggregationGroupRow row, IReadOnlyList<AggregateSelection> aggregates)
-    {
-        var values = new Dictionary<string, object?>(row.Aggregates, StringComparer.OrdinalIgnoreCase);
-        foreach (var agg in aggregates.Where(a => IsNonMergeable(a.Function)))
-        {
-            values[agg.EffectiveAlias] = null;
-        }
-
-        var empty = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        return row with { Aggregates = values, Avg = empty, Min = empty, Max = empty };
+        return values;
     }
 
     private static AggregationGroupRow ComputeDifferencingSafeTotalsCore(
