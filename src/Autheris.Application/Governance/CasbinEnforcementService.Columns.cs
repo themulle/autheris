@@ -377,7 +377,7 @@ public sealed partial class CasbinEnforcementService
             var isAllow = string.Equals(rule.Eft, "allow", StringComparison.OrdinalIgnoreCase);
             if ((!isDeny && !isAllow) ||
                 (!string.Equals(rule.Tenant, "*", StringComparison.OrdinalIgnoreCase) && !string.Equals(rule.Tenant, context.Tenant.Value, StringComparison.OrdinalIgnoreCase)) ||
-                !MatchObjectPattern(rule.Obj, tableStr) ||
+                !MatchObjectPattern(rule.Obj, tableStr, failClosedMatch: isDeny) ||
                 !IsActionMatch(rule.Act, requestedAction, isDeny))
             {
                 continue;
@@ -494,7 +494,7 @@ public sealed partial class CasbinEnforcementService
                 // Deny rules are matched conservatively (matching action or wildcard, wildcard tenant or current tenant).
                 if (!string.Equals(rule.Eft, "deny", StringComparison.OrdinalIgnoreCase) ||
                     (!string.Equals(rule.Tenant, "*", StringComparison.OrdinalIgnoreCase) && !string.Equals(rule.Tenant, context.Tenant.Value, StringComparison.OrdinalIgnoreCase)) ||
-                    !MatchObjectPattern(rule.Obj, tableStr) ||
+                    !MatchObjectPattern(rule.Obj, tableStr, failClosedMatch: true) ||
                     !IsActionMatch(rule.Act, requestedAction, isDeny: true))
                 {
                     continue;

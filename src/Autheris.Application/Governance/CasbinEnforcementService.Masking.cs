@@ -179,8 +179,14 @@ public sealed partial class CasbinEnforcementService
         }
     }
 
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Regex> ObjectPatternRegexes = new(StringComparer.Ordinal);
-    private const int MaxObjectPatternRegexes = 20_000;
+    // WP-PF-03 / M6: one compiled matcher per distinct RAW pattern in a bounded LRU (no per-call string building, no clear-all at the limit).
+    private static readonly Autheris.Application.Caching.BoundedCache<string, ObjectPatternMatcher> ObjectPatternMatchers = new(MaxObjectPatternMatchers, comparer: StringComparer.Ordinal);
+    private const int MaxObjectPatternMatchers = 20_000;
+
+    /// <summary>Test seam for the regex evaluation (a linear-time regex cannot be made to time out reliably in a unit test).</summary>
+    internal static Func<Regex, string, bool> RegexIsMatch { get; set; } = static (regex, target) => regex.IsMatch(target);
+
+    private sealed record ObjectPatternMatcher(string? SegmentPrefix, Regex? Expression, bool Faulted);
 
     /// <summary>
     /// Gateway object matcher (SEC M-18/H-12). Supports:
@@ -188,7 +194,11 @@ public sealed partial class CasbinEnforcementService
     /// <c>*</c> inside a segment (matches within one segment only) and keyMatch2-style <c>:name</c> segment parameters.
     /// Dots are always literal.
     /// </summary>
-    private static bool MatchObjectPattern(string pattern, string target)
+    /// <param name="failClosedMatch">
+    /// The result when the pattern cannot be evaluated (regex compile failure or timeout). Deny rules pass <c>true</c> (an unevaluable deny applies), allow rules
+    /// <c>false</c> (an unevaluable allow does not grant): both failures resolve to the same, restrictive polarity.
+    /// </param>
+    internal static bool MatchObjectPattern(string pattern, string target, bool failClosedMatch = false)
     {
         if (string.Equals(pattern, "*", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(pattern, target, StringComparison.OrdinalIgnoreCase))
@@ -196,18 +206,51 @@ public sealed partial class CasbinEnforcementService
             return true;
         }
 
+        if (!ObjectPatternMatchers.TryGet(pattern, out var matcher))
+        {
+            matcher = CompileObjectPattern(pattern);
+            ObjectPatternMatchers.Set(pattern, matcher);
+        }
+
+        if (matcher.Faulted)
+        {
+            return failClosedMatch;
+        }
+
+        if (matcher.SegmentPrefix is { } prefix)
+        {
+            // SEC M-18: 'finance.dbo.*' must not match 'finance.dbo_hr.salaries' -> compare with the segment separator.
+            return target.Length > prefix.Length && target.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (matcher.Expression is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return RegexIsMatch(matcher.Expression, target);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return failClosedMatch;
+        }
+    }
+
+    private static ObjectPatternMatcher CompileObjectPattern(string pattern)
+    {
         bool trailingWildcard = pattern.EndsWith(".*", StringComparison.Ordinal);
         var body = trailingWildcard ? pattern[..^2] : pattern;
 
         if (trailingWildcard && body.IndexOf('*', StringComparison.Ordinal) < 0 && body.IndexOf(':', StringComparison.Ordinal) < 0)
         {
-            // SEC M-18: 'finance.dbo.*' must not match 'finance.dbo_hr.salaries' -> compare with the segment separator.
-            return target.StartsWith(body + ".", StringComparison.OrdinalIgnoreCase) && target.Length > body.Length + 1;
+            return new ObjectPatternMatcher(body + ".", null, false);
         }
 
         if (!trailingWildcard && pattern.IndexOf('*', StringComparison.Ordinal) < 0 && pattern.IndexOf(':', StringComparison.Ordinal) < 0)
         {
-            return false;
+            return new ObjectPatternMatcher(null, null, false);
         }
 
         var regex = new StringBuilder("^");
@@ -255,23 +298,15 @@ public sealed partial class CasbinEnforcementService
 
         try
         {
-            // WP-PF-03: one precompiled linear-time regex per distinct pattern (the static Regex cache holds only 15 entries).
-            var compiled = ObjectPatternRegexes.GetOrAdd(pattern, static (_, expression) =>
-                new Regex(
-                    expression,
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking,
-                    TimeSpan.FromMilliseconds(200)),
-                regex.ToString());
-            if (ObjectPatternRegexes.Count > MaxObjectPatternRegexes)
-            {
-                ObjectPatternRegexes.Clear();
-            }
-
-            return compiled.IsMatch(target);
+            // linear-time (non-backtracking) regex with a timeout
+            return new ObjectPatternMatcher(
+                null,
+                new Regex(regex.ToString(), RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, TimeSpan.FromMilliseconds(200)),
+                false);
         }
-        catch (RegexMatchTimeoutException)
+        catch (ArgumentException)
         {
-            return false;
+            return new ObjectPatternMatcher(null, null, true);
         }
     }
 
