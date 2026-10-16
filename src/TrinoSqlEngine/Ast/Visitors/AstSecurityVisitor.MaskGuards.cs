@@ -222,6 +222,85 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         }
     }
 
+    // Per-compile state of the mask guards. The visitor is single-use and not thread-safe (one instance per compile), so this state is
+    // plain instance fields: cleared on entry by the owner, never static, pooled or held by the engine.
+    // _specTables/_specDerived: owner PrepareSpecSources; valid from there until the recursion into the children of that specification.
+    private readonly List<(string TableName, string? Alias)> _specTables = new();
+    private readonly List<(string SourceName, string? Alias, HashSet<string> MaskedColumns)> _specDerived = new();
+    // _projectionGuardStack: owner EnsureNoMaskedColumnsInAggregatesAndGrouping / EnsureNoWholeRowReferencesInProjections (never nested).
+    // No callee of those loops may touch it; the callees use _maskGuardStack.
+    private Stack<SqlNode>? _projectionGuardStack;
+    private readonly Dictionary<string, bool> _maskingForTable = new(StringComparer.Ordinal);
+    // Number of enclosing specifications whose projection guards ran: a nested specification may reference their (masked) columns.
+    private int _maskedScopeDepth;
+
+    private void PrepareSpecSources(QuerySpecification node)
+    {
+        _specTables.Clear();
+        _specDerived.Clear();
+        if (node.From == null ||
+            !(_options.RejectMaskedColumnsInPredicates || _options.RejectMaskedColumnsInAggregates || _options.RejectWholeRowReferencesInSelect))
+        {
+            return;
+        }
+
+        CollectTableSources(node.From, _specTables);
+        CollectDerivedMaskedSources(node.From, _specDerived);
+    }
+
+    /// <summary>
+    /// Runs the aggregate/GROUP BY and whole-row guards for the specification prepared by <see cref="PrepareSpecSources"/>, unless every
+    /// condition for skipping them is positively established. Returns true when the guards ran (the scope may carry masked columns).
+    /// </summary>
+    private bool EnsureProjectionMaskGuards(QuerySpecification node)
+    {
+        if (node.From == null ||
+            !(_options.RejectMaskedColumnsInAggregates || _options.RejectWholeRowReferencesInSelect) ||
+            CanSkipProjectionGuards())
+        {
+            return false;
+        }
+
+        EnsureNoMaskedColumnsInAggregatesAndGrouping(node);
+        EnsureNoWholeRowReferencesInProjections(node);
+        return true;
+    }
+
+    /// <summary>
+    /// Fail closed: skip only when no mask can be reachable through the inputs the guards themselves consult. The caller-supplied set must
+    /// be empty, no derived source carries masks, no enclosing specification ran the guards, and the typed provider reports no mask for
+    /// any FROM table (nor for its simple name or alias, which the guards probe as column qualifiers). A failing lookup runs the guard.
+    /// </summary>
+    private bool CanSkipProjectionGuards()
+    {
+        if (_maskedScopeDepth > 0 || _options.TablesWithMaskedColumns.Count > 0 || _specDerived.Count > 0)
+            return false;
+
+        foreach (var (table, alias) in _specTables)
+        {
+            if (MayHaveMask(table) ||
+                MayHaveMask(SqlIdentifierHelper.GetSimpleName(table)) ||
+                (!string.IsNullOrEmpty(alias) && MayHaveMask(alias)))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool MayHaveMask(string name)
+    {
+        try
+        {
+            return HasMaskingForTable(name);
+        }
+        catch (Exception)
+        {
+            return true;   // uncertain: the guard runs (and meets the same failing lookup itself)
+        }
+    }
+
     private static readonly FrozenSet<string> AggregateFunctionNames = new[]
     {
         "count", "sum", "avg", "min", "max", "every", "any_value", "median", "mode",
@@ -243,10 +322,8 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         if (!_options.RejectMaskedColumnsInAggregates || node.From == null)
             return;
 
-        var tables = new List<(string TableName, string? Alias)>();
-        CollectTableSources(node.From, tables);
-        var derived = new List<(string SourceName, string? Alias, HashSet<string> MaskedColumns)>();
-        CollectDerivedMaskedSources(node.From, derived);
+        var tables = _specTables;
+        var derived = _specDerived;
         if (tables.Count == 0 && derived.Count == 0)
             return;
 
@@ -255,7 +332,9 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             CheckAggregationScope(tables, derived, node.GroupBy);
         }
 
-        var stack = new Stack<SqlNode>(16);
+        // The loop below is live while CheckAggregationScope runs, and that call clears _maskGuardStack: this loop must keep its own stack.
+        var stack = _projectionGuardStack ??= new Stack<SqlNode>(64);
+        stack.Clear();
         foreach (var item in node.Projections) stack.Push(item);
         while (stack.Count > 0)
         {
@@ -300,12 +379,13 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         if (!_options.RejectWholeRowReferencesInSelect || node.From == null)
             return;
 
-        var tables = new List<(string TableName, string? Alias)>();
-        CollectTableSources(node.From, tables);
+        var tables = _specTables;
         if (tables.Count == 0)
             return;
 
-        var stack = new Stack<SqlNode>(16);
+        // Shares _projectionGuardStack with the aggregate guard: the two never nest (this loop calls no method that touches a stack).
+        var stack = _projectionGuardStack ??= new Stack<SqlNode>(64);
+        stack.Clear();
         foreach (var item in node.Projections) stack.Push(item);
         while (stack.Count > 0)
         {

@@ -23,6 +23,10 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     {
         switch (node)
         {
+            // Leaves: a column reference only owns its name parts and a literal owns nothing, so the generic child enumeration below
+            // (which allocates an array per node) would only push identifiers that no guard inspects.
+            case ColumnReference or LiteralExpression or ParameterReference or SqlIdentifier or SqlQualifiedName:
+                break;
             case ParenthesizedExpression p:
                 stack.Push(p.Expression);
                 break;
@@ -206,7 +210,21 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         return _cteScopeStack.Peek().Contains(key);
     }
 
+    /// <summary>
+    /// Whether the table has a mask, from the caller-supplied set or from the typed provider. The answer is cached per visitor (one
+    /// visitor per compile): the <see cref="AstSecurityVisitorOptions.TableColumns"/> callback allocates on every call.
+    /// </summary>
     private bool HasMaskingForTable(string normalizedTableName)
+    {
+        if (_maskingForTable.TryGetValue(normalizedTableName, out bool cached))
+            return cached;
+
+        bool result = ComputeHasMaskingForTable(normalizedTableName);
+        _maskingForTable[normalizedTableName] = result;
+        return result;
+    }
+
+    private bool ComputeHasMaskingForTable(string normalizedTableName)
     {
         string simpleTableName = SqlIdentifierHelper.GetSimpleName(normalizedTableName);
         if (_options.TablesWithMaskedColumns.Contains(normalizedTableName) ||
