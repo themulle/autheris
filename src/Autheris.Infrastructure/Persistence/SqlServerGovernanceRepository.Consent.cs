@@ -431,7 +431,7 @@ public partial class SqlServerGovernanceRepository
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
             OnTransactionRolledBack(tx);
             throw;
         }
@@ -722,7 +722,7 @@ public partial class SqlServerGovernanceRepository
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
             OnTransactionRolledBack(tx);
             throw;
         }
@@ -804,7 +804,7 @@ public partial class SqlServerGovernanceRepository
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
             OnTransactionRolledBack(tx);
             throw;
         }
@@ -929,7 +929,7 @@ public partial class SqlServerGovernanceRepository
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
             OnTransactionRolledBack(tx);
             throw;
         }
@@ -1308,7 +1308,7 @@ public partial class SqlServerGovernanceRepository
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
             OnTransactionRolledBack(tx);
             throw;
         }
@@ -1402,7 +1402,7 @@ public partial class SqlServerGovernanceRepository
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
             OnTransactionRolledBack(tx);
             throw;
         }
@@ -1564,7 +1564,7 @@ public partial class SqlServerGovernanceRepository
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
             OnTransactionRolledBack(tx);
             throw;
         }

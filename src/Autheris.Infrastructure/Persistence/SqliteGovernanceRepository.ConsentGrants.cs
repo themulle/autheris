@@ -75,6 +75,7 @@ public partial class SqliteGovernanceRepository
         IReadOnlyList<Consent> create,
         Sid actor,
         string reason,
+        IReadOnlyList<AuditLogEntry>? auditEntries = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(revokeConsentIds);
@@ -93,29 +94,43 @@ public partial class SqliteGovernanceRepository
         await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
         var conn = scope.Connection;
         using var tx = conn.BeginTransaction();
-
-        foreach (var id in revokeConsentIds.Distinct())
+        try
         {
-            var table = await RevokeConsentInTransactionAsync(conn, tx, id, actor, reason, ct).ConfigureAwait(false);
-            if (table is { } t)
+            foreach (var id in revokeConsentIds.Distinct())
             {
-                tables[t.ToString()] = t;
+                var table = await RevokeConsentInTransactionAsync(conn, tx, id, actor, reason, ct).ConfigureAwait(false);
+                if (table is { } t)
+                {
+                    tables[t.ToString()] = t;
+                }
             }
-        }
 
-        foreach (var consent in create)
+            foreach (var consent in create)
+            {
+                await InsertConsentCoreAsync(conn, tx, consent, ct).ConfigureAwait(false);
+                tables[consent.TableIdentifier.ToString()] = consent.TableIdentifier;
+            }
+
+            foreach (var table in tables.Values)
+            {
+                await IncrementTableEpochInternalAsync(conn, table, tx, ct).ConfigureAwait(false);
+            }
+
+            // M2: the caller's audit entries (manifest APPLIED) are part of the same transaction: no change without its record.
+            foreach (var entry in auditEntries ?? [])
+            {
+                await RecordAuditEventInternalAsync(conn, entry, ct, tx).ConfigureAwait(false);
+            }
+
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+            OnTransactionCommitted(tx);
+        }
+        catch
         {
-            await InsertConsentCoreAsync(conn, tx, consent, ct).ConfigureAwait(false);
-            tables[consent.TableIdentifier.ToString()] = consent.TableIdentifier;
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false); // L3: not cancellable, so OnTransactionRolledBack always runs
+            OnTransactionRolledBack(tx);
+            throw;
         }
-
-        foreach (var table in tables.Values)
-        {
-            await IncrementTableEpochInternalAsync(conn, table, tx, ct).ConfigureAwait(false);
-        }
-
-        await tx.CommitAsync(ct).ConfigureAwait(false);
-        OnTransactionCommitted(tx);
 
         foreach (var table in tables.Values)
         {

@@ -141,10 +141,11 @@ public sealed class Wave2GovernanceTests
                 l[0].Effect == ConsentEffect.Allow),
             Arg.Any<Sid>(),
             Arg.Any<string>(),
+            Arg.Is<IReadOnlyList<AuditLogEntry>?>(a => a != null && a.Count == 1 && a[0].EventType == "GITOPS_CONSENT_APPLY"),
             Arg.Any<CancellationToken>());
 
-        await auditRepo.Received(1).RecordAuditEventAsync(Arg.Is<AuditLogEntry>(a =>
-            a.EventType == "GITOPS_CONSENT_APPLY"));
+        // the audit is written inside the replace transaction, no longer separately after the commit
+        await auditRepo.DidNotReceiveWithAnyArgs().RecordAuditEventAsync(default!);
     }
 
     [Fact]

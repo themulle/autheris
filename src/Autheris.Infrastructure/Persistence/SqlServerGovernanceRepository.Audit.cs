@@ -360,6 +360,7 @@ public partial class SqlServerGovernanceRepository
 
     public void OnTransactionCommitted(System.Data.Common.DbTransaction tx)
     {
+        Exception? anchorFailure = null;
         if (_pendingAuditTxStates.TryRemove(tx, out var state))
         {
             lock (_pendingAuditTxStates)
@@ -386,8 +387,20 @@ public partial class SqlServerGovernanceRepository
                 catch (Exception ex)
                 {
                     _logger?.LogError(ex, "Failed to persist external audit chain anchor (seq {Sequence}).", state.LastSeq);
+                    anchorFailure = ex;
                 }
             }
+
+            if (anchorFailure == null && Volatile.Read(ref _auditChainViolation) != null && ViolationPolicy != AuditChainViolationPolicy.AlertOnly)
+            {
+                anchorFailure = new InvalidOperationException("The audit hash chain is latched as violated; no anchor was written.");
+            }
+        }
+
+        // M1: the rows are committed, but the Tier-A mutation (consent grant/revoke, manifest apply) is not acknowledged without its anchor.
+        if (anchorFailure != null)
+        {
+            throw new AuditUnavailableException("The audit chain anchor could not be persisted; the change is not acknowledged (fail-closed).", anchorFailure);
         }
     }
 
@@ -681,6 +694,12 @@ public partial class SqlServerGovernanceRepository
 
         // WP-PF-04 / SEC-SC-08: a batch containing a Tier-A event is acknowledged only after its anchor is written. The rows are
         // committed and the next batch anchors the tail, but the caller fails closed. Tier-B-only batches never fail on a late anchor.
+        // M1: a chain violation latched meanwhile means no anchor was written; a Tier-A event is never acknowledged then (except in the dev AlertOnly policy).
+        if (anchorFailure == null && Volatile.Read(ref _auditChainViolation) != null && ViolationPolicy != AuditChainViolationPolicy.AlertOnly)
+        {
+            anchorFailure = new InvalidOperationException("The audit hash chain is latched as violated; no anchor was written.");
+        }
+
         if (anchorFailure != null && AuditChainViolationGate.AnyTierA(batch))
         {
             throw new AuditUnavailableException("The audit chain anchor could not be persisted; the event is not acknowledged (fail-closed).", anchorFailure);

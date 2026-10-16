@@ -74,6 +74,7 @@ public partial class PostgreSqlGovernanceRepository
         IReadOnlyList<Consent> create,
         Sid actor,
         string reason,
+        IReadOnlyList<AuditLogEntry>? auditEntries = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(revokeConsentIds);
@@ -113,12 +114,18 @@ public partial class PostgreSqlGovernanceRepository
                 await IncrementTableEpochInternalAsync(conn, tx, table, ct).ConfigureAwait(false);
             }
 
+            // M2: the caller's audit entries (manifest APPLIED) are part of the same transaction: no change without its record.
+            foreach (var entry in auditEntries ?? [])
+            {
+                await RecordAuditEventAsync(entry, tx, ct).ConfigureAwait(false);
+            }
+
             await tx.CommitAsync(ct).ConfigureAwait(false);
             OnTransactionCommitted(tx);
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
             OnTransactionRolledBack(tx);
             throw;
         }

@@ -21,6 +21,9 @@ public sealed class DeclarativeConsentApplyService(
     IGrantPolicy? grantPolicy = null) : IDeclarativeConsentApplyService
 {
     // WP-SC-16: the policy is stateless; without an injected instance the built-in maxima apply (never "no policy").
+    // Kept for constructor/DI compatibility: the APPLIED audit entries are written by ReplaceConsentsAsync inside its transaction, never separately.
+    private readonly IAuditLogRepository _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
+
     private readonly IGrantPolicy _grantPolicy = grantPolicy ?? new GrantPolicy();
 
     public async Task<DeclarativeApplyResult> ApplyManifestAsync(
@@ -144,7 +147,7 @@ public sealed class DeclarativeConsentApplyService(
                 .ToList();
 
             // Check if existing consent matches desired policy
-            var matchingConsent = activeExisting.FirstOrDefault(c => IsIdentical(c, effect, policy));
+            var matchingConsent = activeExisting.FirstOrDefault(c => IsIdentical(c, effect, policy, individual ? policy.ValidUntil : null));
             if (matchingConsent != null)
             {
                 unchanged++;
@@ -240,6 +243,8 @@ public sealed class DeclarativeConsentApplyService(
         }
 
         // WP-SC-02: one transaction and one epoch bump for the whole manifest; a fault leaves nothing changed and writes no audit.
+        // M2: the APPLIED audit entries travel into the same transaction, so a committed change always has its (Tier-A, anchored) record and a failing
+        // epoch invalidation after the commit cannot lose it.
         if (!dryRun && (createList.Count > 0 || revokeIds.Count > 0))
         {
             await consentRepository.ReplaceConsentsAsync(
@@ -247,12 +252,8 @@ public sealed class DeclarativeConsentApplyService(
                 createList,
                 actorSid,
                 $"Superseded by GitOps declarative apply (version: {manifest.Version})",
+                auditEntries,
                 ct).ConfigureAwait(false);
-
-            foreach (var entry in auditEntries)
-            {
-                await auditLogRepository.RecordAuditEventAsync(entry, ct).ConfigureAwait(false);
-            }
         }
 
         return new DeclarativeApplyResult(totalEvaluated, applied, unchanged, revoked, dryRun, details);
@@ -268,9 +269,14 @@ public sealed class DeclarativeConsentApplyService(
         return consent.GranteeSid == sid;
     }
 
-    private static bool IsIdentical(Consent existing, ConsentEffect desiredEffect, DeclarativeConsentPolicy policy)
+    /// <param name="desiredIndividualValidTo">
+    /// The explicit validUntil of an individual grant. An EARLIER expiry than the stored one is a change (the manifest shortens the grant); a later or equal one is not
+    /// (a longer validity is a renewal, which needs its own approval, so the manifest cannot extend a grant).
+    /// </param>
+    private static bool IsIdentical(Consent existing, ConsentEffect desiredEffect, DeclarativeConsentPolicy policy, DateTimeOffset? desiredIndividualValidTo = null)
     {
         if (existing.Effect != desiredEffect) return false;
+        if (desiredIndividualValidTo is { } desired && desired < existing.ValidTo) return false;
 
         // Check column rules
         var desiredColRules = policy.ColumnRules ?? Array.Empty<DeclarativeColumnRule>();

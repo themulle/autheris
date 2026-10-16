@@ -115,4 +115,47 @@ public sealed class ManifestIndividualGrantTests
         var c = repo.Active(DateTimeOffset.UtcNow).ShouldHaveSingleItem();
         (c.ValidTo - c.ValidFrom).TotalDays.ShouldBe(365, 0.01);
     }
+
+    [Fact]
+    public async Task SEC_SC_20_Manifest_CanShortenAnIndividualGrant_ButNotExtendIt()
+    {
+        var repo = await ApplyAsync(User(DateTimeOffset.UtcNow.AddDays(60)));
+        var first = repo.Active(DateTimeOffset.UtcNow).Single();
+
+        // an earlier validUntil is a change: the old grant is revoked and replaced by a shorter one
+        await ApplyAsync(User(DateTimeOffset.UtcNow.AddDays(30)), repo: repo);
+        Last!.Applied.ShouldBe(1);
+        Last.Revoked.ShouldBe(1);
+        var shortened = repo.Active(DateTimeOffset.UtcNow).Single();
+        shortened.Id.ShouldNotBe(first.Id);
+        shortened.ValidTo.ShouldBeLessThan(DateTimeOffset.UtcNow.AddDays(31));
+
+        // a later validUntil is not a change (renewal needs its own approval)
+        await ApplyAsync(User(DateTimeOffset.UtcNow.AddDays(90)), repo: repo);
+        Last!.Applied.ShouldBe(0);
+        Last.Unchanged.ShouldBe(1);
+        repo.Active(DateTimeOffset.UtcNow).Single().Id.ShouldBe(shortened.Id);
+    }
+
+    [Fact]
+    public async Task SEC_SC_20_Manifest_AppliedAuditTravelsIntoTheReplaceTransaction_NotAfterCommit()
+    {
+        var repo = new FakeConsentRepository();
+        var audit = Substitute.For<IAuditLogRepository>();
+        var svc = new DeclarativeConsentApplyService(Tables(), repo, audit);
+
+        await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("1", [User(DateTimeOffset.UtcNow.AddDays(30))]));
+
+        repo.ReplaceAuditEntries.ShouldContain(e => e.EventType == "GITOPS_CONSENT_APPLY" && e.Decision == "APPLIED");
+        await audit.DidNotReceiveWithAnyArgs().RecordAuditEventAsync(default!);
+    }
+
+    [Fact]
+    public async Task SEC_SC_20_Manifest_DenyWithoutValidUntil_IsAccepted_AndStaysActiveForever()
+    {
+        var repo = await ApplyAsync(new DeclarativeConsentPolicy("default", "sales", "orders", "User", "S-1-5-21-ALICE", "Deny", Description: "block"));
+
+        var deny = repo.Active(DateTimeOffset.UtcNow.AddDays(2000)).Single();
+        deny.Effect.ShouldBe(ConsentEffect.Deny);
+    }
 }

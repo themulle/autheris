@@ -14,14 +14,17 @@ internal sealed class FakeConsentRepository : IConsentRepository
     public int DirectCreateCalls { get; private set; }
     public int DirectRevokeCalls { get; private set; }
 
+    public List<AuditLogEntry> ReplaceAuditEntries { get; } = [];
+
     public IReadOnlyList<Consent> Active(DateTimeOffset at) => _consents.Where(c => c.IsActive(at)).ToList();
 
     public Task<Autheris.Application.Governance.Paging.ConsentPage> GetConsentPageAsync(Autheris.Application.Governance.Paging.ConsentPageQuery query, CancellationToken ct = default) =>
         throw new NotImplementedException();
 
-    public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, CancellationToken ct = default)
+    public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, IReadOnlyList<AuditLogEntry>? auditEntries = null, CancellationToken ct = default)
     {
         ReplaceCalls++;
+        ReplaceAuditEntries.AddRange(auditEntries ?? []);
         if (FailReplace)
         {
             throw new InvalidOperationException("injected fault");

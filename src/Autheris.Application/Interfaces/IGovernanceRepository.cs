@@ -114,13 +114,14 @@ public interface IConsentRepository
     /// <summary>
     /// WP-SC-02: atomically revokes <paramref name="revokeConsentIds"/> and creates <paramref name="create"/> in ONE transaction
     /// with ONE epoch bump per affected table. Either every change is applied or none. There is no non-atomic fallback and no default: every provider
-    /// must implement it transactionally, so a partial manifest can never be applied.
+    /// must implement it transactionally, so a partial manifest can never be applied. <paramref name="auditEntries"/> are written in the SAME transaction (chain-linked, Tier-A anchored), so a committed change always has its audit record.
     /// </summary>
     Task ReplaceConsentsAsync(
         IReadOnlyList<Guid> revokeConsentIds,
         IReadOnlyList<Consent> create,
         Sid actor,
         string reason,
+        IReadOnlyList<AuditLogEntry>? auditEntries = null,
         CancellationToken ct = default);
 }
 
