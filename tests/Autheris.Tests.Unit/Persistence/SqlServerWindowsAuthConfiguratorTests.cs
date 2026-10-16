@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.ComponentModel.DataAnnotations;
+using System.Net;
 using System.Security;
 using System.Text;
 using Autheris.Api.Extensions.DependencyInjection;
@@ -12,6 +14,7 @@ using Xunit;
 
 namespace Autheris.Tests.Unit.Persistence;
 
+[Collection("ManagedNtlmSwitch")]
 public sealed class SqlServerWindowsAuthConfiguratorTests : IDisposable
 {
     private readonly string _tempDir;
@@ -210,6 +213,224 @@ public sealed class SqlServerWindowsAuthConfiguratorTests : IDisposable
         Assert.Contains("Integrated Security=true", ex.Message, StringComparison.Ordinal);
     }
 
+    private static DataSourceConnectionOptions NtlmOptions(bool? useManagedNtlm = null) => new()
+    {
+        Provider = "SqlServer",
+        ConnectionString = "Server=10.160.2.94,1433;Database=Reporting;Integrated Security=true;",
+        WindowsAuth = new SqlServerWindowsAuthOptions { Mode = SqlServerWindowsAuthMode.Ntlm, UseManagedNtlm = useManagedNtlm }
+    };
+
+    [Fact]
+    public void ClassifyOpenException_GssapiMissing_ReturnsGssapiUnavailableCategory()
+    {
+        var result = SqlServerWindowsAuthConfigurator.ClassifyOpenException(
+            new InvalidOperationException("GSSAPI operation failed with error - An unsupported mechanism was requested."), NtlmOptions());
+
+        var ex = Assert.IsType<SqlServerWindowsAuthException>(result);
+        Assert.IsAssignableFrom<InvalidOperationException>(ex);
+        Assert.Equal(SqlServerWindowsAuthFailureCategory.GssapiUnavailable, ex.Category);
+        Assert.Equal("InvalidOperationException", ex.InnerExceptionType);
+    }
+
+    [Fact]
+    public void ClassifyOpenException_SspiContextWithoutManagedNtlm_ReturnsKerberosNegotiationCategory()
+    {
+        var result = SqlServerWindowsAuthConfigurator.ClassifyOpenException(
+            new InvalidOperationException("Cannot generate SSPI context."), NtlmOptions());
+
+        Assert.Equal(SqlServerWindowsAuthFailureCategory.KerberosNegotiation, Assert.IsType<SqlServerWindowsAuthException>(result).Category);
+    }
+
+    [Fact]
+    public void ClassifyOpenException_SspiContextWithManagedNtlm_ReturnsNtlmNegotiationWithRecordedStatus()
+    {
+        var failure = new ManagedNtlmFailure(ManagedNtlmFailure.ChallengeStep, "InvalidToken", null, null);
+
+        var result = SqlServerWindowsAuthConfigurator.ClassifyOpenException(
+            new InvalidOperationException("Cannot generate SSPI context."), NtlmOptions(), managedNtlmUsed: true, managedNtlmFailure: failure);
+
+        var ex = Assert.IsType<SqlServerWindowsAuthException>(result);
+        Assert.Equal(SqlServerWindowsAuthFailureCategory.NtlmNegotiation, ex.Category);
+        Assert.Equal("InvalidToken", ex.NtlmStatus);
+        Assert.Equal("challenge", ex.NtlmStep);
+        Assert.Contains("InvalidToken", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("challenge", ex.Message, StringComparison.Ordinal);
+        Assert.Equal("InvalidToken", ex.DiagnosticFields["NtlmStatus"]);
+        Assert.Equal("challenge", ex.DiagnosticFields["NtlmStep"]);
+    }
+
+    [Fact]
+    public void ClassifyOpenException_LoginFailed_ReturnsLoginRejectedCategory()
+    {
+        var result = SqlServerWindowsAuthConfigurator.ClassifyOpenException(
+            new InvalidOperationException("Login failed for user 'LWEW2K\\svc'."), NtlmOptions());
+
+        var ex = Assert.IsType<SqlServerWindowsAuthException>(result);
+        Assert.Equal(SqlServerWindowsAuthFailureCategory.LoginRejected, ex.Category);
+        Assert.DoesNotContain("LWEW2K", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ClassifyOpenException_SqlPasswordConnection_IsReturnedUnchanged()
+    {
+        var original = new InvalidOperationException("Cannot generate SSPI context.");
+        var options = new DataSourceConnectionOptions { Provider = "SqlServer", ConnectionString = "Server=h;User ID=sa;Password=x;" };
+
+        Assert.Same(original, SqlServerWindowsAuthConfigurator.ClassifyOpenException(original, options));
+    }
+
+    [Fact]
+    public void ManagedNtlmProvider_InvalidChallengeBlob_ReturnsFalseAndRecordsFailure()
+    {
+        using var provider = new ManagedNtlmSspiContextProvider(new NetworkCredential("svc", "Secret-Pw-123", "DOM"), "MSSQLSvc/host:1433", "NTLM");
+        var writer = new ArrayBufferWriter<byte>();
+
+        Assert.True(provider.TryGenerateContext(ReadOnlySpan<byte>.Empty, writer, "MSSQLSvc/host:1433"));
+        Assert.Null(provider.LastFailure);
+        Assert.True(writer.WrittenCount > 0);
+
+        bool ok = provider.TryGenerateContext(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 }, new ArrayBufferWriter<byte>(), "MSSQLSvc/host:1433");
+
+        Assert.False(ok);
+        var failure = provider.LastFailure;
+        Assert.NotNull(failure);
+        Assert.Equal(ManagedNtlmFailure.ChallengeStep, failure!.Step);
+        Assert.True(failure.StatusCode is not null || failure.ExceptionType is not null);
+        Assert.DoesNotContain("Secret-Pw-123", failure.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PrepareConnection_UseManagedNtlmFalse_CreatesNoProviderAndDoesNotSetSwitch()
+    {
+        AppContext.SetSwitch(SqlServerWindowsAuthConfigurator.UseManagedNtlmSwitchName, false);
+        var envVars = new Dictionary<string, string?>(StringComparer.Ordinal);
+        var options = new DataSourceConnectionOptions
+        {
+            Provider = "SqlServer",
+            ConnectionString = "Server=h,1433;Database=D;",
+            WindowsAuth = new SqlServerWindowsAuthOptions
+            {
+                Mode = SqlServerWindowsAuthMode.Ntlm,
+                Domain = "DOM",
+                Username = "svc",
+                PasswordRef = "file:/run/secrets/pw",
+                UseManagedNtlm = false
+            }
+        };
+
+        SqlServerWindowsAuthConfigurator.PrepareConnection(
+            options,
+            new FakeSecretProvider(new Dictionary<string, string> { ["file:/run/secrets/pw"] = "pw-123" }),
+            new FakeHostEnvironment("Production"),
+            out var provider,
+            gssStateDirectory: _tempDir,
+            getEnvVar: k => envVars.GetValueOrDefault(k),
+            setEnvVar: (k, v) => envVars[k] = v);
+
+        Assert.Null(provider);
+        Assert.True(AppContext.TryGetSwitch(SqlServerWindowsAuthConfigurator.UseManagedNtlmSwitchName, out bool enabled) && !enabled);
+        Assert.True(envVars.ContainsKey("NTLM_USER_FILE"));
+    }
+
+    [Theory]
+    [InlineData(null, null, true)]
+    [InlineData(null, "false", false)]
+    [InlineData(null, "0", false)]
+    [InlineData(null, "true", true)]
+    [InlineData(true, "false", true)]
+    [InlineData(false, "true", false)]
+    public void ManagedNtlmPolicy_ExplicitOptionWinsOverEnvironmentVariable(bool? configured, string? env, bool expected)
+    {
+        Assert.Equal(expected, ManagedNtlmPolicy.Resolve(configured, _ => env));
+    }
+
+    [Fact]
+    public void PrepareConnection_OptionUnsetAndEnvironmentFalse_UsesGssPath()
+    {
+        var envVars = new Dictionary<string, string?>(StringComparer.Ordinal) { [ManagedNtlmPolicy.EnvironmentVariableName] = "false" };
+        var options = new DataSourceConnectionOptions
+        {
+            Provider = "SqlServer",
+            ConnectionString = "Server=h,1433;Database=D;",
+            WindowsAuth = new SqlServerWindowsAuthOptions
+            {
+                Mode = SqlServerWindowsAuthMode.Ntlm,
+                Domain = "DOM",
+                Username = "svc",
+                PasswordRef = "file:/run/secrets/pw"
+            }
+        };
+
+        SqlServerWindowsAuthConfigurator.PrepareConnection(
+            options,
+            new FakeSecretProvider(new Dictionary<string, string> { ["file:/run/secrets/pw"] = "pw-123" }),
+            new FakeHostEnvironment("Production"),
+            out var provider,
+            gssStateDirectory: _tempDir,
+            getEnvVar: k => envVars.GetValueOrDefault(k),
+            setEnvVar: (k, v) => envVars[k] = v);
+
+        Assert.Null(provider);
+        Assert.Equal("Integrated-GSSAPI", SqlServerWindowsAuthConfigurator.DescribeAuthPath(options, k => envVars.GetValueOrDefault(k)));
+        Assert.Equal("Integrated-ManagedNtlm", SqlServerWindowsAuthConfigurator.DescribeAuthPath(options, _ => null));
+    }
+
+    [Fact]
+    public void DescribeAuthPath_ReportsSqlPasswordAndKerberos()
+    {
+        var sqlLogin = new DataSourceConnectionOptions { Provider = "SqlServer", ConnectionString = "Server=h;User ID=sa;Password=x;" };
+        var kerberos = new DataSourceConnectionOptions
+        {
+            Provider = "SqlServer",
+            ConnectionString = "Server=h;Integrated Security=true;",
+            WindowsAuth = new SqlServerWindowsAuthOptions { Mode = SqlServerWindowsAuthMode.Kerberos }
+        };
+
+        Assert.Equal("SqlPassword", SqlServerWindowsAuthConfigurator.DescribeAuthPath(sqlLogin, _ => null));
+        Assert.Equal("Integrated-Kerberos", SqlServerWindowsAuthConfigurator.DescribeAuthPath(kerberos, _ => null));
+    }
+
+    [Theory]
+    [InlineData("Server=10.160.2.94,1433;Database=R;User ID=u;Password=p;", "10.160.2.94", 1433)]
+    [InlineData("Data Source=tcp:sql.corp.local,14330;Integrated Security=true", "sql.corp.local", 14330)]
+    [InlineData("Server=sqlhost\\INST1;Integrated Security=true", "sqlhost", null)]
+    public void SqlSourceDescriber_ExtractsHostAndPortWithoutSecrets(string connectionString, string host, int? port)
+    {
+        var description = new SqlSourceDescriber().Describe(new DataSourceConnectionOptions { Provider = "SqlServer", ConnectionString = connectionString });
+
+        Assert.Equal(host, description.Host);
+        Assert.Equal(port, description.Port);
+        Assert.DoesNotContain("Password", description.Host, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NativeEnvironment_Set_IsVisibleToNativeGetenv_OnUnix()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // native environ is only separate from the managed copy on Unix; the P/Invoke below targets glibc
+        }
+
+        string name = $"AUTHERIS_TEST_NATIVE_ENV_{Guid.NewGuid():N}";
+        System.Diagnostics.Debug.Assert(NativeGetenv(name) == IntPtr.Zero);
+
+        // Managed-only set is invisible to native code (documents the bug this helper fixes).
+        Environment.SetEnvironmentVariable(name, "managed-only");
+        Assert.Equal(IntPtr.Zero, NativeGetenv(name));
+
+        NativeEnvironmentAccess.Set(name, "native-visible");
+
+        var ptr = NativeGetenv(name);
+        Assert.NotEqual(IntPtr.Zero, ptr);
+        Assert.Equal("native-visible", System.Runtime.InteropServices.Marshal.PtrToStringUTF8(ptr));
+        Assert.Equal("native-visible", Environment.GetEnvironmentVariable(name));
+    }
+
+#pragma warning disable SYSLIB1054, CA5392, CA2101 // test-only probe of the native environment; the name is marshalled explicitly as UTF-8
+    [System.Runtime.InteropServices.DllImport("libc", EntryPoint = "getenv")]
+    private static extern IntPtr NativeGetenv([System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPUTF8Str)] string name);
+#pragma warning restore SYSLIB1054, CA5392, CA2101
+
     private sealed class FakeSecretProvider(IReadOnlyDictionary<string, string> secrets) : IKeyVaultSecretProvider
     {
         public byte[] GetSecretBytes(string secretRef) =>
@@ -229,4 +450,10 @@ public sealed class SqlServerWindowsAuthConfiguratorTests : IDisposable
         public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
         public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
+}
+
+/// <summary>Test access to the internal <c>NativeEnvironment</c> helper.</summary>
+internal static class NativeEnvironmentAccess
+{
+    public static void Set(string name, string value) => Autheris.Infrastructure.Persistence.NativeEnvironment.Set(name, value);
 }

@@ -2,10 +2,11 @@
 
 **Document ID:** `PLAN-FED-01`
 **Date:** 2026-10-16
-**Status:** PLAN READY (Phase 2 complete); security review appended in section 12 (Phase 3); extension for #122-#124 (4.11, WP-FED-11..14, 12.6) reviewed; next: Phase 4 (TDD developers)
+**Status:** PLAN READY (Phase 2 complete); security review appended in section 12 (Phase 3); extension for #122-#124 (4.11, WP-FED-11..14, 12.6) reviewed; extension for #131/#132 (4.12, WP-FED-15/16) is a brief Phase 2 design, **SECURITY REVIEW pending** (12.7); next: Phase 4 for the reviewed packages
 **Author:** Solution Architect (Phase 2, `csharp-architect` role), Security Expert (Phase 3, section 12)
 **PRD:** [2026-10-16-req-cross-source-all-consumers.md](2026-10-16-req-cross-source-all-consumers.md) (`REQ-FED-01`; performance addendum section 7.1 for #122-#125)
 **Extension 2026-10-16:** section 4.11 and `WP-FED-11..14` (issues #122, #123, #124), security addendum 12.6 (`SEC-FED-19..34`).
+**Extension 2026-10-16 (2):** section 4.12 and `WP-FED-15..16` (issues #131, #132), security placeholders 12.7 (`SEC-FED-35..42`).
 **Parent Plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
 **Branch:** `feat/cross-source-all-consumers` (base `main` `70b75e27`)
 
@@ -289,6 +290,30 @@ Extension of the existing per-read audit (`FederatedStagingService.cs:225-245`, 
 
 All validated at startup (`IValidateOptions`, WP-FED-01 validator extended by WP-FED-12). Shipping the three `Enabled` flags as `false` until the security tests (12.6) are green and flipping the default in the same increment as the parity tests is the recommended rollout.
 
+### 4.12 Federated parameters and co-located data sources (WP-FED-15, WP-FED-16; issues #131, #132)
+
+*Brief Phase 2 design, verified against `5ae3c046`. Detail to be completed when the packages enter Phase 4; the security conditions are placeholders until Phase 3 (12.7).*
+
+#### 4.12.1 Federated parameters (WP-FED-15, #131)
+
+- **Scope.** WP-FED-03 (4.3) already carries scalar client parameters into `CrossSourcePlanner.Plan` and compiles the DuckDB statement with a `ParameterSource` that binds them. WP-FED-15 adds on top: list parameters (REQ-SQL-128 expander), the single validation pass, the typed pushed value, and parameter names in audit and analysis.
+- **Contract object.** `Federation/FederatedParameterContract` (new) is built once in `FederatedDuckDbExecutionService` before `Plan`: it takes the normalised client values and the declared or inferred types (from the declared query or from the `WebSqlParameterValues` normalisation of REQ-SQL-128), validates names, types, list element types and bounds, and exposes `ParameterSource` (for DuckDB `$n`) and `TryGetTyped(name, columnTypeClass, out value)` for the pushdown builder. Invalid input refuses the request before `StageAsync` (zero source reads).
+- **Pushdown hook (WP-FED-11 region).** `PushedClauseBuilder` asks the contract for the value typed to the column's catalog type class; a type-class mismatch, a list above the source bind budget (`DialectCapabilityTable.MaxBindParameters` minus policy parameters) or an unsupported conjunct form returns "not pushable" and the conjunct stays only in DuckDB (superset rule, SEC-FED-21).
+- **Subtrees (WP-FED-13 region).** The subtree compile receives the same client values through the governed single-source path (binder), so a parameter inside a same-source subtree is bound by the source's binder, not spliced.
+- **Audit and analysis.** `WebSqlCrossSourceSourceRead` gains `parameterNames` and `listParameterCounts`; the query record gets the same; the #79 federation section shows per pushed predicate the feeding parameter name.
+- **No new option** except reuse of `WebSql:MaxListParameterValues` (REQ-SQL-128).
+
+#### 4.12.2 Co-located data sources (WP-FED-16, #132)
+
+- **Configuration.** `DataSourceConnectionOptions.CoLocationGroup` (string, optional, `[A-Za-z0-9_-]{1,64}`) in `src/Autheris.Domain/Options/Storage/DatabaseOptions.cs` (after REQ-GOV-107 and coordinated with `WP-SC-15`). New `Federation/CoLocation/CoLocationRegistry` (immutable, built at startup) and `CoLocationOptionsValidator` (extends `CrossSourceOptionsValidator`, after WP-FED-01): group of at least two members, equal `Provider` (SQL Server only), equal normalised server and credential identity (connection string with `Initial Catalog`/`Database` removed, Windows auth settings equal), equal session options, no `Delegated*` mode (once SC-15 exists), no HTTP source, startup failure otherwise.
+- **Connect-time verification.** `Federation/CoLocation/CoLocationVerifier` runs once per group on first use and on a configurable interval (default 10 minutes): one connection per member, reads `@@SERVERNAME` plus `SERVERPROPERTY('InstanceName')` and `DB_NAME()`, compares all members, caches the verdict; failure marks the group "not co-located" (staging fallback, stable log code, analysis flag). It reuses the login circuit breaker of each source (an open breaker counts as failure of that member).
+- **Grouping.** `SubtreeExtractor` (WP-FED-13) uses the key `registry.GroupOf(source) ?? source`; a subtree may then contain tables of several members. `OutputColumnClassifier`, `ScopedFunctionCollector` and the budget rules are unchanged.
+- **Qualification.** `SubtreeStatementBuilder` marks each table with its member source; for a subtree that spans more than one database the SQL Server emitter qualifies tables as `[database].[schema].[table]` using the database name from the data source configuration (identifier validation and dialect quoting in the emitter, never client text). **Spike (first task of WP-FED-16):** confirm that `TableAccessTarget`/`ISqlEngine.Compile` can carry a catalog part end to end (policy predicates, masks, row filter column references, tenant predicate, `AstSecurityVisitor`), or add it; if the compiler cannot, the package is blocked and the owner is told.
+- **Authorization.** All member tables are authorized once before any read (unchanged FR-30). `SubtreeExecutor` receives the authorized `(source, database, schema, table)` set; after compile, a **reference check** walks the final AST and refuses any table reference outside the set (`FEDERATION_INTERNAL_GUARD`, fail closed, audited).
+- **Connection and session.** One connection of a member, pinned as today; the tenant session context applies to the whole connection; the connection options (timeout, isolation) are those that the validator proved equal.
+- **Audit and limits.** One statement record (`kind: subtree`, `colocated: true`, group, all tables and sources) plus one access-audit entry per table with that table's source and owner identity; per-source concurrency leases and per-user-and-table read limits are acquired for every member (deterministic order to avoid deadlock); the #79 analysis gets `colocated`, group and members.
+- **Switch.** `WebSql:CrossSource:CoLocation:Enabled` (default `false` until the Phase 3 tests pass), `WebSql:CrossSource:CoLocation:VerifyIntervalSeconds` (default 600).
+
 ## 5. Data and Configuration Summary
 
 | Item | Change |
@@ -328,6 +353,8 @@ Disjoint file sets so Sonnet TDD developers can run in parallel. Each WP owns it
 | **WP-FED-12** | Federation performance options, catalog hints, audit fields, #79 analysis section | new `Federation/FederationOptimizationOptions.cs` and validator (extends `CrossSourceOptionsValidator.cs` after WP-01), `CrossSourceOptions` (properties region in `RestApiOptions.cs`, after WP-01), `FederatedStagingService.cs` audit region (`:225-245`), `QueryAnalysisModels.cs`, `QueryAnalysisService.Sql.cs`, analysis REST/MCP serialisation, catalog hints: `TableModels.cs` (`expected_rows`, `exact_compare`), data source flag `allow_key_set_import`, baseline DDL x3 and shape snapshots, three repositories (mapping only), admin API field; tests | 03, 11 | 700 / 900 |
 | **WP-FED-13** | Same-source subtrees (#123) | new `Sql/Federation/Optimization/SubtreeExtractor.cs`, `SubtreeStatementBuilder.cs`, `SubtreeExecutor.cs`, `ScopedFunctionCollector.cs`, `OutputColumnClassifier.cs`; `GovernedSqlExecutionService.cs`/`GovernedSqlExecutor.cs` (new internal entry only, region owned), `FederatedStagingService.cs` (stage plan, subtree input region), `CrossSourcePlanner.cs` (subtree pass region, after WP-11 and WP-14 merges); tests | 03, 11, 12 | 1300 / 1500 |
 | **WP-FED-14** | Key-set filters and shared key batching (#124) | new `Sql/Federation/Optimization/KeySetPlanner.cs`, `KeySetStagingCoordinator.cs`, `KeyExactMatchFilter.cs`; `Federation/KeyBatching/KeyBatchPlanner.cs` (contract owned by WP-06 `KeyPredicate.cs`; WP-14 adds the dialect-bound `Split`, WP-06 consumes it); `FederatedStagingService.cs` (waves and batch region), `CrossSourcePlanner.cs` (key-set pass region); tests | 03, 06, 11, 12 | 700 / 1000 |
+| **WP-FED-15** | Federated parameter contract and list parameters (#131) | new `Federation/FederatedParameterContract.cs`; `CrossSourcePlanner.cs` (parameter region, `ParameterSource` at `:282`), `FederatedDuckDbExecutionService.cs` (contract construction before `Plan`), `PushedClauseBuilder.cs` (typed-value hook, after WP-11), `FederatedStagingService.cs` audit region (`parameterNames`), `QueryAnalysisService.Sql.cs` (parameter names, after WP-12); tests `tests/.../Sql/Federation/FederatedParameterTests.cs`, injection corpus, validation-before-read spy | 03, 11, 12; list parameters need **REQ-SQL-128** (the list expander and `WebSql:MaxListParameterValues`) | 450 / 700 |
+| **WP-FED-16** | Co-located data sources (#132) | `DatabaseOptions.cs` (`CoLocationGroup`, after REQ-GOV-107 merge, coordinate with `WP-SC-15`), new `Federation/CoLocation/CoLocationRegistry.cs`, `CoLocationOptionsValidator.cs`, `CoLocationVerifier.cs`; `SubtreeExtractor.cs` (grouping-key region), `SubtreeStatementBuilder.cs` (qualification region), `SubtreeExecutor.cs` (reference check, multi-lease), SQL Server emitter and `TableAccessTarget` catalog part (`src/TrinoSqlEngine/...`, spike result decides), audit and analysis fields; tests incl. SQL Server two-database container fixture | 13, 12 (spike first) | 1200 / 1500 |
 
 Totals WP-FED-01..10: about 5,350 LOC production and 8,000 LOC tests (estimates, plus or minus 25 percent). WP-FED-11..14 add about 3,600 LOC production and 4,700 LOC tests (plus 1,500 LOC of integration tests in WP-FED-10, see 7); WP-FED-10 grows from 1,600 to about 3,100 test LOC.
 
@@ -344,9 +371,12 @@ Wave G (serial):    WP-11 (after 03)                          [#122]
 Wave H (serial):    WP-12 (after 11)                          [options, hints, audit, analysis]
 Wave I (develop parallel, merge 14 before 13):  WP-14 (after 06, 11, 12)  [#124],  WP-13 (after 11, 12)  [#123]
 Wave F':            WP-10 integration cases for G-I (SQL Server collation, two persons, parity on/off)
+Wave J:             WP-15 (after 03, 11, 12; list parameters after REQ-SQL-128)   [#131]
+Wave K:             WP-16 (after 13, 12; spike first; SQL Server two-database fixture)   [#132]
+Wave F'':           WP-10 integration cases for J-K (parameter parity, co-located one statement, two persons, forged qualification)
 ```
 
-Increments map to waves: **INC-1** = WP-01, WP-02 (error and gate parts); **INC-2** = WP-03, WP-04, WP-05; **INC-3** = WP-06, WP-07, WP-08; **INC-4** = WP-09; **INC-5** = WP-10 plus Phase 6. New **INC-6 (federated query performance)** = WP-FED-11, 12, 13, 14 plus their cases in WP-10; it follows INC-2 (WP-03 owns the same files) and needs only the key-batching contract of WP-06 from INC-3, so INC-6 can ship before INC-4 (HTTP/relation filters) if the owner prefers volume relief over GraphQL non-SQL. Within INC-6 the value order is #122 (Wave G/H), #124, #123. The shared-file rule applies to `CrossSourcePlanner.cs`, `FederatedStagingService.cs`, `GovernedSqlExecutionService.cs`: WP-03 before WP-11 before WP-12 before WP-14 before WP-13; the new classes of 13 and 14 are developed in parallel, only their hook regions are merged in that order.
+Increments map to waves: **INC-1** = WP-01, WP-02 (error and gate parts); **INC-2** = WP-03, WP-04, WP-05; **INC-3** = WP-06, WP-07, WP-08; **INC-4** = WP-09; **INC-5** = WP-10 plus Phase 6. New **INC-6 (federated query performance)** = WP-FED-11, 12, 13, 14 plus their cases in WP-10; it follows INC-2 (WP-03 owns the same files) and needs only the key-batching contract of WP-06 from INC-3, so INC-6 can ship before INC-4 (HTTP/relation filters) if the owner prefers volume relief over GraphQL non-SQL. Within INC-6 the value order is #122 (Wave G/H), #124, #123. New **INC-7 (federated parameters and co-located sources)** = WP-FED-15, WP-FED-16 plus about 600 LOC of integration cases in WP-10 (WP-FED-10 grows to about 3,700 test LOC); it follows INC-6 and, for list parameters, the REQ-SQL-128 work package. The shared-file rule applies to `CrossSourcePlanner.cs`, `FederatedStagingService.cs`, `GovernedSqlExecutionService.cs`: WP-03 before WP-11 before WP-12 before WP-14 before WP-13; the new classes of 13 and 14 are developed in parallel, only their hook regions are merged in that order.
 
 Shared-file rule (from the memory rule on parallel agents): developers only implement; the lead compiles and tests once per wave; files touched by two packages (`AsyncQueryJobBackgroundWorker.cs`, `DuckDbOlapEngine.cs`, `CatalogSchemaModel.cs`, `FederationServiceExtensions.cs`, `FederatedStagingService.cs`) are listed with an owner-by-region and a merge order (WP-02 before WP-04 for the worker error lines; WP-04 before WP-05 for the engine; WP-08 before WP-09 for the schema model; WP-03 before WP-09 for the staging service).
 
@@ -524,8 +554,26 @@ Each condition is mandatory for Phase 4 and checked in Phase 5. Each lists a man
 
 **APPROVED WITH CONDITIONS** for #122, #123 and #124 as designed in 4.11. #122 is acceptable because a pushed clause can only narrow an already governed read and DuckDB re-applies every predicate; the conditions that matter are the mask rule (HMAC passes the existing guard), the conservative superset matrix, and the exclusion of expressions and gateway-enforced tables. #124 is acceptable only with the owner-controlled sink flag (Q-8) and per-batch exact-match de-duplication. #123 is acceptable only if the subtree is compiled through the governed engine and output classification fails closed; if `ISqlEngine.Compile` cannot expose per-output classification, expressions stay out of subtree outputs until it can. Implementation order #122, #124, #123; Phase 4 must not enable any switch by default before the tests of 12.6.3 are green. Deviation from SEC-FED-19..34 returns the work to Phase 2.
 
+### 12.7 Security Review Placeholder: federated parameters and co-located sources (#131, #132; Phase 3 pending)
+
+*Not a review. Phase 1/2 name the conditions that Phase 3 (`csharp-security-expert`) must turn into binding `SEC-FED` conditions with tests. Numbering continues after SEC-FED-34. Until Phase 3 is complete the verdict for WP-FED-15/16 is **SECURITY REVIEW pending**; the optimisation switches stay `false`.*
+
+| ID | Topic (to be defined in Phase 3) | Source of the condition |
+|---|---|---|
+| SEC-FED-35 | Parameters are bound, never spliced, in DuckDB and in every source statement; injection corpus for scalar and list values | REQ-FED-01 7.2.4 |
+| SEC-FED-36 | Pushed value equals the DuckDB value and is typed from the column; type-class mismatch is not pushed; list above the bind budget is not pushed, never truncated | 7.2.4, SEC-FED-21/22 |
+| SEC-FED-37 | One validation before any source read; no parameter-dependent error before all tables are authorized (no oracle) | 7.2.4, D-8 |
+| SEC-FED-38 | Co-location declaration: explicit on every member, startup validation, connect-time server-identity verification, fallback to staging never to a wrong-identity statement; no `Delegated*`, no HTTP, SQL Server only | 7.2.4 |
+| SEC-FED-39 | No authority gain: statement references only the authorized table set; post-compile AST reference check; client qualified names never select a database; database names only from configuration | 7.2.4 |
+| SEC-FED-40 | Per-table governance inside a co-located statement (consents, row filters, masks, tenant, guards); correlated filters across member databases refused; masked-output classification (SEC-FED-25) per member | 7.2.4, SEC-FED-24/25 |
+| SEC-FED-41 | Explicit permissions, no ownership chaining, SELECT only; permission errors mapped to a stable code without database text | 7.2.4 |
+| SEC-FED-42 | Audit per table and per statement, audit failure denies; leases, limits and breakers of every member; switch default false until tests are green | 7.2.4 |
+
+Mandatory tests (to register in the regression catalog by Phase 3): parameter injection corpus on all three engines; validation-before-read spy; pushdown on/off parity with parameters; forged-qualification attempts; unauthorized-table post-compile check; two-persons parity inside a co-located statement; startup validation negative cases; verification-failure fallback.
+
 ## 13. Changelog
 
 - 2026-10-16: Phase 2 architecture and work packages, verified against `70b75e27`.
 - 2026-10-16: Phase 3 security review appended (SEC-FED-01..18), verdict APPROVED WITH CONDITIONS.
 - 2026-10-16: Section 4.11 (design for #122, #123, #124), `WP-FED-11..14`, increment INC-6, test strategy additions; Phase 3 addendum 12.6 (`SEC-FED-19..34`, verdict APPROVED WITH CONDITIONS). Code facts verified against `80eb6b97`.
+- 2026-10-16: Section 4.12 (brief design for #131 and #132), `WP-FED-15`, `WP-FED-16`, waves J and K, INC-7; Phase 3 placeholders 12.7 (`SEC-FED-35..42`, review pending). Verified against `5ae3c046`.

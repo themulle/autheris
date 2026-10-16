@@ -111,9 +111,9 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
                 }
                 catch (Exception ex)
                 {
-                    // Fail closed. Only the exception type is logged: driver messages can carry connection details.
-                    _logger.LogWarning("Catalog metadata load failed for data source {DataSource}, table {Table} ({ExceptionType}); the table is denied.",
-                        dataSourceName, table.ToQualifiedName(), ex.GetType().Name);
+                    // Fail closed. Only classified (credential-free) messages and type/number diagnostics are logged: raw driver messages
+                    // can carry connection details.
+                    LogLoadFailure(dataSourceName, table, ex);
                     _cache.TryRemove(key, out _);
                     if (TrinoSqlEngine.CompilerHooks.IsDisabled(TrinoSqlEngine.SecurityControl.CatalogLoadFailureDenies))
                     {
@@ -136,10 +136,63 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
         return new InMemoryTableCatalog(entries, defaultSchema);
     }
 
+    // A failing source is retried on every cache miss (once per table); the Warning is limited to once per data source and reason
+    // within this window so a down source does not flood the log. Suppressed repeats are logged at Debug.
+    private static readonly long WarnWindowMs = 30_000;
+    private readonly ConcurrentDictionary<string, long> _lastLoadWarning = new(StringComparer.Ordinal);
+
+    private LogLevel NextLoadFailureLevel(string key)
+    {
+        long now = Environment.TickCount64;
+        if (_lastLoadWarning.TryGetValue(key, out long previous) && now - previous < WarnWindowMs)
+        {
+            return LogLevel.Debug;
+        }
+
+        _lastLoadWarning[key] = now;
+        return LogLevel.Warning;
+    }
+
+    private void LogLoadFailure(string dataSourceName, TableIdentifier table, Exception ex)
+    {
+        ISqlSourceDiagnosticException? diagnostic = null;
+        var types = new List<string>();
+        Microsoft.Data.SqlClient.SqlException? sqlException = null;
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            types.Add(current.GetType().Name);
+            diagnostic ??= current as ISqlSourceDiagnosticException;
+            sqlException ??= current as Microsoft.Data.SqlClient.SqlException;
+        }
+
+        if (diagnostic is SqlSourceLoginBlockedException blocked)
+        {
+            // The breaker already logged once at Warning when it opened; a blocked retry per query would only spam the log.
+            _logger.LogDebug("Catalog metadata load skipped for data source {DataSource}, table {Table}: login breaker open ({Remaining:F0} s remaining); the table is denied.",
+                dataSourceName, table.ToQualifiedName(), blocked.Remaining.TotalSeconds);
+            return;
+        }
+
+        if (diagnostic is Exception diagnosticException)
+        {
+            string fields = string.Join(", ", diagnostic.DiagnosticFields.Select(static f => $"{f.Key}={f.Value}"));
+            _logger.Log(NextLoadFailureLevel($"{dataSourceName}|{diagnostic.CategoryName}"),
+                "Catalog metadata load failed for data source {DataSource}, table {Table}: {Message} [Category={Category}; {Fields}]; the table is denied.",
+                dataSourceName, table.ToQualifiedName(), diagnosticException.Message, diagnostic.CategoryName, fields);
+            return;
+        }
+
+        string chain = string.Join(" -> ", types);
+        _logger.Log(NextLoadFailureLevel($"{dataSourceName}|{chain}"),
+            "Catalog metadata load failed for data source {DataSource}, table {Table} ({ExceptionTypes}{SqlDetails}); the table is denied.",
+            dataSourceName, table.ToQualifiedName(), chain,
+            sqlException is null ? string.Empty : $"; SqlNumber={sqlException.Number}, SqlState={sqlException.State}, SqlClass={sqlException.Class}");
+    }
+
     private async Task<DbConnection> OpenAsync(string dataSourceName, CancellationToken ct)
     {
         var options = FindConnection(dataSourceName)
-            ?? throw new InvalidOperationException($"The data source '{dataSourceName}' has no configured connection.");
+            ?? throw new SqlSourceNotConfiguredException(dataSourceName);
         return await _connectionFactory.CreateOpenConnectionAsync(options, ct).ConfigureAwait(false);
     }
 
@@ -181,26 +234,47 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
         });
     }
 
+    // Every silent denial used to be invisible in the log (issue: NTLM catalog diagnostics); the reason names only the data source,
+    // table, provider and dialect, never connection details.
+    private void LogAdmissionDenied(string dataSourceName, TableIdentifier table, string reason) =>
+        _logger.LogWarning("Catalog admission denied for data source {DataSource}, table {Table}: {Reason} The table is denied.",
+            dataSourceName, table.ToQualifiedName(), reason);
+
     private async Task<(TableCatalogEntry? Entry, string Fingerprint)> LoadAsync(
         string dataSourceName, TableIdentifier table, Func<Task<DbConnection>> open, CancellationToken ct)
     {
         var connectionOptions = FindConnection(dataSourceName);
-        if (connectionOptions is null || !DataSourceProvider.TryResolveDialect(connectionOptions.Provider, out var dialect))
+        if (connectionOptions is null)
         {
+            LogAdmissionDenied(dataSourceName, table, $"The data source '{dataSourceName}' has no configured connection.");
+            return (null, string.Empty);
+        }
+
+        if (!DataSourceProvider.TryResolveDialect(connectionOptions.Provider, out var dialect))
+        {
+            LogAdmissionDenied(dataSourceName, table, $"The provider '{connectionOptions.Provider}' of the data source is not supported.");
             return (null, string.Empty);
         }
 
         var metadata = await _governance.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
-        if (metadata is null ||
-            metadata.DataSourceType != DataSourceType.Sql ||
+        if (metadata is null)
+        {
+            LogAdmissionDenied(dataSourceName, table, "The table is not registered in the governance catalog.");
+            return (null, string.Empty);
+        }
+
+        if (metadata.DataSourceType != DataSourceType.Sql ||
             !string.Equals(metadata.Table.SourceName, dataSourceName, StringComparison.OrdinalIgnoreCase) ||
             metadata.Dialect != dialect)
         {
+            LogAdmissionDenied(dataSourceName, table,
+                $"The catalog entry (type {metadata.DataSourceType}, source '{metadata.Table.SourceName}', dialect {metadata.Dialect}) does not match the configured connection (dialect {dialect}).");
             return (null, string.Empty);
         }
 
         if (!SqlDialectMapper.TryToTargetDialect(dialect, out var target) || !_readers.TryGetValue(target, out var reader))
         {
+            LogAdmissionDenied(dataSourceName, table, $"No catalog reader is available for dialect {dialect}.");
             return (null, string.Empty);
         }
 

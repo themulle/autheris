@@ -2,11 +2,11 @@
 
 **Document ID:** `REQ-FED-01`
 **Date:** 2026-10-16
-**Status:** PRD READY (Phase 1 complete); next: Phase 2 architecture plan (`csharp-architect`)
+**Status:** PRD READY (Phase 1 complete, sections 7.1 and 7.2 included); SECURITY REVIEW pending for section 7.2 (Phase 3 placeholders SEC-FED-35..42 in PLAN-FED-01 12.7); next: Phase 2 for 7.2 is a brief design in PLAN-FED-01 4.12
 **Author:** Enterprise Product Manager (Phase 1)
 **Source:** Owner requirement 2026-10-16: "The cross-source feature must work cleanly for all consumers." (original German: "das cross source feature muss bei allen abnehmern sauber funktionieren"). Related issue: #75 "Cross-source GraphQL relations" (falsely recorded as completed).
 **Branch:** `feat/cross-source-all-consumers` (base `main` `70b75e27`)
-**Extended 2026-10-16:** owner issues #122, #123, #124 (federated query performance) and #125 (doc correction), see section 7.1.
+**Extended 2026-10-16:** owner issues #122, #123, #124 (federated query performance) and #125 (doc correction), see section 7.1; owner issues #131 (federated bound parameters) and #132 (co-located data sources), see section 7.2.
 **Parent Plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
 **Related feature docs (read-only references):** [F-GOV-19](../features/f-gov-19-cross-source-graphql-relations.md), [F-DATA-02](../features/f-data-02-governed-websql.md), [F-DATA-03](../features/f-data-03-duckdb-olap.md), [F-DATA-04](../features/f-data-04-arrow-flight-sql.md), [F-DATA-06](../features/f-data-06-governed-rest-data-api.md), [F-DATA-07](../features/f-data-07-async-query-jobs.md), [F-GOV-14](../features/f-gov-14-federated-virtual-filters.md), [F-GOV-21](../features/f-gov-21-declared-table-keys-and-read-ordering.md), [F-AI-12](../features/f-ai-12-hybrid-mcp-gateway.md)
 
@@ -306,6 +306,108 @@ All three are accepted as **P2 performance features with security impact (classi
 | Q-12 | WHERE conjunct on the null-supplying side of a left join (null-rejecting form, equals an inner join): push in a later step? | Later step, behind the same switch, after parity tests exist |
 | Q-13 | Per-table hint name and place (`expected_rows` integer or `size_class` large/small) and who may set it (data owner)? | `expected_rows` on the table metadata, set by the data owner or admin, audited |
 
+### 7.2 Federated parameters and co-located data sources (#131, #132)
+
+*Phase 1 addition (Product Manager), verified against `5ae3c046`. Source: owner issues #131 and #132 and the owner comments on #122 ("parameterised cross-source queries are rejected today; see #131") and #123 ("#132 proposes co-located data sources so a same-source subtree may span several databases on one server"). Both belong to this track; #131 completes D-10, #132 extends #123.*
+
+#### 7.2.1 Verified current behaviour
+
+| Claim in the issues | Verified | Evidence |
+|---|---|---|
+| #131: client-named parameters are not usable in federated queries | **Confirmed, with a correction to the wording** | `docs/features/f-dialect-02-ast-sql-compiler.md:436` ("not supported ... fails closed"). In code the federated planner compiles the DuckDB statement with `ParameterSource.Empty` (`src/Autheris.Application/Sql/Services/CrossSourcePlanner.cs:282`), i.e. request parameters are **not carried** (this PRD 2.1 row 16: parameterised endpoints fail; 7.1.1 row "All query predicates stay in DuckDB"). No dedicated rejection with a stable error code was found; the failure is a consequence of the missing values. The single-source path normalises and binds them (`GovernedSqlExecutor.cs:260-261`, `GovernedSqlExecutionService.NormalizeClientParameters`, binder `ICompiledSqlBinder.cs:196-207`) |
+| #131: planner binds values as `$n` | Confirmed | `CrossSourcePlanner.cs:280-282` ("WP-X3: every query value is bound ($n)") |
+| #131: #122 pushdown needs parameters | Confirmed | FR-25 of this PRD, PLAN-FED-01 4.3 and 4.11.2; `TableFilterClause` carries parameters (`IGatewayExecutionService.cs:66`) |
+| #132: no co-location concept exists | **Confirmed** | no `CoLocation`/`co-locat` reference in `src/` or `docs/plans/`; a data source is one configured connection (`SqlDataSourceOptions.Connections`, `DataSourceConnectionOptions`: `Provider`, `ConnectionString`, session options, `src/Autheris.Domain/Options/Storage/DatabaseOptions.cs`); a table belongs to one source via `domain.schema.table` (`TableMetadata.Identifier`); sessions are pinned per source (`SqlSourceUnavailableException`, `ISqlConnectionFactory.cs`) |
+| #132: a same-source subtree is the extension point | Confirmed (design only) | #123 is not implemented yet (PLAN-FED-01 4.11.5, WP-FED-13). The grouping key there is "data source" |
+| #132: qualified database names are available in the compiler | **Unverified, spike needed** | the governed compiler addresses tables as `schema.table` inside one pinned session; whether `TableAccessTarget` and the SQL Server emitter can emit a `[database].[schema].[table]` form, and that a client three-part name is rejected, must be proven in Phase 2 (see FR-41) |
+
+#### 7.2.2 Qualification and deduplication
+
+- **#131 is mostly a completion of what this PRD already contains.** D-10, FR-5 (WP-FED-03, PLAN-FED-01 4.3) already require that the federated path binds client parameters in DuckDB; FR-25 already requires that bound values and list values are pushed as bound values. **Net new from #131:** (a) list parameters (depends on #128), (b) one-time type validation before any source read, (c) the guarantee that the pushed value and the DuckDB value are the same typed value, (d) parameter names in the audit of the query and of each source read, (e) correction of the f-dialect-02 limitation text (Phase 6). Verdict: **approved, small, split off as `WP-FED-15`**; the scalar part stays in WP-FED-03.
+- **#132 is a new feature** on top of #123 (it changes the grouping key and the name qualification). It is not a duplicate of REQ-GOV-107 or of per-source configuration (BL-05); BL-05's per-source settings must not create a second place for co-location flags (the declaration lives next to the other connection options of the source, one place).
+- Neither issue changes the consumer inventory (section 2): both affect only the SQL-text strategy of the shared core.
+
+#### 7.2.3 Benchmark (brief)
+
+| Product | Practice | Consequence |
+|---|---|---|
+| **Trino** | One catalog per database (SQL Server and PostgreSQL connectors address one database); a join across catalogs is executed in Trino; parameters are bound per query for all connectors | Same architecture as the staging path; #131 matches the prepared-statement model (`EXECUTE ... USING`) |
+| **SQL Server** | Three-part names across databases of one instance in one statement; permission checks per object; cross-database ownership chaining is optional (`DB_CHAINING`) and a known privilege-escalation lever | #132 uses explicit permissions of the service account on each database; chaining must not be required or enabled |
+| **PostgreSQL** | A connection is bound to one database; cross-database access only through `dblink`/`postgres_fdw` | Not supported for co-location in the first step (rejected at startup) |
+| **Snowflake / Databricks (Unity)** | Three-level names (database/catalog, schema, table), cross-database queries natively with grants | Later candidates, as dialect support appears |
+| **Dremio / Calcite JDBC adapter** | Push joins into a JDBC convention when the tables share a connection | Co-location is the explicit, administrator-declared version of "same convention" |
+| **Anti-patterns rejected** | (1) detecting co-location implicitly from host names (aliases, listeners, DNS: a wrong guess runs a query under the wrong identity); (2) one broad service account silently serving every database; (3) relying on ownership chaining; (4) splicing parameter values to push them | Explicit declaration, verified at startup and at connect time; per-table authorization; explicit permissions; bound values |
+
+#### 7.2.4 Gatekeeper review
+
+**#131 (parameters).**
+- **Bound, never spliced, in every engine.** DuckDB statement: `$n` (existing). Source reads for pushed predicates: bound typed parameters built by the pushdown builder (existing SEC-FED-22/27). A test with quotes, comment markers and statement separators in values (scalar and list) asserts no value in any generated text, log or audit.
+- **Same value, same typed value.** The value bound in DuckDB and in a source statement is the same validated value; the source parameter is typed from the **column's catalog type** (SEC-FED-22), so the client's JSON type must be convertible without loss to that class; otherwise the conjunct is **not pushed** (superset rule, FR-22: a literal whose type class differs is not pushed) and DuckDB filters alone. A client value is never coerced differently in the two engines.
+- **One validation, before any read.** Names, declared types (declared query headers) or inferred types (ad hoc WebSQL), list element types and bounds (#128 limits) are validated once in planning; a violation refuses the request before the first source read, with the stable code of #128 or `FEDERATION_PARAMETER_INVALID` (name to fix in Phase 2).
+- **List parameters and budgets.** A list parameter in DuckDB uses the #128 expansion with the same `MaxListParameterValues`; a pushed list is pushed only when it fits `min(dialect bind budget minus policy parameters, MaxKeySetKeys-like bound)`; otherwise it is not pushed (never truncated), DuckDB applies it.
+- **No new oracle.** Parameter validation errors are about the caller's own input; they never depend on governed data. A parameter that only matters for a table the caller may not read must not turn a `FEDERATION_*` denial into a different error (authorization of all tables precedes parameter-dependent errors, as in D-8).
+- **Name collisions.** Client names cannot collide with gateway-generated names (pushdown `p_*`, policy, tenant, staging `s0..`): existing reserved-prefix rules of the compiler apply; a collision fails closed (SEC-ADG-02).
+- **Audit.** Parameter **names** (and for lists the element count) in the query record and in each source read record; values only where the existing WebSQL audit configuration already records them for single-source queries, never in per-source-read records (Q-15).
+
+**#132 (co-located sources).**
+- **No authority gain.** The statement may reference only tables for which the gateway made an allow decision for this caller and this request; after compile, the final AST is checked: every table reference is in the authorized set of `(source, database, schema, table)` entries, nothing else (defence in depth against a qualification bug). A client-supplied two-, three- or four-part name never selects a database: names resolve through the catalog (`domain.schema.table`) to the physical database taken from the **data source configuration**, identifier-validated and dialect-quoted.
+- **Per-table governance unchanged.** Consents, row filters (including Virtual Filters), masks, tenant predicate, `AstSecurityVisitor` guards, masked-column guardrails and the SEC-FED-24/25 classification apply per table exactly as in a direct read of that table; the shared service account never widens what the caller sees. Correlated row filters whose dependent table lies in another member database are **not** supported in the first step (refused at definition or planning, fail closed), so a policy never crosses a database boundary implicitly.
+- **Declaration is explicit, symmetric and verified.** A named co-location group is set on **every** member (`CoLocationGroup`). A one-sided or mismatching declaration, or a group of one, aborts startup (fail closed). Startup validation requires equal `Provider` (SQL Server only in the first step), equal normalised server (host, port or instance), equal credential identity (authentication mode, login or Windows identity), equal session options (`ReadUncommitted`, command-timeout class), and no `Delegated*` enforcement mode (per-user identity at the source breaks the "one service account" premise) and no HTTP or lakehouse source. A **connect-time verification** compares the actual server identity (`@@SERVERNAME`/instance) and current database of each member; a mismatch disables co-location for that group at runtime with a logged error code (the query then runs through federated staging, which is always safe, never through a wrong-identity statement).
+- **Owner consent.** Joining two owners' data in one statement under one account is a decision of both data owners (Q-16, four-eyes in the style of Q-6); because data sources are configuration in this release, the declaration is an operator-deployed configuration change that must be accompanied by the owners' approval, and the audit of the startup validation records the group and members.
+- **No ownership chaining, explicit permissions.** The service account needs `SELECT` on the referenced objects in each member database through its own permissions (least privilege, no write); `DB_CHAINING` is neither required nor assumed; a permission error maps to a stable `FEDERATION_SOURCE_ERROR` without database text.
+- **Audit per table and per statement.** One statement-level record lists all tables, sources and the co-location group; each table also gets its own access-audit entry with its own owner/source identity (so each owner's audit trail shows the read); audit failure denies the request (SR-8).
+- **Limits.** The co-located statement counts every member for per-source concurrency leases, per-user-and-table read limits and circuit breakers (the NTLM login breaker of any member that is open prevents the statement; fallback to staging does not help because that member is unavailable, so the request fails with the stable source error); budgets as for a subtree (`MaxTablesPerSubtree`, row and byte caps of the staged result).
+- **Interplay with #122/#124.** Pushdown inside a co-located subtree is plain compile-time predicate placement (as for any single-source statement). **Key-set import (#124, Q-8) is not needed between members of one group and is not a consequence of co-location**: it still needs `allow_key_set_import` across different groups or servers. Co-location never relaxes SEC-FED-26.
+- **Semantics.** The server's collation, comparison and functions are authoritative for the whole statement, also across databases with different collations (SQL Server cross-database collation conflicts can raise errors: mapped to a stable code, documented; Q-9 applies).
+
+#### 7.2.5 Functional requirements
+
+- **FR-35 Federated parameters (#131).** `ParameterOrigin.ClientNamed` parameters, scalar and (after #128) list, are carried into the federated path: the planner receives the validated client values and compiles the DuckDB statement with a `ParameterSource` that binds them as `$n`. Extends FR-5/D-10 and WP-FED-03.
+- **FR-36 Single validation (#131).** Names, types, list element types and bounds are validated once before any source read; the types are available to the pushdown selector.
+- **FR-37 Pushed parameters (#131).** A pushable conjunct over a parameter pushes the same validated value as a bound, column-typed parameter into the source statement (FR-22/FR-25); when the type class differs or a list exceeds the source bind budget, the conjunct is not pushed. Result with pushdown on and off is identical (AC-16 extended).
+- **FR-38 Audit and analysis (#131).** Query and per-source-read audit records list parameter names and list element counts; the #79 analysis lists parameters and shows for each pushed predicate which parameter feeds it.
+- **FR-39 Co-location declaration (#132).** `CoLocationGroup` (string, optional) on `DataSourceConnectionOptions`; validated per 7.2.4; no declaration means separate sources (today's behaviour).
+- **FR-40 Co-located subtrees (#132).** The #123 grouping key becomes `CoLocationGroup ?? data source`; a subtree may span the members of one group and is compiled and executed as **one statement** on the server through the governed single-source path with the decisions already made per table (FR-27, FR-30 apply to every member table).
+- **FR-41 Qualification (#132).** The emitter qualifies member tables with the database name from the data source configuration (`[db].[schema].[table]` on SQL Server) only when the subtree spans more than one database; in-database references stay as today. A client-written qualified name is rejected exactly as today (qualified names only through the catalog).
+- **FR-42 Verification and fallback (#132).** Startup validation and connect-time server-identity verification per 7.2.4; failure disables co-location for the group (staging path), with a stable code in the log/analysis, never a wrong-identity statement.
+- **FR-43 Audit and analysis (#132).** Per 7.2.4; the #79 analysis shows, per subtree, `colocated: true`, the group and all member tables.
+- **FR-44 Switch.** `WebSql:CrossSource:CoLocation:Enabled` (default `false` until the Phase 3 tests pass); disabled behaves exactly as today even when groups are declared (startup validation still runs).
+- **FR-45 Provider support.** SQL Server in the first step; PostgreSQL, Oracle, Databricks, Snowflake groups are rejected at startup with a clear message (Q-19).
+
+#### 7.2.6 Acceptance criteria
+
+- **AC-23 (#131) Scalar and list.** A declared cross-source query with a scalar parameter and with a list parameter returns the correct rows (REST, WebSQL, async job, Flight SQL).
+- **AC-24 (#131) Pushdown parity.** With #122 the parameterised predicate is pushed (assert via the source-read audit/spy executor) and the result equals the run without pushdown; a parameter whose type class differs from the column is not pushed and the result is still correct.
+- **AC-25 (#131) Injection.** Values with quotes and comment markers (scalar and list elements) never appear in generated SQL text in DuckDB or in any source, nor in logs or audit.
+- **AC-26 (#131) Validation before reads.** A wrongly typed parameter, a list above the bound and a missing required parameter are refused before any source read (spy executor shows zero reads); names appear in the audit, values do not.
+- **AC-27 (#132) One statement.** A join between tables of two co-located SQL Server databases runs as one statement on the server (spy shows one statement with two qualified names) and returns the same rows as the federated path where that fits the budget.
+- **AC-28 (#132) Declaration required.** Without the declaration on both sources the same query uses federated staging; a one-sided or mismatching declaration aborts startup; a group on different servers (identity mismatch at connect time) falls back to staging with the stable log code.
+- **AC-29 (#132) Per-table governance.** Two persons with different row filters on one of the tables get different, correct results; a masked column stays masked and cannot be a join key; a table for which the caller has no consent makes the request fail with the stable denial even though the shared account could read it; a client-written three-part name is rejected.
+- **AC-30 (#132) Audit.** The statement record lists all tables and sources; every table has its own access-audit entry; the analysis shows `colocated: true`.
+- **AC-31 (#132) No authority gain.** A forged qualification attempt (name of a member database in a client name, linked-server four-part name) never reaches a table outside the authorized set; the post-compile reference check test fails closed on an injected unauthorized table reference.
+
+#### 7.2.7 Dependencies and relation to the shared core
+
+- **#131** depends on WP-FED-03 (parameter carrying), WP-FED-11 (pushdown builder) and on **REQ-SQL-128** for list parameters ([2026-10-16-req-issues-128-129-130-websql-parameters-user-attributes-timezones.md](2026-10-16-req-issues-128-129-130-websql-parameters-user-attributes-timezones.md), section 2). Without #128 the scalar part still ships; list parameters are refused with the stable parameter code.
+- **#132** depends on WP-FED-13 (same-source subtrees, grouping, governed compile entry), WP-FED-12 (options, audit, analysis) and on the qualification spike (FR-41). It touches `DatabaseOptions.cs` (data source options), which REQ-GOV-107 and `WP-SC-15` also edit: land after 107 and coordinate with SC-15 (scale plan file-ownership table).
+- **#132 and `WP-SC-15` (delegated enforcement):** a source in a `Delegated*` mode can never be a member (stated in FR-39); the registry reads the enforcement mode once SC-15 exists and rejects the combination at startup.
+
+#### 7.2.8 Size, risks, open questions
+
+- **Size.** #131: S-M (about 450 LOC production, 700 tests; `WP-FED-15`). #132: L (about 1,200 LOC production, 1,500 tests; `WP-FED-16`; the qualification spike may add emitter work in `TrinoSqlEngine`).
+- **Risks.** R-14 a qualification bug lets a statement reach an unauthorized object (post-compile table-reference check, SEC-FED placeholders). R-15 co-location declared for sources that are not on one server (verification at connect time, fallback). R-16 cross-database collation conflicts (stable code, documentation). R-17 the type of a client value pushed to a source differs from DuckDB's interpretation (typed from the column, not pushed on mismatch). R-18 owners did not intend one account to serve both databases (Q-16, explicit declaration, startup audit).
+- **Open owner questions.**
+
+| ID | Question | PM recommendation |
+|---|---|---|
+| Q-14 | Maximum list size in federated queries: the #128 limit, or a lower limit for pushed lists? | #128 limit for the DuckDB side; a pushed list is capped by the source bind budget and not pushed above it (DuckDB still filters) |
+| Q-15 | Audit of parameter values in the query record: "values as configured for audit today" (issue). Which configuration is meant, and are values ever allowed in per-source-read records? | Names and counts everywhere; values only in the existing single-source-equivalent query record when that option is on; never in per-source-read records |
+| Q-16 | Who must approve a co-location group (both data owners, four-eyes)? | Both owners approve; recorded with the configuration change; startup audit entry |
+| Q-17 | Declare co-location only in configuration, or also through admin API/MCP? | Configuration only in the first step (data sources are configuration in this release) |
+| Q-18 | Should the per-table concurrency/cost limits of every member count (yes in this PRD), or only of the first source? | Every member counts |
+| Q-19 | Providers beyond SQL Server (Snowflake, Databricks three-level names; PostgreSQL schemas inside one database as sources)? | Not in the first step; PostgreSQL different-database is impossible, same-database different-schema is a separate (simpler) request |
+| Q-20 | On a failed connect-time verification: fall back silently to staging (recommended) or fail the request? | Fall back to staging with a stable log code and an analysis flag; fail only if staging is not possible either |
+
 ## 8. Security Requirements (summary; Phase 3 appends binding conditions)
 
 - **SR-1** Source-2 reads run under the caller's governance through the governed pipeline; no gateway-service-account bypass.
@@ -373,6 +475,7 @@ Metrics per FR-19 on `GatewayDiagnostics`; per-source read span with `source`, `
 | **INC-3 GraphQL SQL-to-SQL relations** | Relation persistence and admin, governed key reader, resolver rewiring, tree splitting, schema gating | Issue #75 delivered for real |
 | **INC-4 Non-SQL and relation filters** | `HttpDeclarative` in GraphQL, bounded semi-join filters | Full F-GOV-19 scope |
 | **INC-6 Federated query performance** | Predicate pushdown (#122), same-source subtrees (#123), key-set filters (#124), `WP-FED-11..14`; after INC-2 (shares the staging files), independent of INC-3/4 | Cross-source queries that fit the budget after filtering |
+| **INC-7 Federated parameters and co-located sources** | Federated parameter contract and list parameters (#131, `WP-FED-15`, needs REQ-SQL-128), co-located data sources (#132, `WP-FED-16`); after INC-6 (`WP-FED-13`) and #128 | Parameterised declared queries on the federated path; one-statement joins across databases of one server |
 | **INC-5 Parity and documentation** | Integration matrix, Phase 6 docs | Regression protection |
 
 ## 14. Lifecycle Hand-off
@@ -385,3 +488,4 @@ Metrics per FR-19 on `GatewayDiagnostics`; per-source read span with `source`, `
 
 - 2026-10-16: Initial PRD (Phase 1), verified against `70b75e27`. The false "COMPLETED & VERIFIED" status of #75 is corrected in `features.md`, `impl-features-analytics.md`, `00-implementation-roadmap.md` and the master plan.
 - 2026-10-16: Section 7.1 added (Phase 1 for issues #122, #123, #124; #125 registered in 2.1). FR-20..FR-34, AC-15..AC-22, Q-8..Q-13, INC-6.
+- 2026-10-16: Section 7.2 added (Phase 1 for issues #131 and #132). FR-35..FR-45, AC-23..AC-31, Q-14..Q-20, R-14..R-18, INC-7. Finding: #131 mostly completes D-10/FR-5/FR-25 (scalar parameters are already WP-FED-03); net new are list parameters, single validation, pushed-value equality and audit names.

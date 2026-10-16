@@ -47,6 +47,14 @@ public sealed class DataSourceConnectionOptions
     public bool ReadUncommitted { get; init; }
 
     /// <summary>
+    /// SQL Server only: circuit breaker against Active Directory / SQL login lockout. After a login failure (error 18456, 18452, 18451, a rejected
+    /// login or a credential-type NTLM failure) the factory refuses further connections of this data source, without contacting the server, for
+    /// this many seconds (fail closed). The block is per credential identity (connection string + WindowsAuth settings): a changed configuration
+    /// lifts it. Network and timeout failures never open it. Each replica has its own breaker. <c>0</c> disables the breaker. Default 300.
+    /// </summary>
+    [Range(0, 86400)] public int LoginFailureCooldownSeconds { get; init; } = 300;
+
+    /// <summary>
     /// Issue #107 (SEC-RF107-01): operator attestation that the dependent tables of correlated row filters are not filtered per user
     /// at this source (no source-native per-user RLS). The key-set cache key query runs with a tenant-only session; without this flag
     /// every correlated filter of the data source falls back to <c>EXISTS</c> (reason <c>SourceNotEligible</c>). Default false.
@@ -145,12 +153,14 @@ public sealed class SqlServerWindowsAuthOptions
     public string? ServicePrincipalName { get; init; }
 
     /// <summary>
-    /// Issue #102: Enables .NET's built-in managed NTLM implementation (<c>System.Net.Security.UseManagedNtlm</c>) together with a
-    /// per-connection <c>Microsoft.Data.SqlClient.SspiContextProvider</c> backed by <see cref="System.Net.Security.NegotiateAuthentication"/>.
-    /// Defaults to <c>true</c>, allowing NTLM authentication directly from .NET in Linux/Podman containers without requiring host
-    /// GSSAPI environment variables, while keeping <c>gss-ntlmssp</c> / <c>NTLM_USER_FILE</c> configured as fallback.
+    /// Issue #102: selects the NTLM path. <c>true</c> uses .NET's built-in managed NTLM (<c>System.Net.Security.UseManagedNtlm</c>) with a
+    /// per-connection <c>Microsoft.Data.SqlClient.SspiContextProvider</c> backed by <see cref="System.Net.Security.NegotiateAuthentication"/>
+    /// (no native library needed). <c>false</c> never sets the switch and never creates the provider, so SqlClient uses the native
+    /// GSSAPI stack (<c>gss-ntlmssp</c> / <c>NTLM_USER_FILE</c>). When not configured (<c>null</c>) the process environment variable
+    /// <c>DOTNET_System_Net_Security_UseManagedNtlm</c> decides (<c>true</c>/<c>1</c> or <c>false</c>/<c>0</c>); when that is unset or invalid, managed NTLM is used.
+    /// See <see cref="ManagedNtlmPolicy"/>.
     /// </summary>
-    public bool UseManagedNtlm { get; init; } = true;
+    public bool? UseManagedNtlm { get; init; }
 }
 
 /// <summary>Authentication modes of the Databricks Statement Execution client.</summary>
@@ -209,4 +219,30 @@ public static partial class DefaultSchemaPolicy
     private static partial System.Text.RegularExpressions.Regex Pattern();
 
     public static bool IsValid(string? schema) => schema is not null && Pattern().IsMatch(schema);
+}
+
+/// <summary>
+/// Single rule that selects between managed NTLM and the native GSSAPI (<c>gss-ntlmssp</c>) path for SQL Server Windows authentication:
+/// an explicit <see cref="SqlServerWindowsAuthOptions.UseManagedNtlm"/> wins; otherwise the environment variable
+/// <see cref="EnvironmentVariableName"/> (<c>true</c>/<c>1</c>/<c>false</c>/<c>0</c>) decides; otherwise managed NTLM is used.
+/// </summary>
+public static class ManagedNtlmPolicy
+{
+    public const string EnvironmentVariableName = "DOTNET_System_Net_Security_UseManagedNtlm";
+
+    public static bool Resolve(bool? configured, Func<string, string?>? getEnvVar = null)
+    {
+        if (configured is { } explicitValue)
+        {
+            return explicitValue;
+        }
+
+        string? raw = (getEnvVar ?? Environment.GetEnvironmentVariable)(EnvironmentVariableName)?.Trim();
+        if (string.Equals(raw, "false", StringComparison.OrdinalIgnoreCase) || raw == "0")
+        {
+            return false;
+        }
+
+        return true;
+    }
 }
