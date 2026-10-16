@@ -21,13 +21,38 @@ public sealed class AccessProfile
     public string? CreatedBy { get; init; }
 
     /// <summary>
-    /// WP-SC-16: expiry after the read-time clamp of legacy permanent Unmasked profiles. A profile with typed assignments is bounded per assignment
-    /// instead (<see cref="AccessProfileAssignmentRules.EffectiveExpiry"/>: individual users at most 30 days from the grant, standing group/role
-    /// mappings only after a second administrator approved them), so the profile creation date does not end an approved, renewed mapping.
+    /// WP-SC-16: expiry after the read-time clamp. A profile with typed assignments (as loaded for a caller: its effective, matched ones) stays active while ANY
+    /// assignment is effective, so it ends at the latest <see cref="AccessProfileAssignmentRules.EffectiveUntil"/> of its assignments (null when one never lapses),
+    /// never later than <see cref="ValidTo"/>. The loaded profile is cached, so every assignment expiry (individual cap, 24 h break-glass approval window,
+    /// 90-day recertification of an <c>Unmasked</c> mapping) is re-checked at use. A legacy profile without assignments is bounded by its creation date.
     /// </summary>
-    public DateTimeOffset? EffectiveValidTo => Assignments.Count > 0
-        ? ValidTo
-        : IndividualGrantLimits.EffectiveProfileValidTo(MaskingMode, CreatedAt, ValidTo);
+    public DateTimeOffset? EffectiveValidTo
+    {
+        get
+        {
+            if (Assignments.Count == 0)
+            {
+                return IndividualGrantLimits.EffectiveProfileValidTo(MaskingMode, CreatedAt, ValidTo);
+            }
+
+            DateTimeOffset? latest = DateTimeOffset.MinValue;
+            foreach (var a in Assignments)
+            {
+                if (AccessProfileAssignmentRules.EffectiveUntil(this, a) is not { } until)
+                {
+                    latest = null;
+                    break;
+                }
+
+                if (until > latest)
+                {
+                    latest = until;
+                }
+            }
+
+            return latest is { } l && ValidTo is { } v && v < l ? v : latest ?? ValidTo;
+        }
+    }
 
     public bool IsActive(DateTimeOffset at)
     {

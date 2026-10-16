@@ -84,10 +84,71 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
     private static long EstimateEntryBytes(string cacheKey, int profileCount) =>
         BaseEntryBytes + (2L * cacheKey.Length) + ((long)EstimatedBytesPerProfile * profileCount);
 
-    public async ValueTask<IReadOnlyList<AccessProfile>> GetProfilesAsync(TenantId tenantId, string subject, CancellationToken ct = default)
+    public ValueTask<IReadOnlyList<AccessProfile>> GetProfilesAsync(TenantId tenantId, string subject, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(subject, nameof(subject));
+        return LoadAsync(
+            tenantId,
+            subject,
+            subject,
+            token => _accessProfileRepository.GetProfilesForSubjectAsync(tenantId, subject, token),
+            ct);
+    }
 
+    public ValueTask<IReadOnlyList<AccessProfile>> GetProfilesForSubjectsAsync(
+        TenantId tenantId,
+        IReadOnlyCollection<string> users,
+        IReadOnlyCollection<string> groups,
+        IReadOnlyCollection<string> roles,
+        CancellationToken ct = default)
+    {
+        var key = SubjectSetKey(users, groups, roles);
+        if (key is null)
+        {
+            return ValueTask.FromResult<IReadOnlyList<AccessProfile>>([]);
+        }
+
+        return LoadAsync(
+            tenantId,
+            "set:" + key,
+            "<subject set " + key + ">",
+            token => _accessProfileRepository.GetProfilesForSubjectsAsync(tenantId, users, groups, roles, token),
+            ct);
+    }
+
+    /// <summary>Hash of the normalised (upper-case, distinct, ordered) subject set; null when the set is empty. The type prefix keeps a user "X" apart from a group "X".</summary>
+    internal static string? SubjectSetKey(IReadOnlyCollection<string>? users, IReadOnlyCollection<string>? groups, IReadOnlyCollection<string>? roles)
+    {
+        var terms = new SortedSet<string>(StringComparer.Ordinal);
+        void Add(char type, IReadOnlyCollection<string>? values)
+        {
+            foreach (var v in values ?? [])
+            {
+                if (!string.IsNullOrWhiteSpace(v))
+                {
+                    terms.Add(type + ":" + v.Trim().ToUpperInvariant());
+                }
+            }
+        }
+
+        Add('U', users);
+        Add('G', groups);
+        Add('R', roles);
+        if (terms.Count == 0)
+        {
+            return null;
+        }
+
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(string.Join('\n', terms))))[..32];
+    }
+
+    private async ValueTask<IReadOnlyList<AccessProfile>> LoadAsync(
+        TenantId tenantId,
+        string keySuffix,
+        string description,
+        Func<CancellationToken, Task<IReadOnlyList<AccessProfile>>> loader,
+        CancellationToken ct)
+    {
         long? epoch = null;
         bool storeAvailable = false;
 
@@ -108,7 +169,7 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
         if (storeAvailable && epoch.HasValue)
         {
             // Epoch is readable: use epoch-keyed L1 cache entry
-            var cacheKey = $"auth:profile:{tenantId.Value}:{epoch.Value}:{subject}";
+            var cacheKey = $"auth:profile:{tenantId.Value}:{epoch.Value}:{keySuffix}";
             if (_memoryCache.TryGetValue(cacheKey, out var cachedObj) && cachedObj is IReadOnlyList<AccessProfile> cachedProfiles)
             {
                 return cachedProfiles;
@@ -118,12 +179,12 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
             IReadOnlyList<AccessProfile> dbProfiles;
             try
             {
-                dbProfiles = await _accessProfileRepository.GetProfilesForSubjectAsync(tenantId, subject, ct).ConfigureAwait(false);
+                dbProfiles = await loader(ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogError(ex, "Failed to read access profiles from database for tenant {Tenant}, subject {Subject}.", tenantId.Value, subject);
-                throw new AccessProfileSourceUnavailableException($"Access profile repository failed for tenant '{tenantId.Value}' and subject '{subject}'.", ex);
+                _logger.LogError(ex, "Failed to read access profiles from database for tenant {Tenant}, subject {Subject}.", tenantId.Value, description);
+                throw new AccessProfileSourceUnavailableException($"Access profile repository failed for tenant '{tenantId.Value}' and subject '{description}'.", ex);
             }
 
             using var entry = _memoryCache.CreateEntry(cacheKey);
@@ -138,12 +199,11 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
         // Epoch store is unavailable or unconfigured: bypass L1 cache and read authoritative DB directly
         try
         {
-            var dbProfiles = await _accessProfileRepository.GetProfilesForSubjectAsync(tenantId, subject, ct).ConfigureAwait(false);
-            return dbProfiles;
+            return await loader(ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "Failed to read access profiles from database (epoch store was unavailable) for tenant {Tenant}, subject {Subject}.", tenantId.Value, subject);
+            _logger.LogError(ex, "Failed to read access profiles from database (epoch store was unavailable) for tenant {Tenant}, subject {Subject}.", tenantId.Value, description);
             throw new AccessProfileSourceUnavailableException($"Neither epoch store nor database is available to resolve access profiles for tenant '{tenantId.Value}'.", ex);
         }
     }

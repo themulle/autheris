@@ -77,7 +77,9 @@ public sealed class InMemoryAccessProfileRepository : IAccessProfileRepository
 
         var matches = _profiles.Values
             .Where(p => p.TenantId == tenantId &&
-                        p.Assignments.Any(a => wanted.Contains((a.SubjectType, a.Subject.Trim().ToUpperInvariant())) && AccessProfileAssignmentRules.IsEffective(p, a, now)))
+                        (p.Assignments.Any(a => wanted.Contains((a.SubjectType, a.Subject.Trim().ToUpperInvariant())) && AccessProfileAssignmentRules.IsEffective(p, a, now)) ||
+                         // test-double only: a legacy profile without typed assignments keeps the permissive plain-subject match
+                         (p.Assignments.Count == 0 && p.IsActive(now) && p.AssignedSubjects.Any(x => wanted.Contains((AccessProfileSubjectType.User, x.Trim().ToUpperInvariant()))))))
             .ToList();
         return Task.FromResult(AccessProfileAssignmentRules.Order(matches));
     }
@@ -86,7 +88,7 @@ public sealed class InMemoryAccessProfileRepository : IAccessProfileRepository
     {
         var profile = RequireProfile(tenantId, profileId);
         var now = DateTimeOffset.UtcNow;
-        var stored = assignment with { AssignedAt = now, Subject = assignment.Subject.Trim() };
+        var stored = assignment with { AssignedAt = now, Subject = assignment.Subject.Trim(), ApprovedAt = assignment.ApprovedBy is null ? null : assignment.ApprovedAt ?? now };
         AccessProfileAssignmentRules.ValidateForAssignment(profile, stored, now);
         Replace(profile, stored);
         return Task.FromResult(stored);

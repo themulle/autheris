@@ -584,9 +584,11 @@ public sealed class AccessProfileTests
         IDistributedClusterStateProvider? clusterState = null,
         ITableMetadataRepository? metaRepo = null,
         IMemoryCache? memoryCache = null,
+        Autheris.Application.Policy.Interfaces.IAccessProfileCache? profileCache = null,
         params string[] roles)
     {
         var services = new ServiceCollection();
+        if (profileCache != null) services.AddSingleton(profileCache);
         services.AddLogging();
         services.AddAuditWriterOver(auditRepo ?? Substitute.For<IAuditLogRepository>());
         if (clusterState != null)
@@ -935,6 +937,61 @@ public sealed class AccessProfileTests
         var profiles = await repo.GetProfilesForSubjectAsync(TenantLiebherr, "philipp");
         profiles.Count.ShouldBe(1);
         profiles[0].MaskingMode.ShouldBe(MaskingPolicyMode.Default);
+    }
+
+    private static async Task<InMemoryAccessProfileRepository> RepoWithPendingMappingAsync(MaskingPolicyMode mode, string createdBy)
+    {
+        var repo = new InMemoryAccessProfileRepository();
+        var profile = new AccessProfile { ProfileId = "prof-map", Name = "Mapping", TenantId = TenantLiebherr, MaskingMode = mode, TargetTables = ["tem.*"], CreatedBy = createdBy };
+        await repo.UpsertProfileAsync(profile);
+        await repo.AssignProfileAsync(TenantLiebherr, "prof-map", new AccessProfileAssignment { Subject = "AUT-Unmask", SubjectType = AccessProfileSubjectType.Group, CreatedBy = createdBy, Justification = "mapping" });
+        return repo;
+    }
+
+    [Fact]
+    public async Task SEC_SC_04_ApproveAssignment_ByASecondAdmin_ApprovesAuditsAndBumpsTheEpoch()
+    {
+        var repo = await RepoWithPendingMappingAsync(MaskingPolicyMode.Unmasked, "adm1");
+        var auditRepo = Substitute.For<IAuditLogRepository>();
+        var cache = Substitute.For<Autheris.Application.Policy.Interfaces.IAccessProfileCache>();
+        var context = CreateEndpointContext(callerSid: "adm2", callerName: "adm2", auditRepo: auditRepo, profileCache: cache);
+
+        var result = await GovernanceEndpoints.ApproveProfileAssignmentAsync("prof-map", new ApproveProfileAssignmentRequest { Subject = "AUT-Unmask", SubjectType = "Group" }, context, repo, CancellationToken.None);
+        var (status, _) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status200OK);
+        var stored = (await repo.GetProfileAsync(TenantLiebherr, "prof-map"))!.Assignments.Single();
+        stored.ApprovedBy.ShouldBe("adm2");
+        stored.ApprovedAt.ShouldNotBeNull();
+        await auditRepo.Received().RecordAuditEventAsync(Arg.Is<Autheris.Domain.Model.AuditLogEntry>(e => e.EventType == Autheris.Domain.Audit.AuditEventTypes.ConsentApproved), Arg.Any<CancellationToken>());
+        await cache.Received(1).InvalidateTenantAsync(TenantLiebherr, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SEC_SC_04_ApproveAssignment_ByTheCreator_IsForbidden_AndNothingChanges()
+    {
+        var repo = await RepoWithPendingMappingAsync(MaskingPolicyMode.Unmasked, "adm1");
+        var cache = Substitute.For<Autheris.Application.Policy.Interfaces.IAccessProfileCache>();
+        var context = CreateEndpointContext(callerSid: "adm1", callerName: "adm1", profileCache: cache);
+
+        var result = await GovernanceEndpoints.ApproveProfileAssignmentAsync("prof-map", new ApproveProfileAssignmentRequest { Subject = "AUT-Unmask", SubjectType = "Group" }, context, repo, CancellationToken.None);
+        var (status, _) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status403Forbidden);
+        (await repo.GetProfileAsync(TenantLiebherr, "prof-map"))!.Assignments.Single().ApprovedBy.ShouldBeNull();
+        await cache.DidNotReceiveWithAnyArgs().InvalidateTenantAsync(default, default);
+    }
+
+    [Fact]
+    public async Task SEC_SC_04_ApproveAssignment_WithoutGovernanceRole_IsForbidden()
+    {
+        var repo = await RepoWithPendingMappingAsync(MaskingPolicyMode.Default, "adm1");
+        var context = CreateEndpointContext(callerSid: "adm2", callerName: "adm2", roles: "Analyst");
+
+        var result = await GovernanceEndpoints.ApproveProfileAssignmentAsync("prof-map", new ApproveProfileAssignmentRequest { Subject = "AUT-Unmask", SubjectType = "Group" }, context, repo, CancellationToken.None);
+        var (status, _) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status403Forbidden);
     }
 
     [Fact]

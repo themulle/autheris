@@ -257,6 +257,8 @@ public sealed class AccessProfileDistributedStateTests
         var failingRepo = Substitute.For<IAccessProfileRepository>();
         failingRepo.GetProfilesForSubjectAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromException<IReadOnlyList<AccessProfile>>(new IOException("Database connection timeout")));
+        failingRepo.GetProfilesForSubjectsAsync(Arg.Any<TenantId>(), Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<IReadOnlyList<AccessProfile>>(new IOException("Database connection timeout")));
 
         var l1 = new MemoryCache(new MemoryCacheOptions());
         var options = Options.Create(new GatewayOptions());

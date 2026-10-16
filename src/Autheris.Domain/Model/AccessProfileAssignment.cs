@@ -57,6 +57,9 @@ public static class AccessProfileAssignmentRules
     public static readonly TimeSpan MaxBreakGlass = TimeSpan.FromHours(72);
     public static readonly TimeSpan BreakGlassApprovalWindow = TimeSpan.FromHours(24);
 
+    /// <summary>Recertification cadence of a standing <c>Unmasked</c> group/role mapping (C1 route (a), owner Q5): the approval lapses after this period.</summary>
+    public static readonly TimeSpan UnmaskedMappingRecertification = TimeSpan.FromDays(90);
+
     public const string RequiresExpiry = "INDIVIDUAL_GRANT_REQUIRES_EXPIRY";
     public const string ExpiryInThePast = "GRANT_EXPIRY_IN_THE_PAST";
     public const string TooLong = "GRANT_EXCEEDS_MAXIMUM_DURATION";
@@ -98,6 +101,31 @@ public static class AccessProfileAssignmentRules
         }
 
         return limit is { } l && l < explicitExpiry ? l : explicitExpiry;
+    }
+
+    /// <summary>
+    /// The instant from which <paramref name="a"/> no longer grants <paramref name="profile"/>, null when it never lapses by time (a standing group/role mapping of a
+    /// non-<c>Unmasked</c> profile without expiry). It is the earlier of the clamped expiry, the end of the 24 h approval window of an unapproved break-glass
+    /// exception and, for a standing <c>Unmasked</c> mapping, <c>ApprovedAt + 90 days</c> (recertification; no approval time means already lapsed).
+    /// </summary>
+    public static DateTimeOffset? EffectiveUntil(AccessProfile profile, AccessProfileAssignment a)
+    {
+        var until = EffectiveExpiry(profile, a);
+
+        DateTimeOffset? Earlier(DateTimeOffset? current, DateTimeOffset bound) => current is { } c && c < bound ? c : bound;
+
+        if (a.Kind == AccessProfileAssignmentKind.BreakGlass)
+        {
+            var approved = a.ApprovedBy != null && !Same(a.ApprovedBy, a.CreatedBy) && !Same(a.ApprovedBy, a.Subject);
+            return approved ? until : Earlier(until, a.AssignedAt + BreakGlassApprovalWindow);
+        }
+
+        if (profile.MaskingMode == MaskingPolicyMode.Unmasked && a.SubjectType != AccessProfileSubjectType.User)
+        {
+            return Earlier(until, a.ApprovedAt is { } at ? at + UnmaskedMappingRecertification : DateTimeOffset.MinValue);
+        }
+
+        return until;
     }
 
     /// <summary>Throws <see cref="AccessProfileAssignmentRejectedException"/> when <paramref name="a"/> may not be stored for <paramref name="profile"/>.</summary>
@@ -177,7 +205,7 @@ public static class AccessProfileAssignmentRules
             return false;
         }
 
-        if (EffectiveExpiry(profile, a) is { } expiry && expiry <= now)
+        if (EffectiveUntil(profile, a) is { } expiry && expiry <= now)
         {
             return false;
         }

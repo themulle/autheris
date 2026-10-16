@@ -76,8 +76,8 @@ public sealed class AccessProfileAssignmentRulesTests
         AccessProfileAssignmentRules.IsEffective(profile, pending, Now).ShouldBeFalse();
         AccessProfileAssignmentRules.IsEffective(profile, pending with { ApprovedBy = "adm1" }, Now).ShouldBeFalse();
         AccessProfileAssignmentRules.IsEffective(profile, pending with { ApprovedBy = null, CreatedBy = null }, Now).ShouldBeFalse();
-        AccessProfileAssignmentRules.IsEffective(profile, pending with { ApprovedBy = "adm2" }, Now).ShouldBeTrue();
-        AccessProfileAssignmentRules.IsEffective(profile, pending with { SubjectType = AccessProfileSubjectType.Role, ApprovedBy = "adm2" }, Now).ShouldBeTrue();
+        AccessProfileAssignmentRules.IsEffective(profile, pending with { ApprovedBy = "adm2", ApprovedAt = Now }, Now).ShouldBeTrue();
+        AccessProfileAssignmentRules.IsEffective(profile, pending with { SubjectType = AccessProfileSubjectType.Role, ApprovedBy = "adm2", ApprovedAt = Now }, Now).ShouldBeTrue();
     }
 
     [Fact]
@@ -211,10 +211,50 @@ public sealed class AccessProfileAssignmentRulesTests
         var backed = Profile(MaskingPolicyMode.Unmasked);
         backed.Assignments.Add(new AccessProfileAssignment
         {
-            Subject = "analysts", SubjectType = AccessProfileSubjectType.Group, AssignedAt = Now.AddDays(-1), CreatedBy = "req", ApprovedBy = "app"
+            Subject = "analysts", SubjectType = AccessProfileSubjectType.Group, AssignedAt = Now.AddDays(-1), CreatedBy = "req", ApprovedBy = "app", ApprovedAt = Now.AddDays(-1)
         });
         backed.IsActive(Now).ShouldBeTrue();
         AccessProfileAssignmentRules.IsEffective(backed, backed.Assignments[0], Now).ShouldBeTrue();
         AccessProfileAssignmentRules.IsEffective(backed, backed.Assignments[0] with { ApprovedBy = null }, Now).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void SEC_SC_04_UnmaskedMapping_LapsesAfter90DaysWithoutRecertification_AndNeedsAnApprovalTime()
+    {
+        var profile = Profile(MaskingPolicyMode.Unmasked);
+        var mapping = new AccessProfileAssignment
+        {
+            Subject = "AUT-Unmask", SubjectType = AccessProfileSubjectType.Group, AssignedAt = Now.AddDays(-100), CreatedBy = "adm1", ApprovedBy = "adm2", ApprovedAt = Now.AddDays(-89)
+        };
+
+        AccessProfileAssignmentRules.IsEffective(profile, mapping, Now).ShouldBeTrue();
+        AccessProfileAssignmentRules.IsEffective(profile, mapping with { ApprovedAt = Now.AddDays(-91) }, Now).ShouldBeFalse();
+        AccessProfileAssignmentRules.IsEffective(profile, mapping with { ApprovedAt = null }, Now).ShouldBeFalse();
+        AccessProfileAssignmentRules.EffectiveUntil(profile, mapping).ShouldBe(Now.AddDays(1));
+    }
+
+    [Fact]
+    public void SEC_SC_04_CachedProfile_IsReCheckedForEveryAssignmentExpiry_IncludingUnapprovedBreakGlass()
+    {
+        var profile = Profile(MaskingPolicyMode.Unmasked);
+        var breakGlass = new AccessProfileAssignment
+        {
+            Subject = "alice", AssignedAt = Now, ExpiresAt = Now.AddHours(60), CreatedBy = "req", Justification = "incident", Kind = AccessProfileAssignmentKind.BreakGlass
+        };
+        profile.Assignments.Add(breakGlass);
+
+        profile.IsActive(Now.AddHours(23)).ShouldBeTrue();
+        profile.IsActive(Now.AddHours(25)).ShouldBeFalse("an unapproved break-glass lapses after 24 h even when the profile is served from the cache");
+    }
+
+    [Fact]
+    public void SEC_SC_04_CachedProfile_StaysActiveWhileAnyAssignmentIsEffective()
+    {
+        var profile = Profile(MaskingPolicyMode.Strict);
+        profile.Assignments.Add(new AccessProfileAssignment { Subject = "u1", AssignedAt = Now, ExpiresAt = Now.AddDays(1) });
+        profile.Assignments.Add(new AccessProfileAssignment { Subject = "u2", AssignedAt = Now, ExpiresAt = Now.AddDays(10) });
+
+        profile.IsActive(Now.AddDays(5)).ShouldBeTrue();
+        profile.IsActive(Now.AddDays(11)).ShouldBeFalse();
     }
 }

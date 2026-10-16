@@ -217,7 +217,7 @@ internal sealed class AccessProfileStore(
         var desired = new Dictionary<(AccessProfileSubjectType, string), AccessProfileAssignment>();
         foreach (var explicitAssignment in profile.Assignments)
         {
-            var a = explicitAssignment with { AssignedAt = now };
+            var a = explicitAssignment with { AssignedAt = now, ApprovedAt = explicitAssignment.ApprovedBy is null ? null : explicitAssignment.ApprovedAt ?? now };
             AccessProfileAssignmentRules.ValidateForAssignment(profile, a, now);
             desired[(a.SubjectType, ConsentSubjectFilter.Normalize(a.Subject.Trim()))] = a;
         }
@@ -286,7 +286,11 @@ internal sealed class AccessProfileStore(
             throw new AccessProfileAssignmentRejectedException(AccessProfileAssignmentRules.KindConflict, "An assignment of another kind already exists for this subject.");
         }
 
-        var stored = assignment with { AssignedAt = now, Subject = assignment.Subject.Trim(), RenewalCount = existing?.RenewalCount ?? 0 };
+        var stored = assignment with
+        {
+            AssignedAt = now, Subject = assignment.Subject.Trim(), RenewalCount = existing?.RenewalCount ?? 0,
+            ApprovedAt = assignment.ApprovedBy is null ? null : assignment.ApprovedAt ?? now
+        };
         AccessProfileAssignmentRules.ValidateForAssignment(profile, stored, now);
         await UpsertAssignmentAsync(scope.Connection, tx, tenantId, profileId, stored, ct).ConfigureAwait(false);
         await tx.CommitAsync(ct).ConfigureAwait(false);
