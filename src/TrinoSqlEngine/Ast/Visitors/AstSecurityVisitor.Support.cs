@@ -19,6 +19,13 @@ namespace TrinoSqlEngine.Ast.Visitors;
 
 public sealed partial class AstSecurityVisitor : SqlAstRewriter
 {
+    /// <summary>Index loop: a foreach over an <see cref="IReadOnlyList{T}"/> allocates a boxed enumerator per call.</summary>
+    private static void PushAll<T>(IReadOnlyList<T> items, Stack<SqlNode> stack) where T : SqlNode
+    {
+        for (int i = 0; i < items.Count; i++) stack.Push(items[i]);
+    }
+
+    /// <summary>Pushes the children the mask guards walk. Not suitable for finding name nodes: identifiers and qualified names are skipped.</summary>
     private static void PushChildren(SqlNode node, Stack<SqlNode> stack)
     {
         switch (node)
@@ -55,7 +62,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 stack.Push(bt.Operand);
                 break;
             case InListExpression inL:
-                foreach (var it in inL.Items) stack.Push(it);
+                PushAll(inL.Items, stack);
                 stack.Push(inL.Operand);
                 break;
             case InSubqueryExpression inSq:
@@ -73,10 +80,10 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 stack.Push(qc.Left);
                 break;
             case FunctionCallExpression fn:
-                foreach (var arg in fn.Arguments) stack.Push(arg);
+                PushAll(fn.Arguments, stack);
                 if (fn.Filter != null) stack.Push(fn.Filter);
                 if (fn.OrderWithin != null) stack.Push(fn.OrderWithin);
-                if (fn.Window?.PartitionBy != null) foreach (var p in fn.Window.PartitionBy) stack.Push(p);
+                if (fn.Window?.PartitionBy != null) PushAll(fn.Window.PartitionBy, stack);
                 if (fn.Window?.OrderBy != null) stack.Push(fn.Window.OrderBy);
                 break;
             case CaseExpression cs:
@@ -85,10 +92,10 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 if (cs.Operand != null) stack.Push(cs.Operand);
                 break;
             case RowValueExpression row:
-                foreach (var el in row.Elements) stack.Push(el);
+                PushAll(row.Elements, stack);
                 break;
             case ArrayConstructorExpression arr:
-                foreach (var el in arr.Elements) stack.Push(el);
+                PushAll(arr.Elements, stack);
                 break;
             case SubscriptExpression sub:
                 stack.Push(sub.Index);
@@ -124,7 +131,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 }
                 break;
             case QuerySpecification qs:
-                foreach (var p in qs.Projections) stack.Push(p);
+                PushAll(qs.Projections, stack);
                 if (qs.From != null) stack.Push(qs.From);
                 if (qs.Where != null) stack.Push(qs.Where);
                 if (qs.GroupBy != null) stack.Push(qs.GroupBy);
@@ -135,7 +142,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 stack.Push(so.Right);
                 break;
             case ValuesQueryBody vq:
-                foreach (var r in vq.Rows) stack.Push(r);
+                PushAll(vq.Rows, stack);
                 break;
             case JoinedTableSource jt:
                 stack.Push(jt.Left);
@@ -154,14 +161,14 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             case UsingJoinCondition:
                 break;
             case GroupByClause gb:
-                foreach (var g in gb.GroupingExpressions) stack.Push(g);
+                PushAll(gb.GroupingExpressions, stack);
                 if (gb.AdvancedElements != null)
                 {
                     foreach (var adv in gb.AdvancedElements)
                     {
                         foreach (var set in adv.Sets)
                         {
-                            foreach (var g in set) stack.Push(g);
+                            PushAll(set, stack);
                         }
                     }
                 }
@@ -233,7 +240,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             return true;
         }
 
-        var columns = _options.TableColumns(normalizedTableName);
+        var columns = CachedColumns(normalizedTableName);   // shared with the skip probe: the callback allocates
         if (columns != null)
         {
             foreach (var col in columns)

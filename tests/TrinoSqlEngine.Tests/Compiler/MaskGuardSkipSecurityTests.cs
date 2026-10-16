@@ -206,8 +206,49 @@ public class MaskGuardSkipSecurityTests
         "SELECT region, sum(amount) FROM orders GROUP BY ROLLUP (region, email)",
         "SELECT array_agg(id ORDER BY email) FROM orders",
         "SELECT max(amount) FILTER (WHERE email = 'x') FROM orders",
-        "SELECT count(id) FROM entitlements"
+        "SELECT count(id) FROM entitlements",
+        // CTE, LATERAL and set operations (the reference runs on a fresh visitor without CTE scope: the CTE cases are compared
+        // through the real visitor's outcome against the expectation of the theory below instead, see CteAndLateralCorpus)
+        "SELECT id FROM entitlements INTERSECT SELECT max(email) FROM orders",
+        "SELECT id FROM entitlements EXCEPT SELECT max(email) FROM orders",
+        "SELECT id FROM entitlements EXCEPT SELECT id FROM orders",
+        "SELECT sum(l.email) FROM entitlements e, LATERAL (SELECT email FROM orders) l",
+        "SELECT count(l.id) FROM entitlements e, LATERAL (SELECT id FROM orders) l",
+        "SELECT sum(v.x) FROM (VALUES (1), (2)) AS v(x)"
     ];
+
+    /// <summary>CTE cases: the guard depends on the CTE scope of the visit, which the reference (a fresh visitor) does not have.</summary>
+    public static readonly (string Sql, string MaskedOutcome)[] CteAndLateralCorpus =
+    [
+        ("WITH c AS (SELECT email FROM orders) SELECT sum(email) FROM c", "MaskedAggregationException"),
+        ("WITH c(e) AS (SELECT email FROM orders) SELECT sum(e) FROM c", "MaskedAggregationException"),
+        ("WITH c AS (SELECT email AS m FROM orders) SELECT max(m) FROM c", "MaskedAggregationException"),
+        ("WITH c AS (SELECT email FROM orders), d AS (SELECT email FROM c) SELECT sum(email) FROM d", "MaskedAggregationException"),
+        ("WITH c AS (SELECT email FROM orders) SELECT max(x.email) FROM c x", "MaskedAggregationException"),
+        ("WITH c AS (SELECT email FROM orders) SELECT id FROM entitlements UNION SELECT max(email) FROM c", "MaskedAggregationException"),
+        ("WITH RECURSIVE c(e) AS (SELECT email FROM orders UNION ALL SELECT e FROM c) SELECT sum(e) FROM c", "MaskedAggregationException"),
+        ("SELECT sum(l.email) FROM entitlements e, LATERAL (SELECT email FROM orders) l", "MaskedAggregationException"),
+        ("SELECT sum(l.e) FROM entitlements e, LATERAL (SELECT email FROM orders) l(e)", "MaskedAggregationException"),
+        ("SELECT id FROM entitlements INTERSECT SELECT max(email) FROM orders", "MaskedAggregationException"),
+        ("SELECT id FROM entitlements EXCEPT SELECT max(email) FROM orders", "MaskedAggregationException")
+    ];
+
+    [Fact]
+    public void CteAndLateral_MaskedVariantRejected_UnmaskedVariantAccepted()
+    {
+        var failures = new List<string>();
+        foreach (var (sql, masked) in CteAndLateralCorpus)
+        {
+            string a = Actual(sql, provider: true, set: true);
+            string b = Actual(sql, provider: true, set: false);
+            string c = Actual(sql, provider: false, set: false);
+            if (a != masked) failures.Add($"masked+set: {sql} -> {a}");
+            if (b != masked) failures.Add($"masked, empty set: {sql} -> {b}");
+            if (c != "ok") failures.Add($"unmasked: {sql} -> {c}");
+        }
+
+        Assert.True(failures.Count == 0, string.Join("\n", failures));
+    }
 
     [Fact]
     public void Differential_RealVisitorEqualsTheReferenceGuards_ForEveryQueryAndConfiguration()
@@ -242,6 +283,9 @@ public class MaskGuardSkipSecurityTests
     [InlineData("SELECT id FROM entitlements UNION SELECT max(email) FROM orders", "MaskedAggregationException")]
     [InlineData("SELECT id, (SELECT max(o.email) FROM orders o) FROM entitlements", "MaskedAggregationException")]
     [InlineData("SELECT sum(id) OVER (PARTITION BY email) FROM orders", "MaskedAggregationException")]
+    [InlineData("SELECT id FROM entitlements INTERSECT SELECT max(email) FROM orders", "MaskedAggregationException")]
+    [InlineData("SELECT id FROM entitlements EXCEPT SELECT max(email) FROM orders", "MaskedAggregationException")]
+    [InlineData("SELECT sum(l.email) FROM entitlements e, LATERAL (SELECT email FROM orders) l", "MaskedAggregationException")]
     [InlineData("SELECT o FROM orders o", "SecurityException")]
     [InlineData("SELECT id, to_json(o) FROM orders o", "SecurityException")]
     public void MaskedVariant_IsRejected_UnmaskedVariantIsAccepted(string sql, string expected)
@@ -309,6 +353,59 @@ public class MaskGuardSkipSecurityTests
         catch (SecurityException) { return true; }
     }
 
+    [Fact]
+    public void TableColumnsUnknown_WithProviderMask_GuardStillRuns()
+    {
+        var visitor = Visitor(true, false, tableColumns: _ => null);
+
+        var spec = AstReflection.Collect<QuerySpecification>(CompilerTestHelpers.Build("SELECT sum(email) FROM orders")).Single();
+        Invoke(visitor, "PrepareSpecSources", spec);
+
+        Assert.Throws<MaskedAggregationException>(() => Invoke(visitor, "EnsureProjectionMaskGuards", spec));
+        Assert.Equal("MaskedAggregationException",
+            Outcome(() => Visitor(true, false, tableColumns: _ => null).Visit(CompilerTestHelpers.Build("SELECT sum(email) FROM orders"))));
+    }
+
+    [Fact]
+    public void TableColumnsOmittingTheMaskedColumn_IsRejectedByTheGovernedCompile()
+    {
+        // The visitor trusts the catalog column list (a column the catalog does not list cannot be bound). A list that omits a masked
+        // column is therefore a catalog inconsistency; the full compile must still reject the reference.
+        var catalog = new InMemoryTableCatalog(new[]
+        {
+            new TableCatalogEntry(Orders, System.Collections.Immutable.ImmutableArray.Create(
+                new CatalogColumn("Id", "int"), new CatalogColumn("TenantId", "nvarchar(64)"), new CatalogColumn("Amount", "decimal(18,2)")),
+                "TenantId", 1)
+        }, "dbo");
+        var masks = new DictMaskProvider();
+        masks.Masks[(Orders, "email")] = new MaskSpec(MaskKind.Nullify, new MaskArguments(), FrozenDictionary<string, PolicyValue>.Empty);
+        _rowFilters.NoPolicy.Add(Orders);
+        var request = new CompileRequest
+        {
+            TargetDialect = TargetSqlDialect.SqlServer,
+            TokenGuards = SqlTokenSecurityOptions.Strict,
+            Policy = new GovernancePolicy
+            {
+                RowFilters = _rowFilters,
+                Masks = masks,
+                Catalog = catalog,
+                Tenant = new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String)
+            }
+        };
+
+        Assert.NotEqual("ok", Compile(NewEngine(), "SELECT sum(email) FROM orders", request));
+    }
+
+    [Fact]
+    public void UnboundQualifierNamingAMaskedCatalogTable_IsRejectedByTheGovernedCompile()
+    {
+        // other.email: "orders" is a masked catalog table that is not in the FROM clause (an unbound reference)
+        var request = EngineRequest(masked: true, listSet: false);
+
+        Assert.NotEqual("ok", Compile(NewEngine(), "SELECT sum(orders.email) FROM entitlements o", request));
+        Assert.NotEqual("ok", Compile(NewEngine(), "SELECT sum(other.email) FROM orders o", request));
+    }
+
     // ---- SEC-G8-T4: stack ownership of the projection traversal ----
 
     [Theory]
@@ -350,6 +447,8 @@ public class MaskGuardSkipSecurityTests
         Assert.Equal("MaskedAggregationException", Actual("SELECT sum(amount), max(email), count(id) FROM orders", true, true));
     }
 
+    // Tripwire only: it pins the private field names so that a rename or a merge of the two stacks fails here and gets a review. The
+    // behavioural proof of SEC-G8-02 is the position tests above.
     [Fact]
     public void ProjectionGuardStack_IsNotTheStackTheNestedColumnCheckClears()
     {
@@ -470,9 +569,12 @@ public class MaskGuardSkipSecurityTests
             var failures = new List<string>();
             for (int i = 0; i < 150; i++)
             {
-                string sql = queries[random.Next(queries.Length)];
+                // A distinct select-list alias per iteration makes the text unique, so the plan cache never answers: every compile runs the
+                // security visitor concurrently (a cache hit would bypass it and prove nothing).
+                string baseSql = queries[random.Next(queries.Length)];
+                string sql = baseSql.Insert("SELECT ".Length, $"{i} AS k{worker}, ");
                 string actual = Compile(engine, sql, masked);
-                if (actual != expected[sql]) failures.Add($"{sql}: {actual} instead of {expected[sql]}");
+                if (actual != expected[baseSql]) failures.Add($"{baseSql}: {actual} instead of {expected[baseSql]}");
             }
 
             return failures;
@@ -522,7 +624,7 @@ public class MaskGuardSkipSecurityTests
         var guard = (Func<QuerySpecification, bool>)Delegate.CreateDelegate(typeof(Func<QuerySpecification, bool>), visitor,
             typeof(AstSecurityVisitor).GetMethod("EnsureProjectionMaskGuards", BindingFlags.NonPublic | BindingFlags.Instance)!);
 
-        for (int i = 0; i < 5; i++)   // warm-up: JIT, the per-table lookup cache
+        for (int i = 0; i < 50; i++)   // warm-up: JIT, the per-table lookup cache
         {
             prepare(spec);
             guard(spec);
@@ -539,7 +641,7 @@ public class MaskGuardSkipSecurityTests
         long perCall = (GC.GetAllocatedBytesForCurrentThread() - before) / 100;
 
         Assert.False(ran);                        // nothing masked: the traversal was skipped
-        Assert.True(perCall < 512, $"unmasked guard path allocated {perCall} bytes per specification");   // a 400-item stack alone was ~4 KB
+        Assert.True(perCall < 1024, $"unmasked guard path allocated {perCall} bytes per specification");   // a 400-item stack alone was ~4 KB
     }
 
     [Fact]

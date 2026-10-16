@@ -291,13 +291,23 @@ internal sealed class GovernedSqlCompiler
         }
     }
 
+    /// <summary>The column names of a catalog entry as one exactly sized array (no iterator, no list growth per call).</summary>
+    private static IReadOnlyList<string>? ColumnNames(TableCatalogEntry? entry)
+    {
+        if (entry is null) return null;
+        var columns = entry.Columns;
+        var names = new string[columns.Length];
+        for (int i = 0; i < names.Length; i++) names[i] = columns[i].Name;
+        return names;
+    }
+
     private static AstSecurityVisitorOptions BuildOptions(CompileRequest request, TypedPolicyContext typed)
     {
         var guards = typed.Dml;
         return new AstSecurityVisitorOptions
         {
             MaskedColumns = new CatalogMaskLookup(typed.Catalog, typed.Masks),
-            TableColumns = name => typed.Catalog.Resolve(ParseName(name))?.Columns.Select(c => c.Name).ToList(),
+            TableColumns = name => ColumnNames(typed.Catalog.Resolve(ParseName(name))),
             TablesWithMaskedColumns = CaseInsensitive(request.Policy.TablesWithMaskedColumns),
             EnforcedMaxRows = request.EnforcedMaxRows,
             TablesWithConsentRowFilter = CaseInsensitive(request.Policy.TablesWithConsentRowFilter),
