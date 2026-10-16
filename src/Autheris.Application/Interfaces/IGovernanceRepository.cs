@@ -7,6 +7,14 @@ public interface ITableMetadataRepository
     Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default);
 
     /// <summary>
+    /// Issue #107: upserts the object-level row filter evaluation settings (null deletes the row) in TABLE_ROW_FILTER_STRATEGIES and bumps
+    /// the table epoch, in one transaction. Returns null when the table is unknown.
+    /// </summary>
+    Task<RowFilterEvaluationChange?> SetRowFilterEvaluationAsync(
+        TableIdentifier table, RowFilterEvaluationSettings? settings, Sid actor, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement row filter evaluation settings.");
+
+    /// <summary>
     /// Issue #94 (SD-5): replaces ONLY the declared primary key and indexes of a table. In one transaction the stored columns are read,
     /// the definition is validated against them and replaced, and the epoch is bumped once; masking rules and column metadata other than
     /// the key markers are untouched. Returns null when the table does not exist; throws <c>TableDefinitionException</c> when invalid.
@@ -147,6 +155,19 @@ public interface IConsentApprovalRepository
     /// </summary>
     Task ActivateConsentForAutoApproveAsync(Guid requestId, CancellationToken ct = default)
         => ActivateConsentAsync(requestId, ct);
+    /// <summary>Issue #107: one row filter with its consent effect, tenant and target table; null when it does not exist.</summary>
+    Task<(ConsentRowFilter Filter, ConsentEffect Effect, TenantId Tenant, TableIdentifier Table)?> GetRowFilterAsync(
+        Guid rowFilterId, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement row filter lookup.");
+
+    /// <summary>
+    /// Issue #107: in one transaction reads the before settings, updates the three key-set columns and bumps POLICY_EPOCHS of the consent's
+    /// target table; then <c>InvalidateEpochAsync</c>. Null when the filter does not exist or its consent belongs to another tenant.
+    /// </summary>
+    Task<RowFilterEvaluationChange?> UpdateRowFilterEvaluationAsync(
+        Guid rowFilterId, TenantId tenant, RowFilterEvaluationSettings settings, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement row filter evaluation updates.");
+
     Task<ConsentRequest?> GetConsentRequestByTicketIdAsync(string ticketId, CancellationToken ct = default);
     Task ActivateConsentAsync(Guid requestId, CancellationToken ct = default);
     Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default);

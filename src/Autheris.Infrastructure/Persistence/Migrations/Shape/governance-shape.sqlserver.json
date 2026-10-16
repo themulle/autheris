@@ -713,6 +713,21 @@
           "name": "additional_hops_json",
           "type": "NVARCHAR",
           "family": "string"
+        },
+        {
+          "name": "key_set_strategy",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "key_set_duration_seconds",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "key_set_max_keys",
+          "type": "INT",
+          "family": "integer"
         }
       ],
       "primaryKey": [
@@ -1327,6 +1342,45 @@
       ],
       "primaryKey": [
         "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "TABLE_ROW_FILTER_STRATEGIES",
+      "columns": [
+        {
+          "name": "table_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "strategy",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "duration_seconds",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "max_keys",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "updated_by",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "table_id"
       ],
       "indexes": []
     },
