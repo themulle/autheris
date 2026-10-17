@@ -369,9 +369,21 @@ public static class SqlEndpointRoutes
             // REQ-SQL-128 FR-128-4 (SEC-128-14): a repeated key becomes a list only for a key that names a LIST-declared parameter; a repeated key of a
             // scalar parameter is refused (no value in the error); every other key (format, paging, undeclared) stays the joined text as before.
             Autheris.Domain.Model.SqlEndpointDefinition? endpointDefinition = null;
-            httpContext.RequestServices?.GetService<ISqlEndpointRegistry>()?.TryGet(name, out endpointDefinition);
+            var definitionResolved = false;
             foreach (var (k, v) in httpContext.Request.Query)
             {
+                if (v.Count > 1 && !definitionResolved)
+                {
+                    httpContext.RequestServices?.GetService<ISqlEndpointRegistry>()?.TryGet(name, out endpointDefinition);
+                    // Fail closed: without the definition a repeated key can not be classified, so it is never joined into a one-element list.
+                    if (endpointDefinition is null)
+                    {
+                        throw new InvalidOperationException("Endpoint definition unavailable for a repeated query key.");
+                    }
+
+                    definitionResolved = true;
+                }
+
                 var declared = v.Count > 1
                     ? endpointDefinition?.Parameters.FirstOrDefault(p => string.Equals(p.Name, k, StringComparison.OrdinalIgnoreCase))
                     : null;

@@ -43,7 +43,7 @@ using TrinoSqlEngine.Ast.Emit;
 /// X1.2: the only text that reaches a command is <see cref="CompiledSql.Sql"/>, bound through <see cref="CompiledSqlBinders"/>;
 /// governed DML runs through the checked executor inside the session transaction; provider errors are reduced to stable codes.
 /// </summary>
-public sealed class GovernedSqlExecutor
+public sealed partial class GovernedSqlExecutor
 {
     private const string InternalParameterPrefix = GovernedSqlExecutionService.InternalParameterPrefix;
     // SEC-RF107-07(e): the parameters of a substituted row-filter key-set subquery; user SQL and request parameters cannot use the prefix.
@@ -270,8 +270,9 @@ public sealed class GovernedSqlExecutor
         {
             // Scalars, and (REQ-SQL-128) lists on the transports that may carry them; an object is a 400. The binder reads a client
             // value only by the name the statement uses. A list the statement does not reference is dropped here (SEC-128-04).
-            clientValues = BuildClientValues(request, referencedNames);
-            var shapes = ClientListParameters.Shapes(clientValues, referencedNames as IReadOnlySet<string> ?? new HashSet<string>(referencedNames, StringComparer.OrdinalIgnoreCase));
+            var referenced = referencedNames as IReadOnlySet<string> ?? new HashSet<string>(referencedNames, StringComparer.OrdinalIgnoreCase);
+            clientValues = BuildClientValues(request, referenced);
+            var shapes = ClientListParameters.Shapes(clientValues, referenced);
             rewrite = await _rewriter.RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit, probeExtraRow: true, plannedTableRead: request.PlannedTableRead, clientLists: shapes).ConfigureAwait(false);
         }
         catch (Exception policyEx) when (IsAuditedRejection(policyEx, ct))
@@ -347,7 +348,7 @@ public sealed class GovernedSqlExecutor
                 ["dataSource"] = dsName,
                 ["virtual_filters"] = rewrite.VirtualFilters
             };
-            AddCompiledAuditFields(fields, compiled);
+            AddCompiledAuditFields(fields, compiled, clientValues);
             AddKeySetAuditFields(fields, rewrite);
             await _auditWriter.RecordAsync(new AuditLogEntry
             {
@@ -674,7 +675,7 @@ public sealed class GovernedSqlExecutor
         (!(error is OperationCanceledException && ct.IsCancellationRequested) &&
          (error is ArgumentException || SqlCompilerErrorMapper.TryMap(error, out _)));
 
-    private IReadOnlyDictionary<string, object?> BuildClientValues(GovernedSqlQueryRequest request, IReadOnlyCollection<string> referencedNames)
+    private IReadOnlyDictionary<string, object?> BuildClientValues(GovernedSqlQueryRequest request, IReadOnlySet<string> referenced)
     {
         var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         var parameters = request.Parameters;
@@ -684,7 +685,6 @@ public sealed class GovernedSqlExecutor
         }
 
         var limits = ListParameterLimits.From(_options.Value.WebSql);
-        var referenced = referencedNames as IReadOnlySet<string> ?? new HashSet<string>(referencedNames, StringComparer.OrdinalIgnoreCase);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int lists = 0;
         foreach (var (name, value) in parameters)
@@ -748,9 +748,12 @@ public sealed class GovernedSqlExecutor
     /// <summary>
     /// REQ-SQL-128 (C-4, C-15): <c>list_params</c> = list name to expanded element count. The names come from the compiled statement (the
     /// binder slots of the SQL's own identifiers, never from a client key) and the counts are the compiled counts; no value. A list that
-    /// expanded to nothing (an empty list) has no slot and is not listed.
+    /// expanded to nothing (an empty list) has no slot and is not listed here; <c>list_params_empty</c> names it (names only).
     /// </summary>
-    private static void AddListAuditField(Dictionary<string, object?> fields, CompiledSql compiled)
+    [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")]
+    private static partial System.Text.RegularExpressions.Regex AuditListNameRegex();
+
+    private static void AddListAuditField(Dictionary<string, object?> fields, CompiledSql compiled, IReadOnlyDictionary<string, object?>? clientValues)
     {
         SortedDictionary<string, int>? lists = null;
         foreach (var slot in compiled.Parameters)
@@ -765,15 +768,33 @@ public sealed class GovernedSqlExecutor
         {
             fields["list_params"] = lists;
         }
+
+        // An empty list expands to nothing, so it has no slot above: its trace is the name only (no values), limited to plain identifiers.
+        if (clientValues is not null)
+        {
+            SortedSet<string>? empty = null;
+            foreach (var (name, value) in clientValues)
+            {
+                if (value is ClientListValue { Count: 0 } && AuditListNameRegex().IsMatch(name))
+                {
+                    (empty ??= new SortedSet<string>(StringComparer.Ordinal)).Add(name.ToLowerInvariant());
+                }
+            }
+
+            if (empty is not null)
+            {
+                fields["list_params_empty"] = empty.ToArray();
+            }
+        }
     }
 
     /// <summary>X1.2 / SEC-ADG-23: compiler version, dialect, bind count and the digest; the compiled text only with Audit:StoreCompiledSql.</summary>
-    private void AddCompiledAuditFields(Dictionary<string, object?> fields, CompiledSql compiled)
+    private void AddCompiledAuditFields(Dictionary<string, object?> fields, CompiledSql compiled, IReadOnlyDictionary<string, object?>? clientValues = null)
     {
         fields["compiler_version"] = compiled.CompilerVersion;
         fields["dialect"] = compiled.Dialect.ToString();
         fields["bind_count"] = compiled.Parameters.Length;
-        AddListAuditField(fields, compiled);
+        AddListAuditField(fields, compiled, clientValues);
         fields["sql.compiled_digest"] = _digester.Compute(compiled);
         if (_options.Value.Audit.StoreCompiledSql)
         {

@@ -236,7 +236,6 @@ public static class ListParameterNormalizer
     private static object Coerce(object item, SqlParameterType declared, bool guidStrings)
     {
         // A JSON scalar is reduced to the CLR value it carries; a nested array or object is refused.
-        object? json = null;
         string? text = null;
         long? integer = null;
         decimal? number = null;
@@ -255,7 +254,6 @@ public static class ListParameterNormalizer
                         flag = element.GetBoolean();
                         break;
                     case JsonValueKind.Number:
-                        json = element;
                         if (element.TryGetInt64(out long l)) integer = l;
                         if (element.TryGetDecimal(out decimal d)) number = d;
                         if (element.TryGetDouble(out double f) && double.IsFinite(f)) floating = f;
@@ -297,7 +295,6 @@ public static class ListParameterNormalizer
                 throw new ClientListException(GovernedSqlErrorCodes.ListParamType);
         }
 
-        _ = json;
         switch (declared)
         {
             case SqlParameterType.String:

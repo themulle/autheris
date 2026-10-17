@@ -276,6 +276,21 @@ public sealed class ClientListWebSqlTests
         json.ShouldNotContain("other");
     }
 
+    // An empty list has no binder slot, so list_params cannot show it; list_params_empty names it (no values).
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Audit_EmptyList_LeavesACountOnlyTrace()
+    {
+        await using var f = await CreateAsync();
+        await f.IdsAsync("SELECT id FROM orders WHERE id IN (@ids) AND status IN (@statuses)",
+            new Dictionary<string, object?> { ["ids"] = Json("[]"), ["statuses"] = Json("[\"super-secret\"]") });
+
+        string json = f.Audit.Single(e => e.EventType == "WEBSQL_QUERY").DetailsJson!;
+        json.ShouldContain("\"list_params_empty\":[\"ids\"]");
+        json.ShouldContain("\"list_params\":{\"statuses\":1}");
+        json.ShouldNotContain("super-secret");
+    }
+
     [Fact]
     public async Task Audit_WithoutLists_HasNoListParamsField()
     {

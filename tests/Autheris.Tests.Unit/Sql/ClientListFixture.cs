@@ -85,6 +85,7 @@ internal sealed class ClientListFixture : IAsyncDisposable
             MaxListParameters = maxLists ?? 8,
             Enabled = true,
             AllowDml = true,
+            CrossSource = new CrossSourceOptions { Enabled = crossSourceCatalog },
             DmlWriterRoles = [WriterRole],
             DefaultMaxRows = 2000,
             MaxAllowedRows = 5000,
@@ -105,7 +106,7 @@ internal sealed class ClientListFixture : IAsyncDisposable
         var orders = new TableMetadata
         {
             Identifier = new TableIdentifier("default", "main", "orders"),
-            Table = new Table { TableName = "orders", SchemaName = "main", SourceName = string.Empty, SourceType = "Sqlite" },
+            Table = new Table { TableName = "orders", SchemaName = "main", SourceName = string.Empty, SourceType = "Sqlite", DataSourceType = crossSourceCatalog ? DataSourceType.HttpDeclarative : DataSourceType.Sql },
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },

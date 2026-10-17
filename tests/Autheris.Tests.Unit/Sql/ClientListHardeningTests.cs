@@ -115,6 +115,21 @@ public sealed class ClientListHardeningTests
         (await Should.ThrowAsync<ClientListException>(() => service.ExecuteGovernedQueryAsync(request, user, tenant, (_, _) => Task.CompletedTask))).Code.ShouldBe("SQL_LIST_PARAM_UNSUPPORTED");
     }
 
+    // SEC-128-12 (second line): the CrossSourceRoutingException catch blocks refuse a list before the federated service is even resolved.
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Federation_CrossSourceRoutedStatement_WithAList_IsRefused_BeforeTheFederatedServiceIsReached_BothEntries()
+    {
+        var federated = Substitute.For<IFederatedQueryExecutionService>();
+        await using var f = await CreateAsync(federated: federated, crossSourceCatalog: true);
+        var parameters = new Dictionary<string, object?> { ["ids"] = Json("[1,2]") };
+        const string sql = "SELECT id FROM orders WHERE id IN (@ids)";
+
+        (await Should.ThrowAsync<ClientListException>(() => f.QueryAsync(sql, parameters))).Code.ShouldBe("SQL_LIST_PARAM_UNSUPPORTED");
+        (await Should.ThrowAsync<ClientListException>(() => f.ExecuteAsync(sql, parameters))).Code.ShouldBe("SQL_LIST_PARAM_UNSUPPORTED");
+        federated.ReceivedCalls().ShouldBeEmpty();
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public async Task Federation_ScalarParameters_AreNotRefusedByTheListGuard()

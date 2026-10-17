@@ -184,4 +184,31 @@ public class SqlEndpointHeaderGrammarTests
             Directory.Delete(dir, true);
         }
     }
+
+    [Fact]
+    public void Load_BadParamHeaders_RejectOnlyTheAffectedEndpoint_OthersKeepLoading()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "list-bad-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "a_good.sql"), "-- @name good_a\nSELECT id FROM t WHERE id IN (@ids)\n");
+            File.WriteAllText(Path.Combine(dir, "b_unknown_type.sql"), "-- @name bad_type\n-- @param ids: blob[]\nSELECT id FROM t WHERE id IN (@ids)\n");
+            File.WriteAllText(Path.Combine(dir, "c_bad_syntax.sql"), "-- @name bad_syntax\n-- @param ids: int[\nSELECT id FROM t WHERE id IN (@ids)\n");
+            File.WriteAllText(Path.Combine(dir, "d_good.sql"), "-- @name good_d\n-- @param ids: int[]\nSELECT id FROM t WHERE id IN (@ids)\n");
+            var registry = new InMemorySqlEndpointRegistry();
+            using var loader = new SqlEndpointLoader(registry);
+
+            loader.LoadFromDirectory(dir, enableHotReload: false).ShouldBe(2);
+
+            registry.TryGet("good_a", out _).ShouldBeTrue();
+            registry.TryGet("good_d", out _).ShouldBeTrue();
+            registry.TryGet("bad_type", out _).ShouldBeFalse();
+            registry.TryGet("bad_syntax", out _).ShouldBeFalse();
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
 }

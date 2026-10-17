@@ -245,6 +245,31 @@ public sealed class SqlEndpointListParameterTests
         await execution.DidNotReceiveWithAnyArgs().ExecuteEndpointAsync(default!, default, default!, default, default);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait("Category", "Security")]
+    public async Task Rest_Get_RepeatedKey_WithoutAnEndpointDefinition_IsRefused_NeverJoinedIntoAList(bool registryRegistered)
+    {
+        var (context, execution, _) = RouteContext("?ids=a&ids=b", ListOf(typeof(string)));
+        if (!registryRegistered)
+        {
+            context.RequestServices = new ServiceCollection().BuildServiceProvider();
+        }
+        else
+        {
+            // a registry that does not know the endpoint
+            context.RequestServices = new ServiceCollection().AddSingleton<ISqlEndpointRegistry>(new InMemorySqlEndpointRegistry()).BuildServiceProvider();
+        }
+
+        await SqlEndpointRoutes.HandleGetEndpoint("customers", context, execution, Options.Create(new GatewayOptions()), NullLoggerFactory.Instance);
+
+        context.Response.StatusCode.ShouldBe(500);
+        await execution.DidNotReceiveWithAnyArgs().ExecuteEndpointAsync(default!, default, default!, default, default);
+        context.Response.Body.Seek(0, SeekOrigin.Begin);
+        (await new StreamReader(context.Response.Body).ReadToEndAsync()).ShouldNotContain("a,b");
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public async Task Rest_ListError_IsMappedWithAStableCode_AndFixedMessage()
