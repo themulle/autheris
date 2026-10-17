@@ -63,6 +63,9 @@ public static class AuditEventTypes
     public const string CatalogVisibilityChanged = "CATALOG_VISIBILITY_CHANGED";
     public const string CatalogTagsChanged = "CATALOG_TAGS_CHANGED";
 
+    // Issue #111 (A-9): aggregated count of probe attempts on datasets the caller cannot manage (one entry per principal and window).
+    public const string CatalogProbeSuppressed = "CATALOG_PROBE_SUPPRESSED";
+
     // System Lifecycle
     public const string ServiceStarted = "SERVICE_STARTED";
     public const string ServiceStopped = "SERVICE_STOPPED";
