@@ -114,7 +114,7 @@ Delivery mode (owner): one developer, strictly sequential; branches are **stacke
 | B-1 | `fix/catalog-schema-disclosure` | #147 | B-0 | ✅ | ✅ (findings addressed) | pushed, done |
 | B-2 | `fix/aggregation-privacy-hardening` | #148 | B-1 | ✅ | ✅ (CHANGES REQUIRED, findings addressed, re-review APPROVED WITH FINDINGS, last Low finding fixed) | pushed, done (head `ca7dfa2d`) |
 | B-3 | `fix/issue-113-wp0-decision-hardening` | – (owner opens; proposed base B-2) | B-2 | ✅ | ✅ (APPROVED WITH FINDINGS, findings F-1..F-8 addressed, re-review APPROVED WITH FINDINGS) | pushed, done |
-| I-1 | `feat/issue-107-wp-a` | – | B-3 | – | – | **next**; not started |
+| I-1 | `feat/issue-107-wp-a` | – (owner opens; proposed base B-3) | B-3 | – | – | **in progress** (chunk 1) |
 | I-2.. | see section 4 | – | – | – | – | not started |
 
 **Resume on another machine (next run starts with I-1):** `git fetch`, check out `fix/issue-113-wp0-decision-hardening` (B-3, it contains B-0..B-2 and this tracker), create `feat/issue-107-wp-a` from it and start step I-1 (#107 WP-A, `PLAN-GOV-107` with the binding conditions `SEC-RF107-*` of its section 12). Owner rule: before Phase 4 of any feature the owner sees a lines-of-code estimate per work package (production and tests separately); for #107 and BL-06 the estimates already exist in [`2026-10-16-loc-estimates.md`](2026-10-16-loc-estimates.md). Build like CI before every push: `dotnet build Autheris.sln -c Release -p:AutherisIncludeTestAuth=true -warnaserror`; tests with `-c Release -p:AutherisIncludeTestAuth=true`, integration tests with `DOTNET_USE_POLLING_FILE_WATCHER=true` and, in the podman dev container, `TESTCONTAINERS_HOST_OVERRIDE=10.88.0.1` (otherwise every container test fails in about 1 ms). The full integration suite takes about 25 minutes; do not pipe it through `grep` without `--blame-hang-timeout` (a buffered run looks hung).
@@ -197,6 +197,22 @@ Ordering notes:
 - BL-06 runs as four sequential PRs; the PRD's parallel streams become serial.
 - Every step: Phase 4 (single TDD developer), lead builds and tests (Release, warnings as errors, `DOTNET_USE_POLLING_FILE_WATCHER=true` for integration tests in WSL), Phase 5 reviewer, Phase 6 documentation (feature doc, README, master plan row, this tracker), then the next step. Bugfix steps B-0..B-3 need Phase 5 and a short Phase 6 note (release notes), no new feature doc.
 
+### 4.3 Thematic delivery chunks (owner, 2026-10-17)
+
+The owner re-grouped the remaining delivery into thematic chunks; one project-manager agent runs one chunk, so related context stays together. **This chunk order replaces the numeric execution order of section 4.2.** Inside a chunk the steps run in the order listed; branches stay stacked (each step branches from the previous step's branch, across chunk borders too), so every dependency of section 4.2 remains satisfied by the stack.
+
+| Chunk | Theme | Steps (in order) |
+|---:|---|---|
+| 1 | Row filters and WebSQL parameters | I-1, I-2, I-3, I-5, I-6, I-25 |
+| 2 | Catalog, access and analytics | I-4, I-7, I-8, I-22, I-23, I-24 |
+| 3 | Federation gate, hardening, execution | I-9, I-10, I-11, I-12, I-13 |
+| 4 | Federation query planning | I-14, I-15, I-16, I-17, I-26 |
+| 5 | Federation relations and GraphQL | I-18, I-19, I-20, I-21 |
+| 6 | Observability (BL-06) | I-27, I-28, I-29, I-30 |
+| 7 | Wave 4 | planning, then implementation, also chunked by theme |
+
+Dependency check: I-25 needs I-3 and I-5 (both in chunk 1, earlier); I-7 needs I-4 (chunk 2, earlier); I-24 needs I-3 (chunk 1) and I-22 (chunk 2, earlier); I-9 needs B-0 and I-4 (chunk 2); I-16 needs I-13 (chunk 3); I-26 needs I-5 (chunk 1), I-14, I-15, I-17 (chunk 4, earlier); I-19 needs I-13 (chunk 3) and I-18. Owner waiver (2026-10-17): no lines-of-code estimate is required before Phase 4 for the rest of waves 2/3 and for wave 4.
+
 ## 5. Planning sequence (Phase 2 then Phase 3, strictly sequential) - COMPLETED 2026-10-16
 
 All of P-1..P-10 and S-1..S-10 are done (including revisions and narrow re-reviews of #111, #113 and the delta); results in section 3.
@@ -251,4 +267,5 @@ After S-10 the tracker status of every planned item is set to "Planning complete
 
 - 2026-10-16: Tracker created (gate verification, planning and implementation sequences).
 - 2026-10-17: B-2 Phase 5 closed and B-3 delivered (sections 3.5, 3.6); tracker moved into the step stack; resume point I-1.
+- 2026-10-17: Section 4.3 thematic delivery chunks (owner) replaces the numeric order; LOC estimates waived; chunk 1 started on `feat/issue-107-wp-a`.
 - 2026-10-16: Planning complete. Section 3 holds final Phase 2/3 verdicts, section 3.2 the G-PLAN result (passed), section 4 the final implementation sequence (security bugfixes B-0..B-3 first, I-9..I-12 re-ordered per the FED delta review, I-18 enlarged by the Q-6 owner model).
