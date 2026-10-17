@@ -38,6 +38,26 @@ public interface IAccessPlanningService
         CancellationToken ct = default);
 
     /// <summary>
+    /// Issue #107: plans a change of the row filter key-set cache settings of one rule or one object. Validated against the current caps; no state
+    /// mutation. Confirmation uses <see cref="ConfirmPlanAsync"/> (TOTP), the change itself <see cref="ApplyRowFilterEvaluationAsync"/>.
+    /// </summary>
+    Task<AdminPlanRowFilterEvaluationResult> PlanRowFilterEvaluationAsync(
+        AdminPlanRowFilterEvaluationRequest request,
+        string adminSid,
+        string? tenantId = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Issue #107: applies a confirmed row filter evaluation plan. Rejects plans of another kind, validates again against the current caps and
+    /// rejects the plan when the stored settings changed since planning.
+    /// </summary>
+    Task<AdminApplyRowFilterEvaluationResult> ApplyRowFilterEvaluationAsync(
+        AdminApplyAccessRequest request,
+        string adminSid,
+        string? tenantId = null,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Registers a new datasource in inactive status (SEC M-30) and isolates credentials in vault.
     /// </summary>
     Task<AdminRegisterDatasourceResult> RegisterDatasourceAsync(
