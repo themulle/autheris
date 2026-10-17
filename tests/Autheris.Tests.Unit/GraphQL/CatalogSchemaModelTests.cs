@@ -380,6 +380,92 @@ public sealed class CatalogSchemaModelTests
             Entries.Add((logLevel, formatter(state, exception)));
     }
 
+    private static TableMetadata CompositeTable(TableIdentifier id, params string[] cols) =>
+        CreateTable(id, dialect: "PostgreSql", sourceName: "pg1", columns: cols.Select(c => new TableColumn { ColumnName = c, DataType = "int" }).ToArray());
+
+    private static TableRelation CompositeRelation(string name, IReadOnlyList<string> parentKeys, IReadOnlyList<string> childKeys) => new()
+    {
+        RelationName = name,
+        ParentTableIdentifier = PartnerId,
+        ChildTableIdentifier = ContactId,
+        Cardinality = RelationCardinality.OneToMany,
+        JoinKeysParent = parentKeys,
+        JoinKeysChild = childKeys
+    };
+
+    [Fact]
+    public async Task CatalogSchema_KeyCountMismatch_OmitsRelationField()
+    {
+        var model = await BuildWithRelationsAsync(
+            [CompositeTable(PartnerId, "id", "region"), CompositeTable(ContactId, "pid", "region")],
+            [CompositeRelation("contacts", ["id", "region"], ["pid"])]);
+
+        Assert.All(model.Tables, t => Assert.Empty(t.Relations));
+    }
+
+    [Fact]
+    public async Task CatalogSchema_CompositeRelation_KeepsAllPairsInBothDirections()
+    {
+        var model = await BuildWithRelationsAsync(
+            [CompositeTable(PartnerId, "id", "region"), CompositeTable(ContactId, "pid", "reg")],
+            [CompositeRelation("contacts", ["id", "region"], ["pid", "reg"])]);
+
+        var fwd = Assert.Single(Assert.Single(model.Tables, t => t.Identifier == PartnerId).Relations);
+        Assert.Equal(["id", "region"], fwd.ParentColumns);
+        Assert.Equal(["pid", "reg"], fwd.ChildColumns);
+        var rev = Assert.Single(Assert.Single(model.Tables, t => t.Identifier == ContactId).Relations);
+        Assert.Equal(["pid", "reg"], rev.ParentColumns);
+        Assert.Equal(["id", "region"], rev.ChildColumns);
+    }
+
+    [Fact]
+    public async Task CatalogSchema_Fingerprint_ChangesWithSecondKeyPair()
+    {
+        TableMetadata[] tables = [CompositeTable(PartnerId, "id", "region", "zone"), CompositeTable(ContactId, "pid", "reg", "zn")];
+        var one = await BuildWithRelationsAsync(tables, [CompositeRelation("contacts", ["id"], ["pid"])]);
+        var two = await BuildWithRelationsAsync(tables, [CompositeRelation("contacts", ["id", "region"], ["pid", "reg"])]);
+        var twoOther = await BuildWithRelationsAsync(tables, [CompositeRelation("contacts", ["id", "zone"], ["pid", "zn"])]);
+
+        Assert.NotEqual(one.Fingerprint(), two.Fingerprint());
+        Assert.NotEqual(two.Fingerprint(), twoOther.Fingerprint());
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CatalogSchema_DroppedKeyColumn_OmitsRelation(bool dropOnParent)
+    {
+        // SEC-REL151-08 / T-REL151-12: the second key column no longer exists in the table metadata.
+        var parent = dropOnParent ? CompositeTable(PartnerId, "id") : CompositeTable(PartnerId, "id", "region");
+        var child = dropOnParent ? CompositeTable(ContactId, "pid", "reg") : CompositeTable(ContactId, "pid");
+
+        var model = await BuildWithRelationsAsync(
+            [parent, child],
+            [CompositeRelation("contacts", ["id", "region"], ["pid", "reg"])]);
+
+        Assert.All(model.Tables, t => Assert.Empty(t.Relations));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task CatalogSchema_ManyInvalidRelations_LogsBoundedLinesWithIdsOnly()
+    {
+        // SEC-REL151-09: one summary plus at most 10 detail lines, no catalog names.
+        var logger = new CapturingLogger();
+        var relations = Enumerable.Range(0, 50)
+            .Select(i => CompositeRelation($"secret_rel_{i}", ["id", "region"], ["pid"]))
+            .ToList();
+
+        await BuildWithRelationsAsync(
+            [CompositeTable(PartnerId, "id", "region"), CompositeTable(ContactId, "pid", "reg")],
+            relations, logger);
+
+        Assert.True(logger.Entries.Count <= 11, $"Expected at most 11 log lines but got {logger.Entries.Count}.");
+        Assert.All(logger.Entries, e => Assert.DoesNotContain("secret_rel_", e.Message));
+        Assert.All(logger.Entries, e => Assert.DoesNotContain("region", e.Message));
+    }
+
     [Fact]
     public async Task BuildAsync_CrossSourceForwardRelation_IsOmitted()
     {

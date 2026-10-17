@@ -231,6 +231,7 @@ public sealed partial class CatalogSchemaModel
         // Map relations. A relation between tables the tree service cannot run as one statement (different data source or
         // dialect) is not exposed: it would be advertised and then always fail. Omitted before any field name is allocated.
         var omittedRelations = 0;
+        var invalidRelations = new HashSet<Guid>();
         var finalTables = new List<CatalogTableType>();
 
         foreach (var (meta, typeName, queryFieldName, filterTypeName, orderTypeName, columns) in tableBuilders)
@@ -247,9 +248,9 @@ public sealed partial class CatalogSchemaModel
                     {
                         continue;
                     }
-                    if (rel.JoinKeysParent == null || rel.JoinKeysParent.Count == 0 ||
-                        rel.JoinKeysChild == null || rel.JoinKeysChild.Count == 0)
+                    if (!HasValidKeys(rel, meta, targetTable.Metadata))
                     {
+                        invalidRelations.Add(rel.Id);
                         continue;
                     }
                     if (!RelationExecutability.IsSameExecutionSource(meta, targetTable.Metadata))
@@ -301,9 +302,9 @@ public sealed partial class CatalogSchemaModel
                     {
                         continue;
                     }
-                    if (rel.JoinKeysParent == null || rel.JoinKeysParent.Count == 0 ||
-                        rel.JoinKeysChild == null || rel.JoinKeysChild.Count == 0)
+                    if (!HasValidKeys(rel, other.Metadata, meta))
                     {
+                        // Already recorded by the forward loop of the parent table.
                         continue;
                     }
                     if (!RelationExecutability.IsSameExecutionSource(other.Metadata, meta))
@@ -349,6 +350,18 @@ public sealed partial class CatalogSchemaModel
                 relations));
         }
 
+        if (invalidRelations.Count > 0)
+        {
+            // SEC-REL151-09: one summary plus at most MaxInvalidRelationDetailLines detail lines, relation id only.
+            logger?.LogWarning(
+                "GraphQL catalog schema: {Count} relation(s) with invalid or missing join key columns are not exposed.",
+                invalidRelations.Count);
+            foreach (var id in invalidRelations.Take(MaxInvalidRelationDetailLines))
+            {
+                logger?.LogWarning("GraphQL catalog schema: relation {RelationId} not exposed (invalid join keys).", id);
+            }
+        }
+
         if (omittedRelations > 0)
         {
             // Counts only: the line is emitted on every real rebuild and must not carry catalog names.
@@ -358,6 +371,35 @@ public sealed partial class CatalogSchemaModel
         }
 
         return new CatalogSchemaModel(finalTables);
+    }
+
+    private const int MaxInvalidRelationDetailLines = 10;
+
+    /// <summary>
+    /// Fail closed (SEC-REL151-03/08): the key pairs must satisfy <see cref="RelationKeyRules"/> and every key column must
+    /// still exist in the metadata of its table.
+    /// </summary>
+    private static bool HasValidKeys(TableRelation rel, TableMetadata parent, TableMetadata child)
+    {
+        if (RelationKeyRules.Validate(rel.JoinKeysParent, rel.JoinKeysChild) is not null)
+        {
+            return false;
+        }
+
+        return AllColumnsExist(rel.JoinKeysParent, parent) && AllColumnsExist(rel.JoinKeysChild, child);
+    }
+
+    private static bool AllColumnsExist(IReadOnlyList<string> keys, TableMetadata table)
+    {
+        foreach (var key in keys)
+        {
+            if (!table.HasColumn(key))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public static string SanitizeGraphQlName(string input)
