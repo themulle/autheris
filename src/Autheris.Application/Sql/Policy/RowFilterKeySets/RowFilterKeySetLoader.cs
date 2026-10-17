@@ -24,6 +24,13 @@ public sealed record RowFilterKeySetLoadRequest(
     int MaxKeys,
     TimeSpan Timeout);
 
+/// <summary>Seam of the key-set stage for tests; the production implementation is <see cref="RowFilterKeySetLoader"/>.</summary>
+public interface IRowFilterKeySetLoader
+{
+    /// <exception cref="Autheris.Domain.Exceptions.GatewaySecurityException">Code <see cref="RowFilterKeySetErrorCodes.KeySetUnavailable"/>.</exception>
+    Task<RowFilterKeySetEntry> LoadAsync(RowFilterKeySetLoadRequest request, CancellationToken ct);
+}
+
 /// <summary>
 /// Issue #107 (PLAN-GOV-107 A-11): runs one compiled key query on the governed read connection of a data source.
 /// <list type="bullet">
@@ -40,7 +47,7 @@ public sealed record RowFilterKeySetLoadRequest(
 /// cached (SEC-RF107-08).</item>
 /// </list>
 /// </summary>
-public sealed class RowFilterKeySetLoader
+public sealed class RowFilterKeySetLoader : IRowFilterKeySetLoader
 {
     private readonly ISqlConnectionFactory _connections;
     private readonly IDbSessionContextInitializer _sessionInitializer;

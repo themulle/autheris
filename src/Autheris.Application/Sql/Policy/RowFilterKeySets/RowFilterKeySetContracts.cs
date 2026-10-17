@@ -14,10 +14,23 @@ public interface IRowFilterKeySetStage
         IReadOnlyDictionary<TableIdentity, PolicyPredicate?> predicates,
         RowFilterKeySetReport report,
         CancellationToken ct);
+
+    /// <summary>
+    /// D-WPC-2 / SEC-RF107-17: the statement is not a read statement, so <see cref="ApplyAsync"/> is not invoked. Reports <paramref name="reason"/> for every
+    /// site whose resolved strategy is <c>KeySetCache</c>; never reads epochs, the cache or the loader.
+    /// </summary>
+    void ReportSkipped(
+        RowFilterKeySetContext context,
+        IReadOnlyDictionary<TableIdentity, PolicyPredicate?> predicates,
+        RowFilterKeySetReport report,
+        KeySetFallbackReason reason);
 }
 
 /// <param name="GovernanceIdentifiers">Target and dependent governance identifiers per table (the epoch keys).</param>
 /// <param name="Disabled">True on the single bind-limit retry (SEC-RF107-15): every site stays <c>EXISTS</c>.</param>
+/// <param name="IsRead">D-WPC-1 / SEC-RF107-17: <c>metadata.StatementType == Select</c>.</param>
+/// <param name="UserSqlLength">D-WPC-1: length of the user statement (text budget, D-WPC-3).</param>
+/// <param name="MaxExpansionFactor">D-WPC-1: the normalized expansion factor of the compile request.</param>
 public sealed record RowFilterKeySetContext(
     string DataSourceName,
     TenantId Tenant,
@@ -26,7 +39,10 @@ public sealed record RowFilterKeySetContext(
     TenantBinding TenantBinding,
     IReadOnlyDictionary<TableIdentity, TableMetadata?> Metadata,
     IReadOnlyDictionary<TableIdentity, IReadOnlyList<TableIdentifier>> GovernanceIdentifiers,
-    bool Disabled);
+    bool Disabled,
+    bool IsRead = true,
+    int UserSqlLength = 0,
+    int MaxExpansionFactor = CompileRequestFactory.DefaultMaxExpansionFactor);
 
 public enum KeySetOutcomeKind { Exists, Hit, Miss, Fallback }
 
