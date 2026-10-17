@@ -13,6 +13,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Sql.Policy;
 
 /// <summary>PLAN-GOV-129 tests 1, 15, 16, 18 (A-3, A-6): the consent leaf binds resolved caller attributes as typed policy parameters; every unresolved state is the constant.</summary>
+[Trait("Category", "Security")]
 public sealed class TypedRowFilterBuilderAttributeTests
 {
     private static readonly TableIdentity Orders = new("main", "orders");

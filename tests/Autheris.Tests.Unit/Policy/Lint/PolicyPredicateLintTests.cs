@@ -13,6 +13,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Policy.Lint;
 
 /// <summary>WP-X0x (SEC-ADG-26, SEC-X1-16): the pre-deploy lint of every stored row predicate.</summary>
+[Trait("Category", "Security")]
 public sealed class PolicyPredicateLintTests
 {
     private const string SecretValue = "SECRET_VALUE_42";
@@ -180,6 +181,7 @@ public sealed class PolicyPredicateLintTests
 }
 
 /// <summary>REQ-GOV-129 (A-8, ST-129-18): a caller placeholder is only valid in a Virtual Filter.</summary>
+[Trait("Category", "Security")]
 public sealed class PolicyPredicateLintCallerPlaceholderTests
 {
     private static TableMetadata Orders() => new()

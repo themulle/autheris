@@ -23,6 +23,7 @@ using Xunit;
 /// service set, and a caller without an attribute (or with a failing lookup) nothing, with the same shape of response. Real consents, real
 /// SQLite data. Run: dotnet test tests/Autheris.Tests.Integration --filter "FullyQualifiedName~CallerAttributeChannelParityTests"
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class CallerAttributeChannelParityTests : IClassFixture<CallerAttributeChannelParityTests.AttributeFixture>
 {
     private const string PersonA = "S-1-5-21-LWE-A";

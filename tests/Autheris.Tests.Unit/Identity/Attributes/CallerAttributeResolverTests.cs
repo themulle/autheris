@@ -20,6 +20,7 @@ using Xunit;
 using static CallerAttributeTestSupport;
 
 /// <summary>PLAN-GOV-129 tests 9-11 and ST-129-07..09, ST-129-11, ST-129-20 (BC-129-07, BC-129-08, BC-129-12).</summary>
+[Trait("Category", "Security")]
 public sealed class CallerAttributeResolverTests : IDisposable
 {
     private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 10, 17, 8, 0, 0, TimeSpan.Zero));

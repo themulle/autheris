@@ -25,6 +25,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Policy;
 
 /// <summary>PLAN-GOV-129 tests 13, 14, 15, 18 (A-1, A-3): the typed consent policy is bound per request; the cached decision holds the recipe only.</summary>
+[Trait("Category", "Security")]
 public sealed class TableAccessPolicyCallerAttributeTests : IDisposable
 {
     private static readonly TenantId Tenant = new("acme");

@@ -24,6 +24,7 @@ using Xunit;
 /// tenant ordinally (a case-insensitive collation must not match a tenant spelled differently), stops at Max + 1 rows, and never mixes two tenants
 /// that hold the same subject key. Needs Docker; without it each test returns early.
 /// </summary>
+[Trait("Category", "Security")]
 public abstract class CallerAttributeTableProviderEngineTests : IAsyncLifetime
 {
     private const string Oid = "11111111-1111-1111-1111-111111111111";
@@ -167,6 +168,7 @@ public abstract class CallerAttributeTableProviderEngineTests : IAsyncLifetime
     }
 }
 
+[Trait("Category", "Security")]
 public sealed class PostgreSqlCallerAttributeTableProviderTests : CallerAttributeTableProviderEngineTests
 {
     private PostgreSqlTestDatabase? _db;
@@ -206,6 +208,7 @@ public sealed class PostgreSqlCallerAttributeTableProviderTests : CallerAttribut
     }
 }
 
+[Trait("Category", "Security")]
 public sealed class SqlServerCallerAttributeTableProviderTests : CallerAttributeTableProviderEngineTests
 {
     private SqlServerTestDatabase? _db;

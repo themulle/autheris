@@ -36,9 +36,7 @@ public static class CallerSubjectFactory
             return CallerSubject.NoSubject(tenant);
         }
 
-        var allowed = options.Claims.AllowedSchemes;
-        var identity = principal.Identities.FirstOrDefault(i =>
-            i.IsAuthenticated && !string.IsNullOrEmpty(i.AuthenticationType) && allowed.Contains(i.AuthenticationType, StringComparer.OrdinalIgnoreCase));
+        var identity = principal.Identities.FirstOrDefault(i => CallerAttributeSchemeGate.Passes(i, options));
         if (identity is null)
         {
             return CallerSubject.NoSubject(tenant);

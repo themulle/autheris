@@ -214,10 +214,10 @@ public sealed class CallerAttributeClaimsOptions
 
     /// <summary>Authentication types of the identity that owns a claim. Default: the JwtBearer identity only (F-6); ForwardAuth, Basic and Test are off.</summary>
     /// <remarks>
-    /// <c>McpAuth</c> is the identity the MCP session re-creates from the gateway's own security context (immutable SIDs, no issuer): it carries a
-    /// person key for the attribute table and service set providers, never a trusted claim (the claims provider also checks the claim issuer).
+    /// <c>McpAuth</c> is deliberately not listed: the MCP session re-creates its caller as <c>McpAuth</c> and loses the original scheme, so that
+    /// identity passes the gate only with the gateway marker claim, which is set only when the original scheme is listed here (BC-129-01).
     /// </remarks>
-    public IReadOnlyList<string> AllowedSchemes { get; init; } = ["AuthenticationTypes.Federation", "Bearer", "McpAuth"];
+    public IReadOnlyList<string> AllowedSchemes { get; init; } = ["AuthenticationTypes.Federation", "Bearer"];
 
     [Range(1, 256)] public int MaxClaimValueLength { get; init; } = 256;
 
