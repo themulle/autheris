@@ -28,6 +28,7 @@ public enum RebacEnforcement
 /// <summary>
 /// One caller and one catalog table. <paramref name="Claims"/> feed the Casbin attributes and the purpose;
 /// <paramref name="ClientIp"/> overrides the request IP resolver (unknown IPs are <see cref="IPAddress.None"/>).
+/// <paramref name="Principal"/> (REQ-GOV-129, F-1) is used only to resolve caller attributes: it is never logged, hashed or put into a cache key.
 /// </summary>
 public sealed record TableAccessQuery(
     Sid UserSid,
@@ -42,7 +43,8 @@ public sealed record TableAccessQuery(
     IReadOnlyDictionary<string, object?>? ExtraAttributes = null,
     FilterObjectKinds ObjectKind = FilterObjectKinds.Relation,
     IReadOnlySet<Sid>? AllUserSids = null,
-    SchemaContractDefinition? Contract = null)
+    SchemaContractDefinition? Contract = null,
+    ClaimsPrincipal? Principal = null)
 {
     public static TableAccessQuery ForPrincipal(
         ClaimsPrincipal principal,
@@ -67,7 +69,8 @@ public sealed record TableAccessQuery(
             ClientIp: null,
             extraAttributes,
             AllUserSids: principal.GetAllUserSids(),
-            Contract: contract);
+            Contract: contract,
+            Principal: principal);
     }
 }
 
@@ -97,6 +100,7 @@ public sealed partial class TableAccessPolicy
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
     private readonly RowPolicyFactory? _rowPolicyFactory;
     private readonly ColumnMaskPolicyFactory? _maskPolicyFactory;
+    private readonly Autheris.Application.Identity.Attributes.ICallerAttributeResolver? _callerAttributes;
     private readonly ISchemaContractManager? _contractManager;
     private readonly IAccessProfileRepository? _accessProfileRepository;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
@@ -120,8 +124,10 @@ public sealed partial class TableAccessPolicy
         Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
         Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null,
         RowPolicyFactory? rowPolicyFactory = null,
-        ColumnMaskPolicyFactory? maskPolicyFactory = null)
+        ColumnMaskPolicyFactory? maskPolicyFactory = null,
+        Autheris.Application.Identity.Attributes.ICallerAttributeResolver? callerAttributes = null)
     {
+        _callerAttributes = callerAttributes;
         _rowPolicyFactory = rowPolicyFactory;
         _maskPolicyFactory = maskPolicyFactory;
         _mandatoryFilters = mandatoryFilters ?? throw new ArgumentNullException(nameof(mandatoryFilters));

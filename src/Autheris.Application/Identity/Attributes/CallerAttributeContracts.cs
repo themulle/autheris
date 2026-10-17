@@ -162,6 +162,12 @@ public interface ICallerAttributeResolver
     /// <summary>False when <c>Gateway:CallerAttributes:Enabled</c> is off: callers skip the resolution and keep the constants.</summary>
     bool IsEnabled { get; }
 
+    /// <summary>Padding of list expansions (<c>PadListsToBuckets</c>, the hard cap rounded up to a power of two).</summary>
+    CallerAttributePadding Padding { get; }
+
+    /// <summary>Bind items all attribute expansions of one request may use together (BC-129-09).</summary>
+    int BindReserve { get; }
+
     /// <summary>Builds the subject (BC-129-01). <paramref name="longLived"/> marks CDC, webhook and subscription principals: no request memo (BC-129-07).</summary>
     CallerSubject CreateSubject(ClaimsPrincipal? principal, TenantId tenant, bool longLived = false);
 

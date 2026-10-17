@@ -41,7 +41,7 @@ public sealed partial class TableAccessPolicy
             var cached = await _cacheService.GetCachedDecisionAsync(query.Tenant, query.UserSid, table, contextHash, ct).ConfigureAwait(false);
             if (cached != null && !IsUntypedConsentFilter(cached, query.Metadata))
             {
-                return WithTypedConsentPolicy(cached, query.Metadata);
+                return await WithTypedConsentPolicyAsync(cached, query, ct).ConfigureAwait(false);
             }
         }
 
@@ -82,7 +82,7 @@ public sealed partial class TableAccessPolicy
             await _cacheService.SetCachedDecisionAsync(query.Tenant, query.UserSid, table, decision, ttl, contextHash!, epochAtLoad, ct).ConfigureAwait(false);
         }
 
-        return WithTypedConsentPolicy(decision, query.Metadata);
+        return await WithTypedConsentPolicyAsync(decision, query, ct).ConfigureAwait(false);
     }
 
     /// <summary>The compiler path needs the typed form only for SQL sources; the other sources keep the legacy text (no marker consumers there).</summary>
@@ -102,8 +102,9 @@ public sealed partial class TableAccessPolicy
     /// <see cref="ConsentRowFilterRecipe"/>). The text becomes the projection of the policy and the values become bound parameters. A
     /// filter that cannot be typed leaves the decision string-only, which the compiler path denies.
     /// </summary>
-    private TableAccessDecision WithTypedConsentPolicy(TableAccessDecision decision, TableMetadata metadata)
+    private async Task<TableAccessDecision> WithTypedConsentPolicyAsync(TableAccessDecision decision, TableAccessQuery query, CancellationToken ct)
     {
+        var metadata = query.Metadata;
         if (!WantsTypedConsentPolicy(metadata) || !decision.IsAllowed || decision.RowPolicy != null || decision.ConsentFilterRecipe == null)
         {
             return decision;
@@ -111,7 +112,9 @@ public sealed partial class TableAccessPolicy
 
         try
         {
-            var policy = _rowPolicyFactory!.FromConsentFilters(decision.ConsentFilterRecipe, metadata.Dialect);
+            // REQ-GOV-129 (A-1, B-consent): values are bound here, per request, into the typed policy; the cached decision stays value-free.
+            var (attributes, padding) = await ResolveRecipeAttributesAsync(decision.ConsentFilterRecipe, query, ct).ConfigureAwait(false);
+            var policy = _rowPolicyFactory!.FromConsentFilters(decision.ConsentFilterRecipe, metadata.Dialect, attributes, padding);
             return policy == null
                 ? decision
                 : (decision with { CombinedRowFilterSql = null, RowFilterParameters = null }).WithAdditionalRowPolicy(policy);
@@ -120,6 +123,57 @@ public sealed partial class TableAccessPolicy
         {
             return decision;
         }
+    }
+
+    /// <summary>
+    /// The caller attributes the recipe names, resolved once for this request (null when the recipe names none, the feature is off or no
+    /// resolver is registered: the builder then keeps the constants). A statement-wide bind budget guards the expansion (BC-129-09): over the
+    /// budget every attribute of the recipe is <c>OverCardinality</c>, which is the same constant as <c>Missing</c>.
+    /// </summary>
+    private async Task<(Autheris.Application.Identity.Attributes.CallerAttributeSet? Set, Autheris.Application.Identity.Attributes.CallerAttributePadding? Padding)> ResolveRecipeAttributesAsync(
+        ConsentRowFilterRecipe recipe, TableAccessQuery query, CancellationToken ct)
+    {
+        if (_callerAttributes is not { IsEnabled: true } resolver)
+        {
+            return (null, null);
+        }
+
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var filter in recipe.Allow.Concat(recipe.Deny).SelectMany(static f => f))
+        {
+            if (string.Equals(filter.ValueSource, "USER_ATTRIBUTE", StringComparison.OrdinalIgnoreCase) &&
+                filter.FilterType == RowFilterType.SimpleColumnPredicate &&
+                CallerAttributeDefinition.IsValidName(filter.UserAttribute))
+            {
+                names.Add(filter.UserAttribute!);
+            }
+        }
+
+        if (names.Count == 0)
+        {
+            return (null, null);
+        }
+
+        var padding = resolver.Padding;
+        var subject = resolver.CreateSubject(query.Principal, query.Tenant);
+        var set = await resolver.ResolveAsync(subject, names, ct).ConfigureAwait(false);
+
+        int items = 0;
+        foreach (var name in names)
+        {
+            if (set.TryGet(name, out var result) && result.Outcome == Autheris.Application.Identity.Attributes.CallerAttributeOutcome.Resolved && result.Value is { } value)
+            {
+                items += padding.PaddedCount(value.Count);
+            }
+        }
+
+        if (items > 0 && !subject.TryReserveBinds(items, resolver.BindReserve))
+        {
+            set = new Autheris.Application.Identity.Attributes.CallerAttributeSet(
+                names.ToDictionary(n => n, _ => Autheris.Application.Identity.Attributes.CallerAttributeResult.OverCardinality(), StringComparer.Ordinal));
+        }
+
+        return (set, padding);
     }
 
     /// <summary>

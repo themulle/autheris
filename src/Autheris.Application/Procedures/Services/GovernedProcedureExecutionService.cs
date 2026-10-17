@@ -574,7 +574,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 memoryCache: _memoryCache,
                 accessProfileCache: _accessProfileCache,
                 rowPolicyFactory: _typedPolicies?.RowPolicies,
-                maskPolicyFactory: _typedPolicies?.MaskPolicies)
+                maskPolicyFactory: _typedPolicies?.MaskPolicies,
+            callerAttributes: _typedPolicies?.CallerAttributes)
                 .DecideAsync(
                     new Autheris.Application.Policy.TableAccessQuery(
                         userSid,
@@ -585,7 +586,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                         user.Claims,
                         ClientIp: ResolveClientIp(user),
                         ExtraAttributes: new Dictionary<string, object?> { ["gql.action"] = "read" },
-                        ObjectKind: FilterObjectKinds.ProcedureResult),
+                        ObjectKind: FilterObjectKinds.ProcedureResult,
+                        Principal: user),
                     ct).ConfigureAwait(false);
 
         if (!decision.IsAllowed || (!allowRowFilter && !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql)))

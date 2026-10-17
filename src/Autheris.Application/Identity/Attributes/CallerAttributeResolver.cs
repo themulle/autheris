@@ -61,6 +61,21 @@ public sealed class CallerAttributeResolver : ICallerAttributeResolver, ICallerA
 
     public bool IsEnabled => _options.Enabled;
 
+    public CallerAttributePadding Padding => new(_options.PadListsToBuckets, NextPowerOfTwo(_options.MaxValuesHardCap));
+
+    public int BindReserve => _options.BindReserve;
+
+    private static int NextPowerOfTwo(int value)
+    {
+        int result = 1;
+        while (result < value && result < (1 << 20))
+        {
+            result <<= 1;
+        }
+
+        return result;
+    }
+
     public void Dispose() => _cache.Dispose();
 
     public CallerSubject CreateSubject(ClaimsPrincipal? principal, TenantId tenant, bool longLived = false)

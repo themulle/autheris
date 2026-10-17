@@ -495,7 +495,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             var decision = consentBypassed && (_consentRepository == null || _consentResolution == null)
                 ? WithTypedMasks(TableAccessDecision.Allowed(resolvedId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true), tableMeta, tenantId)
                 : await AccessPolicy().DecideAsync(
-                    new TableAccessQuery(userSid, tenantId, groupSids, roles, tableMeta, user.Claims, colList, RebacEnforcement.QueryPaths, clientIp, actionAttribute),
+                    new TableAccessQuery(userSid, tenantId, groupSids, roles, tableMeta, user.Claims, colList, RebacEnforcement.QueryPaths, clientIp, actionAttribute, Principal: user),
                     ct).ConfigureAwait(false);
 
             if (!decision.IsAllowed)
@@ -791,7 +791,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             _accessProfileRepository,
             _memoryCache,
             rowPolicyFactory: _typedPolicies?.RowPolicies,
-            maskPolicyFactory: _typedPolicies?.MaskPolicies);
+            maskPolicyFactory: _typedPolicies?.MaskPolicies,
+            callerAttributes: _typedPolicies?.CallerAttributes);
 
     private System.Net.IPAddress ResolveClientIp()
     {

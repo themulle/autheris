@@ -263,7 +263,12 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IGovernanceMigrationRunner, TMigrationRunner>();
         services.AddSingleton<IGovernanceRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ITableMetadataRepository>(sp => sp.GetRequiredService<TRepository>());
-        services.AddSingleton<IConsentRepository>(sp => sp.GetRequiredService<TRepository>());
+        // REQ-GOV-129 (A-9): the one write seam for consents checks caller attribute filters against the registry; reads pass through.
+        services.AddSingleton<IConsentRepository>(sp => new Autheris.Application.Identity.Attributes.AttributeValidatingConsentRepository(
+            sp.GetRequiredService<TRepository>(),
+            sp.GetRequiredService<Autheris.Application.Identity.Attributes.ICallerAttributeRegistry>(),
+            sp.GetRequiredService<TRepository>(),
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>()));
         services.AddSingleton<IAuditLogRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IPolicyEpochRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsentApprovalRepository>(sp => sp.GetRequiredService<TRepository>());

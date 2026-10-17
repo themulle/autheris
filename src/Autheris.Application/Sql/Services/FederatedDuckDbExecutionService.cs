@@ -127,7 +127,8 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             _accessProfileRepository,
             _memoryCache,
             rowPolicyFactory: _typedPolicies?.RowPolicies,
-            maskPolicyFactory: _typedPolicies?.MaskPolicies);
+            maskPolicyFactory: _typedPolicies?.MaskPolicies,
+            callerAttributes: _typedPolicies?.CallerAttributes);
 
     private IPAddress? ResolveClientIp(ClaimsPrincipal user)
     {
@@ -456,7 +457,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
                     new Autheris.Application.VirtualFilters.MandatoryFilterQuery(userSid, groupSids, roles, tenantId, resolved.Metadata),
                     ct).ConfigureAwait(false)
                 : await AccessPolicy().DecideAsync(
-                    new TableAccessQuery(userSid, tenantId, groupSids, roles, resolved.Metadata, user.Claims, colList, RebacEnforcement.QueryPaths, clientIp, actionAttribute),
+                    new TableAccessQuery(userSid, tenantId, groupSids, roles, resolved.Metadata, user.Claims, colList, RebacEnforcement.QueryPaths, clientIp, actionAttribute, Principal: user),
                     ct).ConfigureAwait(false);
 
             if (!decision.IsAllowed)
