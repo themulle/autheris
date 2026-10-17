@@ -8,13 +8,16 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
+using Autheris.Application.Sql.ListParameters;
 using Autheris.Application.SqlEndpoints.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 using TrinoSqlEngine.Analysis;
+using TrinoSqlEngine.Ast.Emit;
 
 public sealed class SqlEndpointExecutionService : ISqlEndpointExecutionService
 {
@@ -52,18 +55,25 @@ public sealed class SqlEndpointExecutionService : ISqlEndpointExecutionService
 
         var validatedParams = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         var inputs = rawInputs ?? new Dictionary<string, object?>();
+        var listLimits = ListParameterLimits.From(_options.Value.WebSql ?? new WebSqlOptions());
 
         foreach (var paramDef in endpoint.Parameters)
         {
             object? val = null;
 
-            if (inputs.TryGetValue(paramDef.Name, out var providedVal) && providedVal != null)
+            // A JSON null of a list parameter is "not supplied" (default or required rule); scalars keep their behaviour.
+            if (inputs.TryGetValue(paramDef.Name, out var providedVal) && providedVal != null
+                && !(paramDef.IsList && providedVal is JsonElement { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined }))
             {
-                val = CoerceValue(providedVal, paramDef.ClrType, paramDef.Name);
+                val = paramDef.IsList
+                    ? CoerceList(providedVal, paramDef, listLimits)
+                    : ListParameterNormalizer.IsListCandidate(providedVal)
+                        ? throw new ClientListException(GovernedSqlErrorCodes.ListParamType)   // a list for a scalar parameter: never echoed
+                        : CoerceValue(providedVal, paramDef.ClrType, paramDef.Name);
             }
             else if (paramDef.DefaultValue != null)
             {
-                val = paramDef.DefaultValue;
+                val = paramDef.IsList ? CoerceList(paramDef.DefaultValue, paramDef, listLimits) : paramDef.DefaultValue;
             }
             else if (paramDef.IsRequired)
             {
@@ -88,6 +98,20 @@ public sealed class SqlEndpointExecutionService : ISqlEndpointExecutionService
         _logger?.LogDebug("Executing declarative SQL endpoint '{EndpointName}' with {ParamCount} parameters.", endpointName, endpoint.Parameters.Count);
 
         return await _governedSql.ExecuteQueryBufferedAsync(request, user, tenantId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A list-declared parameter accepts a JSON array (POST), a collection (a repeated GET key) or one value, which is a one-element list: a
+    /// comma-separated value is one string and is never split. Elements are coerced by the normalizer, which throws only
+    /// <see cref="ClientListException"/> (no value, no inner message): the scalar message of <see cref="CoerceValue"/> echoes the value and is not used.
+    /// </summary>
+    private static ClientListValue CoerceList(object provided, SqlEndpointParameter definition, ListParameterLimits limits)
+    {
+        var elementType = ListElementTypes.For(definition.ClrType, out bool guidStrings);
+        object raw = provided is ClientListValue existing
+            ? throw new ClientListException(GovernedSqlErrorCodes.ListParamType)   // the caller never supplies a ready-made list value
+            : ListParameterNormalizer.IsListCandidate(provided) ? provided : new[] { provided };
+        return ListParameterNormalizer.Normalize(raw, limits, elementType, guidStrings);
     }
 
     private static object? CoerceValue(object val, Type targetType, string paramName)
