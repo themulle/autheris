@@ -97,7 +97,7 @@ public sealed class DisabledReadPathObserverMiddleware
         return path.StartsWithSegments(DatasetsPrefix, StringComparison.OrdinalIgnoreCase, out var rest) &&
                rest.Value is { } value &&
                value.EndsWith("/sample-rows", StringComparison.OrdinalIgnoreCase) &&
-               value.Count(c => c == '/') == 2;
+               value.AsSpan().Count('/') == 2;
     }
 
     private void TryLog(HttpContext context)

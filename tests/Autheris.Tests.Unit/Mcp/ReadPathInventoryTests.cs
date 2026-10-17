@@ -63,7 +63,7 @@ public sealed class ReadPathInventoryTests
     }
 
     [Fact]
-    public void ST_115_22_The_startup_line_is_logged_once_at_Information_with_the_effective_switches()
+    public void C_115_12_The_startup_line_is_logged_once_at_Information_with_the_effective_switches()
     {
         var logger = new RecordingLogger();
         var options = new GatewayOptions

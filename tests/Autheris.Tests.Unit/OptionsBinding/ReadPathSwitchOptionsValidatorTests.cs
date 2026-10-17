@@ -48,6 +48,13 @@ public sealed class ReadPathSwitchOptionsValidatorTests
     }
 
     [Fact]
+    public void Legitimate_unrelated_keys_do_not_trip_the_typo_check()
+    {
+        Run("""{"Gateway":{"Mcp":{"Enabled":true,"EndpointPath":"/mcp","AllowedOperations":["x"]},"OData":{"Enabled":true},"Profile":"Strict"}}""")
+            .Succeeded.ShouldBeTrue();
+    }
+
+    [Fact]
     public void Valid_hardened_profile_passes()
     {
         Run("""
@@ -116,6 +123,10 @@ public sealed class ReadPathSwitchOptionsValidatorTests
     [InlineData("""{"Gateway":{"Mcp":{"DisabledTools":[null]}}}""", "Gateway:Mcp:DisabledTools:0")]
     [InlineData("""{"Gateway":{"Mcp":{"DisabledTools":["query_sql",""]}}}""", "Gateway:Mcp:DisabledTools:1")]
     [InlineData("""{"Gateway":{"Mcp":{"DisabledTools":{"a":"query_sql"}}}}""", "Gateway:Mcp:DisabledTools")]
+    [InlineData("""{"Gateway":{"Mcp":{"Tool":{"Query":false}}}}""", "Gateway:Mcp")]
+    [InlineData("""{"Gateway":{"Mcp":{"DisabledTool":["query_sql"]}}}""", "Gateway:Mcp")]
+    [InlineData("""{"Gateway":{"RestApis":{"DataEndpoint":{"Enabled":false}}}}""", "Gateway")]
+    [InlineData("""{"Gateway":{"RestAPI2":{"DataEndpoint":{"Enabled":false}}}}""", "Gateway")]
     [Trait("Category", "Security")]
     public void ST_115_03_Malformed_switch_configuration_fails_the_start_naming_the_key(string json, string key)
     {
@@ -130,6 +141,8 @@ public sealed class ReadPathSwitchOptionsValidatorTests
     [InlineData("""{"Gateway":{"Mcp":{"Enabled":false,"Tools":{"Query":"yes"}}}}""")]
     [InlineData("""{"Gateway":{"Mcp":{"Enabled":false,"DisabledTools":"query_sql"}}}""")]
     [InlineData("""{"Gateway":{"Mcp":{"Enabled":false,"DisabledTools":["query_sqll"]}}}""")]
+    [InlineData("""{"Gateway":{"Mcp":{"Enabled":false,"Tool":{"Query":false}}}}""")]
+    [InlineData("""{"Gateway":{"Mcp":{"Enabled":false,"DisabledTool":["query_sql"]}}}""")]
     [InlineData("""{"Gateway":{"Mcp":{"Enabled":false,"DisabledTools":[""]}}}""")]
     [InlineData("""{"Gateway":{"Mcp":{"Enabled":false},"RestApi":{"DataEndpoint":{"Enable":false}}}}""")]
     [Trait("Category", "Security")]

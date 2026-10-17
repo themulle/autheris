@@ -73,6 +73,9 @@ public sealed class ReadPathSwitchOptionsValidator : IValidateOptions<GatewayOpt
     {
         var root = GatewayOptions.SectionName;
 
+        CheckParentForTypos(configuration.GetSection(root), root, typeof(GatewayOptions), failures);
+        CheckParentForTypos(configuration.GetSection($"{root}:Mcp"), $"{root}:Mcp", typeof(McpOptions), failures);
+
         var restApi = configuration.GetSection($"{root}:RestApi");
         CheckNode(restApi, $"{root}:RestApi", ["DataEndpoint"], failures);
         var dataEndpoint = restApi.GetSection("DataEndpoint");
@@ -87,6 +90,58 @@ public sealed class ReadPathSwitchOptionsValidator : IValidateOptions<GatewayOpt
         }
 
         CheckDisabledToolsShape(configuration.GetSection($"{root}:Mcp:DisabledTools"), $"{root}:Mcp:DisabledTools", failures);
+    }
+
+    private static readonly string[] SwitchNodeNames = ["Tools", "DisabledTools", "RestApi", "DataEndpoint"];
+
+    /// <summary>
+    /// A misspelt parent key (<c>Gateway:Mcp:Tool</c>, <c>Gateway:Mcp:DisabledTool</c>, <c>Gateway:RestApis</c>) is ignored by the binder, so
+    /// a closing switch would silently stay open. A child that is no property of the options type but is a near miss of a switch
+    /// node name fails the start.
+    /// </summary>
+    private static void CheckParentForTypos(IConfigurationSection parent, string path, Type optionsType, List<string> failures)
+    {
+        var known = optionsType.GetProperties().Select(p => p.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var child in parent.GetChildren())
+        {
+            if (known.Contains(child.Key)) continue;
+            var near = SwitchNodeNames.FirstOrDefault(n => IsNearMiss(child.Key, n));
+            if (near is not null)
+            {
+                failures.Add($"{path} contains the unknown key '{child.Key}', which looks like a misspelling of '{near}'.");
+            }
+        }
+    }
+
+    private static bool IsNearMiss(string key, string target)
+    {
+        if (string.Equals(key, target, StringComparison.OrdinalIgnoreCase)) return false;
+        if (key.Length >= 4 &&
+            (target.Contains(key, StringComparison.OrdinalIgnoreCase) || key.Contains(target, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return EditDistance(key.ToLowerInvariant(), target.ToLowerInvariant()) <= 2;
+    }
+
+    private static int EditDistance(string a, string b)
+    {
+        var prev = new int[b.Length + 1];
+        var cur = new int[b.Length + 1];
+        for (var j = 0; j <= b.Length; j++) prev[j] = j;
+        for (var i = 1; i <= a.Length; i++)
+        {
+            cur[0] = i;
+            for (var j = 1; j <= b.Length; j++)
+            {
+                cur[j] = Math.Min(Math.Min(cur[j - 1] + 1, prev[j] + 1), prev[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1));
+            }
+
+            (prev, cur) = (cur, prev);
+        }
+
+        return prev[b.Length];
     }
 
     /// <summary>A node must be a section: no scalar value of its own, only keys from the closed set (case-insensitive).</summary>

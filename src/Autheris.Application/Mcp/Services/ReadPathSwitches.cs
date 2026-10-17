@@ -9,7 +9,7 @@ using Autheris.Application.Mcp.Interfaces;
 using Autheris.Domain.Options;
 
 /// <summary>
-/// PLAN-SEC-115 A-2/A-7: immutable startup snapshot of the read-path switches. Built once from the bound options; never reloads
+/// PLAN-SEC-115 A-2/A-7: startup snapshot of the read-path switches (the switch values are immutable; only the bounded set of dropped tool names is filled during startup registration). Built once from the bound options; never reloads
 /// (no <c>IOptionsMonitor</c>), so tools/list and the mapped routes can never disagree within one process.
 /// </summary>
 public sealed class ReadPathSwitches : IReadPathSwitches
@@ -91,8 +91,13 @@ public sealed class ReadPathSwitches : IReadPathSwitches
     public bool IsResourceEnabled(string resourceUri)
     {
         if (resourceUri is null) return true;
-        if (resourceUri.StartsWith("autheris://catalog/", StringComparison.OrdinalIgnoreCase) ||
-            resourceUri.StartsWith("autheris://datasets/", StringComparison.OrdinalIgnoreCase))
+        // The dataset resource is rendered by describe_dataset, so it also follows that tool's DisabledTools entry.
+        if (resourceUri.StartsWith("autheris://datasets/", StringComparison.OrdinalIgnoreCase))
+        {
+            return _catalog && IsToolEnabled(McpDatasetTools.DescribeDataset);
+        }
+
+        if (resourceUri.StartsWith("autheris://catalog/", StringComparison.OrdinalIgnoreCase))
         {
             return _catalog;
         }
@@ -109,6 +114,7 @@ public sealed class ReadPathSwitches : IReadPathSwitches
         return true;
     }
 
+    /// <remarks>Best-effort bound: the count check and the add are not atomic, which is acceptable because registration happens at startup only.</remarks>
     public void RecordDropped(string toolName)
     {
         if (string.IsNullOrWhiteSpace(toolName) || _dropped.Count >= MaxDroppedNames) return;

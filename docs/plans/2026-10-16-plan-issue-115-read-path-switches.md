@@ -6,7 +6,7 @@
 **Branch:** `feat/issue-115-read-path-switches` (planned; base `main`)
 **Parent Plan:** [00-master-plan-overview.md](00-master-plan-overview.md) | **Requirement:** `REQ-SEC-115` | **Delivery tracker:** [`PLAN-DELIVERY-W23`](2026-10-16-plan-waves-2-3-delivery.md) (step P-5, implementation step I-4)
 **Follow-up pointer (intake 2026-10-17):** a later MCP tool to call governed procedures ([`REQ-PROC-153`](2026-10-17-req-issues-152-154-governed-procedures.md) INC-5, wave 4) belongs to the `Query` tool group defined here.
-**Status:** PROPOSED, Phase 3 security review complete: APPROVED WITH CONDITIONS (conditions C-115-1..12 binding; next: Phase 4 TDD implementation)
+**Status:** Phase 4 implemented (conditions C-115-1..12 satisfied); Phase 5 code review APPROVED WITH FINDINGS (findings fixed 2026-10-17)
 
 **Binding project rules applied:** no upgrade/repair migrations (this change has no persistence); fail closed; defaults never turn a path on or off compared with today; CI stays fast (no sleeps, shared fixtures); Phase-4 TDD developer is Sonnet; the SqlGate/AST security suites are not touched; `AstSecurityVisitor.cs` is not modified.
 
@@ -362,6 +362,7 @@ Size S (tracker I-4); the test share is high because every "off" route needs its
   - Observer (C-115-5): the code has no SID audit-hash helper, so a per-process random-key HMAC (6 bytes hex) identifies the principal; budget 20 log lines/min process-wide, 256-entry per-principal table, extra counter tag `observer_error`; the sample-rows route is part of the observed family. Startup line also reports `lakehouse`; it is unit-tested through `GatewayApplicationBuilderExtensions.LogReadPathInventory` because Serilog replaces test logger providers in the integration host.
   - Verified facts: anonymous callers get the fallback-policy 401 for mapped and unmapped paths alike (SEC-115-08(b) moot); the closed sample-rows route is answered by the `/api/v1/catalog/datasets/{*id}` catch-all exactly like any other unknown sub-path (compared against that, not against a 404); `McpProtocolHandler` serves only tools and semantic resources (no native resources/prompts), the SDK handlers are covered by the `GatewayMcpServer` filter helpers plus a real-SDK integration test; ST-115-20 result: with `WebSql:Enabled=false` an async job ends `Failed` (rewriter gate), no gap to report.
   - Known limit: raw-config key checking covers the closed key sets of the three switch nodes (C-115-2); a misspelt key directly under `Gateway:Mcp` (for example `DisabledTool`) is still ignored by the binder. ST-115-23 is example-based (crafted arguments), not a generated property test.
+- 2026-10-17: Phase 5 follow-ups. The validator now also fails the start for a near-miss misspelling (edit distance <= 2 or substring) of `Tools`, `DisabledTools`, `RestApi`, `DataEndpoint` directly under `Gateway` and `Gateway:Mcp` (supersedes the "known limit" above for those names). Accepted limitation: the observer's principal hash is a per-process keyed HMAC, so it cannot be correlated across restarts. `RecordDropped` is a best-effort bound (startup-only registration). The `autheris://datasets/{id}` resource and template also follow a `DisabledTools` entry of `describe_dataset`. ST-115-19 is folded into the test `ST_115_01_and_19_*`; the startup-line unit test is named `C_115_12_*`.
 
 ---
 

@@ -155,6 +155,17 @@ public sealed class McpResourceSwitchTests
         GatewayMcpServer.FilterResourceTemplates(GatewayMcpServer.NativeResourceTemplateList(), Switches(Off(McpToolGroup.Api))).Count.ShouldBe(2);
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ST_115_11_The_dataset_template_and_resource_follow_a_DisabledTools_entry_of_describe_dataset()
+    {
+        var switches = ReadPathSwitches.From(new GatewayOptions { Mcp = new McpOptions { DisabledTools = ["describe_dataset"] } });
+
+        switches.IsResourceEnabled("autheris://datasets/a.b.c").ShouldBeFalse();
+        switches.IsResourceEnabled("autheris://catalog/summary").ShouldBeTrue();
+        GatewayMcpServer.FilterResourceTemplates(GatewayMcpServer.NativeResourceTemplateList(), switches).Select(t => t.Name).ShouldBe(["dataset_schema"]);
+    }
+
     // ---- Prompts (ST-115-14) ----------------------------------------------------------------------------------------------------
 
     [Fact]
