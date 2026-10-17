@@ -414,7 +414,8 @@ public class CompileApiTests
             [nameof(CompileRequest.AllowExperimentalDialect)] = baseRequest with { AllowExperimentalDialect = true },
             [nameof(CompileRequest.CompileTimeout)] = baseRequest with { CompileTimeout = TimeSpan.FromSeconds(9) },
             [nameof(CompileRequest.MaxExpansionFactor)] = baseRequest with { MaxExpansionFactor = 3 },
-            [nameof(CompileRequest.ClientLists)] = baseRequest with { ClientLists = ClientListHarness.Shapes(("ids", 3)) }
+            [nameof(CompileRequest.ClientLists)] = baseRequest with { ClientLists = ClientListHarness.Shapes(("ids", 3)) },
+            [nameof(CompileRequest.TimeZoneConversionAvailable)] = baseRequest with { TimeZoneConversionAvailable = true }
         };
 
         // Every property of CompileRequest except the policy must be covered above.

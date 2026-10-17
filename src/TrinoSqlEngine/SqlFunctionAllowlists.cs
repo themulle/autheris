@@ -31,7 +31,7 @@ public static class SqlFunctionAllowlists
         // Math
         "abs", "round", "floor", "ceil", "ceiling", "mod", "power", "sqrt", "exp", "ln", "log", "log10", "sign",
         // Date / time and conversion helpers
-        "extract", "cast", "current_date", "current_timestamp",
+        "extract", "cast", "current_date", "current_timestamp", "convert_timezone",
     ];
 
     private static readonly string[] PostgreSqlFunctions =
@@ -229,7 +229,19 @@ public static class SqlFunctionAllowlists
     /// The allowlist of admin-authored policy predicates (row policies, policy lint): <see cref="Build"/> without the functions that
     /// need the governed time zone validator (BC-130-2).
     /// </summary>
-    public static IReadOnlySet<string> BuildForPolicy(TargetSqlDialect dialect, IEnumerable<string>? additionalAllowedFunctions) => throw new NotImplementedException();
+    public static IReadOnlySet<string> BuildForPolicy(TargetSqlDialect dialect, IEnumerable<string>? additionalAllowedFunctions)
+    {
+        var result = new HashSet<string>(Build(dialect, additionalAllowedFunctions), StringComparer.OrdinalIgnoreCase);
+        foreach (var name in GovernedOnlyFunctions)
+        {
+            result.Remove(name);
+        }
+
+        return result.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Functions whose arguments are checked by a dedicated governed validator that policy predicates do not run (REQ-SQL-130).</summary>
+    private static readonly string[] GovernedOnlyFunctions = ["convert_timezone"];
 
     private static FrozenSet<string> Create(params string[][] groups)
     {
