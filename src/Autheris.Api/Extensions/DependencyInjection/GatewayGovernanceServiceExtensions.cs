@@ -56,6 +56,7 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IRowFilterEvaluationAdminService, RowFilterEvaluationAdminService>();
 
         // Issue #111: the only writer of dataset tags and catalog visibility tiers (REST, manifest and MCP admin tool).
+        services.AddSingleton<IDatasetTagImportService, DatasetTagImportService>();
         services.AddSingleton<CatalogVisibilityMetrics>();
         services.AddSingleton<ICatalogVisibilityMetrics>(sp => sp.GetRequiredService<CatalogVisibilityMetrics>());
         services.AddHostedService<CatalogGovernanceHostedService>();
