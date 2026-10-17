@@ -2,6 +2,7 @@ namespace Autheris.Application.Identity.Attributes;
 
 using System;
 using System.Collections.Concurrent;
+using System.Threading;
 using System.Threading.Tasks;
 
 /// <summary>
@@ -20,4 +21,24 @@ internal sealed class CallerAttributeRequestState
     internal void Set(string name, Entry entry) => _entries[name] = entry;
 
     internal void Remove(string name) => _entries.TryRemove(name, out _);
+
+    private long _reservedBinds;
+
+    /// <summary>BC-129-09: the bind items all attribute expansions of this request may use together; false when <paramref name="items"/> would exceed <paramref name="cap"/>.</summary>
+    internal bool TryReserve(int items, int cap)
+    {
+        while (true)
+        {
+            long current = Interlocked.Read(ref _reservedBinds);
+            if (current + items > cap)
+            {
+                return false;
+            }
+
+            if (Interlocked.CompareExchange(ref _reservedBinds, current + items, current) == current)
+            {
+                return true;
+            }
+        }
+    }
 }

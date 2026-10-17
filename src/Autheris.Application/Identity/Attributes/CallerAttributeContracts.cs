@@ -60,6 +60,12 @@ public sealed record CallerSubject(
     /// <summary>The caller-scope state of this request (memo, BC-129-07); null for long-lived principals (CDC, webhooks, subscriptions).</summary>
     internal CallerAttributeRequestState? RequestState { get; init; }
 
+    /// <summary>
+    /// Reserves bind items for the attribute expansions of this request (BC-129-09). Without a request scope (long-lived subjects) the
+    /// sum cannot be tracked and the call returns true; the per-decision cap still applies at the bind site.
+    /// </summary>
+    public bool TryReserveBinds(int items, int cap) => RequestState?.TryReserve(items, cap) ?? true;
+
     public override string ToString() => $"CallerSubject {{ Kind = {Kind} }}";
 
     public bool Equals(CallerSubject? other) => ReferenceEquals(this, other);
@@ -214,6 +220,6 @@ public static class CallerAttributeNameRules
     public static string CanonicalApplicationId(string applicationId)
     {
         ArgumentNullException.ThrowIfNull(applicationId);
-        return Guid.TryParseExact(applicationId, "D", out var guid) ? guid.ToString("D", System.Globalization.CultureInfo.InvariantCulture) : applicationId;
+        return applicationId.Length == 36 && Guid.TryParseExact(applicationId, "D", out var guid) ? guid.ToString("D", System.Globalization.CultureInfo.InvariantCulture) : applicationId;
     }
 }

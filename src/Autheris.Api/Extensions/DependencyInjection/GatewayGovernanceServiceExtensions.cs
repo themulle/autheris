@@ -137,7 +137,15 @@ public static class GatewayGovernanceServiceExtensions
 
         services.AddSingleton<VirtualFilterAdministrationService>();
         services.AddSingleton<IVirtualFilterSnapshotProvider, VirtualFilterSnapshotProvider>();
-        // REQ-GOV-129: caller attribute registry and its administration (four-eyes). Providers and the resolver are registered with WP-2.
+        // REQ-GOV-129: caller attribute registry and its administration (four-eyes).
+        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeProvider, Autheris.Application.Identity.Attributes.ClaimsAttributeProvider>();
+        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeProvider, Autheris.Application.Identity.Attributes.ServiceAttributeProvider>();
+        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeProvider, Autheris.Application.Identity.Attributes.AttributeTableProvider>();
+        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeDefinitionValidator, Autheris.Application.Identity.Attributes.ClaimsAttributeDefinitionValidator>();
+        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeDefinitionValidator, Autheris.Application.Identity.Attributes.AttributeTableDefinitionValidator>();
+        services.AddSingleton<Autheris.Application.Identity.Attributes.CallerAttributeResolver>();
+        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeResolver>(sp => sp.GetRequiredService<Autheris.Application.Identity.Attributes.CallerAttributeResolver>());
+        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeCacheInvalidator>(sp => sp.GetRequiredService<Autheris.Application.Identity.Attributes.CallerAttributeResolver>());
         services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeRegistry, Autheris.Application.Identity.Attributes.CallerAttributeRegistry>();
         services.AddSingleton<Autheris.Application.Identity.Attributes.CallerAttributeAdministrationService>(sp => new Autheris.Application.Identity.Attributes.CallerAttributeAdministrationService(
             sp.GetRequiredService<Autheris.Domain.Interfaces.ICallerAttributeRepository>(),
