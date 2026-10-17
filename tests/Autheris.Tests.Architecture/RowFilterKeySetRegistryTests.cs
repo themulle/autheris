@@ -10,6 +10,7 @@ namespace Autheris.Tests.Architecture;
 /// arbitrary node as a site, so <c>Register</c> has exactly one call site in <c>src/</c> and the registry type is not public. The scan reads
 /// the IL of every production assembly (a text search would miss another spelling).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class RowFilterKeySetRegistryTests
 {
     private const string RegistryType = "Autheris.Application.Sql.Policy.RowFilterKeySets.CorrelatedFilterSiteRegistry";
