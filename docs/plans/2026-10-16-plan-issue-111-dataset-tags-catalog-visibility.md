@@ -993,3 +993,64 @@ All of F-C1..F-C8 stand as written. In addition:
 
 - **WP-0 (`fix/catalog-schema-disclosure`): APPROVED WITH CONDITIONS.** Conditions: W0-C1..W0-C8 plus W0-C9..W0-C11 and tests T-W0-13..16. The conditions are implementation-level and small; the plan needs no re-architecture. Phase 4 may start. Merge requires the owner's acknowledgement of O-1, O-5, O-6 and O-7 including the single-tenant migration instruction.
 - **#111 (WP-1..WP-6): APPROVED WITH CONDITIONS.** The three HIGH/MEDIUM items of the last review (F-C1, F-C2, F-C3) are closed. Conditions: F-C1..F-C8 as specified, plus F-C9 and F-C10 and tests T-R3-1/T-R3-2. #111 starts only after WP-0 is merged (tracker step `I-6a`), because it depends on `CallerScopeResolver` and `Gateway:Tenancy:Mode`.
+
+## Addendum A-1 (2026-10-17): pre-Phase-4 drift and gaps
+
+Verified against `origin/main` `f0071be6` (B-0..B-3, I-1, I-2 merged; I-4 #115 in progress). Design unchanged; the items below are binding for Phase 4 of WP-1..WP-6.
+
+### Decisions
+
+1. **G1 - admin rows keep `CatalogView = Unmarked`.** The admin branches of `CatalogVisibility.VisibleTablesAsync` (Global/Unrestricted via `FilterByContract`, Tenant via `FilterToTenant`) and of `QueryTypes.GetCatalogAsync` bypass `FilterForSubject` and do not stamp a view. Consumer rule (WP-3 `McpDatasetCatalog`, GraphQL DTO, WP-5 `CatalogDiscoveryService` shaping): full output iff `isAdmin` (caller class from `CallerScopeResolver`) or `CatalogView is Granted or Full`; `Summary` allow-list iff `CatalogView == Summary`; a non-admin row with `Unmarked` takes the not-found path (fail closed). Tests: `AdminRow_UnmarkedView_GetsFullDescription`, `NonAdminRow_Unmarked_TreatedAsNotFound`.
+2. **G2 - WP-1 and WP-2 are one developer package.** Once the repositories overlay the persisted tier into `Table.Visibility`, the legacy tier branch `CatalogVisibility.FilterForSubject` `:92-109` would become live on every surface, `DataAccess` included. The package that adds the overlay removes that branch in the same change (tiers only under `CatalogSurface.Discovery`). No commit on the branch has the overlay without the removal. Test: T-3 plus `DataAccess_PersistedSummaryOrFull_WithoutConsent_Dropped`.
+3. **O-3 default taken.** The #107 plan/apply kind now exists (`admin_plan_row_filter_evaluation` / `admin_apply_row_filter_evaluation`). `admin_set_dataset_catalog` stays single-call (O-3 as decided, accepted by Phase 3); switching to plan/confirm is recorded as a follow-up, not part of I-7.
+4. **INC-1 overlap (#138 INC-1, step I-7a).** INC-1 deletes `CatalogDiscoveryService.ResolvePermittedAsync`/`VisibleAsync`/`IsRebacAllowedAsync`, the private `McpDatasetCatalog.FindVisibleAsync`/`VisibleTablesAsync`/relation checks and the three branches of `QueryTypes.GetCatalogAsync` `:433-450`. Therefore: WP-2 only passes `Discovery` at `McpDatasetCatalog.cs:806` and `QueryTypes.cs:448` (no new helpers, no restructuring); WP-5 only passes `Discovery` inside `CatalogDiscoveryService.VisibleAsync` plus `Summary` detail/search shaping, and does not rework the ReBAC `Task.WhenAll` loop. Output shaping (`BuildSummaryDescription`, DTOs, `sample_rows` `Full` term), `CatalogVisibility.cs`, repositories and DDL are built normally (INC-1 consumes them).
+5. **Delivery split** (one branch, sequential): DWP-1 = WP-1 + WP-2; DWP-2 = WP-3 + WP-5 (parity tier fixtures seeded through the repository, F-C7); DWP-3 = WP-4 + WP-6 (requires I-4 merged).
+
+### Drift (use the current name)
+
+| Plan text | Current code |
+|---|---|
+| `Options/Integrations/TenancyOptions.cs` | `src/Autheris.Domain/Options/Tenancy/TenancyOptions.cs`; read `GatewayOptions.Tenancy.EffectiveMode` |
+| `SharedTables` as `IReadOnlySet<TableIdentifier>` (C-2) | `DataCatalogOptions.SharedTables` (`IReadOnlyList<string>`); `FilterForSubject` takes `IEnumerable<string>? sharedTables`, parsed like `FilterToTenant` (`:153-176`) |
+| `VisibleTablesAsync(..., surface, tenancyMode, ct)` | new 9-param overload `(..., contract, tenancyMode, sharedTables, CatalogSurface surface, ct = default)`; existing 8-param overload (`:242`) delegates with `DataAccess` |
+| `McpCatalogVisibility` optional `surface` | new overload `(allTables, principal, consentRepo, options, CatalogSurface surface, ct)`; existing overloads unchanged |
+| `McpDatasetCatalog.cs:788-795` | `FindVisibleAsync` `:785`, `VisibleTablesAsync` `:800-807`; `sample_rows` guard `:597-603`; release-profile check `:209-210` |
+| `Table.Tags` readers (F-C9) | switch to `CatalogTags`: `McpDatasetCatalog.cs:154,180,308`, `QueryTypes.cs:359,465,497`; keep: `BackstageCatalogExportService.cs:281` (default taken); policy readers `TableAccessPolicy.cs:226`, `CatalogVisibility.cs:196`, `GrantClassifier.cs:42` untouched |
+| `Extensions/Dbt/DbtSemanticManifestIngestionService.cs:333` | `src/Autheris.Application/Dbt/Services/DbtSemanticManifestIngestionService.cs:333` (upsert `:339`) |
+| `Mcp/Services/McpToolGroups.cs` pin list | created by I-4; register under `McpToolGroup.None` (`McpToolGroups.cs:57`) and in `McpToolGroupsCompletenessTests.cs` (unknown names default to `Query`) |
+| `Tests.Unit/Persistence/GovernanceSchemaShapeSnapshotTests.cs` | `tests/Autheris.Tests.Unit/Governance/GovernanceSchemaShapeSnapshotTests.cs` |
+| `Tests.Integration/CatalogSettingsRepositoryContractTestsBase.cs` | base in `tests/Autheris.Tests.Unit/Governance/` linked into the Integration csproj, SQLite subclass in Unit (#107 pattern) |
+| `CatalogDiscoveryVisibilityTests.cs` | extend `tests/Autheris.Tests.Unit/Catalog/CatalogDiscoveryConsentVisibilityTests.cs` |
+| DDL "after the #107 block" | inside the existing command text after `TABLE_ROW_FILTER_STRATEGIES`: SQLite `:509-517`; PostgreSQL `:519-527` (before `ExecuteNonQuery` and the audit trigger); SQL Server `:607-615` (before the trigger) |
+
+Not to use: `TableMetadata.OwnerTenantId` (no repository sets it; the tier gate stays `SharedTables`-only). Re-verify `_metadataCache` handling after I-3 (#107 WP-C) is merged before adding the overlay.
+
+### Phase 3 narrow review of Addendum A-1 (2026-10-17)
+
+**Verdict: APPROVED WITH CONDITIONS.** F-C1..F-C10 are not weakened by any decision or drift item. Code facts checked in `/work/wt/laneB` (read only).
+
+**G1 (admin rows stay `Unmarked`).** Sound and fail-closed if the consumer rule is implemented as stated.
+- `CatalogVisibility.VisibleTablesAsync` `:255-274` already returns admin rows (Global/Unrestricted via `FilterByContract`, Tenant via `FilterToTenant`) without touching `FilterForSubject`; the non-admin path (`:277-291`) is the only one that can stamp a view. `CallerScope.None` returns empty.
+- `isAdmin` is derived from the same resolver in both consumers: MCP `GetCallerConsentsAndRequestsAsync` `:526-532` (`CallerScopeResolver.IsAdminView(scope)` = Global/Unrestricted/Tenant) and GraphQL `QueryTypes.cs:403-407` (same three classes). `Subject`, `Claimless` and `None` are never admin, so a non-admin cannot be classified admin, and a claim-less GovernanceAdmin in Multi mode is `Claimless`.
+- Residual risks the addendum does not close: (a) `isAdmin` is computed in a different method than the list filtering (`VisibleTablesAsync` re-resolves the scope itself); two resolver calls on one principal are deterministic, but a consumer that passes a different `tenancyMode` to each would diverge. (b) `QueryTypes.cs:343-361` OpenSchema branch hard-codes `isAdmin: true` for every caller and returns all tables; it must stay governed by plan A-4/F-C5 and must not be read as "admin" by the new rule. (c) A Tenant-scope admin sees shared-table rows in full by design (`FilterToTenant` + `SharedTables`); a persisted tier does not narrow admins. This matches the existing admin behaviour and is accepted.
+
+**G2 (WP-1+WP-2 bundling).** Required and correct: the overlay without removal of `FilterForSubject` `:92-109` would make the tier live on `DataAccess` (a persisted `Full` would expose names on the data path without consent). Bundling closes that window. Must be enforced per commit, not only per PR.
+
+**Drift items.** None weaken F-C1..F-C10. F-C9: the reader list is narrowed to the real locations, and the policy readers (`TableAccessPolicy.cs:226`, `CatalogVisibility.cs:196`, `GrantClassifier.cs:42`) stay on `Table.Tags`, consistent with F-C1/F-C10. The 9-param `VisibleTablesAsync` overload keeps the 8-param one delegating with `DataAccess` (fail-closed default). Using `IEnumerable<string>? sharedTables` parsed like `FilterToTenant` is acceptable provided malformed entries are skipped (never widen). The INC-1 overlap (decision 4) is acceptable only with the guard in F-C13.
+
+**Binding conditions**
+- **F-C11** The shaping rule is a single shared pure function (full iff `isAdmin` or view Granted/Full; Summary allow-list iff Summary; else not-found), used by MCP, GraphQL and `CatalogDiscoveryService`; `isAdmin` is passed in from the one `CallerScopeResolver.IsAdminView` result that also drove the list call (same `tenancyMode`), never recomputed from roles or `RequestContext`. Unknown or future `CatalogView` values map to not-found.
+- **F-C12** The GraphQL OpenSchema branch (`QueryTypes.cs:343-361`) is unchanged by G1 and keeps the A-4/F-C5 behaviour; it must not call the shaping function with `isAdmin: true` as a shortcut for "no tier".
+- **F-C13** INC-1 deletes the old filters: no commit of I-7/I-7a may leave a code path that lists tables without passing `CatalogSurface.Discovery` while the overlay is live, and the F-C7 parity tests run on the merged result of both. The tier branch removal (G2) is verified by a test per surface, not only by T-3.
+- **F-C14** `DataAccess`, `Query` and `invoke_api` callers of the 8-param overload must keep `DataAccess` semantics; a test fails if the overload is changed to default to `Discovery`.
+- **F-C15** The G2 pairing rule is enforced in the tracker: DWP-1 is one commit series where the overlay commit and the branch-removal commit are not separated by any pushed commit (squash or single commit).
+
+**Mandatory tests** (`[Trait("Category","Security")]`)
+- `AdminRow_UnmarkedView_GetsFullDescription` (Global, Unrestricted, Tenant).
+- `NonAdminRow_Unmarked_TreatedAsNotFound` (Subject, Claimless, None; MCP, GraphQL, REST).
+- `Claimless_GovernanceAdmin_Multi_NeverFullOutput`.
+- `UnknownCatalogView_TreatedAsNotFound`.
+- `Shaping_IsAdmin_ComesFromSameResolverAsListFilter` (Multi and Single mode).
+- `OpenSchema_Branch_NotAffectedByTierShaping`.
+- `DataAccess_PersistedSummaryOrFull_WithoutConsent_Dropped` (per surface: GraphQL, MCP, REST) and `VisibleTables_8ParamOverload_DefaultsToDataAccess`.
+- `TenantAdmin_SharedTable_PersistedHidden_Behaviour_Pinned` (pins the accepted admin behaviour).
