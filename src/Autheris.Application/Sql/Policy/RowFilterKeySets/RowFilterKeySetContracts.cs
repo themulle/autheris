@@ -45,7 +45,16 @@ public enum KeySetFallbackReason
     TypeNotBindable,
     ValueNotBindable,
     InvalidStoredSetting,
-    LoadThrottled
+    LoadThrottled,
+
+    /// <summary>D-WPC-3: the IN lists would not fit the expansion budget of the statement text (pre-load gate or post-load fit).</summary>
+    ExpansionBudget,
+
+    /// <summary>D-WPC-4: the compile hit the expansion limit and the one-time retry re-assembled the statement with every site as <c>EXISTS</c>.</summary>
+    ExpansionLimitRetry,
+
+    /// <summary>D-WPC-2: key sets apply to read statements only; INSERT, UPDATE, DELETE and unknown statement types keep <c>EXISTS</c>.</summary>
+    WriteStatement
 }
 
 /// <summary>Diagnostics of one site. Never contains key values or a hash of key values (SEC-RF107-09).</summary>
@@ -60,41 +69,6 @@ public sealed record RowFilterKeySetOutcome(
     int? PaddedCount,
     int? AgeSeconds);
 
-/// <summary>Per-statement collector of <see cref="RowFilterKeySetOutcome"/> (single statement, single assembly; not thread-safe).</summary>
-public sealed class RowFilterKeySetReport
-{
-    private readonly List<RowFilterKeySetOutcome> _outcomes = [];
-
-    public IReadOnlyList<RowFilterKeySetOutcome> Outcomes => _outcomes;
-
-    public void Add(RowFilterKeySetOutcome outcome)
-    {
-        ArgumentNullException.ThrowIfNull(outcome);
-        _outcomes.Add(outcome);
-    }
-}
 
 /// <summary>Result of <c>GovernancePolicyFactory.CreateAssemblyAsync</c>: the policy plus the key-set diagnostics.</summary>
 public sealed record GovernedPolicyAssembly(GovernancePolicy Policy, RowFilterKeySetReport KeySets);
-
-/// <summary>
-/// Cached key set of one correlated filter. <see cref="Tenant"/> and <see cref="DataSource"/> are verified on every hit (SEC-RF107-02).
-/// <see cref="ToString"/> prints counts only (SEC-RF107-09).
-/// </summary>
-public sealed record RowFilterKeySetEntry(
-    IReadOnlyList<object> Keys,
-    bool Overflow,
-    DateTimeOffset LoadedAt,
-    string Tenant,
-    string DataSource)
-{
-    public long EstimateBytes() => throw new NotImplementedException("WP-C: RowFilterKeySetEntry.EstimateBytes");
-
-    public override string ToString() => $"RowFilterKeySetEntry {{ Keys = {Keys.Count}, Overflow = {Overflow}, LoadedAt = {LoadedAt:O} }}";
-}
-
-public static class RowFilterKeySetErrorCodes
-{
-    /// <summary>The key query failed (connection, command, read, timeout, conversion); the statement is denied, fail closed (SEC-RF107-08).</summary>
-    public const string KeySetUnavailable = "ROW_FILTER_KEY_SET_UNAVAILABLE";
-}

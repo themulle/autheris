@@ -90,6 +90,10 @@ public sealed class SingleFlightKeySetCache<TValue> : IDisposable where TValue :
         return await flight.Completion.Task.WaitAsync(ct).ConfigureAwait(false);
     }
 
+    /// <summary>Test hook: stores a value without a load (forced-collision tests, SEC-RF107-02).</summary>
+    internal void InsertForTest(string key, TValue value, DateTimeOffset absoluteExpiration, long sizeBytes)
+        => _cache.Set(key, value, new MemoryCacheEntryOptions { AbsoluteExpiration = absoluteExpiration, Size = Math.Max(1, sizeBytes) });
+
     public void Dispose() => _cache.Dispose();
 
     private async Task RunAsync(
