@@ -449,6 +449,7 @@ Above the PRD estimate (1,600 / 2,200) because the plan adds the stream/in-memor
 | 1.5 | 2026-10-17 | Phase 5 follow-up: accepted residual: `CallerAttributeColumnTypeFit` does not check Virtual Filter `target.` columns (their type is unknown until binding); the database fails closed on a mismatch, and `BindsValueFromTheCaller` keeps the resulting driver errors value-free. |
 | 1.6 | 2026-10-17 | Phase 4 fix: `AttributeTableQuery` compares tenant and issuer ordinally in the database (SQL Server `COLLATE Latin1_General_100_BIN2`, PostgreSQL `COLLATE "C"`, SQLite `COLLATE BINARY`, values stay bound), so the Max+1 window counts only exact rows and differently-cased rows no longer cause OverCardinality (ST-129-12 on SQL Server). The post-filter ordinal skip stays as defence in depth. |
 
+| 1.7 | 2026-10-17 | Phase 5 note: the collated tenant/issuer predicate cannot use an index on the default collation (subject equality stays seekable), and the tenant/issuer columns of attribute tables must be text types (`COLLATE` fails otherwise, fail closed as a driver error). Test ST_129_12b pins the defence-in-depth skip (a source that ignores the WHERE yields `OverCardinality`). |
 ---
 
 ## Phase 3 Security Review (2026-10-16)

@@ -119,6 +119,8 @@ public static class AttributeTableQuery
         string Q(string id) => dialect.QuoteIdentifier(id);
         string Marker(string name) => dialect.FormatParameterMarker(name);
         // Tenant and issuer match ordinally in the database (BC-129-11), so the Max+1 limit counts only exactly matching rows.
+        // Note: the collated predicate cannot use an index on the default collation (subject equality stays seekable), and the tenant and
+        // issuer columns of an attribute table must be text types (COLLATE fails on other types).
         string Ordinal() => dialect switch
         {
             DatabaseDialect.SqlServer => " COLLATE Latin1_General_100_BIN2",

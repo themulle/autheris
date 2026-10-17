@@ -155,6 +155,75 @@ public sealed class AttributeTableProviderTests : IDisposable
     }
 
     [Fact]
+    public async Task ST_129_12b_RowOfAnotherTenantCase_ReturnedDespiteTheWhere_FailsClosedAsOverCardinality_BC_129_11()
+    {
+        // Defence in depth: a source that ignores the WHERE clause (collation quirk) returns a differently-cased tenant row.
+        var table = new System.Data.DataTable();
+        table.Columns.Add("cost_center", typeof(string));
+        table.Columns.Add("tenant_id", typeof(string));
+        table.Rows.Add("leak", "TENANT_A");
+        var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions
+        {
+            CallerAttributes = Options(),
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["hr_db"] = new() { Provider = "Sqlite", ConnectionString = "ignored", CallerAttributeLookupAllowed = true, CallerAttributeDedicatedLogin = true }
+                }
+            }
+        });
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Production");
+        var provider = new AttributeTableProvider(new FakeFactory(table), options, env, Substitute.For<ILogger<AttributeTableProvider>>(), null);
+
+        var result = await provider.ResolveAsync(UserSubject(), Definition(), default);
+
+        result.Outcome.ShouldBe(CallerAttributeOutcome.OverCardinality);
+        result.Value.ShouldBeNull();
+    }
+
+    private sealed class FakeFactory(System.Data.DataTable table) : ISqlConnectionFactory
+    {
+        public Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default) =>
+            Task.FromResult<DbConnection>(new FakeConnection(table));
+    }
+
+    private sealed class FakeConnection(System.Data.DataTable table) : DbConnection
+    {
+        [System.Diagnostics.CodeAnalysis.AllowNull]
+        public override string ConnectionString { get; set; } = "";
+        public override string Database => "fake";
+        public override string DataSource => "fake";
+        public override string ServerVersion => "0";
+        public override System.Data.ConnectionState State => System.Data.ConnectionState.Open;
+        public override void ChangeDatabase(string databaseName) { }
+        public override void Close() { }
+        public override void Open() { }
+        protected override DbTransaction BeginDbTransaction(System.Data.IsolationLevel isolationLevel) => throw new NotSupportedException();
+        protected override DbCommand CreateDbCommand() => new FakeCommand(table);
+    }
+
+    private sealed class FakeCommand(System.Data.DataTable table) : DbCommand
+    {
+        [System.Diagnostics.CodeAnalysis.AllowNull]
+        public override string CommandText { get; set; } = "";
+        public override int CommandTimeout { get; set; }
+        public override System.Data.CommandType CommandType { get; set; }
+        public override bool DesignTimeVisible { get; set; }
+        public override System.Data.UpdateRowSource UpdatedRowSource { get; set; }
+        protected override DbConnection? DbConnection { get; set; }
+        protected override DbParameterCollection DbParameterCollection { get; } = new SqliteCommand().Parameters;
+        protected override DbTransaction? DbTransaction { get; set; }
+        public override void Cancel() { }
+        public override int ExecuteNonQuery() => 0;
+        public override object? ExecuteScalar() => null;
+        public override void Prepare() { }
+        protected override DbParameter CreateDbParameter() => new SqliteCommand().CreateParameter();
+        protected override DbDataReader ExecuteDbDataReader(System.Data.CommandBehavior behavior) => table.CreateDataReader();
+    }
+
+    [Fact]
     public async Task NoMatchingRow_IsMissing()
     {
         (await Provider().ResolveAsync(UserSubject(), Definition(), default)).Outcome.ShouldBe(CallerAttributeOutcome.Missing);
