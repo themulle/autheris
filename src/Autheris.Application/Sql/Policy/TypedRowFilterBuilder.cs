@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Autheris.Application.Services;
+using Autheris.Application.Sql.Policy.RowFilterKeySets;
 using Autheris.Domain.Model;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Nodes;
@@ -126,7 +127,7 @@ public sealed partial class TypedRowFilterBuilder
     {
         if (filter.FilterType == RowFilterType.SubqueryCorrelated)
         {
-            return AdvancedRlsPredicateBuilder.CorrelatedExpression(filter, namer);
+            return AdvancedRlsPredicateBuilder.CorrelatedExpression(filter, namer, CorrelatedFilterSource.Consent);
         }
 
         if (filter.FilterType == RowFilterType.CrossSourceSetFilter)

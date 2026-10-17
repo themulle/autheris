@@ -88,7 +88,8 @@ public sealed partial class CasbinEnforcementService
     internal PolicyPredicate BuildCorrelatedRowFilterPredicate(ConsentRowFilter filter, DatabaseDialect? targetDialect, int ruleOrdinal)
     {
         RequireTargetDialect(targetDialect);
-        return _rlsFilterGenerator.BuildCorrelatedPredicate(filter, $"__gql_rls_c{ruleOrdinal}_");
+        return _rlsFilterGenerator.BuildCorrelatedPredicate(
+            filter, $"__gql_rls_c{ruleOrdinal}_", Autheris.Application.Sql.Policy.RowFilterKeySets.CorrelatedFilterSource.Casbin);
     }
 
     private List<string> CollectActiveRlsFilters(
