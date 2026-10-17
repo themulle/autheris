@@ -261,6 +261,29 @@ public sealed class TimeZoneCallValidatorTests
         Assert.Equal(GovernedSqlErrorCodes.TimeZoneArgument, ex.Code);
     }
 
+    // ---- the pass runs when the text spells the function ----
+
+    [Theory, MemberData(nameof(TimeZoneTestSupport.DialectData), MemberType = typeof(TimeZoneTestSupport))]
+    public void TheTimeZonePassRunsOnlyForAStatementThatSpellsTheFunction(TargetSqlDialect dialect)
+    {
+        var engine = new FastSqlEngine();   // a fresh engine: a cache hit reports no pass
+        var without = new List<string>();
+        using (CompilerHooks.Use(new MutantHooks { OnPass = without.Add }))
+        {
+            engine.Compile("SELECT e.Id FROM dbo.Events e".AsMemory(), Request(dialect, available: true), CancellationToken.None);
+        }
+
+        var with = new List<string>();
+        using (CompilerHooks.Use(new MutantHooks { OnPass = with.Add }))
+        {
+            engine.Compile(Good.AsMemory(), Request(dialect, available: true), CancellationToken.None);
+        }
+
+        Assert.DoesNotContain("timezone", without);
+        Assert.Contains("timezone", with);
+        Assert.True(with.IndexOf("timezone") > with.IndexOf("validate") && with.IndexOf("timezone") < with.IndexOf("simplify"));
+    }
+
     // ---- ST-130-7 related names are not admitted ----
 
     [Theory, MemberData(nameof(TimeZoneTestSupport.DialectData), MemberType = typeof(TimeZoneTestSupport))]

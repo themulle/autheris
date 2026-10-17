@@ -16,7 +16,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 [Trait("Category", "SqlGate")]
 public class PipelineSeamTests
 {
-    private static readonly string[] Passes = { "parse", "build", "validate", "timezone", "simplify", "inject", "verify", "capabilities", "emit" };
+    private static readonly string[] Passes = { "parse", "build", "validate", "simplify", "inject", "verify", "capabilities", "emit" };
 
     private readonly FastSqlEngine _engine = new();
     private readonly DictPolicyProvider _rowFilters = new();

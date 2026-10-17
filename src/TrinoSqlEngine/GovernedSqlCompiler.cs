@@ -168,11 +168,18 @@ internal sealed class GovernedSqlCompiler
         new AstValidationVisitor { CancellationToken = token }.Validate(ast);
 
         // 4b. time zone conversion (REQ-SQL-130): every call is checked on the USER tree, before simplification (no folding can turn a non-literal
-        // into a literal) and before injection (policy and mask expressions never contain the function).
-        Pass("timezone");
-        new TimeZoneCallValidator(policy.Catalog, new TimeZoneValidationOptions(
-            request.TargetDialect, caps.SupportsTimeZoneConversion, request.TimeZoneConversionAvailable, policy.Masks, policy.TablesWithMaskedColumns,
-            request.ClientLists, Federated: false)) { CancellationToken = token }.Validate(ast);
+        // into a literal) and before injection (policy and mask expressions never contain the function). A statement whose text does not spell the
+        // function name has no call (the builder refuses delimited function names, so the name of a call is always spelled in the text) and skips the
+        // pass; the emitter is then told that nothing was validated, so a call that appeared anyway could not be emitted (BC-130-12).
+        bool timeZoneCallsValidated = false;
+        if (rawSql.Contains(TimeZoneCallValidator.FunctionName, StringComparison.OrdinalIgnoreCase))
+        {
+            Pass("timezone");
+            new TimeZoneCallValidator(policy.Catalog, new TimeZoneValidationOptions(
+                request.TargetDialect, caps.SupportsTimeZoneConversion, request.TimeZoneConversionAvailable, policy.Masks, policy.TablesWithMaskedColumns,
+                request.ClientLists, Federated: false)) { CancellationToken = token }.Validate(ast);
+            timeZoneCallsValidated = true;
+        }
 
         // 5. simplify the USER tree only: injected predicates do not exist yet (INV-3 by construction)
         Pass("simplify");
@@ -226,7 +233,7 @@ internal sealed class GovernedSqlCompiler
         var generator = SqlDialectGeneratorFactory.GetGenerator(request.TargetDialect);
         var parameterSource = new ParameterSource(typed.PolicyValues, ClientNoValues);
         var compiled = (generator is SqlDialectGeneratorBase capabilityAware
-                ? capabilityAware.Generate(secured, parameterSource, caps, token, timeZoneCallsValidated: true)
+                ? capabilityAware.Generate(secured, parameterSource, caps, token, timeZoneCallsValidated: timeZoneCallsValidated)
                 : generator.Generate(secured, parameterSource, token))
             with { AppliedPredicates = applied, ExpectedAffectedRows = Ast.Security.InsertCheckOption.ExpectedRows(secured) };
 
