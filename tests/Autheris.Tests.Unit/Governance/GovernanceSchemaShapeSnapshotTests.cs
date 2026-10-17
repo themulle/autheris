@@ -75,4 +75,23 @@ public sealed class GovernanceSchemaShapeSnapshotTests
         filters.Columns.Select(c => c.Name).ShouldContain("key_set_duration_seconds");
         filters.Columns.Select(c => c.Name).ShouldContain("key_set_max_keys");
     }
+
+    [Theory]
+    [InlineData("sqlite", "TABLE_RELATIONS", "TABLE_RELATION_KEYS", "UX_TABLE_RELATIONS_NATURAL")]
+    [InlineData("postgresql", "table_relations", "table_relation_keys", "ux_table_relations_natural")]
+    [InlineData("sqlserver", "TABLE_RELATIONS", "TABLE_RELATION_KEYS", "UX_TABLE_RELATIONS_NATURAL")]
+    public void EmbeddedSnapshot_CoversTheRelationKeyTable(string engine, string relations, string keys, string naturalIndex)
+    {
+        var shape = GovernanceSchemaShapeLoader.LoadEmbedded(engine);
+
+        var keyTable = shape.Tables.Single(t => string.Equals(t.Name, keys, StringComparison.Ordinal));
+        keyTable.Columns.Select(c => c.Name).ShouldBe(["relation_id", "key_ordinal", "parent_column", "child_column"]);
+        keyTable.PrimaryKey.ShouldBe(["relation_id", "key_ordinal"]);
+        keyTable.Indexes.Count(i => i.Unique).ShouldBe(2);
+
+        var relationTable = shape.Tables.Single(t => string.Equals(t.Name, relations, StringComparison.Ordinal));
+        var natural = relationTable.Indexes.Single(i => string.Equals(i.Name, naturalIndex, StringComparison.Ordinal));
+        natural.Unique.ShouldBeTrue();
+        natural.Columns.ShouldBe(["parent_table_id", "child_table_id", "relation_name"]);
+    }
 }
