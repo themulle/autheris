@@ -1,5 +1,7 @@
 using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
+using TrinoSqlEngine.Ast.Nodes;
+using TrinoSqlEngine.Governance;
 using TrinoSqlEngine.Ast.Visitors;
 using Xunit;
 using static TrinoSqlEngine.Tests.Compiler.ClientListHarness;
@@ -155,5 +157,40 @@ public class ClientListMutationTests
     public void MaxExpandedItems_IsMinOfBudgetMinus100And10000(TargetSqlDialect dialect, int expected)
     {
         Assert.Equal(expected, ClientListExpander.MaxExpandedItems(DialectCapabilityTable.Default.Get(dialect)));
+    }
+
+    // SEC-128-11 / M-9
+    [Fact]
+    public void PolicyBinds_IdenticalWithAndWithoutAList_AndAListNamedLikeAPolicyParameterIsIsolated()
+    {
+        var predicate = PolicyPredicate.Create(
+            new BinaryExpression(
+                new ColumnReference(new SqlQualifiedName([new SqlIdentifier("Region", true)])),
+                BinaryOperator.Equal, new PolicyParameterExpression("__pol_region", SqlParameterType.String)),
+            new Dictionary<string, PolicyValue> { ["__pol_region"] = new("EU", SqlParameterType.String) });
+        _h.RowFilters.NoPolicy.Remove(PolicyFixtures.Orders);
+        _h.RowFilters.Predicates[PolicyFixtures.Orders] = predicate;
+
+        var without = _h.Compile(TargetSqlDialect.PostgreSql, "SELECT id FROM orders WHERE id = __param_one");
+        // the list is named like the policy parameter without its reserved prefix
+        var with = _h.Compile(TargetSqlDialect.PostgreSql, "SELECT id FROM orders WHERE id IN (__param_pol_region)", Shapes(("pol_region", 3)));
+
+        static List<(ParameterOrigin, string?, object?)> Security(CompiledSql c) =>
+            c.Parameters.Where(p => p.Origin is ParameterOrigin.Tenant or ParameterOrigin.Policy)
+                .Select(p => (p.Origin, p.SourceName, p.Value)).OrderBy(x => x.Item2, StringComparer.Ordinal).ToList();
+
+        Assert.Equal(Security(without), Security(with));
+        Assert.All(ListSlots(with, "pol_region"), s => Assert.Null(s.Value));
+        Assert.DoesNotContain(with.Parameters, p => p.Origin == ParameterOrigin.Policy && p.SourceName == "pol_region");
+    }
+
+    [Theory]
+    [InlineData("__pol_region")]
+    [InlineData("__autheris_tenant")]
+    [InlineData("__rls_ks1")]
+    public void AListWithAReservedGatewayName_IsRefused(string name)
+    {
+        var ex = Record.Exception(() => _h.Compile(TargetSqlDialect.PostgreSql, $"SELECT id FROM orders WHERE id IN (__param_{name})", Shapes((name, 2))));
+        Assert.NotNull(ex);
     }
 }

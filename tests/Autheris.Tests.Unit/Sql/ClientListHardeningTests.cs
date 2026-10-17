@@ -126,4 +126,34 @@ public sealed class ClientListHardeningTests
         var ex = await Record.ExceptionAsync(() => service.ExecuteQueryBufferedAsync(request, User(), new TenantId(TenantA)));
         ex.ShouldNotBeOfType<ClientListException>();
     }
+
+    // ---- C-15 / M-17: every surface -------------------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("SQL_LIST_PARAM_POSITION")]
+    [InlineData("SQL_LIST_PARAM_TOO_LARGE")]
+    [Trait("Category", "Security")]
+    public async Task WebSqlSurface_AnswersWithTheStableCodeAndTheFixedMessage_NoCountNoName(string code)
+    {
+        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        context.Response.Body = new System.IO.MemoryStream();
+
+        await Autheris.Api.Endpoints.WebSqlEndpoints.WriteWebSqlErrorAsync(
+            context, new ClientListException(code), Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance, CancellationToken.None);
+
+        context.Response.StatusCode.ShouldBe(400);
+        context.Response.Body.Seek(0, System.IO.SeekOrigin.Begin);
+        string body = await new System.IO.StreamReader(context.Response.Body).ReadToEndAsync();
+        body.ShouldContain(code);
+        body.ShouldContain(GovernedSqlErrorCodes.FixedMessage(code));
+    }
+
+    [Fact]
+    public async Task Trino_Route_AcceptsAListParameter_ThroughTheSharedExecutor()
+    {
+        await using var f = await CreateAsync();
+        var parameters = new Dictionary<string, object?> { ["ids"] = Json("[1,2,6]") };
+        var result = await f.QueryAsync("SELECT id FROM orders WHERE id IN (@ids) ORDER BY id", parameters, transport: SqlTransports.Trino);
+        result.Rows.Count.ShouldBe(2);
+    }
 }
