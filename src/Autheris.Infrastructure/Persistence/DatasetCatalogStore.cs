@@ -23,11 +23,32 @@ internal static class DatasetCatalogStore
     private const string DbtSource = "dbt";
 
     /// <summary>The effective settings of one table after validation; <see cref="Degraded"/> rows carry the secure value.</summary>
-    internal readonly record struct RowOverlay(DatasetVisibility Visibility, IReadOnlyList<DatasetTag> Tags, bool Degraded)
+    internal readonly record struct RowOverlay(DatasetVisibility Visibility, IReadOnlyList<DatasetTag> Tags, IReadOnlyList<string> TagNames, bool Degraded)
     {
-        internal static readonly RowOverlay Secure = new(DatasetVisibility.Hidden, [], true);
-        internal static readonly RowOverlay Empty = new(DatasetVisibility.Hidden, [], false);
-        internal IReadOnlyList<string> TagNames => Tags.Select(t => t.Tag).ToList();
+        private static readonly DatasetTag[] NoTags = [];
+        private static readonly string[] NoTagNames = [];
+
+        internal static readonly RowOverlay Secure = new(DatasetVisibility.Hidden, NoTags, NoTagNames, true);
+        internal static readonly RowOverlay Empty = new(DatasetVisibility.Hidden, NoTags, NoTagNames, false);
+
+        /// <summary>A healthy row; tables without tags share one empty array, tagged rows are sorted ordinally once.</summary>
+        internal static RowOverlay Create(DatasetVisibility visibility, List<DatasetTag>? tags)
+        {
+            if (tags is null || tags.Count == 0)
+            {
+                return new RowOverlay(visibility, NoTags, NoTagNames, false);
+            }
+
+            var sorted = tags.ToArray();
+            Array.Sort(sorted, static (x, y) => string.CompareOrdinal(x.Tag, y.Tag));
+            var names = new string[sorted.Length];
+            for (var i = 0; i < sorted.Length; i++)
+            {
+                names[i] = sorted[i].Tag;
+            }
+
+            return new RowOverlay(visibility, sorted, names, false);
+        }
     }
 
     /// <summary>All validated rows of one read; a table without any row is <see cref="RowOverlay.Empty"/> (Hidden, no tags).</summary>
@@ -36,6 +57,7 @@ internal static class DatasetCatalogStore
         private readonly Dictionary<Guid, DatasetVisibility> _visibility = [];
         private readonly Dictionary<Guid, List<DatasetTag>> _tags = [];
         private readonly HashSet<Guid> _poisoned = [];
+        private readonly Dictionary<Guid, RowOverlay> _built = [];
 
         internal bool AllDegraded { get; init; }
 
@@ -60,11 +82,14 @@ internal static class DatasetCatalogStore
                 return RowOverlay.Secure;
             }
 
+            if (_built.TryGetValue(tableId, out var built))
+            {
+                return built;
+            }
+
             var visibility = _visibility.TryGetValue(tableId, out var v) ? v : DatasetVisibility.Hidden;
-            var tags = _tags.TryGetValue(tableId, out var list)
-                ? list.OrderBy(t => t.Tag, StringComparer.Ordinal).ToList()
-                : [];
-            return new RowOverlay(visibility, tags, false);
+            _tags.TryGetValue(tableId, out var list);
+            return _built[tableId] = RowOverlay.Create(visibility, list);
         }
     }
 
@@ -79,7 +104,8 @@ internal static class DatasetCatalogStore
 
     /// <summary>
     /// Catalog read mode: all rows (<paramref name="tableId"/> null) or one table. A failing query degrades every row, a malformed row degrades
-    /// that table only (Hidden, no tags); the Error log carries the row id but no values, the counter is incremented. Never throws except for cancellation.
+    /// that table only (Hidden, no tags); the Error log carries the row id but no values, the counter is incremented. Store, format and cast errors degrade;
+    /// cancellation and any other exception type propagate, so the call fails closed (nothing is served from a half-read overlay).
     /// </summary>
     internal static async Task<OverlaySet> ReadOverlayAsync(
         DbConnection conn, DbTransaction? tx, KeyDefinitionDialect dialect, Guid? tableId, ILogger? logger, CancellationToken ct)
@@ -382,7 +408,11 @@ internal static class DatasetCatalogStore
         }, ct);
     }
 
-    /// <summary>Sets the tier (no write when unchanged). Null when the table is unknown or inactive.</summary>
+    /// <summary>
+    /// Sets the tier (no write when unchanged). Null when the table is unknown or inactive. Race: <c>MutateAsync</c> reads the before-state inside
+    /// the caller's transaction, and the write path serialises through the table lookup lock (<c>TableLookupSql</c>); a concurrent first insert
+    /// that slips through ends in a primary-key violation on <c>table_id</c>, which fails the call closed (nothing is committed, no audit).
+    /// </summary>
     internal static Task<DatasetCatalogChange?> SetVisibilityAsync(
         DbConnection conn, DbTransaction tx, KeyDefinitionDialect dialect, TableIdentifier table,
         DatasetVisibility visibility, Sid actor, CancellationToken ct)
@@ -415,7 +445,8 @@ internal static class DatasetCatalogStore
 
     /// <summary>
     /// A-10: inserts the system default tier for a table created in this transaction (only when no row exists). The callers pass it only for
-    /// non-Hidden defaults, so the Hidden default writes nothing.
+    /// non-Hidden defaults, so the Hidden default writes nothing. Race: <c>WHERE NOT EXISTS</c> is not atomic across transactions; a concurrent
+    /// insert for the same new table violates the primary key and fails the creating transaction closed (the table is not created with a tier).
     /// </summary>
     internal static Task<int> InsertDefaultAsync(
         DbConnection conn, DbTransaction tx, KeyDefinitionDialect dialect, Guid tableId, DatasetVisibility visibility, CancellationToken ct) =>
