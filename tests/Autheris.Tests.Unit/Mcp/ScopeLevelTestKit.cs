@@ -166,7 +166,8 @@ internal static class ScopeLevelTestKit
             ConsentRepository(consents),
             Substitute.For<IGatewayExecutionService>(),
             auditLogRepository: Substitute.For<IAuditLogRepository>(),
-            options: Options.Create(gatewayOptions ?? new GatewayOptions()),
+            // Persisted tiers (issue #111) apply on shared tables in Multi mode: the table under test is shared so tier fixtures stay meaningful.
+            options: Options.Create(gatewayOptions ?? new GatewayOptions { Catalog = new Autheris.Domain.Options.DataCatalogOptions { SharedTables = [table.Identifier.ToString()] } }),
             profileService: profileService,
             syntheticRowGenerator: new SyntheticSampleRowGenerator(profileService),
             consentResolution: resolver,

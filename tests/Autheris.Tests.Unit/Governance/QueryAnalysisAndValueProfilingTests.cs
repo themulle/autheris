@@ -741,7 +741,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             "crm",
             "public",
             "contacts",
-            DatasetVisibility.Summary,
+            DatasetVisibility.Full,
             columns,
             releaseProfileToCatalogViewers: true,
             estimatedRowCount: 1000);

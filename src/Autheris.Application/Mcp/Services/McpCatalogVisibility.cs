@@ -33,11 +33,21 @@ internal static class McpCatalogVisibility
     /// Same rule with the deployment tenancy setting: <paramref name="options"/> supplies <c>Gateway:Tenancy:Mode</c> and
     /// <c>Gateway:Catalog:SharedTables</c>. Without options the mode is <see cref="TenancyMode.Multi"/> (confined view).
     /// </summary>
+    public static Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
+        IReadOnlyList<TableMetadata> allTables,
+        ClaimsPrincipal? principal,
+        IConsentRepository? consentRepo,
+        GatewayOptions? options,
+        CancellationToken ct)
+        => VisibleTablesAsync(allTables, principal, consentRepo, options, CatalogSurface.DataAccess, ct);
+
+    /// <summary>Issue #111: as above for an explicit surface; the default of every other overload is <see cref="CatalogSurface.DataAccess"/>.</summary>
     public static async Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
         IReadOnlyList<TableMetadata> allTables,
         ClaimsPrincipal? principal,
         IConsentRepository? consentRepo,
         GatewayOptions? options,
+        CatalogSurface surface,
         CancellationToken ct)
     {
         if (principal == null || consentRepo == null)
@@ -61,6 +71,7 @@ internal static class McpCatalogVisibility
             contract: null,
             options?.Tenancy.EffectiveMode ?? TenancyMode.Multi,
             options?.Catalog.SharedTables,
+            surface,
             ct).ConfigureAwait(false);
     }
 

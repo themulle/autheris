@@ -446,7 +446,10 @@ public sealed class Query
         else
         {
             visibleTables = Autheris.Application.Services.CatalogVisibility.FilterForSubject(
-                allTables, activeConsents, tenantId, Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims));
+                allTables, activeConsents, tenantId, Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims),
+                Autheris.Application.Services.CatalogSurface.Discovery,
+                callerScope == CallerScope.Claimless ? null : options?.Value?.Catalog?.SharedTables,
+                options?.Value?.Tenancy?.EffectiveMode ?? TenancyMode.Multi);
         }
 
         var catalogList = new List<TableMetadataDto>();

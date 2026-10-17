@@ -803,7 +803,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         // SEC H-02: only the explicit (production-blocked) MCP auth bypass opens the whole catalog.
         return options?.Value.IsMcpAuthBypassed == true
             ? allTables
-            : await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepository, options?.Value, ct).ConfigureAwait(false);
+            : await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepository, options?.Value, CatalogSurface.Discovery, ct).ConfigureAwait(false);
     }
 
     private static bool Matches(TableMetadata table, string search) =>

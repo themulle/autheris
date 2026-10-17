@@ -51,6 +51,12 @@ public sealed class Wave3CatalogOwnershipTests
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
     }
 
+    /// <summary>Issue #111: persisted tiers apply on shared tables in Multi mode; the fixture tables are shared.</summary>
+    private static IOptions<GatewayOptions> TierOptions() => Microsoft.Extensions.Options.Options.Create(new GatewayOptions
+    {
+        Catalog = new DataCatalogOptions { SharedTables = [Orders.ToString(), Customers.ToString(), AuditLogs.ToString()] }
+    });
+
     private static TableMetadata CreateTableMetadata(TableIdentifier id, string description, IReadOnlyList<string> tags, DatasetVisibility visibility = DatasetVisibility.Hidden)
     {
         return new TableMetadata
@@ -92,7 +98,7 @@ public sealed class Wave3CatalogOwnershipTests
         var gatewayExec = Substitute.For<IGatewayExecutionService>();
         var user = CreateUser();
 
-        var catalog = new McpDatasetCatalog(metadataRepo, consentRepo, gatewayExec);
+        var catalog = new McpDatasetCatalog(metadataRepo, consentRepo, gatewayExec, options: TierOptions());
 
         // Act: Filter by tag "financial"
         var financialList = await catalog.ListDatasetsAsync(user, tag: "financial");
@@ -151,7 +157,8 @@ public sealed class Wave3CatalogOwnershipTests
             metadataRepo,
             consentRepo,
             gatewayExec,
-            dataOwnershipRepository: dataOwnerRepo);
+            dataOwnershipRepository: dataOwnerRepo,
+            options: TierOptions());
 
         var user = CreateUser();
 
@@ -298,7 +305,9 @@ public sealed class Wave3CatalogOwnershipTests
         var emptyConsents = Array.Empty<Consent>();
 
         // Act
-        var visible = CatalogVisibility.FilterForSubject([hiddenTable, summaryTable, fullTable], emptyConsents, tenantId);
+        var shared = new[] { Orders.ToString(), Customers.ToString(), AuditLogs.ToString() };
+        var visible = CatalogVisibility.FilterForSubject(
+            [hiddenTable, summaryTable, fullTable], emptyConsents, tenantId, null, CatalogSurface.Discovery, shared);
 
         // Assert:
         // Hidden should be omitted
@@ -405,7 +414,8 @@ public sealed class Wave3CatalogOwnershipTests
             consentRepository: consentRepo,
             approvalRepository: null,
             dataOwnershipRepository: null,
-            httpContextAccessor: httpContextAccessor);
+            httpContextAccessor: httpContextAccessor,
+            options: TierOptions());
 
         // Assert
         result.Count.ShouldBe(1);

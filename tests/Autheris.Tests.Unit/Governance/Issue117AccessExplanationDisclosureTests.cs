@@ -100,15 +100,25 @@ public sealed class Issue117AccessExplanationDisclosureTests
     }
 
     [Fact]
-    public async Task DeniedTable_VisibleInCatalog_StillListsColumnsAlreadyVisibleThere()
+    public async Task DeniedTable_VisibleThroughConsent_StillListsColumnsAlreadyVisibleThere()
     {
+        // Issue #111: this service is a DataAccess surface (no persisted tier); the table is discoverable through an Allow consent whose
+        // resolved decision is denied for another reason (here the mocked resolver).
         var tableRepo = Substitute.For<ITableMetadataRepository>();
         tableRepo.GetTableMetadataAsync(Denied, Arg.Any<CancellationToken>()).Returns(Meta(DatasetVisibility.Full));
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetActiveConsentsForSubjectsAsync(default!, default, default, default, default)
             .ReturnsForAnyArgs(Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>()));
+        var visibilityConsent = new Consent
+        {
+            TableIdentifier = Denied,
+            TenantId = TenantId.LegacySingleTenant,
+            Effect = ConsentEffect.Allow,
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1)
+        };
         consentRepo.GetAllActiveConsentsForSubjectsAsync(default!, default, default, default, default)
-            .ReturnsForAnyArgs(Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>()));
+            .ReturnsForAnyArgs(Task.FromResult<IReadOnlyList<Consent>>([visibilityConsent]));
         var resolution = Substitute.For<IConsentResolutionService>();
         resolution.ResolveAccess(
                 Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(),
