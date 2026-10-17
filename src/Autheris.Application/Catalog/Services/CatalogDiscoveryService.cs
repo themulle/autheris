@@ -108,6 +108,21 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             return null;
         }
 
+        // Summary (issue #111): identifier, sensitivity and activity only; no columns, keys or indexes.
+        if (CatalogViewShaping.Resolve(CallerScopeResolver.IsAdminView(scope), metadata.CatalogView) == CatalogOutputShape.Summary)
+        {
+            return new CatalogDatasetDetail(
+                DatasetId: metadata.Identifier.ToString(),
+                Domain: metadata.Identifier.Domain,
+                Schema: metadata.Identifier.Schema,
+                Table: metadata.Identifier.TableName,
+                Columns: [],
+                PrimaryKeys: [],
+                Sensitivity: metadata.Table.Sensitivity.ToString(),
+                IsActive: metadata.Table.IsActive,
+                Indexes: []);
+        }
+
         // SD-4: declared keys and indexes are reported only as a whole and only over the columns this response lists.
         var keys = Autheris.Application.Data.Services.TableKeyVisibility.Restrict(metadata, metadata.Columns);
         var pkSet = new HashSet<string>(keys.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
@@ -233,7 +248,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
                 MatchedTerms: string.IsNullOrWhiteSpace(q) ? [] : [q],
                 RelevantColumns: [],
                 RelatedJoinPaths: [],
-                SuggestedGraphQlField: $"{d.Identifier.Domain}_{d.Identifier.TableName}"
+                SuggestedGraphQlField: d.CatalogView == CatalogView.Summary ? null : $"{d.Identifier.Domain}_{d.Identifier.TableName}"
             ))
             .ToList();
     }
@@ -330,7 +345,9 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     {
         try
         {
-            return await CatalogVisibility.VisibleTablesAsync(
+            // Issue #111: the REST discovery surface applies the persisted tiers. The same resolver result (scope, same tenancy mode)
+            // that drives the list selects the shaping, so a row without a recognised view never reaches a non-administrator.
+            var visible = await CatalogVisibility.VisibleTablesAsync(
                 tables,
                 context.User,
                 context.TenantId,
@@ -338,7 +355,9 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
                 contract: null,
                 TenancyMode,
                 _gatewayOptions.Catalog.SharedTables,
+                CatalogSurface.Discovery,
                 ct).ConfigureAwait(false);
+            return ApplyShape(visible, CallerScopeResolver.IsAdminView(scope));
         }
         catch (OperationCanceledException)
         {
@@ -350,6 +369,10 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             return [];
         }
     }
+
+    /// <summary>F-C11 / G1: drops rows that do not exist for the caller (non-administrator without a recognised view).</summary>
+    internal static IReadOnlyList<TableMetadata> ApplyShape(IReadOnlyList<TableMetadata> rows, bool isAdminView) =>
+        rows.Where(t => CatalogViewShaping.Resolve(isAdminView, t.CatalogView) != CatalogOutputShape.NotFound).ToList();
 
     private async Task<bool> IsRebacAllowedAsync(TableIdentifier table, RequestContext context, CancellationToken ct)
     {
@@ -442,6 +465,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         return hit with
         {
             Description = visible.Table.Description,
+            SuggestedGraphQlField = visible.CatalogView == CatalogView.Summary ? null : hit.SuggestedGraphQlField,
             Sensitivity = visible.Table.Sensitivity?.ToString() ?? "NORMAL",
             MatchedTerms = matchedTerms,
             RelevantColumns = relevantColumns,
