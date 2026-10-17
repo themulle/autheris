@@ -36,7 +36,20 @@ public static class ClientListParameters
             counts.TryAdd(name, list.Count);   // spellings that differ only in case are one list: the first one wins
         }
 
-        return counts is null ? ClientListShapes.Empty : ClientListShapes.Create(counts);
+        if (counts is null)
+        {
+            return ClientListShapes.Empty;
+        }
+
+        try
+        {
+            return ClientListShapes.Create(counts);
+        }
+        catch (ArgumentException)
+        {
+            // A list name the compiler would not accept as a client parameter name (too long, invalid characters): a stable code, no name.
+            throw new ClientListException(GovernedSqlErrorCodes.ListParamPosition);
+        }
     }
 
     /// <summary>

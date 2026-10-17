@@ -107,6 +107,9 @@ public static class SqlCompilerErrorMapper
         e => e is ParseCanceledException { InnerException: TimeoutException } ? Of(422, GovernedSqlErrorCodes.LimitExceeded, nameof(SqlLimitKind.CompileTime)) : null,
         e => e is ParseCanceledException or RecognitionException ? Of(400, GovernedSqlErrorCodes.SyntaxError) : null,
         e => e is MissingClientParameterException ? Of(400, GovernedSqlErrorCodes.ParameterMissing) : null,
+        // REQ-SQL-128: a caller mistake with a list parameter. The code is stable, the message fixed, no count or name. The row precedes
+        // the generic SecurityException row (403), which a wrapped list error must never reach.
+        e => e is ClientListException list ? Of(400, list.Code) : null,
         // Phase 5 L3: a user error (a reserved identifier), not a gateway defect: no invariant metric.
         e => e is ReservedIdentifierException ? Of(400, GovernedSqlErrorCodes.ReservedIdentifier) : null,
         e => e switch

@@ -62,6 +62,9 @@ public sealed class ClientListShapes
 
     public bool TryGetCount(string name, out int count) => _counts.TryGetValue(name, out count);
 
+    /// <summary>The largest list of the shape (0 when empty). A method, not a property: public properties are part of the cache key.</summary>
+    public int MaxCount() => _counts.Count == 0 ? 0 : _counts.Values.Max();
+
     internal bool IsEmpty => _counts.Count == 0;
 }
 
