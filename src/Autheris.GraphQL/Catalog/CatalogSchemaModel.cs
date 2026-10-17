@@ -45,6 +45,17 @@ public sealed record CatalogTableType(
     IReadOnlyList<CatalogColumnField> Columns,
     IReadOnlyList<CatalogRelationField> Relations);
 
+/// <summary>BUG #157: why an active SQL catalog table is not part of the generated GraphQL schema.</summary>
+public enum CatalogTableOmissionReason
+{
+    NoQueryableColumns,
+    NameCollision,
+    UnsupportedDialect
+}
+
+/// <summary>An active SQL catalog table that was left out of the GraphQL schema, with the reason. Carries no column data.</summary>
+public sealed record CatalogOmittedTable(TableIdentifier Table, CatalogTableOmissionReason Reason);
+
 public sealed partial class CatalogSchemaModel
 {
     public IReadOnlyList<CatalogTableType> Tables { get; }
@@ -52,8 +63,11 @@ public sealed partial class CatalogSchemaModel
     public IReadOnlyDictionary<string, CatalogTableType> TablesByTypeName { get; }
     public IReadOnlyDictionary<string, CatalogTableType> TablesByQueryFieldName { get; }
 
+    /// <summary>BUG #157: active SQL tables left out of the schema, in ordinal table order (immutable snapshot).</summary>
+    public IReadOnlyList<CatalogOmittedTable> OmittedTables { get; }
+
     /// <summary>R-GQL-12: catalog without tables, used while the governance database is unreachable.</summary>
-    public static CatalogSchemaModel Empty { get; } = new([]);
+    public static CatalogSchemaModel Empty { get; } = new([], []);
 
     /// <summary>
     /// R-GQL-12: stable fingerprint of everything the generated GraphQL types depend on (type and field names, column
@@ -80,12 +94,25 @@ public sealed partial class CatalogSchemaModel
             sb.Append("];");
         }
 
+        // BUG #157: omissions are part of the fingerprint so a newly added column-less table triggers a rebuild (and the
+        // warning / health list). Each name part is length-prefixed, so no name content can merge or split entries.
+        foreach (var o in OmittedTables)
+        {
+            sb.Append('!');
+            sb.Append(o.Table.Domain.Length).Append('.').Append(o.Table.Domain)
+              .Append(o.Table.Schema.Length).Append('.').Append(o.Table.Schema)
+              .Append(o.Table.TableName.Length).Append('.').Append(o.Table.TableName);
+
+            sb.Append(':').Append(o.Reason).Append(';');
+        }
+
         return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(sb.ToString())));
     }
 
-    private CatalogSchemaModel(List<CatalogTableType> tables)
+    private CatalogSchemaModel(List<CatalogTableType> tables, IReadOnlyList<CatalogOmittedTable> omittedTables)
     {
         Tables = tables;
+        OmittedTables = omittedTables;
         TablesByIdentifier = tables.ToDictionary(t => t.Identifier);
         TablesByTypeName = tables.ToDictionary(t => t.TypeName, StringComparer.Ordinal);
         TablesByQueryFieldName = tables.ToDictionary(t => t.QueryFieldName, StringComparer.Ordinal);
@@ -118,6 +145,7 @@ public sealed partial class CatalogSchemaModel
         var sqlTables = allTables
             .Where(t => t.Table.IsActive && t.DataSourceType == DataSourceType.Sql)
             .ToList();
+        var omittedTables = new List<CatalogOmittedTable>();
         foreach (var excluded in sqlTables.Where(t =>
                      registry.TryGetByName(t.Table.SourceType, out var provider) &&
                      provider.Descriptor.IsExecutable &&
@@ -128,10 +156,23 @@ public sealed partial class CatalogSchemaModel
                 excluded.Identifier.ToQualifiedName(), excluded.Table.SourceType);
         }
 
-        var activeSqlTables = sqlTables
-            .Where(t => registry.TryGetByName(t.Table.SourceType, out var provider) &&
-                        provider.Descriptor.IsExecutable &&
-                        provider.Descriptor.SupportsTreeCompile)
+        var supportedSqlTables = new List<TableMetadata>(sqlTables.Count);
+        foreach (var t in sqlTables)
+        {
+            if (registry.TryGetByName(t.Table.SourceType, out var provider) &&
+                provider.Descriptor.IsExecutable &&
+                provider.Descriptor.SupportsTreeCompile)
+            {
+                supportedSqlTables.Add(t);
+            }
+            else
+            {
+                // BUG #157: only active SQL tables reach this point (inactive and non-SQL were dropped above).
+                omittedTables.Add(new CatalogOmittedTable(t.Identifier, CatalogTableOmissionReason.UnsupportedDialect));
+            }
+        }
+
+        var activeSqlTables = supportedSqlTables
             .OrderBy(t => t.Identifier.Domain, StringComparer.Ordinal)
             .ThenBy(t => t.Identifier.Schema, StringComparer.Ordinal)
             .ThenBy(t => t.Identifier.TableName, StringComparer.Ordinal)
@@ -159,25 +200,6 @@ public sealed partial class CatalogSchemaModel
             var filterTypeName = $"{typeName}_filter";
             var orderTypeName = $"{typeName}_order_by";
 
-            string? collidingName = null;
-            if (usedSchemaTypeNames.Contains(typeName)) collidingName = typeName;
-            else if (usedSchemaTypeNames.Contains(filterTypeName)) collidingName = filterTypeName;
-            else if (usedSchemaTypeNames.Contains(orderTypeName)) collidingName = orderTypeName;
-
-            if (collidingName != null)
-            {
-                logger?.LogError(
-                    "GraphQL catalog schema: table '{Table}' conflicts with existing schema type name '{CollidingName}'. The table is omitted from GraphQL schema generation to preserve schema stability.",
-                    meta.Identifier.ToQualifiedName(),
-                    collidingName);
-                continue;
-            }
-
-            usedSchemaTypeNames.Add(typeName);
-            usedSchemaTypeNames.Add(filterTypeName);
-            usedSchemaTypeNames.Add(orderTypeName);
-
-            var queryFieldName = typeName; // Same name for root query field and object type
             var columns = new List<CatalogColumnField>();
             var usedColNames = new HashSet<string>(StringComparer.Ordinal);
 
@@ -213,6 +235,37 @@ public sealed partial class CatalogSchemaModel
                 columns.Add(new CatalogColumnField(colFieldName, col.ColumnName, fieldType, col.DataType, true));
             }
 
+            // BUG #157: a table without queryable columns would yield field-less GraphQL types and abort schema build. It is
+            // omitted before the collision check and before any name is reserved (SEC-BUG157-08).
+            if (columns.Count == 0)
+            {
+                omittedTables.Add(new CatalogOmittedTable(meta.Identifier, CatalogTableOmissionReason.NoQueryableColumns));
+                logger?.LogWarning(
+                    "GraphQL catalog schema: table '{Table}' has no queryable columns and is omitted from the GraphQL schema.",
+                    meta.Identifier.ToQualifiedName());
+                continue;
+            }
+
+            string? collidingName = null;
+            if (usedSchemaTypeNames.Contains(typeName)) collidingName = typeName;
+            else if (usedSchemaTypeNames.Contains(filterTypeName)) collidingName = filterTypeName;
+            else if (usedSchemaTypeNames.Contains(orderTypeName)) collidingName = orderTypeName;
+
+            if (collidingName != null)
+            {
+                omittedTables.Add(new CatalogOmittedTable(meta.Identifier, CatalogTableOmissionReason.NameCollision));
+                logger?.LogError(
+                    "GraphQL catalog schema: table '{Table}' conflicts with existing schema type name '{CollidingName}'. The table is omitted from GraphQL schema generation to preserve schema stability.",
+                    meta.Identifier.ToQualifiedName(),
+                    collidingName);
+                continue;
+            }
+
+            usedSchemaTypeNames.Add(typeName);
+            usedSchemaTypeNames.Add(filterTypeName);
+            usedSchemaTypeNames.Add(orderTypeName);
+
+            var queryFieldName = typeName; // Same name for root query field and object type
             tableBuilders.Add((meta, typeName, queryFieldName, filterTypeName, orderTypeName, columns));
         }
 
@@ -357,7 +410,14 @@ public sealed partial class CatalogSchemaModel
                 omittedRelations);
         }
 
-        return new CatalogSchemaModel(finalTables);
+        // Deterministic order independent of repository row order; immutable array so snapshots are never mutated (SEC-BUG157-07).
+        var omittedSnapshot = omittedTables
+            .OrderBy(o => o.Table.Domain, StringComparer.Ordinal)
+            .ThenBy(o => o.Table.Schema, StringComparer.Ordinal)
+            .ThenBy(o => o.Table.TableName, StringComparer.Ordinal)
+            .ToArray();
+
+        return new CatalogSchemaModel(finalTables, omittedSnapshot);
     }
 
     public static string SanitizeGraphQlName(string input)

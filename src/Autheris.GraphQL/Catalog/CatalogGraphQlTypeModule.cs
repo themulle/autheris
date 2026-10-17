@@ -23,7 +23,7 @@ using Microsoft.Extensions.Options;
 
 namespace Autheris.GraphQL.Catalog;
 
-public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
+public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalogSchemaDiagnostics
 {
     private readonly ITableMetadataRepository _metadataRepo;
     private readonly ITableRelationRepository _relationRepo;
@@ -32,7 +32,10 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
     private readonly TimeSpan _refreshInterval;
     private readonly object _timerLock = new();
     private Timer? _refreshTimer;
-    private volatile string? _builtFingerprint;
+    private sealed record BuiltState(string? Fingerprint, IReadOnlyList<CatalogOmittedTable> OmittedTables);
+
+    // One volatile reference so readers never observe a fingerprint paired with another build's omissions.
+    private volatile BuiltState _built = new(null, []);
     private volatile string? _builtVersion;
     private int _checking;
 
@@ -52,7 +55,10 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
 
     public event EventHandler<EventArgs>? TypesChanged;
 
-    internal string? BuiltFingerprint => _builtFingerprint;
+    internal string? BuiltFingerprint => _built.Fingerprint;
+
+    /// <summary>BUG #157: omissions of the schema actually served; an immutable snapshot swapped after each build.</summary>
+    public IReadOnlyList<CatalogOmittedTable> OmittedTables => _built.OmittedTables;
 
     internal async Task<bool> CheckForCatalogChangesAsync(CancellationToken ct = default)
     {
@@ -90,7 +96,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
                 return false;
             }
 
-            if (string.Equals(current, _builtFingerprint, StringComparison.Ordinal))
+            if (string.Equals(current, _built.Fingerprint, StringComparison.Ordinal))
             {
                 return false;
             }
@@ -136,7 +142,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
         {
             schemaModel = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, _logger, cancellationToken)
                 .ConfigureAwait(false);
-            _builtFingerprint = schemaModel.Fingerprint();
+            _built = new BuiltState(schemaModel.Fingerprint(), schemaModel.OmittedTables);
             if (_versionProvider != null)
             {
                 _builtVersion = await _versionProvider.GetVersionAsync(cancellationToken).ConfigureAwait(false);
@@ -146,7 +152,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
         {
             _logger?.LogError(ex, "GraphQL catalog schema could not be built; serving the schema without catalog tables until the catalog is reachable.");
             schemaModel = CatalogSchemaModel.Empty;
-            _builtFingerprint = null;
+            _built = new BuiltState(null, []);
             _builtVersion = null;
         }
 
