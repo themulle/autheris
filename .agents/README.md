@@ -21,18 +21,18 @@ This directory defines custom agent roles and skills for the Autheris ecosystem.
    - All agents (architects, developers, reviewers) must update and refine their respective child plans on this origin plan.
 
 4. **Individual Feature Documentation (`docs/features/`):**
-   - Individual feature specifications and technical references **must always be written to `docs/features/`** (e.g. `docs/features/f-<category>-<number>-<name>.md`).
-   - Every feature must be registered in the catalog index [`docs/features/README.md`](file:///root/autheris/docs/features/README.md).
+   - Feature documentation is not part of the implementation lifecycle (no documentation phase, owner rule 2026-10-17); it is written only on explicit owner request.
+   - Such documents go to `docs/features/` (e.g. `docs/features/f-<category>-<number>-<name>.md`) and are registered in the catalog index [`docs/features/README.md`](file:///root/autheris/docs/features/README.md).
 
 5. **Subdirectories & Personas:**
    - `agents/`: Custom persona definitions:
-     - [`project-manager.md`](file:///root/autheris/.agents/agents/project-manager.md): Delivery Project Manager & Workflow Orchestrator (orchestrates the 6-phase implementation lifecycle).
+     - [`project-manager.md`](file:///root/autheris/.agents/agents/project-manager.md): Delivery Project Manager & Workflow Orchestrator (orchestrates the 5-phase implementation lifecycle; no documentation phase).
      - [`product-manager.md`](file:///root/autheris/.agents/agents/product-manager.md): Enterprise Product Manager & Strategic Gatekeeper (qualification, benchmarking, rejection of anti-patterns).
-     - [`documentation-expert.md`](file:///root/autheris/.agents/agents/documentation-expert.md): Technical Documentation Specialist & Architecture Writer.
+     - [`documentation-expert.md`](file:///root/autheris/.agents/agents/documentation-expert.md): Technical Documentation Specialist & Architecture Writer (on explicit owner request only; not part of the lifecycle).
      - [`csharp-tdd-developer.md`](file:///root/autheris/.agents/agents/csharp-tdd-developer.md): Test-Driven Development (.NET 10 / C# 13, Red-Green-Refactor).
      - `frontend-developer.md`, `orchestrator-lead.md`, `qa-cro-reviewer.md`, etc.
    - `skills/`: Specialized domain skills:
-     - [`project-manager`](file:///root/autheris/.agents/skills/project-manager/SKILL.md): 6-phase delivery orchestration: (1) Product Manager -> (2) Solution Architect -> (3) Security Expert -> (4) TDD Developer(s) -> (5) Code Reviewer -> (6) Documentation Expert.
+     - [`project-manager`](file:///root/autheris/.agents/skills/project-manager/SKILL.md): 5-phase delivery orchestration: (1) Product Manager -> (2) Solution Architect -> (3) Security Expert -> (4) TDD Developer(s) -> (5) Code Reviewer, then tracker update; no documentation phase (owner rule 2026-10-17).
      - [`product-manager`](file:///root/autheris/.agents/skills/product-manager/SKILL.md): Feature discovery, intake deduplication check (`docs/features/`), industry best-practice benchmarking (OWASP, RFC, OpenFGA), gatekeeper rejection/enrichment.
      - [`documentation-expert`](file:///root/autheris/.agents/skills/documentation-expert/SKILL.md): Technical documentation, clean docs separation, feature cataloging, English standards.
      - [`csharp-tdd-developer`](file:///root/autheris/.agents/skills/csharp-tdd-developer/SKILL.md): Strict TDD workflow, xUnit, FluentAssertions, Clean Architecture.
