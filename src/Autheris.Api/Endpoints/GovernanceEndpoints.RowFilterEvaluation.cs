@@ -141,7 +141,7 @@ public static partial class GovernanceEndpoints
         }
         catch (RowFilterEvaluationValidationException ex)
         {
-            return Rejected(ex.Message);
+            return Rejected(ex.Reason);
         }
 
         if (change is null)
@@ -214,7 +214,7 @@ public static partial class GovernanceEndpoints
         }
         catch (RowFilterEvaluationValidationException ex)
         {
-            return Rejected(ex.Message);
+            return Rejected(ex.Reason);
         }
 
         if (change is null)

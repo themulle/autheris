@@ -7,7 +7,11 @@ public sealed record RowFilterEvaluationView(RowFilterEvaluationSettings Stored,
 public sealed record RowFilterEvaluationPreview(TableIdentifier Table, RowFilterEvaluationSettings Before);
 
 /// <summary>The requested settings are not acceptable (caps, range, rule type); the reason names no stored data. Mapped to 400 by the REST surface.</summary>
-public sealed class RowFilterEvaluationValidationException(string reason) : Exception(reason);
+public sealed class RowFilterEvaluationValidationException(string reason) : Exception(reason)
+{
+    /// <summary>The curated, fixed-text reason produced by <c>RowFilterEvaluationResolver.Validate</c> (names caps and rule types, never stored data).</summary>
+    public string Reason { get; } = reason;
+}
 
 /// <summary>
 /// Issue #107 (PLAN-GOV-107 C-3, SEC-RF107-14): shared by the REST admin endpoints and the MCP plan/apply tools. Validates, writes through
