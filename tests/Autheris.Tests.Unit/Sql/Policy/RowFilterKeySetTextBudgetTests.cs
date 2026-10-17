@@ -57,7 +57,7 @@ public sealed class RowFilterKeySetTextBudgetTests
         var keys = Enumerable.Range(1, count).Select(i => new PolicyValue((long)i, SqlParameterType.Int64)).ToList();
         var replacement = new KeySetReplacement("client_id", keys, count, ordinal);
         return CorrelatedKeySetSubstitution.Substitute(predicate,
-            new Dictionary<ExistsExpression, KeySetReplacement>(ReferenceEqualityComparer.Instance) { [site] = replacement }, dialect);
+            [(site, replacement)], dialect);
     }
 
     private static CompiledSql Compile(string sql, TargetSqlDialect dialect, PolicyPredicate predicate, int? factor)

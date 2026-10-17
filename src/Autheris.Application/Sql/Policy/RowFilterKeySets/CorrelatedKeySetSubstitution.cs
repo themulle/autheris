@@ -91,10 +91,12 @@ internal static class CorrelatedKeySetSubstitution
     /// Replaces each given node (reference identity) by its IN list, or by <c>1 = 0</c> for an empty key set, and returns a new predicate.
     /// A node that is not an eligible site of <paramref name="predicate"/> (negated, shared, unregistered) is refused with an
     /// <see cref="InvalidOperationException"/>: the substitution never widens a filter by a caller's mistake (fail closed).
+    /// D-WPC-6: the list form builds the reference-equality map itself, so two structurally equal <see cref="ExistsExpression"/> records
+    /// can never be collapsed by a caller's default-comparer dictionary; the same node instance twice is an <see cref="InvalidOperationException"/>.
     /// </summary>
     public static PolicyPredicate Substitute(
         PolicyPredicate predicate,
-        IReadOnlyDictionary<ExistsExpression, KeySetReplacement> replacements,
+        IReadOnlyList<(ExistsExpression Node, KeySetReplacement Replacement)> replacements,
         TargetSqlDialect dialect)
     {
         ArgumentNullException.ThrowIfNull(predicate);
@@ -110,6 +112,11 @@ internal static class CorrelatedKeySetSubstitution
         var chosen = new Dictionary<ExistsExpression, KeySetReplacement>(ReferenceEqualityComparer.Instance);
         foreach (var (node, replacement) in replacements)
         {
+            if (chosen.ContainsKey(node))
+            {
+                throw new InvalidOperationException("The same correlated filter site is replaced twice.");
+            }
+
             if (!eligible.Contains(node))
             {
                 throw new InvalidOperationException("A key-set replacement targets a node that is not a substitutable correlated filter site.");

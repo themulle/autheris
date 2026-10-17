@@ -108,8 +108,7 @@ public sealed class RowFilterKeySetGeneratedSqlTests
     private static PolicyPredicate Substitute(PolicyPredicate predicate, TargetSqlDialect dialect, params (int Index, KeySetReplacement Replacement)[] replacements)
     {
         var sites = CorrelatedKeySetSubstitution.FindSites(predicate);
-        var map = new Dictionary<ExistsExpression, KeySetReplacement>(ReferenceEqualityComparer.Instance);
-        foreach (var (index, replacement) in replacements) map[sites[index].Node] = replacement;
+        var map = replacements.Select(r => (sites[r.Index].Node, r.Replacement)).ToList();
         return CorrelatedKeySetSubstitution.Substitute(predicate, map, dialect);
     }
 
@@ -264,7 +263,7 @@ public sealed class RowFilterKeySetGeneratedSqlTests
         var a = Compile(Select, dialect, catalog, (Air1, registered));
         var b = Compile(Select, dialect, catalog, (Air1, unregistered));
         var c = Compile(Select, dialect, catalog, (Air1, CorrelatedKeySetSubstitution.Substitute(registered,
-            new Dictionary<ExistsExpression, KeySetReplacement>(ReferenceEqualityComparer.Instance), dialect)));
+            Array.Empty<(ExistsExpression, KeySetReplacement)>(), dialect)));
 
         b.Sql.ShouldBe(a.Sql);
         c.Sql.ShouldBe(a.Sql);
@@ -340,7 +339,7 @@ public sealed class RowFilterKeySetGeneratedSqlTests
         var node = CorrelatedKeySetSubstitution.FindSites(predicate).Single().Node;
         var replacement = new KeySetReplacement("client_id", hostile.Select(h => new PolicyValue(h, SqlParameterType.String)).ToList(), KeySetPadding.Bucket(hostile.Length, 2000), 0);
         var substituted = CorrelatedKeySetSubstitution.Substitute(predicate,
-            new Dictionary<ExistsExpression, KeySetReplacement>(ReferenceEqualityComparer.Instance) { [node] = replacement }, dialect);
+            [(node, replacement)], dialect);
 
         // the compile runs the emitted-text invariant checker; it throws when any value reaches the text
         var compiled = Compile(Select, dialect, Catalog(wholeType, text), (Air1, substituted));
@@ -432,12 +431,12 @@ public sealed class RowFilterKeySetGeneratedSqlTests
 
         var sites = CorrelatedKeySetSubstitution.FindSites(predicate);
         sites.Count.ShouldBe(expectedSites);
-        var map = new Dictionary<ExistsExpression, KeySetReplacement>(ReferenceEqualityComparer.Instance);
+        var map = new List<(ExistsExpression, KeySetReplacement)>();
         for (int i = 0; i < sites.Count; i++)
         {
             var keys = LoadKeys(connection, sites[i].Node, predicate, catalog, out var key);
-            map[sites[i].Node] = new KeySetReplacement(key.ForeignKeyColumn,
-                keys.Select(k => new PolicyValue(k, SqlParameterType.Int64)).ToList(), KeySetPadding.Bucket(keys.Count, 2000), i);
+            map.Add((sites[i].Node, new KeySetReplacement(key.ForeignKeyColumn,
+                keys.Select(k => new PolicyValue(k, SqlParameterType.Int64)).ToList(), KeySetPadding.Bucket(keys.Count, 2000), i)));
         }
 
         var substituted = CorrelatedKeySetSubstitution.Substitute(predicate, map, TargetSqlDialect.Sqlite);

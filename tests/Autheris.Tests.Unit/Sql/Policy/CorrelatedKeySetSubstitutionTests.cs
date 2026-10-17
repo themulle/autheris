@@ -60,12 +60,7 @@ public sealed class CorrelatedKeySetSubstitutionTests
     private string Sql(PolicyPredicate predicate, TargetSqlDialect dialect = TargetSqlDialect.SqlServer) =>
         _renderer.Render(predicate, dialect, RowFilterAliases.Target).Sql;
 
-    private static Dictionary<ExistsExpression, KeySetReplacement> Replace(params (ExistsExpression Node, KeySetReplacement Replacement)[] pairs)
-    {
-        var map = new Dictionary<ExistsExpression, KeySetReplacement>(ReferenceEqualityComparer.Instance);
-        foreach (var (node, replacement) in pairs) map[node] = replacement;
-        return map;
-    }
+    private static IReadOnlyList<(ExistsExpression Node, KeySetReplacement Replacement)> Replace(params (ExistsExpression Node, KeySetReplacement Replacement)[] pairs) => pairs;
 
     // ---- registry (A-1, SEC-RF107-10 a) ----
 
@@ -480,6 +475,34 @@ public sealed class CorrelatedKeySetSubstitutionTests
             Replace((CorrelatedKeySetSubstitution.FindSites(b).Single().Node, Replacement(1, 2, 2, "b_id"))), TargetSqlDialect.SqlServer);
 
         left.And(right).Parameters.Count.ShouldBe(4);
+    }
+
+    [Fact]
+    public void TwoStructurallyEqualSites_BothSubstituted_DistinctOrdinals()
+    {
+        // D-WPC-6: two registered nodes that are equal as records (same rule shape) are still two instances; a default-comparer
+        // dictionary would collapse them. The list form keeps both.
+        var predicate = Build([Allow(Correlated(id: Guid.NewGuid(), group: 0), Correlated(id: Guid.NewGuid(), group: 1))], []);
+        var sites = CorrelatedKeySetSubstitution.FindSites(predicate);
+        sites.Count.ShouldBe(2);
+        sites[0].Node.ShouldNotBeSameAs(sites[1].Node);
+
+        var result = CorrelatedKeySetSubstitution.Substitute(predicate,
+            Replace((sites[0].Node, Replacement(0, 2, 2)), (sites[1].Node, Replacement(1, 2, 2))), TargetSqlDialect.SqlServer);
+
+        result.Parameters.Keys.Where(k => k.StartsWith("__rls_ks0_", StringComparison.Ordinal)).Count().ShouldBe(2);
+        result.Parameters.Keys.Where(k => k.StartsWith("__rls_ks1_", StringComparison.Ordinal)).Count().ShouldBe(2);
+        CorrelatedKeySetSubstitution.FindSites(result).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void DuplicateNodeInList_Throws()
+    {
+        var predicate = _builder.Build([Correlated()], Orders);
+        var node = CorrelatedKeySetSubstitution.FindSites(predicate).Single().Node;
+
+        Should.Throw<InvalidOperationException>(() => CorrelatedKeySetSubstitution.Substitute(predicate,
+            Replace((node, Replacement(0, 2, 2)), (node, Replacement(1, 2, 2))), TargetSqlDialect.SqlServer));
     }
 
     // ---- padding (A-10) ----
