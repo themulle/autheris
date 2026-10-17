@@ -8,7 +8,19 @@ using System.Collections.Generic;
 /// </summary>
 public sealed record DeclarativeConsentManifest(
     string Version,
-    IReadOnlyList<DeclarativeConsentPolicy> Policies);
+    IReadOnlyList<DeclarativeConsentPolicy> Policies,
+    IReadOnlyList<DeclarativeDatasetCatalog>? Datasets = null);
+
+/// <summary>
+/// Issue #111: declarative dataset catalog settings. A null field is "unchanged" (never a reset); an empty <c>Tags</c> list
+/// replaces the admin tags with none. <c>Visibility</c> is parsed by name only (<see cref="DatasetTagRules.TryParseVisibility"/>).
+/// </summary>
+public sealed record DeclarativeDatasetCatalog(
+    string Domain,
+    string Schema,
+    string TableName,
+    IReadOnlyList<string>? Tags = null,
+    string? Visibility = null);
 
 /// <remarks>
 /// WP-SC-16: <c>ValidUntil</c> is an absolute expiry and is mandatory for individual (User / ServicePrincipal) grantees; group and role

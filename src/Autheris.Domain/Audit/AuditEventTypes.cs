@@ -59,6 +59,10 @@ public static class AuditEventTypes
     // Catalog definition changes (Tier A, issue #94 SEC-94-06): declared primary key / index replacement with before and after.
     public const string CatalogKeyDefinitionChanged = "CATALOG_KEY_DEFINITION_CHANGED";
 
+    // Catalog visibility and tag changes (Tier A, issue #111): before/after, actor and source.
+    public const string CatalogVisibilityChanged = "CATALOG_VISIBILITY_CHANGED";
+    public const string CatalogTagsChanged = "CATALOG_TAGS_CHANGED";
+
     // System Lifecycle
     public const string ServiceStarted = "SERVICE_STARTED";
     public const string ServiceStopped = "SERVICE_STOPPED";
