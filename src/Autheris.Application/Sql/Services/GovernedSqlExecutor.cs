@@ -607,11 +607,6 @@ public sealed partial class GovernedSqlExecutor
     }
 
     /// <summary>
-    /// A driver error becomes a typed error with a stable code and a fixed message; the original is logged server-side only. A timeout
-    /// or an unavailable source is classified first and keeps its own status (504, 503). Everything that is not a driver error
-    /// (policy and binder refusals, cancellation, the gateway's own exceptions) passes through unchanged.
-    /// </summary>
-    /// <summary>
     /// True when the statement binds a client list (SEC-128-07) or a caller attribute value (BC-129-16): a driver message can quote such a value, so
     /// the exception text is not logged for it.
     /// </summary>
@@ -619,6 +614,11 @@ public sealed partial class GovernedSqlExecutor
         clientValues.Values.Any(v => v is ClientListValue) ||
         compiled.Parameters.Any(p => p.Origin == ParameterOrigin.Policy && p.SourceName != null && Autheris.Application.Identity.Attributes.CallerAttributeParameterName.IsReserved(p.SourceName));
 
+    /// <summary>
+    /// A driver error becomes a typed error with a stable code and a fixed message; the original is logged server-side only. A timeout
+    /// or an unavailable source is classified first and keeps its own status (504, 503). Everything that is not a driver error
+    /// (policy and binder refusals, cancellation, the gateway's own exceptions) passes through unchanged.
+    /// </summary>
     private GovernedSqlException? SanitizeProviderError(Exception error, TargetSqlDialect dialect, string dataSourceName, bool clientListsBound)
     {
         if (error is GovernedSqlException || !IsProviderError(error))

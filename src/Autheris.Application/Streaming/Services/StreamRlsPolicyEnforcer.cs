@@ -358,9 +358,10 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
     /// </summary>
     private sealed class SubjectBox
     {
-        public Autheris.Application.Identity.Attributes.CallerSubject? Subject;
-        public TenantId Tenant;
+        public volatile SubjectEntry? Entry;
     }
+
+    private sealed record SubjectEntry(TenantId Tenant, Autheris.Application.Identity.Attributes.CallerSubject Subject);
 
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ConsentRowFilterRecipe, IReadOnlyCollection<string>> RecipeNames = new();
     private readonly System.Runtime.CompilerServices.ConditionalWeakTable<ClaimsPrincipal, SubjectBox> Subjects = new();
@@ -391,13 +392,15 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         {
             // The subscriber principal is fixed for the subscription: its subject is built once, not per event.
             var cached = Subjects.GetValue(subscriber, _ => new SubjectBox());
-            if (cached.Subject is null || cached.Tenant != tenantId)
+            var entry = cached.Entry;
+            if (entry is null || entry.Tenant != tenantId)
             {
-                cached.Subject = resolver.CreateSubject(subscriber, tenantId, longLived: true);
-                cached.Tenant = tenantId;
+                // One immutable pair swapped by a single reference write: a concurrent event never sees a subject with a foreign tenant.
+                entry = new SubjectEntry(tenantId, resolver.CreateSubject(subscriber, tenantId, longLived: true));
+                cached.Entry = entry;
             }
 
-            var subject = cached.Subject;
+            var subject = entry.Subject;
             var (set, padding) = await Autheris.Application.Identity.Attributes.CallerAttributeRecipes.ResolveAsync(resolver, subject, names, ct).ConfigureAwait(false);
             var predicate = new Autheris.Application.Sql.Policy.TypedRowFilterBuilder().BuildCombined(
                 recipe.Allow, recipe.Deny, default, Autheris.Application.Sql.Policy.PolicyParameterNamer.ToTargetDialect(metadata.Dialect), set, padding);
