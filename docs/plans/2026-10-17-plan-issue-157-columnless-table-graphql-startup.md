@@ -104,3 +104,50 @@ Tests: `tests/Autheris.Tests.Unit/GraphQL/CatalogSchemaModelTests.cs`, `tests/Au
 None. Defaults taken: health `status` unaffected by omissions (decision 7); list cap 100; silently dropped unknown dialects recorded as `UnsupportedDialect` without a new log line (decision 3).
 
 ## Phase 3 Security Review
+
+**Reviewer:** `csharp-security-expert`, 2026-10-17. Code facts F1-F11 re-verified against `origin/main` (`CatalogSchemaModel.cs:56-92,121-216`, `CatalogGraphQlTypeModule.cs:57-151`, `SystemEndpoints.cs:46-73`). They are accurate.
+
+**Verdict: APPROVED WITH CONDITIONS.**
+
+### Assessment
+- Fail-closed holds. The change is purely subtractive: a table is dropped from the model, never added or widened. The model is global (not tenant- or principal-scoped), so no per-caller schema variance is introduced. Per-table governance at runtime is untouched.
+- R-GQL-13 does not leak. The omission reason is the fixed enum `NoQueryableColumns` and carries no column names. A table whose columns were all filtered by R-GQL-13 is indistinguishable from a table with no columns.
+- Name ordering (decision 2) is sound. The omitted table reserves nothing, so no governed table is shadowed. Relations to or from it vanish through `tableMapById` (F3). The MCP map (F11) uses the same `BuildAsync`, so its omissions match.
+- Fingerprint: the omission set is derived deterministically from the same inputs on the change-check build (`logger: null`) and the real build. There is no rebuild loop. Startup no longer fails on this cause, which removes an availability DoS reachable by one catalog row.
+
+### Findings
+| Id | Sev | Finding |
+|---|---|---|
+| S-1 | Medium | `GetEffectiveAllowedRoles()` is configurable. Any role added for health monitoring would receive full table names (`domain.schema.table`) in `omittedTables`, which is catalog metadata. The existing health payload carries no catalog data. |
+| S-2 | Low | Existing R-GQL-13 `LogInformation` (`:188-192`) logs the column name on real builds. Decision 5 and the planned test ("no column name") would be wrong or flaky if they assert on all log output rather than on the new warning only. |
+| S-3 | Low | Name allocation is sorted-order dependent. If a previously empty table that sorts earlier gains columns, it takes the type/field name and a later valid table becomes `NameCollision`. The same GraphQL field name then serves a different table (pre-existing scheme, but the omission now makes it reachable). Runtime governance is per table identifier, so no bypass, but clients are surprised. |
+| S-4 | Low | `UnsupportedDialect` recording extends to the silently dropped non-executable/unknown dialects. The list must stay limited to active SQL tables, or it becomes a catalog-wide inventory. |
+| S-5 | Info | Catch branch resets diagnostics to `[]`: an unreachable catalog looks identical to "nothing omitted". Acceptable, documented. |
+
+### Binding conditions
+- **SEC-BUG157-01** The model change is subtractive only: an omitted table must have no entity type, `_filter`, `_order_by`, query field, relation field (either direction) or MCP map entry, and must not reserve any name.
+- **SEC-BUG157-02** `omittedTables` (names) is emitted only after the existing gates AND only when the caller holds `GovernanceAdmin` (or another principal authorised to read catalog metadata). Any other authorised health caller gets `omittedTableCount` only, no names. `graphQlCatalog` is omitted entirely when `ICatalogSchemaDiagnostics` is null.
+- **SEC-BUG157-03** Health entries contain only `table` (qualified name) and `reason` (enum `ToString()`); never column names, column counts, dialect/connection details, source type or data-source ids. The list is capped at 100 in deterministic order; `omittedTableCount` is the full number; `omittedTablesTruncated` is set accordingly.
+- **SEC-BUG157-04** Omissions never change `status` or the HTTP status code (decision 7 confirmed).
+- **SEC-BUG157-05** The new `LogWarning` carries only the qualified table name. The test asserts on the new warning record only (the R-GQL-13 column `LogInformation` is pre-existing and out of scope). No new log line may contain column names or values.
+- **SEC-BUG157-06** `UnsupportedDialect` is recorded only for active SQL tables. Inactive and non-SQL tables are never recorded or listed.
+- **SEC-BUG157-07** The diagnostics list is an immutable snapshot (array or `ImmutableArray`) swapped atomically via the `volatile` field after the model build succeeds; it is never mutated in place and never shared with the builder's working list.
+- **SEC-BUG157-08** Decision-2 ordering is fixed: `NoQueryableColumns` is checked before the collision check and before reservation. Row ordering of the sorted tables stays the allocation order. Do not change collision semantics for non-empty tables.
+- **SEC-BUG157-09** The fingerprint omission suffix uses an unambiguous encoding (qualified name plus reason with delimiters that cannot merge two entries); the change check and the real build must use the same `BuildAsync` path so no rebuild loop arises.
+- **SEC-BUG157-10** If R4 forces a stubbed executor for the host test, the stub must not bypass the governance pipeline in the security tests below; those run against the real model and endpoint.
+
+### Mandatory security tests (`[Trait("Category","Security")]`)
+- **T-BUG157-S01** `Model_OmittedTable_HasNoTypesFieldsRelationsOrReservedNames` (both relation directions, name reuse by the later table).
+- **T-BUG157-S02** `Model_AllColumnsFilteredByRGql13_ReasonIsNoQueryableColumnsAndLeaksNoColumnName` (reason, log text and diagnostics contain no column name).
+- **T-BUG157-S03** `Health_NonAdminAllowedRole_GetsCountWithoutTableNames`.
+- **T-BUG157-S04** `Health_Admin_EntriesContainOnlyTableAndReason`.
+- **T-BUG157-S05** `Health_NonAdmin403_AndDisabled404_ExposeNoTableNames` (covers body, not just status).
+- **T-BUG157-S06** `Health_MoreThan100Omissions_CapsListDeterministicallyAndReportsFullCount`.
+- **T-BUG157-S07** `Health_Omissions_DoNotChangeStatusOrStatusCode`.
+- **T-BUG157-S08** `Model_InactiveAndNonSqlTables_NeverAppearInOmittedTables`.
+- **T-BUG157-S09** `Warning_ColumnlessTable_ContainsOnlyQualifiedName` (new warning record only).
+- **T-BUG157-S10** `Fingerprint_StableAcrossRepeatedBuilds_NoRebuildLoop` (check build vs real build, equal fingerprint with omissions present).
+- **T-BUG157-S11** `Schema_OmittedTableName_NotQueryable_ValidTableStillGoverned` (query on the omitted name fails; valid table with masking/column rule still enforced after the fix).
+- **T-BUG157-S12** `Diagnostics_Snapshot_NotMutatedByLaterBuild`.
+
+No architect changes required beyond folding the conditions into the work packages.
