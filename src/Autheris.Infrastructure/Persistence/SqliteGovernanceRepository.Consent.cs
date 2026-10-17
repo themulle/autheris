@@ -409,7 +409,7 @@ public partial class SqliteGovernanceRepository
                                    filter_type, dependent_table, dependent_table_alias, foreign_key_column,
                                    primary_key_column, subquery_predicate_json, target_temporal_column,
                                    dependent_valid_from_column, dependent_valid_to_column, target_table_alias,
-                                   additional_hops_json
+                                   additional_hops_json, key_set_strategy, key_set_duration_seconds, key_set_max_keys
                             FROM CONSENT_ROW_FILTERS WHERE consent_id = @cid";
         cmd.Parameters.AddWithValue("@cid", consentId.ToString());
 
@@ -465,7 +465,10 @@ public partial class SqliteGovernanceRepository
                 DependentValidFromColumn = reader.IsDBNull(17) ? null : reader.GetString(17),
                 DependentValidToColumn = reader.IsDBNull(18) ? null : reader.GetString(18),
                 TargetTableAlias = reader.IsDBNull(19) ? null : reader.GetString(19),
-                AdditionalHops = hops
+                AdditionalHops = hops,
+                KeySetStrategy = reader.IsDBNull(21) ? null : (RowFilterEvaluationStrategy)reader.GetInt32(21),
+                KeySetDurationSeconds = reader.IsDBNull(22) ? null : reader.GetInt32(22),
+                KeySetMaxKeys = reader.IsDBNull(23) ? null : reader.GetInt32(23)
             });
         }
         return filters;
@@ -538,7 +541,7 @@ public partial class SqliteGovernanceRepository
                                            filter_type, dependent_table, dependent_table_alias, foreign_key_column,
                                            primary_key_column, subquery_predicate_json, target_temporal_column,
                                            dependent_valid_from_column, dependent_valid_to_column, target_table_alias,
-                                           additional_hops_json
+                                           additional_hops_json, key_set_strategy, key_set_duration_seconds, key_set_max_keys
                                     FROM CONSENT_ROW_FILTERS WHERE consent_id IN ({idList})";
                 for (int i = 0; i < consentChunk.Length; i++)
                 {
@@ -601,7 +604,10 @@ public partial class SqliteGovernanceRepository
                         DependentValidFromColumn = reader.IsDBNull(17) ? null : reader.GetString(17),
                         DependentValidToColumn = reader.IsDBNull(18) ? null : reader.GetString(18),
                         TargetTableAlias = reader.IsDBNull(19) ? null : reader.GetString(19),
-                        AdditionalHops = hops
+                        AdditionalHops = hops,
+                        KeySetStrategy = reader.IsDBNull(21) ? null : (RowFilterEvaluationStrategy)reader.GetInt32(21),
+                        KeySetDurationSeconds = reader.IsDBNull(22) ? null : reader.GetInt32(22),
+                        KeySetMaxKeys = reader.IsDBNull(23) ? null : reader.GetInt32(23)
                     });
                 }
 
@@ -613,6 +619,47 @@ public partial class SqliteGovernanceRepository
         }
     }
 
+
+    public async Task<(ConsentRowFilter Filter, ConsentEffect Effect, TenantId Tenant, TableIdentifier Table)?> GetRowFilterAsync(
+        Guid rowFilterId, CancellationToken ct = default)
+    {
+        await using var scope = await ReadScopeAsync(ct, snapshot: false).ConfigureAwait(false);
+        var row = await RowFilterEvaluationStore.ReadRuleAsync(scope.Connection, null, CatalogKeyDefinitionStore.Sqlite, rowFilterId, ct).ConfigureAwait(false);
+        return row is null ? null : (row.Filter, row.Effect, row.Tenant, row.Table);
+    }
+
+    public async Task<RowFilterEvaluationChange?> UpdateRowFilterEvaluationAsync(
+        Guid rowFilterId, TenantId tenant, RowFilterEvaluationSettings settings, CancellationToken ct = default)
+    {
+        RowFilterEvaluationChange? change;
+        await using (var scope = await WriteScopeAsync(ct).ConfigureAwait(false))
+        {
+            var conn = scope.Connection;
+            using var tx = conn.BeginTransaction();
+            try
+            {
+                change = await RowFilterEvaluationStore.UpdateRuleAsync(
+                    conn, tx, CatalogKeyDefinitionStore.Sqlite, rowFilterId, tenant, settings,
+                    table => BumpTableEpochAndReadAsync(conn, tx, table, ct), ct).ConfigureAwait(false);
+                if (change is null)
+                {
+                    await tx.RollbackAsync(ct);
+                    return null;
+                }
+
+                await tx.CommitAsync(ct);
+            }
+            catch
+            {
+                await tx.RollbackAsync(ct);
+                throw;
+            }
+        }
+
+        QueueMetadataInvalidation(change.TargetTable);
+        await _epochValidationService.InvalidateEpochAsync(change.TargetTable, ct);
+        return change;
+    }
 
     public async Task<ConsentRequest> CreateConsentRequestAsync(ConsentRequest request, CancellationToken ct = default)
     {
@@ -1369,12 +1416,12 @@ public partial class SqliteGovernanceRepository
                 id, consent_id, filter_group, table_column_id, column_name, operator, value_type, value_json, value_source, user_attribute,
                 filter_type, dependent_table, dependent_table_alias, foreign_key_column, primary_key_column,
                 subquery_predicate_json, target_temporal_column, dependent_valid_from_column, dependent_valid_to_column,
-                target_table_alias, additional_hops_json)
+                target_table_alias, additional_hops_json, key_set_strategy, key_set_duration_seconds, key_set_max_keys)
             VALUES (
                 @id, @cid, @grp, @tcid, @col, @op, @type, @json, @src, @attr,
                 @ftype, @deptbl, @depalias, @fkcol, @pkcol,
                 @subpred, @ttemp, @dvfrom, @dvto,
-                @talias, @hops)";
+                @talias, @hops, @ksstrategy, @ksduration, @ksmax)";
             filterCmd.Parameters.AddWithValue("@id", filter.Id.ToString());
             filterCmd.Parameters.AddWithValue("@cid", consent.Id.ToString());
             filterCmd.Parameters.AddWithValue("@grp", filter.FilterGroup);
@@ -1398,6 +1445,9 @@ public partial class SqliteGovernanceRepository
             filterCmd.Parameters.AddWithValue("@talias", (object?)filter.TargetTableAlias ?? DBNull.Value);
             var hopsJson = filter.AdditionalHops != null ? System.Text.Json.JsonSerializer.Serialize(filter.AdditionalHops) : null;
             filterCmd.Parameters.AddWithValue("@hops", (object?)hopsJson ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@ksstrategy", filter.KeySetStrategy is { } ksStrategy ? (object)(int)ksStrategy : DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@ksduration", (object?)filter.KeySetDurationSeconds ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@ksmax", (object?)filter.KeySetMaxKeys ?? DBNull.Value);
 
             await filterCmd.ExecuteNonQueryAsync(ct);
         }

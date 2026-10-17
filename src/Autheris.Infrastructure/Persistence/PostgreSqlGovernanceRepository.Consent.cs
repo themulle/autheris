@@ -290,7 +290,8 @@ public partial class PostgreSqlGovernanceRepository
                         : scopesStr.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                     ruleList.Add(new ConsentColumnRule
                     {
-                        Id = Guid.NewGuid(),
+                        // The stored row id is the stable rule id of the admin surface (issue #107); a fresh id per read would make it unaddressable.
+                        Id = Guid.Parse(reader.GetString(20)),
                         ConsentId = Guid.Parse(cId),
                         TableColumnId = Guid.Parse(reader.GetString(1)),
                         ColumnName = reader.GetString(2),
@@ -316,7 +317,7 @@ public partial class PostgreSqlGovernanceRepository
             cmd.CommandText = @"SELECT consent_id, filter_group, table_column_id, column_name, operator, value_type, value_json, value_source, user_attribute,
                                        filter_type, dependent_table, dependent_table_alias, foreign_key_column, primary_key_column,
                                        subquery_predicate_json, target_temporal_column, dependent_valid_from_column, dependent_valid_to_column,
-                                       target_table_alias, additional_hops_json
+                                       target_table_alias, additional_hops_json, id, key_set_strategy, key_set_duration_seconds, key_set_max_keys
                                 FROM CONSENT_ROW_FILTERS
                                 WHERE consent_id = ANY(@ids)";
             cmd.Parameters.AddWithValue("@ids", consentIds.ToArray());
@@ -351,7 +352,8 @@ public partial class PostgreSqlGovernanceRepository
 
                     filterList.Add(new ConsentRowFilter
                     {
-                        Id = Guid.NewGuid(),
+                        // The stored row id is the stable rule id of the admin surface (issue #107); a fresh id per read would make it unaddressable.
+                        Id = Guid.Parse(reader.GetString(20)),
                         ConsentId = Guid.Parse(cId),
                         FilterGroup = reader.GetInt32(1),
                         TableColumnId = Guid.Parse(reader.GetString(2)),
@@ -371,7 +373,10 @@ public partial class PostgreSqlGovernanceRepository
                         DependentValidFromColumn = reader.IsDBNull(16) ? null : reader.GetString(16),
                         DependentValidToColumn = reader.IsDBNull(17) ? null : reader.GetString(17),
                         TargetTableAlias = reader.IsDBNull(18) ? null : reader.GetString(18),
-                        AdditionalHops = hops
+                        AdditionalHops = hops,
+                        KeySetStrategy = reader.IsDBNull(21) ? null : (RowFilterEvaluationStrategy)reader.GetInt32(21),
+                        KeySetDurationSeconds = reader.IsDBNull(22) ? null : reader.GetInt32(22),
+                        KeySetMaxKeys = reader.IsDBNull(23) ? null : reader.GetInt32(23)
                     });
                 }
             }
@@ -483,10 +488,10 @@ public partial class PostgreSqlGovernanceRepository
                                         id, consent_id, filter_group, table_column_id, column_name, operator, value_type, value_json, value_source, user_attribute,
                                         filter_type, dependent_table, dependent_table_alias, foreign_key_column, primary_key_column,
                                         subquery_predicate_json, target_temporal_column, dependent_valid_from_column, dependent_valid_to_column,
-                                        target_table_alias, additional_hops_json
+                                        target_table_alias, additional_hops_json, key_set_strategy, key_set_duration_seconds, key_set_max_keys
                                     ) VALUES (
                                         @id, @consentId, @fg, @colId, @colName, @op, @vType, @vJson, @vSource, @uAttr,
-                                        @ft, @dt, @dta, @fk, @pk, @sqp, @ttc, @dvfc, @dvtc, @tta, @hops
+                                        @ft, @dt, @dta, @fk, @pk, @sqp, @ttc, @dvfc, @dvtc, @tta, @hops, @ksStrategy, @ksDuration, @ksMax
                                     )";
             filterCmd.Parameters.AddWithValue("@id", filterId.ToString());
             filterCmd.Parameters.AddWithValue("@consentId", consentId.ToString());
@@ -509,6 +514,9 @@ public partial class PostgreSqlGovernanceRepository
             filterCmd.Parameters.AddWithValue("@dvtc", (object?)filter.DependentValidToColumn ?? DBNull.Value);
             filterCmd.Parameters.AddWithValue("@tta", (object?)filter.TargetTableAlias ?? DBNull.Value);
             filterCmd.Parameters.AddWithValue("@hops", (object?)hopsJson ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@ksStrategy", filter.KeySetStrategy is { } ksStrategy ? (object)(int)ksStrategy : DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@ksDuration", (object?)filter.KeySetDurationSeconds ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@ksMax", (object?)filter.KeySetMaxKeys ?? DBNull.Value);
             await filterCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
 
@@ -915,6 +923,46 @@ public partial class PostgreSqlGovernanceRepository
             _metadataCache.TryRemove(tableId.Value.ToString().ToLowerInvariant(), out _);
             await _epochValidationService.InvalidateEpochAsync(tableId.Value, ct).ConfigureAwait(false);
         }
+    }
+
+    public async Task<(ConsentRowFilter Filter, ConsentEffect Effect, TenantId Tenant, TableIdentifier Table)?> GetRowFilterAsync(
+        Guid rowFilterId, CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        var row = await RowFilterEvaluationStore.ReadRuleAsync(conn, null, CatalogKeyDefinitionStore.PostgreSql, rowFilterId, ct).ConfigureAwait(false);
+        return row is null ? null : (row.Filter, row.Effect, row.Tenant, row.Table);
+    }
+
+    public async Task<RowFilterEvaluationChange?> UpdateRowFilterEvaluationAsync(
+        Guid rowFilterId, TenantId tenant, RowFilterEvaluationSettings settings, CancellationToken ct = default)
+    {
+        RowFilterEvaluationChange? change;
+        await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
+        {
+            await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
+            {
+                change = await RowFilterEvaluationStore.UpdateRuleAsync(
+                    conn, tx, CatalogKeyDefinitionStore.PostgreSql, rowFilterId, tenant, settings,
+                    table => IncrementTableEpochInternalAsync(conn, tx, table, ct), ct).ConfigureAwait(false);
+                if (change is null)
+                {
+                    await tx.RollbackAsync(ct).ConfigureAwait(false);
+                    return null;
+                }
+
+                await tx.CommitAsync(ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                await tx.RollbackAsync(ct).ConfigureAwait(false);
+                throw;
+            }
+        }
+
+        _metadataCache.TryRemove(change.TargetTable.ToString().ToLowerInvariant(), out _);
+        await _epochValidationService.InvalidateEpochAsync(change.TargetTable, ct).ConfigureAwait(false);
+        return change;
     }
 
     public async Task<ConsentRequest> CreateConsentRequestAsync(ConsentRequest request, CancellationToken ct = default)
