@@ -2,6 +2,8 @@ namespace TrinoSqlEngine.Tests.TimeZones;
 
 using TrinoSqlEngine.Ast.Builder;
 using TrinoSqlEngine.Ast.Emit;
+using TrinoSqlEngine.Ast.Nodes;
+using TrinoSqlEngine.Tests.Security;
 using TrinoSqlEngine.Tests.Compiler;
 using Xunit;
 using static TrinoSqlEngine.Tests.TimeZones.TimeZoneTestSupport;
@@ -294,5 +296,64 @@ public sealed class TimeZoneCallValidatorTests
         {
             Assert.ThrowsAny<Exception>(() => Compile(dialect, $"SELECT {call} FROM dbo.Events e"));
         }
+    }
+
+    // ---- ST-130-6 full compile path over raw SQL text (SEC-130 review finding: not an AST replacement) ----
+
+    [Theory, MemberData(nameof(TimeZoneTestSupport.DialectData), MemberType = typeof(TimeZoneTestSupport))]
+    [Trait("Category", "Security")]
+    public void ST_130_6_DelimitedAndLookalikeSpellingsOfTheNameAreRejectedOverTheFullCompilePath(TargetSqlDialect dialect)
+    {
+        string[] names =
+        [
+            "\"convert_timezone\"", "`convert_timezone`", "[convert_timezone]", "\"CONVERT_TIMEZONE\"",
+            "\uFF43\uFF4F\uFF4E\uFF56\uFF45\uFF52\uFF54\uFF3F\uFF54\uFF49\uFF4D\uFF45\uFF5A\uFF4F\uFF4E\uFF45"   // fullwidth lookalike
+        ];
+        foreach (string name in names)
+        {
+            string sql = $"SELECT {name}('UTC', 'Europe/Berlin', e.OccurredAt) FROM dbo.Events e";
+            var ex = Record.Exception(() => Compile(dialect, sql));
+            Assert.NotNull(ex);
+            Assert.DoesNotContain("CONVERT_TIMEZONE(", ex!.Message, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Theory, MemberData(nameof(TimeZoneTestSupport.DialectData), MemberType = typeof(TimeZoneTestSupport))]
+    [Trait("Category", "Security")]
+    public void ST_130_6_AMixedCaseSpellingReachesTheValidatorOverTheFullCompilePath(TargetSqlDialect dialect)
+    {
+        Assert.Equal(GovernedSqlErrorCodes.TimeZoneInvalid, Rejected(dialect, "SELECT CoNvErT_TiMeZoNe('Mars/Base', 'UTC', e.OccurredAt) FROM dbo.Events e"));
+        Assert.Equal(GovernedSqlErrorCodes.TimeZoneArgument, Rejected(dialect, "SELECT CoNvErT_TiMeZoNe('UTC', 'Europe/Berlin', e.OccurredAtTz) FROM dbo.Events e"));
+    }
+
+    [Theory, MemberData(nameof(TimeZoneTestSupport.DialectData), MemberType = typeof(TimeZoneTestSupport))]
+    [Trait("Category", "Security")]
+    public void ST_130_10_ACallInjectedIntoTheAstOfAStatementThatDoesNotSpellTheNameIsRefusedByTheGeneratorGuard(TargetSqlDialect dialect)
+    {
+        // The text has no "convert_timezone", so the validator pass is skipped and TimeZoneCallsValidated stays false; a faulty injector that adds the
+        // call afterwards must not be able to emit it.
+        string sql = "SELECT e.Id AS injected_guard_probe FROM dbo.Events e";   // unique text: a plan-cache hit would skip the hook
+        var passes = new List<string>();
+        using var _ = CompilerHooks.Use(new MutantHooks
+        {
+            OnPass = passes.Add,
+            FaultyInjector = secured =>
+            {
+                var select = (SelectStatement)secured;
+                var spec = (QuerySpecification)select.Body;
+                var call = new FunctionCallExpression(new SqlQualifiedName("convert_timezone"), [
+                    new LiteralExpression("UTC", LiteralType.String), new LiteralExpression("Europe/Berlin", LiteralType.String),
+                    new ColumnReference(new SqlQualifiedName("e", "OccurredAt"))]);
+                return select with { Body = spec with { Projections = [.. spec.Projections, new ColumnSelectItem(call, null)] } };
+            }
+        });
+
+        var ex = Record.Exception(() => Compile(dialect, sql));
+
+        Assert.DoesNotContain("timezone", passes);
+        Assert.NotNull(ex);
+        Assert.DoesNotContain("CONVERT_TIMEZONE(", ex!.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.IsType<SqlTimeZoneException>(ex);
+        Assert.Equal(GovernedSqlErrorCodes.TimeZoneArgument, ((SqlTimeZoneException)ex).Code);
     }
 }

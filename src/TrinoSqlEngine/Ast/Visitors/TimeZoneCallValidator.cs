@@ -213,7 +213,7 @@ internal sealed class TimeZoneCallValidator : ColumnScopeTracker
         {
             return options.Masks.HasMask(resolved.Table.Identity, resolved.Column.Name);
         }
-        catch (Exception)
+        catch (Exception e) when (e is not OperationCanceledException)
         {
             return true;
         }
@@ -235,7 +235,7 @@ internal sealed class TimeZoneCallValidator : ColumnScopeTracker
 
             return false;
         }
-        catch (Exception)
+        catch (Exception e) when (e is not OperationCanceledException)
         {
             return true;
         }

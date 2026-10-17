@@ -161,6 +161,26 @@ public sealed class TimeZoneValidatorCoverageTests
         Assert.Equal(GovernedSqlErrorCodes.TimeZoneArgument, Rejected(dialect, sql, masks: masks, tablesWithMaskedColumns: new HashSet<string> { "dbo.Events" }.ToFrozenSet()));
     }
 
+    [Theory, MemberData(nameof(DialectData), MemberType = typeof(TimeZoneTestSupport))]
+    public void BC_130_1_ACancelledMaskLookupIsNotSwallowedIntoARefusal(TargetSqlDialect dialect)
+    {
+        var masks = new CancellingMaskProvider();
+        // resolved column path
+        Assert.ThrowsAny<OperationCanceledException>(() =>
+            Compile(dialect, "SELECT convert_timezone('UTC', 'Europe/Berlin', e.OccurredAt) FROM dbo.Events e", masks: masks));
+        // unresolved CAST operand: the TablesWithMaskedColumns fallback
+        Assert.ThrowsAny<OperationCanceledException>(() =>
+            Compile(dialect, "WITH c AS (SELECT e.OccurredAt AS OccurredAt FROM dbo.Events e) SELECT convert_timezone('UTC', 'Europe/Berlin', CAST(c.OccurredAt AS timestamp)) FROM c",
+                masks: masks, tablesWithMaskedColumns: new HashSet<string> { "dbo.Events" }.ToFrozenSet()));
+    }
+
+    private sealed class CancellingMaskProvider : IColumnMaskProvider
+    {
+        public bool HasMask(TableIdentity table, string column) => throw new OperationCanceledException();
+
+        public MaskSpec GetMask(TableIdentity table, string column) => throw new OperationCanceledException();
+    }
+
     private sealed class ThrowingMaskProvider : IColumnMaskProvider
     {
         public bool HasMask(TableIdentity table, string column) => throw new InvalidOperationException("lookup failed");
