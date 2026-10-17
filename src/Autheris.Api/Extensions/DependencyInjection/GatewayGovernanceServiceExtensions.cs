@@ -54,6 +54,15 @@ public static class GatewayGovernanceServiceExtensions
         // Issue #107: admin surface of the row filter key-set cache settings and the startup validation of its global options
         // (runs with the GatewayOptions ValidateOnStart; SEC-RF107-16).
         services.AddSingleton<IRowFilterEvaluationAdminService, RowFilterEvaluationAdminService>();
+
+        // Issue #111: the only writer of dataset tags and catalog visibility tiers (REST, manifest and MCP admin tool).
+        services.AddSingleton<IDatasetCatalogAdminService>(sp => new DatasetCatalogAdminService(
+            sp.GetRequiredService<Autheris.Application.Interfaces.ITableMetadataRepository>(),
+            sp.GetService<Autheris.Application.Interfaces.IDataOwnershipRepository>(),
+            sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<GatewayOptions>>(),
+            sp.GetService<TimeProvider>(),
+            sp.GetService<ICatalogVisibilityMetrics>()));
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<GatewayOptions>, Autheris.Application.Policy.RowFilterKeySetCacheOptionsValidator>();
         services.AddSingleton<Autheris.Application.Auditing.AuditGroupCommitOptions>();
         services.AddSingleton<Autheris.Application.Auditing.AuditGroupCommitSink>();

@@ -102,6 +102,11 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         var table = gate.Table;
 
         // Validation of the whole body, only after the caller is known to manage the dataset.
+        if (edit.Malformed)
+        {
+            return new DatasetCatalogResult(DatasetCatalogOutcome.InvalidRequest);
+        }
+
         DatasetVisibility? requested = null;
         if (edit.Visibility is not null)
         {

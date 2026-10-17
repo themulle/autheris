@@ -12,7 +12,11 @@ public sealed record DatasetCatalogEdit(
     IReadOnlyList<string>? ReplaceTags,
     IReadOnlyList<string>? AddTags,
     IReadOnlyList<string>? RemoveTags,
-    string? Visibility);
+    string? Visibility)
+{
+    /// <summary>A request body that could not be bound (missing or wrong shape); answered as <see cref="DatasetCatalogOutcome.InvalidRequest"/> after authorization.</summary>
+    public bool Malformed { get; init; }
+}
 
 /// <summary>
 /// Result classes of <see cref="IDatasetCatalogAdminService"/>. <see cref="NotFound"/> is identical for unknown, inactive and non-manageable datasets.
@@ -27,6 +31,7 @@ public enum DatasetCatalogOutcome
     InvalidTag,
     TagLimitExceeded,
     InvalidVisibility,
+    InvalidRequest,
     Unavailable
 }
 
