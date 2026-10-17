@@ -327,6 +327,58 @@ public sealed class CatalogChannelParityTests : IClassFixture<WebApplicationFact
     }
 
     [Fact]
+    public async Task HiddenTier_IsIndistinguishableFromANonexistentDataset_OnEveryChannel()
+    {
+        var (_, client) = await TierFactoryAsync();
+
+        // REST: status and body are identical.
+        var hidden = await client.GetAsync("/api/v1/catalog/datasets/dom_s.main.hid_t");
+        var missing = await client.GetAsync("/api/v1/catalog/datasets/dom_s.main.nothing_t");
+        hidden.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        hidden.StatusCode.ShouldBe(missing.StatusCode);
+        (await BodyAsync(hidden)).ShouldBe(await BodyAsync(missing));
+
+        // MCP: the same tool error, apart from the echoed identifier.
+        await using var mcp = await McpTestClient.ConnectAsync(client);
+        var (hiddenError, hiddenText) = await McpTestClient.CallAsync(mcp, "describe_dataset", new { dataset = "dom_s.main.hid_t" });
+        var (missingError, missingText) = await McpTestClient.CallAsync(mcp, "describe_dataset", new { dataset = "dom_s.main.nothing_t" });
+        hiddenError.ShouldBeTrue();
+        missingError.ShouldBeTrue();
+        hiddenText.Replace("hid_t", "x").ShouldBe(missingText.Replace("nothing_t", "x"));
+
+        // GraphQL: a catalog search for either name answers the same empty page.
+        client.DefaultRequestHeaders.Add("GraphQL-Preflight", "1");
+        var gqlHidden = await BodyAsync(await client.PostAsJsonAsync("/graphql", new { query = "{ catalog(search: \"hid_t\", first: 3) { tableName } }" }));
+        var gqlMissing = await BodyAsync(await client.PostAsJsonAsync("/graphql", new { query = "{ catalog(search: \"nothing_t\", first: 3) { tableName } }" }));
+        // The cost extension carries a rate-limit counter; the data element is what must be identical.
+        JsonDocument.Parse(gqlHidden).RootElement.GetProperty("data").GetRawText().ShouldBe(JsonDocument.Parse(gqlMissing).RootElement.GetProperty("data").GetRawText());
+        gqlHidden.ShouldNotContain("hid_t");
+    }
+
+    [Fact]
+    public async Task ConsentedNonAdmin_OnAHiddenTier_GetsTheGrantedView_OnTheDiscoverySurface()
+    {
+        var (factory, client) = await TierFactoryAsync();
+        using (var scope = factory.Services.CreateScope())
+        {
+            await ConsentAsync(scope.ServiceProvider.GetRequiredService<IGovernanceRepository>(), HiddenT, "S-T-USER", TenantB, "id");
+        }
+
+        // Granted view: the consented column only, never the whole table, and never for an unconsented caller.
+        var detail = await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/dom_s.main.hid_t"));
+        detail.ShouldContain("\"id\"");
+        detail.ShouldNotContain("tier_secret_col");
+
+        await using var mcp = await McpTestClient.ConnectAsync(client);
+        var (error, text) = await McpTestClient.CallAsync(mcp, "describe_dataset", new { dataset = "dom_s.main.hid_t" });
+        error.ShouldBeFalse(text);
+        text.ShouldNotContain("tier_secret_col");
+
+        var other = await ClientAsync("S-T-OTHER", TenantB, "Reader", factory);
+        (await other.GetAsync("/api/v1/catalog/datasets/dom_s.main.hid_t")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
     public async Task Admins_SeeEveryTier_Unnarrowed_ClaimlessAdminInMultiSeesNothingOfTheTiers()
     {
         var (factory, _) = await TierFactoryAsync();
