@@ -1,6 +1,5 @@
 namespace Autheris.Application.Sql.Policy.RowFilterKeySets;
 
-using System.Collections.Immutable;
 using System.Data;
 using System.Data.Common;
 using Autheris.Application.Interfaces;
@@ -9,7 +8,6 @@ using Autheris.Domain.Common;
 using Microsoft.Extensions.Logging;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Emit;
-using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Governance;
 
 /// <summary>
@@ -32,7 +30,7 @@ public sealed record RowFilterKeySetLoadRequest(
 /// <item>The session is tenant only: <c>userSid: null, purpose: null</c> (SEC-RF107-01 b); the key set is principal independent.</item>
 /// <item>SQL Server: <c>SET TRANSACTION ISOLATION LEVEL READ COMMITTED</c> before the query, regardless of <c>ReadUncommitted</c> (SEC-RF107-12), so
 /// uncommitted rows are never cached. PostgreSQL and Oracle: <c>SET TRANSACTION READ ONLY</c>, always rolled back. SQLite: <c>PRAGMA query_only</c>.</item>
-/// <item>Every <see cref="CompiledKeyQuery.Parameters"/> element is bound through the engine's production binder (the SQLite row limit is a
+/// <item>Every <see cref="CompiledKeyQuery.Parameters"/> element is bound through the engine's production binder (<see cref="CompiledSqlBinders.BindKeyQuery"/>; the SQLite row limit is a
 /// <c>QueryLiteral</c> bind) and the command's parameter count is checked before execution (SEC-RF107-20, D-WPC-8).</item>
 /// <item>At most <c>MaxKeys + 1</c> rows are read; one more than <c>MaxKeys</c> yields the overflow sentinel. A set with a value that does not fit
 /// the foreign key type yields the not-bindable sentinel (SEC-RF107-07 b).</item>
@@ -44,8 +42,6 @@ public sealed record RowFilterKeySetLoadRequest(
 /// </summary>
 public sealed class RowFilterKeySetLoader
 {
-    private static readonly IReadOnlyDictionary<string, object?> NoClientValues = new Dictionary<string, object?>();
-
     private readonly ISqlConnectionFactory _connections;
     private readonly IDbSessionContextInitializer _sessionInitializer;
     private readonly TimeProvider _time;
@@ -131,9 +127,7 @@ public sealed class RowFilterKeySetLoader
             cmd.Transaction = tx;
             cmd.CommandType = CommandType.Text;
             cmd.CommandTimeout = (int)Math.Max(1, Math.Ceiling(request.Timeout.TotalSeconds));
-            var compiled = new CompiledSql(
-                query.Sql, query.Parameters, request.Dialect, SqlStatementClass.Select, ImmutableArray<SecurityPredicateId>.Empty, query.CompilerVersion);
-            CompiledSqlBinders.For(request.Dialect).Bind(cmd, compiled, NoClientValues);
+            CompiledSqlBinders.BindKeyQuery(cmd, query, request.Dialect);
 
             // SEC-RF107-20: a bind that was not added would silently change the query (D-WPC-8).
             if (cmd.Parameters.Count != query.Parameters.Length)
