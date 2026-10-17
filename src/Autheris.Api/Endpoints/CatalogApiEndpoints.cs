@@ -168,6 +168,19 @@ public static class CatalogApiEndpoints
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogKeyDefinitionChanged);
 
+        // Issue #107: object level of the row filter key-set cache strategy (same authorization and dataset resolution as /keys).
+        group.MapGet("/datasets/{id}/row-filter-strategy", GovernanceEndpoints.GetDatasetRowFilterStrategyAsync)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+
+        group.MapPut("/datasets/{id}/row-filter-strategy", GovernanceEndpoints.SetDatasetRowFilterStrategyAsync)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Full, AuditEventTypes.TableRowFilterStrategyChanged);
+
+        group.MapDelete("/datasets/{id}/row-filter-strategy", GovernanceEndpoints.ClearDatasetRowFilterStrategyAsync)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Full, AuditEventTypes.TableRowFilterStrategyChanged);
+
         return app;
     }
 

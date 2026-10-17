@@ -50,6 +50,11 @@ public static class GatewayGovernanceServiceExtensions
         GatewayOptions gatewayOptions)
     {
         services.AddSingleton<Autheris.Application.Audit.IAuditWriter, Autheris.Application.Audit.AuditWriter>();
+
+        // Issue #107: admin surface of the row filter key-set cache settings and the startup validation of its global options
+        // (runs with the GatewayOptions ValidateOnStart; SEC-RF107-16).
+        services.AddSingleton<IRowFilterEvaluationAdminService, RowFilterEvaluationAdminService>();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<GatewayOptions>, Autheris.Application.Policy.RowFilterKeySetCacheOptionsValidator>();
         services.AddSingleton<Autheris.Application.Auditing.AuditGroupCommitOptions>();
         services.AddSingleton<Autheris.Application.Auditing.AuditGroupCommitSink>();
 
