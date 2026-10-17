@@ -93,5 +93,7 @@ public sealed class GovernanceSchemaShapeSnapshotTests
         var natural = relationTable.Indexes.Single(i => string.Equals(i.Name, naturalIndex, StringComparison.Ordinal));
         natural.Unique.ShouldBeTrue();
         natural.Columns.ShouldBe(["parent_table_id", "child_table_id", "relation_name"]);
+        relationTable.Columns.Select(c => c.Name).ShouldNotContain("join_key_parent");
+        relationTable.Columns.Select(c => c.Name).ShouldNotContain("join_key_child");
     }
 }

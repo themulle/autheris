@@ -252,8 +252,6 @@ internal static class PostgreSqlBaselineSchema
                 parent_table_id TEXT NOT NULL,
                 child_table_id TEXT NOT NULL,
                 relation_name TEXT NOT NULL,
-                join_key_parent TEXT NOT NULL,
-                join_key_child TEXT NOT NULL,
                 cardinality TEXT NOT NULL
             );
 

@@ -1456,16 +1456,6 @@
           "family": "string"
         },
         {
-          "name": "join_key_parent",
-          "type": "TEXT",
-          "family": "string"
-        },
-        {
-          "name": "join_key_child",
-          "type": "TEXT",
-          "family": "string"
-        },
-        {
           "name": "cardinality",
           "type": "TEXT",
           "family": "string"

@@ -294,8 +294,6 @@ CREATE TABLE dbo.TABLE_RELATIONS (
     parent_table_id NVARCHAR(128) NOT NULL,
     child_table_id NVARCHAR(128) NOT NULL,
     relation_name NVARCHAR(256) NOT NULL,
-    join_key_parent NVARCHAR(256) NOT NULL,
-    join_key_child NVARCHAR(256) NOT NULL,
     cardinality NVARCHAR(64) NOT NULL
 );
 

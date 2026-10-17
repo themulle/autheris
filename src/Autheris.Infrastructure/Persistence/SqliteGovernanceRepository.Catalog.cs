@@ -1067,68 +1067,157 @@ public partial class SqliteGovernanceRepository
     {
         await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
         var conn = scope.Connection;
+
+        // One statement: a reader never sees a mixed key set (SEC-REL151-06). Key rows are only reached through the join (SEC-REL151-08).
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"SELECT r.id, r.parent_table_id, r.child_table_id, r.relation_name, r.cardinality,
+                                   COALESCE(tp.source_name, 'default'), tp.schema_name, tp.table_name,
+                                   COALESCE(tc.source_name, 'default'), tc.schema_name, tc.table_name,
+                                   k.key_ordinal, k.parent_column, k.child_column
+                            FROM TABLE_RELATIONS r
+                            JOIN TABLES tp ON r.parent_table_id = tp.id
+                            JOIN TABLES tc ON r.child_table_id = tc.id
+                            LEFT JOIN TABLE_RELATION_KEYS k ON k.relation_id = r.id
+                            WHERE tp.source_name = @pDomain COLLATE NOCASE AND tp.schema_name = @pSchema COLLATE NOCASE AND tp.table_name = @pTable COLLATE NOCASE
+                            ORDER BY r.id, k.key_ordinal";
+        cmd.Parameters.AddWithValue("@pDomain", parentTable.Domain);
+        cmd.Parameters.AddWithValue("@pSchema", parentTable.Schema);
+        cmd.Parameters.AddWithValue("@pTable", parentTable.TableName);
+
+        var rows = new List<RelationRowData>();
+        using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
-            var relations = new List<TableRelation>();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"SELECT r.id, r.parent_table_id, COALESCE(tp.source_name, 'default'), tp.schema_name, tp.table_name,
-                                       r.child_table_id, COALESCE(tc.source_name, 'default'), tc.schema_name, tc.table_name,
-                                       r.relation_name, r.join_key_parent, r.join_key_child, r.cardinality
-                                FROM TABLE_RELATIONS r
-                                JOIN TABLES tp ON r.parent_table_id = tp.id
-                                JOIN TABLES tc ON r.child_table_id = tc.id
-                                WHERE tp.source_name = @pDomain COLLATE NOCASE AND tp.schema_name = @pSchema COLLATE NOCASE AND tp.table_name = @pTable COLLATE NOCASE";
-            cmd.Parameters.AddWithValue("@pDomain", parentTable.Domain);
-            cmd.Parameters.AddWithValue("@pSchema", parentTable.Schema);
-            cmd.Parameters.AddWithValue("@pTable", parentTable.TableName);
-
-            using var reader = await cmd.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                var relId = Guid.Parse(reader.GetString(0));
-                var parentId = Guid.Parse(reader.GetString(1));
-                var pId = new TableIdentifier(reader.GetString(2), reader.GetString(3), reader.GetString(4));
-                var childId = Guid.Parse(reader.GetString(5));
-                var cId = new TableIdentifier(reader.GetString(6), reader.GetString(7), reader.GetString(8));
-                var relName = reader.GetString(9);
-                var jkParent = reader.GetString(10);
-                var jkChild = reader.GetString(11);
-                var card = Enum.TryParse<RelationCardinality>(reader.GetString(12), true, out var c) ? c : RelationCardinality.OneToMany;
-
-                relations.Add(new TableRelation
-                {
-                    Id = relId,
-                    ParentTableId = parentId,
-                    ParentTableIdentifier = pId,
-                    ChildTableId = childId,
-                    ChildTableIdentifier = cId,
-                    RelationName = relName,
-                    JoinKeysParent = [jkParent],
-                    JoinKeysChild = [jkChild],
-                    Cardinality = card
-                });
+                rows.Add(new RelationRowData(
+                    reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4),
+                    new TableIdentifier(reader.GetString(5), reader.GetString(6), reader.GetString(7)),
+                    new TableIdentifier(reader.GetString(8), reader.GetString(9), reader.GetString(10)),
+                    reader.IsDBNull(11) ? null : reader.GetInt32(11),
+                    reader.IsDBNull(12) ? null : reader.GetString(12),
+                    reader.IsDBNull(13) ? null : reader.GetString(13)));
             }
-            return relations;
         }
+
+        return RelationRowAssembler.Assemble(rows, _logger);
     }
 
-    public async Task CreateRelationAsync(TableRelation relation, CancellationToken ct = default)
+    public async Task<RelationWriteResult> CreateRelationAsync(TableRelation relation, CancellationToken ct = default)
     {
+        RelationWriteSupport.ValidateKeysOrThrow(relation);
+
+        // The write scope holds the single-writer gate; one explicit transaction covers relation row and key rows (SEC-REL151-06).
         await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
         var conn = scope.Connection;
+        using var tx = conn.BeginTransaction();
+
+        var parentTableId = await ResolveActiveTableIdAsync(conn, tx, relation.RelationName, relation.ParentTableIdentifier, ct).ConfigureAwait(false);
+        var childTableId = await ResolveActiveTableIdAsync(conn, tx, relation.RelationName, relation.ChildTableIdentifier, ct).ConfigureAwait(false);
+        var parentKeys = RelationWriteSupport.Canonicalize(relation.RelationName, "parent", relation.JoinKeysParent, await LoadColumnNamesAsync(conn, tx, parentTableId, ct).ConfigureAwait(false));
+        var childKeys = RelationWriteSupport.Canonicalize(relation.RelationName, "child", relation.JoinKeysChild, await LoadColumnNamesAsync(conn, tx, childTableId, ct).ConfigureAwait(false));
+
+        string storedId;
+        bool created;
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = @"SELECT id FROM TABLE_RELATIONS WHERE parent_table_id = @pId AND child_table_id = @cId AND relation_name = @relName";
+            cmd.Parameters.AddWithValue("@pId", parentTableId);
+            cmd.Parameters.AddWithValue("@cId", childTableId);
+            cmd.Parameters.AddWithValue("@relName", relation.RelationName);
+            created = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) is null;
+        }
+
+        // Natural-key upsert: only discovery-owned columns are in the SET list (I-18 keeps allow_cross_data_source out of it).
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = @"INSERT INTO TABLE_RELATIONS (id, parent_table_id, child_table_id, relation_name, cardinality)
+                                VALUES (@id, @pId, @cId, @relName, @card)
+                                ON CONFLICT (parent_table_id, child_table_id, relation_name) DO UPDATE SET cardinality = excluded.cardinality
+                                RETURNING id";
+            cmd.Parameters.AddWithValue("@id", relation.Id.ToString());
+            cmd.Parameters.AddWithValue("@pId", parentTableId);
+            cmd.Parameters.AddWithValue("@cId", childTableId);
+            cmd.Parameters.AddWithValue("@relName", relation.RelationName);
+            cmd.Parameters.AddWithValue("@card", relation.Cardinality.ToString());
+            storedId = (string)(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
+        }
+
+        var stored = new List<(string Parent, string Child)>();
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = "SELECT parent_column, child_column FROM TABLE_RELATION_KEYS WHERE relation_id = @id ORDER BY key_ordinal";
+            cmd.Parameters.AddWithValue("@id", storedId);
+            using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                stored.Add((reader.GetString(0), reader.GetString(1)));
+            }
+        }
+
+        var keysChanged = !created && !RelationWriteSupport.SamePairs(stored, parentKeys, childKeys);
+
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = "DELETE FROM TABLE_RELATION_KEYS WHERE relation_id = @id";
+            cmd.Parameters.AddWithValue("@id", storedId);
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        for (var i = 0; i < parentKeys.Count; i++)
         {
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"INSERT OR REPLACE INTO TABLE_RELATIONS 
-                                (id, parent_table_id, child_table_id, relation_name, join_key_parent, join_key_child, cardinality)
-                                VALUES (@id, @pId, @cId, @relName, @jkP, @jkC, @card)";
-            cmd.Parameters.AddWithValue("@id", relation.Id.ToString());
-            cmd.Parameters.AddWithValue("@pId", relation.ParentTableId.ToString());
-            cmd.Parameters.AddWithValue("@cId", relation.ChildTableId.ToString());
-            cmd.Parameters.AddWithValue("@relName", relation.RelationName);
-            cmd.Parameters.AddWithValue("@jkP", relation.JoinKeysParent.Count > 0 ? relation.JoinKeysParent[0] : string.Empty);
-            cmd.Parameters.AddWithValue("@jkC", relation.JoinKeysChild.Count > 0 ? relation.JoinKeysChild[0] : string.Empty);
-            cmd.Parameters.AddWithValue("@card", relation.Cardinality.ToString());
-            await cmd.ExecuteNonQueryAsync(ct);
+            cmd.Transaction = tx;
+            cmd.CommandText = "INSERT INTO TABLE_RELATION_KEYS (relation_id, key_ordinal, parent_column, child_column) VALUES (@id, @ord, @pc, @cc)";
+            cmd.Parameters.AddWithValue("@id", storedId);
+            cmd.Parameters.AddWithValue("@ord", i + 1);
+            cmd.Parameters.AddWithValue("@pc", parentKeys[i]);
+            cmd.Parameters.AddWithValue("@cc", childKeys[i]);
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
+
+        ct.ThrowIfCancellationRequested();
+        tx.Commit();
+        return new RelationWriteResult(Guid.Parse(storedId), created, keysChanged);
+    }
+
+    /// <summary>Resolves an active table id from its identifier: zero or several matches throw (SEC-REL151-07, no LIMIT 1).</summary>
+    private static async Task<string> ResolveActiveTableIdAsync(SqliteConnection conn, SqliteTransaction tx, string relationName, TableIdentifier table, CancellationToken ct)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = @"SELECT id FROM TABLES
+                            WHERE source_name = @domain COLLATE NOCASE AND schema_name = @schema COLLATE NOCASE AND table_name = @table COLLATE NOCASE AND is_active = 1";
+        cmd.Parameters.AddWithValue("@domain", table.Domain);
+        cmd.Parameters.AddWithValue("@schema", table.Schema);
+        cmd.Parameters.AddWithValue("@table", table.TableName);
+        var ids = new List<string>(2);
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            ids.Add(reader.GetString(0));
+        }
+
+        return ids.Count == 1 ? ids[0] : throw RelationWriteSupport.TableNotResolved(relationName, table, ids.Count);
+    }
+
+    private static async Task<List<string>> LoadColumnNamesAsync(SqliteConnection conn, SqliteTransaction tx, string tableId, CancellationToken ct)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SELECT column_name FROM TABLE_COLUMNS WHERE table_id = @t";
+        cmd.Parameters.AddWithValue("@t", tableId);
+        var names = new List<string>();
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            names.Add(reader.GetString(0));
+        }
+
+        return names;
     }
 
 }

@@ -1759,16 +1759,6 @@
           "family": "string"
         },
         {
-          "name": "join_key_parent",
-          "type": "NVARCHAR",
-          "family": "string"
-        },
-        {
-          "name": "join_key_child",
-          "type": "NVARCHAR",
-          "family": "string"
-        },
-        {
           "name": "cardinality",
           "type": "NVARCHAR",
           "family": "string"
