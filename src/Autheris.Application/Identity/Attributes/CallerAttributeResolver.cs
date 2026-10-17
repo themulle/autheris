@@ -373,6 +373,11 @@ public sealed class CallerAttributeResolver : ICallerAttributeResolver, ICallerA
     /// SHA-256 over length-prefixed material (BC-129-08): tenant, issuer, subject kind, subject key kind and key (or application id), attribute,
     /// definition hash and the epochs of the attribute and the subject. The hex form is 64 characters, never truncated.
     /// </summary>
+    private static readonly SubjectKeyKind[] KeyKindOrder = [SubjectKeyKind.EntraObjectId, SubjectKeyKind.WindowsSid, SubjectKeyKind.Subject];
+
+    private static void AppendPart(StringBuilder sb, string part) =>
+        sb.Append('|').Append(part.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(part);
+
     private string CacheKey(CallerSubject subject, CallerAttributeDefinition definition, string providerKind)
     {
         string keyKind;
@@ -384,7 +389,16 @@ public sealed class CallerAttributeResolver : ICallerAttributeResolver, ICallerA
         }
         else
         {
-            var kind = new[] { SubjectKeyKind.EntraObjectId, SubjectKeyKind.WindowsSid, SubjectKeyKind.Subject }.FirstOrDefault(k => subject.KeyFor(k) is not null);
+            var kind = default(SubjectKeyKind);
+            foreach (var candidate in KeyKindOrder)
+            {
+                if (subject.KeyFor(candidate) is not null)
+                {
+                    kind = candidate;
+                    break;
+                }
+            }
+
             keyKind = kind.ToString();
             keyValue = subject.KeyFor(kind) ?? string.Empty;
         }
@@ -393,14 +407,16 @@ public sealed class CallerAttributeResolver : ICallerAttributeResolver, ICallerA
         _subjectEpochs.TryGetValue(EpochKey(subject.Tenant.Value, keyValue.ToLowerInvariant()), out long subjectEpoch);
 
         var sb = new StringBuilder(CacheDomain);
-        foreach (var part in new[]
-        {
-            subject.Tenant.Value, subject.Issuer ?? string.Empty, subject.Kind.ToString(), providerKind, keyKind, keyValue, definition.Name,
-            definition.ComputeDefinitionHash(), attributeEpoch.ToString(CultureInfo.InvariantCulture), subjectEpoch.ToString(CultureInfo.InvariantCulture)
-        })
-        {
-            sb.Append('|').Append(part.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(part);
-        }
+        AppendPart(sb, subject.Tenant.Value);
+        AppendPart(sb, subject.Issuer ?? string.Empty);
+        AppendPart(sb, subject.Kind.ToString());
+        AppendPart(sb, providerKind);
+        AppendPart(sb, keyKind);
+        AppendPart(sb, keyValue);
+        AppendPart(sb, definition.Name);
+        AppendPart(sb, definition.ComputeDefinitionHash());
+        AppendPart(sb, attributeEpoch.ToString(CultureInfo.InvariantCulture));
+        AppendPart(sb, subjectEpoch.ToString(CultureInfo.InvariantCulture));
 
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString())));
     }

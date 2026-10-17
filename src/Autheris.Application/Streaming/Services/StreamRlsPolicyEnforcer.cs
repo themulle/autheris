@@ -356,6 +356,15 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
     /// subscribe time, so the event is dropped once its token has expired (<c>exp</c>), and the principal is a long-lived scope (no request memo):
     /// the value cache keeps the cost per event at one memory lookup.
     /// </summary>
+    private sealed class SubjectBox
+    {
+        public Autheris.Application.Identity.Attributes.CallerSubject? Subject;
+        public TenantId Tenant;
+    }
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ConsentRowFilterRecipe, IReadOnlyCollection<string>> RecipeNames = new();
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<ClaimsPrincipal, SubjectBox> Subjects = new();
+
     private async ValueTask<bool?> EvaluateAttributeFilterAsync(
         TableAccessDecision decision, ClaimsPrincipal subscriber, TenantId tenantId, TableMetadata metadata,
         IReadOnlyDictionary<string, object?> payload, CancellationToken ct)
@@ -365,7 +374,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
             return null;
         }
 
-        var names = Autheris.Application.Identity.Attributes.CallerAttributeRecipes.Names(recipe);
+        var names = RecipeNames.GetValue(recipe, static r => Autheris.Application.Identity.Attributes.CallerAttributeRecipes.Names(r));
         if (names.Count == 0)
         {
             return null;
@@ -380,7 +389,15 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
 
         try
         {
-            var subject = resolver.CreateSubject(subscriber, tenantId, longLived: true);
+            // The subscriber principal is fixed for the subscription: its subject is built once, not per event.
+            var cached = Subjects.GetValue(subscriber, _ => new SubjectBox());
+            if (cached.Subject is null || cached.Tenant != tenantId)
+            {
+                cached.Subject = resolver.CreateSubject(subscriber, tenantId, longLived: true);
+                cached.Tenant = tenantId;
+            }
+
+            var subject = cached.Subject;
             var (set, padding) = await Autheris.Application.Identity.Attributes.CallerAttributeRecipes.ResolveAsync(resolver, subject, names, ct).ConfigureAwait(false);
             var predicate = new Autheris.Application.Sql.Policy.TypedRowFilterBuilder().BuildCombined(
                 recipe.Allow, recipe.Deny, default, Autheris.Application.Sql.Policy.PolicyParameterNamer.ToTargetDialect(metadata.Dialect), set, padding);

@@ -43,7 +43,18 @@ public static class CallerSubjectFactory
         }
 
         var claims = identity.Claims.ToArray();
-        var personIssuers = options.Claims.TrustedIssuers.Where(t => t.SubjectKeyIsPerson).Select(t => t.Issuer).ToHashSet(StringComparer.Ordinal);
+        static bool IsPersonIssuer(CallerAttributeOptions o, string issuer)
+        {
+            foreach (var trusted in o.Claims.TrustedIssuers)
+            {
+                if (trusted.SubjectKeyIsPerson && string.Equals(trusted.Issuer, issuer, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
 
         string? First(string[] types, out Claim? claim)
         {
@@ -86,7 +97,7 @@ public static class CallerSubjectFactory
             issuer ??= sidClaim!.Issuer;
         }
 
-        if (subRaw is not null && subClaim is not null && personIssuers.Contains(subClaim.Issuer))
+        if (subRaw is not null && subClaim is not null && IsPersonIssuer(options, subClaim.Issuer))
         {
             keys[SubjectKeyKind.Subject] = subRaw;
             issuer ??= subClaim.Issuer;
