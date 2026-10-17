@@ -70,7 +70,7 @@ public static class GovernedSqlErrorCodes
         SourceUnavailable => "The data source is temporarily unavailable. Retry later.",
         ListParamPosition => "A list parameter is only allowed as the single item of an IN or NOT IN list.",
         ListParamType => "A list parameter has an invalid or mixed element type, or a scalar parameter received a list.",
-        ListParamNull => "A list parameter must not contain null or empty-string elements.",
+        ListParamNull => "A list parameter contains an element that is not allowed (null, or text the data source cannot store as given).",
         ListParamTooLarge => "A list parameter exceeds the maximum number of values.",
         ListParamUnsupported => "List parameters are not supported for this statement.",
         _ => "The statement could not be executed."

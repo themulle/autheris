@@ -203,7 +203,30 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
                     throw new MissingClientParameterException(bound.SourceName ?? "?");
                 }
 
-                type = InferType(value);
+                if (bound.ListIndex is { } listIndex)
+                {
+                    // List element slot: the value must be a list of exactly the compiled count (a longer list is refused, never
+                    // cut), and the element type comes from the list, never from one value (SEC-128-10).
+                    if (value is not ClientListValue list || bound.ListCount is not { } expectedCount
+                        || (list.Count != expectedCount && !CompilerHooks.IsDisabled(SecurityControl.ClientListCount))
+                        || (uint)listIndex >= (uint)list.Count)
+                    {
+                        throw new ClientListException(GovernedSqlErrorCodes.ListParamType);
+                    }
+
+                    value = list[listIndex];
+                    type = list.ElementType;
+                }
+                else
+                {
+                    // A list in a scalar slot is refused before InferType can fail by accident (SEC-128-10 b).
+                    if (value is ClientListValue)
+                    {
+                        throw new ClientListException(GovernedSqlErrorCodes.ListParamType);
+                    }
+
+                    type = InferType(value);
+                }
             }
             else if (bound.Origin == ParameterOrigin.ClientPositional)
             {
@@ -213,6 +236,11 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
             ValidateValue(bound, value);
             if (RejectsEmbeddedNul && value is string text && text.Contains('\0', StringComparison.Ordinal))
             {
+                if (bound.ListIndex is not null)
+                {
+                    throw new ClientListException(GovernedSqlErrorCodes.ListParamNull);
+                }
+
                 throw new SecurityException("A string parameter contains an embedded NUL character, which the provider would truncate.");
             }
 
@@ -252,6 +280,7 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
         DateTime => SqlParameterType.Timestamp,
         DateTimeOffset => SqlParameterType.TimestampTz,
         byte[] => SqlParameterType.Binary,
+        Guid => SqlParameterType.String,
         _ => throw new SecurityException($"Unsupported client parameter value type '{value.GetType().Name}'.")
     };
 
@@ -425,6 +454,12 @@ public sealed class OracleCompiledSqlBinder : DbCommandCompiledSqlBinder
         if (parameter.Origin is ParameterOrigin.Tenant or ParameterOrigin.Policy && value is string { Length: 0 })
         {
             throw new SecurityException("An empty tenant or policy string is rejected on Oracle (it would be NULL).");
+        }
+
+        // SEC-128-06: Oracle stores '' as NULL, which would turn NOT IN (.., '') into a predicate that matches nothing.
+        if (parameter.ListIndex is not null && value is string { Length: 0 })
+        {
+            throw new ClientListException(GovernedSqlErrorCodes.ListParamNull);
         }
     }
 }

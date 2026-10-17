@@ -72,6 +72,8 @@ internal static class SecurityMutants
         m.Add(new SecurityMutant("client-list-position-check-off", "the residual position check of the client list pass is skipped", "SEC-128-10", Off(SecurityControl.ClientListPosition)));
         m.Add(new SecurityMutant("client-list-max-expanded-off", "the per-statement cap of expanded list items is not enforced", "SEC-128-02", Off(SecurityControl.ClientListMaxExpanded)));
 
+        m.Add(new SecurityMutant("client-list-count-check-off", "the binder does not compare the compiled element count with the supplied list", "SEC-128-10", Off(SecurityControl.ClientListCount)));
+
         // M-3: the further named mutants
         m.Add(new SecurityMutant("skip-coverage-verifier", "skip the coverage verifier", "M-3, CR-ADG-04", Off(SecurityControl.CoverageVerifier)));
         m.Add(new SecurityMutant("skip-emitted-text-checker", "skip the emitted-text invariant checker", "M-3, CR-ADG-04", Off(SecurityControl.EmittedTextChecker)));
