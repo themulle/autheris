@@ -145,18 +145,25 @@ public sealed class EffectiveAccessExplanationService(
 
         var applicableConsents = MatchingAllowConsents(activeConsents, table, now, userSid.Value, groupSids, roles, allUserSids);
 
-        // Earliest moment at which the caller's current effective access changes (clamped expiry of matching grants only).
-        var validTo = applicableConsents.Count > 0
-            ? applicableConsents.Min(c => c.EffectiveValidTo)
-            : (DateTimeOffset?)null;
+        // Earliest moment at which the caller's current effective access changes (clamped expiry of matching grants only);
+        // interim description (INC-1 adds the stored one): a held role name, deterministic by ordinal order.
+        DateTimeOffset? validTo = null;
+        string? roleName = null;
+        foreach (var c in applicableConsents)
+        {
+            if (validTo is null || c.EffectiveValidTo < validTo)
+            {
+                validTo = c.EffectiveValidTo;
+            }
 
-        // Interim description (INC-1 adds the stored one): a role the caller holds, deterministic by ordinal order.
-        var description = applicableConsents
-            .Where(c => c.GranteeType == GranteeType.Role && !string.IsNullOrWhiteSpace(c.RoleName))
-            .Select(c => c.RoleName!)
-            .Order(StringComparer.Ordinal)
-            .FirstOrDefault()
-            ?? $"Active grant for subject {userSid.Value}";
+            if (c.GranteeType == GranteeType.Role && !string.IsNullOrWhiteSpace(c.RoleName)
+                && (roleName is null || string.CompareOrdinal(c.RoleName, roleName) < 0))
+            {
+                roleName = c.RoleName;
+            }
+        }
+
+        var description = roleName ?? $"Active grant for subject {userSid.Value}";
 
         return new EffectiveTableAccessDto(
             table.ToString(),

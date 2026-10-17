@@ -423,9 +423,16 @@ public sealed class Issue158ExplainAccessMatchingTests
     {
         var (service, tables, repo) = CreateService(RegressionFixture());
 
-        var viaMcp = await CatalogOver(service, tables, repo).DescribeMyAccessAsync(Caller(roles: [RoleA]), "sales.public.orders");
+        var caller = Caller(roles: [RoleA]);
+        var accessor = Substitute.For<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+        accessor.HttpContext.Returns(new Microsoft.AspNetCore.Http.DefaultHttpContext { User = caller });
+
+        var viaMcp = await CatalogOver(service, tables, repo).DescribeMyAccessAsync(caller, "sales.public.orders");
+        var viaGraphQl = await new Autheris.GraphQL.Types.Query().MyAccessAsync("sales.public.orders", service, accessor);
 
         Json(viaMcp).ShouldNotContain(RoleB);
-        viaMcp.ConsentDescription.ShouldBe(RoleA);
+        Json(viaGraphQl).ShouldNotContain(RoleB);
+        viaGraphQl.ConsentDescription.ShouldBe(RoleA);
+        Json(viaGraphQl).ShouldBe(Json(viaMcp));
     }
 }
