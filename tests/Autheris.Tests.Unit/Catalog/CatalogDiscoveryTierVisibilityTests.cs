@@ -57,6 +57,18 @@ public sealed class CatalogDiscoveryTierVisibilityTests
     }
 
     [Fact]
+    public async Task List_AndSearch_SummaryRowsCarryNoSourceType_FullRowsKeepIt()
+    {
+        var service = Service(Opts(TenancyMode.Multi));
+
+        foreach (var rows in new[] { await service.ListDatasetsAsync(Subject()), await service.SearchCatalogAsync("", null, Subject()), await service.SearchCatalogAsync("t", null, Subject()) })
+        {
+            rows.Single(d => d.Table == "sum_t").SourceType.ShouldBeEmpty();
+            rows.Single(d => d.Table == "full_t").SourceType.ShouldNotBeNullOrEmpty();
+        }
+    }
+
+    [Fact]
     public async Task Detail_Summary_HasNoColumnsKeysOrIndexes_Full_HasColumns_Hidden_IsNull()
     {
         var service = Service(Opts(TenancyMode.Multi));

@@ -340,6 +340,9 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         return (results.Where(t => t != null).Select(t => t!).ToList(), allTables);
     }
 
+    /// <summary>Test seam: replaces the visibility engine output so a row the engine never produces (non-admin, no recognised view) reaches <see cref="ApplyShape"/>.</summary>
+    internal Func<IReadOnlyList<TableMetadata>, RequestContext, CancellationToken, Task<IReadOnlyList<TableMetadata>>>? EngineOutputForTesting { get; set; }
+
     private async Task<IReadOnlyList<TableMetadata>> VisibleAsync(
         IReadOnlyList<TableMetadata> tables, RequestContext context, CallerScope scope, CancellationToken ct)
     {
@@ -347,16 +350,18 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         {
             // Issue #111: the REST discovery surface applies the persisted tiers. The same resolver result (scope, same tenancy mode)
             // that drives the list selects the shaping, so a row without a recognised view never reaches a non-administrator.
-            var visible = await CatalogVisibility.VisibleTablesAsync(
-                tables,
-                context.User,
-                context.TenantId,
-                _consentRepository,
-                contract: null,
-                TenancyMode,
-                _gatewayOptions.Catalog.SharedTables,
-                CatalogSurface.Discovery,
-                ct).ConfigureAwait(false);
+            var visible = EngineOutputForTesting is { } seam
+                ? await seam(tables, context, ct).ConfigureAwait(false)
+                : await CatalogVisibility.VisibleTablesAsync(
+                    tables,
+                    context.User,
+                    context.TenantId,
+                    _consentRepository,
+                    contract: null,
+                    TenancyMode,
+                    _gatewayOptions.Catalog.SharedTables,
+                    CatalogSurface.Discovery,
+                    ct).ConfigureAwait(false);
             return ApplyShape(visible, CallerScopeResolver.IsAdminView(scope));
         }
         catch (OperationCanceledException)
@@ -398,7 +403,8 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         Domain: table.Identifier.Domain,
         Schema: table.Identifier.Schema,
         Table: table.Identifier.TableName,
-        SourceType: sourceType,
+        // A Summary row discloses only the allow-listed fields; the source type is not one of them.
+        SourceType: table.CatalogView == CatalogView.Summary ? string.Empty : sourceType,
         Sensitivity: table.Table.Sensitivity.ToString(),
         Description: table.Table.Description,
         IsActive: table.Table.IsActive);
