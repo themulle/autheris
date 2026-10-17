@@ -231,6 +231,8 @@ public static class GatewayStartupValidator
                 string.Join("\n  - ", warnings));
         }
 
+        ReportTenancyAndCatalogSettings(options, logger);
+
         if (!environment.IsDevelopment() && !options.VirtualFilters.RequireApproval)
         {
             Console.WriteLine("[Autheris] WARNING: VirtualFilters.RequireApproval is false outside Development. Four-eyes principle is recommended for production.");
@@ -593,6 +595,44 @@ public static class GatewayStartupValidator
             options.Caching.Garnet.EnableEmbeddedServer)
         {
             throw new ValidationException("NF-HA-02 violation: Multi-node cluster mode or more than one replica requires an external Redis/Garnet. The embedded Garnet server (Caching.Garnet.EnableEmbeddedServer = true) is local to one process and cannot provide cluster-wide state; disable it and configure Caching.Redis.");
+        }
+    }
+
+    /// <summary>
+    /// Reports the effective tenancy mode (Warning when it is the default, Information when explicit) and the deprecation of the
+    /// <c>Catalog:AllowAuthenticatedCatalogDiscovery</c> flag, which no longer widens any catalog view.
+    /// </summary>
+    internal static void ReportTenancyAndCatalogSettings(GatewayOptions options, ILogger? logger)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var tenancy = options.Tenancy;
+        if (!tenancy.IsExplicit)
+        {
+            Report(logger, LogLevel.Warning,
+                "Gateway:Tenancy:Mode is not configured; defaulting to Multi. Single-tenant deployments must set Gateway:Tenancy:Mode=Single; " +
+                "in Multi mode a principal without tenant claim is not treated as an administrator and sees only consented tables.");
+        }
+        else if (tenancy.IsValid)
+        {
+            Report(logger, LogLevel.Information, $"Gateway:Tenancy:Mode is {tenancy.EffectiveMode}.");
+        }
+
+        if (options.Catalog.AllowAuthenticatedCatalogDiscovery)
+        {
+            Report(logger, LogLevel.Warning,
+                "Gateway:Catalog:AllowAuthenticatedCatalogDiscovery is deprecated and has no effect: non-administrators see only consented tables in the GraphQL catalog.");
+        }
+    }
+
+    private static void Report(ILogger? logger, LogLevel level, string message)
+    {
+        if (logger is not null)
+        {
+            logger.Log(level, "{Message}", message);
+        }
+        else
+        {
+            Console.WriteLine($"[Autheris] {level.ToString().ToUpperInvariant()}: {message}");
         }
     }
 

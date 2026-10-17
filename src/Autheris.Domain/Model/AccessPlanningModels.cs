@@ -72,6 +72,43 @@ public sealed record AdminApplyAccessResult(
 
 
 /// <summary>
+/// Issue #107 (SEC-RF107-14): request to plan a change of the row filter key-set cache settings. Exactly one of
+/// <paramref name="RowFilterId"/> (rule level) or <paramref name="DatasetId"/> (object level) is set. All values are replaced as given:
+/// a missing value means "inherit"; an object-level request with all values missing clears the object level.
+/// <paramref name="Strategy"/> is accepted only as the strings <c>Exists</c> or <c>KeySetCache</c> (no numeric enum values).
+/// </summary>
+public sealed record AdminPlanRowFilterEvaluationRequest(
+    string? RowFilterId,
+    string? DatasetId,
+    string? Strategy,
+    int? DurationSeconds,
+    int? MaxKeys,
+    string? Reason = null);
+
+/// <summary>Row filter evaluation settings as shown in plan and apply results (strategy as its name, never a number).</summary>
+public sealed record RowFilterEvaluationSettingsDto(string? Strategy, int? DurationSeconds, int? MaxKeys);
+
+/// <summary>Result of planning a row filter evaluation change: before/after settings and warnings, no state mutation.</summary>
+public sealed record AdminPlanRowFilterEvaluationResult(
+    string PlanId,
+    string Level,
+    string? RowFilterId,
+    string DatasetId,
+    RowFilterEvaluationSettingsDto Before,
+    RowFilterEvaluationSettingsDto After,
+    IReadOnlyList<string> Warnings,
+    DateTimeOffset ExpiresAt);
+
+/// <summary>Result of applying a row filter evaluation plan (the epoch of the target table was bumped).</summary>
+public sealed record AdminApplyRowFilterEvaluationResult(
+    bool Success,
+    string PlanId,
+    string Level,
+    string DatasetId,
+    long NewEpoch,
+    string? Message = null);
+
+/// <summary>
 /// Request to register a new datasource (OpenAPI/Swagger/SQL/etc.).
 /// </summary>
 public sealed record AdminRegisterDatasourceRequest(

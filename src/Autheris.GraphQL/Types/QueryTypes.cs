@@ -12,6 +12,7 @@ using HotChocolate;
 using HotChocolate.Types;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
+using Autheris.Application.Catalog.Services;
 
 namespace Autheris.GraphQL.Types;
 
@@ -396,11 +397,14 @@ public sealed class Query
                 .Build());
         }
 
-        // Only the canonical ClusterAdmin keeps the global view; GovernanceAdmin is tenant-scoped.
-        var isClusterAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
-        var isGovernanceAdmin = roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
+        // Caller class from the one canonical resolver: only the canonical ClusterAdmin keeps the global view; a GovernanceAdmin is
+        // tenant-scoped (in Gateway:Tenancy:Mode=Single without tenant claim it is unrestricted; a claim-less principal in Multi mode is no
+        // administrator). AllowAuthenticatedCatalogDiscovery no longer widens anything: every non-administrator takes the consent path.
+        var callerScope = CallerScopeResolver.Resolve(
+            principal, options?.Value?.Tenancy?.EffectiveMode ?? TenancyMode.Multi);
+        var isClusterAdmin = callerScope == CallerScope.Global;
+        var isGovernanceAdmin = callerScope is CallerScope.Unrestricted or CallerScope.Tenant;
         var isAdmin = isClusterAdmin || isGovernanceAdmin;
-        var allowDiscovery = options?.Value?.Catalog?.AllowAuthenticatedCatalogDiscovery == true;
 
         var allTables = await metadataRepository.GetAllTablesAsync(ct);
         if (contractDef != null)
@@ -432,9 +436,9 @@ public sealed class Query
         {
             visibleTables = allTables;
         }
-        else if (isGovernanceAdmin || allowDiscovery)
+        else if (isGovernanceAdmin)
         {
-            // SR-L-21: admin/discovery views are confined to the caller's tenant (consent-derived ownership + shared tables).
+            // SR-L-21: the tenant-scoped administrator view is confined to the caller's tenant (consent-derived ownership + shared tables).
             var tenantConsentTables = await consentRepository.GetTablesWithConsentsForTenantAsync(tenantId, ct);
             visibleTables = Autheris.Application.Services.CatalogVisibility.FilterToTenant(
                 allTables, tenantId, tenantConsentTables, options?.Value?.Catalog?.SharedTables);
@@ -779,6 +783,20 @@ public sealed class AnalyticsQueryExtensions
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode(MaskedAggregationException.ErrorCodeConst)
+                .SetMessage(ex.Message)
+                .Build());
+        }
+        catch (AggregationColumnUnavailableException)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode(AggregationColumnUnavailableException.ErrorCodeConst)
+                .SetMessage(AggregationColumnUnavailableException.FixedMessage)
+                .Build());
+        }
+        catch (AggregationRowCapExceededException ex)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode(AggregationRowCapExceededException.ErrorCodeConst)
                 .SetMessage(ex.Message)
                 .Build());
         }

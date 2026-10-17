@@ -37,6 +37,11 @@ public sealed class RlsFilterGenerator : IRlsFilterGenerator
         return AdvancedRlsFilterGenerator.BuildCorrelatedPredicate(filter, parameterPrefix);
     }
 
+    public PolicyPredicate BuildCorrelatedPredicate(ConsentRowFilter filter, string parameterPrefix, Autheris.Application.Sql.Policy.RowFilterKeySets.CorrelatedFilterSource source)
+    {
+        return AdvancedRlsFilterGenerator.BuildCorrelatedPredicate(filter, parameterPrefix, source);
+    }
+
     public PolicyPredicate BuildCrossSourceSetPredicate(ConsentRowFilter filter, DatabaseDialect dialect, string parameterPrefix = "__gql_rls_")
     {
         return AdvancedRlsFilterGenerator.BuildCrossSourceSetPredicate(filter, dialect, parameterPrefix);

@@ -300,7 +300,8 @@ public sealed class McpHybridToolsTests
             _metadataRepo);
 
         var tool = McpDatasetTools.Definitions().First(t => t.Name == McpDatasetTools.ListDatasources);
-        var session = CreateSessionContext("user:eve", "tenant-1");
+        // Data sources are administrator-only (endpoint URLs, authentication state).
+        var session = CreateSessionContext("user:eve", "tenant-1") with { Roles = ["ClusterAdmin"] };
 
         _catalogDiscoveryService.ListDatasourcesAsync(Arg.Any<RequestContext>(), Arg.Any<CancellationToken>())
             .Returns([new CatalogDatasourceSummary("ds-1", "Warehouse", "sales", "PostgreSql", null, true, "active", DateTimeOffset.UtcNow)]);
@@ -311,6 +312,25 @@ public sealed class McpHybridToolsTests
         resultJson.ShouldContain("Warehouse");
         resultJson.ShouldContain("PostgreSql");
         resultJson.ShouldNotContain("secret");
+    }
+
+    [Fact]
+    public async Task ToolExecution_ListDatasources_NonAdmin_IsForbidden_AndNeverCallsTheService()
+    {
+        var handler = new McpToolExecutionHandler(
+            _sqlExecutionService,
+            _dataQueryService,
+            _catalogDiscoveryService,
+            _apiDispatcherService,
+            _lineageGraphStore,
+            _metadataRepo);
+
+        var tool = McpDatasetTools.Definitions().First(t => t.Name == McpDatasetTools.ListDatasources);
+
+        var resultJson = await handler.ExecuteToolAsync(tool, "{}", CreateSessionContext("user:eve", "tenant-1"));
+
+        resultJson.ShouldContain("Forbidden");
+        await _catalogDiscoveryService.DidNotReceive().ListDatasourcesAsync(Arg.Any<RequestContext>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

@@ -529,6 +529,17 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
         {
             throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode(MaskedAggregationException.ErrorCodeConst).Build());
         }
+        catch (AggregationColumnUnavailableException)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetMessage(AggregationColumnUnavailableException.FixedMessage)
+                .SetCode(AggregationColumnUnavailableException.ErrorCodeConst)
+                .Build());
+        }
+        catch (AggregationRowCapExceededException ex)
+        {
+            throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode(AggregationRowCapExceededException.ErrorCodeConst).Build());
+        }
         catch (GatewayInvalidQueryException ex)
         {
             throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode("INVALID_QUERY").Build());
@@ -602,6 +613,17 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
                 list.Add(item);
             }
             return list;
+        }
+        catch (AggregationColumnUnavailableException)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetMessage(AggregationColumnUnavailableException.FixedMessage)
+                .SetCode(AggregationColumnUnavailableException.ErrorCodeConst)
+                .Build());
+        }
+        catch (AggregationRowCapExceededException ex)
+        {
+            throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode(AggregationRowCapExceededException.ErrorCodeConst).Build());
         }
         catch (GatewayInvalidQueryException ex)
         {

@@ -9,6 +9,8 @@ using System.Threading.Tasks;
 using Autheris.Application.Dbt.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using Microsoft.Extensions.Options;
 
 public sealed class InMemorySemanticCatalog : ISemanticCatalogService
 {
@@ -21,6 +23,17 @@ public sealed class InMemorySemanticCatalog : ISemanticCatalogService
 
     private readonly ConcurrentDictionary<string, TenantCatalogPartition> _partitions = new(StringComparer.OrdinalIgnoreCase);
     private volatile string _manifestVersion = "1.0";
+
+    private readonly bool _singleTenant;
+
+    /// <param name="gatewayOptions">
+    /// Source of <c>Gateway:Tenancy:Mode</c>. Only in <see cref="TenancyMode.Single"/> a tenant without its own partition falls back to the legacy
+    /// partition; in <see cref="TenancyMode.Multi"/> (also when no options are supplied) a tenant sees nothing but its own partition.
+    /// </param>
+    public InMemorySemanticCatalog(IOptions<GatewayOptions>? gatewayOptions = null)
+    {
+        _singleTenant = gatewayOptions?.Value.Tenancy.EffectiveMode == TenancyMode.Single;
+    }
 
     public string ManifestVersion => _manifestVersion;
 
@@ -142,7 +155,9 @@ public sealed class InMemorySemanticCatalog : ISemanticCatalogService
             return partition;
         }
 
-        if (_partitions.TryGetValue(TenantId.LegacySingleTenant.Value, out var fallback))
+        // WP-0 (F-6): the legacy partition is shared by every claim-less caller. It is a fallback only for single-tenant deployments;
+        // in a multi-tenant deployment a tenant must never see the metric definitions that were imported into another partition.
+        if (_singleTenant && _partitions.TryGetValue(TenantId.LegacySingleTenant.Value, out var fallback))
         {
             return fallback;
         }

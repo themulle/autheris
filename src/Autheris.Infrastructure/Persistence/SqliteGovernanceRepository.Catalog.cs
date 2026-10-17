@@ -195,6 +195,9 @@ public partial class SqliteGovernanceRepository
                 throw;
             }
 
+            var rowFilterEvaluation = await RowFilterEvaluationStore.ReadObjectAsync(
+                conn, null, CatalogKeyDefinitionStore.Sqlite, tableId.Value, ct).ConfigureAwait(false);
+
             var result = new TableMetadata
             {
                 Table = tableEntity,
@@ -202,7 +205,8 @@ public partial class SqliteGovernanceRepository
                 Columns = columns,
                 ColumnMaskingRules = maskingRules,
                 PrimaryKeyColumns = pkColumns,
-                Indexes = indexes
+                Indexes = indexes,
+                RowFilterEvaluation = rowFilterEvaluation
             };
 
             if (AfterMetadataSnapshotForTesting is { } hook)
@@ -706,6 +710,54 @@ public partial class SqliteGovernanceRepository
         QueueMetadataInvalidation(table);
         await _epochValidationService.InvalidateEpochAsync(table, ct);
         return change;
+    }
+
+    public async Task<RowFilterEvaluationChange?> SetRowFilterEvaluationAsync(
+        TableIdentifier table, RowFilterEvaluationSettings? settings, Sid actor, CancellationToken ct = default)
+    {
+        RowFilterEvaluationChange? change;
+        await using (var scope = await WriteScopeAsync(ct).ConfigureAwait(false))
+        {
+            var conn = scope.Connection;
+            using var tx = conn.BeginTransaction();
+            try
+            {
+                change = await RowFilterEvaluationStore.SetObjectAsync(
+                    conn, tx, CatalogKeyDefinitionStore.Sqlite, table, settings, actor,
+                    () => BumpTableEpochAndReadAsync(conn, tx, table, ct), ct).ConfigureAwait(false);
+                if (change is null)
+                {
+                    await tx.RollbackAsync(ct);
+                    return null;
+                }
+
+                await tx.CommitAsync(ct);
+            }
+            catch
+            {
+                await tx.RollbackAsync(ct);
+                throw;
+            }
+        }
+
+        QueueMetadataInvalidation(table);
+        await _epochValidationService.InvalidateEpochAsync(table, ct);
+        return change;
+    }
+
+    /// <summary>Bumps the policy epoch inside the caller's transaction and returns the new value (issue #107).</summary>
+    private async Task<long> BumpTableEpochAndReadAsync(SqliteConnection conn, SqliteTransaction tx, TableIdentifier table, CancellationToken ct)
+    {
+        await IncrementTableEpochInternalAsync(conn, table, tx, ct).ConfigureAwait(false);
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = @"SELECT epoch FROM POLICY_EPOCHS
+                            WHERE domain = @domain COLLATE NOCASE AND schema_name = @schema COLLATE NOCASE AND table_name = @table COLLATE NOCASE";
+        cmd.Parameters.AddWithValue("@domain", table.Domain);
+        cmd.Parameters.AddWithValue("@schema", table.Schema);
+        cmd.Parameters.AddWithValue("@table", table.TableName);
+        var result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return result is long l ? l : Convert.ToInt64(result ?? 1L, System.Globalization.CultureInfo.InvariantCulture);
     }
 
     public async Task<TableIdentifier?> GetActiveTableIdentifierAsync(TableIdentifier table, CancellationToken ct = default)

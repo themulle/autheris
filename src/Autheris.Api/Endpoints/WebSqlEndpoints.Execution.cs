@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Application.Common;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -84,7 +85,7 @@ public static partial class WebSqlEndpoints
             catch (JsonException ex)
             {
                 // SEC M-10: Parser details stay in the server log
-                logger.LogWarning(ex, "WebSQL request body is not valid JSON. TraceId={TraceId}", httpContext.TraceIdentifier);
+                logger.Warning(ex, "WebSQL request body is not valid JSON. TraceId={TraceId}", httpContext.TraceIdentifier);
                 httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
                 await httpContext.Response.WriteAsJsonAsync(new { error = "Invalid JSON payload.", traceId = httpContext.TraceIdentifier }, ct);
                 return;
@@ -427,13 +428,13 @@ public static partial class WebSqlEndpoints
         catch (SecurityException ex)
         {
             // SEC-12H-06: Uniform 404 response to eliminate the enumeration oracle
-            logger.LogWarning(ex, "Unauthorized statement access attempt for {StatementId}", statementId);
+            logger.Warning(ex, "Unauthorized statement access attempt for {StatementId}", statementId);
             httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
             await httpContext.Response.WriteAsJsonAsync(new { error = "Statement not found or expired.", id = statementId }, ct);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to poll statement {StatementId}", statementId);
+            logger.Error(ex, "Failed to poll statement {StatementId}", statementId);
             httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
             await httpContext.Response.WriteAsJsonAsync(new { error = "InternalServerError", message = GenericServerErrorMessage }, ct);
         }

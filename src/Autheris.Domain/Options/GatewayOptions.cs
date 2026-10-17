@@ -57,6 +57,7 @@ public sealed class GatewayOptions
     [Required] public LoggingOptions Logging { get; init; } = new();
     [Required] public ClassificationOptions Classification { get; init; } = new();
     [Required] public TenantIsolationOptions TenantIsolation { get; init; } = new();
+    public TenancyOptions Tenancy { get; init; } = new();
     [Required] public ODataOptions OData { get; init; } = new();
     [Required] public WebhooksOptions Webhooks { get; init; } = new();
     [Required] public FieldSunsettingOptions FieldSunsetting { get; init; } = new();

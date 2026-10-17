@@ -133,7 +133,7 @@ public class DataPathSecurityTests : IDisposable
     }
 
     [Fact]
-    public async Task Catalog_WhenAllowAuthenticatedCatalogDiscoveryEnabled_AllAuthenticatedUsersSeeAllTables()
+    public async Task Catalog_WhenAllowAuthenticatedCatalogDiscoveryEnabled_FlagIsDeprecatedAndDoesNotWidenTheCatalog()
     {
         var userWithoutRole = new Sid("S-1-5-21-USER-NO-ROLE");
         var accessorWithoutRole = CreateAccessor(userWithoutRole, roles: new[] { "Auditor" });
@@ -146,9 +146,10 @@ public class DataPathSecurityTests : IDisposable
             }
         });
 
+        // WP-0: the flag no longer widens anything; a caller without consent keeps an empty catalog.
         var catalog = await _query.GetCatalogAsync(_repository, accessorWithoutRole, options);
-        catalog.ShouldContain(t => t.TableName == "finance_table_2");
-        catalog.ShouldContain(t => t.TableName == "finance_table_1");
+        catalog.ShouldNotContain(t => t.TableName == "finance_table_2");
+        catalog.ShouldNotContain(t => t.TableName == "finance_table_1");
     }
 
     [Fact]

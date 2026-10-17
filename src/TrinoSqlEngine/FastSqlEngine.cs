@@ -29,7 +29,7 @@ public sealed class ThrowingErrorListener : BaseErrorListener, IAntlrErrorListen
     }
 }
 
-public sealed partial class FastSqlEngine : ISqlEngine
+public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQueryCompiler
 {
     /// <summary>Thread-safe default shared instance of <see cref="FastSqlEngine"/>.</summary>
     public static FastSqlEngine Default { get; } = new();
@@ -763,6 +763,16 @@ public sealed partial class FastSqlEngine : ISqlEngine
     /// <inheritdoc />
     public Ast.Emit.CompiledSql Compile(ReadOnlyMemory<char> sql, CompileRequest request, CancellationToken cancellationToken) =>
         _compiler.Value.Compile(sql, request, cancellationToken);
+
+    private static readonly Governance.PolicyKeyQueryCompiler KeyQueryCompiler = new();
+
+    /// <summary>
+    /// Issue #107 (PLAN-GOV-107 A-3): compiles the key query of a registered correlated EXISTS through the policy-subquery controls. The
+    /// engine entry point delegates to the stateless <see cref="Governance.PolicyKeyQueryCompiler"/>.
+    /// </summary>
+    /// <inheritdoc />
+    public Governance.CompiledKeyQuery CompileKeyQuery(Governance.PolicyKeyQueryRequest request, CancellationToken ct) =>
+        KeyQueryCompiler.CompileKeyQuery(request, ct);
 
     /// <summary>
     /// Analyzes a SQL query AST for statement type, referenced physical tables, projected columns, and query metrics.

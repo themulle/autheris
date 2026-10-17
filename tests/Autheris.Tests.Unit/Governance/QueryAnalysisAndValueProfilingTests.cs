@@ -784,7 +784,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             metadataRepo,
             consentRepo,
             executionService,
-            options: Options.Create(new GatewayOptions()),
+            options: Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Single" } }),
             profileService: profileService,
             syntheticRowGenerator: syntheticGenerator,
             auditLogRepository: auditRepo);
@@ -804,7 +804,10 @@ public sealed class QueryAnalysisAndValueProfilingTests
         emailCol.ValueProfile!.SampleValues.Should().BeNull();
 
         // 2. sample_rows(synthetic: true) returns synthetic rows without calling IGatewayExecutionService
-        var sample = await catalog.SampleRowsAsync(viewer, "crm.public.contacts", count: 5, synthetic: true);
+        // WP-0: the consent-less "released to catalog viewers" branch is closed; only an administrator view or an active consent may sample.
+        await Assert.ThrowsAsync<Autheris.Domain.Exceptions.GatewayForbiddenException>(() => catalog.SampleRowsAsync(viewer, "crm.public.contacts", count: 5, synthetic: true));
+        var administrator = Autheris.Tests.Unit.Catalog.Wp0.User("catalog-admin-1", null, ["GovernanceAdmin"]);
+        var sample = await catalog.SampleRowsAsync(administrator, "crm.public.contacts", count: 5, synthetic: true);
         sample.IsSynthetic.Should().BeTrue();
         sample.RowCount.Should().Be(5);
         sample.Rows.Should().HaveCount(5);

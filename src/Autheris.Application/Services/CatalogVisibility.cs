@@ -6,9 +6,11 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog.Services;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 
 /// <summary>
 /// F-CONS-04 / MCP-1: which catalog tables and columns a non-admin subject may discover. Shared by the GraphQL
@@ -213,9 +215,12 @@ public static class CatalogVisibility
     }
 
     /// <summary>
-    /// Tables <paramref name="principal"/> may discover within <paramref name="tenantId"/>: GovernanceAdmin and ClusterAdmin
-    /// see every table, everybody else only tables passing <see cref="FilterForSubject"/>. Without a SID or without a consent
-    /// repository nothing is visible (fail-closed). Slices results by <paramref name="contract"/> if specified.
+    /// Tables <paramref name="principal"/> may discover within <paramref name="tenantId"/>. The caller class comes from
+    /// <see cref="CallerScopeResolver"/>: the canonical ClusterAdmin (and, in <see cref="TenancyMode.Single"/>, a claim-less
+    /// GovernanceAdmin) sees every table, a GovernanceAdmin with a tenant claim only its tenant (<see cref="FilterToTenant"/>),
+    /// everybody else only tables passing <see cref="FilterForSubject"/>. Without a SID or without a consent repository nothing
+    /// is visible (fail-closed). Slices results by <paramref name="contract"/> if specified. These overloads that do not pass a
+    /// tenancy mode use <see cref="TenancyMode.Multi"/> (the confined view).
     /// </summary>
     public static Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
         IReadOnlyList<TableMetadata> allTables,
@@ -223,7 +228,16 @@ public static class CatalogVisibility
         TenantId tenantId,
         IConsentRepository? consentRepository,
         CancellationToken ct = default)
-        => VisibleTablesAsync(allTables, principal, tenantId, consentRepository, contract: null, ct);
+        => VisibleTablesAsync(allTables, principal, tenantId, consentRepository, contract: null, TenancyMode.Multi, sharedTables: null, ct);
+
+    public static Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
+        IReadOnlyList<TableMetadata> allTables,
+        ClaimsPrincipal principal,
+        TenantId tenantId,
+        IConsentRepository? consentRepository,
+        Autheris.Application.Governance.Contracts.SchemaContractDefinition? contract,
+        CancellationToken ct = default)
+        => VisibleTablesAsync(allTables, principal, tenantId, consentRepository, contract, TenancyMode.Multi, sharedTables: null, ct);
 
     public static async Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
         IReadOnlyList<TableMetadata> allTables,
@@ -231,17 +245,37 @@ public static class CatalogVisibility
         TenantId tenantId,
         IConsentRepository? consentRepository,
         Autheris.Application.Governance.Contracts.SchemaContractDefinition? contract,
+        TenancyMode tenancyMode,
+        IEnumerable<string>? sharedTables,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(allTables);
         ArgumentNullException.ThrowIfNull(principal);
 
-        var roles = principal.GetUserRoles();
-        if (roles.Contains("GovernanceAdmin") || Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal))
+        var scope = CallerScopeResolver.Resolve(principal, tenancyMode);
+        switch (scope)
         {
-            return FilterByContract(allTables, contract);
+            case CallerScope.None:
+                return Array.Empty<TableMetadata>();
+            case CallerScope.Global:
+            case CallerScope.Unrestricted:
+                return FilterByContract(allTables, contract);
+            case CallerScope.Tenant:
+            {
+                if (consentRepository == null)
+                {
+                    return Array.Empty<TableMetadata>();
+                }
+
+                // Same confinement rule as the GraphQL catalog (consent-derived ownership plus Gateway:Catalog:SharedTables).
+                var claimTenant = principal.GetTenantId();
+                var tenantConsentTables = await consentRepository.GetTablesWithConsentsForTenantAsync(claimTenant, ct).ConfigureAwait(false);
+                var confined = FilterToTenant(allTables, claimTenant, tenantConsentTables, sharedTables);
+                return FilterByContract(confined, contract);
+            }
         }
 
+        var roles = principal.GetUserRoles();
         var userSid = principal.GetUserSid() ?? (!string.IsNullOrWhiteSpace(principal.Identity?.Name) ? new Sid(principal.Identity.Name) : (Sid?)null);
         if (userSid == null || consentRepository == null)
         {

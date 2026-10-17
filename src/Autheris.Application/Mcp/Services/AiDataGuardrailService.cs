@@ -1,6 +1,7 @@
 namespace Autheris.Application.Mcp.Services;
 
 using System;
+using Autheris.Application.Catalog.Services;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -91,6 +92,12 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         _eventBus = eventBus;
         _sqlEngine = sqlEngine;
     }
+
+    // Canonical caller class (never role strings): only the global and the unrestricted administrator skip the catalog visibility check;
+    // a tenant-scoped administrator is confined by it, a claim-less GovernanceAdmin in Multi mode is no administrator.
+    private bool IsUnrestrictedCatalogCaller(McpSessionContext session) =>
+        CallerScopeResolver.Resolve(McpProtocolHandler.BuildPrincipalFromSession(session), _options.Value.Tenancy.EffectiveMode)
+            is CallerScope.Global or CallerScope.Unrestricted;
 
     public async ValueTask<McpToolCallResult> ExecuteToolWithGuardrailAsync(
         McpToolCallRequest request,
@@ -281,13 +288,12 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
 
             if (meta?.Table.RequiresFourEyes == true)
             {
-                var roles = sessionContext.Roles ?? [];
-                bool isAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) || roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
+                bool isAdmin = IsUnrestrictedCatalogCaller(sessionContext);
 
                 if (_consentRepository != null && !_options.Value.IsMcpAuthBypassed && !isAdmin)
                 {
                     var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
-                    var visibleTables = await McpCatalogVisibility.VisibleTablesAsync([meta], principal, _consentRepository, cancellationToken).ConfigureAwait(false);
+                    var visibleTables = await McpCatalogVisibility.VisibleTablesAsync([meta], principal, _consentRepository, _options.Value, cancellationToken).ConfigureAwait(false);
                     bool isVisible = visibleTables.Any(t =>
                         t.Identifier.Equals(resolvedTable.Value) ||
                         (string.Equals(t.Identifier.Domain, resolvedTable.Value.Domain, StringComparison.OrdinalIgnoreCase) &&
@@ -344,14 +350,13 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
 
             var queries = await _goldenQueryService.GetGoldenQueriesAsync(domain, tableName, cancellationToken).ConfigureAwait(false);
             var isMcpAuthBypassed = _options.Value.IsMcpAuthBypassed;
-            var roles = sessionContext.Roles ?? [];
-            bool isAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) || roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
+            bool isAdmin = IsUnrestrictedCatalogCaller(sessionContext);
 
             if (_consentRepository != null && !isMcpAuthBypassed && !isAdmin)
             {
                 var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
                 var allTables = _tableMetadataRepository != null ? await _tableMetadataRepository.GetAllTablesAsync(cancellationToken).ConfigureAwait(false) : Array.Empty<TableMetadata>();
-                var visibleTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepository, cancellationToken).ConfigureAwait(false);
+                var visibleTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepository, _options.Value, cancellationToken).ConfigureAwait(false);
                 var visibleKeys = visibleTables.Select(t => (Domain: t.Identifier.Domain.ToLowerInvariant(), Table: t.Identifier.TableName.ToLowerInvariant())).ToHashSet();
                 queries = queries.Where(q => visibleKeys.Contains((q.Domain.ToLowerInvariant(), q.TableName.ToLowerInvariant()))).ToList();
             }

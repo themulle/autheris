@@ -50,6 +50,11 @@ public static class GatewayGovernanceServiceExtensions
         GatewayOptions gatewayOptions)
     {
         services.AddSingleton<Autheris.Application.Audit.IAuditWriter, Autheris.Application.Audit.AuditWriter>();
+
+        // Issue #107: admin surface of the row filter key-set cache settings and the startup validation of its global options
+        // (runs with the GatewayOptions ValidateOnStart; SEC-RF107-16).
+        services.AddSingleton<IRowFilterEvaluationAdminService, RowFilterEvaluationAdminService>();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<GatewayOptions>, Autheris.Application.Policy.RowFilterKeySetCacheOptionsValidator>();
         services.AddSingleton<Autheris.Application.Auditing.AuditGroupCommitOptions>();
         services.AddSingleton<Autheris.Application.Auditing.AuditGroupCommitSink>();
 
@@ -138,6 +143,9 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IRowFilterSqlBuilder, RowFilterSqlBuilder>();
         services.AddSingleton<IConsentResolutionService, ConsentResolutionService>();
         services.AddSingleton<IIdentitySubjectResolver, IdentitySubjectResolver>();
+        // WP-0 (PLAN-GOV-113): only a person decides consent requests. The resolvers resolve the guard with GetRequiredService (no fallback).
+        services.AddSingleton<Autheris.Application.Governance.ConsentRequests.IConsentDecisionGuard, Autheris.Application.Governance.ConsentRequests.ConsentDecisionGuard>();
+        services.AddSingleton<Autheris.Application.Governance.ConsentRequests.IConsentDecisionDenialRecorder, Autheris.Application.Governance.ConsentRequests.ConsentDecisionDenialRecorder>();
         services.AddSingleton<IKeyVaultSecretProvider, DefaultEnvironmentSecretProvider>();
         services.AddSingleton<IColumnMaskingProvider, ColumnMaskingProvider>();
 

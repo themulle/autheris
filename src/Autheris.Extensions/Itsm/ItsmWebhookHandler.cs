@@ -1,3 +1,4 @@
+using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.State;
 
 namespace Autheris.Extensions.Itsm;
@@ -370,12 +371,20 @@ public sealed class ItsmWebhookHandler(
         if (string.Equals(payload.Action, "REJECT", StringComparison.OrdinalIgnoreCase))
         {
             logger.LogInformation("Consent Request {RequestId} via ITSM Ticket {TicketId} ({System}) abgelehnt.", request.Id, payload.TicketId, payload.System);
-            await governanceRepo.RejectConsentRequestAsync(
-                request.Id,
-                actor,
-                payload.Reason ?? $"Rejected via {payload.System} webhook",
-                isExternalItsm: true,
-                ct).ConfigureAwait(false);
+            try
+            {
+                await governanceRepo.RejectConsentRequestAsync(
+                    request.Id,
+                    actor,
+                    payload.Reason ?? $"Rejected via {payload.System} webhook",
+                    isExternalItsm: true,
+                    ct).ConfigureAwait(false);
+            }
+            catch (ConsentRequestStatusConflictException)
+            {
+                return AcknowledgeLostRace(request.Id);
+            }
+
             return true;
         }
 
@@ -386,12 +395,20 @@ public sealed class ItsmWebhookHandler(
             // SEC M-2: Route approval through ApproveConsentRequestStepAsync to enforce separation of duties,
             // approver != requester check, and four-eyes verification rather than bypassing directly to ActivateConsentAsync.
             // Review R3-1: the approver is passed typed so the repository can check it against the table owners.
-            var stepResult = await governanceRepo.ApproveConsentRequestStepAsync(
-                request.Id,
-                actor,
-                isExternalItsmApproval: true,
-                itsmApproverAccount: string.IsNullOrWhiteSpace(payload.Approver) ? null : payload.Approver.Trim(),
-                ct).ConfigureAwait(false);
+            ConsentRequest stepResult;
+            try
+            {
+                stepResult = await governanceRepo.ApproveConsentRequestStepAsync(
+                    request.Id,
+                    actor,
+                    isExternalItsmApproval: true,
+                    itsmApproverAccount: string.IsNullOrWhiteSpace(payload.Approver) ? null : payload.Approver.Trim(),
+                    ct).ConfigureAwait(false);
+            }
+            catch (ConsentRequestStatusConflictException)
+            {
+                return AcknowledgeLostRace(request.Id);
+            }
 
             if (string.Equals(stepResult.Status, "APPROVED", StringComparison.OrdinalIgnoreCase))
             {
@@ -414,6 +431,16 @@ public sealed class ItsmWebhookHandler(
 
         logger.LogWarning("Webhook ignoriert: Unbekannte Action '{Action}'", payload.Action);
         return false;
+    }
+
+    /// <summary>
+    /// A concurrent decision already moved the request out of <c>PENDING_EXTERNAL_APPROVAL</c> (the same outcome the idempotency check above
+    /// acknowledges): the delivery is acknowledged without effect, so the ITSM system neither sees an error nor retries endlessly. Ids only are logged.
+    /// </summary>
+    private bool AcknowledgeLostRace(Guid requestId)
+    {
+        logger.LogInformation("Webhook acknowledged without effect: consent request {RequestId} was decided concurrently.", requestId);
+        return true;
     }
 
     /// <summary>

@@ -689,7 +689,10 @@ Ermöglicht die zentrale Anbindung an externe Unternehmens-Datenkataloge (**Micr
 | `SharedTables` | `List<string>` | `domain.schema.table` | `[]` | Tables visible in the GraphQL `catalog` to administrators and discovery users of every tenant, in addition to the tables the tenant holds a consent record on. |
 
 > [!NOTE]
-> **Tenant-scoped GraphQL catalog and `syncOpenMetadata`**: Outside the single-tenant deployment (`legacy-single-tenant`), the GraphQL `catalog` admin view and `AllowAuthenticatedCatalogDiscovery` are limited to tables on which the caller's tenant holds at least one consent record (Allow or Deny) or that are listed in `Catalog.SharedTables`. Only the canonical `ClusterAdmin` keeps the global view; `GovernanceAdmin` is tenant-scoped. `accessStatus` is computed from the caller's consents. `syncOpenMetadata` is available to the canonical `ClusterAdmin` (all tenants) and to `GovernanceAdmin` (own tenant only: tables mapped to that tenant via `OpenMetadata.ServiceDatabaseToTenantMap`); it returns warnings as stable codes with counts (for example `OM_TABLE_MAP_FAILED: 3`) and failures as the error code `SYNC_FAILED` without detail text. Full details are written to the server log.
+> **Tenant-scoped GraphQL catalog and `syncOpenMetadata`**: In `Gateway:Tenancy:Mode = Multi` (default), the tenant administrator view of the GraphQL `catalog` is limited to tables on which the caller's tenant holds at least one consent record (Allow or Deny) or that are listed in `Catalog.SharedTables`. Only the canonical `ClusterAdmin` keeps the global view; `GovernanceAdmin` is tenant-scoped. `accessStatus` is computed from the caller's consents. `syncOpenMetadata` is available to the canonical `ClusterAdmin` (all tenants) and to `GovernanceAdmin` (own tenant only: tables mapped to that tenant via `OpenMetadata.ServiceDatabaseToTenantMap`); it returns warnings as stable codes with counts (for example `OM_TABLE_MAP_FAILED: 3`) and failures as the error code `SYNC_FAILED` without detail text. Full details are written to the server log.
+
+> [!NOTE]
+> **`AllowAuthenticatedCatalogDiscovery` is deprecated and has no effect.** Every non-administrator (GraphQL, REST, MCP) sees only the tables and columns its consents allow; the flag no longer widens the catalog. A start-up warning is logged when it is set. The explicit `OpenSchema` mode is a separate operator opt-in and is unchanged.
 
 > [!NOTE]
 > **Sensitivity Classification Ranking (D-4 & ADR-010)**:
@@ -1084,6 +1087,44 @@ Maxima of individual grants (`User` / `ServicePrincipal` grantees and individual
   }
 }
 ```
+
+### 2.22 `Tenancy` (Deployment tenancy mode)
+
+Whether the deployment is single- or multi-tenant is a **deployment setting**. It is never inferred from a missing tenant claim in a token.
+
+| Key | Type | Range | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `Mode` | `string` | `Multi`, `Single` (names only, case-insensitive) | `Multi` (also when empty) | `Multi`: several tenants share the deployment. A principal without tenant claim is never an administrator: it takes the consent path only. `Single`: one tenant owns the deployment, tokens carry no tenant claim, and a `GovernanceAdmin` without tenant claim sees the whole catalog. Any other value fails start-up validation. |
+
+**Catalog caller classes.** Every catalog channel (REST `/api/v1/catalog/*`, GraphQL `catalog`, MCP tools and resources, `invoke_api`, Trino/Arrow/Iceberg metadata) decides the caller class from the authenticated principal only, through one resolver:
+
+| Caller | `Multi` | `Single` |
+| :--- | :--- | :--- |
+| Canonical `ClusterAdmin` (no forward-auth identity, no tenant-prefixed role) | whole catalog, all tenants | whole catalog |
+| `GovernanceAdmin` with a tenant claim | tables of its tenant (consent-derived ownership plus `Gateway:Catalog:SharedTables`) | same |
+| `GovernanceAdmin` without tenant claim | not an administrator: consent path only | whole catalog |
+| Everybody else | consent path: tables and columns allowed by the caller's active consents | same |
+| No principal, unauthenticated, invalid tenant claim | nothing | nothing |
+
+**Semantic metric catalog.** The in-memory semantic catalog (dbt semantic manifest, `GET /api/extensions/dbt/metrics`, metric queries) is partitioned per tenant. In `Multi` mode a tenant sees only its own partition; in `Single` mode a tenant without its own partition falls back to the legacy partition that principals without tenant claim import into. `GET /api/extensions/dbt/metrics` and `GET /api/v1/analytics/metrics` return the full metric definition (filter template, type parameters, meta) only to `GovernanceAdmin` and `DbtAdmin`; everybody else gets name, type, label, description and unit.
+
+The tenant signal of the tenant administrator view is derived from consent records and is not a hard tenant boundary; a dedicated tenant-owner attribute for tables is a separate topic.
+
+**Start-up diagnostics.** The effective mode is logged at start: a Warning when `Mode` is not configured (single-tenant deployments must set `Single`), an Information entry when it is. At runtime a throttled Warning (once per principal and ten minutes) names the option when a principal that holds `GovernanceAdmin` has no tenant claim in `Multi` mode.
+
+#### Breaking changes / upgrade notes
+
+> **Upgrade note: single-tenant installations must set `Gateway:Tenancy:Mode=Single` before upgrading.** The default is `Multi`.
+
+- A `GovernanceAdmin` without tenant claim in `Multi` mode is no administrator any more and loses the administrator view in the catalog (REST, GraphQL, MCP), Trino/WebSQL metadata, Arrow Flight SQL, Iceberg REST catalog and the effective-access explanation.
+- Deployments with ReBAC enabled now need a consent **and** a ReBAC permission to discover a dataset (intersection).
+- `GET /api/v1/catalog/datasources` and its MCP equivalents are administrator-only.
+- `AllowAuthenticatedCatalogDiscovery` has no effect.
+- `sample_rows(synthetic: true)` needs the administrator view or an active table consent.
+- Search recall is reduced for column-restricted callers.
+- Known limitation: the tenant-scoped administrator sees only the tables on which its tenant holds a consent plus `Gateway:Catalog:SharedTables`.
+- Semantic metrics imported without tenant (legacy partition) are no longer visible to tenants with a tenant claim in `Multi` mode; re-import the manifest with a token of the owning tenant, or set `Mode=Single`.
+- The semantic manifest import (`POST /api/extensions/dbt/semantic-manifest`) writes into the tenant of the caller's token.
 
 ---
 

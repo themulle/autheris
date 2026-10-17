@@ -13,13 +13,18 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
+using Autheris.Domain.Options;
+using Microsoft.Extensions.Options;
 
 public sealed class EffectiveAccessExplanationService(
     ITableMetadataRepository metadataRepository,
     IConsentRepository consentRepository,
     IConsentResolutionService resolutionService,
-    IDataOwnershipRepository? ownershipRepository = null) : IEffectiveAccessExplanationService
+    IDataOwnershipRepository? ownershipRepository = null,
+    IOptions<GatewayOptions>? gatewayOptions = null) : IEffectiveAccessExplanationService
 {
+    private TenancyMode EffectiveTenancyMode => gatewayOptions?.Value.Tenancy.EffectiveMode ?? TenancyMode.Multi;
+
     /// <summary>Answer for tables that do not exist or that the caller may not discover (identical on purpose).</summary>
     internal const string TableNotFoundMessage = "Table not found in catalog.";
 
@@ -56,7 +61,7 @@ public sealed class EffectiveAccessExplanationService(
         if (metadata == null)
         {
             // Same lookups as for an existing table, so unknown and hidden tables behave alike.
-            await CatalogVisibility.VisibleTablesAsync(Array.Empty<TableMetadata>(), principal, tenantId, consentRepository, ct).ConfigureAwait(false);
+            await CatalogVisibility.VisibleTablesAsync(Array.Empty<TableMetadata>(), principal, tenantId, consentRepository, contract: null, EffectiveTenancyMode, gatewayOptions?.Value.Catalog.SharedTables, ct).ConfigureAwait(false);
             return NotFound(table);
         }
 
@@ -90,7 +95,7 @@ public sealed class EffectiveAccessExplanationService(
         {
             // Only tables the caller can discover in the catalog are described; everything else is answered
             // exactly like an unknown table (no columns, same message).
-            var visible = await CatalogVisibility.VisibleTablesAsync([metadata], principal, tenantId, consentRepository, ct).ConfigureAwait(false);
+            var visible = await CatalogVisibility.VisibleTablesAsync([metadata], principal, tenantId, consentRepository, contract: null, EffectiveTenancyMode, gatewayOptions?.Value.Catalog.SharedTables, ct).ConfigureAwait(false);
             if (visible.Count == 0)
             {
                 return NotFound(table);

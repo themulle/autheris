@@ -90,16 +90,14 @@ public sealed class CatalogTenantIsolationTests
     }
 
     [Fact]
-    public async Task DiscoveryMode_DoesNotLeakOtherTenantTables()
+    public async Task DiscoveryFlag_NoLongerWidensTheCatalog_ConsentlessCallerSeesNothing()
     {
         var options = new GatewayOptions { Catalog = new DataCatalogOptions { AllowAuthenticatedCatalogDiscovery = true } };
 
         var catalog = await Catalog(Accessor("tenant-a"), Repositories(), options);
 
-        catalog.Select(t => t.TableName).ShouldBe(["orders_a"]);
-        catalog.ShouldNotContain(t => t.TableName == "invoices_b");
-        // Discovery does not grant access: without a consent for the caller the status is not GRANTED.
-        catalog.ShouldAllBe(t => t.AccessStatus == "NONE");
+        // WP-0: the flag is deprecated; no consent means no table, in no tenant.
+        catalog.ShouldBeEmpty();
     }
 
     [Fact]
@@ -123,7 +121,9 @@ public sealed class CatalogTenantIsolationTests
     [Fact]
     public async Task LegacySingleTenant_GovernanceAdmin_IsNotRestricted()
     {
-        var catalog = await Catalog(Accessor(TenantId.LegacySingleTenant.Value, "GovernanceAdmin"), Repositories());
+        // Single-tenant deployment (Gateway:Tenancy:Mode=Single): a GovernanceAdmin without a real tenant claim is unrestricted.
+        var options = new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Single" } };
+        var catalog = await Catalog(Accessor(TenantId.LegacySingleTenant.Value, "GovernanceAdmin"), Repositories(), options);
 
         catalog.Count.ShouldBe(3);
     }

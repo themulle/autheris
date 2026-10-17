@@ -148,8 +148,7 @@ public sealed partial class GovernedAggregationService
 
         foreach (var rawCol in query.GroupBy)
         {
-            var colMeta = metadata.GetColumn(rawCol)
-                ?? throw new ArgumentException($"Column '{rawCol}' does not exist on table '{query.Table.ToQualifiedName()}'.", nameof(query));
+            var colMeta = metadata.GetColumn(rawCol) ?? throw new AggregationColumnUnavailableException();
 
             var access = decision.GetEffectiveColumnAccess(colMeta.ColumnName, metadata);
             if (access == ColumnAccessLevel.Mask)
@@ -159,7 +158,7 @@ public sealed partial class GovernedAggregationService
 
             if (access != ColumnAccessLevel.Clear)
             {
-                throw new GatewayForbiddenException($"Access to column '{colMeta.ColumnName}' on table '{query.Table.ToQualifiedName()}' is denied.");
+                throw new AggregationColumnUnavailableException();
             }
 
             if (!result.Contains(colMeta.ColumnName, StringComparer.OrdinalIgnoreCase))
@@ -196,8 +195,7 @@ public sealed partial class GovernedAggregationService
                 continue;
             }
 
-            var colMeta = metadata.GetColumn(agg.Column)
-                ?? throw new ArgumentException($"Column '{agg.Column}' does not exist on table '{query.Table.ToQualifiedName()}'.", nameof(query));
+            var colMeta = metadata.GetColumn(agg.Column) ?? throw new AggregationColumnUnavailableException();
 
             var access = decision.GetEffectiveColumnAccess(colMeta.ColumnName, metadata);
             if (access == ColumnAccessLevel.Mask)
@@ -207,7 +205,7 @@ public sealed partial class GovernedAggregationService
 
             if (access != ColumnAccessLevel.Clear)
             {
-                throw new GatewayForbiddenException($"Access to column '{colMeta.ColumnName}' on table '{query.Table.ToQualifiedName()}' is denied.");
+                throw new AggregationColumnUnavailableException();
             }
 
             if (agg.Function is AggregateFunction.Sum or AggregateFunction.Avg && !IsNumericType(colMeta.DataType))
@@ -223,6 +221,9 @@ public sealed partial class GovernedAggregationService
         return result;
     }
 
+    [System.Text.RegularExpressions.GeneratedRegex(@"@[A-Za-z_][A-Za-z0-9_]*", System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    private static partial System.Text.RegularExpressions.Regex ParameterPlaceholderRegex();
+
     private static void ValidateWhereClause(
         TableFilterClause? where,
         TableMetadata metadata,
@@ -233,19 +234,36 @@ public sealed partial class GovernedAggregationService
             return;
         }
 
+        // WP-0 (SEC-112-01): the referenced-column set is a union, never a replacement. The text of the predicate is always scanned as well
+        // (defence in depth), so a clause that arrives with a partial set (for example a metric filter combined with a request predicate)
+        // is checked against every identifier of its text. Placeholders of bound parameters (@gq1) are not identifiers and are removed first; an @name without a bound parameter is still checked.
+        // A clause that carries both a column set and bound parameters is generated text: there only identifiers that resolve to a table
+        // column are added, so SQL keywords and function names in the generated text are not mistaken for unknown columns.
         var referenced = new HashSet<string>(where.ReferencedColumns ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-        if (referenced.Count == 0 && !string.IsNullOrWhiteSpace(where.SqlPredicate))
+        bool hadExplicitSet = referenced.Count > 0;
+        if (!string.IsNullOrWhiteSpace(where.SqlPredicate))
         {
-            foreach (var col in DataApiFilterTranslator.ExtractReferencedColumns(where.SqlPredicate, metadata))
+            // Only placeholders that name a bound parameter are removed; any other @name keeps its identifier and is checked.
+            var parameters = where.Parameters;
+            var text = parameters.Count == 0
+                ? where.SqlPredicate
+                : ParameterPlaceholderRegex().Replace(
+                    where.SqlPredicate,
+                    m => parameters.ContainsKey(m.Value[1..]) || parameters.ContainsKey(m.Value) ? " " : m.Value);
+            foreach (var col in DataApiFilterTranslator.ExtractReferencedColumns(text, metadata))
             {
+                if (hadExplicitSet && where.Parameters.Count > 0 && metadata.GetColumn(col) == null)
+                {
+                    continue;
+                }
+
                 referenced.Add(col);
             }
         }
 
         foreach (var col in referenced)
         {
-            var colMeta = metadata.GetColumn(col)
-                ?? throw new ArgumentException($"Filter column '{col}' does not exist on table '{metadata.Identifier.ToQualifiedName()}'.", nameof(where));
+            var colMeta = metadata.GetColumn(col) ?? throw new AggregationColumnUnavailableException();
 
             var access = decision.GetEffectiveColumnAccess(colMeta.ColumnName, metadata);
             if (access == ColumnAccessLevel.Mask)
@@ -257,7 +275,7 @@ public sealed partial class GovernedAggregationService
 
             if (access != ColumnAccessLevel.Clear)
             {
-                throw new GatewayForbiddenException($"Filtering on denied column '{colMeta.ColumnName}' is forbidden.");
+                throw new AggregationColumnUnavailableException();
             }
         }
     }
@@ -285,9 +303,20 @@ public sealed partial class GovernedAggregationService
             }
 
             var colMeta = metadata.GetColumn(item.Column);
-            if (colMeta != null && decision.GetEffectiveColumnAccess(colMeta.ColumnName, metadata) == ColumnAccessLevel.Mask)
+            if (colMeta == null)
+            {
+                throw new AggregationColumnUnavailableException();
+            }
+
+            var orderAccess = decision.GetEffectiveColumnAccess(colMeta.ColumnName, metadata);
+            if (orderAccess == ColumnAccessLevel.Mask)
             {
                 throw new MaskedAggregationException(colMeta.ColumnName);
+            }
+
+            if (orderAccess != ColumnAccessLevel.Clear)
+            {
+                throw new AggregationColumnUnavailableException();
             }
 
             throw new ArgumentException(
@@ -295,6 +324,9 @@ public sealed partial class GovernedAggregationService
                 nameof(orderBy));
         }
     }
+
+    /// <summary>Maximum number of rows the in-memory aggregation branches read; reaching it fails closed (<c>AGGREGATION_ROW_CAP_EXCEEDED</c>).</summary>
+    private const int InMemoryAggregationRowCap = 100_000;
 
     private async Task<List<ComputedBucket>> ExecuteAndBuildBucketsAsync(
         ClaimsPrincipal principal,
@@ -321,16 +353,23 @@ public sealed partial class GovernedAggregationService
                 AccessDecision: decision,
                 Arguments: new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["limit"] = 100_000,
+                    ["limit"] = InMemoryAggregationRowCap,
                     ["offset"] = 0
                 },
                 RequestedFields: authorizedColumns,
                 RequestHeaders: null,
-                Limit: 100_000,
+                Limit: InMemoryAggregationRowCap,
                 Offset: 0,
                 Tenant: tenantId);
 
             var rawRows = await executor.ExecuteAsync(execContext, ct).ConfigureAwait(false);
+
+            // WP-0 (F-1a): a read that fills the page cannot be told apart from a truncated read, and an aggregate over a truncated prefix is wrong.
+            if (rawRows.Count >= InMemoryAggregationRowCap)
+            {
+                throw new AggregationRowCapExceededException();
+            }
+
             bool rlsAlreadyPushedDown = execContext.Items.TryGetValue("RlsPushdownExecuted", out var pushed) && pushed is true;
             var rlsRows = rlsAlreadyPushedDown
                 ? rawRows.ToList()
@@ -344,9 +383,14 @@ public sealed partial class GovernedAggregationService
             var (rows, _) = await _gatewayExecutionService.ExecuteTableQueryAsync(
                 principal,
                 query.Table,
-                first: 100_000,
+                first: InMemoryAggregationRowCap,
                 after: 0,
                 ct: ct).ConfigureAwait(false);
+            if (rows.Count >= InMemoryAggregationRowCap)
+            {
+                throw new AggregationRowCapExceededException();
+            }
+
             var filteredRows = FilterRowsByWhere(rows.ToList(), query.Where, metadata);
             return BuildBucketsFromRows(filteredRows, groupByColumns, resolvedAggregates, metadata);
         }

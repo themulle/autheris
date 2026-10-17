@@ -1,3 +1,4 @@
+using Autheris.Application.Common;
 using System;
 using System.Security.Claims;
 using System.Text.Json;
@@ -65,7 +66,7 @@ public static class DuckDbOlapEndpoints
         }
         catch (JsonException ex)
         {
-            logger.LogWarning(ex, "Invalid JSON payload in OLAP query request.");
+            logger.Warning(ex, "Invalid JSON payload in OLAP query request.");
             httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
             await httpContext.Response.WriteAsJsonAsync(new { error = "Invalid JSON payload in request body." }, ct);
             return;
@@ -103,7 +104,8 @@ public static class DuckDbOlapEndpoints
             catch (Exception ex)
             {
                 // Same contract as before the extraction: a failure while writing the result is a 400 with a generic error.
-                logger.LogError(ex, "Error executing DuckDB OLAP query.");
+                // SEC-FED-DELTA-01: type and trace id only above Debug; the message can quote data values.
+                logger.Error(ex, "Error executing DuckDB OLAP query. TraceId={TraceId}", httpContext.TraceIdentifier);
                 if (!httpContext.Response.HasStarted)
                 {
                     httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;

@@ -143,6 +143,9 @@ public partial class SqlServerGovernanceRepository
                 throw;
             }
 
+            var rowFilterEvaluation = await RowFilterEvaluationStore.ReadObjectAsync(
+                conn, null, CatalogKeyDefinitionStore.SqlServer, tableId.Value, ct).ConfigureAwait(false);
+
             var result = new TableMetadata
             {
                 Identifier = table,
@@ -150,7 +153,8 @@ public partial class SqlServerGovernanceRepository
                 Columns = columns,
                 ColumnMaskingRules = maskingRules,
                 PrimaryKeyColumns = pkColumns,
-                Indexes = indexes
+                Indexes = indexes,
+                RowFilterEvaluation = rowFilterEvaluation
             };
 
             _metadataCache[cacheKey] = (result, DateTime.UtcNow.Ticks);
@@ -417,6 +421,38 @@ public partial class SqlServerGovernanceRepository
             {
                 change = await CatalogKeyDefinitionStore.ReplaceNarrowAsync(
                     conn, tx, CatalogKeyDefinitionStore.SqlServer, table, primaryKey, indexes,
+                    () => IncrementTableEpochInternalAsync(conn, tx, table, ct), ct).ConfigureAwait(false);
+                if (change is null)
+                {
+                    await tx.RollbackAsync(ct).ConfigureAwait(false);
+                    return null;
+                }
+
+                await tx.CommitAsync(ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                await tx.RollbackAsync(ct).ConfigureAwait(false);
+                throw;
+            }
+        }
+
+        _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
+        await _epochValidationService.InvalidateEpochAsync(table, ct).ConfigureAwait(false);
+        return change;
+    }
+
+    public async Task<RowFilterEvaluationChange?> SetRowFilterEvaluationAsync(
+        TableIdentifier table, RowFilterEvaluationSettings? settings, Sid actor, CancellationToken ct = default)
+    {
+        RowFilterEvaluationChange? change;
+        await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
+        {
+            await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
+            {
+                change = await RowFilterEvaluationStore.SetObjectAsync(
+                    conn, tx, CatalogKeyDefinitionStore.SqlServer, table, settings, actor,
                     () => IncrementTableEpochInternalAsync(conn, tx, table, ct), ct).ConfigureAwait(false);
                 if (change is null)
                 {
