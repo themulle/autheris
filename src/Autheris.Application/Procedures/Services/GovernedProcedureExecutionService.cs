@@ -202,7 +202,10 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger?.LogError(ex, "Stored procedure endpoint '{Procedure}' failed (trace {TraceId}).", definition.ProcedureName, traceId);
+                // SEC-PROC152-08: exception type only; never the message, inner exceptions or ToString (may carry values).
+                _logger?.LogError(
+                    "Stored procedure endpoint '{Procedure}' failed with {ExceptionType} (trace {TraceId}).",
+                    definition.ProcedureName, ex.GetType().Name, traceId);
                 await AuditAsync("PROCEDURE_FAILED", "DENY", definition, tenantId, userSid, new { reason = ex.GetType().Name }, traceId, ct).ConfigureAwait(false);
                 throw;
             }
@@ -382,11 +385,14 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         string sid = user.FindFirst(ClaimTypes.PrimarySid)?.Value
                      ?? user.FindFirst("sub")?.Value
                      ?? "anonymous";
-        var tables = decisions.Values
-            .Select(d => d.Meta.Identifier.ToQualifiedName())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Order(StringComparer.Ordinal)
-            .ToList();
+        var tableSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var d in decisions.Values)
+        {
+            tableSet.Add(d.Meta.Identifier.ToQualifiedName());
+        }
+
+        var tables = new List<string>(tableSet);
+        tables.Sort(StringComparer.Ordinal);
         var leases = new List<IDisposable>(tables.Count);
         try
         {

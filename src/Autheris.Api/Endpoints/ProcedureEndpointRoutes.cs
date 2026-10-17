@@ -399,7 +399,8 @@ public static class ProcedureEndpointRoutes
         catch (Exception ex)
         {
             // Neither the (caller supplied) name nor any parameter value is logged (SEC-PROC152-11).
-            logger.LogError(ex, "Unexpected error executing a procedure endpoint.");
+            // SEC-PROC152-08: exception type only; the message and inner exceptions may carry values.
+            logger.LogError("Unexpected error executing a procedure endpoint ({ExceptionType}).", ex.GetType().Name);
             await WriteErrorAsync(http, StatusCodes.Status500InternalServerError, "An internal error occurred.", ct).ConfigureAwait(false);
         }
     }

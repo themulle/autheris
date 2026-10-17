@@ -438,6 +438,65 @@ public class ProcedureSecurityInc1Tests
         limiter.TryAcquire("t", "s").ShouldBeTrue();
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public void T_PROC152_05_Limiter_AtCapacity_NewKeysDropped_ExistingKeysStillServed_Counted()
+    {
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+        var limiter = new ProcedureDenialAuditLimiter(perMinute: 2, time, maxTrackedKeys: 5);
+        for (var i = 0; i < 5; i++)
+        {
+            limiter.TryAcquire("t", "s" + i).ShouldBeTrue();
+        }
+
+        limiter.TryAcquire("t", "new").ShouldBeFalse();
+        limiter.Dropped.ShouldBe(1);
+        limiter.TrackedKeys.ShouldBe(5);
+        limiter.TryAcquire("t", "s0").ShouldBeTrue();
+        time.Advance(TimeSpan.FromSeconds(61));
+        limiter.TryAcquire("t", "new").ShouldBeTrue();
+        limiter.TrackedKeys.ShouldBe(1);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void T_PROC152_05_Limiter_SweepsAtMostOncePerWindow()
+    {
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+        var limiter = new ProcedureDenialAuditLimiter(perMinute: 2, time, maxTrackedKeys: 4);
+        limiter.TryAcquire("t", "a").ShouldBeTrue(); // sweep at t0, next sweep t0+60
+        limiter.TryAcquire("t", "b").ShouldBeTrue();
+        time.Advance(TimeSpan.FromSeconds(30));
+        limiter.TryAcquire("t", "c").ShouldBeTrue();
+        limiter.TryAcquire("t", "d").ShouldBeTrue();
+        time.Advance(TimeSpan.FromSeconds(31)); // t0+61: a,b expired
+        limiter.TryAcquire("t", "e").ShouldBeTrue(); // sweep removes a,b
+        limiter.TryAcquire("t", "f").ShouldBeTrue(); // c,d,e,f: at cap
+        time.Advance(TimeSpan.FromSeconds(30)); // t0+91: c,d expired but the next sweep is only due at t0+121
+        limiter.TryAcquire("t", "g").ShouldBeFalse();
+        time.Advance(TimeSpan.FromSeconds(30)); // t0+121
+        limiter.TryAcquire("t", "g").ShouldBeTrue();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void T_PROC152_05_Limiter_ConcurrentNewKeys_NeverExceedBound()
+    {
+        var limiter = new ProcedureDenialAuditLimiter(perMinute: 2, maxTrackedKeys: 50);
+        var granted = 0;
+        Parallel.For(0, 2000, new ParallelOptions { MaxDegreeOfParallelism = 16 }, i =>
+        {
+            if (limiter.TryAcquire("t", "s" + i))
+            {
+                Interlocked.Increment(ref granted);
+            }
+        });
+
+        granted.ShouldBe(50);
+        limiter.TrackedKeys.ShouldBe(50);
+        limiter.Dropped.ShouldBe(1950);
+    }
+
     // ---------- WP-2: lease ----------
 
     [Theory]
@@ -898,6 +957,45 @@ public class ProcedureSecurityInc1Tests
         response.Body.ShouldBe("{\"error\":\"An internal error occurred.\"}");
         logger.AllText.ShouldNotContain("value-4711");
         logger.AllText.ShouldNotContain("probe-name");
+    }
+
+    private const string SecretText = "Asset 4711 of Mueller";
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task T_PROC152_08_Service_GenericException_NotInLogsAuditOrResponse()
+    {
+        var e = Active();
+        e.Invoker.ExecuteReadAsync(default!, default!, default!, default).ThrowsAsyncForAnyArgs(new InvalidOperationException(SecretText, new InvalidOperationException(SecretText)));
+
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() => Run(e));
+
+        ex.Message.ShouldContain("4711"); // rethrown unchanged; the route maps it to a generic 500
+        e.Logger.AllText.ShouldNotContain("4711");
+        e.Logger.AllText.ShouldNotContain("Mueller");
+        e.Logger.Entries.ShouldAllBe(x => x.Exception == null);
+        e.Logger.AllText.ShouldContain(nameof(InvalidOperationException));
+        e.AuditEntries.ShouldAllBe(x => !x.DetailsJson.Contains("4711") && !x.DetailsJson.Contains("Mueller"));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task T_PROC152_08_Route_UnexpectedException_NotInLogsOrResponse()
+    {
+        var logger = new CapturingLogger();
+        var factory = Substitute.For<ILoggerFactory>();
+        factory.CreateLogger(Arg.Any<string>()).Returns(logger);
+        var service = Substitute.For<IProcedureExecutionService>();
+        service.ExecuteAsync(default!, default, default!, default, default).ThrowsAsyncForAnyArgs(new InvalidOperationException(SecretText, new InvalidOperationException(SecretText)));
+
+        var response = await CallRoute(service, false, "probe-name", null, null, factory);
+
+        response.Status.ShouldBe(500);
+        response.Body.ShouldNotContain("4711");
+        logger.AllText.ShouldNotContain("4711");
+        logger.AllText.ShouldNotContain("Mueller");
+        logger.Entries.ShouldAllBe(x => x.Exception == null);
+        logger.AllText.ShouldContain(nameof(InvalidOperationException));
     }
 
     [Theory]
