@@ -146,8 +146,11 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         string? tag = null,
         CancellationToken ct = default)
     {
-        var visible = await VisibleTablesAsync(principal, ct).ConfigureAwait(false);
         var isAdminView = IsAdminView(principal);
+        // F-C11: a row the shaping rule maps to NotFound (non-admin without a recognised view) never reaches the filters, the total or the paging.
+        var visible = (await VisibleTablesAsync(principal, ct).ConfigureAwait(false))
+            .Where(t => Shape(isAdminView, t) != CatalogOutputShape.NotFound)
+            .ToList();
 
         var matches = visible
             .Where(t => string.IsNullOrWhiteSpace(domain) || string.Equals(t.Identifier.Domain, domain.Trim(), StringComparison.OrdinalIgnoreCase))
@@ -200,7 +203,8 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
 
     public async Task<McpDatasetDescription> DescribeDatasetAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct = default)
     {
-        var table = await FindVisibleAsync(principal, dataset, ct).ConfigureAwait(false);
+        var isAdminView = IsAdminView(principal);
+        var table = await FindVisibleAsync(principal, dataset, isAdminView, ct).ConfigureAwait(false);
         var id = table.Identifier;
 
         var (activeConsents, pendingRequests, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
@@ -208,7 +212,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             ? "GRANTED"
             : CatalogVisibility.ComputeAccessStatus(id, activeConsents, pendingRequests, isAdmin);
 
-        if (Shape(IsAdminView(principal), table) == CatalogOutputShape.Summary)
+        if (Shape(isAdminView, table) == CatalogOutputShape.Summary)
         {
             return await BuildSummaryDescriptionAsync(table, accessStatus, ct).ConfigureAwait(false);
         }
@@ -280,7 +284,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             table.Table.RequiresFourEyes,
             columns,
             examples,
-            graphQl == null ? null : await GraphQlAccessAsync(principal, graphQl, columns, ct).ConfigureAwait(false),
+            graphQl == null ? null : await GraphQlAccessAsync(principal, isAdminView, graphQl, columns, ct).ConfigureAwait(false),
             DatasetAccess(id),
             Tags: table.CatalogTags,
             DataOwner: dataOwner,
@@ -650,7 +654,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
 
     public async Task<McpDatasetSample> SampleRowsAsync(ClaimsPrincipal principal, string dataset, int? count, bool synthetic, CancellationToken ct = default)
     {
-        var table = await FindVisibleAsync(principal, dataset, ct).ConfigureAwait(false);
+        var table = await FindVisibleAsync(principal, dataset, IsAdminView(principal), ct).ConfigureAwait(false);
         var rowCount = Math.Clamp(count ?? DefaultSampleRows, 1, MaxSampleRows);
 
         if (synthetic)
@@ -724,12 +728,12 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
 
     private async Task<McpGraphQlAccess> GraphQlAccessAsync(
         ClaimsPrincipal principal,
+        bool isAdminView,
         GraphQlTableMapping graphQl,
         IReadOnlyList<McpDatasetColumn> columns,
         CancellationToken ct)
     {
         // Relations are offered only to datasets the caller can see, so hidden table names do not leak.
-        var isAdminView = IsAdminView(principal);
         var visibleIds = (await VisibleTablesAsync(principal, ct).ConfigureAwait(false))
             .Where(t => Shape(isAdminView, t) != CatalogOutputShape.NotFound)
             .Select(t => DatasetId(t.Identifier))
@@ -851,7 +855,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         return true;
     }
 
-    private async Task<TableMetadata> FindVisibleAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct)
+    private async Task<TableMetadata> FindVisibleAsync(ClaimsPrincipal principal, string dataset, bool isAdminView, CancellationToken ct)
     {
         if (!TryParseDatasetId(dataset, out var requested))
         {
@@ -860,7 +864,6 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
 
         var visible = await VisibleTablesAsync(principal, ct).ConfigureAwait(false);
         var requestedId = DatasetId(requested);
-        var isAdminView = IsAdminView(principal);
 
         // A table the caller may not see (including a row without a recognised view) is reported exactly like one that does not exist
         // (no enumeration oracle).
@@ -870,8 +873,16 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             : throw new TableNotFoundException(requested);
     }
 
+    /// <summary>Test seam: replaces the visibility engine output so a row the engine never produces (non-admin, no recognised view) reaches the shaping stage.</summary>
+    internal Func<ClaimsPrincipal, CancellationToken, Task<IReadOnlyList<TableMetadata>>>? VisibleTablesForTesting { get; set; }
+
     private async Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(ClaimsPrincipal principal, CancellationToken ct)
     {
+        if (VisibleTablesForTesting is { } seam)
+        {
+            return await seam(principal, ct).ConfigureAwait(false);
+        }
+
         var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
         // SEC H-02: only the explicit (production-blocked) MCP auth bypass opens the whole catalog.
         return options?.Value.IsMcpAuthBypassed == true

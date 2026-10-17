@@ -473,10 +473,10 @@ public sealed class McpToolSwitchTests
     {
         // Visibility rule for non-admins is unchanged: the admin tools are filtered out by the existing admin check, not by the switches.
         var rig = Rigged(Opts());
-        Names(rig.Registry).Count(n => n.StartsWith("admin_", StringComparison.Ordinal)).ShouldBe(7);
+        Names(rig.Registry).Count(n => n.StartsWith("admin_", StringComparison.Ordinal)).ShouldBe(8);
 
         var (reduced, _) = Build(Opts(disabled: ["admin_apply_access"]));
-        Names(reduced).Count(n => n.StartsWith("admin_", StringComparison.Ordinal)).ShouldBe(6);
+        Names(reduced).Count(n => n.StartsWith("admin_", StringComparison.Ordinal)).ShouldBe(7);
         await Task.CompletedTask;
     }
 }
