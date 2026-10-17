@@ -33,7 +33,7 @@ public sealed class AttributeTableQueryTests
     public void Golden_SqlServer()
     {
         var q = AttributeTableQuery.Build(Spec(Config()), DatabaseDialect.SqlServer, "tenant_a", "oid-1", null, 50);
-        q.Sql.ShouldBe("SELECT TOP (51) [cost_center], [tenant_id] FROM [hr].[person_attributes] WHERE [person_oid] = @ca_subject AND [tenant_id] = @ca_tenant AND [cost_center] IS NOT NULL");
+        q.Sql.ShouldBe("SELECT TOP (51) [cost_center], [tenant_id] FROM [hr].[person_attributes] WHERE [person_oid] = @ca_subject AND [tenant_id] COLLATE Latin1_General_100_BIN2 = @ca_tenant AND [cost_center] IS NOT NULL");
         q.Parameters.Select(p => (p.Key, p.Value)).ShouldBe([("@ca_subject", (object)"oid-1"), ("@ca_tenant", "tenant_a")]);
     }
 
@@ -41,16 +41,16 @@ public sealed class AttributeTableQueryTests
     public void Golden_PostgreSql_AndSqlite()
     {
         var pg = AttributeTableQuery.Build(Spec(Config()), DatabaseDialect.PostgreSql, "tenant_a", "oid-1", null, 50);
-        pg.Sql.ShouldBe("SELECT \"cost_center\", \"tenant_id\" FROM \"hr\".\"person_attributes\" WHERE \"person_oid\" = @ca_subject AND \"tenant_id\" = @ca_tenant AND \"cost_center\" IS NOT NULL LIMIT 51");
+        pg.Sql.ShouldBe("SELECT \"cost_center\", \"tenant_id\" FROM \"hr\".\"person_attributes\" WHERE \"person_oid\" = @ca_subject AND \"tenant_id\" COLLATE \"C\" = @ca_tenant AND \"cost_center\" IS NOT NULL LIMIT 51");
         var lite = AttributeTableQuery.Build(Spec(Config(schema: null!)), DatabaseDialect.Sqlite, "tenant_a", "oid-1", null, 5);
-        lite.Sql.ShouldBe("SELECT \"cost_center\", \"tenant_id\" FROM \"person_attributes\" WHERE \"person_oid\" = @ca_subject AND \"tenant_id\" = @ca_tenant AND \"cost_center\" IS NOT NULL LIMIT 6");
+        lite.Sql.ShouldBe("SELECT \"cost_center\", \"tenant_id\" FROM \"person_attributes\" WHERE \"person_oid\" = @ca_subject AND \"tenant_id\" COLLATE BINARY = @ca_tenant AND \"cost_center\" IS NOT NULL LIMIT 6");
     }
 
     [Fact]
     public void IssuerColumn_AddsAnIssuerPredicate_AndAParameter()
     {
         var q = AttributeTableQuery.Build(Spec(Config(tenant: null, issuer: "issuer")), DatabaseDialect.PostgreSql, "tenant_a", "oid-1", "https://login.example/", 10);
-        q.Sql.ShouldContain("\"issuer\" = @ca_issuer");
+        q.Sql.ShouldContain("\"issuer\" COLLATE \"C\" = @ca_issuer");
         q.Parameters.Select(p => p.Key).ShouldBe(["@ca_subject", "@ca_issuer"]);
         q.IssuerOrdinal.ShouldBe(1);
         q.TenantOrdinal.ShouldBeNull();

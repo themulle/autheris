@@ -118,6 +118,13 @@ public static class AttributeTableQuery
 
         string Q(string id) => dialect.QuoteIdentifier(id);
         string Marker(string name) => dialect.FormatParameterMarker(name);
+        // Tenant and issuer match ordinally in the database (BC-129-11), so the Max+1 limit counts only exactly matching rows.
+        string Ordinal() => dialect switch
+        {
+            DatabaseDialect.SqlServer => " COLLATE Latin1_General_100_BIN2",
+            DatabaseDialect.PostgreSql => " COLLATE \"C\"",
+            _ => " COLLATE BINARY",
+        };
 
         var select = new List<string> { Q(spec.ValueColumn) };
         int? tenantOrdinal = null;
@@ -128,7 +135,7 @@ public static class AttributeTableQuery
         {
             tenantOrdinal = select.Count;
             select.Add(Q(spec.TenantColumn));
-            where.Add($"{Q(spec.TenantColumn)} = {Marker(TenantParameter)}");
+            where.Add($"{Q(spec.TenantColumn)}{Ordinal()} = {Marker(TenantParameter)}");
             parameters.Add(new(dialect.FormatParameterName(TenantParameter), tenant));
         }
 
@@ -141,7 +148,7 @@ public static class AttributeTableQuery
 
             issuerOrdinal = select.Count;
             select.Add(Q(spec.IssuerColumn));
-            where.Add($"{Q(spec.IssuerColumn)} = {Marker(IssuerParameter)}");
+            where.Add($"{Q(spec.IssuerColumn)}{Ordinal()} = {Marker(IssuerParameter)}");
             parameters.Add(new(dialect.FormatParameterName(IssuerParameter), issuer));
         }
 

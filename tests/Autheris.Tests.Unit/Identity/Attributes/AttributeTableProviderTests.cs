@@ -139,10 +139,9 @@ public sealed class AttributeTableProviderTests : IDisposable
     }
 
     [Fact]
-    public async Task ST_129_12_ARowSkippedByTheOrdinalCheck_FailsClosedAsOverCardinality()
+    public async Task ST_129_12_OrdinalTenantMatch_RunsInTheDatabase_SoDifferentlyCasedRowsDoNotCrowdTheWindow()
     {
-        // The case-insensitive source returns rows of "TENANT_A" for the tenant "tenant_a"; the LIMIT of Max+1 rows ran before the ordinal skip,
-        // so skipped rows could crowd the real ones out of the window: any skipped row means the result set is not trustworthy.
+        // The column is NOCASE, but the query compares the tenant with an explicit binary collation, so the Max+1 window counts only exact rows.
         for (int i = 0; i < 3; i++)
         {
             Exec($"INSERT INTO nocase_attributes VALUES ('{UserOid}', 'x{i}', 'TENANT_A', 'iss');");
@@ -152,8 +151,7 @@ public sealed class AttributeTableProviderTests : IDisposable
 
         var result = await Provider().ResolveAsync(UserSubject(), Definition(table: "nocase_attributes", max: 2), default);
 
-        result.Outcome.ShouldBe(CallerAttributeOutcome.OverCardinality);
-        result.Value.ShouldBeNull();
+        result.Outcome.ShouldBe(CallerAttributeOutcome.Resolved);
     }
 
     [Fact]
