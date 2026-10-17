@@ -343,6 +343,7 @@ public sealed class GovernedSqlExecutor
                 ["virtual_filters"] = rewrite.VirtualFilters
             };
             AddCompiledAuditFields(fields, compiled);
+            AddKeySetAuditFields(fields, rewrite);
             await _auditWriter.RecordAsync(new AuditLogEntry
             {
                 TenantId = tenantId,
@@ -684,6 +685,31 @@ public sealed class GovernedSqlExecutor
         {
             fields["compiledSql"] = compiled.Sql;
         }
+    }
+
+    /// <summary>
+    /// Issue #107 (A-14, SEC-RF107-09): the key-set outcome per site with reason and counts; never key values or a hash of them. Absent when no site
+    /// used or tried the strategy, so a statement without opt-in is audited exactly as before.
+    /// </summary>
+    private static void AddKeySetAuditFields(Dictionary<string, object?> fields, GovernedRewrite rewrite)
+    {
+        if (rewrite.KeySets is not { Count: > 0 } outcomes)
+        {
+            return;
+        }
+
+        fields["row_filter_key_sets"] = outcomes.Select(o => new Dictionary<string, object?>
+        {
+            ["table"] = o.Table,
+            ["rule_id"] = o.RuleId,
+            ["source"] = o.Source.ToString(),
+            ["strategy_source"] = o.StrategySource.ToString(),
+            ["outcome"] = o.Outcome.ToString(),
+            ["reason"] = o.Reason?.ToString(),
+            ["key_count"] = o.KeyCount,
+            ["padded_count"] = o.PaddedCount,
+            ["age_seconds"] = o.AgeSeconds
+        }).ToList();
     }
 
     private async Task RecordDmlAuditAsync(

@@ -142,7 +142,7 @@ internal sealed class StageHarness : IDisposable
         Stage = new RowFilterKeySetStage(Options, Compiler, Epochs, Cache, Loader, new ListLogger<RowFilterKeySetStage>(Logs));
     }
 
-    public static GatewayOptions Gateway(bool allowSource, RowFilterEvaluationStrategy strategy, int maxKeys = 2000, string provider = "SqlServer", TimeSpan? duration = null) => new()
+    public static GatewayOptions Gateway(bool allowSource, RowFilterEvaluationStrategy strategy, int maxKeys = 2000, string provider = "SqlServer", TimeSpan? duration = null, string dataSource = DataSource) => new()
     {
         RowFilters = new RowFilterOptions
         {
@@ -157,7 +157,7 @@ internal sealed class StageHarness : IDisposable
         {
             Connections = new(StringComparer.OrdinalIgnoreCase)
             {
-                [DataSource] = new DataSourceConnectionOptions { Provider = provider, ConnectionString = "Server=x", KeySetCacheAllowed = allowSource }
+                [dataSource] = new DataSourceConnectionOptions { Provider = provider, ConnectionString = "Server=x", KeySetCacheAllowed = allowSource }
             }
         }
     };

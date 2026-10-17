@@ -18,6 +18,7 @@ using Autheris.Application.Sql.Internal;
 using Autheris.Application.Sql.Masking;
 using Autheris.Application.Sql.Pipeline;
 using Autheris.Application.Sql.Policy;
+using Autheris.Application.Sql.Policy.RowFilterKeySets;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -29,6 +30,7 @@ using Microsoft.Extensions.Options;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Analysis;
 using TrinoSqlEngine.Ast;
+using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Visitors;
 using TrinoSqlEngine.Governance;
@@ -616,13 +618,61 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 
         // Fail closed when the typed assembly is not wired (a DI defect, never a silent downgrade to string policies).
         var policyFactory = _policyFactory ?? throw new SqlCompileConfigurationException();
-        var policy = await policyFactory.CreateAsync(
-            new GovernedPolicyInput(effectiveDataSourceName, tenantId, decisions, tablesWithoutRls, GovernedSubqueryStrategy.Correlated)
-            {
-                Metadata = decidedTableMetadata
-            },
-            ct).ConfigureAwait(false);
 
+        // Issue #107 (D-WPC-1, SEC-RF107-17): IsRead comes from the same classification as isDml; the stage never runs for anything but a SELECT.
+        bool isRead = metadata.StatementType == SqlStatementType.Select && !isDml;
+        GovernedPolicyInput PolicyInput(bool disabled) =>
+            new(effectiveDataSourceName, tenantId, decisions, tablesWithoutRls, GovernedSubqueryStrategy.Correlated)
+            {
+                Metadata = decidedTableMetadata,
+                KeySetStatement = new RowFilterKeySetStatement(isRead, rawSql.Length, CompileRequestFactory.DefaultMaxExpansionFactor, disabled)
+            };
+
+        var assembly = await policyFactory.CreateAssemblyAsync(PolicyInput(disabled: false), ct).ConfigureAwait(false);
+        var request = CreateCompileRequest(assembly.Policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions);
+
+        // -------------------------------------------------------------
+        // Stage 5: Compile (Security invariant 2). Engine exceptions propagate unwrapped: SqlCompilerErrorMapper maps them to
+        // stable codes with fixed messages at every error surface, and no Exception.Message is copied into a new exception.
+        // -------------------------------------------------------------
+        CompiledSql compiled;
+        try
+        {
+            compiled = CompileStatement(rawSql, request, mayRetry: assembly.KeySets.HasSubstitution, ct);
+        }
+        catch (SqlLimitExceededException limit) when (IsRetryableLimit(limit.Kind) && assembly.KeySets.HasSubstitution)
+        {
+            // SEC-RF107-15 / SEC-RF107-19, D-WPC-4: once, only because a site was substituted, only for the bind or expansion limit. The values of the
+            // first exception (Actual, Maximum) are a function of the key-set size: only the kind is used, nothing is logged, audited or surfaced.
+            assembly.KeySets.MarkSubstitutedSitesAsRetried(
+                limit.Kind == SqlLimitKind.BindParameters ? KeySetFallbackReason.BindLimitRetry : KeySetFallbackReason.ExpansionLimitRetry);
+            RecordRetryMetrics(assembly.KeySets, targetSqlDialect);
+
+            // The retry starts from the original decisions and the unsubstituted predicates (never from the first assembly's provider), with the
+            // stage disabled: no epoch read, cache lookup or key query, same token and deadline. Its failure is not retried.
+            var retried = await policyFactory.CreateAssemblyAsync(PolicyInput(disabled: true), ct).ConfigureAwait(false);
+            request = CreateCompileRequest(retried.Policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions);
+            compiled = CompileStatement(rawSql, request, mayRetry: false, ct);
+        }
+
+        if (_options.Value.Logging.LogGeneratedSql)
+        {
+            _logger?.LogDebug("GovernedSqlExecutionService: Compiled secured SQL: {SecuredSql}", compiled.Sql);
+            LogKeySets(assembly.KeySets);
+        }
+
+        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, assembly.KeySets.Outcomes);
+    }
+
+    private CompileRequest CreateCompileRequest(
+        GovernancePolicy policy,
+        Dictionary<TableIdentity, TableAccessTarget> decidedTargets,
+        TargetSqlDialect targetSqlDialect,
+        WebSqlOptions webSqlOptions,
+        bool isDml,
+        long enforcedMaxRows,
+        IReadOnlySet<string> allowedFunctions)
+    {
         // SEC-X1-05: a table that stage 3 admitted but the assembly dropped (no typed policy, catalog load failure, missing column)
         // is denied here with the same exception as every other "table not usable" cause, before the compiler could answer differently.
         foreach (var (identity, deniedTarget) in decidedTargets)
@@ -634,29 +684,50 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             }
         }
 
-        var request = CompileRequestFactory.Create(policy, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions);
+        return CompileRequestFactory.Create(policy, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions);
+    }
 
-        // -------------------------------------------------------------
-        // Stage 5: Compile (Security invariant 2). Engine exceptions propagate unwrapped: SqlCompilerErrorMapper maps them to
-        // stable codes with fixed messages at every error surface, and no Exception.Message is copied into a new exception.
-        // -------------------------------------------------------------
-        CompiledSql compiled;
+    private CompiledSql CompileStatement(string rawSql, CompileRequest request, bool mayRetry, CancellationToken ct)
+    {
         try
         {
-            compiled = _sqlEngine.Compile(rawSql.AsMemory(), request, ct);
+            return _sqlEngine.Compile(rawSql.AsMemory(), request, ct);
         }
-        catch (Exception ex) when (ex is SecurityException or TrinoSqlEngine.Ast.Builder.AstBuildException)
+        catch (Exception ex) when (ex is SecurityException or TrinoSqlEngine.Ast.Builder.AstBuildException
+                                   && !(mayRetry && ex is SqlLimitExceededException limit && IsRetryableLimit(limit.Kind)))
         {
+            // A retryable limit of a statement with substituted key sets is handled by the caller without logging (SEC-RF107-15 b).
             _logger?.Warning(ex, "WebSQL statement rejected by the SQL compiler.");
             throw;
         }
+    }
 
-        if (_options.Value.Logging.LogGeneratedSql)
+    private static bool IsRetryableLimit(SqlLimitKind kind) => kind is SqlLimitKind.BindParameters or SqlLimitKind.PolicyExpansionFactor;
+
+    private static void RecordRetryMetrics(RowFilterKeySetReport report, TargetSqlDialect dialect)
+    {
+        foreach (var o in report.Outcomes)
         {
-            _logger?.LogDebug("GovernedSqlExecutionService: Compiled secured SQL: {SecuredSql}", compiled.Sql);
+            if (o.Reason is KeySetFallbackReason.BindLimitRetry or KeySetFallbackReason.ExpansionLimitRetry)
+            {
+                Autheris.Domain.Diagnostics.GatewayDiagnostics.RowFilterKeySetFallbacks.Add(
+                    1,
+                    new KeyValuePair<string, object?>("dialect", dialect.ToString()),
+                    new KeyValuePair<string, object?>("outcome", "Fallback"),
+                    new KeyValuePair<string, object?>("reason", o.Reason.ToString()));
+            }
         }
+    }
 
-        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters);
+    /// <summary>A-14: one Debug line per site after the compiled SQL line. Counts are allowed here (SEC-RF107-09 c); never values or hashes.</summary>
+    private void LogKeySets(RowFilterKeySetReport report)
+    {
+        foreach (var o in report.Outcomes)
+        {
+            _logger?.LogDebug(
+                "GovernedSqlExecutionService: Row-filter key set site {Table} outcome={Outcome} reason={Reason} keys={Keys} padded={Padded} ageSeconds={Age}",
+                o.Table, o.Outcome, o.Reason, o.KeyCount, o.PaddedCount, o.AgeSeconds);
+        }
     }
 
     /// <summary>
