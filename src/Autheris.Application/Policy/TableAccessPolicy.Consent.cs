@@ -154,6 +154,13 @@ public sealed partial class TableAccessPolicy
             return (null, null);
         }
 
+        return await ResolveAttributeSetAsync(resolver, names, query, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Resolves <paramref name="names"/> for the caller of <paramref name="query"/> once, under the request's bind reserve (BC-129-09).</summary>
+    private static async Task<(Autheris.Application.Identity.Attributes.CallerAttributeSet? Set, Autheris.Application.Identity.Attributes.CallerAttributePadding? Padding)> ResolveAttributeSetAsync(
+        Autheris.Application.Identity.Attributes.ICallerAttributeResolver resolver, IReadOnlyCollection<string> names, TableAccessQuery query, CancellationToken ct)
+    {
         var padding = resolver.Padding;
         var subject = resolver.CreateSubject(query.Principal, query.Tenant);
         var set = await resolver.ResolveAsync(subject, names, ct).ConfigureAwait(false);
@@ -174,6 +181,22 @@ public sealed partial class TableAccessPolicy
         }
 
         return (set, padding);
+    }
+
+    /// <summary>
+    /// REQ-GOV-129 (A-1, B-vf): binds the slots of a Virtual Filter predicate for this request. Feature off or anything unresolved: deny all rows
+    /// (a Virtual Filter is a restriction ANDed with the consent decision, never a grant).
+    /// </summary>
+    private async Task<TrinoSqlEngine.Governance.PolicyPredicate> BindVirtualFilterAttributesAsync(
+        TrinoSqlEngine.Governance.PolicyPredicate typed, IReadOnlyList<string> names, TableAccessQuery query, CancellationToken ct)
+    {
+        if (_callerAttributes is not { IsEnabled: true } resolver)
+        {
+            return TrinoSqlEngine.Governance.PolicyPredicate.DenyAll;
+        }
+
+        var (set, padding) = await ResolveAttributeSetAsync(resolver, names, query, ct).ConfigureAwait(false);
+        return Autheris.Application.Identity.Attributes.CallerAttributeBinder.Bind(typed, set!, padding!);
     }
 
     /// <summary>

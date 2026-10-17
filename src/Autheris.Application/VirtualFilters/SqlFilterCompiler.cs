@@ -54,12 +54,14 @@ public static partial class SqlFilterCompiler
         IReadOnlyList<TableMetadata> catalog,
         IReadOnlyList<string>? allowedReferenceTables = null,
         bool requireTenantColumn = false,
-        IEnumerable<string>? tenantColumnExemptTables = null)
+        IEnumerable<string>? tenantColumnExemptTables = null,
+        Autheris.Application.Identity.Attributes.CallerAttributeSnapshot? callerAttributes = null)
     {
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(catalog);
         filter.Validate();
         var fragment = filter.Sql ?? throw new ArgumentException($"The virtual filter '{filter.Name}' has no sql definition.", nameof(filter));
+        var original = fragment;
 
         if (!StartsWithFrom().IsMatch(fragment))
         {
@@ -75,6 +77,25 @@ public static partial class SqlFilterCompiler
         if (StringLiteral().Matches(fragment).Any(m => m.Value.Contains(TargetAlias, StringComparison.OrdinalIgnoreCase)))
         {
             throw Reject(filter, "string literals must not contain the reserved name 'target'.");
+        }
+
+        // REQ-GOV-129 (A-4): a caller placeholder becomes the reserved sentinel before the fragment is parsed.
+        IReadOnlyList<string> callerNames = [];
+        if (CallerPlaceholders.Contains(fragment))
+        {
+            if (callerAttributes is null)
+            {
+                throw Reject(filter, "caller attributes are not available (Gateway:CallerAttributes:Enabled).");
+            }
+
+            try
+            {
+                fragment = CallerPlaceholders.Rewrite(fragment, out callerNames);
+            }
+            catch (ArgumentException ex)
+            {
+                throw Reject(filter, ex.Message);
+            }
         }
 
         TrinoSqlEngine.Analysis.SqlQueryMetadata metadata;
@@ -193,12 +214,17 @@ public static partial class SqlFilterCompiler
         }
         ValidateAstPredicates(spec.Where, filter);
         RequireTenantBinding(filter, tenanted, spec.Where);
+        if (callerNames.Count > 0)
+        {
+            ValidateCallerPlaceholders(filter, select, spec.Where, callerAttributes!);
+        }
 
         var validated = filter with { SqlTargetColumns = targetColumns };
         var dialect = sourceTables.Count > 0 ? sourceTables[0].Dialect : DatabaseDialect.SqlServer;
         try
         {
-            Compile(validated with { Sql = Substitute(fragment, "validation") }, dialect);
+            // The translation check runs on the definition with harmless values for the sentinels; the stored definition keeps the placeholders.
+            Compile(validated with { Sql = Substitute(CallerPlaceholders.WithHarmlessValues(fragment), "validation") }, dialect);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not ArgumentException)
         {
@@ -206,6 +232,33 @@ public static partial class SqlFilterCompiler
         }
 
         return validated;
+    }
+
+    /// <summary>The position grammar and the registry rules of the placeholders of a definition (BC-129-06, A-9).</summary>
+    private static void ValidateCallerPlaceholders(VirtualFilter filter, SelectStatement select, Expression where, Autheris.Application.Identity.Attributes.CallerAttributeSnapshot attributes)
+    {
+        IReadOnlyList<(string Name, bool InList)> uses;
+        try
+        {
+            uses = CallerPlaceholders.EnforcePositions(select, where);
+        }
+        catch (ArgumentException ex)
+        {
+            throw Reject(filter, ex.Message);
+        }
+
+        foreach (var (name, inList) in uses)
+        {
+            if (!attributes.TryGetDefinition(filter.TenantId, name, out var definition))
+            {
+                throw Reject(filter, "a caller attribute of the definition is not registered and active.");
+            }
+
+            if (!inList && definition.Cardinality != CallerAttributeCardinality.Scalar)
+            {
+                throw Reject(filter, "a list caller attribute is only allowed as the item of IN or NOT IN.");
+            }
+        }
     }
 
     /// <summary>
@@ -462,6 +515,13 @@ public static partial class SqlFilterCompiler
     public static string Compile(VirtualFilter filter, DatabaseDialect dialect, VirtualFilterTenantContext? tenant = null)
     {
         ArgumentNullException.ThrowIfNull(filter);
+        if (CallerPlaceholders.Contains(filter.Sql))
+        {
+            // BC-129-05: the text form of a caller attribute filter never carries a value or a sentinel (NOT IN of a sentinel would match every
+            // row): it is the constant that denies all rows of this filter. The typed form is authoritative where a row policy factory exists.
+            return CallerAttributeFilterText;
+        }
+
         filter = BindTenant(filter, tenant);
         var fragment = filter.Sql ?? throw new InvalidOperationException($"The virtual filter '{filter.Name}' has no sql definition.");
         var target = Sql.SqlDialectMapper.ToTargetDialect(dialect);
@@ -475,6 +535,9 @@ public static partial class SqlFilterCompiler
         var correlated = generated.Replace(quotedTarget, dialect.QuoteIdentifier(RowFilterAliases.Target) + ".", StringComparison.Ordinal);
         return $"EXISTS ({correlated})";
     }
+
+    /// <summary>The text form of a filter with caller placeholders: no rows (BC-129-05).</summary>
+    public const string CallerAttributeFilterText = "(1 = 0)";
 
     /// <summary>Default prefix of the policy parameters of a typed virtual filter predicate.</summary>
     public const string DefaultTypedParameterPrefix = "__gql_vf_";
@@ -492,6 +555,12 @@ public static partial class SqlFilterCompiler
     {
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(engine);
+        if (CallerPlaceholders.Contains(filter.Sql))
+        {
+            // Re-checked at every compile: a stored definition is never trusted to have been validated (BC-129-05, BC-129-06).
+            filter = filter with { Sql = CallerPlaceholders.Rewrite(filter.Sql!, out _) };
+        }
+
         filter = BindTenant(filter, tenant);
         var fragment = filter.Sql ?? throw new InvalidOperationException($"The virtual filter '{filter.Name}' has no sql definition.");
         var target = Sql.SqlDialectMapper.ToTargetDialect(dialect);
@@ -503,6 +572,17 @@ public static partial class SqlFilterCompiler
         if (simplified is not SelectStatement { Body: QuerySpecification { Where: not null } } select)
         {
             throw new InvalidOperationException($"The virtual filter '{filter.Name}' did not compile to a correlated subquery.");
+        }
+
+        if (CallerPlaceholders.Contains(fragment))
+        {
+            // On the tree as built, before the simplifier: it rewrites NOT (a = b) to a <> b, which would hide a negation over a placeholder.
+            if (secured is not SelectStatement { Body: QuerySpecification { Where: { } securedWhere } } securedSelect)
+            {
+                throw new InvalidOperationException($"The virtual filter '{filter.Name}' did not compile to a correlated subquery.");
+            }
+
+            CallerPlaceholders.EnforcePositions(securedSelect, securedWhere);
         }
 
         var shaper = new TypedShaper(new Sql.Policy.PolicyParameterNamer(parameterPrefix));
@@ -540,6 +620,8 @@ public static partial class SqlFilterCompiler
 
         private Expression Bind(Expression expression, bool isLikePattern = false) => expression switch
         {
+            LiteralExpression { Type: LiteralType.String, Value: string sentinel } when CallerPlaceholders.TryParseSentinel(sentinel, out var attribute) =>
+                Autheris.Application.Identity.Attributes.CallerAttributeBinder.CreateSlot(Namer, attribute),
             LiteralExpression { Type: LiteralType.String, Value: string text } => Namer.Add(new PolicyValue(text, SqlParameterType.String), isLikePattern),
             LiteralExpression { Type: LiteralType.Integer, Value: long number } => Namer.Add(new PolicyValue(number, SqlParameterType.Int64)),
             LiteralExpression { Type: LiteralType.Decimal, Value: decimal number } => Namer.Add(new PolicyValue(number, SqlParameterType.Decimal)),

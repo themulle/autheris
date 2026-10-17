@@ -178,3 +178,36 @@ public sealed class PolicyPredicateLintTests
         exit.ShouldBe(2);
     }
 }
+
+/// <summary>REQ-GOV-129 (A-8, ST-129-18): a caller placeholder is only valid in a Virtual Filter.</summary>
+public sealed class PolicyPredicateLintCallerPlaceholderTests
+{
+    private static TableMetadata Orders() => new()
+    {
+        Table = new Table { SourceType = "PostgreSQL", SourceName = "erp", SchemaName = "main", TableName = "orders" },
+        Identifier = new TableIdentifier("erp", "main", "orders"),
+        Columns = [new TableColumn { ColumnName = "region", DataType = "varchar" }]
+    };
+
+    [Theory]
+    [InlineData("region = {{caller.dept}}")]
+    [InlineData("region = '{{caller.dept}}'")]
+    [InlineData("region = '__autheris_caller__dept'")]
+    public void AccessProfile_WithAPlaceholder_IsAFinding(string predicate)
+    {
+        var profile = new AccessProfile { ProfileId = "p", Name = "p", TenantId = TenantId.LegacySingleTenant, TargetTables = ["erp.main.orders"], RowFilterPredicate = predicate };
+        var report = new PolicyPredicateLinter().Lint(new PolicyLintInput([Orders()], [profile], [], []));
+        report.Findings.ShouldHaveSingleItem().Code.ShouldBe(PolicyPredicateLinter.CodeCallerPlaceholderNotAllowed);
+    }
+
+    [Fact]
+    public void CasbinRlsFilter_WithAPlaceholder_IsAFinding_AndTheFindingCarriesNoText()
+    {
+        var rule = new CasbinLintRule("rule-1", "erp.main.orders", "region = {{caller.dept}}", null);
+        var report = new PolicyPredicateLinter().Lint(new PolicyLintInput([Orders()], [], [], [rule]));
+        var finding = report.Findings.ShouldHaveSingleItem();
+        finding.Code.ShouldBe("CALLER_PLACEHOLDER_NOT_ALLOWED");
+        finding.Kind.ShouldBe(PolicyLintKind.CasbinRowFilter);
+        finding.ToString().ShouldNotContain("dept");
+    }
+}

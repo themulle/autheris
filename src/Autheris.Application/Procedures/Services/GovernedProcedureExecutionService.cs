@@ -963,6 +963,12 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             return TableAccessDecision.Denied(decision.Table, mandatory.DenyReason ?? "Denied by virtual filters.");
         }
 
+        if (mandatory.CallerAttributesTextConstant)
+        {
+            // REQ-GOV-129 (BC-129-05, F-4): this consent bypass path is text only; the text of a caller attribute filter is a constant, so the table is denied.
+            return TableAccessDecision.Denied(decision.Table, "Denied by virtual filters.");
+        }
+
         return mandatory.PredicateSql != null ? decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters, mandatory.AppliedBindings) : decision;
     }
 

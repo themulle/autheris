@@ -317,9 +317,24 @@ public sealed partial class TableAccessPolicy
             {
                 // WP-X0g: with a RowPolicyFactory the typed predicate is attached (values bound, passes RequireTypedRowPolicy);
                 // without one, or when a builder has no typed form, the legacy text path stays until X1.
-                decision = _rowPolicyFactory != null && mandatory.TypedPredicate != null
-                    ? decision.WithMandatoryPredicate(_rowPolicyFactory.FromPredicate(mandatory.TypedPredicate, query.Metadata.Dialect), mandatory.AppliedFilters, mandatory.AppliedBindings)
-                    : decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters, mandatory.AppliedBindings);
+                if (mandatory.CallerAttributesTextConstant && (_rowPolicyFactory == null || mandatory.TypedPredicate == null))
+                {
+                    // REQ-GOV-129 (BC-129-05): the text of a caller attribute filter is only a constant; without the typed predicate the table is denied,
+                    // whether or not a sibling filter has a typed form.
+                    return TableAccessDecision.Denied(table, "Denied by virtual filters.");
+                }
+
+                if (_rowPolicyFactory != null && mandatory.TypedPredicate != null)
+                {
+                    var typed = mandatory.CallerAttributes.Count > 0
+                        ? await BindVirtualFilterAttributesAsync(mandatory.TypedPredicate, mandatory.CallerAttributes, query, ct).ConfigureAwait(false)
+                        : mandatory.TypedPredicate;
+                    decision = decision.WithMandatoryPredicate(_rowPolicyFactory.FromPredicate(typed, query.Metadata.Dialect), mandatory.AppliedFilters, mandatory.AppliedBindings);
+                }
+                else
+                {
+                    decision = decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters, mandatory.AppliedBindings);
+                }
             }
         }
 
