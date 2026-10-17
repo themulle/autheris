@@ -827,6 +827,17 @@ public sealed class CatalogSchemaModelTests
         Assert.NotEqual(a.Fingerprint(), b.Fingerprint());
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Fingerprint_OmittedTablesDifferingOnlyInDomain_DoNotCollide()
+    {
+        // SEC-BUG157-09: schema.table alone is ambiguous across domains.
+        var a = await BuildTablesAsync([CreateTable(new TableIdentifier("d1", "s", "t"), columns: NoColumns)]);
+        var b = await BuildTablesAsync([CreateTable(new TableIdentifier("d2", "s", "t"), columns: NoColumns)]);
+
+        Assert.NotEqual(a.Fingerprint(), b.Fingerprint());
+    }
+
     private static TableMetadata CreateTable(
         TableIdentifier id,
         bool isActive = true,

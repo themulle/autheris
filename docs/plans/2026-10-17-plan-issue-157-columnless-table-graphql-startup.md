@@ -151,3 +151,13 @@ None. Defaults taken: health `status` unaffected by omissions (decision 7); list
 - **T-BUG157-S12** `Diagnostics_Snapshot_NotMutatedByLaterBuild`.
 
 No architect changes required beyond folding the conditions into the work packages.
+
+## Changelog (Phase 4)
+
+- 2026-10-17 G-PLAN-REBASE: F1-F11 re-checked against the branch; no drift. Deviations and notes:
+  - `TableIdentifier.ToQualifiedName()` is `Schema.TableName` (no domain). The health payload (`table`) and the fingerprint therefore use the three-part name `Domain.Schema.TableName` (fingerprint length-prefixes every part); the new LogWarning keeps `ToQualifiedName()` as specified in decision 5.
+  - Omitted-table list is sorted ordinally by domain, schema, table (not "as encountered") so the dialect omissions, which come from unsorted repository order, are deterministic (SEC-BUG157-03/09).
+  - Role hierarchy: `ClusterAdmin` implies `GovernanceAdmin` in `GatewayRoleEvaluator`, so it receives names; the S03 test uses `SecurityAdmin` (default allowed, no implication).
+  - R4 resolved without a stub: the host test starts twice over one SQLite file (first start seeds, second builds the schema from a catalog with column-less tables). Real model, schema and endpoint (SEC-BUG157-10).
+  - Extra tests: `Fingerprint_OmittedTablesDifferingOnlyInDomain_DoNotCollide`, `Fingerprint_OmissionEntries_AreUnambiguouslyEncoded`.
+  - WP-2 schema tests were green on arrival because WP-1 had already fixed the model; Red for the fix itself was the WP-1 tests (compile-red on `OmittedTables`, then behavioural).

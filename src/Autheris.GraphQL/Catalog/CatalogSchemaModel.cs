@@ -95,10 +95,16 @@ public sealed partial class CatalogSchemaModel
         }
 
         // BUG #157: omissions are part of the fingerprint so a newly added column-less table triggers a rebuild (and the
-        // warning / health list). Entries are delimited by '!' ... ';' and the reason name contains neither character.
+        // warning / health list). Each name part is length-prefixed, so no name content can merge or split entries.
         foreach (var o in OmittedTables)
         {
-            sb.Append('!').Append(o.Table.ToQualifiedName()).Append(':').Append(o.Reason).Append(';');
+            sb.Append('!');
+            foreach (var part in new[] { o.Table.Domain, o.Table.Schema, o.Table.TableName })
+            {
+                sb.Append(part.Length).Append('.').Append(part);
+            }
+
+            sb.Append(':').Append(o.Reason).Append(';');
         }
 
         return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(sb.ToString())));
