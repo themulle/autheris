@@ -66,7 +66,7 @@ Guiding rule (owner): rights are checked by the backend, not by the calling agen
 | Rank | Item | Size | Phase 1 (PM) | Next phase |
 |---:|---|:---:|:---:|---|
 | 2.1 | **#107** row filter key-set cache: implementation of WP-A/B/C (contracts merged) — the real answer to `RowFilters:SubqueryStrategy` (#136); **consumer-urgent:** WebSQL `ORDER BY` with row filters runs into timeouts without it | M | ✅ | Phase 4 (steps I-1..I-3): WP-A delivered on `feat/issue-107-wp-a` (I-1 done), WP-B delivered on `feat/issue-107-wp-b` (I-2 done; feature doc [F-GOV-23](../features/f-gov-23-row-filter-key-set-cache.md)); next I-3 WP-C |
-| 2.2 | **#115** switches for the remaining read paths (REST data endpoint, MCP tool groups) — closes uncontrollable read paths | S | ✅ | Phase 4 (step I-4) |
+| 2.2 | **#115** switches for the remaining read paths (REST data endpoint, MCP tool groups) — closes uncontrollable read paths | S | ✅ | ✅ Phase 4 + Phase 5 done (step I-4, lane B, `feat/issue-115-read-path-switches`); awaiting consolidated PR |
 | 2.3 | **#128** list parameters (`IN`/`NOT IN`) — prerequisite of #129 and #131 | M | ✅ | Phase 4 (step I-5) |
 | 2.4 | **#130** governed time zone conversion | S-M | ✅ | Phase 4 (step I-6) |
 | 2.5 | **#111** persisted dataset tags and catalog visibility | M | ✅ | Phase 4 (steps B-1 security fix, then I-7) |

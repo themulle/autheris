@@ -47,7 +47,7 @@ Legend: PRD = Phase 1; P2 = architect plan; P3 = security review (final verdict 
 | Rank | Item | PRD | Phase 2 plan | Phase 3 final verdict | Implementation steps | Status |
 |---:|---|---|---|---|---|---|
 | 2.1 | #107 row filter key-set cache (WP-A/B/C) | [`REQ-GOV-107`](2026-10-15-req-issue-107-row-filter-key-set-cache.md) | done: [`PLAN-GOV-107`](2026-10-15-plan-issue-107-row-filter-key-set-cache.md) | AWC (section 12.5, `SEC-RF107-01..16`) | I-1..I-3 (contracts: PR #108 merged) | Planning complete; Phase 4 next (I-1) |
-| 2.2 | #115 read-path switches | [`REQ-SEC-115`](2026-10-16-req-issues-111-115-catalog-access-analytics.md) | done: [`plan-issue-115`](2026-10-16-plan-issue-115-read-path-switches.md) | AWC (`C-115-1..12`, `ST-115-01..24`) | I-4 | Planning complete; Phase 4 pending |
+| 2.2 | #115 read-path switches | [`REQ-SEC-115`](2026-10-16-req-issues-111-115-catalog-access-analytics.md) | done: [`plan-issue-115`](2026-10-16-plan-issue-115-read-path-switches.md) | AWC (`C-115-1..12`, `ST-115-01..24`) | I-4 | I-4 done (Phase 4 + Phase 5 APPROVED; lane B, see section 3.5 lane B) |
 | 2.3 | #128 list parameters | [`REQ-SQL-128`](2026-10-16-req-issues-128-129-130-websql-parameters-user-attributes-timezones.md) | done: [`plan-issue-128`](2026-10-16-plan-issue-128-list-parameters.md) | AWC (section 14, `SEC-128-01..14`, C-1..C-16, M-1..M-18) | I-5 | Planning complete; Phase 4 pending |
 | 2.4 | #130 governed time zone conversion | `REQ-SQL-130` (same PRD) | done: [`plan-issue-130`](2026-10-16-plan-issue-130-convert-timezone.md) | AWC (`BC-130-1..14`, 18 security tests) | I-6 | Planning complete; Phase 4 pending |
 | 2.5 | #111 dataset tags and catalog visibility | `REQ-GOV-111` (bundle 111-115 PRD) | done: [`plan-issue-111`](2026-10-16-plan-issue-111-dataset-tags-catalog-visibility.md) (rev. 3) | narrow re-review rev. 3: **WP-0 AWC** (`W0-C1..C11`), **#111 WP-1..6 AWC** (`F-C1..C10`) | B-1 (WP-0 security fix), I-7 | B-1 done (WP-0); I-7 pending |
@@ -137,6 +137,22 @@ Delivery mode (owner): one developer, strictly sequential; branches are **stacke
 - B-3 decisions taken by the lead (default taken, owner to confirm at PR): `ErrorSanitizingFilter` whitelists `DECISION_NOT_PERMITTED` and `ACCESS_REQUEST_NOT_PENDING` (outside the R2.1 file list; without it clients see `INTERNAL_SERVER_ERROR`); the ITSM webhook acknowledges a lost status race without effect (R2.1 said "untouched"); recorded in the `PLAN-GOV-113` changelog. The `INDIVIDUAL_GRANT_*` codes are still masked by the sanitizer outside Development (pre-existing; candidate for #113 A).
 - B-3 owner confirmation O-9 (application and certificate tokens can no longer decide consent requests): default taken (accepted as recommended by the review), owner to confirm at PR.
 - Owner confirmations still due: see section 3.2 (B-1 O-1/O-5/O-6/O-7 acknowledged by the owner for O-7; B-3 O-9; I-8 O-4/O-5; I-22/I-24 O-8, O-3).
+
+### 3.5 lane B (catalog and read paths; parallel lane, 2026-10-17)
+
+Lane B delivers I-4, I-7, 1.7 (#138 INC-1, tracker label I-7a) and I-8 as stacked branches from `main` `f0071be6`: `feat/issue-115-read-path-switches` -> `feat/issue-111-dataset-tags-visibility` -> `feat/issue-138-inc1-catalog-visibility` -> `feat/issue-112-typed-aggregations`. The main thread consolidates; lane B opens no PR. Branches are pushed once per finished step (owner rule 2026-10-17).
+
+| Step | Branch | Phase 4 | Phase 5 code review | State |
+|---|---|:---:|:---:|---|
+| I-4 | `feat/issue-115-read-path-switches` | ✅ | ✅ (APPROVED WITH FINDINGS: 1 Medium near-miss typo of parent switch keys, 5 Low; all fixed; re-review APPROVED) | done |
+| I-7 | `feat/issue-111-dataset-tags-visibility` | – | – | **next**; pre-Phase-4 Addendum A-1 (drift, G1/G2) with narrow Phase 3 review AWC (`F-C11..F-C15`) |
+| I-7a (1.7) | `feat/issue-138-inc1-catalog-visibility` | – | – | not started |
+| I-8 | `feat/issue-112-typed-aggregations` | – | – | not started |
+
+**Resume lane B:** check out the branch of the last done step above, create the **next** branch from it, run that step.
+
+**Notes lane B:**
+- I-4: deviations are in the `plan-issue-115` changelog (`RecordDropped`, seven ungrouped admin tools, per-process HMAC principal hash in the observer - not correlatable across restarts, accepted; closed sample-rows route answered by the catalog catch-all; near-miss typo check on `Gateway`/`Gateway:Mcp` children fails the start). Catalog row `SEC-115` added. Tests (Release, `AutherisIncludeTestAuth=true`): build clean with warnings as errors; unit 8,837; architecture 117 (+1 skipped); TrinoSqlEngine 8,254; integration filter `Mcp|ChangeDetection|DatasetData|AuditEndpointCoverage|GovernedEntryPoints|ReadPath` 54 passed; all green.
 
 ### 3.6 Release notes of the bugfix steps (for the PR texts)
 
