@@ -225,7 +225,7 @@ that route.
 column governance and describe (M, wave 3), INC-4 catalog and MCP entries (M, wave 3, after #138 INC-1/INC-2 and #111),
 INC-5 MCP call tool (wave 4, own PRD). INC-1 and INC-2 change the same method and run sequentially.
 
-## 4. Proposed placement in the prioritized backlog
+## 4. Placement in the prioritized backlog (confirmed 2026-10-17)
 
 | Wave | Rank (proposed) | Item | Size |
 |---|---|---|:---:|
@@ -246,7 +246,9 @@ The wave 2/3 items are not part of the running `PLAN-DELIVERY-W23` sequence; the
 reaches them, so the gate G-PLAN of the current run is not reopened. Wave 1 items need Phase 2 and Phase 3 before
 Phase 4 like every other item.
 
-## 5. Open owner questions (recommended default in brackets)
+## 5. Owner questions and decisions
+
+**Decision 2026-10-17:** the owner accepted every recommended default below (OQ-1..OQ-15). The placements in section 4 are confirmed.
 
 | ID | Question | Default |
 |---|---|---|
