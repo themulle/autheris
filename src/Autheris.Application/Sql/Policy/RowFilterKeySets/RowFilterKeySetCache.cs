@@ -105,6 +105,11 @@ public sealed class RowFilterKeySetCache : IDisposable
         {
             return new RowFilterKeySetCacheResult(RowFilterKeySetCacheStatus.Throttled, null, null);
         }
+        catch (TimeoutException ex)
+        {
+            // The shared load exceeded its timeout: the same denial as a failed key query (SEC-RF107-08), nothing cached.
+            throw RowFilterKeySetErrorCodes.Unavailable(ex);
+        }
     }
 
     public void Dispose()

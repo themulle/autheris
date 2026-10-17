@@ -300,7 +300,9 @@ public sealed class RowFilterKeySetCacheTests : IDisposable
 
         _time.Advance(TimeSpan.FromSeconds(6));
 
-        await Should.ThrowAsync<TimeoutException>(() => call.WaitAsync(Wait));
+        var ex = await Should.ThrowAsync<Autheris.Domain.Exceptions.GatewaySecurityException>(() => call.WaitAsync(Wait));
+        ex.ErrorCode.ShouldBe(RowFilterKeySetErrorCodes.KeySetUnavailable);
+        ex.InnerException.ShouldBeOfType<TimeoutException>();
         cache.TryGetRaw(Key).ShouldBeNull();
     }
 
