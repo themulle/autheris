@@ -2,7 +2,6 @@ namespace Autheris.Application.Identity.Attributes;
 
 using System;
 using System.Collections.Concurrent;
-using System.Threading;
 using System.Threading.Tasks;
 
 /// <summary>
@@ -22,23 +21,41 @@ internal sealed class CallerAttributeRequestState
 
     internal void Remove(string name) => _entries.TryRemove(name, out _);
 
+    private readonly object _reserveLock = new();
+    private readonly TimeProvider _time;
+    private readonly TimeSpan _window;
     private long _reservedBinds;
+    private DateTimeOffset _windowStart;
 
-    /// <summary>BC-129-09: the bind items all attribute expansions of this request may use together; false when <paramref name="items"/> would exceed <paramref name="cap"/>.</summary>
+    internal CallerAttributeRequestState(TimeProvider time, TimeSpan window)
+    {
+        _time = time;
+        _window = window;
+        _windowStart = time.GetUtcNow();
+    }
+
+    /// <summary>
+    /// BC-129-09: the bind items all attribute expansions of this request may use together; false when <paramref name="items"/> would exceed
+    /// <paramref name="cap"/>. The sum is released with the memo window, so a principal object that outlives its request starts afresh.
+    /// </summary>
     internal bool TryReserve(int items, int cap)
     {
-        while (true)
+        lock (_reserveLock)
         {
-            long current = Interlocked.Read(ref _reservedBinds);
-            if (current + items > cap)
+            var now = _time.GetUtcNow();
+            if (now - _windowStart >= _window)
+            {
+                _reservedBinds = 0;
+                _windowStart = now;
+            }
+
+            if (_reservedBinds + items > cap)
             {
                 return false;
             }
 
-            if (Interlocked.CompareExchange(ref _reservedBinds, current + items, current) == current)
-            {
-                return true;
-            }
+            _reservedBinds += items;
+            return true;
         }
     }
 }

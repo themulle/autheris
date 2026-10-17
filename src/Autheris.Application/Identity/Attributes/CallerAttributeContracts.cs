@@ -61,10 +61,11 @@ public sealed record CallerSubject(
     internal CallerAttributeRequestState? RequestState { get; init; }
 
     /// <summary>
-    /// Reserves bind items for the attribute expansions of this request (BC-129-09). Without a request scope (long-lived subjects) the
-    /// sum cannot be tracked and the call returns true; the per-decision cap still applies at the bind site.
+    /// Reserves bind items for the attribute expansions of this request (BC-129-09), released with the memo window. Without a request scope
+    /// (long-lived subjects: CDC, webhook, subscription) nothing accumulates between decisions, so the cap applies to the single call, that is
+    /// to one decision.
     /// </summary>
-    public bool TryReserveBinds(int items, int cap) => RequestState?.TryReserve(items, cap) ?? true;
+    public bool TryReserveBinds(int items, int cap) => RequestState?.TryReserve(items, cap) ?? items <= cap;
 
     public override string ToString() => $"CallerSubject {{ Kind = {Kind} }}";
 

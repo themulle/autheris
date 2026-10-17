@@ -537,6 +537,45 @@ public sealed class CallerAttributeResolverTests : IDisposable
     }
 
     [Fact]
+    public async Task ST_129_15_BindReservation_IsReleased_WithTheMemoWindow()
+    {
+        var resolver = Create(null, Registry(Def()), new FakeProvider());
+        var subject = resolver.CreateSubject(Principal(Bearer, [("oid", UserOid)]), Tenant);
+        subject.TryReserveBinds(400, 400).ShouldBeTrue();
+        subject.TryReserveBinds(1, 400).ShouldBeFalse();
+        _time.Advance(TimeSpan.FromSeconds(Options().RequestMemoSeconds + 1));
+        subject.TryReserveBinds(400, 400).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void ST_129_15_LongLivedSubject_HasThePerDecisionCap()
+    {
+        var resolver = Create(null, Registry(Def()), new FakeProvider());
+        var subject = resolver.CreateSubject(Principal(Bearer, [("oid", UserOid)]), Tenant, longLived: true);
+        subject.TryReserveBinds(400, 400).ShouldBeTrue();
+        subject.TryReserveBinds(400, 400).ShouldBeTrue();   // another decision: nothing accumulates
+        subject.TryReserveBinds(401, 400).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ST_129_09_FirstCallerCancellation_DoesNotFailAnotherWaiterOfTheSharedMemoTask()
+    {
+        var gate = new TaskCompletionSource();
+        var provider = new FakeProvider { Behavior = async (_, _, _) => { await gate.Task; return Raw("100"); } };
+        var resolver = Create(null, Registry(Def()), provider);
+        var principal = Principal(Bearer, [("oid", UserOid)]);
+        using var cancelA = new CancellationTokenSource();
+        var a = Resolve(resolver, resolver.CreateSubject(principal, Tenant), ct: cancelA.Token);
+        var b = Resolve(resolver, resolver.CreateSubject(principal, Tenant));
+        await Task.Delay(50);
+        cancelA.Cancel();
+        await Should.ThrowAsync<OperationCanceledException>(() => a);
+        gate.SetResult();
+        (await b).Outcome.ShouldBe(CallerAttributeOutcome.Resolved);
+        provider.Calls.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task PlugInSeam_AFakeScimProvider_IsUsedForAnAttributeBoundToIt()
     {
         var scim = new FakeProvider("scim") { Behavior = (_, _, _) => Task.FromResult(Raw("from-scim")) };

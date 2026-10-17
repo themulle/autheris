@@ -87,7 +87,7 @@ public sealed class CallerAttributeResolver : ICallerAttributeResolver, ICallerA
             return subject;
         }
 
-        return subject with { RequestState = _states.GetValue(principal, static _ => new CallerAttributeRequestState()) };
+        return subject with { RequestState = _states.GetValue(principal, _ => new CallerAttributeRequestState(_time, TimeSpan.FromSeconds(_options.RequestMemoSeconds))) };
     }
 
     public void InvalidateAttribute(TenantId tenant, string attributeName) =>
@@ -182,9 +182,24 @@ public sealed class CallerAttributeResolver : ICallerAttributeResolver, ICallerA
             return await entry.Result.WaitAsync(ct).ConfigureAwait(false);
         }
 
-        var task = ResolveCoreAsync(subject, definition, ct).AsTask();
+        // The shared work runs under a gateway-owned token (bounded by the provider timeout), never under the first caller's: a caller that
+        // cancels leaves the memo task running for the other waiters and observes only its own cancellation.
+        var task = ResolveSharedAsync(subject, definition);
         state.Set(memoKey, new CallerAttributeRequestState.Entry(now, hash, snapshot.Generation, task));
-        return await task.ConfigureAwait(false);
+        return await task.WaitAsync(ct).ConfigureAwait(false);
+    }
+
+    private async Task<CallerAttributeResult> ResolveSharedAsync(CallerSubject subject, CallerAttributeDefinition definition)
+    {
+        using var own = new CancellationTokenSource(TimeSpan.FromMilliseconds(Math.Max(1, _options.ProviderTimeoutMilliseconds) * 2L));
+        try
+        {
+            return await ResolveCoreAsync(subject, definition, own.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return CallerAttributeResult.Failed("Timeout");   // the gateway-owned bound elapsed
+        }
     }
 
     private async ValueTask<CallerAttributeResult> ResolveCoreAsync(CallerSubject subject, CallerAttributeDefinition definition, CancellationToken ct)
