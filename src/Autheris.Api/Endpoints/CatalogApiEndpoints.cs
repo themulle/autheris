@@ -171,43 +171,14 @@ public static class CatalogApiEndpoints
         return app;
     }
 
-    private const int MaxDatasetIdLength = 512;
-
     private static IResult DatasetKeysNotFound() => Results.NotFound(new { error = "Dataset was not found." });
 
-    /// <summary>
-    /// Resolves an active dataset by table id (strict "D" GUID) or by domain.schema.table without loading the whole catalog.
-    /// Unknown and inactive datasets are indistinguishable (SEC-94-15); a dataset with an invalid stored definition resolves (repair).
-    /// </summary>
-    private static async Task<TableIdentifier?> ResolveActiveDatasetAsync(
+    /// <summary>Resolves an active dataset by table id or domain.schema.table (shared with the row filter strategy endpoints).</summary>
+    private static Task<TableIdentifier?> ResolveActiveDatasetAsync(
         string? id,
         Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
         CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(id) || id.Length > MaxDatasetIdLength)
-        {
-            return null;
-        }
-
-        TableIdentifier identifier;
-        if (Guid.TryParseExact(id, "D", out var tableGuid))
-        {
-            var resolved = await metadataRepository.GetActiveTableIdentifierByIdAsync(tableGuid, ct).ConfigureAwait(false);
-            if (resolved is not { } found)
-            {
-                return null;
-            }
-
-            identifier = found;
-        }
-        else if (!TableIdentifier.TryParse(id.Replace('/', '.'), out identifier))
-        {
-            return null;
-        }
-
-        // Catalog row only: the stored key definition is neither loaded nor validated, so an invalid definition can be replaced.
-        return await metadataRepository.GetActiveTableIdentifierAsync(identifier, ct).ConfigureAwait(false);
-    }
+        => Autheris.Application.Governance.Services.DatasetIdResolver.ResolveActiveAsync(id, metadataRepository, ct);
 
     internal static async Task<IResult> SetDatasetKeysHandler(
         string id,
