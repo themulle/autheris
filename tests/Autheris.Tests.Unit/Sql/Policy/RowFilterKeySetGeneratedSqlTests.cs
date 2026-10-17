@@ -203,7 +203,7 @@ public sealed class RowFilterKeySetGeneratedSqlTests
         var predicate = Policy([Allow(Example1())]);
 
         Compile(Select, TargetSqlDialect.Oracle, Catalog("NUMBER(10)", "VARCHAR2(64)"), (Air1, predicate)).Sql.ShouldBe(
-            "SELECT \"ID\" FROM (SELECT \"id\" AS \"id\", \"client_id\" AS \"client_id\", \"region\" AS \"region\", \"tenant_id\" AS \"tenant_id\" FROM \"fms\".\"air1\" \"AUTHERIS_TARGET\" WHERE (\"tenant_id\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"tenant_id\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000)))) AND (EXISTS (SELECT :p2 FROM (SELECT \"id\" AS \"id\", \"country\" AS \"country\", \"tenant_id\" AS \"tenant_id\" FROM \"conf\".\"client\" WHERE (\"tenant_id\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"tenant_id\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) \"c\" INNER JOIN (SELECT \"id\" AS \"id\", \"client_id\" AS \"client_id\", \"kind\" AS \"kind\", \"tenant_id\" AS \"tenant_id\" FROM \"md\".\"crane\" WHERE (\"tenant_id\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"tenant_id\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) \"cr\" ON \"c\".\"id\" = \"cr\".\"client_id\" WHERE \"c\".\"id\" = \"autheris_target\".\"client_id\" AND \"cr\".\"kind\" = :p3))) \"AIR1\"");
+            "SELECT \"ID\" FROM (SELECT \"id\" AS \"id\", \"client_id\" AS \"client_id\", \"region\" AS \"region\", \"tenant_id\" AS \"tenant_id\" FROM \"fms\".\"air1\" \"AUTHERIS_TARGET\" WHERE (\"tenant_id\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"tenant_id\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000)))) AND (EXISTS (SELECT :p2 FROM (SELECT \"id\" AS \"id\", \"country\" AS \"country\", \"tenant_id\" AS \"tenant_id\" FROM \"conf\".\"client\" WHERE (\"tenant_id\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"tenant_id\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) \"c\" INNER JOIN (SELECT \"id\" AS \"id\", \"client_id\" AS \"client_id\", \"kind\" AS \"kind\", \"tenant_id\" AS \"tenant_id\" FROM \"md\".\"crane\" WHERE (\"tenant_id\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"tenant_id\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) \"cr\" ON \"c\".\"id\" = \"cr\".\"client_id\" WHERE \"c\".\"id\" = \"AUTHERIS_TARGET\".\"client_id\" AND \"cr\".\"kind\" = :p3))) \"AIR1\"");
     }
 
     [Fact]
@@ -215,7 +215,7 @@ public sealed class RowFilterKeySetGeneratedSqlTests
         var compiled = Compile(Select, TargetSqlDialect.Oracle, Catalog("NUMBER(10)", "VARCHAR2(64)"), (Air1, substituted));
 
         compiled.Sql.ShouldBe(
-            "SELECT \"ID\" FROM (SELECT \"id\" AS \"id\", \"client_id\" AS \"client_id\", \"region\" AS \"region\", \"tenant_id\" AS \"tenant_id\" FROM \"fms\".\"air1\" \"AUTHERIS_TARGET\" WHERE (\"tenant_id\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"tenant_id\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000)))) AND (\"autheris_target\".\"client_id\" IN (:p2, :p3, :p4, :p5))) \"AIR1\"");
+            "SELECT \"ID\" FROM (SELECT \"id\" AS \"id\", \"client_id\" AS \"client_id\", \"region\" AS \"region\", \"tenant_id\" AS \"tenant_id\" FROM \"fms\".\"air1\" \"AUTHERIS_TARGET\" WHERE (\"tenant_id\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"tenant_id\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000)))) AND (\"AUTHERIS_TARGET\".\"client_id\" IN (:p2, :p3, :p4, :p5))) \"AIR1\"");
         // the keys are binds typed by the foreign key column (D-8) and padded to the bucket of three keys
         compiled.Parameters.Where(p => p.Origin == ParameterOrigin.Policy).Count().ShouldBe(4);
         compiled.Parameters.Where(p => p.Origin == ParameterOrigin.Policy).ShouldAllBe(p => p.ColumnType == "NUMBER(10)" && p.Type == SqlParameterType.Int64);
@@ -230,7 +230,7 @@ public sealed class RowFilterKeySetGeneratedSqlTests
         var substituted = Substitute(predicate, TargetSqlDialect.Oracle, (0, Keys("crane_id", 0, 2000, 5)));
 
         Compile("SELECT id FROM md.engine", TargetSqlDialect.Oracle, Catalog("NUMBER(10)", "VARCHAR2(64)"), (Engine, substituted)).Sql.ShouldBe(
-            "SELECT \"ID\" FROM (SELECT \"id\" AS \"id\", \"crane_id\" AS \"crane_id\", \"tenant_id\" AS \"tenant_id\" FROM \"md\".\"engine\" \"AUTHERIS_TARGET\" WHERE (\"tenant_id\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"tenant_id\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000)))) AND (\"autheris_target\".\"crane_id\" IN (:p2))) \"ENGINE\"");
+            "SELECT \"ID\" FROM (SELECT \"id\" AS \"id\", \"crane_id\" AS \"crane_id\", \"tenant_id\" AS \"tenant_id\" FROM \"md\".\"engine\" \"AUTHERIS_TARGET\" WHERE (\"tenant_id\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"tenant_id\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000)))) AND (\"AUTHERIS_TARGET\".\"crane_id\" IN (:p2))) \"ENGINE\"");
     }
 
 
@@ -244,7 +244,7 @@ public sealed class RowFilterKeySetGeneratedSqlTests
         var compiled = Compile(Select, TargetSqlDialect.Oracle, Catalog("NUMBER(10)", "VARCHAR2(64)"), (Air1, substituted));
 
         System.Text.RegularExpressions.Regex.Count(compiled.Sql, " IN \\(").ShouldBe(2);
-        compiled.Sql.ShouldContain(") OR \"autheris_target\".\"client_id\" IN (");
+        compiled.Sql.ShouldContain(") OR \"AUTHERIS_TARGET\".\"client_id\" IN (");
         compiled.Parameters.Count(p => p.Origin == ParameterOrigin.Policy).ShouldBe(2000);
     }
 

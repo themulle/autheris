@@ -472,7 +472,8 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
         TargetSqlDialect.SqlServer => DatabaseDialect.SqlServer,
         TargetSqlDialect.PostgreSql => DatabaseDialect.PostgreSql,
         TargetSqlDialect.Oracle => DatabaseDialect.Oracle,
-        _ => DatabaseDialect.Sqlite
+        TargetSqlDialect.Sqlite => DatabaseDialect.Sqlite,
+        _ => throw new NotSupportedException("The key-set cache has no loader for this dialect.")
     };
 
     private sealed record Site(
