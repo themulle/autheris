@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -30,6 +31,13 @@ public sealed class GatewayCoreOptionsValidator : IValidateOptions<GatewayOption
         if (!Enum.IsDefined(opts.RowFilters.SubqueryStrategy))
         {
             failures.Add("Gateway:RowFilters:SubqueryStrategy must be Exists, InCorrelated or In.");
+        }
+
+        // REQ-SQL-130 (BC-130-9): a time zone function without the closed zone set must not be admitted by configuration.
+        if (opts.WebSql?.AdditionalAllowedFunctions is { Count: > 0 } additional &&
+            additional.Any(TrinoSqlEngine.SqlFunctionAllowlists.IsTimeZoneFunctionName))
+        {
+            failures.Add("Gateway:WebSql:AdditionalAllowedFunctions must not list a time zone function; convert_timezone is the governed one.");
         }
 
         if (!opts.Tenancy.IsValid)

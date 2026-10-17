@@ -71,6 +71,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
     private readonly IMemoryCache? _memoryCache;
     private readonly SqlDataSourceResolver _dataSourceResolver;
     private readonly TypedPolicySources? _typedPolicies;
+    private readonly Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? _timeZoneState;   // null = conversion unavailable (fail closed)
     private readonly Autheris.Application.Caching.BoundedCache<string, SqlQueryMetadata> _stage1Analyses = new(4_096);
 
     public IReadOnlyList<SqlRewriteStageOrder> StageOrder =>
@@ -100,8 +101,10 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         IAccessProfileRepository? accessProfileRepository = null,
         IMemoryCache? memoryCache = null,
         SqlDataSourceResolver? dataSourceResolver = null,
-        TypedPolicySources? typedPolicies = null)
+        TypedPolicySources? typedPolicies = null,
+        Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? timeZoneState = null)
     {
+        _timeZoneState = timeZoneState;
         _typedPolicies = typedPolicies;
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _policyEnforcement = policyEnforcement; _consentResolution = consentResolution;
@@ -722,7 +725,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             }
         }
 
-        return CompileRequestFactory.Create(policy, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists);
+        return CompileRequestFactory.Create(policy, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists,
+            timeZoneConversionAvailable: _timeZoneState?.IsAvailable(targetSqlDialect) ?? false);
     }
 
     private CompiledSql CompileStatement(string rawSql, CompileRequest request, bool mayRetry, CancellationToken ct)

@@ -85,6 +85,19 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
     {
         ArgumentNullException.ThrowIfNull(query);
 
+        // REQ-SQL-130 (BC-130-5d): a time zone slot is bound only by the production binder, which maps its value through the closed zone set. This path
+        // binds BoundParameter.Value as it is (null for a client slot), so it refuses a zone slot until the federated binding exists (#131).
+        if (query.Parameters is not null)
+        {
+            foreach (var parameter in query.Parameters)
+            {
+                if (parameter.ZoneArgument)
+                {
+                    throw new InvalidOperationException("The compiled SQL contains a parameter that only the governed binder may bind.");
+                }
+            }
+        }
+
         // Gateway-compiled SQL (all values bound): not client text, so the client-text floor and the client AST policy do not apply.
         return ExecuteCoreAsync(new OlapQueryRequest(query.Sql, sources, limit, query.Parameters), trustedGeneratedSql: true, ct);
     }
