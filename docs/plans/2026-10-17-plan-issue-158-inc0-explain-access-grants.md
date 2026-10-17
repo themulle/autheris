@@ -103,3 +103,54 @@ None blocking. Defaults taken: minimum `EffectiveValidTo` (R-0.2); interim role-
 matching `Role` grants with ordinal tie-break (R-0.4); generic text wording unchanged.
 
 ## Phase 3 Security Review
+
+**Reviewer:** `csharp-security-expert`, 2026-10-17. **Verified against:** `origin/main`.
+**Verdict: APPROVED WITH CONDITIONS.** The fix removes a real disclosure (foreign role names, foreign expiries) and only
+narrows what is shown. No control is weakened.
+
+### Verified code facts
+- F1, F2, F4, F5, F6 confirmed. F3 path is wrong: the resolver is `src/Autheris.Application/Services/ConsentResolutionService.cs`
+  (`ResolveAccess` `:31-33`, `IsSubjectMatch` `:313`), not `Governance/Services/`. Fix the reference.
+- The decision applies `IsActive(now) && TableIdentifier == table && IsSubjectMatch` with its own `UtcNow`. Tenant filtering
+  is done only by the explanation service (`:79-81`), before the decision. Scope claims affect column/rule evaluation, not
+  which consents are applicable, so the plan's predicate is equivalent for allows.
+
+### Findings
+| Id | Sev | Finding |
+|---|---|---|
+| S-1 | Medium | R3 (drift): the helper re-states the decision predicate. It is equivalent today, but a future change to `IsSubjectMatch`/`IsActive` use would re-open the disclosure silently. The reuse is cheap now (one extra private-to-internal change), so deferring to INC-1 is not justified. |
+| S-2 | Low | A `Role` grant matched by `RoleId` shows the consent's stored `RoleName`, which may differ from the caller's claim. It is a role the caller holds by id, so not a foreign disclosure; the label may be stale. Accepted. |
+| S-3 | Low | `CallerWithoutRoleClaims_RoleGrantsNeverMatch` ends in `DENIED`, so it does not exercise the new helper on the `ALLOWED` path. A mixed fixture (own user grant + foreign role grant, no role claims) is needed. |
+| S-4 | Low | `validTo` = minimum over matching allows may be earlier than later grants; shows only the caller's own grants. No disclosure. Accepted. |
+| S-5 | Info | Missing claims give empty non-null sets (F6), unknown `GranteeType` never matches (F4), missing `userSid` keeps early `DENIED`. Fail-closed confirmed. #117 paths (unknown, hidden, denied) are untouched. No new logging. |
+
+### Binding conditions
+- **SEC-GOV158-01** Do not duplicate the predicate. Extract one `internal static` method in `ConsentResolutionService`
+  (for example `IsApplicable(Consent, TableIdentifier, DateTimeOffset, Sid, IReadOnlySet<Sid>, IReadOnlySet<string>, IReadOnlySet<Sid>?)` =
+  `IsActive(now) && TableIdentifier == table && IsSubjectMatch(...)`), call it from `ResolveAccess` and from the explanation
+  helper. Production scope grows by this one file (~10 LOC); update plan sections 3.1, 4, 5 and R3 accordingly. The explanation
+  adds only `Effect == Allow`. Existing resolver tests must stay green unchanged.
+- **SEC-GOV158-02** `description` and `validTo` are computed only from consents that pass SEC-GOV158-01 and the tenant filter
+  (`:79-81` stays before the helper). No fallback to the unfiltered `activeConsents` anywhere, including the empty-match case.
+- **SEC-GOV158-03** The role-name description is taken only from a matching `GranteeType.Role` consent with non-whitespace
+  `RoleName`, chosen with `StringComparer.Ordinal`. Never from `User`/`Group`/`ServicePrincipal` or unknown types.
+- **SEC-GOV158-04** `validTo` uses `EffectiveValidTo` of matching consents only, one `now` for the whole method, inclusive
+  boundary via `IsActive` (`now == EffectiveValidTo` excluded).
+- **SEC-GOV158-05** Empty match on `ALLOWED` returns `validTo = null` and the unchanged generic text. No exception, no
+  extra data, no change to `DENIED`/`NotFound`/hidden-table output or to the DTO shape.
+- **SEC-GOV158-06** No new logging, audit event or exception message containing role names, SIDs or consent data.
+- **SEC-GOV158-07** Fix the F3 path reference in the plan.
+
+### Mandatory security tests (`[Trait("Category","Security")]`, file `Issue158ExplainAccessMatchingTests.cs`)
+- **T-GOV158-S01** `ForeignRoleGrant_NameAbsentFromEntireDto` : caller role A; allow to B and A; no `B` string anywhere in the serialized DTO (all fields).
+- **T-GOV158-S02** `ForeignRoleGrant_ExpiryDoesNotInfluenceValidTo` : B expires earlier, `validTo` equals A's `EffectiveValidTo`.
+- **T-GOV158-S03** `NoRoleClaims_OwnUserGrantPlusForeignRoleGrant_AllowedWithoutRoleName` : mixed fixture, real resolver, `ALLOWED`, generic text, `validTo` from the user grant (covers S-3).
+- **T-GOV158-S04** `UnknownGranteeType_NeverMatchesNorDiscloses` : `(GranteeType)99` consent with `RoleName`; ignored by explanation and decision.
+- **T-GOV158-S05** `ExplanationApplicability_ParityWithResolver_Theory` : theory over grantee type x match/non-match x active/expired/not-yet-valid/revoked x table; the helper's applicable set equals the resolver's allow set (guards drift).
+- **T-GOV158-S06** `ValidTo_BoundaryExactlyAtEffectiveValidTo_IsExcluded` : consent expiring at `now` does not count.
+- **T-GOV158-S07** `GroupGrant_NotInToken_NotDisclosed` : foreign group grant with `RoleName` set contributes nothing.
+- **T-GOV158-S08** `OtherTenantConsent_NeverUsed` : consent of another tenant returned by a substituted repository is ignored.
+- **T-GOV158-S09** `DeniedAndUnknownTablePaths_UnchangedByFix_NoExistenceOracle` : hidden table and unknown table give identical DTOs (#117 parity); existing `Issue117AccessExplanationDisclosureTests` stay green.
+- **T-GOV158-S10** `RoleGrantMatchedByRoleId_ShowsOnlyCallersHeldRoleGrant` : id-matched grant shown, other-id grant not.
+- **T-GOV158-S11** `DescriptionAndValidTo_IndependentOfRepositoryOrder` : both orders yield equal DTOs.
+- **T-GOV158-S12** `McpAndGraphQlMyAccess_ShareServiceOutput_NoForeignRole` : MCP result for the regression fixture carries no foreign role name.
