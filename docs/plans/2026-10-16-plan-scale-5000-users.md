@@ -7,6 +7,7 @@ the owner decisions. Two packages need a dedicated Phase-3 re-review before Phas
 **Author:** Solution Architect (Phase 2), Security Expert (Phase 3, section 8)
 **Branch:** `feat/scale-5000-users`
 **Parent Plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
+**Follow-up pointers (intake 2026-10-17):** [`REQ-CAT-138`](2026-10-17-req-issue-138-catalog-at-scale.md) INC-2 proposes to absorb the `CatalogSnapshot` part of `WP-PF-10` (catalog version counter plus shared snapshot); [`REQ-GOV-143`](2026-10-17-req-issue-143-restricted-scope-sensitive-columns.md) leaves a seam so `WP-SC-06` tag-based column policy can later widen the sensitivity predicate.
 **Inputs:**
 - [2026-10-16-analysis-scale-5000-users-governance.md](2026-10-16-analysis-scale-5000-users-governance.md) (findings B1–B4, H1–H6, M1–M5, open-source §6)
 - [2026-10-16-analysis-scale-5000-users-performance.md](2026-10-16-analysis-scale-5000-users-performance.md) (findings B-1..B-3, H-1..H-6, M-1..M-4, open-source §8)

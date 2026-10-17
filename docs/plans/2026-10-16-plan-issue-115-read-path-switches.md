@@ -5,6 +5,7 @@
 **Input:** [PRD REQ-SEC-115](2026-10-16-req-issues-111-115-catalog-access-analytics.md) section 6 (decisions D-115-1..4, FR-115-1..6, SI-115-1..4, AC 1..6, questions Q-115-1..3, verification item T-115-1) and section 8
 **Branch:** `feat/issue-115-read-path-switches` (planned; base `main`)
 **Parent Plan:** [00-master-plan-overview.md](00-master-plan-overview.md) | **Requirement:** `REQ-SEC-115` | **Delivery tracker:** [`PLAN-DELIVERY-W23`](2026-10-16-plan-waves-2-3-delivery.md) (step P-5, implementation step I-4)
+**Follow-up pointer (intake 2026-10-17):** a later MCP tool to call governed procedures ([`REQ-PROC-153`](2026-10-17-req-issues-152-154-governed-procedures.md) INC-5, wave 4) belongs to the `Query` tool group defined here.
 **Status:** PROPOSED, Phase 3 security review complete: APPROVED WITH CONDITIONS (conditions C-115-1..12 binding; next: Phase 4 TDD implementation)
 
 **Binding project rules applied:** no upgrade/repair migrations (this change has no persistence); fail closed; defaults never turn a path on or off compared with today; CI stays fast (no sleeps, shared fixtures); Phase-4 TDD developer is Sonnet; the SqlGate/AST security suites are not touched; `AstSecurityVisitor.cs` is not modified.
