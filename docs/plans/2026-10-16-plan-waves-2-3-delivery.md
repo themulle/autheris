@@ -219,6 +219,8 @@ The owner re-grouped the remaining delivery into thematic chunks; one project-ma
 | 6 | Observability (BL-06) | I-27, I-28, I-29, I-30 |
 | 7 | Wave 4 | planning, then implementation, also chunked by theme |
 
+**Owner instruction (permanent, 2026-10-17): Phase 6 is removed from the per-step workflow.** No documentation agent, no feature docs in `docs/features/`, no `docs/features/README.md` registrations, no release notes and no master plan edits per step. Only the tracker bookkeeping in this file (section 3/3.5 status row, resume instruction) is kept. Per step: Phase 4 -> lead build and test -> Phase 5 review loop -> tracker update -> commit and push -> next step. (F-GOV-23 was written for I-1/I-2 before this instruction and is not extended further.)
+
 Dependency check: I-25 needs I-3 and I-5 (both in chunk 1, earlier); I-7 needs I-4 (chunk 2, earlier); I-24 needs I-3 (chunk 1) and I-22 (chunk 2, earlier); I-9 needs B-0 and I-4 (chunk 2); I-16 needs I-13 (chunk 3); I-26 needs I-5 (chunk 1), I-14, I-15, I-17 (chunk 4, earlier); I-19 needs I-13 (chunk 3) and I-18. Owner waiver (2026-10-17): no lines-of-code estimate is required before Phase 4 for the rest of waves 2/3 and for wave 4.
 
 ## 5. Planning sequence (Phase 2 then Phase 3, strictly sequential) - COMPLETED 2026-10-16
@@ -275,6 +277,7 @@ After S-10 the tracker status of every planned item is set to "Planning complete
 
 - 2026-10-16: Tracker created (gate verification, planning and implementation sequences).
 - 2026-10-17: B-2 Phase 5 closed and B-3 delivered (sections 3.5, 3.6); tracker moved into the step stack; resume point I-1.
+- 2026-10-17: Owner instruction: Phase 6 removed from the per-step workflow (section 4.3).
 - 2026-10-17: I-2 (#107 WP-B) delivered on `feat/issue-107-wp-b`; `PLAN-GOV-107` addendum section 13 plus Phase 3 review before I-3; next I-3.
 - 2026-10-17: I-1 (#107 WP-A) delivered on `feat/issue-107-wp-a` (section 3.5); next I-2.
 - 2026-10-17: Section 4.3 thematic delivery chunks (owner) replaces the numeric order; LOC estimates waived; chunk 1 started on `feat/issue-107-wp-a`.
