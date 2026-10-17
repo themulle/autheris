@@ -2,7 +2,7 @@ namespace TrinoSqlEngine.Tests.TimeZones;
 
 using Xunit;
 
-/// <summary>BC-130-6 / ST-130-16: supply-chain checks of the embedded zone data.</summary>
+/// <summary>BC-130-6 / ST-130-16 / SEC-130-06: supply-chain checks of the embedded zone data.</summary>
 [Trait("Category", "Security")]
 public sealed class IanaWindowsZonesReproducibilityTests
 {

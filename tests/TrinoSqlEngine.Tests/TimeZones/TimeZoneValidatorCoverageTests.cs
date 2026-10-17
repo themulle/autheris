@@ -9,7 +9,7 @@ using TrinoSqlEngine.Tests.Compiler;
 using Xunit;
 using static TrinoSqlEngine.Tests.TimeZones.TimeZoneTestSupport;
 
-/// <summary>ST-130-9, ST-130-11 (compile part), ST-130-5, ST-130-17: validator coverage, masks, list parameters and the caps.</summary>
+/// <summary>SEC-130-01 (masked timestamp), SEC-130-05 (list zones), SEC-130-08 (caps), SEC-130-12 (every position): ST-130-9, ST-130-11 (compile part), ST-130-5, ST-130-17.</summary>
 [Trait("Category", "Security")]
 public sealed class TimeZoneValidatorCoverageTests
 {

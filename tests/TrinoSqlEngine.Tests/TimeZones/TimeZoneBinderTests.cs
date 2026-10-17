@@ -6,7 +6,7 @@ using TrinoSqlEngine.Tests.Compiler;
 using Xunit;
 using static TrinoSqlEngine.Tests.TimeZones.TimeZoneTestSupport;
 
-/// <summary>REQ-SQL-130 (A-4, BC-130-5): zone slots are mapped through the closed set by the production binder, in a pre-pass, before the command exists.</summary>
+/// <summary>REQ-SQL-130 (A-4, BC-130-5, SEC-130-05): zone slots are mapped through the closed set by the production binder, in a pre-pass, before the command exists.</summary>
 public sealed class TimeZoneBinderTests
 {
     private const string Sql = "SELECT convert_timezone(__param_zone, __param_to, e.OccurredAt) AS t FROM dbo.Events e WHERE e.Label = __param_zone";

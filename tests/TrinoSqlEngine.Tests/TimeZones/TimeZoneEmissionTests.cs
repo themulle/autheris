@@ -9,7 +9,7 @@ using TrinoSqlEngine.Tests.Compiler;
 using Xunit;
 using static TrinoSqlEngine.Tests.TimeZones.TimeZoneTestSupport;
 
-/// <summary>REQ-SQL-130 WP-3: emission (A-6), zone binding (A-4, A-5), generator guards (BC-130-3, BC-130-11, BC-130-12).</summary>
+/// <summary>REQ-SQL-130 WP-3: emission (A-6), zone binding (A-4, A-5), generator guards (BC-130-3, BC-130-11, BC-130-12; SEC-130-03, SEC-130-11, SEC-130-12).</summary>
 public sealed class TimeZoneEmissionTests
 {
     private const string Call = "convert_timezone('UTC', 'Europe/Berlin', e.OccurredAt)";

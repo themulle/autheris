@@ -65,7 +65,9 @@ internal sealed class ClientListFixture : IAsyncDisposable
         ListCapturingLogger<GovernedSqlExecutionService>? logger = null,
         Func<DbConnection>? openConnection = null,
         IFederatedQueryExecutionService? federated = null,
-        bool crossSourceCatalog = false)
+        bool crossSourceCatalog = false,
+        string provider = "Sqlite",
+        Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? timeZoneState = null)
     {
         string connectionString = $"Data Source=list_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
         var keepAlive = new SqliteConnection(connectionString);
@@ -98,15 +100,16 @@ internal sealed class ClientListFixture : IAsyncDisposable
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["default"] = new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = connectionString }
+                    ["default"] = new DataSourceConnectionOptions { Provider = provider, ConnectionString = connectionString }
                 }
             }
         };
 
+        string schema = provider switch { "PostgreSql" => "public", "SqlServer" => "dbo", _ => "main" };
         var orders = new TableMetadata
         {
-            Identifier = new TableIdentifier("default", "main", "orders"),
-            Table = new Table { TableName = "orders", SchemaName = "main", SourceName = string.Empty, SourceType = "Sqlite", DataSourceType = crossSourceCatalog ? DataSourceType.HttpDeclarative : DataSourceType.Sql },
+            Identifier = new TableIdentifier("default", schema, "orders"),
+            Table = new Table { TableName = "orders", SchemaName = schema, SourceName = string.Empty, SourceType = provider, DataSourceType = crossSourceCatalog ? DataSourceType.HttpDeclarative : DataSourceType.Sql },
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },
@@ -158,7 +161,8 @@ internal sealed class ClientListFixture : IAsyncDisposable
             logger: (ILogger<GovernedSqlExecutionService>?)logger ?? NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: consentRepository,
             secretProvider: null,
-            federatedExecutionService: federated);
+            federatedExecutionService: federated,
+            timeZoneState: timeZoneState);
         return new ClientListFixture(keepAlive, connectionString, service, fixtureEntries);
     }
 
