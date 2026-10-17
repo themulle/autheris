@@ -356,7 +356,7 @@ public sealed class Query
                 Sensitivity = t.Table.Sensitivity,
                 Description = t.Table.Description,
                 Columns = t.Columns.Select(c => c.ColumnName).ToList(),
-                Tags = t.Table.Tags ?? Array.Empty<string>(),
+                Tags = t.CatalogTags,
                 AccessStatus = Autheris.Application.Services.CatalogVisibility.ComputeAccessStatus(t.Identifier, Array.Empty<Consent>(), null, isAdmin: true)
             });
             return FilterAndPaginateCatalog(dtos, domain, search, tag, first, after);
@@ -452,25 +452,47 @@ public sealed class Query
                 options?.Value?.Tenancy?.EffectiveMode ?? TenancyMode.Multi);
         }
 
+        // F-C11: the same IsAdminView result (callerScope, same tenancy mode) that selected the list branch drives the shaping.
+        var isAdminView = CallerScopeResolver.IsAdminView(callerScope);
         var catalogList = new List<TableMetadataDto>();
         foreach (var t in visibleTables)
         {
             var status = Autheris.Application.Services.CatalogVisibility.ComputeAccessStatus(t.Identifier, activeConsents, pendingRequests, isAdmin);
-            catalogList.Add(new TableMetadataDto
+            var dto = ToCatalogDto(t, isAdminView, status);
+            if (dto != null)
             {
-                Domain = t.Identifier.Domain,
-                Schema = t.Table.SchemaName,
-                TableName = t.Table.TableName,
-                DisplayName = t.Table.DisplayName,
-                Sensitivity = t.Table.Sensitivity,
-                Description = t.Table.Description,
-                Columns = t.Columns.Select(c => c.ColumnName).ToList(),
-                Tags = t.Table.Tags ?? Array.Empty<string>(),
-                AccessStatus = status
-            });
+                catalogList.Add(dto);
+            }
         }
 
         return FilterAndPaginateCatalog(catalogList, domain, search, tag, first, after);
+    }
+
+    /// <summary>
+    /// Issue #111 shaping of one consent/tier-filtered row (<see cref="Autheris.Application.Services.CatalogViewShaping"/>): null when the row
+    /// does not exist for the caller (a non-administrator row without a recognised view), no columns for <c>Summary</c>. Not used by the
+    /// explicit OpenSchema branch.
+    /// </summary>
+    internal static TableMetadataDto? ToCatalogDto(TableMetadata t, bool isAdminView, string status)
+    {
+        var shape = Autheris.Application.Services.CatalogViewShaping.Resolve(isAdminView, t.CatalogView);
+        if (shape == Autheris.Application.Services.CatalogOutputShape.NotFound)
+        {
+            return null;
+        }
+
+        return new TableMetadataDto
+        {
+            Domain = t.Identifier.Domain,
+            Schema = t.Table.SchemaName,
+            TableName = t.Table.TableName,
+            DisplayName = t.Table.DisplayName,
+            Sensitivity = t.Table.Sensitivity,
+            Description = t.Table.Description,
+            Columns = shape == Autheris.Application.Services.CatalogOutputShape.Summary ? [] : t.Columns.Select(c => c.ColumnName).ToList(),
+            Tags = t.CatalogTags,
+            AccessStatus = status
+        };
     }
 
     private static IReadOnlyList<TableMetadataDto> FilterAndPaginateCatalog(

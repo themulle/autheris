@@ -70,9 +70,10 @@ public sealed class Wave3CatalogOwnershipTests
                 DisplayName = $"{id.Schema}.{id.TableName}",
                 Description = description,
                 Sensitivity = "NORMAL",
-                Tags = tags,
+                Tags = tags, // Backstage export (Table.Tags) and MCP/GraphQL (CatalogTags) read different sources; the fixture feeds both
                 Visibility = visibility
             },
+            CatalogTags = tags,
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },

@@ -147,11 +147,12 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         CancellationToken ct = default)
     {
         var visible = await VisibleTablesAsync(principal, ct).ConfigureAwait(false);
+        var isAdminView = IsAdminView(principal);
 
         var matches = visible
             .Where(t => string.IsNullOrWhiteSpace(domain) || string.Equals(t.Identifier.Domain, domain.Trim(), StringComparison.OrdinalIgnoreCase))
             .Where(t => string.IsNullOrWhiteSpace(search) || Matches(t, search.Trim()))
-            .Where(t => string.IsNullOrWhiteSpace(tag) || (t.Table.Tags != null && t.Table.Tags.Any(tg => string.Equals(tg, tag.Trim(), StringComparison.OrdinalIgnoreCase))))
+            .Where(t => string.IsNullOrWhiteSpace(tag) || t.CatalogTags.Any(tg => string.Equals(tg, tag.Trim(), StringComparison.OrdinalIgnoreCase)))
             .OrderBy(t => DatasetId(t.Identifier), StringComparer.Ordinal)
             .ToList();
 
@@ -165,7 +166,8 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
 
         foreach (var t in pagedMatches)
         {
-            var graphQl = graphQlMap == null ? null : await graphQlMap.GetTableAsync(t.Identifier, ct).ConfigureAwait(false);
+            var summaryOnly = Shape(isAdminView, t) == CatalogOutputShape.Summary;
+            var graphQl = graphQlMap == null || summaryOnly ? null : await graphQlMap.GetTableAsync(t.Identifier, ct).ConfigureAwait(false);
             var status = options?.Value.IsMcpAuthBypassed == true
                 ? "GRANTED"
                 : CatalogVisibility.ComputeAccessStatus(t.Identifier, activeConsents, pendingRequests, isAdmin);
@@ -175,9 +177,9 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
                 DatasetId(t.Identifier),
                 t.Table.Description,
                 t.Table.Sensitivity,
-                t.Columns.Count,
+                summaryOnly ? 0 : t.Columns.Count,
                 graphQl?.QueryField,
-                Tags: t.Table.Tags ?? Array.Empty<string>(),
+                Tags: t.CatalogTags,
                 AccessStatus: status));
         }
 
@@ -206,8 +208,14 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             ? "GRANTED"
             : CatalogVisibility.ComputeAccessStatus(id, activeConsents, pendingRequests, isAdmin);
 
+        if (Shape(IsAdminView(principal), table) == CatalogOutputShape.Summary)
+        {
+            return await BuildSummaryDescriptionAsync(table, accessStatus, ct).ConfigureAwait(false);
+        }
+
+        // Positive check (fail closed): the catalog-viewer release applies to a tier-Full row only, never to an unmarked or consent row.
         bool canViewProfile = string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase) ||
-                              table.ReleaseProfileToCatalogViewers;
+                              (table.CatalogView == CatalogView.Full && table.ReleaseProfileToCatalogViewers);
 
         var columnAccessLevels = ResolveColumnLevels(principal, table, activeConsents, isAdmin, isGranted: options?.Value.IsMcpAuthBypassed != true && string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase),
             bypass: options?.Value.IsMcpAuthBypassed == true);
@@ -259,38 +267,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
                 .ToList();
         }
 
-        string? dataOwner = null;
-        List<string>? dataOwnerDelegates = null;
-        if (dataOwnershipRepository != null)
-        {
-            try
-            {
-                var owners = await dataOwnershipRepository.GetDataOwnersForTableAsync(id, ct).ConfigureAwait(false);
-                var activeOwners = owners.Where(o => o.IsActive).ToList();
-                if (activeOwners.Count > 0)
-                {
-                    var primary = activeOwners[0];
-                    dataOwner = !string.IsNullOrWhiteSpace(primary.DisplayName) && !string.IsNullOrWhiteSpace(primary.Email)
-                        ? $"{primary.DisplayName} <{primary.Email}>"
-                        : (!string.IsNullOrWhiteSpace(primary.DisplayName)
-                            ? primary.DisplayName
-                            : (!string.IsNullOrWhiteSpace(primary.Email) ? primary.Email : primary.AdAccount));
-
-                    if (activeOwners.Count > 1)
-                    {
-                        dataOwnerDelegates = activeOwners.Skip(1).Select(o =>
-                            !string.IsNullOrWhiteSpace(o.DisplayName) && !string.IsNullOrWhiteSpace(o.Email)
-                                ? $"{o.DisplayName} <{o.Email}>"
-                                : (!string.IsNullOrWhiteSpace(o.DisplayName) ? o.DisplayName : (o.Email ?? o.AdAccount))
-                        ).ToList();
-                    }
-                }
-            }
-            catch
-            {
-                // Fail-safe
-            }
-        }
+        var (dataOwner, dataOwnerDelegates) = await LoadOwnersAsync(id, displayNameOnly: false, ct).ConfigureAwait(false);
 
         return new McpDatasetDescription(
             DatasetId(id),
@@ -305,12 +282,102 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             examples,
             graphQl == null ? null : await GraphQlAccessAsync(principal, graphQl, columns, ct).ConfigureAwait(false),
             DatasetAccess(id),
-            Tags: table.Table.Tags ?? Array.Empty<string>(),
+            Tags: table.CatalogTags,
             DataOwner: dataOwner,
             DataOwnerDelegates: dataOwnerDelegates,
             AccessStatus: accessStatus,
             Indexes: keyView.Indexes);
     }
+
+    /// <summary>
+    /// Active owners of a dataset. <paramref name="displayNameOnly"/> (the <c>Summary</c> view, BC-14) reports display names only, never
+    /// SIDs, e-mail addresses or accounts; an owner without a display name is omitted.
+    /// </summary>
+    private async Task<(string? DataOwner, IReadOnlyList<string>? Delegates)> LoadOwnersAsync(TableIdentifier id, bool displayNameOnly, CancellationToken ct)
+    {
+        if (dataOwnershipRepository == null)
+        {
+            return (null, null);
+        }
+
+        try
+        {
+            var owners = await dataOwnershipRepository.GetDataOwnersForTableAsync(id, ct).ConfigureAwait(false);
+            var activeOwners = owners.Where(o => o.IsActive).ToList();
+            if (displayNameOnly)
+            {
+                var names = activeOwners
+                    .Select(o => o.DisplayName)
+                    .Where(n => !string.IsNullOrWhiteSpace(n))
+                    .Select(n => n!)
+                    .ToList();
+                return (names.FirstOrDefault(), names.Count > 1 ? names.Skip(1).ToList() : null);
+            }
+
+            if (activeOwners.Count == 0)
+            {
+                return (null, null);
+            }
+
+            static string Label(Autheris.Domain.Model.DataOwner o) =>
+                !string.IsNullOrWhiteSpace(o.DisplayName) && !string.IsNullOrWhiteSpace(o.Email)
+                    ? $"{o.DisplayName} <{o.Email}>"
+                    : (!string.IsNullOrWhiteSpace(o.DisplayName) ? o.DisplayName : (!string.IsNullOrWhiteSpace(o.Email) ? o.Email : o.AdAccount));
+
+            return (Label(activeOwners[0]), activeOwners.Count > 1 ? activeOwners.Skip(1).Select(Label).ToList() : null);
+        }
+        catch
+        {
+            // Fail-safe
+            return (null, null);
+        }
+    }
+
+    /// <summary>
+    /// Issue #111 A-4: the <c>Summary</c> answer is built from an allow-list (a property added to <see cref="McpDatasetDescription"/> is
+    /// excluded until it is listed here): identifier, description, sensitivity, four-eyes flag, tags, display-name-only owners, access
+    /// status and the view marker. No long description, columns, examples, GraphQL block, access hints, keys or profiles.
+    /// </summary>
+    private async Task<McpDatasetDescription> BuildSummaryDescriptionAsync(TableMetadata table, string accessStatus, CancellationToken ct)
+    {
+        var id = table.Identifier;
+        var (owner, delegates) = await LoadOwnersAsync(id, displayNameOnly: true, ct).ConfigureAwait(false);
+        return new McpDatasetDescription(
+            DatasetId(id),
+            id.Domain,
+            id.Schema,
+            id.TableName,
+            table.Table.Description,
+            LongDescription: null,
+            table.Table.Sensitivity,
+            table.Table.RequiresFourEyes,
+            Columns: [],
+            Examples: [],
+            GraphQl: null,
+            OtherAccess: null,
+            Tags: table.CatalogTags,
+            DataOwner: owner,
+            DataOwnerDelegates: delegates,
+            AccessStatus: accessStatus,
+            Indexes: null,
+            View: SummaryView);
+    }
+
+    /// <summary>Value of <see cref="McpDatasetDescription.View"/> for the allow-listed summary.</summary>
+    public const string SummaryView = "summary";
+
+    private TenancyMode TenancyMode => options?.Value.Tenancy.EffectiveMode ?? Autheris.Domain.Options.TenancyMode.Multi;
+
+    /// <summary>
+    /// The administrator class of the caller, from the same <see cref="CallerScopeResolver"/> call and tenancy mode that drive the list
+    /// filter (<see cref="McpCatalogVisibility"/>). The explicit MCP auth bypass is the operator-opened whole catalog.
+    /// </summary>
+    private bool IsAdminView(ClaimsPrincipal principal) =>
+        options?.Value.IsMcpAuthBypassed == true ||
+        CallerScopeResolver.IsAdminView(CallerScopeResolver.Resolve(principal, TenancyMode));
+
+    internal static CatalogOutputShape Shape(bool isAdminView, TableMetadata table) =>
+        CatalogViewShaping.Resolve(isAdminView, table.CatalogView);
 
     private async Task<IReadOnlyList<FieldSunsettingRule>> LoadSunsettingRulesAsync(CancellationToken ct)
     {
@@ -595,10 +662,10 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
 
             bool isGranted = string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase);
 
-            // Positive guard (fail closed): administrator view or an active table consent. The consent-less "released to catalog
-            // viewers" branch is closed in this change: the flag is not persisted and no tier marks a table as explicitly released.
-            // A later catalog-view tier adds a positive "Full" check as a third term; every other value stays refused.
-            if (!(isAdmin || isGranted))
+            // Positive guard (fail closed): administrator view, an active table consent, or a tier-Full row explicitly released to
+            // catalog viewers (DENY columns excluded by the level resolution). Summary, Unmarked and every other value stay refused.
+            var releasedFull = table.CatalogView == CatalogView.Full && table.ReleaseProfileToCatalogViewers;
+            if (!(isAdmin || isGranted || releasedFull))
             {
                 throw new GatewayForbiddenException("Synthetic sample rows require an active table consent.");
             }
@@ -662,7 +729,9 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         CancellationToken ct)
     {
         // Relations are offered only to datasets the caller can see, so hidden table names do not leak.
+        var isAdminView = IsAdminView(principal);
         var visibleIds = (await VisibleTablesAsync(principal, ct).ConfigureAwait(false))
+            .Where(t => Shape(isAdminView, t) != CatalogOutputShape.NotFound)
             .Select(t => DatasetId(t.Identifier))
             .ToHashSet(StringComparer.Ordinal);
         var relations = graphQl.Relations
@@ -791,10 +860,14 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
 
         var visible = await VisibleTablesAsync(principal, ct).ConfigureAwait(false);
         var requestedId = DatasetId(requested);
+        var isAdminView = IsAdminView(principal);
 
-        // A table the caller may not see is reported exactly like one that does not exist (no enumeration oracle).
-        return visible.FirstOrDefault(t => string.Equals(DatasetId(t.Identifier), requestedId, StringComparison.Ordinal))
-            ?? throw new TableNotFoundException(requested);
+        // A table the caller may not see (including a row without a recognised view) is reported exactly like one that does not exist
+        // (no enumeration oracle).
+        var found = visible.FirstOrDefault(t => string.Equals(DatasetId(t.Identifier), requestedId, StringComparison.Ordinal));
+        return found != null && Shape(isAdminView, found) != CatalogOutputShape.NotFound
+            ? found
+            : throw new TableNotFoundException(requested);
     }
 
     private async Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(ClaimsPrincipal principal, CancellationToken ct)
@@ -809,7 +882,8 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
     private static bool Matches(TableMetadata table, string search) =>
         DatasetId(table.Identifier).Contains(search, StringComparison.OrdinalIgnoreCase) ||
         (table.Table.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
-        table.Columns.Any(c =>
+        // A Summary row matches on identifier and description only; Full rows carry no DENY-masked column (removed by the engine).
+        (table.CatalogView != CatalogView.Summary && table.Columns.Any(c =>
             c.ColumnName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-            (c.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false));
+            (c.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)));
 }
