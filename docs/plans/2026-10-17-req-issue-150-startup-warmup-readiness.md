@@ -7,6 +7,7 @@
 **Author:** Enterprise Product Manager (Phase 1)
 **Source:** GitHub issue #150 (owner, v1.1.15, unchanged in v1.1.16)
 **Parent Plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
+**Pointer (intake 2026-10-17B):** [`REQ-BUG-157`](2026-10-17-req-issue-157-columnless-table-graphql-startup.md) removes a startup crash in the GraphQL schema build (column-less catalog tables); warm-up must not hide schema build failures.
 **Related:** [REQ-BL-06 OpenTelemetry](2026-10-16-req-bl-06-open-telemetry.md) (metrics, health tracing), [PLAN-SCALE-5000](2026-10-16-plan-scale-5000-users.md) (performance lanes)
 
 **Binding project constraints:** fail closed for security; no governed data read, no audit record and no privileged principal during warm-up; no query text or row values in logs; English only.
