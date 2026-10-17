@@ -7,6 +7,7 @@
 **Source:** GitHub issue #146 (owner, v1.1.16); related: #138 (`REQ-CAT-138`, search index), #111 (catalog visibility tiers), #153
 **Branch:** `docs/issue-intake-2026-10-17` (docs only)
 **Parent Plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
+**Pointer (intake 2026-10-17B):** per-language consent descriptions ([`REQ-GOV-158`](2026-10-17-req-issue-158-consent-description.md), later step) follow the text-map pattern defined by step B.
 **Binding project constraints:** fail closed; no production deployment and **no upgrade migrations** (the `0001` baseline DDL of SQLite, PostgreSQL and SQL Server plus the shape snapshots is edited in place; the caller supplies the newest schema); English only; no row values in logs.
 
 ---
