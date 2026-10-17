@@ -108,10 +108,10 @@ public static partial class CallerPlaceholders
     /// operand of a comparison or as the sole item of an IN list. Returns the attribute names with their form (<c>true</c> = IN list).
     /// </summary>
     /// <exception cref="ArgumentException">A sentinel sits anywhere else.</exception>
-    internal static IReadOnlyList<(string Name, bool InList)> EnforcePositions(SqlNode statement, Expression where)
+    internal static IReadOnlyList<(string Name, bool InList, ColumnReference? Column)> EnforcePositions(SqlNode statement, Expression where)
     {
         int total = CountSentinels(statement);
-        var matched = new List<(string, bool)>();
+        var matched = new List<(string, bool, ColumnReference?)>();
         Collect(where, matched);
         if (matched.Count != total)
         {
@@ -122,7 +122,7 @@ public static partial class CallerPlaceholders
         return matched;
     }
 
-    private static void Collect(Expression expression, List<(string, bool)> matched)
+    private static void Collect(Expression expression, List<(string, bool, ColumnReference?)> matched)
     {
         switch (expression)
         {
@@ -142,13 +142,13 @@ public static partial class CallerPlaceholders
                     var other = leftSentinel ? bin.Right : bin.Left;
                     if (CountSentinels(other) == 0)
                     {
-                        matched.Add((leftSentinel ? leftName : rightName, false));
+                        matched.Add((leftSentinel ? leftName : rightName, false, other as ColumnReference));
                     }
                 }
 
                 break;
             case InListExpression { Items.Count: 1 } inList when IsSentinel(inList.Items[0], out var itemName) && CountSentinels(inList.Operand) == 0:
-                matched.Add((itemName, true));
+                matched.Add((itemName, true, inList.Operand as ColumnReference));
                 break;
         }
     }

@@ -62,6 +62,26 @@ public sealed class SqlFilterCompilerCallerAttributeTests
         validated.SqlTargetColumns.ShouldContain("client_id");
     }
 
+    private static IReadOnlyList<TableMetadata> TypedCatalog(string deptType) =>
+    [
+        Catalogued("conf", "client") with { Columns = [new TableColumn { ColumnName = "client_id", DataType = "varchar" }, new TableColumn { ColumnName = "dept", DataType = deptType }] }
+    ];
+
+    [Theory]
+    [InlineData("integer")]
+    [InlineData("uniqueidentifier")]
+    [InlineData("bit")]
+    public void ST_129_05_V1294_TextAttribute_AgainstANonTextSourceColumn_IsRefusedAtValidate_WithoutValues(string columnType)
+    {
+        var ex = Should.Throw<ArgumentException>(() => SqlFilterCompiler.Validate(SqlFilter(Scalar), TypedCatalog(columnType), callerAttributes: Attributes()));
+        ex.Message.ShouldContain("type");
+        ex.Message.ShouldNotContain("{{caller");
+    }
+
+    [Fact]
+    public void ST_129_05_V1294_TextAttribute_AgainstATextSourceColumn_IsAccepted() =>
+        SqlFilterCompiler.Validate(SqlFilter(Scalar), TypedCatalog("nvarchar(50)"), callerAttributes: Attributes()).Sql.ShouldBe(Scalar);
+
     [Theory]
     [InlineData("from conf.client client where target.client_id = client.client_id and (client.dept = {{caller.dept}} or client.level = 1)", "")]
     [InlineData("from conf.client client where target.client_id = client.client_id and not (client.dept = {{caller.dept}})", "top-level")]

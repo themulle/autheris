@@ -125,6 +125,41 @@ public sealed class ConsentRowFilterAttributeValidatorTests
         Should.Throw<InvalidOperationException>(() => ConsentRowFilterAttributeValidator.ValidateAgainstRegistry(ConsentOf(Attr("IN")), Snapshot(), Options(), null));
     }
 
+    private static TableMetadata MetaWithType(string dataType) => Meta() with { Columns = [new TableColumn { ColumnName = "cost_center", DataType = dataType }] };
+
+    private static CallerAttributeSnapshot SnapshotOf(CallerAttributeType type) =>
+        new(1, [Definition("cost_center", "claims", type, CallerAttributeCardinality.List, 50, 60)], []);
+
+    [Theory]
+    [InlineData(CallerAttributeType.Text, "INTEGER")]
+    [InlineData(CallerAttributeType.Text, "uniqueidentifier")]
+    [InlineData(CallerAttributeType.Text, "boolean")]
+    [InlineData(CallerAttributeType.Whole, "varchar(20)")]
+    [InlineData(CallerAttributeType.Number, "nvarchar")]
+    [InlineData(CallerAttributeType.Uuid, "int")]
+    [InlineData(CallerAttributeType.Flag, "text")]
+    [InlineData(CallerAttributeType.Whole, "uuid")]
+    public void ST_129_24_V1294_AttributeTypeThatDoesNotFitTheColumn_IsRefused_WithoutValues(CallerAttributeType type, string columnType)
+    {
+        var ex = Should.Throw<InvalidOperationException>(() => Registry(ConsentOf(Attr("IN")), SnapshotOf(type), meta: MetaWithType(columnType)));
+        ex.Message.ShouldContain("cost_center");
+        ex.Message.ShouldContain("type");
+    }
+
+    [Theory]
+    [InlineData(CallerAttributeType.Text, "TEXT")]
+    [InlineData(CallerAttributeType.Text, "nvarchar(50)")]
+    [InlineData(CallerAttributeType.Whole, "INTEGER")]
+    [InlineData(CallerAttributeType.Whole, "bigint")]
+    [InlineData(CallerAttributeType.Number, "decimal(10,2)")]
+    [InlineData(CallerAttributeType.Uuid, "uuid")]
+    [InlineData(CallerAttributeType.Uuid, "uniqueidentifier")]
+    [InlineData(CallerAttributeType.Uuid, "varchar(36)")]
+    [InlineData(CallerAttributeType.Flag, "bit")]
+    [InlineData(CallerAttributeType.Text, "someVendorType")]
+    public void ST_129_24_V1294_FittingOrUnknownColumnType_Passes(CallerAttributeType type, string columnType) =>
+        Registry(ConsentOf(Attr("IN")), SnapshotOf(type), meta: MetaWithType(columnType));
+
     [Fact]
     public void Registry_Disabled_RefusesAttributeFilters() =>
         Should.Throw<InvalidOperationException>(() => Registry(ConsentOf(Attr("IN")), enabled: false));

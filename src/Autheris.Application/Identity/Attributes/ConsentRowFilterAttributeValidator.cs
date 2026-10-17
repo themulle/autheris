@@ -48,6 +48,12 @@ public static class ConsentRowFilterAttributeValidator
             {
                 throw Refuse(filter, "a caller attribute filter needs a catalogued SQL table");
             }
+
+            var column = metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, filter.ColumnName, StringComparison.OrdinalIgnoreCase));
+            if (column is not null && !CallerAttributeColumnTypeFit.Fits(definition.ValueType, column.DataType))
+            {
+                throw Refuse(filter, "the attribute type does not fit the column type");
+            }
         }
     }
 

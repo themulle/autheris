@@ -115,6 +115,7 @@ public static partial class SqlFilterCompiler
 
         var sourceTables = new List<TableMetadata>();
         var tenanted = new List<(TableAccessTarget Table, string Column)>();
+        var sourceByAlias = new Dictionary<string, TableMetadata>(StringComparer.OrdinalIgnoreCase);
         foreach (var table in metadata.ReferencedTables)
         {
             if (string.Equals(table.Alias, TargetAlias, StringComparison.OrdinalIgnoreCase) ||
@@ -152,6 +153,7 @@ public static partial class SqlFilterCompiler
                 string.Equals(t.Identifier.Schema, table.Schema, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(t.Identifier.TableName, table.TableName, StringComparison.OrdinalIgnoreCase));
             sourceTables.Add(catalogued ?? throw Reject(filter, $"the table '{table.FullName}' is unknown in the catalog of '{filter.Source}'."));
+            sourceByAlias[table.Alias ?? table.TableName] = catalogued;
 
             // SR-L-11: a tenanted source table must be compared with the reserved tenant value (checked on the AST below).
             string? tenantCol;
@@ -216,7 +218,7 @@ public static partial class SqlFilterCompiler
         RequireTenantBinding(filter, tenanted, spec.Where);
         if (callerNames.Count > 0)
         {
-            ValidateCallerPlaceholders(filter, select, spec.Where, callerAttributes!);
+            ValidateCallerPlaceholders(filter, select, spec.Where, callerAttributes!, sourceByAlias);
         }
 
         var validated = filter with { SqlTargetColumns = targetColumns };
@@ -235,9 +237,9 @@ public static partial class SqlFilterCompiler
     }
 
     /// <summary>The position grammar and the registry rules of the placeholders of a definition (BC-129-06, A-9).</summary>
-    private static void ValidateCallerPlaceholders(VirtualFilter filter, SelectStatement select, Expression where, Autheris.Application.Identity.Attributes.CallerAttributeSnapshot attributes)
+    private static void ValidateCallerPlaceholders(VirtualFilter filter, SelectStatement select, Expression where, Autheris.Application.Identity.Attributes.CallerAttributeSnapshot attributes, IReadOnlyDictionary<string, TableMetadata> sourceByAlias)
     {
-        IReadOnlyList<(string Name, bool InList)> uses;
+        IReadOnlyList<(string Name, bool InList, ColumnReference? Column)> uses;
         try
         {
             uses = CallerPlaceholders.EnforcePositions(select, where);
@@ -247,7 +249,7 @@ public static partial class SqlFilterCompiler
             throw Reject(filter, ex.Message);
         }
 
-        foreach (var (name, inList) in uses)
+        foreach (var (name, inList, column) in uses)
         {
             if (!attributes.TryGetDefinition(filter.TenantId, name, out var definition))
             {
@@ -257,6 +259,15 @@ public static partial class SqlFilterCompiler
             if (!inList && definition.Cardinality != CallerAttributeCardinality.Scalar)
             {
                 throw Reject(filter, "a list caller attribute is only allowed as the item of IN or NOT IN.");
+            }
+
+            // V-129-4: the type of a compared source column is known here; the protected object's columns are only known at binding.
+            if (column is { Name.Parts.Count: >= 2 } &&
+                sourceByAlias.TryGetValue(column.Name.Parts[^2].Value, out var source) &&
+                source.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, column.Name.Parts[^1].Value, StringComparison.OrdinalIgnoreCase)) is { } sourceColumn &&
+                !Autheris.Application.Identity.Attributes.CallerAttributeColumnTypeFit.Fits(definition.ValueType, sourceColumn.DataType))
+            {
+                throw Reject(filter, $"the type of a caller attribute does not fit the type of the column '{sourceColumn.ColumnName}'.");
             }
         }
     }
