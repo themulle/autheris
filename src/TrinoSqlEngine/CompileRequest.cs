@@ -79,6 +79,16 @@ public sealed record CompileRequest
 
     /// <summary>Maximum emitted length divided by the input length (floor 64 characters of input); SEC-ADG-05.</summary>
     public int MaxExpansionFactor { get; init; } = 64;
+
+    /// <summary>Value-free shapes of the client list parameters the statement references (REQ-SQL-128); part of the cache key.</summary>
+    public Ast.Emit.ClientListShapes ClientLists { get; init; } = Ast.Emit.ClientListShapes.Empty;
+
+    /// <summary>
+    /// REQ-SQL-130: true only when the application proved time zone conversion for <see cref="TargetDialect"/> (registry self-test, and for
+    /// DuckDB the ICU probe). The default is false (fail closed): every caller that does not pass the proof rejects the function. It is part
+    /// of the cache key because the compile cache key serializes every public property.
+    /// </summary>
+    public bool TimeZoneConversionAvailable { get; init; }
 }
 
 /// <summary>

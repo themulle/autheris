@@ -255,6 +255,27 @@ public sealed class SqlParameterExtractor : SqlBaseBaseListener
         CheckAndAssociate(rightText, leftText, opText);
     }
 
+    /// <summary>
+    /// REQ-SQL-128 (FR-128-7): <c>column [NOT] IN (@list)</c> describes the list parameter by its column and the operator <c>IN</c> / <c>NOT IN</c>.
+    /// Only the sole item of the list is associated: the compiler accepts a list parameter in no other form.
+    /// </summary>
+    public override void EnterInList(SqlBaseParser.InListContext context)
+    {
+        var items = context.expression();
+        if (items.Length != 1)
+        {
+            return;
+        }
+
+        var operand = (context.Parent as SqlBaseParser.PredicatedContext)?.valueExpression();
+        if (operand == null)
+        {
+            return;
+        }
+
+        CheckAndAssociate(operand.GetText(), items[0].GetText(), context.NOT() != null ? "NOT IN" : "IN");
+    }
+
     private void CheckAndAssociate(string possibleColText, string possibleParamText, string opText)
     {
         if (possibleParamText.StartsWith("__param_", StringComparison.OrdinalIgnoreCase))

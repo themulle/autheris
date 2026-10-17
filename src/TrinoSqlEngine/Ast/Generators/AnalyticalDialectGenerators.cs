@@ -88,6 +88,23 @@ public sealed class DuckDbDialectGenerator : SqlDialectGeneratorBase
     // The inline structural positions of this generator are registered with the emitter context (WP-A3 for DuckDB).
     protected override bool BindLiterals => true;
 
+    protected override bool EmitsTimeZoneConversion => true;
+
+    /// <summary>
+    /// <c>TIMEZONE(to, TIMEZONE(from, ts))</c>: <c>timezone(zone, TIMESTAMP)</c> reads the plain value as local time of <c>zone</c> (a <c>TIMESTAMPTZ</c> instant),
+    /// <c>timezone(zone, TIMESTAMPTZ)</c> returns the local plain <c>TIMESTAMP</c>. The ICU build of the library does the work; the gateway never installs an extension.
+    /// </summary>
+    protected override void FormatConvertTimeZone(ref ValueStringBuilder builder, FunctionCallExpression fn, SqlEmitterContext context)
+    {
+        builder.Append("TIMEZONE(");
+        AppendZoneArgument(ref builder, fn.Arguments[1], context);
+        builder.Append(", TIMEZONE(");
+        AppendZoneArgument(ref builder, fn.Arguments[0], context);
+        builder.Append(", ");
+        GenerateExpression(fn.Arguments[2], ref builder, context);
+        builder.Append("))");
+    }
+
     /// <summary>Virtual filters (phase 7b): <c>(x + INTERVAL '±n unit')</c>; on the governed path the amount is bound.</summary>
     protected override void FormatDateAdd(ref ValueStringBuilder builder, DateUnit unit, long amount, Expression source, SqlEmitterContext context)
     {

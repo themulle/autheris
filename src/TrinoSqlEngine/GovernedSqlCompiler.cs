@@ -167,10 +167,39 @@ internal sealed class GovernedSqlCompiler
         Pass("validate");
         new AstValidationVisitor { CancellationToken = token }.Validate(ast);
 
+        // 4b. time zone conversion (REQ-SQL-130): every call is checked on the USER tree, before simplification (no folding can turn a non-literal
+        // into a literal) and before injection (policy and mask expressions never contain the function). A statement whose text does not spell the
+        // function name has no call (the builder refuses delimited function names, so the name of a call is always spelled in the text) and skips the
+        // pass; the emitter is then told that nothing was validated, so a call that appeared anyway could not be emitted (BC-130-12).
+        bool timeZoneCallsValidated = false;
+        if (rawSql.Contains(TimeZoneCallValidator.FunctionName, StringComparison.OrdinalIgnoreCase))
+        {
+            Pass("timezone");
+            new TimeZoneCallValidator(policy.Catalog, new TimeZoneValidationOptions(
+                request.TargetDialect, caps.SupportsTimeZoneConversion, request.TimeZoneConversionAvailable, policy.Masks, policy.TablesWithMaskedColumns,
+                request.ClientLists, Federated: false)) { CancellationToken = token }.Validate(ast);
+            timeZoneCallsValidated = true;
+        }
+
         // 5. simplify the USER tree only: injected predicates do not exist yet (INV-3 by construction)
         Pass("simplify");
         var simplified = (SqlStatement)new AstSimplificationVisitor { CancellationToken = token }.Visit(ast);
         CheckBudget(request, clock, token);
+
+        // 5b. client lists (REQ-SQL-128): expanded on the user tree BEFORE the security visitor, so the DML guard judges the
+        // expanded predicate (an empty NOT IN list is the constant 1 = 1, SEC-128-01). The mutation control moves the pass behind it.
+        ClientListExpander? expander = null;
+        bool listsBeforeGuards = !CompilerHooks.IsDisabled(SecurityControl.ClientListExpandsBeforeGuards);
+        if (!request.ClientLists.IsEmpty)
+        {
+            expander = new ClientListExpander(request.ClientLists, caps) { CancellationToken = token };
+            if (listsBeforeGuards)
+            {
+                Pass("lists");
+                simplified = (SqlStatement)expander.Visit(simplified);
+                CheckBudget(request, clock, token);
+            }
+        }
 
         // 6. typed security injection; user literals first learn the catalog type of the column they are compared with (SEC-ADG-16 item 2)
         Pass("inject");
@@ -182,6 +211,12 @@ internal sealed class GovernedSqlCompiler
         CheckBudget(request, clock, token);
 
         secured = CompilerHooks.Current.InterceptInjected(secured);
+
+        if (expander is not null && !listsBeforeGuards)
+        {
+            Pass("lists");
+            secured = (SqlStatement)expander.Visit(secured);
+        }
 
         // 7. production coverage proof (does not trust the injector)
         Pass("verify");
@@ -198,13 +233,16 @@ internal sealed class GovernedSqlCompiler
         var generator = SqlDialectGeneratorFactory.GetGenerator(request.TargetDialect);
         var parameterSource = new ParameterSource(typed.PolicyValues, ClientNoValues);
         var compiled = (generator is SqlDialectGeneratorBase capabilityAware
-                ? capabilityAware.Generate(secured, parameterSource, caps, token)
+                ? capabilityAware.Generate(secured, parameterSource, caps, token, timeZoneCallsValidated: timeZoneCallsValidated)
                 : generator.Generate(secured, parameterSource, token))
             with { AppliedPredicates = applied, ExpectedAffectedRows = Ast.Security.InsertCheckOption.ExpectedRows(secured) };
 
         // 10. output budget
+        // The marker text of the lists that were actually expanded is not policy expansion (SEC-128-03): it is subtracted from the
+        // emitted length, derived from the expander counter and never from the request shapes.
         long limit = (long)request.MaxExpansionFactor * Math.Max(rawSql.Length, CompileLimits.MinimumInputForExpansion);
-        if (compiled.Sql.Length > limit)
+        long emitted = compiled.Sql.Length - (expander?.ExpandedItems ?? 0) * ClientListExpander.MarkerAllowance;
+        if (emitted > limit)
         {
             throw new SqlLimitExceededException(SqlLimitKind.PolicyExpansionFactor, request.TargetDialect, compiled.Sql.Length, limit);
         }

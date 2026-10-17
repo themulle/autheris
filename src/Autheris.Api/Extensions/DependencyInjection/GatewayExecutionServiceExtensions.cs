@@ -111,6 +111,11 @@ public static class GatewayExecutionServiceExtensions
                 sp.GetRequiredService<IOptions<GatewayOptions>>(),
                 sp.GetService<ILogger<DuckDbOlapEngine>>()));
 
+        // REQ-SQL-130: time zone conversion state (registry self-test and DuckDB ICU probe), evaluated once at startup; fail closed until then.
+        services.AddSingleton<Autheris.Application.Sql.TimeZones.TimeZoneConversionState>();
+        services.AddSingleton<Autheris.Application.Sql.TimeZones.ITimeZoneConversionState>(sp => sp.GetRequiredService<Autheris.Application.Sql.TimeZones.TimeZoneConversionState>());
+        services.AddHostedService<Autheris.Application.Sql.TimeZones.TimeZoneConversionStartupCheck>();
+
         // HA & Traffic Drain
         services.AddSingleton<ITrafficDrainController, TrafficDrainController>();
         services.AddHostedService<TrafficDrainHostedService>();

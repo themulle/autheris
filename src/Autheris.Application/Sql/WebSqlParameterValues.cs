@@ -47,4 +47,13 @@ public static class WebSqlParameterValues
                 throw new ArgumentException("SQL parameters must be scalar values (string, number, boolean or null).");
         }
     }
+
+    /// <summary>
+    /// Converts one client parameter: a scalar through <see cref="Normalize"/>, a JSON array or collection (REQ-SQL-128) to a
+    /// <see cref="TrinoSqlEngine.Ast.Emit.ClientListValue"/>. <see cref="Normalize"/> itself stays scalar-only.
+    /// </summary>
+    public static object? NormalizeParameter(object? value, ListParameters.ListParameterLimits limits) =>
+        ListParameters.ListParameterNormalizer.IsListCandidate(value)
+            ? ListParameters.ListParameterNormalizer.Normalize(value!, limits, null)
+            : Normalize(value);
 }

@@ -22,6 +22,8 @@ public static class CompileRequestFactory
 
     /// <param name="policy">The assembled policy; its DML guards must be <see cref="DmlGuardOptions.Strict"/> (CR-ADG-38).</param>
     /// <param name="options">The WebSQL options (validated here; the governed switches are not configurable per request).</param>
+    /// <param name="clientLists">The value-free shapes of the client lists the statement references (REQ-SQL-128); part of the template cache key.</param>
+    /// <param name="timeZoneConversionAvailable">REQ-SQL-130: the node proved the conversion for <paramref name="dialect"/>; the default is false (fail closed).</param>
     /// <param name="isDml">The statement is DML: the DML statement classes are permitted (the dialect capability entry still decides).</param>
     /// <exception cref="SecurityException">The row policies of <paramref name="policy"/> were assembled for another dialect.</exception>
     /// <exception cref="SqlCompileConfigurationException">The policy carries DML guards other than <see cref="DmlGuardOptions.Strict"/>.</exception>
@@ -31,7 +33,9 @@ public static class CompileRequestFactory
         WebSqlOptions options,
         bool isDml,
         long enforcedMaxRows,
-        IReadOnlySet<string> allowedFunctions)
+        IReadOnlySet<string> allowedFunctions,
+        TrinoSqlEngine.Ast.Emit.ClientListShapes? clientLists = null,
+        bool timeZoneConversionAvailable = false)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(options);
@@ -72,7 +76,9 @@ public static class CompileRequestFactory
             EnforcedMaxRows = enforcedMaxRows,
             EnforceCatalogProjection = true,
             MaxExpansionFactor = DefaultMaxExpansionFactor,
-            AllowedFunctions = allowedFunctions.ToFrozenSet(StringComparer.OrdinalIgnoreCase)
+            AllowedFunctions = allowedFunctions.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
+            ClientLists = clientLists ?? TrinoSqlEngine.Ast.Emit.ClientListShapes.Empty,
+            TimeZoneConversionAvailable = timeZoneConversionAvailable
         };
     }
 }

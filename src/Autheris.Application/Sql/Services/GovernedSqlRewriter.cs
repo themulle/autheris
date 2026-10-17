@@ -71,6 +71,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
     private readonly IMemoryCache? _memoryCache;
     private readonly SqlDataSourceResolver _dataSourceResolver;
     private readonly TypedPolicySources? _typedPolicies;
+    private readonly Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? _timeZoneState;   // null = conversion unavailable (fail closed)
     private readonly Autheris.Application.Caching.BoundedCache<string, SqlQueryMetadata> _stage1Analyses = new(4_096);
 
     public IReadOnlyList<SqlRewriteStageOrder> StageOrder =>
@@ -100,8 +101,10 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         IAccessProfileRepository? accessProfileRepository = null,
         IMemoryCache? memoryCache = null,
         SqlDataSourceResolver? dataSourceResolver = null,
-        TypedPolicySources? typedPolicies = null)
+        TypedPolicySources? typedPolicies = null,
+        Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? timeZoneState = null)
     {
+        _timeZoneState = timeZoneState;
         _typedPolicies = typedPolicies;
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _policyEnforcement = policyEnforcement; _consentResolution = consentResolution;
@@ -141,7 +144,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         CancellationToken ct,
         SqlRowLimit? rowLimit = null,
         bool probeExtraRow = false,
-        bool plannedTableRead = false)
+        bool plannedTableRead = false,
+        ClientListShapes? clientLists = null)
     {
         if (string.IsNullOrWhiteSpace(rawSql))
         {
@@ -603,6 +607,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         }
         TargetSqlDialect targetSqlDialect = SqlDialectMapper.ToTargetDialect(targetDatabaseDialect.Value);
 
+        EnforceEffectiveListMaximum(clientLists, targetSqlDialect, webSqlOptions);
+
         IReadOnlySet<string> allowedFunctions = SqlFunctionAllowlists.Build(targetSqlDialect, webSqlOptions.AdditionalAllowedFunctions);
         if (metadata.FunctionCalls is { Count: > 0 })
         {
@@ -629,7 +635,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             };
 
         var assembly = await policyFactory.CreateAssemblyAsync(PolicyInput(disabled: false), ct).ConfigureAwait(false);
-        var request = CreateCompileRequest(assembly.Policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions);
+        var request = CreateCompileRequest(assembly.Policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists);
 
         // -------------------------------------------------------------
         // Stage 5: Compile (Security invariant 2). Engine exceptions propagate unwrapped: SqlCompilerErrorMapper maps them to
@@ -651,7 +657,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             // The retry starts from the original decisions and the unsubstituted predicates (never from the first assembly's provider), with the
             // stage disabled: no epoch read, cache lookup or key query, same token and deadline. Its failure is not retried.
             var retried = await policyFactory.CreateAssemblyAsync(PolicyInput(disabled: true), ct).ConfigureAwait(false);
-            request = CreateCompileRequest(retried.Policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions);
+            request = CreateCompileRequest(retried.Policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists);
             compiled = CompileStatement(rawSql, request, mayRetry: false, ct);
         }
 
@@ -664,6 +670,40 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, assembly.KeySets.Outcomes);
     }
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<TargetSqlDialect, byte> ClampWarned = new();
+
+    /// <summary>
+    /// Stage 2 of the list limits (PLAN-SQL-128 A-6): the dialect is known now, so each list is checked against
+    /// <c>min(configured, MaxBindParameters - 100, MaxInListItems)</c>. A configured value above that is clamped at runtime and logged once
+    /// per dialect, with numbers only. Nothing is truncated: a larger list is refused.
+    /// </summary>
+    private void EnforceEffectiveListMaximum(ClientListShapes? clientLists, TargetSqlDialect dialect, WebSqlOptions webSqlOptions)
+    {
+        if (clientLists is null)
+        {
+            return;
+        }
+
+        int largest = clientLists.MaxCount();
+        if (largest == 0)
+        {
+            return;
+        }
+
+        var limits = Autheris.Application.Sql.ListParameters.ListParameterLimits.From(webSqlOptions);
+        int effective = Autheris.Application.Sql.ListParameters.ListParameterLimits.EffectiveMax(
+            limits.ConfiguredMaxValues, TrinoSqlEngine.Ast.Capabilities.DialectCapabilityTable.Default.Get(dialect));
+        if (effective < limits.ConfiguredMaxValues && ClampWarned.TryAdd(dialect, 0))
+        {
+            _logger?.LogWarning("WebSQL list parameter maximum {Configured} is clamped to {Effective} for dialect {Dialect}.", limits.ConfiguredMaxValues, effective, dialect);
+        }
+
+        if (largest > effective)
+        {
+            throw new ClientListException(GovernedSqlErrorCodes.ListParamTooLarge);
+        }
+    }
+
     private CompileRequest CreateCompileRequest(
         GovernancePolicy policy,
         Dictionary<TableIdentity, TableAccessTarget> decidedTargets,
@@ -671,7 +711,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         WebSqlOptions webSqlOptions,
         bool isDml,
         long enforcedMaxRows,
-        IReadOnlySet<string> allowedFunctions)
+        IReadOnlySet<string> allowedFunctions,
+        ClientListShapes? clientLists)
     {
         // SEC-X1-05: a table that stage 3 admitted but the assembly dropped (no typed policy, catalog load failure, missing column)
         // is denied here with the same exception as every other "table not usable" cause, before the compiler could answer differently.
@@ -684,7 +725,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             }
         }
 
-        return CompileRequestFactory.Create(policy, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions);
+        return CompileRequestFactory.Create(policy, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists,
+            timeZoneConversionAvailable: _timeZoneState?.IsAvailable(targetSqlDialect) ?? false);
     }
 
     private CompiledSql CompileStatement(string rawSql, CompileRequest request, bool mayRetry, CancellationToken ct)

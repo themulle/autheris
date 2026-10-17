@@ -193,14 +193,16 @@ public static class SqlEndpointRoutes
             return Results.Ok(endpoints);
         }
 
-        return Results.Ok(ToPublicListing(endpoints));
+        int maxListItems = Autheris.Application.Sql.ListParameters.ListParameterLimits.From(
+            context.RequestServices?.GetService<IOptions<GatewayOptions>>()?.Value.WebSql ?? new WebSqlOptions()).ConfiguredMaxValues;
+        return Results.Ok(ToPublicListing(endpoints, maxListItems));
     }
 
     // G3: RawSql, DataSource and ReferencedTables are internal schema details; only admins see them.
     internal static bool IsListAdmin(System.Security.Claims.ClaimsPrincipal? user)
         => EndpointSecurity.IsCanonicalClusterAdmin(user) || EndpointSecurity.IsGlobalGovernanceAdmin(user);
 
-    internal static IReadOnlyList<object> ToPublicListing(IEnumerable<Autheris.Domain.Model.SqlEndpointDefinition> endpoints)
+    internal static IReadOnlyList<object> ToPublicListing(IEnumerable<Autheris.Domain.Model.SqlEndpointDefinition> endpoints, int maxListItems = 1000)
         => endpoints.Select(e => (object)new
         {
             name = e.Name,
@@ -208,14 +210,18 @@ public static class SqlEndpointRoutes
             parameters = e.Parameters.Select(p => new
             {
                 name = p.Name,
-                type = p.ClrType.Name,
+                type = p.ClrType.Name,   // the element type of a list parameter
                 isRequired = p.IsRequired,
-                description = p.Description
+                description = p.Description,
+                isList = p.IsList,
+                // REQ-SQL-128 FR-128-7: the configured maximum is published; the dialect-clamped effective number reveals the backend and is not.
+                maxItems = p.IsList ? (int?)maxListItems : null
             }).ToList()
         }).ToList();
 
-    private static IResult HandleOpenApiSpec(ISqlEndpointRegistry registry)
+    internal static IResult HandleOpenApiSpec(ISqlEndpointRegistry registry, IOptions<GatewayOptions>? gatewayOptions = null)
     {
+        int maxListItems = Autheris.Application.Sql.ListParameters.ListParameterLimits.From(gatewayOptions?.Value.WebSql ?? new WebSqlOptions()).ConfiguredMaxValues;
         var endpoints = registry.GetAll();
         var paths = new Dictionary<string, object>();
 
@@ -228,23 +234,45 @@ public static class SqlEndpointRoutes
                 {
                     ["type"] = GetJsonType(p.ClrType)
                 };
-                if (p.DefaultValue != null)
-                {
-                    schema["default"] = p.DefaultValue;
-                }
                 if (p.ClrType == typeof(DateTimeOffset) || p.ClrType == typeof(DateTime))
                 {
                     schema["format"] = "date-time";
                 }
 
-                queryParams.Add(new Dictionary<string, object?>
+                if (p.IsList)
+                {
+                    // REQ-SQL-128 AC-128-7: an array of the element type, repeated query key (?ids=1&ids=2), the configured maximum.
+                    schema = new Dictionary<string, object>
+                    {
+                        ["type"] = "array",
+                        ["items"] = schema,
+                        ["maxItems"] = maxListItems
+                    };
+                    if (p.DefaultValue != null)
+                    {
+                        schema["default"] = p.DefaultValue;
+                    }
+                }
+                else if (p.DefaultValue != null)
+                {
+                    schema["default"] = p.DefaultValue;
+                }
+
+                var parameter = new Dictionary<string, object?>
                 {
                     ["name"] = p.Name,
                     ["in"] = "query",
                     ["required"] = p.IsRequired,
                     ["description"] = p.Description ?? $"Parameter {p.Name}",
                     ["schema"] = schema
-                });
+                };
+                if (p.IsList)
+                {
+                    parameter["style"] = "form";
+                    parameter["explode"] = true;
+                }
+
+                queryParams.Add(parameter);
             }
 
             var properties = new Dictionary<string, object>();
@@ -338,9 +366,39 @@ public static class SqlEndpointRoutes
         try
         {
             var rawInputs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            // REQ-SQL-128 FR-128-4 (SEC-128-14): a repeated key becomes a list only for a key that names a LIST-declared parameter; a repeated key of a
+            // scalar parameter is refused (no value in the error); every other key (format, paging, undeclared) stays the joined text as before.
+            Autheris.Domain.Model.SqlEndpointDefinition? endpointDefinition = null;
+            var definitionResolved = false;
             foreach (var (k, v) in httpContext.Request.Query)
             {
-                rawInputs[k] = v.ToString();
+                if (v.Count > 1 && !definitionResolved)
+                {
+                    httpContext.RequestServices?.GetService<ISqlEndpointRegistry>()?.TryGet(name, out endpointDefinition);
+                    // Fail closed: without the definition a repeated key can not be classified, so it is never joined into a one-element list.
+                    if (endpointDefinition is null)
+                    {
+                        throw new InvalidOperationException("Endpoint definition unavailable for a repeated query key.");
+                    }
+
+                    definitionResolved = true;
+                }
+
+                var declared = v.Count > 1
+                    ? endpointDefinition?.Parameters.FirstOrDefault(p => string.Equals(p.Name, k, StringComparison.OrdinalIgnoreCase))
+                    : null;
+                if (declared is null)
+                {
+                    rawInputs[k] = v.ToString();
+                }
+                else if (declared.IsList)
+                {
+                    rawInputs[k] = v.Select(x => (object?)x).ToList();
+                }
+                else
+                {
+                    throw new TrinoSqlEngine.Ast.Emit.ClientListException(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.ListParamType);
+                }
             }
 
             var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
@@ -357,6 +415,10 @@ public static class SqlEndpointRoutes
         {
             httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
             await httpContext.Response.WriteAsJsonAsync(new { error = knf.Message }, ct).ConfigureAwait(false);
+        }
+        catch (TrinoSqlEngine.Ast.Emit.ClientListException listEx)
+        {
+            await WriteListErrorAsync(httpContext, listEx, ct).ConfigureAwait(false);
         }
         catch (ArgumentException argEx)
         {
@@ -437,6 +499,10 @@ public static class SqlEndpointRoutes
             httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
             await httpContext.Response.WriteAsJsonAsync(new { error = knf.Message }, ct).ConfigureAwait(false);
         }
+        catch (TrinoSqlEngine.Ast.Emit.ClientListException listEx)
+        {
+            await WriteListErrorAsync(httpContext, listEx, ct).ConfigureAwait(false);
+        }
         catch (ArgumentException argEx)
         {
             var isProd = httpContext.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
@@ -462,6 +528,14 @@ public static class SqlEndpointRoutes
             httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
             await httpContext.Response.WriteAsJsonAsync(new { error = "An internal error occurred during query execution." }, ct).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>REQ-SQL-128 C-15: a list error answers 400 with its stable code and the fixed message of that code (no count, no name, no value), in every environment.</summary>
+    private static async Task WriteListErrorAsync(HttpContext httpContext, TrinoSqlEngine.Ast.Emit.ClientListException error, CancellationToken ct)
+    {
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(error, out var mapped);
+        httpContext.Response.StatusCode = mapped.Status == 0 ? StatusCodes.Status400BadRequest : mapped.Status;
+        await httpContext.Response.WriteAsJsonAsync(new { error = mapped.Title ?? error.Message, code = error.Code }, ct).ConfigureAwait(false);
     }
 
     private static (bool Requested, IParquetExportService? Service) ResolveParquetService(HttpContext httpContext)

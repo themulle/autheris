@@ -36,4 +36,17 @@ public class WebSqlParameterValuesTests
     {
         Should.Throw<ArgumentException>(() => Parse(json));
     }
+
+    [Fact]
+    public void NormalizeParameter_ScalarsStayScalar_ArraysBecomeLists()
+    {
+        var limits = new Autheris.Application.Sql.ListParameters.ListParameterLimits(100, 8);
+        WebSqlParameterValues.NormalizeParameter(JsonDocument.Parse("5").RootElement.Clone(), limits).ShouldBe(5L);
+        WebSqlParameterValues.NormalizeParameter("x", limits).ShouldBe("x");
+        WebSqlParameterValues.NormalizeParameter(null, limits).ShouldBeNull();
+        var list = WebSqlParameterValues.NormalizeParameter(JsonDocument.Parse("[1,2]").RootElement.Clone(), limits)
+            .ShouldBeOfType<TrinoSqlEngine.Ast.Emit.ClientListValue>();
+        list.Count.ShouldBe(2);
+        Should.Throw<ArgumentException>(() => WebSqlParameterValues.NormalizeParameter(JsonDocument.Parse("{\"a\":1}").RootElement.Clone(), limits));
+    }
 }

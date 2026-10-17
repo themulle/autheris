@@ -9,6 +9,7 @@ using System.Text.RegularExpressions;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Buffer;
 using TrinoSqlEngine.Ast.Nodes;
+using TrinoSqlEngine.Ast.Visitors;
 
 namespace TrinoSqlEngine.Ast.Generators;
 
@@ -243,6 +244,12 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     protected virtual void GenerateFunctionCall(FunctionCallExpression fn, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
+        if (TimeZoneCallValidator.IsTimeZoneFunction(fn.Name))
+        {
+            GenerateTimeZoneCall(fn, ref builder, context);
+            return;
+        }
+
         FormatFunctionName(ref builder, fn.Name, context);
         builder.Append('(');
         if (fn.Distinct) builder.Append("DISTINCT ");
