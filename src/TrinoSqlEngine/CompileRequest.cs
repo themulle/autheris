@@ -93,6 +93,12 @@ public static class CompileLimits
     /// <summary>Upper bound of <see cref="CompileRequest.MaxExpansionFactor"/>.</summary>
     public const int MaxExpansionFactorLimit = 256;
 
+    /// <summary>
+    /// Floor of the user-SQL length the output budget is computed from (<c>MaxExpansionFactor * max(length, floor)</c>), so that a very short
+    /// statement still gets a usable text budget. Public so that callers can reproduce the compiler's budget formula (issue #107).
+    /// </summary>
+    public const int MinimumInputForExpansion = 64;
+
     /// <summary>The request the compiler actually runs: validated, clamped, with the mandatory guards of the dialect.</summary>
     public static CompileRequest Normalize(CompileRequest request)
     {

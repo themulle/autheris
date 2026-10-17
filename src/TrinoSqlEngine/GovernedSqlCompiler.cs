@@ -24,7 +24,6 @@ using TrinoSqlEngine.Governance;
 /// </summary>
 internal sealed class GovernedSqlCompiler
 {
-    private const int MinimumInputForExpansion = 64;
     private const StatementPermissions AllDml =
         StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge;
     private static readonly IReadOnlyDictionary<string, object?> ClientNoValues = new Dictionary<string, object?>();
@@ -204,7 +203,7 @@ internal sealed class GovernedSqlCompiler
             with { AppliedPredicates = applied, ExpectedAffectedRows = Ast.Security.InsertCheckOption.ExpectedRows(secured) };
 
         // 10. output budget
-        long limit = (long)request.MaxExpansionFactor * Math.Max(rawSql.Length, MinimumInputForExpansion);
+        long limit = (long)request.MaxExpansionFactor * Math.Max(rawSql.Length, CompileLimits.MinimumInputForExpansion);
         if (compiled.Sql.Length > limit)
         {
             throw new SqlLimitExceededException(SqlLimitKind.PolicyExpansionFactor, request.TargetDialect, compiled.Sql.Length, limit);
