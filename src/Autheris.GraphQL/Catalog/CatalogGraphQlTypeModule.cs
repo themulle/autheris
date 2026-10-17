@@ -23,7 +23,7 @@ using Microsoft.Extensions.Options;
 
 namespace Autheris.GraphQL.Catalog;
 
-public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
+public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalogSchemaDiagnostics
 {
     private readonly ITableMetadataRepository _metadataRepo;
     private readonly ITableRelationRepository _relationRepo;
@@ -33,6 +33,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
     private readonly object _timerLock = new();
     private Timer? _refreshTimer;
     private volatile string? _builtFingerprint;
+    private volatile IReadOnlyList<CatalogOmittedTable> _omittedTables = [];
     private volatile string? _builtVersion;
     private int _checking;
 
@@ -53,6 +54,9 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
     public event EventHandler<EventArgs>? TypesChanged;
 
     internal string? BuiltFingerprint => _builtFingerprint;
+
+    /// <summary>BUG #157: omissions of the schema actually served; an immutable snapshot swapped after each build.</summary>
+    public IReadOnlyList<CatalogOmittedTable> OmittedTables => _omittedTables;
 
     internal async Task<bool> CheckForCatalogChangesAsync(CancellationToken ct = default)
     {
@@ -137,6 +141,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
             schemaModel = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, _logger, cancellationToken)
                 .ConfigureAwait(false);
             _builtFingerprint = schemaModel.Fingerprint();
+            _omittedTables = schemaModel.OmittedTables;
             if (_versionProvider != null)
             {
                 _builtVersion = await _versionProvider.GetVersionAsync(cancellationToken).ConfigureAwait(false);
@@ -146,6 +151,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
         {
             _logger?.LogError(ex, "GraphQL catalog schema could not be built; serving the schema without catalog tables until the catalog is reachable.");
             schemaModel = CatalogSchemaModel.Empty;
+            _omittedTables = [];
             _builtFingerprint = null;
             _builtVersion = null;
         }

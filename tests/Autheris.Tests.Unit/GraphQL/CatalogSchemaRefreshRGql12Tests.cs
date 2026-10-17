@@ -74,4 +74,102 @@ public sealed class CatalogSchemaRefreshRGql12Tests
         meta.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new List<TableMetadata> { Table("orders") });
         (await module.CheckForCatalogChangesAsync()).ShouldBeTrue();
     }
+
+    private static async Task<IRequestExecutor> WaitForRebuildAsync(IRequestExecutorProvider provider, ICatalogSchemaDiagnostics diagnostics, int expectedOmissions)
+    {
+        // HotChocolate evicts and rebuilds the executor asynchronously after TypesChanged.
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        var executor = await provider.GetExecutorAsync();
+        while (diagnostics.OmittedTables.Count != expectedOmissions && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(25);
+            executor = await provider.GetExecutorAsync();
+        }
+
+        return executor;
+    }
+
+    private static TableMetadata ColumnlessTable(string name) => new()
+    {
+        Identifier = new TableIdentifier("sales", "public", name),
+        Table = new Table { TableName = name, SchemaName = "public", SourceType = "PostgreSql", IsActive = true },
+        Columns = []
+    };
+
+    [Fact]
+    public async Task Refresh_ColumnlessTableAddedAtRuntime_RaisesTypesChangedAndRebuiltExecutorServesValidTable()
+    {
+        var (meta, rel) = Repos();
+        meta.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new List<TableMetadata> { Table("orders") });
+        using var module = new CatalogGraphQlTypeModule(meta, rel);
+        var raised = 0;
+        module.TypesChanged += (_, _) => raised++;
+        var provider = new ServiceCollection().AddGraphQLServer().AddQueryType<PingQuery>().AddTypeModule(_ => module).Services.BuildServiceProvider();
+        var resolver = provider.GetRequiredService<IRequestExecutorProvider>();
+        await resolver.GetExecutorAsync();
+        ((ICatalogSchemaDiagnostics)module).OmittedTables.ShouldBeEmpty();
+
+        meta.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new List<TableMetadata> { Table("orders"), ColumnlessTable("empty") });
+        (await module.CheckForCatalogChangesAsync()).ShouldBeTrue();
+        raised.ShouldBe(1);
+
+        var rebuilt = await WaitForRebuildAsync(resolver, (ICatalogSchemaDiagnostics)module, expectedOmissions: 1);
+        rebuilt.Schema.Types.ContainsName("sales_public_orders").ShouldBeTrue();
+        rebuilt.Schema.Types.ContainsName("sales_public_empty").ShouldBeFalse();
+        var omitted = ((ICatalogSchemaDiagnostics)module).OmittedTables.ShouldHaveSingleItem();
+        omitted.Reason.ShouldBe(CatalogTableOmissionReason.NoQueryableColumns);
+        // Same catalog again: no further rebuild trigger (no rebuild loop).
+        (await module.CheckForCatalogChangesAsync()).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Diagnostics_AfterBuild_ReportsOmittedTables()
+    {
+        var (meta, rel) = Repos();
+        meta.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new List<TableMetadata> { Table("orders"), ColumnlessTable("empty") });
+        using var module = new CatalogGraphQlTypeModule(meta, rel);
+
+        await new ServiceCollection().AddGraphQLServer().AddQueryType<PingQuery>().AddTypeModule(_ => module).BuildRequestExecutorAsync();
+
+        var omitted = ((ICatalogSchemaDiagnostics)module).OmittedTables.ShouldHaveSingleItem();
+        omitted.Table.TableName.ShouldBe("empty");
+        omitted.Reason.ShouldBe(CatalogTableOmissionReason.NoQueryableColumns);
+    }
+
+    [Fact]
+    public async Task Diagnostics_CatalogUnreachable_ReportsEmptyList()
+    {
+        var (meta, rel) = Repos();
+        meta.GetAllTablesAsync(Arg.Any<CancellationToken>()).ThrowsAsync(new TimeoutException("down"));
+        using var module = new CatalogGraphQlTypeModule(meta, rel);
+
+        await new ServiceCollection().AddGraphQLServer().AddQueryType<PingQuery>().AddTypeModule(_ => module).BuildRequestExecutorAsync();
+
+        ((ICatalogSchemaDiagnostics)module).OmittedTables.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Diagnostics_Snapshot_NotMutatedByLaterBuild()
+    {
+        // SEC-BUG157-07 / T-BUG157-S12
+        var (meta, rel) = Repos();
+        meta.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new List<TableMetadata> { Table("orders"), ColumnlessTable("empty") });
+        using var module = new CatalogGraphQlTypeModule(meta, rel);
+        var provider = new ServiceCollection().AddGraphQLServer().AddQueryType<PingQuery>().AddTypeModule(_ => module).Services.BuildServiceProvider();
+        var resolver = provider.GetRequiredService<IRequestExecutorProvider>();
+        await resolver.GetExecutorAsync();
+        var diagnostics = (ICatalogSchemaDiagnostics)module;
+        var first = diagnostics.OmittedTables;
+        var firstCopy = first.ToArray();
+
+        meta.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new List<TableMetadata> { Table("orders"), ColumnlessTable("empty"), ColumnlessTable("empty2") });
+        (await module.CheckForCatalogChangesAsync()).ShouldBeTrue();
+        await WaitForRebuildAsync(resolver, diagnostics, expectedOmissions: 2);
+
+        first.ToArray().ShouldBe(firstCopy);
+        first.Count.ShouldBe(1);
+        diagnostics.OmittedTables.Count.ShouldBe(2);
+        ReferenceEquals(first, diagnostics.OmittedTables).ShouldBeFalse();
+    }
 }
