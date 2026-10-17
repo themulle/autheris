@@ -111,6 +111,16 @@ public sealed class TimeZoneBinderTests
         Assert.Empty(command.Parameters);
     }
 
+    [Theory, MemberData(nameof(DialectData), MemberType = typeof(TimeZoneTestSupport))]
+    public void BC_130_8_TheCommandTimeoutOfTheGovernedPathIsNeitherResetNorBypassedByAZoneSlot(TargetSqlDialect dialect)
+    {
+        var compiled = Compile(dialect, Sql);
+        var command = new ZoneCommand { CommandTimeout = 17 };
+        CompiledSqlBinders.For(dialect).Bind(command, compiled, new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["zone"] = "UTC", ["to"] = "UTC", ["label"] = "x" });
+        Assert.Equal(17, command.CommandTimeout);
+        Assert.Equal(CommandType.Text, command.CommandType);   // the executor sets the timeout before the bind and the row limit is part of the compiled text
+    }
+
     // ---- BC-130-5(d) every other consumer of the parameters refuses a zone slot ----
 
     [Theory, MemberData(nameof(DialectData), MemberType = typeof(TimeZoneTestSupport))]
