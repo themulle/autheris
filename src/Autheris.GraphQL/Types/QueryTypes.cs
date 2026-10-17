@@ -454,6 +454,15 @@ public sealed class Query
 
         // F-C11: the same IsAdminView result (callerScope, same tenancy mode) that selected the list branch drives the shaping.
         var isAdminView = CallerScopeResolver.IsAdminView(callerScope);
+        var catalogList = ToCatalogDtos(visibleTables, isAdminView, activeConsents, pendingRequests, isAdmin);
+
+        return FilterAndPaginateCatalog(catalogList, domain, search, tag, first, after);
+    }
+
+    /// <summary>The shaping loop of the catalog query: rows that do not exist for the caller are dropped before filtering and paging (F-C11).</summary>
+    internal static List<TableMetadataDto> ToCatalogDtos(
+        IEnumerable<TableMetadata> visibleTables, bool isAdminView, IReadOnlyList<Consent> activeConsents, IReadOnlyList<ConsentRequest> pendingRequests, bool isAdmin)
+    {
         var catalogList = new List<TableMetadataDto>();
         foreach (var t in visibleTables)
         {
@@ -465,7 +474,7 @@ public sealed class Query
             }
         }
 
-        return FilterAndPaginateCatalog(catalogList, domain, search, tag, first, after);
+        return catalogList;
     }
 
     /// <summary>

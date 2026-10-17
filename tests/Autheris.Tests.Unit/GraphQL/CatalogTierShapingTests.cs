@@ -116,6 +116,20 @@ public sealed class CatalogTierShapingTests
     }
 
     [Fact]
+    public void ShapeLoop_NonAdminRowsWithoutRecognisedView_NeverReachTheResult_AdminKeepsThem()
+    {
+        var rows = new[]
+        {
+            Tier("a_t", DatasetVisibility.Full) with { CatalogView = CatalogView.Unmarked },
+            Tier("b_t", DatasetVisibility.Full) with { CatalogView = (CatalogView)42 },
+            Tier("c_t", DatasetVisibility.Full) with { CatalogView = CatalogView.Granted }
+        };
+
+        Query.ToCatalogDtos(rows, isAdminView: false, [], [], isAdmin: false).Select(d => d.TableName).ShouldBe(["c_t"]);
+        Query.ToCatalogDtos(rows, isAdminView: true, [], [], isAdmin: true).Count.ShouldBe(3);
+    }
+
+    [Fact]
     public async Task NonAdminRow_Unmarked_NoneCaller_IsRefused()
     {
         // An invalid tenant claim resolves to the None class and is refused outright.
