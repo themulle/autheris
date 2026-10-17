@@ -51,8 +51,12 @@ public sealed record DatasetCatalogResult(
 /// </summary>
 public interface IDatasetCatalogAdminService
 {
-    /// <summary><paramref name="source"/> is <c>admin</c>, <c>manifest</c> or <c>mcp</c> (audit detail only).</summary>
-    Task<DatasetCatalogResult> ApplyAsync(ClaimsPrincipal? caller, string datasetId, DatasetCatalogEdit edit, string source, CancellationToken ct);
+    /// <summary>
+    /// <paramref name="source"/> is <c>admin</c>, <c>manifest</c> or <c>mcp</c> (audit detail only). <paramref name="dryRun"/> runs the same authorization,
+    /// tenant rule and validation (so it is no visibility oracle), reports <see cref="DatasetCatalogOutcome.Applied"/> or
+    /// <see cref="DatasetCatalogOutcome.Unchanged"/> and writes neither data nor audit.
+    /// </summary>
+    Task<DatasetCatalogResult> ApplyAsync(ClaimsPrincipal? caller, string datasetId, DatasetCatalogEdit edit, string source, CancellationToken ct, bool dryRun = false);
 
     Task<DatasetCatalogResult> GetAsync(ClaimsPrincipal? caller, string datasetId, CancellationToken ct);
 }

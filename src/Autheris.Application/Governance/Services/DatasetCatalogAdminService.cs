@@ -84,13 +84,13 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         }
     }
 
-    public async Task<DatasetCatalogResult> ApplyAsync(ClaimsPrincipal? caller, string datasetId, DatasetCatalogEdit edit, string source, CancellationToken ct)
+    public async Task<DatasetCatalogResult> ApplyAsync(ClaimsPrincipal? caller, string datasetId, DatasetCatalogEdit edit, string source, CancellationToken ct, bool dryRun = false)
     {
         ArgumentNullException.ThrowIfNull(edit);
         var gate = await AuthorizeAsync(caller, datasetId, ct).ConfigureAwait(false);
         if (gate.Failure is { } failure)
         {
-            if (failure.Outcome == DatasetCatalogOutcome.NotFound && gate.Caller is { } probe)
+            if (!dryRun && failure.Outcome == DatasetCatalogOutcome.NotFound && gate.Caller is { } probe)
             {
                 await AuditProbeAsync(probe, ct).ConfigureAwait(false);
             }
@@ -127,7 +127,11 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         // The Full rule: only the administrator classes may set Full; the owner who asks is told so after ownership is established.
         if (requested == DatasetVisibility.Full && !actor.IsAdmin)
         {
-            await AuditDenyFullAsync(actor, table, source, ct).ConfigureAwait(false);
+            if (!dryRun)
+            {
+                await AuditDenyFullAsync(actor, table, source, ct).ConfigureAwait(false);
+            }
+
             return new DatasetCatalogResult(DatasetCatalogOutcome.Forbidden);
         }
 
@@ -153,6 +157,11 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
             {
                 return new DatasetCatalogResult(DatasetCatalogOutcome.TagLimitExceeded);
             }
+        }
+
+        if (dryRun)
+        {
+            return Simulate(table, before, replace, add, remove, requested);
         }
 
         DatasetCatalogChange? tagChange = null;
@@ -217,6 +226,33 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         return new DatasetCatalogResult(
             tagsChanged || visibilityChanged ? DatasetCatalogOutcome.Applied : DatasetCatalogOutcome.Unchanged,
             table, after, IsTierEffective(table));
+    }
+
+    /// <summary>Dry run: the state the edit would produce, computed from the strict before-state like the repositories do (admin rows only are touched).</summary>
+    private DatasetCatalogResult Simulate(
+        TableIdentifier table, DatasetCatalogSettings before, IReadOnlyList<string>? replace, IReadOnlyList<string>? add, IReadOnlyList<string>? remove, DatasetVisibility? requested)
+    {
+        var admin = new HashSet<string>(before.Tags.Where(t => t.Source == DatasetTagSource.Admin).Select(t => t.Tag), StringComparer.Ordinal);
+        if (replace is not null)
+        {
+            admin = new HashSet<string>(replace, StringComparer.Ordinal);
+        }
+
+        if (remove is not null)
+        {
+            admin.ExceptWith(remove);
+        }
+
+        if (add is not null)
+        {
+            admin.UnionWith(add);
+        }
+
+        var tags = admin.Select(t => new DatasetTag(t, DatasetTagSource.Admin))
+            .Concat(before.Tags.Where(t => t.Source == DatasetTagSource.Dbt && !admin.Contains(t.Tag))).ToList();
+        var after = new DatasetCatalogSettings(tags, requested ?? before.Visibility);
+        var changed = new DatasetCatalogChange(table, before, after).Changed;
+        return new DatasetCatalogResult(changed ? DatasetCatalogOutcome.Applied : DatasetCatalogOutcome.Unchanged, table, after, IsTierEffective(table));
     }
 
     private readonly record struct Gate(DatasetCatalogResult? Failure, Caller? Caller, TableIdentifier Table);

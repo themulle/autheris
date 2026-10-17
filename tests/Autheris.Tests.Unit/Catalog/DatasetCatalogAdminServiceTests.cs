@@ -370,4 +370,27 @@ public sealed class DatasetCatalogAdminServiceTests
 
         (await Create().ApplyAsync(Admin(), id.ToString("D"), Vis("Summary"), "admin", default)).Outcome.ShouldBe(DatasetCatalogOutcome.Applied);
     }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task SEC_111_11_DryRun_WritesNothing_AuditsNothing_ButReportsTheSameOutcomeClasses()
+    {
+        OwnerIs("S-1-5-21-owner");
+        var svc = Create(maxTags: 2);
+
+        (await svc.ApplyAsync(Admin(), "sales.dbo.orders", new DatasetCatalogEdit(["a"], null, null, "Summary"), "manifest", default, dryRun: true))
+            .Outcome.ShouldBe(DatasetCatalogOutcome.Applied);
+        (await svc.ApplyAsync(Admin(), "sales.dbo.orders", Vis("Hidden"), "manifest", default, dryRun: true)).Outcome.ShouldBe(DatasetCatalogOutcome.Unchanged);
+        (await svc.ApplyAsync(Admin(), "sales.dbo.orders", Replace("a", "b", "c"), "manifest", default, dryRun: true)).Outcome.ShouldBe(DatasetCatalogOutcome.TagLimitExceeded);
+        (await svc.ApplyAsync(Owner(), "sales.dbo.orders", Vis("Full"), "manifest", default, dryRun: true)).Outcome.ShouldBe(DatasetCatalogOutcome.Forbidden);
+        (await svc.ApplyAsync(Stranger(), "sales.dbo.orders", Vis("Summary"), "manifest", default, dryRun: true)).Outcome.ShouldBe(DatasetCatalogOutcome.NotFound);
+        (await svc.ApplyAsync(Admin(), "sales.dbo.orders", Vis("7"), "manifest", default, dryRun: true)).Outcome.ShouldBe(DatasetCatalogOutcome.InvalidVisibility);
+
+        _state.Visibility.ShouldBe(DatasetVisibility.Hidden);
+        _state.Tags.ShouldBeEmpty();
+        await _tables.DidNotReceiveWithAnyArgs().ReplaceDatasetTagsAsync(default, default!, default, default, default);
+        await _tables.DidNotReceiveWithAnyArgs().ChangeDatasetTagsAsync(default, default!, default!, default, default);
+        await _tables.DidNotReceiveWithAnyArgs().SetDatasetVisibilityAsync(default, default, default, default);
+        await _audit.DidNotReceiveWithAnyArgs().RecordRequiredAsync(default!, default);
+    }
 }

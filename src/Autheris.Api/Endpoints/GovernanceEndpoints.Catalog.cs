@@ -111,6 +111,10 @@ public static partial class GovernanceEndpoints
             var result = await applyService.ApplyManifestAsync(context.User, manifest, dryRun, ct);
             return Results.Ok(result);
         }
+        catch (Autheris.Application.Governance.Services.DeclarativeDatasetCatalogException ex)
+        {
+            return Results.Json(new { error = ex.ErrorCode }, statusCode: ex.StatusCode);
+        }
         catch (Autheris.Application.Governance.Grants.GrantPolicyViolationException ex)
         {
             return Results.Json(

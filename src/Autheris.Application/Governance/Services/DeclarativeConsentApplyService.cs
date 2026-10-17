@@ -18,7 +18,8 @@ public sealed class DeclarativeConsentApplyService(
     ITableMetadataRepository metadataRepository,
     IConsentRepository consentRepository,
     IAuditLogRepository auditLogRepository,
-    IGrantPolicy? grantPolicy = null) : IDeclarativeConsentApplyService
+    IGrantPolicy? grantPolicy = null,
+    IDatasetCatalogAdminService? datasetCatalog = null) : IDeclarativeConsentApplyService
 {
     // WP-SC-16: the policy is stateless; without an injected instance the built-in maxima apply (never "no policy").
     // Kept for constructor/DI compatibility: the APPLIED audit entries are written by ReplaceConsentsAsync inside its transaction, never separately.
@@ -59,13 +60,15 @@ public sealed class DeclarativeConsentApplyService(
         int revoked = 0;
         var details = new List<string>();
 
-        if (manifest.Policies == null || manifest.Policies.Count == 0)
+        var hasDatasets = manifest.Datasets is { Count: > 0 };
+        if ((manifest.Policies == null || manifest.Policies.Count == 0) && !hasDatasets)
         {
             return new DeclarativeApplyResult(0, 0, 0, 0, dryRun, ["Empty manifest; 0 policies processed."]);
         }
 
+        var policies = manifest.Policies ?? [];
         var seenTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var p in manifest.Policies)
+        foreach (var p in policies)
         {
             var key = $"{p.Domain}|{p.Schema}|{p.TableName}|{(string.Equals(p.GranteeType, "Role", StringComparison.OrdinalIgnoreCase) ? "Role" : "Sid")}|{p.GranteeRef}";
             if (!seenTargets.Add(key))
@@ -79,7 +82,7 @@ public sealed class DeclarativeConsentApplyService(
         var createList = new List<Consent>();
         var auditEntries = new List<AuditLogEntry>();
 
-        foreach (var policy in manifest.Policies)
+        foreach (var policy in policies)
         {
             totalEvaluated++;
             var tableId = new TableIdentifier(policy.Domain, policy.Schema, policy.TableName);
@@ -254,6 +257,44 @@ public sealed class DeclarativeConsentApplyService(
             details.Add($"{(dryRun ? "[DryRun] Would apply" : "Applied")} policy for '{tableId}' -> '{policy.GranteeRef}'.");
         }
 
+        // Issue #111 (A-7, BC-11): the dataset entries run the service dry run first (same authorization, tenant rule and validation as the
+        // apply), so one rejected entry stops the whole manifest before anything is written.
+        var datasetEdits = new List<(string Id, DatasetCatalogEdit Edit)>();
+        if (hasDatasets)
+        {
+            if (datasetCatalog is null)
+            {
+                details.Add($"Dataset catalog settings are not available; {manifest.Datasets!.Count} dataset entries were not applied.");
+            }
+            else
+            {
+                foreach (var entry in manifest.Datasets!)
+                {
+                    totalEvaluated++;
+                    var datasetId = new TableIdentifier(entry.Domain, entry.Schema, entry.TableName).ToString();
+                    var edit = new DatasetCatalogEdit(entry.Tags, null, null, entry.Visibility);
+                    var planned = await datasetCatalog.ApplyAsync(caller, datasetId, edit, "manifest", ct, dryRun: true).ConfigureAwait(false);
+                    switch (planned.Outcome)
+                    {
+                        case DatasetCatalogOutcome.NotFound:
+                            details.Add($"Dataset '{datasetId}' not found in catalog; skipped catalog settings.");
+                            break;
+                        case DatasetCatalogOutcome.Applied:
+                            applied++;
+                            datasetEdits.Add((datasetId, edit));
+                            details.Add($"{(dryRun ? "[DryRun] Would apply" : "Applied")} catalog settings for '{datasetId}'.");
+                            break;
+                        case DatasetCatalogOutcome.Unchanged:
+                            unchanged++;
+                            details.Add($"Catalog settings for '{datasetId}' are unchanged.");
+                            break;
+                        default:
+                            throw new DeclarativeDatasetCatalogException(planned.Outcome);
+                    }
+                }
+            }
+        }
+
         // WP-SC-02: one transaction and one epoch bump for the whole manifest; a fault leaves nothing changed and writes no audit.
         // M2: the APPLIED audit entries travel into the same transaction, so a committed change always has its (Tier-A, anchored) record and a failing
         // epoch invalidation after the commit cannot lose it.
@@ -266,6 +307,18 @@ public sealed class DeclarativeConsentApplyService(
                 $"Superseded by GitOps declarative apply (version: {manifest.Version})",
                 auditEntries,
                 ct).ConfigureAwait(false);
+        }
+
+        if (!dryRun)
+        {
+            foreach (var (datasetId, edit) in datasetEdits)
+            {
+                var result = await datasetCatalog!.ApplyAsync(caller, datasetId, edit, "manifest", ct).ConfigureAwait(false);
+                if (!result.IsSuccess && result.Outcome != DatasetCatalogOutcome.NotFound)
+                {
+                    throw new DeclarativeDatasetCatalogException(result.Outcome);
+                }
+            }
         }
 
         return new DeclarativeApplyResult(totalEvaluated, applied, unchanged, revoked, dryRun, details);
@@ -323,4 +376,27 @@ public sealed class DeclarativeConsentApplyService(
 
         return true;
     }
+}
+
+/// <summary>Issue #111: a dataset entry of the manifest was rejected by the admin service; the whole manifest is refused with a stable code.</summary>
+public sealed class DeclarativeDatasetCatalogException(DatasetCatalogOutcome outcome) : Exception("A dataset catalog entry of the manifest was rejected.")
+{
+    public DatasetCatalogOutcome Outcome { get; } = outcome;
+
+    public string ErrorCode => Outcome switch
+    {
+        DatasetCatalogOutcome.InvalidTag => "INVALID_TAG",
+        DatasetCatalogOutcome.TagLimitExceeded => "TAG_LIMIT_EXCEEDED",
+        DatasetCatalogOutcome.InvalidVisibility => "INVALID_VISIBILITY",
+        DatasetCatalogOutcome.Forbidden => "FORBIDDEN",
+        DatasetCatalogOutcome.Unavailable => "UNAVAILABLE",
+        _ => "INVALID_REQUEST"
+    };
+
+    public int StatusCode => Outcome switch
+    {
+        DatasetCatalogOutcome.Forbidden => 403,
+        DatasetCatalogOutcome.Unavailable => 503,
+        _ => 400
+    };
 }
