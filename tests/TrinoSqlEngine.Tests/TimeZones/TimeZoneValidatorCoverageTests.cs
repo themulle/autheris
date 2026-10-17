@@ -162,6 +162,7 @@ public sealed class TimeZoneValidatorCoverageTests
     }
 
     [Theory, MemberData(nameof(DialectData), MemberType = typeof(TimeZoneTestSupport))]
+    [Trait("Category", "Security")]
     public void BC_130_1_ACancelledMaskLookupIsNotSwallowedIntoARefusal(TargetSqlDialect dialect)
     {
         var masks = new CancellingMaskProvider();

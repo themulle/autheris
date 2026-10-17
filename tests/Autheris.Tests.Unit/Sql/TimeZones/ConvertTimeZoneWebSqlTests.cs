@@ -70,7 +70,7 @@ public sealed class ConvertTimeZoneWebSqlTests
     public async Task ST_130_12_TheOperatorFormIsRejectedByThePreAnalysis(string sql)
     {
         await using var f = await CreateAsync(timeZoneState: new FixedState(true));
-        await Should.ThrowAsync<Exception>(() => Validate(f, sql));
+        await Should.ThrowAsync<TrinoSqlEngine.Ast.Builder.AstBuildException>(() => Validate(f, sql));
     }
 
     [Theory]

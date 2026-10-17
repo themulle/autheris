@@ -88,16 +88,16 @@ public sealed class SqlFilterDefinitionTests : IDisposable
     }
 
     [Theory]
-    [InlineData("from conf.client client where target.client_id = client.client_id and target.ts AT TIME ZONE 'UTC' > current_timestamp")]
-    [InlineData("from conf.client client where target.client_id = client.client_id and convert_timezone('UTC', 'Europe/Berlin', target.ts) > current_timestamp")]
-    [InlineData("from conf.client client where target.client_id = client.client_id and convert_timezone('UTC', 'Europe/Berlin', target.ts AT TIME ZONE 'UTC') > current_timestamp")]
+    [InlineData("from conf.client client where target.client_id = client.client_id and target.ts AT TIME ZONE 'UTC' > current_timestamp", true)]
+    [InlineData("from conf.client client where target.client_id = client.client_id and convert_timezone('UTC', 'Europe/Berlin', target.ts) > current_timestamp", false)]
+    [InlineData("from conf.client client where target.client_id = client.client_id and convert_timezone('UTC', 'Europe/Berlin', target.ts AT TIME ZONE 'UTC') > current_timestamp", false)]
     [Trait("Category", "Security")]
-    public void ST_130_12_TheTimeZoneOperatorAndTheConversionFunctionAreRejectedInAVirtualFilter(string sql)
+    public void ST_130_12_TheTimeZoneOperatorAndTheConversionFunctionAreRejectedInAVirtualFilter(string sql, bool refusedByTheBuilder)
     {
         // The operator is refused by the AST builder (AstBuildException); the function by the closed function list (ArgumentException).
         var ex = Record.Exception(() => Validate(sql));
         ex.ShouldNotBeNull();
-        (ex is ArgumentException || ex is TrinoSqlEngine.Ast.Builder.AstBuildException).ShouldBeTrue(ex.GetType().Name);
+        ex.GetType().ShouldBe(refusedByTheBuilder ? typeof(TrinoSqlEngine.Ast.Builder.AstBuildException) : typeof(ArgumentException));
     }
 
     [Fact]
