@@ -1,9 +1,14 @@
 using System.Data.Common;
 using System.Globalization;
+using System.Text.Json;
+using Autheris.Application.Dbt.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
+using Autheris.Extensions.Dbt;
+using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -408,5 +413,76 @@ public abstract class RelationRepositoryContractTestsBase : IAsyncLifetime
         variants.Select(v => v.Select(x => (x, x)).ToList()).ShouldContain(v => v.SequenceEqual(stored));
         var read = (await Repo.GetRelationsForTableAsync(parent)).ShouldHaveSingleItem();
         read.JoinKeysParent.ShouldBe(stored.Select(p => p.Parent).ToList());
+    }
+
+    private DbtMetadataIngestionService NewDbtService() => new(
+        Substitute.For<IDbtProposalRepository>(), (ITableMetadataRepository)Repo, Substitute.For<ILineageGraphStore>(), (ITableRelationRepository)Repo, NullLogger<DbtMetadataIngestionService>.Instance);
+
+    private static MemoryStream DbtManifest(TableIdentifier parent, TableIdentifier child, string[] childCols, string[] parentCols)
+    {
+        static Dictionary<string, object> Cols(params string[] c) =>
+            c.ToDictionary(x => x, x => (object)new Dictionary<string, object> { ["name"] = x, ["data_type"] = "integer" });
+
+        Dictionary<string, object> Node(TableIdentifier id, object? constraints) => new()
+        {
+            ["name"] = id.TableName, ["database"] = id.Domain, ["schema"] = id.Schema,
+            ["columns"] = Cols("a", "b", "c", "d"),
+            ["constraints"] = constraints ?? Array.Empty<object>()
+        };
+
+        var fk = new Dictionary<string, object>
+        {
+            ["type"] = "foreign_key", ["to"] = $"ref('{parent.TableName}')", ["columns"] = childCols, ["to_columns"] = parentCols
+        };
+        var manifest = new Dictionary<string, object>
+        {
+            ["nodes"] = new Dictionary<string, object>
+            {
+                [$"model.p.{parent.TableName}"] = Node(parent, null),
+                [$"model.p.{child.TableName}"] = Node(child, new object[] { fk })
+            }
+        };
+        return new MemoryStream(JsonSerializer.SerializeToUtf8Bytes(manifest));
+    }
+
+    /// <summary>AC-151-1: a composite foreign key of a dbt manifest is imported as both ordered pairs and is read back from the store (new connection).</summary>
+    [Fact]
+    public async Task DbtManifest_CompositeForeignKey_ImportsBothPairs_AndSurvivesRestart()
+    {
+        if (!Available) return;
+        var (parent, child) = await SeedPairAsync();
+
+        using var manifest = DbtManifest(parent, child, ["d", "c"], ["a", "b"]);
+        var result = await NewDbtService().IngestManifestStreamAsync(manifest);
+
+        result.Success.ShouldBeTrue();
+        result.ImportedRelationsCount.ShouldBe(1);
+        var read = (await Repo.GetRelationsForTableAsync(parent)).ShouldHaveSingleItem();
+        read.JoinKeysParent.ShouldBe(["a", "b"]);
+        read.JoinKeysChild.ShouldBe(["d", "c"]);
+        read.AllowCrossDataSource.ShouldBeFalse();
+        StoredPairs(read.Id).ShouldBe([("a", "d"), ("b", "c")]);
+        KeyCount().ShouldBe(2);
+    }
+
+    /// <summary>AC-151-2: importing the same manifest twice yields one relation with unchanged id and key rows.</summary>
+    [Fact]
+    public async Task DbtManifest_ImportedTwice_YieldsOneRelation()
+    {
+        if (!Available) return;
+        var (parent, child) = await SeedPairAsync();
+
+        using var first = DbtManifest(parent, child, ["d", "c"], ["a", "b"]);
+        await NewDbtService().IngestManifestStreamAsync(first);
+        var id = (await Repo.GetRelationsForTableAsync(parent)).ShouldHaveSingleItem().Id;
+
+        using var second = DbtManifest(parent, child, ["d", "c"], ["a", "b"]);
+        var result = await NewDbtService().IngestManifestStreamAsync(second);
+
+        result.ImportedRelationsCount.ShouldBe(1);
+        RelationCount().ShouldBe(1);
+        KeyCount().ShouldBe(2);
+        (await Repo.GetRelationsForTableAsync(parent)).ShouldHaveSingleItem().Id.ShouldBe(id);
+        StoredPairs(id).ShouldBe([("a", "d"), ("b", "c")]);
     }
 }
