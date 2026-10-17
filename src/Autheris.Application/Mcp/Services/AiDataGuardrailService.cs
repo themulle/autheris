@@ -15,6 +15,7 @@ using Autheris.Application.Mcp.Diagnostics;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Tools;
 using Autheris.Domain.Common;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Events;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -47,6 +48,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
     private readonly IUniversalDocStore? _docStore;
     private readonly IGatewayEventBus? _eventBus;
     private readonly TrinoSqlEngine.ISqlEngine? _sqlEngine;
+    private readonly IReadPathSwitches? _switches;
 
     private static readonly TimeSpan DefaultRegexTimeout = TimeSpan.FromMilliseconds(250);
     private static readonly Regex EmailRegex = new(@"\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b", RegexOptions.Compiled | RegexOptions.IgnoreCase, DefaultRegexTimeout);
@@ -71,7 +73,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         IDocSearchService? docSearchService = null,
         IUniversalDocStore? docStore = null,
         IGatewayEventBus? eventBus = null,
-        TrinoSqlEngine.ISqlEngine? sqlEngine = null)
+        TrinoSqlEngine.ISqlEngine? sqlEngine = null,
+        IReadPathSwitches? switches = null)
     {
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -91,7 +94,18 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         _docStore = docStore;
         _eventBus = eventBus;
         _sqlEngine = sqlEngine;
+        _switches = switches;
     }
+
+    /// <summary>Closed tag set for <c>autheris_disabled_path_requests_total</c> (no tool names, no ids).</summary>
+    private static string DisabledPathTag(string reason) => reason switch
+    {
+        ReadPathSwitches.ListedReason => "mcp_listed",
+        nameof(McpToolGroup.Catalog) => "mcp_catalog",
+        nameof(McpToolGroup.Api) => "mcp_api",
+        nameof(McpToolGroup.Access) => "mcp_access",
+        _ => "mcp_query"
+    };
 
     // Canonical caller class (never role strings): only the global and the unrestricted administrator skip the catalog visibility check;
     // a tenant-scoped administrator is confined by it, a claim-less GovernanceAdmin in Multi mode is no administrator.
@@ -126,7 +140,17 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
             McpDiagnostics.RecordGuardrailVerdict("deny", request.ToolName, false, false);
             _logger.LogWarning("AI Agent attempted to call unauthorized or unknown MCP tool '{ToolName}'.", request.ToolName);
-            await RecordAuditEventAsync(request.ToolName, sessionContext, "DENY", $"Tool '{request.ToolName}' is not registered or allowed.", false, false, 0, cancellationToken).ConfigureAwait(false);
+            // PLAN-SEC-115 C-115-4: the internal audit row names the switch behind the denial; the caller-visible result below is
+            // byte-identical to the one for a name that never existed. Only names a switch really closed get a reason and a count.
+            var disabledReason = _switches?.DisabledReason(request.ToolName);
+            var denyDetails = $"Tool '{request.ToolName}' is not registered or allowed.";
+            if (disabledReason is not null)
+            {
+                denyDetails = $"Tool '{request.ToolName}' is not registered or allowed. Tool disabled by configuration ({disabledReason}).";
+                GatewayDiagnostics.DisabledPathRequestCounter.Add(1, new KeyValuePair<string, object?>("path", DisabledPathTag(disabledReason)));
+            }
+
+            await RecordAuditEventAsync(request.ToolName, sessionContext, "DENY", denyDetails, false, false, 0, cancellationToken).ConfigureAwait(false);
             return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Tool '{request.ToolName}' is not registered or allowed.");
         }
 

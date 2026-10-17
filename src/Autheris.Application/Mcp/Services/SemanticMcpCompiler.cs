@@ -23,7 +23,8 @@ public sealed class SemanticMcpCompiler(
     ILogger<SemanticMcpCompiler> logger,
     IGoldenQueryService? goldenQueryService = null,
     IConsentRepository? consentRepo = null,
-    IOptions<GatewayOptions>? options = null) : ISemanticMcpCompiler
+    IOptions<GatewayOptions>? options = null,
+    IReadPathSwitches? switches = null) : ISemanticMcpCompiler
 {
     private readonly ITableMetadataRepository _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
     private readonly ILogger<SemanticMcpCompiler> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -106,6 +107,12 @@ public sealed class SemanticMcpCompiler(
         System.Security.Claims.ClaimsPrincipal? principal = null,
         CancellationToken ct = default)
     {
+        // PLAN-SEC-115 A-6: semantic resources render catalog metadata, so they follow the Catalog group (no repository call when off).
+        if (switches is not null && !switches.IsGroupEnabled(McpToolGroup.Catalog))
+        {
+            return [];
+        }
+
         var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
         // SEC H-02: OpenSchema no longer opens MCP resources; only the explicit (production-blocked) MCP auth bypass does.
         var isMcpAuthBypassed = _options?.Value.IsMcpAuthBypassed == true;
