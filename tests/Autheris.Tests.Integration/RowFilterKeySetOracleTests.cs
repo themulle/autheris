@@ -12,9 +12,11 @@ using Autheris.Application.Sql;
 using Autheris.Application.Sql.Policy;
 using Autheris.Application.Sql.Policy.RowFilterKeySets;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
+using Oracle.ManagedDataAccess.Client;
 using Shouldly;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Emit;
@@ -74,6 +76,24 @@ public sealed class RowFilterKeySetOracleTests
         return ids;
     }
 
+    // A READ ONLY transaction fails with ORA-01466 while a table's DDL is newer than the transaction snapshot;
+    // fixture tables in this collection are (re)created just before, so retry until the DDL has settled.
+    private static async Task<RowFilterKeySetEntry> LoadSettledAsync(RowFilterKeySetLoadRequest request)
+    {
+        var loader = new RowFilterKeySetLoader(new SqlConnectionFactory(new DevelopmentEnvironment()));
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await loader.LoadAsync(request, CancellationToken.None);
+            }
+            catch (GatewaySecurityException ex) when (attempt < 10 && ex.InnerException is OracleException { Number: 1466 })
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1));
+            }
+        }
+    }
+
     [Fact]
     public async Task TargetAliasSpelling_InListAndExistsResolve()
     {
@@ -95,8 +115,8 @@ public sealed class RowFilterKeySetOracleTests
         var query = new PolicyKeyQueryCompiler().CompileKeyQuery(
             new PolicyKeyQueryRequest(node, exists.Parameters, catalog, catalog.Resolve(Orders.ToQualifiedName())!, tenant, TargetSqlDialect.Oracle, 101), CancellationToken.None);
         var converter = KeySetValueConverter.Create(TargetSqlDialect.Oracle, query.KeyColumnType, query.ForeignKeyColumnType)!;
-        var entry = await new RowFilterKeySetLoader(new SqlConnectionFactory(new DevelopmentEnvironment())).LoadAsync(
-            new RowFilterKeySetLoadRequest(Options(), TargetSqlDialect.Oracle, new TenantId("acme"), "ds", query, converter, 100, TimeSpan.FromSeconds(30)), CancellationToken.None);
+        var entry = await LoadSettledAsync(
+            new RowFilterKeySetLoadRequest(Options(), TargetSqlDialect.Oracle, new TenantId("acme"), "ds", query, converter, 100, TimeSpan.FromSeconds(30)));
         entry.Keys.ShouldNotBeEmpty();
 
         var column = new ColumnReference(new SqlQualifiedName([new SqlIdentifier(RowFilterAliases.Target, true), new SqlIdentifier(query.ForeignKeyColumn, true)]));
