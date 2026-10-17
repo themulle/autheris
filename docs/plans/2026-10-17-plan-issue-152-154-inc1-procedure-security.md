@@ -129,3 +129,54 @@ I-1/I-2 are merged; I-3, I-5, I-6 (chunk 1) and #138 INC-1 (1.7) share no file. 
 2. `traceId` in the 422 body - default taken (yes).
 3. Row-scope lookup failure -> 503 like key misconfiguration - default taken.
 4. Zero-table procedures not visible - default taken.
+
+---
+
+## Phase 3 Security Review (csharp-security-expert, 2026-10-17)
+
+**Verdict: APPROVED WITH CONDITIONS.** No plan revision required; the conditions are binding for Phase 4. Code facts F-1..F-13 re-verified against `GPES`/`PER`/`GovernedSqlExecutor` (ordering, `SecurityException` 403 branch, `ex.Message` into 422, `LogError(ex)`, `level != Deny` lift, lease key shape all as stated).
+
+### Findings
+
+| Id | Sev | Finding |
+|---|---|---|
+| S-1 | Medium | D-4 audits every unknown name as `PROCEDURE_DENIED`. Any caller (incl. anonymous in open-schema mode, or any authenticated user) can flood the audit store and evict real evidence. Not bounded in the plan. |
+| S-2 | Medium | R-3 timing: unknown names skip consent/registry-dependent work, so a known-but-denied name is slower (consent lookup, async I/O). A latency floor is **not** required (brittle, penalises all denials, DoS lever); instead equalise the structure: same awaits, same single audit write, and one constant-time-ish path. Residual bound accepted, see SEC-04. |
+| S-3 | Medium | Anonymous (consent-bypass / open-schema) callers share SID `anonymous`, so the D-5 lease key is one global budget per table: a single anonymous client can exhaust it and 429 everyone else. |
+| S-4 | Low | `GPES` still has `ArgumentException.ThrowIfNullOrWhiteSpace(name)` before lookup and the route maps `ArgumentException` to 400 with `ex.Message`; any `ArgumentException` raised inside the visibility stage must not reach the 400 mapping. |
+| S-5 | Low | D-5 derives the SID via `GetUserSid()` while `GovernedSqlExecutor` uses `PrimarySid` then `sub`; the "shared budget" claim holds only if the key SID is identical. |
+| S-6 | Low | Visibility `Decisions` are computed before invocation and reused after it (D-2); a consent change during a long call is not re-evaluated. Acceptable (same as the SQL path), document only. |
+| S-7 | Info | D-7/D-1/D-3/D-6/D-8 and defaults 1-5 are sound and fail closed; no existing control is weakened. 400 for invalid parameters moves behind visibility, so it is no oracle. |
+
+### Binding conditions
+
+- **SEC-PROC152-01** Visibility, 503 and 429 are decided strictly in the D-2 order; no parameter text, procedure name or driver text appears in any response before visibility is established. Unavailable-and-invisible is always the 404.
+- **SEC-PROC152-02** Inside the visibility stage every exception except `OperationCanceledException` (including `ArgumentException`, `GatewaySecurityException`, `InvalidOperationException`) maps to not visible / 404 and is never rethrown to the route. `OperationCanceledException` propagates and is not audited as a denial.
+- **SEC-PROC152-03** The 404 body, headers and status are produced by one writer with a constant message; the route must not echo the name, the reason or the exception type; the constant `KeyNotFoundException` message must also not be logged with the name at a level visible to callers (server log only, Information or lower is fine).
+- **SEC-PROC152-04** Timing: no latency floor. The unknown-name path must perform exactly one audit write through the same writer, awaiting at the same point as the denied paths, and must not return early before it. Residual timing difference (consent lookup) is accepted and recorded in R-3 as closed-by-decision.
+- **SEC-PROC152-05** Audit flood bound (S-1): unknown-name audit is allowed only for authenticated callers and rate-limited per tenant and SID (reuse an existing limiter or a small in-memory token bucket, default 30 per minute; excess is dropped silently and counted in one metric/log line, response unchanged). Anonymous (bypass) unknown names are not audited. Target is the sanitised `^[A-Za-z0-9_.\-]{1,128}$` form or `<invalid>`; no other caller-supplied text is stored or logged.
+- **SEC-PROC152-06** Lease: taken only after visibility and 503, released in one `finally` covering validation, invoke, row scope, govern, audit and cancellation; partial acquisition is rolled back; a lease must be released even if the final audit write throws (dispose before or independent of the audit await failure). Limit > 0 with gate null fails closed (500 after visibility).
+- **SEC-PROC152-07** Lease key SID must be computed exactly as in `GovernedSqlExecutor` (PrimarySid, then `sub`, then `anonymous`); for the anonymous bypass SID the key additionally includes the remote IP-independent constant only if a per-client discriminator exists, otherwise anonymous callers get the documented shared budget and S-3 is recorded as accepted risk in section 9.
+- **SEC-PROC152-08** 422 and its audit/log lines carry only the fixed message, number/SQLSTATE, procedure id and trace id. Non-business `DbException` is logged without the exception object (and without `ex.Message`/`InnerException` text) at every level; the invoker's client span/activity must not record exception text.
+- **SEC-PROC152-09** `cleared_columns` lifts only the sensitivity-only `Mask` computed before the ABAC rewrite; explicit base or scope-specific `Mask` and any `Deny` are never lifted; if the sensitivity-only set cannot be computed (null/exception) nothing is lifted (fail closed).
+- **SEC-PROC152-10** Zero referenced tables and no `ResultTable` is not visible in every mode; zero tables never reaches invoke. Open-schema anonymous OpenAPI has empty `paths` and the list returns only `IsVisibleAsync` entries; list/OpenAPI evaluation failure for one procedure omits that procedure and never fails the whole response with details.
+- **SEC-PROC152-11** `GPES` no longer throws `SecurityException`; the route 403 branch is removed, and the generic 500 handler never logs request parameter values.
+
+### Mandatory security tests (`[Trait("Category","Security")]`)
+
+- **T-PROC152-01** `Differential_UnknownRoleConsentNoTableUnavailable_ByteIdenticalStatusBodyHeaders` (GET/POST, all parameter variants).
+- **T-PROC152-02** `VisibilityStage_AnyExceptionKind_Returns404_NotThrownToRoute` (theory over Argument/GatewaySecurity/InvalidOperation/KeyNotFound; Cancellation propagates).
+- **T-PROC152-03** `Order_Invisible_NeverSees503_429_400_Visible_SeesInOrder` (theory per stage).
+- **T-PROC152-04** `UnknownName_Anonymous_NotAudited_Authenticated_AuditedAndRateLimited_OneWritePerCall`.
+- **T-PROC152-05** `UnknownName_NonIdentifierAndOversize_StoredAsInvalidMarker_NoRawTextInAuditOrLog`.
+- **T-PROC152-06** `Lease_ReleasedOn_Success_Exception_Cancellation_AuditThrows_PartialAcquire` (gate fake counts outstanding leases = 0).
+- **T-PROC152-07** `Lease_KeyEqualsSqlPathKey_PrimarySidThenSubThenAnonymous`.
+- **T-PROC152-08** `Lease_LimitPositive_GateNull_FailsClosed500AfterVisibility_404ForInvisible`.
+- **T-PROC152-09** `BusinessAndDbFailure_SecretText_AbsentFromResponseLogsAuditSpans` (capturing logger + audit fake + ActivityListener; message `Asset 4711 of Mueller`, `dbo.Secret`, a value in a `DbException`).
+- **T-PROC152-10** `ClearedColumns_ExplicitBaseMask_ScopeMask_Deny_NeverLifted_SensitivityOnlyLifted_AlsoUnderAbac`.
+- **T-PROC152-11** `ClearedColumns_SensitivitySetUnavailable_LiftsNothing`.
+- **T-PROC152-12** `ZeroTableProcedure_AllModes_InvisibleAndNeverInvoked`.
+- **T-PROC152-13** `OpenApiAndList_OpenSchemaAnonymous_NoProcedures_OneProcedureFailing_OmittedOnly`.
+- **T-PROC152-14** `Route_NoSecurityExceptionBranch_NoParameterValuesInErrorLogs`.
+
+Plan edits to apply by the architect/developer without re-review: add S-3 and the closed R-3 decision to section 9, and note S-6 in D-2.
