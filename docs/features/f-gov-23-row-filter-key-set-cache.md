@@ -1,6 +1,6 @@
 # F-GOV-23: Row Filter Key-Set Cache (Evaluation Strategy Settings, Persistence & Administration)
 
-**Components:** [`RowFilterEvaluation.cs`](../../src/Autheris.Domain/Model/RowFilterEvaluation.cs), [`RlsOptions.cs`](../../src/Autheris.Domain/Options/Security/RlsOptions.cs), [`DatabaseOptions.cs`](../../src/Autheris.Domain/Options/Storage/DatabaseOptions.cs), [`RowFilterEvaluationResolver.cs`](../../src/Autheris.Application/Policy/RowFilterEvaluationResolver.cs), [`RowFilterEvaluationInput.cs`](../../src/Autheris.Application/Policy/RowFilterEvaluationInput.cs), [`RowFilterKeySetCacheOptionsValidator.cs`](../../src/Autheris.Application/Policy/RowFilterKeySetCacheOptionsValidator.cs), [`RowFilterEvaluationAdminService.cs`](../../src/Autheris.Application/Governance/Services/RowFilterEvaluationAdminService.cs), [`AccessPlanningService.cs`](../../src/Autheris.Application/Governance/Services/AccessPlanningService.cs), [`McpAdminTools.cs`](../../src/Autheris.Application/Mcp/Tools/McpAdminTools.cs), [`GovernanceEndpoints.RowFilterEvaluation.cs`](../../src/Autheris.Api/Endpoints/GovernanceEndpoints.RowFilterEvaluation.cs), [`RowFilterEvaluationStore.cs`](../../src/Autheris.Infrastructure/Persistence/RowFilterEvaluationStore.cs)
+**Components:** [`RowFilterEvaluation.cs`](../../src/Autheris.Domain/Model/RowFilterEvaluation.cs), [`RlsOptions.cs`](../../src/Autheris.Domain/Options/Security/RlsOptions.cs), [`DatabaseOptions.cs`](../../src/Autheris.Domain/Options/Storage/DatabaseOptions.cs), [`RowFilterEvaluationResolver.cs`](../../src/Autheris.Application/Policy/RowFilterEvaluationResolver.cs), [`RowFilterEvaluationInput.cs`](../../src/Autheris.Application/Policy/RowFilterEvaluationInput.cs), [`RowFilterKeySetCacheOptionsValidator.cs`](../../src/Autheris.Application/Policy/RowFilterKeySetCacheOptionsValidator.cs), [`RowFilterEvaluationAdminService.cs`](../../src/Autheris.Application/Governance/Services/RowFilterEvaluationAdminService.cs), [`AccessPlanningService.cs`](../../src/Autheris.Application/Governance/Services/AccessPlanningService.cs), [`McpAdminTools.cs`](../../src/Autheris.Application/Mcp/Tools/McpAdminTools.cs), [`GovernanceEndpoints.RowFilterEvaluation.cs`](../../src/Autheris.Api/Endpoints/GovernanceEndpoints.RowFilterEvaluation.cs), [`RowFilterEvaluationStore.cs`](../../src/Autheris.Infrastructure/Persistence/RowFilterEvaluationStore.cs), [`CorrelatedFilterSiteRegistry.cs`](../../src/Autheris.Application/Sql/Policy/RowFilterKeySets/CorrelatedFilterSiteRegistry.cs), [`CorrelatedKeySetSubstitution.cs`](../../src/Autheris.Application/Sql/Policy/RowFilterKeySets/CorrelatedKeySetSubstitution.cs), [`PolicyKeyQueryCompiler.cs`](../../src/TrinoSqlEngine/Governance/PolicyKeyQueryCompiler.cs), [`KeySetKeyTypes.cs`](../../src/TrinoSqlEngine/Governance/KeySetKeyTypes.cs)
 
 ---
 
@@ -13,7 +13,7 @@ A correlated row filter (`FilterType = SubqueryCorrelated`) restricts a table to
 | `Exists` (default) | The correlated filter is evaluated per statement as an `EXISTS` subquery. Always exact. |
 | `KeySetCache` | The filter is meant to be evaluated from a cached set of keys (bounded staleness of the dependent data). |
 
-This feature provides the **settings model**: where a strategy, a cache duration and a maximum key count are stored, how the effective value is resolved, how administrators change it (REST and MCP), and how a change is audited.
+This feature provides the **settings model** (sections 2 to 7) and the **engine building blocks** that a key-set evaluation is made of (section 8): where a strategy, a cache duration and a maximum key count are stored, how the effective value is resolved, how administrators change it (REST and MCP), and how a change is audited.
 
 **Current runtime behaviour.** No statement-execution path reads the resolved strategy. SQL generation, WebSQL, OData, GraphQL and the other query paths do not call `RowFilterEvaluationResolver`; every correlated row filter is evaluated with the `EXISTS` form regardless of the stored or effective strategy. The resolved values are visible through the admin read endpoints and the plan/apply results only.
 
@@ -168,7 +168,84 @@ The object level lives in its own table because catalog ingestion upserts rewrit
 
 ---
 
-## 8. Accepted Residual Risks
+## 8. Engine Architecture: Correlated Filter Sites, Key Query Compiler, Key-Set Substitution
+
+These components exist as library code with their own tests. **No statement-execution path calls them**: `IPolicyKeyQueryCompiler.CompileKeyQuery` and `CorrelatedKeySetSubstitution.Substitute` have no caller in the request pipeline, so every correlated row filter is still evaluated with the `EXISTS` form, whatever strategy is stored or resolved.
+
+### 8.1 Correlated filter sites
+
+The typed row-filter builder for correlated filters (`AdvancedRlsPredicateBuilder.CorrelatedExpression`) registers every `EXISTS` node it creates in `CorrelatedFilterSiteRegistry`, for both sources: consent row filters (`CorrelatedFilterSource.Consent`) and Casbin rules (`CorrelatedFilterSource.Casbin`, through the `IRlsFilterGenerator.BuildCorrelatedPredicate` overload that takes the source).
+
+- The registry is internal, keyed by node **reference** in a `ConditionalWeakTable`: it never keeps a node alive, an entry disappears with its node, and a node that was not registered (user AST, a node re-created by a rewriter) is not found. `Register` has exactly one caller (guarded by an architecture test), so no other code can mark an arbitrary node as a site.
+- A site (`CorrelatedFilterSite`) holds the rule id, the source, the rule-level settings of a consent filter (`null` for Casbin: no rule level) and `StructurallyEligible`, which is `false` for a temporal filter (target temporal column and dependent valid-from column set). The two Casbin sites are shared immutable instances.
+
+### 8.2 Key query derivation
+
+The key query of a site is derived from its registered `EXISTS` body. The derivation succeeds only if all of the following hold; otherwise `CompileKeyQuery` throws `KeyQueryNotDerivableException` with a reason code and a diagnostic rule name (never shown to users, never containing values):
+
+1. The body is a plain `SELECT ... FROM ... WHERE`: no `WITH`, `ORDER BY`, `LIMIT`/`OFFSET`, `GROUP BY`, `HAVING` or set operation, a `FROM` and a `WHERE` are present, and the `WHERE` is a conjunction (an `OR` at the top level is rejected).
+2. Exactly one conjunct is `dep.pk = autheris_target.fk` (two qualified column references, one of them on the reserved target alias). It is removed; zero such conjuncts, several, or a correlation through an expression (`dep.pk = t.fk + 0`) are not derivable.
+3. No remaining conjunct, join condition or alias references `autheris_target`. This independence from the outer row is what makes `EXISTS (... dep.pk = t.fk AND P)` equal to `t.fk IN (SELECT dep.pk ... WHERE P AND dep.pk IS NOT NULL)`.
+4. Every value of the body is a policy parameter of the filter definition with a value of its declared type. A client parameter, a parameter of another origin, an unqualified column reference or a node outside a small allowlist of scalar expression nodes makes the site not derivable, so a key set can never depend on the caller or on time.
+5. The key and foreign key columns resolve in the catalog and form a bindable pair (section 8.4).
+
+| Reason code (`KeyQueryNotDerivableReasons`) | Meaning |
+| :--- | :--- |
+| `NotDerivable` | A derivation rule above is violated |
+| `TypeNotBindable` | Key type pair outside the allowlist, or differing collations |
+| `DialectUnsupported` | The dialect has no production capability entry |
+
+### 8.3 Key query compiler
+
+`IPolicyKeyQueryCompiler.CompileKeyQuery(PolicyKeyQueryRequest, CancellationToken)` (implemented by `PolicyKeyQueryCompiler`, also exposed by `FastSqlEngine`) takes the registered `EXISTS`, the predicate's parameter values, the statement's catalog, the target table, the `TenantBinding`, the dialect and a row limit, and returns a `CompiledKeyQuery` (SQL text, binds, key and foreign key column types, foreign key column, compiler version `<engine version>+key-query/1`). The compiler is stateless and has no template cache. Controls applied, in order:
+
+| Control | Behaviour |
+| :--- | :--- |
+| Tenant rewriter | The same `PolicySubqueryTenantRewriter` that governs the `EXISTS` body: every physical table is wrapped with its tenant predicate, nested subqueries and tables outside the catalog are rejected |
+| Single SELECT | The emitted statement is a single `SELECT` with one projection, the key column |
+| `IS NOT NULL` | `dep.pk IS NOT NULL` is the first conjunct, so NULL keys never enter the set |
+| `DISTINCT` / `ORDER BY` | `SELECT DISTINCT dep.pk ... ORDER BY dep.pk` (a deterministic order; SQL Server needs it for `OFFSET ... FETCH`) |
+| Row limit | `MaxKeys + 1` rows, so a caller detects an overflow; the limit is checked on the final statement |
+| Coverage proof | The `SecurityCoverageVerifier` proves, with the policy-subquery scope rules, that every physical table carries its tenant predicate |
+| Dialect validation | `DialectCapabilityValidator` and the dialect generator; only production-tier dialects are accepted |
+| Emitted-text invariant check | The generator runs the emitted-SQL invariant checks; the compiled statement class and dialect must be a single `SELECT` of the requested dialect |
+| Result re-check | After the injection hook the statement is re-checked: projection is the key column, no reference to the target remains, `IS NOT NULL` and the row limit are present |
+
+A violation of a security control (`SecurityException`) or a limit (`SqlLimitExceededException`) propagates unchanged and is never converted into a `KeyQueryNotDerivableException`, so a failing control cannot degrade into a silent fallback to a weaker form.
+
+### 8.4 Bindable key types and collation
+
+`KeySetKeyTypes.IsBindablePair` is a closed allowlist over the catalog types of the dependent key and the target foreign key:
+
+| Key type | Foreign key type |
+| :--- | :--- |
+| Integer | Integer of equal or wider range (SQLite: all integer types are one class) |
+| Exact numeric with scale 0 (`decimal`/`numeric`, `number` on Oracle) | Exact numeric with scale 0 |
+| Bounded non-Unicode text (`char`, `varchar`, `varchar2`) | Bounded non-Unicode or Unicode text |
+| Bounded Unicode text (`nchar`, `nvarchar`, `nvarchar2`; all bounded text on PostgreSQL and SQLite) | Bounded Unicode text |
+| `uniqueidentifier` (SQL Server) / `uuid` (PostgreSQL) | The same |
+
+Everything else is not bindable: LOB and `MAX` types, unbounded text, floating point, dates, binary, unknown types, and `nvarchar` to `varchar` (it would convert lossily and could match unrelated values). **Collation rule:** when both columns expose a collation and the two differ (case-insensitive comparison of the names), the pair is not bindable; a missing collation on either side does not reject.
+
+### 8.5 Substitution shape
+
+`CorrelatedKeySetSubstitution` finds the sites of a `PolicyPredicate` (`Scan`: eligible sites and registered sites that were excluded) and replaces chosen sites by an `IN` list (`Substitute`), producing a new predicate; the original predicate is not modified.
+
+- **Positive polarity only:** a site is eligible only when it is reached from the predicate root through `AND`, `OR` and parentheses. A site under `NOT`, `CASE`, a function or a comparison stays `EXISTS` (`NOT (fk IN ...)` and `NOT EXISTS` differ for NULL foreign keys). This also keeps `DENY` filters on `EXISTS`.
+- **A single occurrence:** a registered node that occurs more than once in the tree is not substituted anywhere.
+- **Fail closed:** `Substitute` throws `InvalidOperationException` for a node that is not an eligible site (negated, shared, unregistered) or is not structurally eligible (temporal).
+- **Shape:** `autheris_target.<fk> IN (:__rls_ks<n>_<i>, ...)`, where `<n>` is the site ordinal (unique per statement) and `<i>` the position; the list is padded to the replacement's padded count by repeating the last key, and is chunked and joined with `OR` at the dialect's `IN` list limit (Oracle: 1,000). Keys are never truncated and never null.
+- **Padding:** `KeySetPadding.Bucket(count, maxKeys)` is `min(nextPow2(count), maxKeys)`, so the statement shape changes only per bucket.
+- **Empty key set:** the leaf becomes `1 = 0`; the surrounding `AND`/`OR` structure is kept.
+- Substituted parameters that collide with an existing name bound to a different value raise `PolicyConflictException`.
+
+### 8.6 Reserved parameter prefix
+
+`__rls_ks` is reserved for the substituted lists. `GovernedSqlRewriter` rejects raw SQL text that contains it (case-insensitive), and `GovernedSqlExecutor` rejects request parameter names that start with it (after an optional `@`), next to the `__gql_`, `p_rls_` and `rls_` checks. Both rejections use the same `WebSqlPolicyException` messages as those checks.
+
+---
+
+## 9. Accepted Residual Risks
 
 - The admin-versus-admin race of section 5 (the check against `Before` precedes a non-conditional write) is detected afterwards and logged, not prevented.
 - A failing audit store reports an error after the change was committed (section 6).
