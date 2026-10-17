@@ -220,6 +220,55 @@ end";
         return result;
     }
 
+    /// <summary>
+    /// Issue #107 (SEC-RF107-05, C-6): all-or-nothing authoritative epoch read for the key-set cache. Redis is read for every table on every call (no
+    /// staleness budget, no local fallback). <c>null</c> when Redis is configured but not connected, when any read fails or cannot be confirmed, or on any
+    /// exception (Warning with the exception type only); it never throws and never returns a partial result. Without Redis (single node) the local epoch
+    /// is authoritative.
+    /// </summary>
+    public async ValueTask<IReadOnlyDictionary<TableIdentifier, long>?> TryGetAuthoritativeEpochsAsync(
+        IReadOnlyCollection<TableIdentifier> tables,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            ArgumentNullException.ThrowIfNull(tables);
+            ct.ThrowIfCancellationRequested();
+            if (_multiplexer != null && !_multiplexer.IsConnected)
+            {
+                return null;
+            }
+
+            var distinct = tables.Distinct().ToList();
+            var reads = new Task<(long Epoch, bool Authoritative)>[distinct.Count];
+            for (int i = 0; i < reads.Length; i++)
+            {
+                reads[i] = GetCurrentEpochCoreAsync(distinct[i]);
+            }
+
+            await Task.WhenAll(reads).ConfigureAwait(false);
+            var result = new Dictionary<TableIdentifier, long>(distinct.Count);
+            for (int i = 0; i < reads.Length; i++)
+            {
+                var (epoch, authoritative) = reads[i].Result;
+                if (!authoritative)
+                {
+                    return null;
+                }
+
+                result[distinct[i]] = epoch;
+            }
+
+            ct.ThrowIfCancellationRequested();
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning("Authoritative policy epoch read failed ({ExceptionType}); key-set caching is skipped.", ex.GetType().Name);
+            return null;
+        }
+    }
+
     public async ValueTask<IReadOnlyDictionary<TableIdentifier, bool>> AreEpochsValidAsync(
         IReadOnlyList<EpochCheck> checks,
         CancellationToken ct = default)
