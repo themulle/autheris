@@ -7,6 +7,7 @@
 **Source:** GitHub issue #138 (owner, v1.1.14); related: #146 (multilingual texts), #153 (procedures in search), #111 (visibility tiers), scale-5000 plans (H-5, WP-PF-10, WP-PF-11)
 **Branch:** `docs/issue-intake-2026-10-17` (docs only)
 **Parent Plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
+**Pointer (intake 2026-10-17B):** [`REQ-BUG-157`](2026-10-17-req-issue-157-columnless-table-graphql-startup.md) changes `CatalogSchemaModel.BuildAsync` (omits tables without queryable columns, `OmittedTables`); it is merged before INC-4.
 **Binding project constraints:** fail closed; no production deployment yet and **no upgrade migrations** (the `0001` baseline DDL of the three engines plus the three shape snapshots is edited in place; the caller supplies the newest schema); English only; no row values in logs; the feature-doc phase is not part of delivery.
 
 ---
