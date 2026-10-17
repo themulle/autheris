@@ -25,3 +25,6 @@ public sealed record DatasetCatalogChange(TableIdentifier Table, DatasetCatalogS
         !Before.Tags.OrderBy(t => t.Tag, StringComparer.Ordinal).ThenBy(t => t.Source)
             .SequenceEqual(After.Tags.OrderBy(t => t.Tag, StringComparer.Ordinal).ThenBy(t => t.Source));
 }
+
+/// <summary>Issue #111 (A-9): number of tables per visibility tier (inactive tables with a settings row may be included); feeds the gauge only.</summary>
+public sealed record DatasetVisibilityCounts(long Hidden, long Summary, long Full);

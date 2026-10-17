@@ -90,6 +90,30 @@ public abstract class CatalogSettingsRepositoryContractTestsBase : IAsyncLifetim
     }
 
     [Fact]
+    public async Task VisibilityCounts_FollowTierChanges_ForTheGauge()
+    {
+        if (!Available) { return; }
+
+        var before = await Repo.GetDatasetVisibilityCountsAsync();
+        var a = NewTable();
+        var b = NewTable();
+        await UpsertTableAsync(Repo, a);
+        await UpsertTableAsync(Repo, b);
+        await Repo.SetDatasetVisibilityAsync(a, DatasetVisibility.Summary, Admin);
+        await Repo.SetDatasetVisibilityAsync(b, DatasetVisibility.Full, Admin);
+
+        var after = await Repo.GetDatasetVisibilityCountsAsync();
+
+        (after.Summary - before.Summary).ShouldBe(1);
+        (after.Full - before.Full).ShouldBe(1);
+        (after.Hidden - before.Hidden).ShouldBe(0);
+        await Repo.SetDatasetVisibilityAsync(a, DatasetVisibility.Hidden, Admin);
+        var reverted = await Repo.GetDatasetVisibilityCountsAsync();
+        (reverted.Hidden - before.Hidden).ShouldBe(1);
+        (reverted.Summary - before.Summary).ShouldBe(0);
+    }
+
+    [Fact]
     public async Task Visibility_IsPersisted_MissingRowIsHidden_AndOverlaidIntoTableVisibility()
     {
         if (!Available) { return; }
@@ -416,5 +440,8 @@ public abstract class CatalogSettingsRepositoryContractTestsBase : IAsyncLifetim
         (await summaryRepo.GetTableMetadataAsync(created))!.Table.Visibility.ShouldBe(DatasetVisibility.Summary);
         (await summaryRepo.GetTableMetadataAsync(existing))!.Table.Visibility.ShouldBe(DatasetVisibility.Hidden);
         (await Repo.GetTableMetadataAsync(hiddenCreated))!.Table.Visibility.ShouldBe(DatasetVisibility.Hidden);
+
+        // A-9: the tier given to a new table is tallied for the aggregated creation audit (only the created table counts, not the re-ingested one).
+        Autheris.Domain.Diagnostics.CatalogDefaultTierTally.TakeAndReset().ShouldBeGreaterThanOrEqualTo(1);
     }
 }

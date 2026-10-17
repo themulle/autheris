@@ -510,6 +510,12 @@ public partial class SqlServerGovernanceRepository
         return change;
     }
 
+    public async Task<DatasetVisibilityCounts> GetDatasetVisibilityCountsAsync(CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        return await DatasetCatalogStore.CountByVisibilityAsync(conn, null, CatalogKeyDefinitionStore.SqlServer, ct).ConfigureAwait(false);
+    }
+
     public async Task<DatasetCatalogSettings?> GetDatasetCatalogSettingsAsync(TableIdentifier table, bool strict = true, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);

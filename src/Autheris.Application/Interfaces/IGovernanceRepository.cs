@@ -21,6 +21,10 @@ public interface ITableMetadataRepository
     Task<DatasetCatalogSettings?> GetDatasetCatalogSettingsAsync(TableIdentifier table, bool strict = true, CancellationToken ct = default)
         => throw new NotSupportedException($"{GetType().Name} does not implement dataset catalog settings.");
 
+    /// <summary>Issue #111 (A-9): table counts per tier for <c>autheris_catalog_visibility_total</c>; Hidden is all tables minus the Summary and Full rows.</summary>
+    Task<DatasetVisibilityCounts> GetDatasetVisibilityCountsAsync(CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement dataset catalog settings.");
+
     /// <summary>
     /// Issue #111: replaces the tags of one <paramref name="source"/> (admin replaces only admin rows, dbt only dbt rows; a tag present as admin
     /// stays admin) in one transaction with the before read. No epoch bump (tags are not policy inputs). Null when the table is unknown or inactive.

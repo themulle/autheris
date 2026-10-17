@@ -775,6 +775,12 @@ public partial class SqliteGovernanceRepository
         return change;
     }
 
+    public async Task<DatasetVisibilityCounts> GetDatasetVisibilityCountsAsync(CancellationToken ct = default)
+    {
+        await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
+        return await DatasetCatalogStore.CountByVisibilityAsync(scope.Connection, null, CatalogKeyDefinitionStore.Sqlite, ct).ConfigureAwait(false);
+    }
+
     public async Task<DatasetCatalogSettings?> GetDatasetCatalogSettingsAsync(TableIdentifier table, bool strict = true, CancellationToken ct = default)
     {
         await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);

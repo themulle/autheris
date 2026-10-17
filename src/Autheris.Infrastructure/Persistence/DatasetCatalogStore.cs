@@ -160,6 +160,35 @@ internal static class DatasetCatalogStore
         return new DatasetCatalogSettings(row.Tags, row.Visibility);
     }
 
+    /// <summary>Counts per tier: Summary and Full from the settings rows, Hidden as all tables minus those (every other stored value counts as Hidden).</summary>
+    internal static async Task<DatasetVisibilityCounts> CountByVisibilityAsync(
+        DbConnection conn, DbTransaction? tx, KeyDefinitionDialect dialect, CancellationToken ct)
+    {
+        long summary = 0, full = 0, total;
+        await using (var cmd = conn.CreateCommand())
+        {
+            Enlist(cmd, tx);
+            cmd.CommandText = $"SELECT COUNT(*), visibility FROM {dialect.Prefix}{SettingsTable} GROUP BY visibility";
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                var tier = TryReadVisibility(reader, out var v) ? v : DatasetVisibility.Hidden;
+                var count = Convert.ToInt64(reader.GetValue(0), CultureInfo.InvariantCulture);
+                if (tier == DatasetVisibility.Summary) summary += count;
+                else if (tier == DatasetVisibility.Full) full += count;
+            }
+        }
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            Enlist(cmd, tx);
+            cmd.CommandText = $"SELECT COUNT(*) FROM {dialect.Prefix}TABLES WHERE is_active = 1";
+            total = Convert.ToInt64(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false), CultureInfo.InvariantCulture);
+        }
+
+        return new DatasetVisibilityCounts(Math.Max(0, total - summary - full), summary, full);
+    }
+
     /// <summary>Id of the active table with this identifier (no row lock); null when unknown or inactive.</summary>
     internal static async Task<Guid?> FindActiveTableIdAsync(
         DbConnection conn, DbTransaction? tx, KeyDefinitionDialect dialect, TableIdentifier table, CancellationToken ct)
@@ -448,12 +477,21 @@ internal static class DatasetCatalogStore
     /// non-Hidden defaults, so the Hidden default writes nothing. Race: <c>WHERE NOT EXISTS</c> is not atomic across transactions; a concurrent
     /// insert for the same new table violates the primary key and fails the creating transaction closed (the table is not created with a tier).
     /// </summary>
-    internal static Task<int> InsertDefaultAsync(
-        DbConnection conn, DbTransaction tx, KeyDefinitionDialect dialect, Guid tableId, DatasetVisibility visibility, CancellationToken ct) =>
-        ExecAsync(conn, tx,
+    internal static async Task<int> InsertDefaultAsync(
+        DbConnection conn, DbTransaction tx, KeyDefinitionDialect dialect, Guid tableId, DatasetVisibility visibility, CancellationToken ct)
+    {
+        var inserted = await ExecAsync(conn, tx,
             $"INSERT INTO {dialect.Prefix}{SettingsTable} (table_id, visibility, updated_by, updated_at) " +
             $"SELECT @tid, @vis, @by, @now WHERE NOT EXISTS (SELECT 1 FROM {dialect.Prefix}{SettingsTable} WHERE table_id = @tid)",
-            ct, ("@tid", tableId.ToString()), ("@vis", (int)visibility), ("@by", SystemDefaultActor), ("@now", Now()));
+            ct, ("@tid", tableId.ToString()), ("@vis", (int)visibility), ("@by", SystemDefaultActor), ("@now", Now())).ConfigureAwait(false);
+        if (inserted > 0)
+        {
+            // Feeds the aggregated creation audit of A-9 (counted before the commit; a rollback over-counts, which the entry states as "up to").
+            CatalogDefaultTierTally.Note();
+        }
+
+        return inserted;
+    }
 
     private static async Task<DatasetCatalogChange?> MutateAsync(
         DbConnection conn, DbTransaction tx, KeyDefinitionDialect dialect, TableIdentifier table, Sid actor,
