@@ -111,7 +111,7 @@ DDL-touching steps still open: I-7 (#111), I-8 (#112 semantic manifest), I-15, I
 | Removing single-key accessors breaks unknown callers | Only V-4 sites exist; compile errors, not silent behaviour |
 | SQL Server `MERGE` race | `HOLDLOCK` plus natural unique index; concurrency test (section 5.4) |
 
-## 9. Open Questions (defaults taken)
+## 9. Open Questions (defaults taken; confirmed by the owner 2026-10-17)
 
 | # | Question | Default taken |
 |---|---|---|
