@@ -32,6 +32,11 @@ public sealed class GatewayCoreOptionsValidator : IValidateOptions<GatewayOption
             failures.Add("Gateway:RowFilters:SubqueryStrategy must be Exists, InCorrelated or In.");
         }
 
+        if (!opts.Tenancy.IsValid)
+        {
+            failures.Add("Gateway:Tenancy:Mode must be Single or Multi (empty means Multi).");
+        }
+
         if (opts.Casbin.Enabled &&
             !string.IsNullOrWhiteSpace(opts.Casbin.ModelPath) &&
             !_fileSystem.FileExists(opts.Casbin.ModelPath))

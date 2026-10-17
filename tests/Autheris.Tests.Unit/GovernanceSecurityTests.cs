@@ -52,9 +52,12 @@ public class GovernanceSecurityTests : IDisposable
 
         var identity = new ClaimsIdentity(claims, "TestAuth", ClaimTypes.Name, ClaimTypes.Role);
         var principal = new ClaimsPrincipal(identity);
-        var context = new DefaultHttpContext { User = principal };
+        // WP-0: the decision resolvers resolve the guard and the grant policy from the request services (GetRequiredService).
+        var context = new DefaultHttpContext { User = principal, RequestServices = DecisionServicesForTests };
         return new IsolatedHttpContextAccessor(context);
     }
+
+    private static readonly IServiceProvider DecisionServicesForTests = Autheris.Tests.Unit.ConsentRequests.DecisionServices.Build();
 
     private static IHttpContextAccessor CreateAccessorWithTenant(Sid userSid, TenantId tenantId, params string[] roles)
     {

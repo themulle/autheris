@@ -292,6 +292,23 @@ public class SecurityReview20261002EndpointTests
             replayCache: cache ?? new ItsmWebhookReplayCache());
     }
 
+    [Theory]
+    [InlineData("APPROVE")]
+    [InlineData("REJECT")]
+    public async Task WP0_LostDecisionRace_IsAcknowledgedWithoutEffect_NoThrow_NoActivation(string action)
+    {
+        var repo = new FakeConsentApprovalRepository { LoseDecisionRace = true };
+        repo.Add("SN-RACE", "tenant-a");
+        var handler = CreateHandler(repo);
+        var ts = DateTimeOffset.UtcNow;
+        var payload = ItsmPayload("SN-RACE", "inst-a", action: action, approver: "risk.officer");
+
+        var ok = await handler.HandleStatusChangeAsync(payload, Sign(SecretA, ts, payload), ts, null, null, CancellationToken.None);
+
+        ok.ShouldBeTrue("a lost race is acknowledged so the ITSM system does not retry endlessly or see a server error");
+        repo.Activations.ShouldBeEmpty();
+    }
+
     [Fact]
     public async Task H06_PerInstanceSecret_ValidCallback_ActivatesWithInstanceAsAuditActor()
     {
@@ -666,6 +683,7 @@ public class SecurityReview20261002EndpointTests
         private readonly List<ConsentRequest> _requests = [];
 
         public bool KeepStatusOnActivate { get; init; }
+        public bool LoseDecisionRace { get; init; }
         public List<(Guid RequestId, Sid? Actor)> Activations { get; } = [];
         public int UnscopedLookups { get; private set; }
 
@@ -711,6 +729,11 @@ public class SecurityReview20261002EndpointTests
 
         public Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default)
         {
+            if (LoseDecisionRace)
+            {
+                throw new Autheris.Application.Governance.ConsentRequests.ConsentRequestStatusConflictException(requestId);
+            }
+
             var request = _requests.First(r => r.Id == requestId);
             request.Status = "REJECTED";
             return Task.FromResult(request);
@@ -718,6 +741,11 @@ public class SecurityReview20261002EndpointTests
 
         public Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default)
         {
+            if (LoseDecisionRace)
+            {
+                throw new Autheris.Application.Governance.ConsentRequests.ConsentRequestStatusConflictException(requestId);
+            }
+
             var request = _requests.First(r => r.Id == requestId);
             var result = new ConsentRequest
             {

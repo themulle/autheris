@@ -3,6 +3,7 @@ namespace Autheris.Application.Governance.Services;
 using System;
 using System.Buffers.Text;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Security;
 using System.Security.Cryptography;
@@ -15,6 +16,7 @@ using Autheris.Application.Events;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Policy;
 using Autheris.Application.Security;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Security.Totp.Interfaces;
@@ -55,6 +57,7 @@ public class AccessPlanningService : IAccessPlanningService
     private readonly TimeProvider _time;
     private readonly bool _allowDemoDirectory;
     private readonly IGrantPolicy _grantPolicy;
+    private readonly IRowFilterEvaluationAdminService? _rowFilterEvaluationAdmin;
 
     private void EnsureGrantsAllowed(AdminPlanAccessRequest request, TableMetadata? meta, IReadOnlyList<AccessPlanDiffItem> diffs, DateTimeOffset now)
     {
@@ -116,8 +119,10 @@ public class AccessPlanningService : IAccessPlanningService
         TimeProvider? timeProvider = null,
         IAccessPlanStore? accessPlanStore = null,
         IClusterStateTopology? clusterTopology = null,
-        IGrantPolicy? grantPolicy = null)
+        IGrantPolicy? grantPolicy = null,
+        IRowFilterEvaluationAdminService? rowFilterEvaluationAdmin = null)
     {
+        _rowFilterEvaluationAdmin = rowFilterEvaluationAdmin;
         _grantPolicy = grantPolicy ?? new GrantPolicy();
         _auditRepo = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
         _tableRepo = tableMetadataRepository ?? new NullTableMetadataRepository();
@@ -275,62 +280,7 @@ public class AccessPlanningService : IAccessPlanningService
         string? tenantId = null,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentException.ThrowIfNullOrWhiteSpace(adminSid);
-
-        if (string.IsNullOrWhiteSpace(request.ConfirmationToken))
-        {
-            throw new SecurityException("Confirmation token is required to apply access changes (ADR-03).");
-        }
-
-        var stored = await _store.GetPlanAsync(request.PlanId, ct).ConfigureAwait(false);
-        if (stored == null)
-        {
-            throw new SecurityException($"Plan '{request.PlanId}' was not found.");
-        }
-
-        if (stored.Result.ExpiresAt <= _time.GetUtcNow())
-        {
-            throw new SecurityException($"Plan '{request.PlanId}' has expired.");
-        }
-
-        // SR-L-06: apply is bound to the confirming administrator and the planning tenant.
-        if (!string.Equals(stored.AdminSid, adminSid, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new SecurityException("Plan confirmation must be performed by the initiating administrator.");
-        }
-
-        var callerTenant = NormalizeTenant(tenantId);
-        if (stored.TenantId != null && callerTenant != null &&
-            !string.Equals(stored.TenantId, callerTenant, StringComparison.Ordinal))
-        {
-            throw new SecurityException("Plan belongs to a different tenant.");
-        }
-
-        if (string.IsNullOrWhiteSpace(stored.ConfirmedTokenHash) ||
-            !CryptographicOperations.FixedTimeEquals(
-                Encoding.UTF8.GetBytes(HashToken(request.ConfirmationToken)),
-                Encoding.UTF8.GetBytes(stored.ConfirmedTokenHash)))
-        {
-            throw new SecurityException("Confirmation token does not match the confirmed plan token.");
-        }
-
-        if (!ValidateConfirmationToken(request.ConfirmationToken, request.PlanId, adminSid, out var tokenExpiry))
-        {
-            throw new SecurityException("Invalid or malformed confirmation token.");
-        }
-
-        if (tokenExpiry <= _time.GetUtcNow())
-        {
-            throw new SecurityException("Confirmation token has expired.");
-        }
-
-        // Cluster-wide single use: the first caller wins; an unavailable store throws (no apply).
-        var consumeTtl = stored.Result.ExpiresAt - _time.GetUtcNow();
-        if (!await _store.TryConsumeTokenAsync(HashToken(request.ConfirmationToken), consumeTtl, ct).ConfigureAwait(false))
-        {
-            throw new SecurityException("Confirmation token has already been consumed (replay prevention).");
-        }
+        var stored = await ConsumeConfirmedPlanAsync(request, adminSid, tenantId, AccessPlanKind.Access, null, ct).ConfigureAwait(false);
 
         var tableId = ParseTableIdentifier(stored.Request.DatasetId);
 
@@ -400,6 +350,270 @@ public class AccessPlanningService : IAccessPlanningService
         }
 
         return new AdminApplyAccessResult(true, request.PlanId, tuples.Count, "Access applied successfully.");
+    }
+
+    // ---- Issue #107: row filter evaluation plans (SEC-RF107-14) ----
+
+    private IRowFilterEvaluationAdminService RowFilterAdmin
+        => _rowFilterEvaluationAdmin ?? throw new SecurityException("Row filter evaluation administration is not available.");
+
+    // Fixed text: neither the id nor the existence of a rule of another tenant is revealed.
+    private const string RowFilterNotFound = "The row filter or dataset was not found.";
+
+    public async Task<AdminPlanRowFilterEvaluationResult> PlanRowFilterEvaluationAsync(
+        AdminPlanRowFilterEvaluationRequest request,
+        string adminSid,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(adminSid);
+        var admin = RowFilterAdmin;
+
+        var hasRule = !string.IsNullOrWhiteSpace(request.RowFilterId);
+        var hasDataset = !string.IsNullOrWhiteSpace(request.DatasetId);
+        if (hasRule == hasDataset)
+        {
+            throw new ArgumentException("Exactly one of rowFilterId (rule level) or datasetId (object level) is required.");
+        }
+
+        if (!RowFilterEvaluationInput.TryCreate(request.Strategy, request.DurationSeconds, request.MaxKeys, out var settings, out var inputError))
+        {
+            throw new ArgumentException(inputError);
+        }
+
+        var tenant = NormalizeTenant(tenantId);
+        Guid? ruleId = null;
+        RowFilterEvaluationPreview preview;
+        RowFilterEvaluationSettings after;
+        if (hasRule)
+        {
+            if (!Guid.TryParseExact(request.RowFilterId, "D", out var parsedRule))
+            {
+                throw new ArgumentException("rowFilterId must be a GUID.");
+            }
+
+            if (tenant is null)
+            {
+                throw new SecurityException("A tenant context is required to change a rule level setting.");
+            }
+
+            ruleId = parsedRule;
+            after = settings;
+            preview = await admin.ValidateRuleAsync(parsedRule, new TenantId(tenant), settings, ct).ConfigureAwait(false)
+                ?? throw new SecurityException(RowFilterNotFound);
+        }
+        else
+        {
+            var table = await DatasetIdResolver.ResolveActiveAsync(request.DatasetId, _tableRepo, ct).ConfigureAwait(false)
+                ?? throw new SecurityException(RowFilterNotFound);
+            after = settings;
+            preview = await admin.ValidateObjectAsync(table, settings, ct).ConfigureAwait(false)
+                ?? throw new SecurityException(RowFilterNotFound);
+        }
+
+        var now = _time.GetUtcNow();
+        var planId = $"plan_{Guid.NewGuid():N}";
+        var planTtl = TimeSpan.FromMinutes(_planOptions.PlanTtlMinutes);
+        var expiresAt = now.Add(planTtl);
+        var level = hasRule ? "rule" : "object";
+        var tableText = preview.Table.ToString();
+        var warnings = new List<string>();
+        if (after.Strategy == RowFilterEvaluationStrategy.KeySetCache)
+        {
+            warnings.Add("KeySetCache evaluates the correlated filter from a cached key set: changes of the dependent data become visible after at most the configured duration.");
+        }
+
+        // The generic plan fields describe the change for the shared store and GetPlanAsync; they carry no grants.
+        var diffs = new List<AccessPlanDiffItem>();
+        AddDiff(diffs, level, "strategy", RowFilterEvaluationInput.Format(preview.Before.Strategy), RowFilterEvaluationInput.Format(after.Strategy));
+        AddDiff(diffs, level, "durationSeconds", preview.Before.DurationSeconds?.ToString(CultureInfo.InvariantCulture), after.DurationSeconds?.ToString(CultureInfo.InvariantCulture));
+        AddDiff(diffs, level, "maxKeys", preview.Before.MaxKeys?.ToString(CultureInfo.InvariantCulture), after.MaxKeys?.ToString(CultureInfo.InvariantCulture));
+        var stored = new StoredAccessPlan(
+            new AdminPlanAccessResult(planId, tableText, diffs, warnings, expiresAt),
+            new AdminPlanAccessRequest(tableText, [], request.Reason ?? string.Empty),
+            adminSid,
+            TenantId: tenant,
+            PlanKind: AccessPlanKind.RowFilterEvaluation,
+            RowFilterEvaluation: new RowFilterEvaluationPlan(ruleId, tableText, preview.Before, after));
+
+        if (!await _store.TrySavePlanAsync(stored, planTtl, _planOptions.MaxPendingPlansPerAdmin, ct).ConfigureAwait(false))
+        {
+            throw new SecurityException(
+                $"Too many pending access plans for this administrator (limit {_planOptions.MaxPendingPlansPerAdmin}). Apply or wait for existing plans to expire.");
+        }
+
+        return new AdminPlanRowFilterEvaluationResult(
+            planId, level, ruleId?.ToString("D"), tableText, ToDto(preview.Before), ToDto(after), warnings, expiresAt);
+    }
+
+    public async Task<AdminApplyRowFilterEvaluationResult> ApplyRowFilterEvaluationAsync(
+        AdminApplyAccessRequest request,
+        string adminSid,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var admin = RowFilterAdmin;
+        var callerTenant = NormalizeTenant(tenantId);
+
+        // Validation against the CURRENT caps and the optimistic concurrency check happen before the token is consumed.
+        var stored = await ConsumeConfirmedPlanAsync(request, adminSid, tenantId, AccessPlanKind.RowFilterEvaluation, async (plan, token) =>
+        {
+            var change = plan.RowFilterEvaluation ?? throw new SecurityException("The plan carries no row filter evaluation change.");
+            RowFilterEvaluationPreview? current;
+            if (change.RowFilterId is { } ruleId)
+            {
+                var tenant = NormalizeTenant(plan.TenantId ?? callerTenant)
+                    ?? throw new SecurityException("A tenant context is required to change a rule level setting.");
+                current = await admin.ValidateRuleAsync(ruleId, new TenantId(tenant), change.After, token).ConfigureAwait(false);
+            }
+            else
+            {
+                current = await admin.ValidateObjectAsync(ParseStoredTable(change.Table), change.After, token).ConfigureAwait(false);
+            }
+
+            if (current is null)
+            {
+                throw new SecurityException(RowFilterNotFound);
+            }
+
+            if (current.Before != change.Before)
+            {
+                throw new SecurityException("The stored settings changed since the plan was created; create a new plan.");
+            }
+        }, ct).ConfigureAwait(false);
+
+        var applied = stored.RowFilterEvaluation!;
+        var actor = new Sid(adminSid);
+        RowFilterEvaluationChange? result;
+        string level;
+        if (applied.RowFilterId is { } id)
+        {
+            level = "rule";
+            var tenant = new TenantId(NormalizeTenant(stored.TenantId ?? callerTenant)!);
+            result = await admin.SetRuleAsync(id, tenant, applied.After, actor, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            level = "object";
+            var tenant = NormalizeTenant(stored.TenantId ?? callerTenant) is { } t ? new TenantId(t) : TenantId.LegacySingleTenant;
+            var settings = applied.After == RowFilterEvaluationSettings.Inherit ? null : applied.After;
+            result = await admin.SetObjectAsync(ParseStoredTable(applied.Table), settings, actor, tenant, ct).ConfigureAwait(false);
+        }
+
+        if (result is null)
+        {
+            throw new SecurityException(RowFilterNotFound);
+        }
+
+        // Residual admin-vs-admin race (the check before the write is not transactional): detectable afterwards, logged without values.
+        if (result.Before != applied.Before)
+        {
+            _logger.LogWarning(
+                "Row filter evaluation plan {PlanId} was applied over settings that changed between the check and the write (level {Level}).",
+                request.PlanId, level);
+        }
+
+        return new AdminApplyRowFilterEvaluationResult(
+            true, request.PlanId, level, applied.Table, result.NewEpoch, "Row filter evaluation settings applied successfully.");
+    }
+
+    private static TableIdentifier ParseStoredTable(string table)
+        => TableIdentifier.TryParse(table, out var parsed) ? parsed : throw new SecurityException(RowFilterNotFound);
+
+    private static RowFilterEvaluationSettingsDto ToDto(RowFilterEvaluationSettings s)
+        => new(RowFilterEvaluationInput.Format(s.Strategy), s.DurationSeconds, s.MaxKeys);
+
+    private static void AddDiff(List<AccessPlanDiffItem> diffs, string level, string setting, string? before, string? after)
+    {
+        if (!string.Equals(before, after, StringComparison.Ordinal))
+        {
+            diffs.Add(new AccessPlanDiffItem(level, setting, before ?? "inherit", after ?? "inherit", false));
+        }
+    }
+
+    /// <summary>
+    /// The checks every apply shares (SR-L-06, ADR-03): the plan exists, has the expected kind, is unexpired, belongs to the confirming
+    /// administrator and tenant, the confirmation token matches the confirmed token, is valid and unexpired, and is consumed once cluster-wide.
+    /// </summary>
+    private async Task<StoredAccessPlan> ConsumeConfirmedPlanAsync(
+        AdminApplyAccessRequest request,
+        string adminSid,
+        string? tenantId,
+        AccessPlanKind expectedKind,
+        Func<StoredAccessPlan, CancellationToken, Task>? beforeConsume,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(adminSid);
+
+        if (string.IsNullOrWhiteSpace(request.ConfirmationToken))
+        {
+            throw new SecurityException("Confirmation token is required to apply access changes (ADR-03).");
+        }
+
+        var stored = await _store.GetPlanAsync(request.PlanId, ct).ConfigureAwait(false);
+        if (stored == null)
+        {
+            throw new SecurityException($"Plan '{request.PlanId}' was not found.");
+        }
+
+        // Issue #107 (SEC-RF107-14c): every apply path accepts only plans of its own kind, in both directions.
+        if (stored.PlanKind != expectedKind)
+        {
+            throw new SecurityException("The plan is not of the kind this operation applies.");
+        }
+
+        if (stored.Result.ExpiresAt <= _time.GetUtcNow())
+        {
+            throw new SecurityException($"Plan '{request.PlanId}' has expired.");
+        }
+
+        // SR-L-06: apply is bound to the confirming administrator and the planning tenant.
+        if (!string.Equals(stored.AdminSid, adminSid, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new SecurityException("Plan confirmation must be performed by the initiating administrator.");
+        }
+
+        var callerTenant = NormalizeTenant(tenantId);
+        if (stored.TenantId != null && callerTenant != null &&
+            !string.Equals(stored.TenantId, callerTenant, StringComparison.Ordinal))
+        {
+            throw new SecurityException("Plan belongs to a different tenant.");
+        }
+
+        if (string.IsNullOrWhiteSpace(stored.ConfirmedTokenHash) ||
+            !CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(HashToken(request.ConfirmationToken)),
+                Encoding.UTF8.GetBytes(stored.ConfirmedTokenHash)))
+        {
+            throw new SecurityException("Confirmation token does not match the confirmed plan token.");
+        }
+
+        if (!ValidateConfirmationToken(request.ConfirmationToken, request.PlanId, adminSid, out var tokenExpiry))
+        {
+            throw new SecurityException("Invalid or malformed confirmation token.");
+        }
+
+        if (tokenExpiry <= _time.GetUtcNow())
+        {
+            throw new SecurityException("Confirmation token has expired.");
+        }
+
+        // Kind specific checks run before the token is consumed, so a stale or invalid plan does not burn the confirmation.
+        if (beforeConsume != null)
+        {
+            await beforeConsume(stored, ct).ConfigureAwait(false);
+        }
+
+        // Cluster-wide single use: the first caller wins; an unavailable store throws (no apply).
+        var consumeTtl = stored.Result.ExpiresAt - _time.GetUtcNow();
+        if (!await _store.TryConsumeTokenAsync(HashToken(request.ConfirmationToken), consumeTtl, ct).ConfigureAwait(false))
+        {
+            throw new SecurityException("Confirmation token has already been consumed (replay prevention).");
+        }
+
+        return stored;
     }
 
     public async Task<AdminRegisterDatasourceResult> RegisterDatasourceAsync(

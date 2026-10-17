@@ -105,3 +105,7 @@ curl -X POST "http://localhost:8080/api/v1/catalog/datasources/finance_db/test" 
 ## SQL data sources
 
 For SQL data sources the endpoint opens a real connection through the configured connection factory (see [F-AUTH-04](f-auth-04-sqlserver-windows-auth-ntlm-kerberos.md#35-testing-a-sql-server-data-source)). Host and port come from the connection string, `ProbeDetails` contains `Dialect`, `AuthPath`, the effective `LoginName` (never a password) and, on failure, a `Category`. After a login failure the data source is protected by a circuit breaker: further probes are refused with category `LoginBlocked` and the remaining seconds, without contacting the server, so the endpoint cannot drive Active Directory lockout (see [F-AUTH-04 section 3.7](f-auth-04-sqlserver-windows-auth-ntlm-kerberos.md#37-lockout-protection-login-circuit-breaker)). TLS details are not determined and are not fabricated.
+
+## Listing Data Sources
+
+`GET /api/v1/catalog/datasources` (and the MCP tool `list_datasources`, the resource `autheris://catalog/datasources` and the `invoke_api` route of the same name) discloses endpoint base URLs and authentication state. It is restricted to `GovernanceAdmin` and `ClusterAdmin`; a `GovernanceAdmin` of a tenant sees only the data sources of the tables of its tenant. In `Gateway:Tenancy:Mode = Multi` a `GovernanceAdmin` without tenant claim receives `403` with the code `TENANCY_MODE_CLAIMLESS_ADMIN`.

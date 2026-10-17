@@ -313,7 +313,8 @@ public sealed class GovernedAggregationAndMetricsTests
                 Where: TableFilterClause.FromTrinoText("partner.name = 'x'", Array.Empty<string>()),
                 PreEvaluatedDecision: decision);
 
-        await Should.ThrowAsync<ArgumentException>(() => service.ExecuteAggregationAsync(principal, query));
+        // WP-0 (F-4): an unknown column and a denied column are one indistinguishable error.
+        await Should.ThrowAsync<AggregationColumnUnavailableException>(() => service.ExecuteAggregationAsync(principal, query));
 
         executor.Calls.ShouldBe(0);
     }
@@ -564,7 +565,7 @@ public sealed class GovernedAggregationAndMetricsTests
         }
         """;
 
-        await ingestion.ParseAndIngestAsync(manifestJson);
+        await ingestion.ParseAndIngestAsync(manifestJson, new TenantId("tenant-a"));
 
         var metadata = CreateOrdersMetadata(minGroupSize: 5);
         var metaRepo = Substitute.For<ITableMetadataRepository>();

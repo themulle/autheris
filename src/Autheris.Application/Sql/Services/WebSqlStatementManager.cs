@@ -1,5 +1,6 @@
 namespace Autheris.Application.Sql.Services;
 
+using Autheris.Application.Common;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -37,6 +38,8 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
     private static readonly TimeSpan DefaultRetention = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan MaxWaitTimeout = TimeSpan.FromSeconds(300);
 
+    private readonly GatewayOptions? _gatewayOptions;
+
     public WebSqlStatementManager(
         IServiceScopeFactory scopeFactory,
         ILogger<WebSqlStatementManager>? logger = null,
@@ -47,6 +50,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _logger = logger;
+        _gatewayOptions = options?.Value;
 
         var webSqlOpt = options?.Value?.WebSql;
         _retentionPeriod = retentionPeriod ?? (webSqlOpt != null && webSqlOpt.StatementRetentionMinutes > 0
@@ -153,7 +157,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
             var metadataRepo = scope.ServiceProvider.GetService<ITableMetadataRepository>();
             var consentRepo = scope.ServiceProvider.GetService<IConsentRepository>();
             var metadataResult = await TrinoMetadataQueryHandler.TryExecuteAsync(
-                request.Sql, user, tenantId, metadataRepo, consentRepo, sessionCts.Token).ConfigureAwait(false);
+                request.Sql, user, tenantId, metadataRepo, consentRepo, _gatewayOptions, sessionCts.Token).ConfigureAwait(false);
             if (metadataResult != null)
             {
                 return metadataResult;
@@ -253,7 +257,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         if (session.ExecutionTask.IsFaulted)
         {
             var ex = session.ExecutionTask.Exception?.InnerException ?? session.ExecutionTask.Exception;
-            _logger?.LogError(ex, "WebSQL async execution faulted for statement {StatementId}", session.StatementId);
+            _logger?.Error(ex, "WebSQL async execution faulted for statement {StatementId}", session.StatementId);
             return new StatementExecutionStatus(session.StatementId, "FAILED", null, null, null, SanitizeErrorMessage(ex), elapsedMillis);
         }
 

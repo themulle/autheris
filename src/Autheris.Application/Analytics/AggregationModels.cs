@@ -117,3 +117,34 @@ public sealed class MaskedAggregationException : GatewaySecurityException
         ColumnName = columnName;
     }
 }
+
+/// <summary>
+/// Thrown when a column used in <c>groupBy</c>, an aggregate argument, <c>where</c> or <c>orderBy</c> is unknown or denied for the caller
+/// (<c>AGGREGATION_COLUMN_UNAVAILABLE</c>). Unknown and denied columns are deliberately indistinguishable (type, code, message, audit text),
+/// and the message never carries the requested name, so the error cannot be used as an existence oracle for columns the caller may not read.
+/// </summary>
+public sealed class AggregationColumnUnavailableException : GatewaySecurityException
+{
+    public const string ErrorCodeConst = "AGGREGATION_COLUMN_UNAVAILABLE";
+    public const string FixedMessage = "The requested column is not available for aggregation.";
+
+    public AggregationColumnUnavailableException()
+        : base(FixedMessage, ErrorCodeConst)
+    {
+    }
+}
+
+/// <summary>
+/// Thrown when an aggregation would have to read at least the in-memory row cap: the aggregate over a truncated prefix would be wrong,
+/// so the call fails closed (<c>AGGREGATION_ROW_CAP_EXCEEDED</c>) instead of returning a silently truncated result.
+/// </summary>
+public sealed class AggregationRowCapExceededException : GatewaySecurityException
+{
+    public const string ErrorCodeConst = "AGGREGATION_ROW_CAP_EXCEEDED";
+    public const string FixedMessage = "The aggregation covers more rows than the governed in-memory aggregation limit allows; narrow the filter.";
+
+    public AggregationRowCapExceededException()
+        : base(FixedMessage, ErrorCodeConst)
+    {
+    }
+}

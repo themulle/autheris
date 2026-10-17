@@ -76,3 +76,28 @@ mutation ApproveTableAccess {
   }
 }
 ```
+
+---
+
+## 6. Who Can Decide and How a Decision Is Applied
+
+**Behaviour.** Only a person can approve or reject a consent request through `approveConsentRequest` and `rejectConsentRequest`. The decision guard (`IConsentDecisionGuard`) is the first step of both resolvers, before the approver identity is read, before the idempotency lookup and before any repository access. A refused decision answers `DECISION_NOT_PERMITTED`.
+
+| Caller | Can decide |
+|---|---|
+| Interactive person (Basic, Kerberos/Negotiate, ForwardAuth, Entra ID or ADFS delegated token) who is an owner, delegate or `GovernanceAdmin` | yes |
+| Delegated token with a scope claim (`scp`, also in its mapped URI form) and an `oid`/SID, even without a human-name claim | yes |
+| Application token (`idtyp=app`, or an application id such as `appid`, `azp`, `client_id` without a delegated scope), also with the `GovernanceAdmin` role and `AppOnlyTokens=ReadWrite` | no |
+| ADFS token mapped to only `unique_name`, an application id, no `scp` and no `upn`/email (indistinguishable from an application) | no |
+| Certificate (mTLS) subject | no |
+| Read-only token, unauthenticated or missing principal | no |
+
+An operator-enabled `ReadWrite` administrative application keeps its governance admin REST access; that access is not a request decision. The external ITSM webhook activates and rejects requests through its signed callback and does not use the guard.
+
+**Denial audit.** The first refusal of a principal in a minute writes one Tier-A `CONSENT_DENIED` entry that carries only the reason class (`read-only`, `not-person`, `unauthenticated`). Further refusals of the same principal in that minute are counted in `autheris_consent_decision_denied_total{reason,audited}` only. A failing audit write never changes the answer.
+
+**Order of a decision.** For an individual grantee (user or service principal) the grant policy (`IGrantPolicy`, class maximum from the `IndividualGrantOptions`) is evaluated on the loaded request before the approval step, on the first and on the second step. Unknown table metadata classifies as sensitive. A refusal writes nothing: the request keeps its status (`PENDING` or `PENDING_SECOND_APPROVAL`) and can still be rejected. Role and group grantees are standing grants and skip the policy. The guard and the policy are resolved with `GetRequiredService`; a missing registration fails the call and never allows it.
+
+**Status guard.** The approval step and the rejection change the request with `UPDATE CONSENT_REQUESTS SET status = @st WHERE id = @id AND status = @expected` on SQLite, PostgreSQL and SQL Server. `@expected` is the status read under the lock of the same transaction (`PENDING`, `PENDING_SECOND_APPROVAL` or the ITSM `PENDING_EXTERNAL_APPROVAL`). If no row matches, the transaction is rolled back (no approval step, no audit entry, no status change) and the call answers `ACCESS_REQUEST_NOT_PENDING`. The same answer is given when the status read under the lock is no longer approvable or rejectable for the step (a concurrent decision won). A signed ITSM callback that loses such a race is acknowledged without effect, so the ITSM system neither sees an error nor retries.
+
+**Consent creation.** After the final approval step the consent is created in a second transaction. If that creation fails, the request stays `APPROVED`, the failure is logged at Error with the request id, the tenant id and the exception type only (never request content or the exception message), and the existing activation (`ActivateConsentAsync`, status `APPROVED`) completes it.

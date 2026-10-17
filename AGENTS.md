@@ -74,7 +74,7 @@ The central origin/master plan for the entire project is:
 ## 5. 🌟 Individual Feature Documentation Location (`docs/features/`)
 
 > [!IMPORTANT]
-> **Every individual feature must always be documented in the [`docs/features/`](file:///root/autheris/docs/features/) catalog.**
+> **Feature documentation is not part of the implementation lifecycle (no documentation phase, owner rule 2026-10-17).** Feature docs are written only when the owner explicitly asks for them; the rules below apply to those documents.
 
 * **Mandatory File Location & Naming:**
   - Individual feature specifications and technical reference docs **must always reside in `docs/features/`**.
@@ -92,9 +92,9 @@ The central origin/master plan for the entire project is:
 
 ---
 
-## 6. 🔄 The 6-Phase Standard Implementation Lifecycle
+## 6. 🔄 The 5-Phase Standard Implementation Lifecycle
 
-Every feature, requirement, or significant change must pass through the standard 6-phase quality-gated delivery pipeline:
+Every feature, requirement, or significant change must pass through the standard 5-phase quality-gated delivery pipeline. There is no documentation phase:
 
 ```mermaid
 flowchart LR
@@ -102,7 +102,7 @@ flowchart LR
     P2 --> P3["3. Security Expert<br/>(Audit & Threat Hardening)"]
     P3 --> P4["4. Developer(s)<br/>(Strict TDD Red-Green-Refactor)"]
     P4 --> P5["5. Code Reviewer<br/>(Inspection & Quality Gate)"]
-    P5 --> P6["6. Documentation Expert<br/>(docs/features/ Catalog)"]
+    P5 --> T["Tracker update<br/>(doc/plan/, commit, push)"]
 ```
 
 1. **Phase 1: Product Management (`product-manager`)**
@@ -117,8 +117,8 @@ flowchart LR
    - Strictly applies Red-Green-Refactor with xUnit and FluentAssertions. Ensures full test suite is green.
 5. **Phase 5: Code Review & Quality Gate (`csharp-code-reviewer`)**
    - Audits code quality, C# 13 idioms, allocation efficiency, and test completeness. Loops back to developers if issues arise.
-6. **Phase 6: Documentation & Cataloging (`documentation-expert`)**
-   - Authors official feature documentation in `docs/features/f-*.md` (without WIP notes), registers it in `docs/features/README.md`, and marks plan completed in `doc/plan/00-master-plan-overview.md`.
+6. **After Phase 5: Tracker update (no documentation phase)**
+   - Updates the progress tracker and `doc/plan/00-master-plan-overview.md` (status and links), commits and pushes. No feature documentation is written as part of the lifecycle.
 
 ---
 

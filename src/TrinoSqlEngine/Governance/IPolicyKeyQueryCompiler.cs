@@ -44,9 +44,3 @@ public sealed record CompiledKeyQuery(
     public override string ToString() =>
         $"CompiledKeyQuery {{ ForeignKeyColumn = {ForeignKeyColumn}, KeyColumnType = {KeyColumnType}, ForeignKeyColumnType = {ForeignKeyColumnType}, Parameters = {Parameters.Length}, CompilerVersion = {CompilerVersion} }}";
 }
-
-/// <summary>The correlated <c>EXISTS</c> has no equivalent key query; the caller falls back to <c>EXISTS</c> (reason <c>NotDerivable</c>).</summary>
-public sealed class KeyQueryNotDerivableException(string reasonCode) : Exception(reasonCode)
-{
-    public string ReasonCode { get; } = reasonCode;
-}

@@ -16,6 +16,9 @@ using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Application.Catalog.Services;
+using Autheris.Domain.Options;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Pipeline handler for executing MCP tools without bloating AiDataGuardrailService or GatewayMcpQueryExecutor.
@@ -36,6 +39,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
     private readonly ITableMetadataRepository _metadataRepo;
     private readonly ISemanticCatalogService? _semanticCatalog;
     private readonly Autheris.Application.Analytics.ISemanticMetricQueryService? _metricQueryService;
+    private readonly TenancyMode _tenancyMode;
 
     public McpToolExecutionHandler(
         IGovernedSqlExecutionService sqlExecutionService,
@@ -45,8 +49,10 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         ILineageGraphStore lineageGraphStore,
         ITableMetadataRepository metadataRepo,
         ISemanticCatalogService? semanticCatalog = null,
-        Autheris.Application.Analytics.ISemanticMetricQueryService? metricQueryService = null)
+        Autheris.Application.Analytics.ISemanticMetricQueryService? metricQueryService = null,
+        IOptions<GatewayOptions>? gatewayOptions = null)
     {
+        _tenancyMode = gatewayOptions?.Value.Tenancy.EffectiveMode ?? TenancyMode.Multi;
         _sqlExecutionService = sqlExecutionService ?? throw new ArgumentNullException(nameof(sqlExecutionService));
         _dataQueryService = dataQueryService ?? throw new ArgumentNullException(nameof(dataQueryService));
         _catalogDiscoveryService = catalogDiscoveryService ?? throw new ArgumentNullException(nameof(catalogDiscoveryService));
@@ -207,6 +213,20 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
 
         if (string.Equals(tool.Name, McpDatasetTools.ListDatasources, StringComparison.OrdinalIgnoreCase))
         {
+            // Data sources disclose endpoint URLs and authentication state: administrator view only (canonical caller class).
+            var datasourceScope = CallerScopeResolver.Resolve(userPrincipal, _tenancyMode);
+            if (!CallerScopeResolver.IsAdminView(datasourceScope))
+            {
+                return JsonSerializer.Serialize(new
+                {
+                    error = "Forbidden",
+                    message = datasourceScope == CallerScope.Claimless &&
+                              CallerScopeResolver.HoldsGovernanceAdminRole(userPrincipal)
+                        ? "Listing data sources requires an administrator with a tenant claim; single-tenant deployments must set Gateway:Tenancy:Mode=Single."
+                        : "Listing data sources requires a governance administrator."
+                }, JsonOpts);
+            }
+
             var status = root.TryGetProperty("status", out var sProp) ? sProp.GetString() : null;
             var datasources = await _catalogDiscoveryService.ListDatasourcesAsync(requestContext, ct).ConfigureAwait(false);
 

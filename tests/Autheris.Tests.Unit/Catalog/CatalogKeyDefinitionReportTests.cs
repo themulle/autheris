@@ -50,13 +50,15 @@ public sealed class CatalogKeyDefinitionReportTests
         var service = new CatalogDiscoveryService(
             repo,
             Substitute.For<IAuditLogRepository>(),
+            Substitute.For<IConsentRepository>(),
+            Microsoft.Extensions.Options.Options.Create(Wp0.Options(Autheris.Domain.Options.TenancyMode.Single)),
             Substitute.For<IRebacEvaluator>(),
             Substitute.For<IKeyVaultSecretProvider>(),
             Substitute.For<IOpenApiIngestionService>(),
             Substitute.For<ICatalogSearchEngine>(),
             NullLogger<CatalogDiscoveryService>.Instance);
 
-        var detail = await service.GetDatasetDetailAsync(Id, new RequestContext(new TenantId("t"), new Sid("user:x")));
+        var detail = await service.GetDatasetDetailAsync(Id, new RequestContext(new TenantId("t"), new Sid("user:x"), User: Wp0.User("user:x", null, ["GovernanceAdmin"])));
 
         detail.ShouldNotBeNull();
         detail.PrimaryKeys.ShouldBeEmpty();

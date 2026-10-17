@@ -128,7 +128,7 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
             .ToList();
 
         // Wunsch 9: only tables the caller may discover (same rule as the GraphQL catalog and MCP).
-        var visible = await CatalogVisibility.VisibleTablesAsync(tenantTables, principal, tenant, _consentRepository, ct).ConfigureAwait(false);
+        var visible = await CatalogVisibility.VisibleTablesAsync(tenantTables, principal, tenant, _consentRepository, contract: null, _options.Value.Tenancy.EffectiveMode, _options.Value.Catalog.SharedTables, ct).ConfigureAwait(false);
         var filtered = visible
             .Where(t => string.IsNullOrWhiteSpace(schemaPattern) ||
                         string.Equals(t.Identifier.Schema, schemaPattern, StringComparison.OrdinalIgnoreCase))

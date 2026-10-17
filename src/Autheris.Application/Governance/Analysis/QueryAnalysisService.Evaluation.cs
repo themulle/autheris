@@ -76,6 +76,10 @@ public sealed partial class QueryAnalysisService
                 Column: null,
                 RequestedLevel: "READ",
                 SuggestedPurpose: $"Read access to dataset '{canonicalDataset}' required by query '{queryName}'."));
+
+            // Table-level stop, independent of the catalog visibility value: without a table grant, ownership or administrator class the
+            // column stage (select * expansion, OutputColumns, UnknownColumn, column-level requests) would disclose which columns exist.
+            return;
         }
 
         var tableAllowConsents = activeConsents

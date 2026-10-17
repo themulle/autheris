@@ -13,6 +13,12 @@ namespace Autheris.Infrastructure.Persistence;
 public partial class PostgreSqlGovernanceRepository
 {
     /// <summary>
+    /// Test seam (WP-0, SEC-113-R2-03): runs inside the decision transaction between the status read under the lock and the guarded
+    /// status UPDATE, so a test can change the status where no concurrent writer can be injected. Always null in production.
+    /// </summary>
+    internal Func<System.Data.Common.DbConnection, System.Data.Common.DbTransaction, CancellationToken, Task>? ConsentStatusUpdateSeam { get; set; }
+
+    /// <summary>
     /// WP-SC-01: prefilter on the indexed upper-invariant grantee SID (<c>= ANY(array)</c>). Role consents and rows without a
     /// normalised SID always pass; the C# filter on the loaded rows stays authoritative.
     /// </summary>
@@ -310,7 +316,7 @@ public partial class PostgreSqlGovernanceRepository
             cmd.CommandText = @"SELECT consent_id, filter_group, table_column_id, column_name, operator, value_type, value_json, value_source, user_attribute,
                                        filter_type, dependent_table, dependent_table_alias, foreign_key_column, primary_key_column,
                                        subquery_predicate_json, target_temporal_column, dependent_valid_from_column, dependent_valid_to_column,
-                                       target_table_alias, additional_hops_json
+                                       target_table_alias, additional_hops_json, id, key_set_strategy, key_set_duration_seconds, key_set_max_keys
                                 FROM CONSENT_ROW_FILTERS
                                 WHERE consent_id = ANY(@ids)";
             cmd.Parameters.AddWithValue("@ids", consentIds.ToArray());
@@ -345,7 +351,8 @@ public partial class PostgreSqlGovernanceRepository
 
                     filterList.Add(new ConsentRowFilter
                     {
-                        Id = Guid.NewGuid(),
+                        // The stored row id is the stable rule id of the admin surface (issue #107); a fresh id per read would make it unaddressable.
+                        Id = Guid.Parse(reader.GetString(20)),
                         ConsentId = Guid.Parse(cId),
                         FilterGroup = reader.GetInt32(1),
                         TableColumnId = Guid.Parse(reader.GetString(2)),
@@ -365,7 +372,10 @@ public partial class PostgreSqlGovernanceRepository
                         DependentValidFromColumn = reader.IsDBNull(16) ? null : reader.GetString(16),
                         DependentValidToColumn = reader.IsDBNull(17) ? null : reader.GetString(17),
                         TargetTableAlias = reader.IsDBNull(18) ? null : reader.GetString(18),
-                        AdditionalHops = hops
+                        AdditionalHops = hops,
+                        KeySetStrategy = reader.IsDBNull(21) ? null : (RowFilterEvaluationStrategy)reader.GetInt32(21),
+                        KeySetDurationSeconds = reader.IsDBNull(22) ? null : reader.GetInt32(22),
+                        KeySetMaxKeys = reader.IsDBNull(23) ? null : reader.GetInt32(23)
                     });
                 }
             }
@@ -477,10 +487,10 @@ public partial class PostgreSqlGovernanceRepository
                                         id, consent_id, filter_group, table_column_id, column_name, operator, value_type, value_json, value_source, user_attribute,
                                         filter_type, dependent_table, dependent_table_alias, foreign_key_column, primary_key_column,
                                         subquery_predicate_json, target_temporal_column, dependent_valid_from_column, dependent_valid_to_column,
-                                        target_table_alias, additional_hops_json
+                                        target_table_alias, additional_hops_json, key_set_strategy, key_set_duration_seconds, key_set_max_keys
                                     ) VALUES (
                                         @id, @consentId, @fg, @colId, @colName, @op, @vType, @vJson, @vSource, @uAttr,
-                                        @ft, @dt, @dta, @fk, @pk, @sqp, @ttc, @dvfc, @dvtc, @tta, @hops
+                                        @ft, @dt, @dta, @fk, @pk, @sqp, @ttc, @dvfc, @dvtc, @tta, @hops, @ksStrategy, @ksDuration, @ksMax
                                     )";
             filterCmd.Parameters.AddWithValue("@id", filterId.ToString());
             filterCmd.Parameters.AddWithValue("@consentId", consentId.ToString());
@@ -503,6 +513,9 @@ public partial class PostgreSqlGovernanceRepository
             filterCmd.Parameters.AddWithValue("@dvtc", (object?)filter.DependentValidToColumn ?? DBNull.Value);
             filterCmd.Parameters.AddWithValue("@tta", (object?)filter.TargetTableAlias ?? DBNull.Value);
             filterCmd.Parameters.AddWithValue("@hops", (object?)hopsJson ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@ksStrategy", filter.KeySetStrategy is { } ksStrategy ? (object)(int)ksStrategy : DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@ksDuration", (object?)filter.KeySetDurationSeconds ?? DBNull.Value);
+            filterCmd.Parameters.AddWithValue("@ksMax", (object?)filter.KeySetMaxKeys ?? DBNull.Value);
             await filterCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
 
@@ -911,6 +924,46 @@ public partial class PostgreSqlGovernanceRepository
         }
     }
 
+    public async Task<(ConsentRowFilter Filter, ConsentEffect Effect, TenantId Tenant, TableIdentifier Table)?> GetRowFilterAsync(
+        Guid rowFilterId, CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        var row = await RowFilterEvaluationStore.ReadRuleAsync(conn, null, CatalogKeyDefinitionStore.PostgreSql, rowFilterId, ct).ConfigureAwait(false);
+        return row is null ? null : (row.Filter, row.Effect, row.Tenant, row.Table);
+    }
+
+    public async Task<RowFilterEvaluationChange?> UpdateRowFilterEvaluationAsync(
+        Guid rowFilterId, TenantId tenant, RowFilterEvaluationSettings settings, CancellationToken ct = default)
+    {
+        RowFilterEvaluationChange? change;
+        await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
+        {
+            await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
+            {
+                change = await RowFilterEvaluationStore.UpdateRuleAsync(
+                    conn, tx, CatalogKeyDefinitionStore.PostgreSql, rowFilterId, tenant, settings,
+                    table => IncrementTableEpochInternalAsync(conn, tx, table, ct), ct).ConfigureAwait(false);
+                if (change is null)
+                {
+                    await tx.RollbackAsync(ct).ConfigureAwait(false);
+                    return null;
+                }
+
+                await tx.CommitAsync(ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                await tx.RollbackAsync(ct).ConfigureAwait(false);
+                throw;
+            }
+        }
+
+        _metadataCache.TryRemove(change.TargetTable.ToString().ToLowerInvariant(), out _);
+        await _epochValidationService.InvalidateEpochAsync(change.TargetTable, ct).ConfigureAwait(false);
+        return change;
+    }
+
     public async Task<ConsentRequest> CreateConsentRequestAsync(ConsentRequest request, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
@@ -1299,14 +1352,7 @@ public partial class PostgreSqlGovernanceRepository
             // (GraphQL: with column snapshot) or calls ActivateConsentAsync (ITSM). Review E-9: ITSM keeps its second step.
             string newStatus = ConsentApprovalPolicy.StatusAfterApproval(requiresFourEyes, stepNumber, isExternalItsmApproval, tableSensitivity);
 
-            await using (var updateReq = conn.CreateCommand())
-            {
-                updateReq.Transaction = tx;
-                updateReq.CommandText = "UPDATE CONSENT_REQUESTS SET status = @status WHERE id = @id";
-                updateReq.Parameters.AddWithValue("@status", newStatus);
-                updateReq.Parameters.AddWithValue("@id", requestId.ToString());
-                await updateReq.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
+            await ApplyGuardedStatusAsync(conn, tx, requestId, newStatus, currentStatus, ct).ConfigureAwait(false);
 
             req.Status = newStatus;
             var auditEntry = ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_APPROVAL_STEP", "APPROVED", newStatus, itsmApproverAccount, null);
@@ -1340,6 +1386,34 @@ public partial class PostgreSqlGovernanceRepository
         return Convert.ToInt64(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false)) > 0;
     }
 
+    /// <summary>
+    /// Status guard of the approve step and the reject path (WP-0): the UPDATE only matches while the request still has the status read under
+    /// the row lock of this transaction. Zero rows throw, and the caller rolls the transaction back (no step row, no audit entry, no status change).
+    /// </summary>
+    private async Task ApplyGuardedStatusAsync(System.Data.Common.DbConnection conn, System.Data.Common.DbTransaction tx, Guid requestId, string newStatus, string expectedStatus, CancellationToken ct)
+    {
+        if (ConsentStatusUpdateSeam is { } seam)
+        {
+            await seam(conn, tx, ct).ConfigureAwait(false);
+        }
+
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = ConsentApprovalPolicy.GuardedStatusUpdateSql;
+        AddParameter(cmd, "@st", newStatus);
+        AddParameter(cmd, "@id", requestId.ToString());
+        AddParameter(cmd, "@expected", expectedStatus);
+        ConsentApprovalPolicy.EnsureTransitionApplied(await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false), requestId);
+    }
+
+    private static void AddParameter(System.Data.Common.DbCommand cmd, string name, string value)
+    {
+        var parameter = cmd.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value;
+        cmd.Parameters.Add(parameter);
+    }
+
     public Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default) =>
         RejectConsentRequestAsync(requestId, approverSid, reason, isExternalItsm: false, ct);
 
@@ -1350,7 +1424,7 @@ public partial class PostgreSqlGovernanceRepository
 
         if (!ConsentApprovalPolicy.IsRejectableStatus(req.Status))
         {
-            throw new InvalidOperationException($"Request {requestId} is in status '{req.Status}' and cannot be rejected.");
+            throw new Autheris.Application.Governance.ConsentRequests.ConsentRequestStatusConflictException(requestId); // lost the race: ACCESS_REQUEST_NOT_PENDING
         }
 
         // Review PG-5: authorization at repository level (as in SQLite): ITSM actors, or owner/delegate/admin of the table.
@@ -1378,7 +1452,7 @@ public partial class PostgreSqlGovernanceRepository
 
             if (!ConsentApprovalPolicy.IsRejectableStatus(currentStatus))
             {
-                throw new InvalidOperationException($"Request {requestId} is in status '{currentStatus}' and cannot be rejected.");
+                throw new Autheris.Application.Governance.ConsentRequests.ConsentRequestStatusConflictException(requestId); // lost the race: ACCESS_REQUEST_NOT_PENDING
             }
 
             await using (var stepInsert = conn.CreateCommand())
@@ -1394,13 +1468,7 @@ public partial class PostgreSqlGovernanceRepository
                 await stepInsert.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
-            await using (var updateReq = conn.CreateCommand())
-            {
-                updateReq.Transaction = tx;
-                updateReq.CommandText = "UPDATE CONSENT_REQUESTS SET status = 'REJECTED' WHERE id = @id";
-                updateReq.Parameters.AddWithValue("@id", requestId.ToString());
-                await updateReq.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
+            await ApplyGuardedStatusAsync(conn, tx, requestId, "REJECTED", currentStatus, ct).ConfigureAwait(false);
 
             req.Status = "REJECTED";
             var auditEntry = ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_REQUEST_REJECTED", "REJECTED", "REJECTED", null, reason);

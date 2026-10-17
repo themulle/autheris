@@ -6,14 +6,17 @@ using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Services;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Options;
 
 public static class CatalogApiEndpoints
 {
@@ -51,16 +54,32 @@ public static class CatalogApiEndpoints
         .RequireAuthorization()
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
+        // Data sources disclose endpoint base URLs and authentication state: administrators only. A tenant-scoped GovernanceAdmin
+        // is further confined to the tables of its tenant by the service. A GovernanceAdmin without tenant claim in Multi mode is
+        // answered with a stable 403 that names the option instead of a misleading empty list.
         group.MapGet("/datasources", async (
             ICatalogDiscoveryService discoveryService,
+            IOptions<GatewayOptions> gatewayOptions,
             HttpContext httpContext,
             CancellationToken ct) =>
         {
+            var scope = CallerScopeResolver.Resolve(httpContext.User, gatewayOptions.Value.Tenancy.EffectiveMode);
+            if (scope == CallerScope.Claimless && CallerScopeResolver.HoldsGovernanceAdminRole(httpContext.User))
+            {
+                return Results.Json(
+                    new
+                    {
+                        error = "TENANCY_MODE_CLAIMLESS_ADMIN",
+                        message = "The principal has no tenant claim and Gateway:Tenancy:Mode is Multi; single-tenant deployments must set Gateway:Tenancy:Mode=Single."
+                    },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+
             var context = CreateRequestContext(httpContext);
             var datasources = await discoveryService.ListDatasourcesAsync(context, ct);
             return Results.Ok(datasources);
         })
-        .RequireAuthorization()
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         group.MapPost("/datasources", RegisterDatasourceHandler)
@@ -149,46 +168,30 @@ public static class CatalogApiEndpoints
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogKeyDefinitionChanged);
 
+        // Issue #107: object level of the row filter key-set cache strategy (same authorization and dataset resolution as /keys).
+        group.MapGet("/datasets/{id}/row-filter-strategy", GovernanceEndpoints.GetDatasetRowFilterStrategyAsync)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+
+        group.MapPut("/datasets/{id}/row-filter-strategy", GovernanceEndpoints.SetDatasetRowFilterStrategyAsync)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Full, AuditEventTypes.TableRowFilterStrategyChanged);
+
+        group.MapDelete("/datasets/{id}/row-filter-strategy", GovernanceEndpoints.ClearDatasetRowFilterStrategyAsync)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Full, AuditEventTypes.TableRowFilterStrategyChanged);
+
         return app;
     }
 
-    private const int MaxDatasetIdLength = 512;
-
     private static IResult DatasetKeysNotFound() => Results.NotFound(new { error = "Dataset was not found." });
 
-    /// <summary>
-    /// Resolves an active dataset by table id (strict "D" GUID) or by domain.schema.table without loading the whole catalog.
-    /// Unknown and inactive datasets are indistinguishable (SEC-94-15); a dataset with an invalid stored definition resolves (repair).
-    /// </summary>
-    private static async Task<TableIdentifier?> ResolveActiveDatasetAsync(
+    /// <summary>Resolves an active dataset by table id or domain.schema.table (shared with the row filter strategy endpoints).</summary>
+    private static Task<TableIdentifier?> ResolveActiveDatasetAsync(
         string? id,
         Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
         CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(id) || id.Length > MaxDatasetIdLength)
-        {
-            return null;
-        }
-
-        TableIdentifier identifier;
-        if (Guid.TryParseExact(id, "D", out var tableGuid))
-        {
-            var resolved = await metadataRepository.GetActiveTableIdentifierByIdAsync(tableGuid, ct).ConfigureAwait(false);
-            if (resolved is not { } found)
-            {
-                return null;
-            }
-
-            identifier = found;
-        }
-        else if (!TableIdentifier.TryParse(id.Replace('/', '.'), out identifier))
-        {
-            return null;
-        }
-
-        // Catalog row only: the stored key definition is neither loaded nor validated, so an invalid definition can be replaced.
-        return await metadataRepository.GetActiveTableIdentifierAsync(identifier, ct).ConfigureAwait(false);
-    }
+        => Autheris.Application.Governance.Services.DatasetIdResolver.ResolveActiveAsync(id, metadataRepository, ct);
 
     internal static async Task<IResult> SetDatasetKeysHandler(
         string id,

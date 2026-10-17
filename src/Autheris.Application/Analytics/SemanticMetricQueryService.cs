@@ -24,6 +24,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 /// </summary>
 public sealed partial class SemanticMetricQueryService : ISemanticMetricQueryService
 {
+    /// <summary>Fixed caller-facing message for a denied or missing backing table; carries no table, metric or reason text.</summary>
+    internal const string DeniedMessage = "Access denied.";
+
     private static readonly HashSet<string> StandardTimeGranularities = new(StringComparer.OrdinalIgnoreCase)
     {
         "hour", "day", "week", "month", "quarter", "year"
@@ -109,12 +112,12 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
                 throw new ArgumentException("Metric name must not be empty.", nameof(request));
             }
 
-            var metric = await _catalogService.GetMetricAsync(rawName.Trim(), ct).ConfigureAwait(false)
+            var metric = await _catalogService.GetMetricAsync(rawName.Trim(), tenantId, ct).ConfigureAwait(false)
                 ?? throw new KeyNotFoundException($"Metric '{rawName}' was not found in the semantic catalog.");
             resolvedMetrics[metric.Name] = metric;
         }
 
-        var allModels = await _catalogService.ListSemanticModelsAsync(ct).ConfigureAwait(false);
+        var allModels = await _catalogService.ListSemanticModelsAsync(tenantId, ct).ConfigureAwait(false);
         DbtSemanticModel? targetModel = null;
         var requiredMeasures = new Dictionary<string, DbtMeasure>(StringComparer.OrdinalIgnoreCase);
         int? metricOrMeasureMinGroupSize = null;
@@ -161,7 +164,32 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
             throw new InvalidOperationException("No semantic model could be resolved for the requested metrics.");
         }
 
-        var tableMetadata = await ResolveTableMetadataAsync(targetModel, ct).ConfigureAwait(false);
+        TableMetadata tableMetadata;
+        try
+        {
+            tableMetadata = await ResolveTableMetadataAsync(targetModel, ct).ConfigureAwait(false);
+        }
+        catch (TableNotFoundException notFound)
+        {
+            // WP-0 (W0-4): a missing backing table and a denied one are one indistinguishable error for the caller; the true reason stays in the audit.
+            await RecordMetricAuditAsync(
+                tenantId,
+                userSid,
+                notFound.Table,
+                allowed: false,
+                resolvedMetrics.Keys.ToList(),
+                _catalogService.ManifestVersion,
+                new Dictionary<string, object?>
+                {
+                    ["is_allowed"] = false,
+                    ["metrics"] = resolvedMetrics.Keys.ToArray(),
+                    ["reasons"] = new[] { "Backing table not found." }
+                },
+                ct).ConfigureAwait(false);
+
+            throw new GatewayForbiddenException(DeniedMessage);
+        }
+
         var tableId = tableMetadata.Identifier;
 
         // Evaluate table consent OR metric-scoped consent (metric:<metricName>)
@@ -190,8 +218,8 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
                 },
                 ct).ConfigureAwait(false);
 
-            throw new GatewayForbiddenException(
-                $"Access to semantic metric(s) '{string.Join(", ", resolvedMetrics.Keys)}' on table '{tableId.ToQualifiedName()}' is denied: {string.Join("; ", decision.DeniedReasons)}");
+            // WP-0 (W0-4): fixed message without metric names, table name or denial reasons (those are in the audit entry above).
+            throw new GatewayForbiddenException(DeniedMessage);
         }
 
         // Build aggregate selections from the resolved measures

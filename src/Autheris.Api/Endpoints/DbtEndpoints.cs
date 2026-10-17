@@ -361,7 +361,7 @@ public static class DbtEndpoints
 
             try
             {
-                var manifest = await ingestionService.ParseAndIngestAsync(payload, context.RequestAborted);
+                var manifest = await ingestionService.ParseAndIngestAsync(payload, EndpointSecurity.GetRequestTenant(context), context.RequestAborted);
                 return Results.Ok(new
                 {
                     success = true,
@@ -383,8 +383,11 @@ public static class DbtEndpoints
             ISemanticCatalogService semanticCatalog) =>
         {
             var dataset = context.Request.Query["dataset"].ToString();
-            var metrics = await semanticCatalog.ListMetricsAsync(string.IsNullOrWhiteSpace(dataset) ? null : dataset, context.RequestAborted);
-            return Results.Ok(metrics);
+            var metrics = await semanticCatalog.ListMetricsAsync(
+                string.IsNullOrWhiteSpace(dataset) ? null : dataset,
+                EndpointSecurity.GetRequestTenant(context),
+                context.RequestAborted);
+            return Results.Ok(SemanticMetricCatalogProjection.Project(metrics, context.User));
         }).RequireAuthorization()
           .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 

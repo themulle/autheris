@@ -166,7 +166,8 @@ public sealed class ArrowFlightSqlSecurityTests
                 Enabled = true,
                 AllowedDataSources = ["tenant-1", "tenant-2"],
                 TenantDataSourceAllowlist = new(StringComparer.OrdinalIgnoreCase) { ["tenant-1"] = ["tenant-1"] }
-            }
+            },
+            Tenancy = new TenancyOptions { Mode = "Single" }
         });
         var server = new ArrowFlightSqlServer(
             _exportService,

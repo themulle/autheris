@@ -113,7 +113,7 @@ public sealed class SemanticMcpCompiler(
         {
             if (_consentRepo != null)
             {
-                allTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepo, ct).ConfigureAwait(false);
+                allTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepo, _options?.Value, ct).ConfigureAwait(false);
             }
             else if (principal != null)
             {

@@ -1,5 +1,6 @@
 namespace Autheris.Application.Sql.Services;
 
+using Autheris.Application.Common;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -552,7 +553,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         }
         catch (Exception auditEx)
         {
-            _logger?.LogError(auditEx, "Failed to record start audit for cross-source query.");
+            _logger?.Error(auditEx, "Failed to record start audit for cross-source query.");
             throw new InvalidOperationException("Audit logging failure during cross-source query execution.", auditEx);
         }
     }
@@ -621,13 +622,15 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             bool isDenied = ex is WebSqlPolicyException or SecurityException or GatewaySecurityException;
             var eventType = isDenied ? AuditEventTypes.WebSqlQueryDenied : AuditEventTypes.QueryExecutionError;
 
+            var reasonCode = ex is GatewaySecurityException gse ? gse.ErrorCode : isDenied ? "POLICY_VIOLATION" : ex.GetType().Name;
             var detailsJson = JsonSerializer.Serialize(new
             {
                 originalSql = redactedOriginalSql,
                 originalSqlHash,
-                reasonCode = ex is GatewaySecurityException gse ? gse.ErrorCode : isDenied ? "POLICY_VIOLATION" : ex.GetType().Name,
-                // SEC-11: a denial stores its code only; messages may carry names or data values of the failing source.
-                error = ex is GatewaySecurityException denial ? $"Access denied ({denial.ErrorCode})" : ex.Message
+                reasonCode,
+                // SEC-11 / SEC-FED-DELTA-01: the audit stores a stable code or the exception type name for every failure, never
+                // Exception.Message (it may quote data values of the failing source or of the DuckDB stage; audit entries cannot be redacted).
+                error = ex is GatewaySecurityException ? $"Access denied ({reasonCode})" : $"Query failed ({reasonCode})"
             });
 
             await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
@@ -644,7 +647,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         catch (Exception auditEx)
         {
             // Do not mask the original failure, but never lose a denial silently (SEC-22).
-            _logger?.LogError(auditEx, "Failed to record the failure audit of a cross-source query; the original error is rethrown.");
+            _logger?.Error(auditEx, "Failed to record the failure audit of a cross-source query; the original error is rethrown.");
         }
     }
 

@@ -21,17 +21,16 @@ See [AGENTS.md](file:///root/autheris/AGENTS.md) for full project governance.
    - When refining requirements or implementing features, keep the origin plan synchronized with the current status and links to detailed child plans.
 
 5. **Individual Feature Documentation (`docs/features/`):**
-   - Individual feature specifications and technical references **MUST always be documented in `docs/features/`** (e.g., `docs/features/f-<category>-<number>-<name>.md`).
-   - Register every new feature in [`docs/features/README.md`](file:///root/autheris/docs/features/README.md).
-   - Document how the feature works, configuration, and architecture (strictly without WIP or progress notes).
+   - Feature documentation is **not** part of the implementation lifecycle (there is no documentation phase). Write feature docs only when the owner explicitly asks for them.
+   - When a feature doc is written, it goes to `docs/features/` (e.g., `docs/features/f-<category>-<number>-<name>.md`), is registered in [`docs/features/README.md`](file:///root/autheris/docs/features/README.md), and describes how the feature works, configuration, and architecture (strictly without WIP or progress notes).
 
-6. **The 6-Phase Standard Implementation Lifecycle:**
+6. **The 5-Phase Standard Implementation Lifecycle:**
    - **Phase 1: Product Manager (`product-manager`)**: Qualify, benchmark with best practices, reject anti-patterns, enrich into PRD in `doc/plan/`.
    - **Phase 2: Solution Architect (`csharp-architect`)**: Draft architectural implementation plan in `doc/plan/`.
    - **Phase 3: Security Expert (`csharp-security-expert`)**: Security audit, Fail-Closed verification, threat hardening.
    - **Phase 4: Developer(s) (`csharp-tdd-developer`)**: Strict TDD Red-Green-Refactor, pass all unit & integration tests.
    - **Phase 5: Code Reviewer (`csharp-code-reviewer`)**: Code quality, C# 13 idioms, allocation/performance check.
-   - **Phase 6: Documentation Expert (`documentation-expert`)**: Catalog feature in `docs/features/`, register in README, update master plan.
+   - **After Phase 5**: update the progress tracker / master plan in `doc/plan/`, commit, push. There is **no documentation phase** (owner rule 2026-10-17).
 
 7. **Build & Test Verification:**
    - Solution: `Autheris.sln` (.NET 10.0)
