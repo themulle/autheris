@@ -419,6 +419,32 @@ public sealed class CorrelatedKeySetSubstitutionTests
     }
 
     [Fact]
+    public void Substitute_RefusesATemporalSite_NotStructurallyEligible()   // SEC-RF107-06 (F2)
+    {
+        var predicate = _builder.Build([Correlated(temporal: "invoice_date", validFrom: "valid_from")], Orders);
+        var node = CorrelatedKeySetSubstitution.FindSites(predicate).Single().Node;
+
+        Should.Throw<InvalidOperationException>(() =>
+            CorrelatedKeySetSubstitution.Substitute(predicate, Replace((node, Replacement(0, 1, 1))), TargetSqlDialect.SqlServer));
+    }
+
+    [Fact]
+    public void Substitute_ParametersAreExactlyTheReferencedOnes_NoStaleNames()   // SEC-RF107-07e (F6)
+    {
+        var predicate = _builder.Build([Correlated(), Simple()], Orders);
+        predicate.Parameters.Count.ShouldBeGreaterThan(1);
+        var node = CorrelatedKeySetSubstitution.FindSites(predicate).Single().Node;
+
+        var result = CorrelatedKeySetSubstitution.Substitute(predicate, Replace((node, Replacement(0, 2, 2))), TargetSqlDialect.SqlServer);
+
+        var referenced = AstReflection.Collect<PolicyParameterExpression>(result.Expression).Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+        result.Parameters.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(referenced).ShouldBeTrue();
+        referenced.ShouldContain("__rls_ks0_0");
+        foreach (var stale in predicate.Parameters.Keys.Except(referenced)) result.Fingerprint.ShouldNotContain(stale);
+        result.Fingerprint.ShouldBe(AstFingerprint.Compute(result.Expression));
+    }
+
+    [Fact]
     public void Substitute_RefusesNullKeys_AndUnderPaddedLists()
     {
         var predicate = _builder.Build([Correlated()], Orders);

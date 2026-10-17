@@ -115,6 +115,11 @@ internal static class CorrelatedKeySetSubstitution
                 throw new InvalidOperationException("A key-set replacement targets a node that is not a substitutable correlated filter site.");
             }
 
+            if (!CorrelatedFilterSiteRegistry.TryGet(node, out var site) || !site.StructurallyEligible)
+            {
+                throw new InvalidOperationException("A key-set replacement targets a site that is not structurally eligible (temporal filter).");
+            }
+
             chosen[node] = replacement;
         }
 

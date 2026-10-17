@@ -142,6 +142,42 @@ public sealed class GovernedSqlExecutionParameterSecurityTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task SEC_RF107_07e_Client_Parameter_With_KeySet_Prefix_Throws_WebSqlPolicyException()
+    {
+        var table = CreateTable(new TableIdentifier(DataSource, "public", "orders"));
+        var service = CreateService(table);
+
+        var request = new GovernedSqlQueryRequest(
+            Sql: "SELECT id FROM orders WHERE id = @__rls_ks0_0",
+            Parameters: new Dictionary<string, object?> { ["__rls_ks0_0"] = 42 },
+            DataSourceName: DataSource);
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(async () =>
+            await service.ExecuteQueryBufferedAsync(request, CreateUser(), new TenantId(Tenant)));
+
+        ex.Message.ShouldContain("reserved gateway parameter name");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SEC_RF107_07e_Raw_Sql_With_KeySet_Prefix_Throws_WebSqlPolicyException()
+    {
+        var table = CreateTable(new TableIdentifier(DataSource, "public", "orders"));
+        var service = CreateService(table);
+
+        var request = new GovernedSqlQueryRequest(
+            Sql: "SELECT id FROM orders WHERE id = __rls_ks0_0",
+            Parameters: null,
+            DataSourceName: DataSource);
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(async () =>
+            await service.ExecuteQueryBufferedAsync(request, CreateUser(), new TenantId(Tenant)));
+
+        ex.Message.ShouldContain("reserved gateway identifier");
+    }
+
+    [Fact]
     public async Task Client_Parameter_With_Rls_Prefix_Throws_WebSqlPolicyException()
     {
         var table = CreateTable(new TableIdentifier(DataSource, "public", "orders"));

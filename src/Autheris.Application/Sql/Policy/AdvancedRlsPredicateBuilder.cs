@@ -119,11 +119,15 @@ internal static class AdvancedRlsPredicateBuilder
         return exists;
     }
 
+    // Casbin sites carry no per-rule data, so two shared immutable instances replace one allocation per correlated build.
+    private static readonly CorrelatedFilterSite CasbinSite = new(null, CorrelatedFilterSource.Casbin, null, true);
+    private static readonly CorrelatedFilterSite CasbinTemporalSite = new(null, CorrelatedFilterSource.Casbin, null, false);
+
     private static CorrelatedFilterSite Site(ConsentRowFilter filter, CorrelatedFilterSource source, bool temporal)
     {
         if (source == CorrelatedFilterSource.Casbin)
         {
-            return new CorrelatedFilterSite(null, source, null, !temporal);
+            return temporal ? CasbinTemporalSite : CasbinSite;
         }
 
         RowFilterEvaluationSettings? settings = filter.KeySetStrategy is null && filter.KeySetDurationSeconds is null && filter.KeySetMaxKeys is null

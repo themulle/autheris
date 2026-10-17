@@ -44,6 +44,8 @@ using TrinoSqlEngine.Ast.Emit;
 public sealed class GovernedSqlExecutor
 {
     private const string InternalParameterPrefix = GovernedSqlExecutionService.InternalParameterPrefix;
+    // SEC-RF107-07(e): the parameters of a substituted row-filter key-set subquery; user SQL and request parameters cannot use the prefix.
+    private const string KeySetParameterPrefix = "__rls_ks";
     private const int ThrottledRetryAfterSeconds = 2;
 
     private readonly GovernedSqlRewriter _rewriter;
@@ -249,6 +251,7 @@ public sealed class GovernedSqlExecutor
                 var trimmed = paramName.TrimStart('@');
                 if (trimmed.StartsWith(InternalParameterPrefix, StringComparison.OrdinalIgnoreCase) ||
                     trimmed.StartsWith("p_rls_", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.StartsWith(KeySetParameterPrefix, StringComparison.OrdinalIgnoreCase) ||
                     trimmed.StartsWith("rls_", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new WebSqlPolicyException("A request parameter uses a reserved gateway parameter name.");

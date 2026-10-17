@@ -162,7 +162,9 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                 $"SQL query length ({rawSql.Length}) exceeds the maximum allowed limit of {webSqlOptions.MaxQueryLength} characters.");
         }
 
-        if (rawSql.Contains(InternalParameterPrefix, StringComparison.OrdinalIgnoreCase))
+        // SEC-RF107-07(e): "__rls_ks" is the reserved prefix of the key-set subquery parameters.
+        if (rawSql.Contains(InternalParameterPrefix, StringComparison.OrdinalIgnoreCase) ||
+            rawSql.Contains("__rls_ks", StringComparison.OrdinalIgnoreCase))
         {
             throw new WebSqlPolicyException("The SQL statement references a reserved gateway identifier.");
         }

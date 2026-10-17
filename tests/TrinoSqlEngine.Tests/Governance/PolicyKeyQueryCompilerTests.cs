@@ -293,6 +293,10 @@ public sealed class PolicyKeyQueryCompilerTests
             "CorrelationNotColumn");
 
     [Fact]
+    public void NotDerivable_UnqualifiedColumnInTheBody() =>
+        AssertNotDerivable(Exists(Table("md", "crane", "cr"), And(CraneCorrelation(), Eq(Col("kind"), P("__gql_rls_0")))), "UnqualifiedColumn");
+
+    [Fact]
     public void NotDerivable_UnqualifiedCorrelationOperand() =>
         AssertNotDerivable(Exists(Table("md", "crane", "cr"), And(Eq(Col("id"), Col("autheris_target.crane_id")), KindIsParam)), "CorrelationOperand");
 
@@ -504,7 +508,7 @@ public sealed class PolicyKeyQueryCompilerTests
     // ---- SEC-RF107-08, -11: governance errors are not fallbacks ----
 
     [Fact]
-    public void NestedSubquery_Rejected_SEC_RF107_11()
+    public void NestedSubquery_Rejected()   // SEC-RF107-11
     {
         var nested = new ExistsExpression(((ExistsExpression)Exists(Table("md", "crane", "n"), Eq(Col("n.kind"), P("__gql_rls_0")))).Subquery);
         var exists = Exists(Table("md", "crane", "cr"), And(CraneCorrelation(), nested));

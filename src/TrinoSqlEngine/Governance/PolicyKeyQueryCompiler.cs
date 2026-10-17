@@ -284,6 +284,8 @@ public sealed class PolicyKeyQueryCompiler : IPolicyKeyQueryCompiler
                         break;
                     case ParameterReference or NamedBindMarkerExpression:
                         throw NotDerivable("ClientParameter");
+                    case ColumnReference { Name.Parts.Count: 1 }:
+                        throw NotDerivable("UnqualifiedColumn");
                     case ColumnReference or LiteralExpression or TypedLiteralExpression or IntervalLiteralExpression or ParenthesizedExpression
                         or BinaryExpression or UnaryExpression or LikeExpression or InListExpression or BetweenExpression or IsDistinctFromExpression
                         or CaseExpression or WhenClause:
