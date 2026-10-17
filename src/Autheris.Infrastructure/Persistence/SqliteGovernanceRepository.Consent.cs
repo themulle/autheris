@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -1221,7 +1222,17 @@ public partial class SqliteGovernanceRepository
         cmd.Parameters.AddWithValue("@st", newStatus);
         cmd.Parameters.AddWithValue("@id", requestId.ToString());
         cmd.Parameters.AddWithValue("@expected", expectedStatus);
-        ConsentApprovalPolicy.EnsureTransitionApplied(await cmd.ExecuteNonQueryAsync(ct), requestId);
+        try
+        {
+            ConsentApprovalPolicy.EnsureTransitionApplied(await cmd.ExecuteNonQueryAsync(ct), requestId);
+        }
+        catch (ConsentRequestStatusConflictException)
+        {
+            // Same hook as the PostgreSQL/SQL Server catch blocks: roll back first (not cancellable), then release the transaction's audit chain state.
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
+            OnTransactionRolledBack(tx);
+            throw;
+        }
     }
 
     public Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default) =>
@@ -1236,7 +1247,7 @@ public partial class SqliteGovernanceRepository
             !string.Equals(req.Status, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(req.Status, "PENDING_EXTERNAL_APPROVAL", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException($"Request {requestId} is in status '{req.Status}' and cannot be rejected.");
+            throw new Autheris.Application.Governance.ConsentRequests.ConsentRequestStatusConflictException(requestId); // lost the race: ACCESS_REQUEST_NOT_PENDING
         }
 
         await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
@@ -1256,7 +1267,7 @@ public partial class SqliteGovernanceRepository
                 !string.Equals(currentStatus, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(currentStatus, "PENDING_EXTERNAL_APPROVAL", StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException($"Request {requestId} is in status '{currentStatus}' and cannot be rejected.");
+                throw new Autheris.Application.Governance.ConsentRequests.ConsentRequestStatusConflictException(requestId); // lost the race: ACCESS_REQUEST_NOT_PENDING
             }
 
             bool isAuthorized = isExternalItsm ||

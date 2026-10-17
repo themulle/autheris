@@ -121,9 +121,13 @@ internal static class ConsentApprovalPolicy
 
         if (isExternalItsmApproval ? !isExternal : !isInternal)
         {
-            throw new InvalidOperationException(isExternal
-                ? $"Request {requestId} waits for the external ITSM approval and can only be approved by the ITSM system."
-                : $"Request {requestId} is in status '{status}' and cannot be approved.");
+            if (isExternal)
+            {
+                throw new InvalidOperationException($"Request {requestId} waits for the external ITSM approval and can only be approved by the ITSM system.");
+            }
+
+            // The request left the approvable states (a concurrent decision won): the loser's outcome is ACCESS_REQUEST_NOT_PENDING.
+            throw new Autheris.Application.Governance.ConsentRequests.ConsentRequestStatusConflictException(requestId);
         }
     }
 

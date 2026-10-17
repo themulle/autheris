@@ -113,7 +113,7 @@ public interface IConsentDecisionDenialRecorder
 /// </summary>
 public sealed class ConsentDecisionDenialRecorder : IConsentDecisionDenialRecorder
 {
-    private const int MaxTrackedPrincipals = 10_000;
+    private const int DefaultMaxTrackedPrincipals = 10_000;
 
     private static readonly Counter<long> DeniedCounter = GatewayDiagnostics.Meter.CreateCounter<long>(
         "autheris_consent_decision_denied_total",
@@ -122,22 +122,36 @@ public sealed class ConsentDecisionDenialRecorder : IConsentDecisionDenialRecord
     private readonly IAuditWriter _audit;
     private readonly TimeProvider _time;
     private readonly ILogger? _logger;
+    private readonly int _maxTrackedPrincipals;
     private readonly ConcurrentDictionary<string, long> _lastAuditedMinute = new(StringComparer.OrdinalIgnoreCase);
+    private long _lastPurgeMinute = long.MinValue;
+    private int _purgeScanCount;
 
     public ConsentDecisionDenialRecorder(IAuditWriter audit, TimeProvider? time = null, ILogger<ConsentDecisionDenialRecorder>? logger = null)
+        : this(audit, time, logger, DefaultMaxTrackedPrincipals)
+    {
+    }
+
+    internal ConsentDecisionDenialRecorder(IAuditWriter audit, TimeProvider? time, ILogger? logger, int maxTrackedPrincipals)
     {
         ArgumentNullException.ThrowIfNull(audit);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxTrackedPrincipals, 1);
         _audit = audit;
         _time = time ?? TimeProvider.System;
         _logger = logger;
+        _maxTrackedPrincipals = maxTrackedPrincipals;
     }
+
+    /// <summary>Number of stale-entry purge scans performed (a purge runs at most once per minute window).</summary>
+    internal int PurgeScanCount => Volatile.Read(ref _purgeScanCount);
 
     public async Task RecordAsync(ClaimsPrincipal? principal, string reasonClass, TenantId tenantId, CancellationToken ct = default)
     {
         try
         {
             var actor = principal?.GetUserSid()?.Value;
-            var key = string.IsNullOrWhiteSpace(actor) ? "anonymous" : actor;
+            var principalKey = string.IsNullOrWhiteSpace(actor) ? "anonymous" : actor;
+            var key = string.Concat(tenantId.Value, "|", principalKey); // per tenant: one tenant's denials never mask another tenant's
             var minute = _time.GetUtcNow().ToUnixTimeSeconds() / 60;
 
             if (!ShouldAudit(key, minute))
@@ -151,12 +165,16 @@ public sealed class ConsentDecisionDenialRecorder : IConsentDecisionDenialRecord
             {
                 TenantId = tenantId,
                 EventType = AuditEventTypes.ConsentDenied,
-                ActorSid = new Sid(key),
+                ActorSid = new Sid(principalKey),
                 TargetTable = "CONSENT_REQUEST",
                 Decision = "DENY",
                 TraceId = Guid.NewGuid().ToString("N"),
                 DetailsJson = JsonSerializer.Serialize(new { reasonClass })
             }, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // A cancelled request is not an audit failure: nothing is counted or logged and the denial is still returned.
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -165,16 +183,32 @@ public sealed class ConsentDecisionDenialRecorder : IConsentDecisionDenialRecord
         }
     }
 
+    /// <summary>Entries only become stale when the minute changes, so one scan per minute window is enough; a flood at the cap costs O(1) per denial.</summary>
+    private void PurgeStaleEntries(long minute)
+    {
+        var lastPurge = Interlocked.Read(ref _lastPurgeMinute);
+        if (lastPurge >= minute || Interlocked.CompareExchange(ref _lastPurgeMinute, minute, lastPurge) != lastPurge)
+        {
+            return;
+        }
+
+        Interlocked.Increment(ref _purgeScanCount);
+        foreach (var entry in _lastAuditedMinute)
+        {
+            if (entry.Value < minute)
+            {
+                _lastAuditedMinute.TryRemove(entry);
+            }
+        }
+    }
+
     private bool ShouldAudit(string key, long minute)
     {
-        if (_lastAuditedMinute.Count >= MaxTrackedPrincipals)
+        if (_lastAuditedMinute.Count >= _maxTrackedPrincipals)
         {
-            foreach (var stale in _lastAuditedMinute.Where(kv => kv.Value < minute).Select(kv => kv.Key).ToList())
-            {
-                _lastAuditedMinute.TryRemove(stale, out _);
-            }
+            PurgeStaleEntries(minute);
 
-            if (_lastAuditedMinute.Count >= MaxTrackedPrincipals)
+            if (_lastAuditedMinute.Count >= _maxTrackedPrincipals)
             {
                 return false; // bounded memory: under a flood of distinct principals only the metric counts
             }
@@ -203,8 +237,9 @@ public sealed class ConsentDecisionDenialRecorder : IConsentDecisionDenialRecord
 }
 
 /// <summary>
-/// A guarded status transition (<c>UPDATE ... WHERE id = @id AND status = @expected</c>) matched no row: the request is no longer in the
-/// status the decision was based on. Derives from <see cref="InvalidOperationException"/> so existing handlers of status conflicts keep working.
+/// A decision lost the race for a request: either the guarded status transition (<c>UPDATE ... WHERE id = @id AND status = @expected</c>)
+/// matched no row, or the status read under the lock is no longer approvable for this step. Either way the request is no longer in the status
+/// the decision was based on. Derives from <see cref="InvalidOperationException"/> so existing handlers of status conflicts keep working.
 /// </summary>
 public sealed class ConsentRequestStatusConflictException(Guid requestId)
     : InvalidOperationException($"Request {requestId} is no longer in the status the decision was based on.")

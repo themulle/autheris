@@ -1367,7 +1367,7 @@ public partial class SqlServerGovernanceRepository
 
         if (!ConsentApprovalPolicy.IsRejectableStatus(req.Status))
         {
-            throw new InvalidOperationException($"Request {requestId} is in status '{req.Status}' and cannot be rejected.");
+            throw new Autheris.Application.Governance.ConsentRequests.ConsentRequestStatusConflictException(requestId); // lost the race: ACCESS_REQUEST_NOT_PENDING
         }
 
         // Review PG-5: authorization at repository level (as in SQLite): ITSM actors, or owner/delegate/admin of the table.
@@ -1395,7 +1395,7 @@ public partial class SqlServerGovernanceRepository
 
             if (!ConsentApprovalPolicy.IsRejectableStatus(currentStatus))
             {
-                throw new InvalidOperationException($"Request {requestId} is in status '{currentStatus}' and cannot be rejected.");
+                throw new Autheris.Application.Governance.ConsentRequests.ConsentRequestStatusConflictException(requestId); // lost the race: ACCESS_REQUEST_NOT_PENDING
             }
 
             await using (var stepInsert = conn.CreateCommand())

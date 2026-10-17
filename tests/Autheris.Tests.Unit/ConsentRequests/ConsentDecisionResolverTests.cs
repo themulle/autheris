@@ -279,6 +279,45 @@ public sealed class ConsentDecisionResolverTests : IDisposable
         result.Status.ShouldBe("APPROVED");
     }
 
+    // ---------------- condition 3: failure after the final step ----------------
+
+    [Fact]
+    public async Task Condition3_ConsentCreationFailsAfterTheFinalStep_LogsIdsOnlyAtError_AndActivationRecoversTheRequest()
+    {
+        var logs = new CapturingLoggerProvider();
+        using var services = DecisionServices.Build(logs: logs);
+        var req = await NewRequestAsync();
+        var consents = Substitute.For<IConsentRepository>();
+        consents.CreateConsentAsync(Arg.Any<Consent>(), Arg.Any<CancellationToken>())
+            .Returns<Task<Consent>>(_ => throw new TimeoutException("db down while storing " + req.BusinessJustification + " for " + req.RequestedGranteeRef));
+
+        var thrown = await Should.ThrowAsync<TimeoutException>(() => _mutation.ApproveConsentRequestAsync(
+            req.Id, null, _repository, _repository, consents, DecisionServices.Accessor(DecisionPrincipals.Basic(OwnerSid), services)));
+        thrown.ShouldNotBeNull();
+
+        // The final step is committed: APPROVED without a consent.
+        (await _repository.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("APPROVED");
+        (await CountStepsAsync(req.Id)).ShouldBe(1);
+
+        // One Error entry: request id, tenant id and the exception type; no exception object, no justification, grantee or message text.
+        var error = logs.Entries.Where(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Error).ShouldHaveSingleItem();
+        error.Message.ShouldContain(req.Id.ToString());
+        error.Message.ShouldContain(req.TenantId.Value);
+        error.Message.ShouldContain(nameof(TimeoutException));
+        error.Message.ShouldNotContain(req.BusinessJustification);
+        error.Message.ShouldNotContain(req.RequestedGranteeRef);
+        error.Message.ShouldNotContain("db down");
+        error.Exception.ShouldBeNull();
+
+        // Recoverable by the existing activation (status 'APPROVED' path).
+        await _repository.ActivateConsentAsync(req.Id, new Sid(OwnerSid));
+        using var cmd = _repository.RawConnection().CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM CONSENTS WHERE consent_request_id = @id";
+        cmd.Parameters.AddWithValue("@id", req.Id.ToString());
+        Convert.ToInt32(await cmd.ExecuteScalarAsync()).ShouldBe(1, "activation completes the consent");
+        (await _repository.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("APPROVED");
+    }
+
     // ---------------- W-4 / W-14 composition ----------------
 
     [Fact]

@@ -3,6 +3,7 @@ using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Tests.Unit.Support;
 using Shouldly;
 using Xunit;
 
@@ -44,6 +45,15 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
     }
 
     public Task DisposeAsync() => DisposeRepositoryAsync();
+
+    /// <summary>Reports the test as skipped (never as passed) when the engine's container is unavailable; a run that requires its databases already failed at startup.</summary>
+    private void RequireAvailable()
+    {
+        if (!Available)
+        {
+            throw new RuntimeSkipException("The database container for this contract is unavailable (no Docker); set CI=true or SQLGATE_REQUIRE_DATABASES=1 to require it.");
+        }
+    }
 
     private async Task<string> NewApproverAsync()
     {
@@ -103,10 +113,10 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
 
     // ---------------- W-6 (seam) ----------------
 
-    [Fact]
+    [RuntimeSkippableFact]
     public async Task W6_Approve_StaleExpectedStatus_RollsBackStepAuditAndStatus()
     {
-        if (!Available) return;
+        RequireAvailable();
         var approver = await NewApproverAsync();
         var req = await NewRequestAsync(fourEyes: false);
         SetStatusUpdateSeam(ForceStatus(req.Id, "WITHDRAWN"));
@@ -122,10 +132,10 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         await AssertNothingPersistedAsync(req.Id, "PENDING", 0);
     }
 
-    [Fact]
+    [RuntimeSkippableFact]
     public async Task W6_Reject_StaleExpectedStatus_RollsBackStepAuditAndStatus()
     {
-        if (!Available) return;
+        RequireAvailable();
         var approver = await NewApproverAsync();
         var req = await NewRequestAsync(fourEyes: false);
         SetStatusUpdateSeam(ForceStatus(req.Id, "APPROVED"));
@@ -141,10 +151,10 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         await AssertNothingPersistedAsync(req.Id, "PENDING", 0);
     }
 
-    [Fact]
+    [RuntimeSkippableFact]
     public async Task W6_SecondStep_UsesTheLockedStatusAsExpected_AndRollsBackWhenItChanged()
     {
-        if (!Available) return;
+        RequireAvailable();
         var first = await NewApproverAsync();
         var second = await NewApproverAsync();
         var req = await NewRequestAsync(fourEyes: true);
@@ -165,12 +175,28 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         (await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(second))).Status.ShouldBe("APPROVED");
     }
 
+    // ---------------- W-9 (outcome of a decision on an already decided request) ----------------
+
+    [RuntimeSkippableFact]
+    public async Task W9_ApproveAndReject_OnAnAlreadyDecidedRequest_AnswerTheStatusConflict()
+    {
+        RequireAvailable();
+        var approver = await NewApproverAsync();
+        var other = await NewApproverAsync();
+        var req = await NewRequestAsync(fourEyes: false);
+        (await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(approver))).Status.ShouldBe("APPROVED");
+
+        await Should.ThrowAsync<ConsentRequestStatusConflictException>(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(other)));
+        await Should.ThrowAsync<ConsentRequestStatusConflictException>(() => Repo.RejectConsentRequestAsync(req.Id, new Sid(other), "Too late"));
+        await AssertNothingPersistedAsync(req.Id, "APPROVED", 1);
+    }
+
     // ---------------- W-7 (ITSM step keeps working, guard uses the locked status) ----------------
 
-    [Fact]
+    [RuntimeSkippableFact]
     public async Task W7_ItsmStep_OnPendingExternalApproval_StillApproves_AndStaleStatusRollsBack()
     {
-        if (!Available) return;
+        RequireAvailable();
         var staleReq = await NewRequestAsync(fourEyes: false, status: "PENDING_EXTERNAL_APPROVAL");
         SetStatusUpdateSeam(ForceStatus(staleReq.Id, "REJECTED"));
         try
@@ -190,10 +216,10 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         approved.Status.ShouldBe("APPROVED");
     }
 
-    [Fact]
+    [RuntimeSkippableFact]
     public async Task W7_ItsmFourEyesRequest_KeepsItsSecondExternalStep()
     {
-        if (!Available) return;
+        RequireAvailable();
         var req = await NewRequestAsync(fourEyes: true, status: "PENDING_EXTERNAL_APPROVAL");
 
         var step1 = await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid("ITSM_SNOW:inst:board-a"), isExternalItsmApproval: true);
@@ -204,34 +230,35 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
 
     // ---------------- W-6 / W-9 (concurrency) ----------------
 
-    [Fact]
+    [RuntimeSkippableFact]
     public async Task W6_ConcurrentApproveAndReject_EndInExactlyOneTerminalOutcome()
     {
-        if (!Available) return;
+        RequireAvailable();
         var approver = await NewApproverAsync();
         var rejector = await NewApproverAsync();
         var req = await NewRequestAsync(fourEyes: false);
 
         var results = await Task.WhenAll(
-            Attempt(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(approver))),
-            Attempt(() => Repo.RejectConsentRequestAsync(req.Id, new Sid(rejector), "Declined")));
+            Attempt<ConsentRequestStatusConflictException>(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(approver))),
+            Attempt<ConsentRequestStatusConflictException>(() => Repo.RejectConsentRequestAsync(req.Id, new Sid(rejector), "Declined")));
 
-        results.Count(ok => ok).ShouldBe(1, "exactly one terminal outcome");
+        results.Count(ok => ok).ShouldBe(1, "exactly one terminal outcome (the loser answers ACCESS_REQUEST_NOT_PENDING)");
         var final = await Repo.GetConsentRequestAsync(req.Id);
         final!.Status.ShouldBeOneOf("APPROVED", "REJECTED");
         (await CountApprovalStepsAsync(req.Id)).ShouldBe(1);
     }
 
-    [Fact]
+    [RuntimeSkippableFact]
     public async Task W9_SameApproverConcurrentFirstStepOnFourEyesTable_RecordsExactlyOneStep()
     {
-        if (!Available) return;
+        RequireAvailable();
         var approver = await NewApproverAsync();
         var req = await NewRequestAsync(fourEyes: true);
 
+        // The loser sees the first step under the lock and is refused for its true reason (four-eyes), not as a status conflict.
         var results = await Task.WhenAll(
-            Attempt(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(approver))),
-            Attempt(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(approver))));
+            Attempt<InvalidOperationException>(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(approver)), exact: true),
+            Attempt<InvalidOperationException>(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(approver)), exact: true));
 
         results.Count(ok => ok).ShouldBe(1);
         var final = await Repo.GetConsentRequestAsync(req.Id);
@@ -239,10 +266,10 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         (await CountApprovalStepsAsync(req.Id)).ShouldBe(1);
     }
 
-    [Fact]
+    [RuntimeSkippableFact]
     public async Task W9_TwoDifferentApproversConcurrentlyOnTheSecondStep_EndInOneTerminalOutcome()
     {
-        if (!Available) return;
+        RequireAvailable();
         var first = await NewApproverAsync();
         var secondA = await NewApproverAsync();
         var secondB = await NewApproverAsync();
@@ -250,8 +277,8 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         (await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(first))).Status.ShouldBe("PENDING_SECOND_APPROVAL");
 
         var results = await Task.WhenAll(
-            Attempt(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(secondA))),
-            Attempt(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(secondB))));
+            Attempt<ConsentRequestStatusConflictException>(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(secondA))),
+            Attempt<ConsentRequestStatusConflictException>(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(secondB))));
 
         results.Count(ok => ok).ShouldBe(1);
         var final = await Repo.GetConsentRequestAsync(req.Id);
@@ -259,14 +286,16 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         (await CountApprovalStepsAsync(req.Id)).ShouldBe(2);
     }
 
-    private static async Task<bool> Attempt(Func<Task<ConsentRequest>> action)
+    /// <summary>True when the call succeeded, false when it lost with exactly <typeparamref name="TLoser"/>; any other exception propagates and fails the test.</summary>
+    private static async Task<bool> Attempt<TLoser>(Func<Task<ConsentRequest>> action, bool exact = false)
+        where TLoser : InvalidOperationException
     {
         try
         {
             await action();
             return true;
         }
-        catch (InvalidOperationException)
+        catch (TLoser ex) when (!exact || ex.GetType() == typeof(TLoser))
         {
             return false;
         }

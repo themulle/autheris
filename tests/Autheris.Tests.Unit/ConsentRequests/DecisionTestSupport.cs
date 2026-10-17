@@ -10,6 +10,7 @@ using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Autheris.Tests.Unit.ConsentRequests;
@@ -93,8 +94,16 @@ internal sealed class RecordingAuditWriter : IAuditWriter
     public List<AuditLogEntry> Entries { get; } = [];
     public bool ThrowOnWrite { get; set; }
 
+    /// <summary>When set, every write throws this exception (for example an <see cref="OperationCanceledException"/>).</summary>
+    public Exception? ThrowException { get; set; }
+
     public Task RecordRequiredAsync(AuditLogEntry entry, CancellationToken ct = default)
     {
+        if (ThrowException != null)
+        {
+            throw ThrowException;
+        }
+
         if (ThrowOnWrite)
         {
             throw new AuditUnavailableException("audit down");
@@ -121,6 +130,30 @@ internal sealed class TestHttpContextAccessor(HttpContext context) : IHttpContex
     public HttpContext? HttpContext { get; set; } = context;
 }
 
+/// <summary>Captures log entries (level, rendered message, exception) so a test can assert what was logged and what was not.</summary>
+internal sealed class CapturingLoggerProvider : ILoggerProvider
+{
+    public List<(LogLevel Level, string Category, string Message, Exception? Exception)> Entries { get; } = [];
+
+    public ILogger CreateLogger(string categoryName) => new CapturingLogger(this, categoryName);
+
+    public void Dispose()
+    {
+    }
+
+    private sealed class CapturingLogger(CapturingLoggerProvider owner, string category) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            lock (owner.Entries) owner.Entries.Add((logLevel, category, formatter(state, exception), exception));
+        }
+    }
+}
+
 internal static class DecisionServices
 {
     /// <summary>Builds the request services the decision resolvers need; the guard and the grant policy can be left out (composition tests).</summary>
@@ -129,9 +162,11 @@ internal static class DecisionServices
         bool withGuard = true,
         bool withGrantPolicy = true,
         IndividualGrantOptions? grantOptions = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        CapturingLoggerProvider? logs = null)
     {
         var services = new ServiceCollection();
+        services.AddLogging(b => b.SetMinimumLevel(LogLevel.Trace).AddProvider(logs ?? new CapturingLoggerProvider()));
         services.AddSingleton<IIdentitySubjectResolver, IdentitySubjectResolver>();
         if (withGuard)
         {

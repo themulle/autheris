@@ -1,8 +1,10 @@
 using System.Security.Claims;
+using Autheris.Application.Audit;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Microsoft.Extensions.Logging;
 using Shouldly;
 using Xunit;
 
@@ -174,5 +176,60 @@ public class ConsentDecisionGuardTests
         var recorder = Recorder(audit, TimeProvider.System);
 
         await Should.NotThrowAsync(() => recorder.RecordAsync(DecisionPrincipals.AppIdOnly("app-1"), "not-person", TenantId.LegacySingleTenant));
+    }
+
+    // ---- Recorder hardening (review F-4) ----
+
+    [Fact]
+    public async Task F4_SamePrincipalInTwoTenants_IsAggregatedPerTenant()
+    {
+        var audit = new RecordingAuditWriter();
+        var recorder = Recorder(audit, new ManualTimeProvider(DateTimeOffset.Parse("2026-10-16T10:00:10Z")));
+        var principal = DecisionPrincipals.AppIdOnly("app-1");
+
+        await recorder.RecordAsync(principal, "not-person", new TenantId("tenant-a"));
+        await recorder.RecordAsync(principal, "not-person", new TenantId("tenant-b"));
+        await recorder.RecordAsync(principal, "not-person", new TenantId("tenant-a"));
+
+        audit.Entries.Select(e => e.TenantId.Value).ShouldBe(["tenant-a", "tenant-b"]);
+    }
+
+    [Fact]
+    public async Task F4_FloodAtTheCap_PurgesStaleEntriesAtMostOncePerMinuteWindow()
+    {
+        var audit = new RecordingAuditWriter();
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-10-16T10:00:10Z"));
+        var recorder = new ConsentDecisionDenialRecorder(audit, time, null, maxTrackedPrincipals: 2);
+
+        foreach (var app in new[] { "a", "b", "c", "d", "e", "f" })
+        {
+            await recorder.RecordAsync(DecisionPrincipals.AppIdOnly(app), "not-person", TenantId.LegacySingleTenant);
+        }
+
+        audit.Entries.Count.ShouldBe(2, "bounded memory: only the first two principals are audited, the rest only count in the metric");
+        recorder.PurgeScanCount.ShouldBe(1, "one O(n) scan for the whole minute window, not one per denial");
+
+        time.Advance(TimeSpan.FromSeconds(60));
+        await recorder.RecordAsync(DecisionPrincipals.AppIdOnly("g"), "not-person", TenantId.LegacySingleTenant);
+
+        audit.Entries.Count.ShouldBe(3, "the next minute purges the stale entries and audits again");
+        recorder.PurgeScanCount.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task F4_CancelledAuditWrite_IsNotAnAuditFailure_AndTheDenialStillCompletes()
+    {
+        var audit = new RecordingAuditWriter { ThrowException = new OperationCanceledException() };
+        var logs = new CapturingLoggerProvider();
+        using var factory = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Trace).AddProvider(logs));
+        var recorder = new ConsentDecisionDenialRecorder(audit, TimeProvider.System, factory.CreateLogger<ConsentDecisionDenialRecorder>());
+
+        await Should.NotThrowAsync(() => recorder.RecordAsync(DecisionPrincipals.AppIdOnly("app-1"), "not-person", TenantId.LegacySingleTenant));
+
+        logs.Entries.ShouldBeEmpty("a cancelled request is not an audit failure");
+
+        audit.ThrowException = new AuditUnavailableException("audit down");
+        await recorder.RecordAsync(DecisionPrincipals.AppIdOnly("app-2"), "not-person", TenantId.LegacySingleTenant);
+        logs.Entries.ShouldHaveSingleItem().Level.ShouldBe(LogLevel.Error);
     }
 }
