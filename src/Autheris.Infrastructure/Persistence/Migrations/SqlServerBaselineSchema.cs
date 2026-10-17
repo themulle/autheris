@@ -412,6 +412,55 @@ CREATE TABLE dbo.VIRTUAL_FILTER_GENERATION (
 IF NOT EXISTS (SELECT 1 FROM dbo.VIRTUAL_FILTER_GENERATION WHERE id = 1)
     INSERT INTO dbo.VIRTUAL_FILTER_GENERATION (id, generation) VALUES (1, 0);
 
+-- Issue #129: caller attribute registry (four-eyes, draft beside the active row), service sets and one generation counter
+IF OBJECT_ID(N'dbo.CALLER_ATTRIBUTES', N'U') IS NULL
+CREATE TABLE dbo.CALLER_ATTRIBUTES (
+    id NVARCHAR(128) NOT NULL PRIMARY KEY,
+    tenant_id NVARCHAR(128) NOT NULL,
+    name NVARCHAR(128) NOT NULL,
+    definition_json NVARCHAR(MAX) NOT NULL,
+    definition_hash NVARCHAR(128) NOT NULL,
+    status INT NOT NULL,
+    created_by NVARCHAR(256) NOT NULL,
+    approved_by NVARCHAR(256) NULL,
+    approved_at NVARCHAR(64) NULL,
+    draft_definition_json NVARCHAR(MAX) NULL,
+    draft_definition_hash NVARCHAR(128) NULL,
+    draft_created_by NVARCHAR(256) NULL,
+    pending_deletion INT NOT NULL CONSTRAINT DF_CALLER_ATTRIBUTES_pending_deletion DEFAULT 0,
+    deletion_requested_by NVARCHAR(256) NULL,
+    updated_by NVARCHAR(256) NULL,
+    updated_at NVARCHAR(64) NOT NULL,
+    CONSTRAINT uq_caller_attributes_tenant_name UNIQUE (tenant_id, name)
+);
+
+IF OBJECT_ID(N'dbo.CALLER_ATTRIBUTE_SERVICE_SETS', N'U') IS NULL
+CREATE TABLE dbo.CALLER_ATTRIBUTE_SERVICE_SETS (
+    id NVARCHAR(128) NOT NULL PRIMARY KEY,
+    tenant_id NVARCHAR(128) NOT NULL,
+    application_id NVARCHAR(256) NOT NULL,
+    attribute_name NVARCHAR(128) NOT NULL,
+    values_json NVARCHAR(MAX) NOT NULL,
+    values_hash NVARCHAR(128) NOT NULL,
+    status INT NOT NULL,
+    created_by NVARCHAR(256) NOT NULL,
+    approved_by NVARCHAR(256) NULL,
+    approved_at NVARCHAR(64) NULL,
+    draft_values_json NVARCHAR(MAX) NULL,
+    draft_created_by NVARCHAR(256) NULL,
+    updated_at NVARCHAR(64) NOT NULL,
+    CONSTRAINT uq_caller_attribute_service_sets UNIQUE (tenant_id, application_id, attribute_name)
+);
+
+IF OBJECT_ID(N'dbo.CALLER_ATTRIBUTE_GENERATION', N'U') IS NULL
+CREATE TABLE dbo.CALLER_ATTRIBUTE_GENERATION (
+    id INT NOT NULL PRIMARY KEY CHECK (id = 1),
+    generation BIGINT NOT NULL
+);
+
+IF NOT EXISTS (SELECT 1 FROM dbo.CALLER_ATTRIBUTE_GENERATION WHERE id = 1)
+    INSERT INTO dbo.CALLER_ATTRIBUTE_GENERATION (id, generation) VALUES (1, 0);
+
 -- CR-ADG-31: tenant registry (grouped by NFKC + upper-case key; collided = 1 denies every spelling of the group)
 IF OBJECT_ID(N'dbo.TENANT_REGISTRY', N'U') IS NULL
 CREATE TABLE dbo.TENANT_REGISTRY (

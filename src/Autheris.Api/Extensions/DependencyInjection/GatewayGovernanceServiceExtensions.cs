@@ -137,6 +137,15 @@ public static class GatewayGovernanceServiceExtensions
 
         services.AddSingleton<VirtualFilterAdministrationService>();
         services.AddSingleton<IVirtualFilterSnapshotProvider, VirtualFilterSnapshotProvider>();
+        // REQ-GOV-129: caller attribute registry and its administration (four-eyes). Providers and the resolver are registered with WP-2.
+        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeRegistry, Autheris.Application.Identity.Attributes.CallerAttributeRegistry>();
+        services.AddSingleton<Autheris.Application.Identity.Attributes.CallerAttributeAdministrationService>(sp => new Autheris.Application.Identity.Attributes.CallerAttributeAdministrationService(
+            sp.GetRequiredService<Autheris.Domain.Interfaces.ICallerAttributeRepository>(),
+            sp.GetRequiredService<Autheris.Application.Identity.Attributes.ICallerAttributeRegistry>(),
+            sp.GetRequiredService<Autheris.Application.Interfaces.IAuditLogRepository>(),
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>(),
+            sp.GetService<TimeProvider>() ?? TimeProvider.System,
+            sp.GetServices<Autheris.Application.Identity.Attributes.ICallerAttributeDefinitionValidator>()));
         services.AddSingleton<IVirtualFilterPredicateBuilder, StructuredFilterSqlBuilder>();
         services.AddSingleton<MandatoryRowFilterResolver>();
         services.AddSingleton<IMandatoryRowFilterResolver>(sp => sp.GetRequiredService<MandatoryRowFilterResolver>());
@@ -235,6 +244,7 @@ public static class GatewayGovernanceServiceExtensions
             IItsmOutboxRepository,
             IWebhookOutbox,
             IVirtualFilterRepository,
+            ICallerAttributeRepository,
             IAuditChainExportSource,
             ICdcWatermarkRepository,
             ICloudEventSubscriptionStore
@@ -254,6 +264,7 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IWebhookOutbox>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IVirtualFilterRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<ICallerAttributeRepository>(sp => sp.GetRequiredService<TRepository>());
         // WP-SC-03: every engine persists access profiles; the in-memory repository is a test double only.
         services.AddSingleton<IAccessProfileRepository>(sp => (IAccessProfileRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<TRepository>());

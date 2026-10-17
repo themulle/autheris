@@ -342,6 +342,188 @@
       ]
     },
     {
+      "name": "CALLER_ATTRIBUTES",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "definition_json",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "definition_hash",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "status",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "created_by",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "approved_by",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "approved_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "draft_definition_json",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "draft_definition_hash",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "draft_created_by",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "pending_deletion",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "deletion_requested_by",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "updated_by",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "CALLER_ATTRIBUTE_GENERATION",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "generation",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "CALLER_ATTRIBUTE_SERVICE_SETS",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "application_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "attribute_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "values_json",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "values_hash",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "status",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "created_by",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "approved_by",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "approved_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "draft_values_json",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "draft_created_by",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
       "name": "CLOUDEVENT_SUBSCRIPTIONS",
       "columns": [
         {

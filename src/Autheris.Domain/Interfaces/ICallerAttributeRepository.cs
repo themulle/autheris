@@ -25,9 +25,9 @@ public enum CallerAttributeChangeResult
 /// </summary>
 public interface ICallerAttributeRepository
 {
-    Task<CallerAttributeStoreSnapshot> LoadSnapshotAsync(CancellationToken ct = default);
+    Task<CallerAttributeStoreSnapshot> LoadCallerAttributeSnapshotAsync(CancellationToken ct = default);
 
-    Task<long> GetGenerationAsync(CancellationToken ct = default);
+    Task<long> GetCallerAttributeGenerationAsync(CancellationToken ct = default);
 
     /// <summary>A new attribute (stored pending) or, for an existing one, a draft beside the active definition.</summary>
     Task<CallerAttributeChangeResult> SubmitDefinitionAsync(CallerAttributeDefinition definition, string actor, DateTimeOffset at, CancellationToken ct = default);
