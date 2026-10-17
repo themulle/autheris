@@ -22,6 +22,8 @@ public static class McpAdminTools
     public const string RegisterDatasource = "admin_register_datasource";
     public const string SetDatasetState = "admin_set_dataset_state";
     public const string ResolvePrincipal = "admin_resolve_principal";
+    public const string PlanRowFilterEvaluation = "admin_plan_row_filter_evaluation";
+    public const string ApplyRowFilterEvaluation = "admin_apply_row_filter_evaluation";
 
     private static readonly TableIdentifier AdminControlPlaneTable = new("governance", "admin", "control_plane");
 
@@ -31,7 +33,15 @@ public static class McpAdminTools
         WriteIndented = false
     };
 
+    // Issue #107 (SEC-RF107-14b): the row filter evaluation tools reject unknown properties; the strategy is a string, so numbers fail to bind.
+    private static readonly JsonSerializerOptions StrictJsonOptions = new(JsonOptions)
+    {
+        UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow
+    };
+
     public static bool IsAdminTool(string? toolName) =>
+        string.Equals(toolName, PlanRowFilterEvaluation, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, ApplyRowFilterEvaluation, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, PlanAccess, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, ApplyAccess, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, RegisterDatasource, StringComparison.OrdinalIgnoreCase) ||
@@ -140,6 +150,44 @@ public static class McpAdminTools
             TargetTable: AdminControlPlaneTable);
 
         yield return new McpToolDefinition(
+            Name: PlanRowFilterEvaluation,
+            Description: "Plans a change of the key-set cache settings of a correlated row filter rule (rowFilterId) or of a dataset (datasetId): " +
+                         "strategy, duration and maximum keys, validated against the global caps, without mutating state. Confirm with TOTP, then apply with admin_apply_row_filter_evaluation (issue #107).",
+            InputJsonSchema: """
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "rowFilterId": { "type": "string", "description": "Rule level: id of an ALLOW correlated row filter of the caller's tenant (exclusive with datasetId)." },
+                "datasetId": { "type": "string", "description": "Object level: table id or domain.schema.table (exclusive with rowFilterId). All values omitted clears the object level." },
+                "strategy": { "type": ["string", "null"], "enum": ["Exists", "KeySetCache", null], "description": "Evaluation strategy; omitted or null = inherit." },
+                "durationSeconds": { "type": ["integer", "null"], "minimum": 1, "description": "Cache duration in seconds, at most the configured maximum; omitted = inherit." },
+                "maxKeys": { "type": ["integer", "null"], "minimum": 1, "description": "Maximum number of keys, at most the configured maximum; omitted = inherit." },
+                "reason": { "type": "string", "description": "Business justification." }
+              }
+            }
+            """,
+            TargetGraphQLOperation: string.Empty,
+            TargetTable: AdminControlPlaneTable);
+
+        yield return new McpToolDefinition(
+            Name: ApplyRowFilterEvaluation,
+            Description: "Applies a confirmed row filter evaluation plan. Requires a valid HMAC confirmation token issued via TOTP; rejects access plans and plans whose stored settings changed since planning (issue #107).",
+            InputJsonSchema: """
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["planId", "confirmationToken"],
+              "properties": {
+                "planId": { "type": "string", "description": "Plan identifier." },
+                "confirmationToken": { "type": "string", "description": "HMAC-signed confirmation token." }
+              }
+            }
+            """,
+            TargetGraphQLOperation: string.Empty,
+            TargetTable: AdminControlPlaneTable);
+
+        yield return new McpToolDefinition(
             Name: ResolvePrincipal,
             Description: "Fuzzy / unsharp resolution of principal names into SIDs and groups (R-61).",
             InputJsonSchema: """
@@ -183,6 +231,22 @@ public static class McpAdminTools
                 var req = JsonSerializer.Deserialize<AdminApplyAccessRequest>(argumentsJson, JsonOptions)
                     ?? throw new ArgumentException("Invalid arguments for admin_apply_access.");
                 var result = await planningService.ApplyAccessAsync(req, adminSid, sessionContext.TenantId, ct).ConfigureAwait(false);
+                return new McpToolCallResult(true, JsonSerializer.Serialize(result, JsonOptions));
+            }
+
+            if (string.Equals(toolName, PlanRowFilterEvaluation, StringComparison.OrdinalIgnoreCase))
+            {
+                var req = JsonSerializer.Deserialize<AdminPlanRowFilterEvaluationRequest>(argumentsJson, StrictJsonOptions)
+                    ?? throw new ArgumentException("Invalid arguments for admin_plan_row_filter_evaluation.");
+                var result = await planningService.PlanRowFilterEvaluationAsync(req, adminSid, sessionContext.TenantId, ct).ConfigureAwait(false);
+                return new McpToolCallResult(true, JsonSerializer.Serialize(result, JsonOptions));
+            }
+
+            if (string.Equals(toolName, ApplyRowFilterEvaluation, StringComparison.OrdinalIgnoreCase))
+            {
+                var req = JsonSerializer.Deserialize<AdminApplyAccessRequest>(argumentsJson, StrictJsonOptions)
+                    ?? throw new ArgumentException("Invalid arguments for admin_apply_row_filter_evaluation.");
+                var result = await planningService.ApplyRowFilterEvaluationAsync(req, adminSid, sessionContext.TenantId, ct).ConfigureAwait(false);
                 return new McpToolCallResult(true, JsonSerializer.Serialize(result, JsonOptions));
             }
 
