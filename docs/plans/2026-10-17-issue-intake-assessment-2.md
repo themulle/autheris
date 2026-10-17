@@ -114,9 +114,9 @@ justification is not copied); text normalised (NFC, no control, bidi or zero-wid
 never logged, audit stores length and hash prefix; returned as plain data, documented as owner-authored and not an
 instruction; Phase 3 review required.
 
-## 4. Proposed placement
+## 4. Placement (confirmed by the owner 2026-10-17)
 
-| Wave | Rank (proposed) | Item | Size |
+| Wave | Rank | Item | Size |
 |---|---|---|:---:|
 | 1 | 1.9 | `REQ-BUG-157`: omit tables without queryable columns from the GraphQL schema | S |
 | 1 | 1.10 | `REQ-GOV-158` INC-0: access explanation uses only matching consents (description, `EffectiveValidTo`) | S |
@@ -127,7 +127,9 @@ The wave 2 item does not enter the running `PLAN-DELIVERY-W23` sequence until th
 is not reopened. Wave 1 items need Phase 2 and Phase 3 before Phase 4. Both wave 1 items are small and share no files
 with 1.6-1.8 or with each other; they can run in parallel with the current step under the relaxed G-ONE rule.
 
-## 5. Owner questions
+## 5. Owner questions and decisions
+
+**Decision 2026-10-17:** the owner accepted every recommended default below (OQ-16..OQ-25).
 
 | ID | Question | Recommended default |
 |---|---|---|
