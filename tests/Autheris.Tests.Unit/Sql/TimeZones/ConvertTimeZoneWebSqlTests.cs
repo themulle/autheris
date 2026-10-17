@@ -63,6 +63,17 @@ public sealed class ConvertTimeZoneWebSqlTests
     }
 
     [Theory]
+    [InlineData("SELECT CAST(status AS timestamp) AT TIME ZONE 'UTC' AS t FROM orders")]
+    [InlineData("SELECT convert_timezone('UTC', 'Europe/Berlin', CAST(status AS timestamp)) AS t, CAST(status AS timestamp) AT TIME ZONE 'UTC' AS u FROM orders")]
+    [InlineData("SELECT convert_timezone('UTC', 'Europe/Berlin', CAST(status AS timestamp) AT TIME ZONE 'UTC') AS t FROM orders")]
+    [Trait("Category", "Security")]
+    public async Task ST_130_12_TheOperatorFormIsRejectedByThePreAnalysis(string sql)
+    {
+        await using var f = await CreateAsync(timeZoneState: new FixedState(true));
+        await Should.ThrowAsync<Exception>(() => Validate(f, sql));
+    }
+
+    [Theory]
     [InlineData("PostgreSql", false)]
     [InlineData("PostgreSql", true)]
     [InlineData("SqlServer", false)]

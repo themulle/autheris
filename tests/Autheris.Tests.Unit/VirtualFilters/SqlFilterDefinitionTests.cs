@@ -87,6 +87,19 @@ public sealed class SqlFilterDefinitionTests : IDisposable
         ex.Message.ShouldContain(reasonContains, Case.Insensitive);
     }
 
+    [Theory]
+    [InlineData("from conf.client client where target.client_id = client.client_id and target.ts AT TIME ZONE 'UTC' > current_timestamp")]
+    [InlineData("from conf.client client where target.client_id = client.client_id and convert_timezone('UTC', 'Europe/Berlin', target.ts) > current_timestamp")]
+    [InlineData("from conf.client client where target.client_id = client.client_id and convert_timezone('UTC', 'Europe/Berlin', target.ts AT TIME ZONE 'UTC') > current_timestamp")]
+    [Trait("Category", "Security")]
+    public void ST_130_12_TheTimeZoneOperatorAndTheConversionFunctionAreRejectedInAVirtualFilter(string sql)
+    {
+        // The operator is refused by the AST builder (AstBuildException); the function by the closed function list (ArgumentException).
+        var ex = Record.Exception(() => Validate(sql));
+        ex.ShouldNotBeNull();
+        (ex is ArgumentException || ex is TrinoSqlEngine.Ast.Builder.AstBuildException).ShouldBeTrue(ex.GetType().Name);
+    }
+
     [Fact]
     public void SqlFilter_CannotHaveStructuredParts()
     {

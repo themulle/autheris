@@ -260,6 +260,24 @@ public sealed class TimeZoneEmissionTests
         Assert.Equal(GovernedSqlErrorCodes.TimeZoneArgument, ex.Code);
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ST_130_14_TheFederatedProofIsBoundToTheValidatedCallCount()
+    {
+        var one = CompilerTestHelpers.Build("SELECT convert_timezone('UTC', 'Europe/Berlin', CAST(e.OccurredAt AS timestamp)) FROM dbo.Events e");
+        var two = CompilerTestHelpers.Build(
+            "SELECT convert_timezone('UTC', 'Europe/Berlin', CAST(e.OccurredAt AS timestamp)), convert_timezone('UTC', 'Europe/Berlin', CAST(e.UpdatedAt AS timestamp)) FROM dbo.Events e");
+        var none = CompilerTestHelpers.Build("SELECT e.Id FROM dbo.Events e");
+
+        var proof = TimeZoneConversion.ValidateFederated(one, duckDbAvailable: true);
+        Assert.NotNull(TimeZoneConversion.GenerateFederated(one, proof));
+
+        // a statement with another number of calls than the validated one (a call added after validation) is refused, nothing is emitted
+        Assert.Equal(GovernedSqlErrorCodes.TimeZoneArgument, Assert.Throws<SqlTimeZoneException>(() => TimeZoneConversion.GenerateFederated(two, proof)).Code);
+        Assert.Equal(GovernedSqlErrorCodes.TimeZoneArgument, Assert.Throws<SqlTimeZoneException>(() => TimeZoneConversion.GenerateFederated(one, TimeZoneConversion.ValidateFederated(none, true))).Code);
+        Assert.NotNull(TimeZoneConversion.GenerateFederated(none, TimeZoneConversion.ValidateFederated(none, true)));
+    }
+
     private static CompiledSql GenerateValidated(TargetSqlDialect dialect, SqlStatement statement) =>
         ((SqlDialectGeneratorBase)SqlDialectGeneratorFactory.GetGenerator(dialect))
             .Generate(statement, ParameterSource.Empty, DialectCapabilityTable.Default.Get(dialect), CancellationToken.None, timeZoneCallsValidated: true);

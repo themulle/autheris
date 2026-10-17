@@ -160,4 +160,15 @@ public sealed class ConvertTimeZoneFederationTests
         var (_, plan) = Setup("SELECT o.id");
         plan(false, null, null).GeneratedDuckDbSql.ShouldNotContain("TIMEZONE");
     }
+
+    [Theory]
+    [InlineData("SELECT o.created_at AT TIME ZONE 'UTC'")]
+    [InlineData("SELECT convert_timezone('UTC', 'Europe/Berlin', CAST(o.created_at AT TIME ZONE 'UTC' AS timestamp))")]
+    [Trait("Category", "Security")]
+    public void ST_130_12_TheOperatorFormIsRejectedOnEveryFederatedEntry(string select)
+    {
+        // Without a supplied statement the planner parses and builds (the builder refuses the operator); a supplied statement cannot be built at all.
+        Should.Throw<AstBuildException>(() => Setup(select).Plan(false, Available, null));
+        Should.Throw<AstBuildException>(() => Parse(Setup(select).Sql));
+    }
 }
