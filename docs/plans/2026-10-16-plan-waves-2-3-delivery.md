@@ -219,13 +219,19 @@ The owner re-grouped the remaining delivery into thematic chunks; one project-ma
 
 | Chunk | Theme | Steps (in order) |
 |---:|---|---|
-| 1 | Row filters and WebSQL parameters | I-1, I-2, I-3, I-5, I-6, I-25 |
-| 2 | Catalog, access and analytics | I-4, I-7, I-8, I-22, I-23, I-24 |
+| 1 | Row filters and WebSQL parameters | I-1, I-2, I-3, I-5, I-6, 1.6, I-25 |
+| 2 | Catalog, access and analytics | I-4, I-7, 1.8, I-7a, I-8, I-22, I-23, I-24 |
 | 3 | Federation gate, hardening, execution | I-9, I-10, I-11, I-12, I-13 |
 | 4 | Federation query planning | I-14, I-15, I-16, I-17, I-26 |
 | 5 | Federation relations and GraphQL | I-18, I-19, I-20, I-21 |
 | 6 | Observability (BL-06) | I-27, I-28, I-29, I-30 |
 | 7 | Wave 4 | planning, then implementation, also chunked by theme |
+
+**Wave-1 intake insertions (owner approved the 2026-10-17 issue intake; plans on `docs/w1-intake-plans`, Phase 2/3 done):**
+
+- **1.6** `PLAN-PROC-152-INC1` (`docs/plans/2026-10-17-plan-issue-152-154-inc1-procedure-security.md`, #152-#154 INC-1, procedure security slice, M, conditions `SEC-PROC152-01..11`, tests `T-PROC152-01..14`), branch `fix/procedure-inc1-security`, chunk 1 after I-6 and before I-25. Shared files: `ProcedureEndpointRoutes.cs`, `GovernedProcedureExecutionService.cs` (also touched by I-25 and I-23), `MssqlProcedureInvoker`; no DDL. It shares no file with I-5/I-6, so it is developed in parallel in its own worktree (from the I-3 head) and integrated into the stack after I-6.
+- **1.8** `PLAN-REL-151` (#151, DDL step): chunk 2, in the first free DDL slot after I-7, before I-8.
+- **I-7a** `PLAN-CAT-138-INC1` (#138 INC-1, wave-1 item 1.7): chunk 2, right after I-7 (after 1.8), before I-8.
 
 **Owner instruction (permanent, 2026-10-17): Phase 6 is removed from the per-step workflow.** No documentation agent, no feature docs in `docs/features/`, no `docs/features/README.md` registrations, no release notes and no master plan edits per step. Only the tracker bookkeeping in this file (section 3/3.5 status row, resume instruction) is kept. Per step: Phase 4 -> lead build and test -> Phase 5 review loop -> tracker update -> commit and push -> next step. (F-GOV-23 was written for I-1/I-2 before this instruction and is not extended further.)
 
