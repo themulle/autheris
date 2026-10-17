@@ -136,12 +136,12 @@ Assessment: [`INTAKE-2026-10-17B`](2026-10-17-issue-intake-assessment-2.md). Bot
 | D-2 | #107 WP-C key-set expansion | No new option for the expansion factor (default 64, about 100 keys on short statements, then EXISTS); SEC-ADG-05 stays unchanged |
 | D-3 | #112 (I-8) O-4 / O-5 | `suppressedRowsCount` dropped from the GraphQL result; `GraphQL:Aggregation:MaxFieldsPerOperation` default 3 |
 | D-4 | #113 (I-22/I-24) O-8 / O-3 | As planned; group templates deferred |
-| D-5 | #114 (I-23) O-4/O-9 | Audit retention purge job tracked as a separate GitHub issue; #114 does not depend on it |
+| D-5 | #114 (I-23) O-4/O-9 | Audit retention purge job tracked as GitHub issue #161; #114 does not depend on it |
 | D-6 | B-1 (#111 WP-0) O-1, O-5, O-6, O-7 | Confirmed; single-tenant installations set `Gateway:Tenancy:Mode=Single` |
 | D-7 | B-3 (#113 WP-0) | Confirmed: O-9 (app-only tokens and mTLS subjects cannot decide consent requests), ADFS `unique_name` + app id counts as application, ITSM webhook acknowledges a lost status race without effect, error-sanitizer whitelist extension |
 | D-8 | I-3 Oracle fix | `OracleDialectGenerator.FormatIdentifier` alias fix and the changed Oracle goldens confirmed |
 | D-9 | `INDIVIDUAL_GRANT_*` error codes masked outside Development | Fixed within #113 increment A (I-22) |
-| D-10 | `PUT /datasets/{id}/keys` placeholder audit actor | Follow-up GitHub issue |
+| D-10 | `PUT /datasets/{id}/keys` placeholder audit actor | Follow-up GitHub issue #160 |
 | D-11 | #99 increment I1 branches `feat/issue-99-i1-a/b/c` | Kept; picked up when wave 4 starts |
 | D-12 | `documentation-expert` agent and skill | Removed (no documentation phase) |
 
