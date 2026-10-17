@@ -179,6 +179,12 @@ public sealed class CallerAttributeOptions
 
     /// <summary>BC-129-13: administrator requests per minute of the simulation endpoint.</summary>
     [Range(1, 600)] public int SimulationRequestsPerMinute { get; init; } = 30;
+
+    /// <summary>
+    /// BC-129-13: secret of the per-tenant peppered value hashes of the simulation output. Empty: a random process-wide pepper (hashes are then only
+    /// comparable within one process lifetime, which is all a simulation needs).
+    /// </summary>
+    public string? SimulationHashPepper { get; init; }
 }
 
 public sealed class CallerAttributeCircuitBreakerOptions

@@ -100,6 +100,9 @@ public sealed class CallerAttributeValue
 /// <summary>Result of one attribute; <paramref name="ReasonCode"/> is a stable audit code (never a value, never exception text).</summary>
 public sealed record CallerAttributeResult(CallerAttributeOutcome Outcome, CallerAttributeValue? Value, string? ReasonCode)
 {
+    /// <summary>The registry id of the definition the result belongs to (set by the resolver; audit only).</summary>
+    public Guid? DefinitionId { get; init; }
+
     public static CallerAttributeResult Resolved(CallerAttributeValue value) => new(CallerAttributeOutcome.Resolved, value, null);
 
     public static CallerAttributeResult Missing(string? reason = null) => new(CallerAttributeOutcome.Missing, null, reason);
@@ -141,6 +144,12 @@ public sealed class CallerAttributeSet
         result = CallerAttributeResult.Unknown();
         return false;
     }
+
+    /// <summary>The audit entries of this set: registry id (or <c>unregistered</c>), outcome and reason; never a name, a value or a subject (BC-129-15).</summary>
+    public IReadOnlyList<CallerAttributeAuditEntry> AuditEntries() =>
+        _results.OrderBy(p => p.Key, StringComparer.Ordinal)
+            .Select(p => new CallerAttributeAuditEntry(p.Value.DefinitionId?.ToString("D") ?? "unregistered", p.Value.Outcome.ToString(), p.Value.ReasonCode))
+            .ToList();
 
     public IReadOnlyList<(string Name, CallerAttributeOutcome Outcome, string? ReasonCode)> Outcomes =>
         _results.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => (p.Key, p.Value.Outcome, p.Value.ReasonCode)).ToList();

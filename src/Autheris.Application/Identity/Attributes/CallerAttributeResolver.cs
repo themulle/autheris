@@ -14,6 +14,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Caching;
 using Autheris.Application.Sql.ListParameters;
 using Autheris.Domain.Common;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -133,11 +134,25 @@ public sealed class CallerAttributeResolver : ICallerAttributeResolver, ICallerA
 
         foreach (var name in names.Distinct(StringComparer.Ordinal))
         {
-            results[name] = await ResolveOneAsync(subject, name, snapshot, ct).ConfigureAwait(false);
+            var result = await ResolveOneAsync(subject, name, snapshot, ct).ConfigureAwait(false);
+            if (snapshot.TryGetDefinition(subject.Tenant, name, out var registered))
+            {
+                result = result with { DefinitionId = registered.Id };
+            }
+
+            results[name] = result;
+            GatewayDiagnostics.CallerAttributeResolutions.Add(1,
+                new KeyValuePair<string, object?>("provider", ProviderTag(subject, name, snapshot)),
+                new KeyValuePair<string, object?>("outcome", result.Outcome.ToString()));
         }
 
         return new CallerAttributeSet(results);
     }
+
+    /// <summary>The provider kind as a metric tag; never the attribute name.</summary>
+    private static string ProviderTag(CallerSubject subject, string name, CallerAttributeSnapshot snapshot) =>
+        subject.Kind == CallerSubjectKind.Application ? ServiceSetKind
+        : snapshot.TryGetDefinition(subject.Tenant, name, out var definition) ? definition.Provider.Kind : "none";
 
     private async ValueTask<CallerAttributeResult> ResolveOneAsync(CallerSubject subject, string name, CallerAttributeSnapshot snapshot, CancellationToken ct)
     {
@@ -195,6 +210,7 @@ public sealed class CallerAttributeResolver : ICallerAttributeResolver, ICallerA
             }
 
             string key = CacheKey(subject, definition, kind);
+            (_cache.TryGet(key, out _) ? GatewayDiagnostics.CallerAttributeCacheHits : GatewayDiagnostics.CallerAttributeCacheMisses).Add(1);
             var entry = await _cache.GetOrLoadAsync(
                 key,
                 loadCt => LoadAsync(subject, definition, provider, kind, key, max, loadCt),
@@ -228,6 +244,7 @@ public sealed class CallerAttributeResolver : ICallerAttributeResolver, ICallerA
         var breaker = _breakers.GetOrAdd(kind, _ => new Breaker());
         if (!breaker.TryEnter(_time))
         {
+            GatewayDiagnostics.CallerAttributeCircuitOpen.Add(1);
             throw new CallerAttributeLoadException(CallerAttributeResult.Failed("CircuitOpen"));
         }
 
@@ -239,10 +256,12 @@ public sealed class CallerAttributeResolver : ICallerAttributeResolver, ICallerA
         }
 
         CallerAttributeResult raw;
+        long started = _time.GetTimestamp();
         try
         {
             raw = await provider.ResolveAsync(subject, definition, ct).ConfigureAwait(false);
             breaker.Success();
+            GatewayDiagnostics.CallerAttributeProviderDuration.Record(_time.GetElapsedTime(started).TotalMilliseconds, new KeyValuePair<string, object?>("provider", kind));
         }
         catch (Exception)
         {

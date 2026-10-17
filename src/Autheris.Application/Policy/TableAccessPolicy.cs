@@ -326,10 +326,18 @@ public sealed partial class TableAccessPolicy
 
                 if (_rowPolicyFactory != null && mandatory.TypedPredicate != null)
                 {
-                    var typed = mandatory.CallerAttributes.Count > 0
-                        ? await BindVirtualFilterAttributesAsync(mandatory.TypedPredicate, mandatory.CallerAttributes, query, ct).ConfigureAwait(false)
-                        : mandatory.TypedPredicate;
+                    var typed = mandatory.TypedPredicate;
+                    IReadOnlyList<CallerAttributeAuditEntry>? audit = null;
+                    if (mandatory.CallerAttributes.Count > 0)
+                    {
+                        (typed, audit) = await BindVirtualFilterAttributesAsync(typed, mandatory.CallerAttributes, query, ct).ConfigureAwait(false);
+                    }
+
                     decision = decision.WithMandatoryPredicate(_rowPolicyFactory.FromPredicate(typed, query.Metadata.Dialect), mandatory.AppliedFilters, mandatory.AppliedBindings);
+                    if (audit is { Count: > 0 })
+                    {
+                        decision = decision with { CallerAttributes = Merge(decision.CallerAttributes, audit) };
+                    }
                 }
                 else
                 {

@@ -339,6 +339,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         var tablesWithoutRls = new HashSet<TableIdentity>();
         var accessedTables = new List<TableIdentifier>();
         var virtualFilters = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        var callerAttributes = new Dictionary<string, IReadOnlyList<CallerAttributeAuditEntry>>(StringComparer.OrdinalIgnoreCase);
         var accessedTableSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         DatabaseDialect? targetDatabaseDialect = _dataSourceResolver.ResolveConnectionDialect(effectiveDataSourceName);
@@ -533,6 +534,11 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                 virtualFilters[resolvedId.ToQualifiedName()] = applied;
             }
 
+            if (decision.CallerAttributes is { Count: > 0 } resolvedAttributes)
+            {
+                callerAttributes[resolvedId.ToQualifiedName()] = resolvedAttributes;
+            }
+
             var identity = new TableIdentity(tableMeta.Table.SchemaName, tableMeta.Table.TableName);
             decisions[identity] = decision;
             decidedTableMetadata[identity] = tableMeta;
@@ -667,7 +673,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             LogKeySets(assembly.KeySets);
         }
 
-        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, assembly.KeySets.Outcomes);
+        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, assembly.KeySets.Outcomes, callerAttributes);
     }
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<TargetSqlDialect, byte> ClampWarned = new();

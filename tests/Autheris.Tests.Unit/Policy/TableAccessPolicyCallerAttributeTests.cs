@@ -252,4 +252,29 @@ public sealed class TableAccessPolicyCallerAttributeTests : IDisposable
         (await Rows(OidB)).ShouldBe([2]);
         (await Rows(OidC)).ShouldBeEmpty();
     }
+
+    [Fact]
+    public async Task ST_129_15_TheDecision_CarriesAuditEntries_WithIdsAndOutcomes_NeverNamesOrValues()
+    {
+        var policy = Policy(Repo(Consent(ConsentEffect.Allow, Attr())), Resolver(Map()));
+        var resolved = await Decide(policy, Person(OidA), OidA);
+        var missing = await Decide(policy, Person(OidC), OidC);
+
+        var entry = resolved.CallerAttributes.ShouldNotBeNull().ShouldHaveSingleItem();
+        entry.Outcome.ShouldBe("Resolved");
+        Guid.TryParse(entry.Id, out _).ShouldBeTrue();
+        missing.CallerAttributes!.Single().Outcome.ShouldBe("Missing");
+        foreach (var e in new[] { entry, missing.CallerAttributes!.Single() })
+        {
+            e.ToString().ShouldNotContain("cost_center");
+            e.ToString().ShouldNotContain("CC100");
+        }
+    }
+
+    [Fact]
+    public async Task ADecisionWithoutAttributeLeaves_HasNoAuditEntries()
+    {
+        var literal = new ConsentRowFilter { ColumnName = "cost_center", Operator = "EQ", ValueJson = "\"CC1\"" };
+        (await Decide(Policy(Repo(Consent(ConsentEffect.Allow, literal)), Resolver(Map())), Person(OidA))).CallerAttributes.ShouldBeNull();
+    }
 }

@@ -24,7 +24,12 @@ public enum GatewayRole
     // Virtual filters (decision 2): maintenance and the file repository sync are separate; neither is implied by
     // GovernanceAdmin or TenantAdmin, only by ClusterAdmin.
     FilterAdmin = 30,
-    FilterSync = 31
+    FilterSync = 31,
+
+    // Caller attributes (REQ-GOV-129, BC-129-03, BC-129-13): approving data-granting changes and revealing attribute values are separate roles;
+    // neither is implied by GovernanceAdmin or TenantAdmin, only by ClusterAdmin.
+    CallerAttributeApprover = 32,
+    CallerAttributeInspector = 33
 }
 
 public static class GatewayRoleExtensions
@@ -42,6 +47,8 @@ public static class GatewayRoleExtensions
         ["Consumer"] = GatewayRole.Consumer,
         ["FilterAdmin"] = GatewayRole.FilterAdmin,
         ["FilterSync"] = GatewayRole.FilterSync,
+        ["CallerAttributeApprover"] = GatewayRole.CallerAttributeApprover,
+        ["CallerAttributeInspector"] = GatewayRole.CallerAttributeInspector,
         ["Analyst"] = GatewayRole.Consumer
     };
 
