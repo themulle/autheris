@@ -32,6 +32,8 @@ public static class CompiledSqlBinders
         return Resolve(dialect);
     }
 
+    private static readonly IReadOnlyDictionary<string, object?> NoClientValues = System.Collections.Frozen.FrozenDictionary<string, object?>.Empty;
+
     /// <summary>
     /// Issue #107 (SEC-RF107-20, D-WPC-8): binds a <see cref="CompiledKeyQuery"/> to a provider command through the same production binder as every
     /// governed statement: <c>CommandText</c> is <see cref="CompiledKeyQuery.Sql"/> and every <see cref="CompiledKeyQuery.Parameters"/> element is added
@@ -43,7 +45,7 @@ public static class CompiledSqlBinders
         ArgumentNullException.ThrowIfNull(command);
         ArgumentNullException.ThrowIfNull(query);
         var compiled = new CompiledSql(query.Sql, query.Parameters, dialect, SqlStatementClass.Select, ImmutableArray<SecurityPredicateId>.Empty, query.CompilerVersion);
-        Resolve(dialect).Bind(command, compiled, new Dictionary<string, object?>());
+        Resolve(dialect).Bind(command, compiled, NoClientValues);
     }
 
     private static DbCommandCompiledSqlBinder Resolve(TargetSqlDialect dialect) => dialect switch

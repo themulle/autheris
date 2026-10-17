@@ -176,7 +176,7 @@ public sealed class GovernancePolicyFactory(
 
         var keySets = new RowFilterKeySetReport();
         IReadOnlyDictionary<TableIdentity, PolicyPredicate?> finalPredicates = rowPredicates;
-        if (_keySetStage is not null && input.KeySetStatement is { } statement && dialect is { } keySetDialect)
+        if (_keySetStage is not null && input.KeySetStatement is { } statement && dialect is { } keySetDialect && HasRegisteredSite(rowPredicates))
         {
             var context = await BuildKeySetContextAsync(input, statement, keySetDialect, catalog, admitted, dependents, rowPredicates, records, ct).ConfigureAwait(false);
             if (statement.IsRead)
@@ -208,6 +208,20 @@ public sealed class GovernancePolicyFactory(
         };
 
         return new GovernedPolicyAssembly(policyResult, keySets);
+    }
+
+    /// <summary>True when any predicate holds a registered correlated site; without one the key-set stage has nothing to do and no governance record is read for it.</summary>
+    private static bool HasRegisteredSite(IReadOnlyDictionary<TableIdentity, PolicyPredicate?> predicates)
+    {
+        foreach (var predicate in predicates.Values)
+        {
+            if (predicate is not null && CorrelatedKeySetSubstitution.Scan(predicate) is { Eligible.Count: > 0 } or { Excluded.Count: > 0 })
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>The tables read by the given predicates of admitted tables (resolvable subquery tables of the final policy).</summary>
@@ -248,6 +262,11 @@ public sealed class GovernancePolicyFactory(
         Dictionary<TableIdentifier, GovernanceRecord> records,
         CancellationToken ct)
     {
+        // The dependent scan only feeds the epoch keys of a read statement against an opted-in data source; the stage stops before them otherwise.
+        bool needDependents = statement.IsRead
+            && _options.Value.DataSources?.Connections is { } connections
+            && connections.TryGetValue(input.DataSourceName, out var connection)
+            && connection.KeySetCacheAllowed;
         var identifiers = new Dictionary<TableIdentity, IReadOnlyList<TableIdentifier>>();
         var metadata = new Dictionary<TableIdentity, TableMetadata?>();
         foreach (var (identity, predicate) in rowPredicates)
@@ -258,7 +277,7 @@ public sealed class GovernancePolicyFactory(
             }
 
             var ids = new List<TableIdentifier> { input.Decisions[identity].Table };
-            if (predicate is not null)
+            if (predicate is not null && needDependents)
             {
                 foreach (var name in PolicySubqueryTables.Names(predicate))
                 {

@@ -52,6 +52,17 @@ public sealed class EpochValidationServiceAuthoritativeTests
     }
 
     [Fact]
+    public async Task ClientCancellation_IsRethrown_NotSwallowedAsNull()
+    {
+        var (multiplexer, _) = Redis();
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Should.ThrowAsync<OperationCanceledException>(async () => await Service(multiplexer).TryGetAuthoritativeEpochsAsync([A], cts.Token));
+        _logs.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Disconnected_ReturnsNull_WithoutReadingRedis_SEC_RF107_05()
     {
         var (multiplexer, db) = Redis(connected: false);
@@ -92,17 +103,6 @@ public sealed class EpochValidationServiceAuthoritativeTests
         multiplexer.GetDatabase(Arg.Any<int>(), Arg.Any<object>()).Throws(new InvalidOperationException("down"));
 
         (await Service(multiplexer).TryGetAuthoritativeEpochsAsync([A, B])).ShouldBeNull();
-    }
-
-    [Fact]
-    public async Task CancelledToken_ReturnsNull_NeverThrows()
-    {
-        var (multiplexer, db) = Redis();
-        db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>()).Returns(Task.FromResult((RedisValue)"4"));
-        using var cts = new CancellationTokenSource();
-        await cts.CancelAsync();
-
-        (await Service(multiplexer).TryGetAuthoritativeEpochsAsync([A], cts.Token)).ShouldBeNull();
     }
 
     [Fact]

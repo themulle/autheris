@@ -156,4 +156,51 @@ public sealed class RowFilterKeySetTextBudgetTests
         RowFilterKeySetTextBudget.EstimateListChars(TargetSqlDialect.PostgreSql, 2, 64, "fk").ShouldBe(a);
         RowFilterKeySetTextBudget.EstimateListChars(TargetSqlDialect.PostgreSql, 2, 128, "fk").ShouldBeGreaterThan(a);
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(9)]
+    [InlineData(10)]
+    [InlineData(11)]
+    [InlineData(99)]
+    [InlineData(100)]
+    [InlineData(101)]
+    [InlineData(999)]
+    [InlineData(1000)]
+    [InlineData(1001)]
+    [InlineData(9999)]
+    [InlineData(10000)]
+    [InlineData(100000)]
+    public void IndexDigitSum_ClosedForm_EqualsTheNaiveSum(int count)
+    {
+        long naive = 0;
+        for (int i = 0; i < count; i++)
+        {
+            naive += i.ToString(System.Globalization.CultureInfo.InvariantCulture).Length;
+        }
+
+        RowFilterKeySetTextBudget.IndexDigitSum(count).ShouldBe(naive);
+    }
+
+    [Theory]
+    [InlineData(0, 10)]
+    [InlineData(9, 100)]
+    [InlineData(10, 1000)]
+    [InlineData(100, 1001)]
+    public void EstimateListChars_EqualsTheNaivePerItemFormula(int ordinal, int count)
+    {
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        long perItem = 0;
+        for (int i = 0; i < count; i++)
+        {
+            perItem += 1 + "__rls_ks".Length + ordinal.ToString(culture).Length + 1 + i.ToString(culture).Length + 2;
+        }
+
+        const string column = "client_id";
+        long chunks = (count + 999) / 1000;
+        long expected = perItem + chunks * (2L * (RowFilterAliases.Target.Length + column.Length + 6) + 16);
+
+        RowFilterKeySetTextBudget.EstimateListChars(TargetSqlDialect.Oracle, ordinal, count, column).ShouldBe(expected);
+    }
 }

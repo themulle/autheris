@@ -1,6 +1,5 @@
 namespace Autheris.Application.Sql.Policy.RowFilterKeySets;
 
-using System.Globalization;
 using TrinoSqlEngine;
 
 /// <summary>
@@ -39,13 +38,8 @@ public static class RowFilterKeySetTextBudget
             return 5;   // 1 = 0
         }
 
-        int ordinalDigits = Digits(siteOrdinal);
-        long perItem = 0;
-        for (int i = 0; i < paddedCount; i++)
-        {
-            // sigil + "__rls_ks" + ordinal + "_" + index + ", "
-            perItem += 1 + ParameterPrefix.Length + ordinalDigits + 1 + Digits(i) + 2;
-        }
+        // sigil + "__rls_ks" + ordinal + "_" + index + ", " per item; the index digits are summed per decade, not per item.
+        long perItem = paddedCount * (long)(1 + ParameterPrefix.Length + Digits(siteOrdinal) + 1 + 2) + IndexDigitSum(paddedCount);
 
         int chunkSize = ChunkSize(dialect);
         long chunks = (paddedCount + chunkSize - 1) / chunkSize;
@@ -56,5 +50,31 @@ public static class RowFilterKeySetTextBudget
     /// <summary>Items per <c>IN</c> list: the dialect limit (Oracle 1,000), otherwise a single list.</summary>
     public static int ChunkSize(TargetSqlDialect dialect) => PolicyParameterNamer.InListLimit(dialect) is > 0 and var limit ? limit : int.MaxValue;
 
-    private static int Digits(int value) => value.ToString(CultureInfo.InvariantCulture).Length;
+    /// <summary>Sum of the decimal digit counts of the indexes <c>0 .. count - 1</c> (closed form per decade; equals the naive per-item sum).</summary>
+    internal static long IndexDigitSum(int count)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        long total = 0;
+        long lower = 0;
+        long upper = 10;
+        for (int digits = 1; lower < count; digits++)
+        {
+            total += (Math.Min(count, upper) - lower) * digits;
+            lower = upper;
+            upper *= 10;
+        }
+
+        return total;
+    }
+
+    private static int Digits(int value)
+    {
+        int digits = 1;
+        for (long bound = 10; value >= bound; bound *= 10)
+        {
+            digits++;
+        }
+
+        return digits;
+    }
 }

@@ -46,7 +46,7 @@ public sealed record RowFilterKeySetContext(
 
 public enum KeySetOutcomeKind { Exists, Hit, Miss, Fallback }
 
-/// <summary><c>Deny_Negated</c> is the reason of a site in a negated context or a shared node instance (SEC-RF107-06).</summary>
+/// <summary><c>Deny_Negated</c> is the reason of a site in a negated context, <c>Deny_Shared</c> the one of a node instance that occurs more than once in the predicate (SEC-RF107-06).</summary>
 public enum KeySetFallbackReason
 {
     Deny_Negated,
@@ -70,7 +70,10 @@ public enum KeySetFallbackReason
     ExpansionLimitRetry,
 
     /// <summary>D-WPC-2: key sets apply to read statements only; INSERT, UPDATE, DELETE and unknown statement types keep <c>EXISTS</c>.</summary>
-    WriteStatement
+    WriteStatement,
+
+    /// <summary>SEC-RF107-06: the node instance of the site occurs more than once in the predicate tree and is never substituted.</summary>
+    Deny_Shared
 }
 
 /// <summary>Diagnostics of one site. Never contains key values or a hash of key values (SEC-RF107-09).</summary>

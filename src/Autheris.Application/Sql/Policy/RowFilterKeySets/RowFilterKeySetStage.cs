@@ -117,7 +117,7 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
 
             if (!site.Substitutable)
             {
-                report.Add(Outcome(site, KeySetOutcomeKind.Fallback, site.Excluded ? KeySetFallbackReason.Deny_Negated : KeySetFallbackReason.Temporal));
+                report.Add(Outcome(site, KeySetOutcomeKind.Fallback, site.Excluded ? (site.Shared ? KeySetFallbackReason.Deny_Shared : KeySetFallbackReason.Deny_Negated) : KeySetFallbackReason.Temporal));
                 continue;
             }
 
@@ -161,9 +161,29 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
             return predicates;
         }
 
+        // Key query compilation and converter derivation need no epoch: sites that cannot be substituted never cause an authoritative read (SEC-RF107-04 e).
+        var prepared = new List<Prepared>();
+        foreach (var site in candidates.OrderBy(static c => c.Ordinal))
+        {
+            ct.ThrowIfCancellationRequested();
+            var item = Prepare(context, predicates, site, ct);
+            if (item.Reason is { } reason)
+            {
+                report.Add(Outcome(site, KeySetOutcomeKind.Fallback, reason));
+                continue;
+            }
+
+            prepared.Add(item.Prepared!);
+        }
+
+        if (prepared.Count == 0)
+        {
+            return predicates;
+        }
+
         // SEC-RF107-04 e / -05: target and dependent epochs are read once, before any lookup; the same values go into the keys.
         var epochTables = new HashSet<TableIdentifier>();
-        foreach (var table in candidates.Select(static c => c.Table).Distinct())
+        foreach (var table in prepared.Select(static c => c.Site.Table).Distinct())
         {
             if (context.GovernanceIdentifiers.TryGetValue(table, out var ids))
             {
@@ -174,25 +194,25 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
         var epochs = await _epochs.TryGetAuthoritativeEpochsAsync(epochTables, ct).ConfigureAwait(false);
         if (epochs is null)
         {
-            FallbackAll(report, candidates, KeySetFallbackReason.EpochUnavailable);
+            FallbackAll(report, prepared.Select(static p => p.Site), KeySetFallbackReason.EpochUnavailable);
             return predicates;
         }
 
         long keyListBudget = RowFilterKeySetTextBudget.KeyListBudget(context.UserSqlLength, context.MaxExpansionFactor);
         long gateUsed = 0;
         var loaded = new List<Loaded>();
-        foreach (var site in candidates.OrderBy(static c => c.Ordinal))
+        foreach (var item in prepared)
         {
             ct.ThrowIfCancellationRequested();
-            var item = await TryLoadAsync(context, predicates, site, connection, global, epochs, keyListBudget, gateUsed, ct).ConfigureAwait(false);
-            if (item.Reason is { } reason)
+            var result = await TryLoadAsync(context, item, connection, global, epochs, keyListBudget, gateUsed, ct).ConfigureAwait(false);
+            if (result.Reason is { } reason)
             {
-                report.Add(Outcome(site, KeySetOutcomeKind.Fallback, reason));
+                report.Add(Outcome(item.Site, KeySetOutcomeKind.Fallback, reason));
                 continue;
             }
 
-            gateUsed += RowFilterKeySetTextBudget.EstimateListChars(context.Dialect, site.Ordinal, 1, item.Loaded!.ForeignKeyColumn);
-            loaded.Add(item.Loaded!);
+            gateUsed += RowFilterKeySetTextBudget.EstimateListChars(context.Dialect, item.Site.Ordinal, 1, result.Loaded!.ForeignKeyColumn);
+            loaded.Add(result.Loaded!);
         }
 
         if (loaded.Count == 0)
@@ -228,15 +248,10 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
         return rewritten;
     }
 
-    private async ValueTask<(Loaded? Loaded, KeySetFallbackReason? Reason)> TryLoadAsync(
+    private (Prepared? Prepared, KeySetFallbackReason? Reason) Prepare(
         RowFilterKeySetContext context,
         IReadOnlyDictionary<TableIdentity, PolicyPredicate?> predicates,
         Site site,
-        DataSourceConnectionOptions connection,
-        RowFilterKeySetCacheOptions global,
-        IReadOnlyDictionary<TableIdentifier, long> epochs,
-        long keyListBudget,
-        long gateUsed,
         CancellationToken ct)
     {
         var target = context.Catalog.Resolve(site.Table.ToQualifiedName());
@@ -261,10 +276,22 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
         }
 
         var converter = KeySetValueConverter.Create(context.Dialect, query.KeyColumnType, query.ForeignKeyColumnType);
-        if (converter is null)
-        {
-            return (null, KeySetFallbackReason.TypeNotBindable);
-        }
+        return converter is null
+            ? (null, KeySetFallbackReason.TypeNotBindable)
+            : (new Prepared(site, query, converter), null);
+    }
+
+    private async ValueTask<(Loaded? Loaded, KeySetFallbackReason? Reason)> TryLoadAsync(
+        RowFilterKeySetContext context,
+        Prepared prepared,
+        DataSourceConnectionOptions connection,
+        RowFilterKeySetCacheOptions global,
+        IReadOnlyDictionary<TableIdentifier, long> epochs,
+        long keyListBudget,
+        long gateUsed,
+        CancellationToken ct)
+    {
+        var (site, query, converter) = prepared;
 
         // D-WPC-3 pre-load gate: a site whose 1-key list does not fit the remaining text budget never loads.
         if (gateUsed + RowFilterKeySetTextBudget.EstimateListChars(context.Dialect, site.Ordinal, 1, query.ForeignKeyColumn) > keyListBudget)
@@ -328,7 +355,8 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
 
         int padded = KeySetPadding.Bucket(values.Count, site.Eval.MaxKeys);
         var replacement = new KeySetReplacement(query.ForeignKeyColumn, values, padded, site.Ordinal);
-        return (new Loaded(site, replacement, query.ForeignKeyColumn, result.Status == RowFilterKeySetCacheStatus.Hit, result.AgeSeconds), null);
+        long estimate = RowFilterKeySetTextBudget.EstimateListChars(context.Dialect, site.Ordinal, padded, query.ForeignKeyColumn);
+        return (new Loaded(site, replacement, query.ForeignKeyColumn, result.Status == RowFilterKeySetCacheStatus.Hit, result.AgeSeconds, estimate), null);
     }
 
     /// <summary>
@@ -348,23 +376,41 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
         long existing = predicates.Values.Sum(static p => p?.Parameters.Count ?? 0);
         long bindBudget = maxBinds - existing - global.BindParameterReserve;
 
+        // Per-site estimates are computed once (Loaded.EstimatedChars); the running sums shrink as sites drop out.
+        long binds = 0;
+        long chars = 0;
+        foreach (var l in loaded)
+        {
+            binds += l.Replacement.PaddedCount;
+            chars += l.EstimatedChars;
+        }
+
         while (loaded.Count > 0)
         {
-            long binds = loaded.Sum(static l => (long)l.Replacement.PaddedCount);
-            long chars = loaded.Sum(l => RowFilterKeySetTextBudget.EstimateListChars(context.Dialect, l.Site.Ordinal, l.Replacement.PaddedCount, l.ForeignKeyColumn));
             bool bindsExceeded = binds > bindBudget;
             if (!bindsExceeded && chars <= keyListBudget)
             {
                 return;
             }
 
-            var largest = loaded.OrderByDescending(static l => l.Replacement.PaddedCount).ThenBy(static l => l.Site.Ordinal).First();
+            var largest = loaded[0];
+            foreach (var l in loaded)
+            {
+                if (l.Replacement.PaddedCount > largest.Replacement.PaddedCount
+                    || (l.Replacement.PaddedCount == largest.Replacement.PaddedCount && l.Site.Ordinal < largest.Site.Ordinal))
+                {
+                    largest = l;
+                }
+            }
+
             if (largest.Replacement.PaddedCount == 0)
             {
                 return;   // nothing left that adds binds or text beyond the constant 1 = 0
             }
 
             loaded.Remove(largest);
+            binds -= largest.Replacement.PaddedCount;
+            chars -= largest.EstimatedChars;
             report.Add(Outcome(largest.Site, KeySetOutcomeKind.Fallback, bindsExceeded ? KeySetFallbackReason.ParameterBudget : KeySetFallbackReason.ExpansionBudget));
         }
     }
@@ -395,7 +441,7 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
 
             foreach (var (node, site) in scan.Excluded)
             {
-                sites.Add(Create(table, node, site, objectSettings, global, -1, excluded: true, substitutable: false, warn, ineligible: true));
+                sites.Add(Create(table, node, site, objectSettings, global, -1, excluded: true, substitutable: false, warn, ineligible: true, shared: scan.Shared.Contains(node)));
             }
         }
 
@@ -404,7 +450,7 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
 
     private Site Create(
         TableIdentity table, ExistsExpression node, CorrelatedFilterSite site, RowFilterEvaluationSettings? objectSettings,
-        RowFilterKeySetCacheOptions global, int ordinal, bool excluded, bool substitutable, bool warn, bool ineligible)
+        RowFilterKeySetCacheOptions global, int ordinal, bool excluded, bool substitutable, bool warn, bool ineligible, bool shared = false)
     {
         var eval = RowFilterEvaluationResolver.Resolve(site.RuleSettings, objectSettings, global);
         bool invalid = RowFilterEvaluationResolver.HasInvalidStoredValue(site.RuleSettings) || RowFilterEvaluationResolver.HasInvalidStoredValue(objectSettings);
@@ -421,7 +467,7 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
             }
         }
 
-        return new Site(table, node, site, eval, ordinal, excluded, substitutable, invalid);
+        return new Site(table, node, site, eval, ordinal, excluded, substitutable, invalid, shared);
     }
 
     private void WarnOnce(string key, string message)
@@ -435,7 +481,7 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
         _logger?.LogWarning("{Message} Key={Key}", message, key[(key.IndexOf(':') + 1)..]);
     }
 
-    private static void FallbackAll(RowFilterKeySetReport report, List<Site> candidates, KeySetFallbackReason reason)
+    private static void FallbackAll(RowFilterKeySetReport report, IEnumerable<Site> candidates, KeySetFallbackReason reason)
     {
         foreach (var site in candidates)
         {
@@ -478,7 +524,9 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
 
     private sealed record Site(
         TableIdentity Table, ExistsExpression? Node, CorrelatedFilterSite Info, EffectiveRowFilterEvaluation Eval,
-        int Ordinal, bool Excluded, bool Substitutable, bool InvalidStored);
+        int Ordinal, bool Excluded, bool Substitutable, bool InvalidStored, bool Shared);
 
-    private sealed record Loaded(Site Site, KeySetReplacement Replacement, string ForeignKeyColumn, bool Hit, int? AgeSeconds);
+    private sealed record Loaded(Site Site, KeySetReplacement Replacement, string ForeignKeyColumn, bool Hit, int? AgeSeconds, long EstimatedChars);
+
+    private sealed record Prepared(Site Site, CompiledKeyQuery Query, KeySetValueConverter Converter);
 }

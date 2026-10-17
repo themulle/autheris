@@ -262,6 +262,10 @@ end";
             ct.ThrowIfCancellationRequested();
             return result;
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;   // a client cancellation is not an epoch failure
+        }
         catch (Exception ex)
         {
             _logger?.LogWarning("Authoritative policy epoch read failed ({ExceptionType}); key-set caching is skipped.", ex.GetType().Name);

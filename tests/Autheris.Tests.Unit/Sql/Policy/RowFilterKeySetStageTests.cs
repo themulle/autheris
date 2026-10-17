@@ -277,7 +277,37 @@ public sealed class RowFilterKeySetStageTests : IDisposable
 
         result.ShouldBeSameAs(preds);
         report.Outcomes.Single().Reason.ShouldBe(KeySetFallbackReason.EpochUnavailable);
-        (h.Compiler.Calls, h.Loader.Calls).ShouldBe((0, 0));
+        (h.Compiler.Calls, h.Loader.Calls).ShouldBe((1, 0));   // the key query is derived before the epoch read; no key query runs
+    }
+
+    [Fact]
+    public async Task NoSubstitutableSite_NoEpochRead_SEC_RF107_05()
+    {
+        var h = Harness();
+        h.Compiler.Failure = new KeyQueryNotDerivableException(KeyQueryNotDerivableReasons.NotDerivable, "NonPolicyParameter");
+        var preds = Preds((StageHarness.Orders, Predicate(StageHarness.Orders, Correlated())));
+
+        var (result, report) = await Apply(h, StageHarness.Context(), preds);
+
+        result.ShouldBeSameAs(preds);
+        report.Outcomes.Single().Reason.ShouldBe(KeySetFallbackReason.NotDerivable);
+        (h.Epochs.Calls, h.Loader.Calls).ShouldBe((0, 0));
+    }
+
+    [Fact]
+    public async Task SharedInstance_ReportsDeny_Shared_NotDeny_Negated_SEC_RF107_06()
+    {
+        var h = Harness();
+        var built = new TypedRowFilterBuilder().Build([Correlated()], StageHarness.Orders);
+        var exists = (ExistsExpression)built.Expression;
+        var twice = PolicyPredicate.Create(new BinaryExpression(exists, BinaryOperator.Or, exists), built.Parameters);
+        var preds = Preds((StageHarness.Orders, twice));
+
+        var (result, report) = await Apply(h, StageHarness.Context(), preds);
+
+        result.ShouldBeSameAs(preds);
+        report.Outcomes.Single().Reason.ShouldBe(KeySetFallbackReason.Deny_Shared);
+        (h.Epochs.Calls, h.Compiler.Calls, h.Loader.Calls).ShouldBe((0, 0, 0));
     }
 
     [Fact]

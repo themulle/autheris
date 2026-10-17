@@ -91,6 +91,27 @@ public sealed class RowFilterKeySetLoaderTests
     }
 
     [Fact]
+    public async Task ClientCancellation_IsRethrown_NotMappedToUnavailable_SEC_RF107_08()
+    {
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        var act = () => Loader(Db(1), factoryFailure: new OperationCanceledException(cts.Token)).LoadAsync(Request(), cts.Token);
+
+        await Should.ThrowAsync<OperationCanceledException>(act);
+        _logs.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task OperationCanceled_WithoutClientCancellation_StaysUnavailable_SEC_RF107_08()
+    {
+        var act = () => Loader(Db(1), factoryFailure: new OperationCanceledException()).LoadAsync(Request(), CancellationToken.None);
+
+        var ex = await Should.ThrowAsync<GatewaySecurityException>(act);
+        ex.ErrorCode.ShouldBe(RowFilterKeySetErrorCodes.KeySetUnavailable);
+    }
+
+    [Fact]
     public async Task SqlServer_ForcesReadCommitted_EvenWithReadUncommitted_SEC_RF107_12()
     {
         var db = Db(1);
@@ -337,20 +358,6 @@ public sealed class RowFilterKeySetLoaderTests
         var ex = await Should.ThrowAsync<GatewaySecurityException>(() => Loader(Db(1)).LoadAsync(Request(), CancellationToken.None));
 
         ex.ErrorCode.ShouldBe(RowFilterKeySetErrorCodes.KeySetUnavailable);
-    }
-
-    [Fact]
-    public async Task CancelledLoad_IsTheStableDenial_SEC_RF107_08()
-    {
-        using var cts = new CancellationTokenSource();
-        await cts.CancelAsync();
-        _session.InitializeSessionAsync(Arg.Any<DbConnection>(), Arg.Any<DbTransaction?>(), Arg.Any<DatabaseDialect>(), Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(ci => Task.FromCanceled(ci.Arg<CancellationToken>()));
-
-        var ex = await Should.ThrowAsync<GatewaySecurityException>(() => Loader(Db(1)).LoadAsync(Request(), cts.Token));
-
-        ex.ErrorCode.ShouldBe(RowFilterKeySetErrorCodes.KeySetUnavailable);
-        ex.InnerException.ShouldBeAssignableTo<OperationCanceledException>();
     }
 
     [Fact]

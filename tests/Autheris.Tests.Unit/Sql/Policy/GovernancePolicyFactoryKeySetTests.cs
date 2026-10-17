@@ -30,11 +30,13 @@ public sealed class GovernancePolicyFactoryKeySetTests
         public int SkippedCalls;
         public List<TableIdentity> Tables { get; } = [];
         public KeySetFallbackReason? SkippedReason;
+        public RowFilterKeySetContext? LastContext;
 
         public ValueTask<IReadOnlyDictionary<TableIdentity, PolicyPredicate?>> ApplyAsync(
             RowFilterKeySetContext context, IReadOnlyDictionary<TableIdentity, PolicyPredicate?> predicates, RowFilterKeySetReport report, CancellationToken ct)
         {
             ApplyCalls++;
+            LastContext = context;
             Tables.AddRange(predicates.Keys);
             return inner is null ? ValueTask.FromResult(predicates) : inner.ApplyAsync(context, predicates, report, ct);
         }
@@ -42,6 +44,7 @@ public sealed class GovernancePolicyFactoryKeySetTests
         public void ReportSkipped(RowFilterKeySetContext context, IReadOnlyDictionary<TableIdentity, PolicyPredicate?> predicates, RowFilterKeySetReport report, KeySetFallbackReason reason)
         {
             SkippedCalls++;
+            LastContext = context;
             SkippedReason = reason;
             inner?.ReportSkipped(context, predicates, report, reason);
         }
@@ -94,6 +97,49 @@ public sealed class GovernancePolicyFactoryKeySetTests
     }
 
     private static RowFilterKeySetStatement Read(bool disabled = false) => new(true, 4000, CompileRequestFactory.DefaultMaxExpansionFactor, disabled);
+
+    [Fact]
+    public async Task NoRegisteredSite_StageIsNotInvoked_AndNoDependentRecordIsRead()
+    {
+        var (input, _, repo, _) = Setup();
+        var simple = new TypedRowFilterBuilder().BuildCombined(
+            [new Consent { Effect = ConsentEffect.Allow, RowFilters = [new ConsentRowFilter { FilterGroup = 0, ColumnName = "region", Operator = "EQ", ValueJson = "\"EU\"" }] }], [], Orders)!;
+        var decision = TableAccessDecision.Allowed(OrdersId, new Dictionary<string, ColumnAccessLevel>(), null, hasUnconstrainedColumnAllow: true)
+            .WithAdditionalRowPolicy(new PolicyPredicateRowPolicy(simple, TargetSqlDialect.PostgreSql, new PolicyPredicateRenderer()));
+        var options = Options.Create(StageHarness.Gateway(true, RowFilterEvaluationStrategy.KeySetCache, provider: "PostgreSql", dataSource: "default"));
+        var stage = new RecordingStage();
+
+        await Factory(repo, options, stage).CreateAssemblyAsync(
+            input with { Decisions = new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = decision }, KeySetStatement = Read() }, default);
+
+        stage.ApplyCalls.ShouldBe(0);
+        stage.SkippedCalls.ShouldBe(0);
+        await repo.DidNotReceive().GetTableMetadataAsync(Arg.Is<TableIdentifier>(t => t.TableName == "customers"), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DataSourceWithoutKeySetOptIn_BuildsNoDependentEpochKeys()
+    {
+        var (input, _, repo, options) = Setup();   // default options: no data source is opted in
+        var stage = new RecordingStage();
+
+        await Factory(repo, options, stage).CreateAssemblyAsync(input with { KeySetStatement = Read() }, default);
+
+        stage.ApplyCalls.ShouldBe(1);
+        stage.LastContext!.GovernanceIdentifiers[Orders].ShouldBe([OrdersId]);
+    }
+
+    [Fact]
+    public async Task OptedInDataSource_AddsTheDependentToTheEpochKeys()
+    {
+        var (input, _, repo, _) = Setup();
+        var options = Options.Create(StageHarness.Gateway(true, RowFilterEvaluationStrategy.KeySetCache, provider: "PostgreSql", dataSource: "default"));
+        var stage = new RecordingStage();
+
+        await Factory(repo, options, stage).CreateAssemblyAsync(input with { KeySetStatement = Read() }, default);
+
+        stage.LastContext!.GovernanceIdentifiers[Orders].Select(i => i.TableName).ShouldBe(["orders", "customers"]);
+    }
 
     [Fact]
     public async Task WithoutKeySetStatement_StageIsNotInvoked_AC8()

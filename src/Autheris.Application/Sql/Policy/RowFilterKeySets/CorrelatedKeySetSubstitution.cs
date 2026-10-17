@@ -15,10 +15,11 @@ using TrinoSqlEngine.Governance;
 /// </summary>
 internal static class CorrelatedKeySetSubstitution
 {
-    /// <summary>The sites of a predicate: the ones a stage may substitute and the registered ones it must leave as <c>EXISTS</c> (reason <c>Deny_Negated</c>).</summary>
+    /// <summary>The sites of a predicate: the ones a stage may substitute and the registered ones it must leave as <c>EXISTS</c> (reason <c>Deny_Negated</c>, or <c>Deny_Shared</c> for a node instance that occurs more than once).</summary>
     internal sealed record SiteScan(
         IReadOnlyList<(ExistsExpression Node, CorrelatedFilterSite Site)> Eligible,
-        IReadOnlyList<(ExistsExpression Node, CorrelatedFilterSite Site)> Excluded);
+        IReadOnlyList<(ExistsExpression Node, CorrelatedFilterSite Site)> Excluded,
+        IReadOnlySet<ExistsExpression> Shared);
 
     /// <summary>Positive-polarity registered sites of the predicate that occur once, in a stable pre-order.</summary>
     public static IReadOnlyList<(ExistsExpression Node, CorrelatedFilterSite Site)> FindSites(PolicyPredicate predicate) => Scan(predicate).Eligible;
@@ -76,15 +77,21 @@ internal static class CorrelatedKeySetSubstitution
         }
 
         var excluded = new List<(ExistsExpression, CorrelatedFilterSite)>();
+        var shared = new HashSet<ExistsExpression>(ReferenceEqualityComparer.Instance);
         foreach (var node in order)
         {
+            if (total[node] > 1)
+            {
+                shared.Add(node);
+            }
+
             if (!seenEligible.Contains(node) && CorrelatedFilterSiteRegistry.TryGet(node, out var site))
             {
                 excluded.Add((node, site));
             }
         }
 
-        return new SiteScan(eligible, excluded);
+        return new SiteScan(eligible, excluded, shared);
     }
 
     /// <summary>

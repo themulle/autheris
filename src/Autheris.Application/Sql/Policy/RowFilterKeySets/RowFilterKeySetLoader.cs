@@ -84,6 +84,10 @@ public sealed class RowFilterKeySetLoader : IRowFilterKeySetLoader
                 ? new RowFilterKeySetEntry(keys, false, loadedAt, tenant, request.DataSourceName)
                 : RowFilterKeySetEntry.NotBindableSentinel(loadedAt, tenant, request.DataSourceName);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;   // a client cancellation is not a load failure (no 503, no warning)
+        }
         catch (Exception ex)
         {
             // SEC-RF107-08: database messages can quote data; only the type is logged, the cause travels as inner exception.
