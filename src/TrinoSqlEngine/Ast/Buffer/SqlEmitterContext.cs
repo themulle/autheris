@@ -38,6 +38,12 @@ public sealed class SqlEmitterContext
     public int MaxParameterBudget { get; init; }
     public int ParameterCount { get; set; }
     public bool InPredicateContext { get; set; }
+
+    /// <summary>
+    /// REQ-SQL-130 (BC-130-12): set by the compiler or the federated planner after the time zone call validator ran over the statement. The default is
+    /// false: a generator refuses to emit <c>convert_timezone</c> for an unvalidated statement, so a future emit site that skips the validator fails closed.
+    /// </summary>
+    internal bool TimeZoneCallsValidated { get; init; }
     public bool InProjectionContext { get; set; }
     public int IndentLevel { get; set; }
 

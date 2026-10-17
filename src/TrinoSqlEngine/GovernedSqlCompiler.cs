@@ -167,6 +167,13 @@ internal sealed class GovernedSqlCompiler
         Pass("validate");
         new AstValidationVisitor { CancellationToken = token }.Validate(ast);
 
+        // 4b. time zone conversion (REQ-SQL-130): every call is checked on the USER tree, before simplification (no folding can turn a non-literal
+        // into a literal) and before injection (policy and mask expressions never contain the function).
+        Pass("timezone");
+        new TimeZoneCallValidator(policy.Catalog, new TimeZoneValidationOptions(
+            request.TargetDialect, caps.SupportsTimeZoneConversion, request.TimeZoneConversionAvailable, policy.Masks, policy.TablesWithMaskedColumns,
+            request.ClientLists, Federated: false)) { CancellationToken = token }.Validate(ast);
+
         // 5. simplify the USER tree only: injected predicates do not exist yet (INV-3 by construction)
         Pass("simplify");
         var simplified = (SqlStatement)new AstSimplificationVisitor { CancellationToken = token }.Visit(ast);
@@ -219,7 +226,7 @@ internal sealed class GovernedSqlCompiler
         var generator = SqlDialectGeneratorFactory.GetGenerator(request.TargetDialect);
         var parameterSource = new ParameterSource(typed.PolicyValues, ClientNoValues);
         var compiled = (generator is SqlDialectGeneratorBase capabilityAware
-                ? capabilityAware.Generate(secured, parameterSource, caps, token)
+                ? capabilityAware.Generate(secured, parameterSource, caps, token, timeZoneCallsValidated: true)
                 : generator.Generate(secured, parameterSource, token))
             with { AppliedPredicates = applied, ExpectedAffectedRows = Ast.Security.InsertCheckOption.ExpectedRows(secured) };
 
