@@ -1455,6 +1455,35 @@
       "indexes": []
     },
     {
+      "name": "table_catalog_settings",
+      "columns": [
+        {
+          "name": "table_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "visibility",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "updated_by",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "table_id"
+      ],
+      "indexes": []
+    },
+    {
       "name": "table_columns",
       "columns": [
         {
@@ -1749,6 +1778,41 @@
       ],
       "primaryKey": [
         "table_id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "table_tags",
+      "columns": [
+        {
+          "name": "table_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "tag",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_by",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "table_id",
+        "tag"
       ],
       "indexes": []
     },
