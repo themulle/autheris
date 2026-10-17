@@ -156,6 +156,7 @@ No architect changes required beyond folding the conditions into the work packag
 
 - 2026-10-17 G-PLAN-REBASE: F1-F11 re-checked against the branch; no drift. Deviations and notes:
   - `TableIdentifier.ToQualifiedName()` is `Schema.TableName` (no domain). The health payload (`table`) and the fingerprint therefore use the three-part name `Domain.Schema.TableName` (fingerprint length-prefixes every part); the new LogWarning keeps `ToQualifiedName()` as specified in decision 5.
+  - Phase 5 Low: the health `table` string deliberately stays domain-qualified, because `Schema.TableName` is ambiguous across domains; the warning follows decision 5 and is log-only. Fingerprint now appends the length-prefixed parts directly (same encoding, no per-entry array); `_builtFingerprint`/`_omittedTables` are one immutable `BuiltState` behind a single volatile reference.
   - Omitted-table list is sorted ordinally by domain, schema, table (not "as encountered") so the dialect omissions, which come from unsorted repository order, are deterministic (SEC-BUG157-03/09).
   - Role hierarchy: `ClusterAdmin` implies `GovernanceAdmin` in `GatewayRoleEvaluator`, so it receives names; the S03 test uses `SecurityAdmin` (default allowed, no implication).
   - R4 resolved without a stub: the host test starts twice over one SQLite file (first start seeds, second builds the schema from a catalog with column-less tables). Real model, schema and endpoint (SEC-BUG157-10).

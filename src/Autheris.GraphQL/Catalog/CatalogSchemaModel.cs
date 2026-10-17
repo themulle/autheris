@@ -99,10 +99,9 @@ public sealed partial class CatalogSchemaModel
         foreach (var o in OmittedTables)
         {
             sb.Append('!');
-            foreach (var part in new[] { o.Table.Domain, o.Table.Schema, o.Table.TableName })
-            {
-                sb.Append(part.Length).Append('.').Append(part);
-            }
+            sb.Append(o.Table.Domain.Length).Append('.').Append(o.Table.Domain)
+              .Append(o.Table.Schema.Length).Append('.').Append(o.Table.Schema)
+              .Append(o.Table.TableName.Length).Append('.').Append(o.Table.TableName);
 
             sb.Append(':').Append(o.Reason).Append(';');
         }
