@@ -8,6 +8,7 @@
 **Extension 2026-10-16:** section 4.11 and `WP-FED-11..14` (issues #122, #123, #124), security addendum 12.6 (`SEC-FED-19..34`).
 **Extension 2026-10-16 (2):** section 4.12 and `WP-FED-15..16` (issues #131, #132), security placeholders 12.7 (`SEC-FED-35..42`).
 **Parent Plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
+**Follow-up pointer (intake 2026-10-17):** [`REQ-REL-151`](2026-10-17-req-issue-151-composite-key-relations.md) changes `TABLE_RELATIONS` storage to ordered key pairs (`TABLE_RELATION_KEYS`) and should merge before step I-18; composite cross-source relations stay supported by `CrossSourceRelationResolver` and are locked by a test.
 **Branch:** `feat/cross-source-all-consumers` (base `main` `70b75e27`)
 
 **Binding constraints:** `.NET 10`, C# 13; no upgrade migrations (baseline `0001` DDL edited in place for SQLite, PostgreSQL, SQL Server, plus shape snapshots under `src/Autheris.Infrastructure/Persistence/Migrations/Shape/`); least privilege on sources; fail closed; all text English.
