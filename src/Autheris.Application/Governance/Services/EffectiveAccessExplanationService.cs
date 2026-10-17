@@ -143,15 +143,19 @@ public sealed class EffectiveAccessExplanationService(
             activeRowFilters.Add(canSeeDefinition ? decision.CombinedRowFilterSql : RowFilterDescription);
         }
 
-        var applicableConsents = activeConsents
-            .Where(c => c.Effect == ConsentEffect.Allow && c.IsActive(now))
-            .ToList();
+        var applicableConsents = MatchingAllowConsents(activeConsents, table, now, userSid.Value, groupSids, roles, allUserSids);
 
+        // Earliest moment at which the caller's current effective access changes (clamped expiry of matching grants only).
         var validTo = applicableConsents.Count > 0
-            ? applicableConsents.Min(c => c.ValidTo)
+            ? applicableConsents.Min(c => c.EffectiveValidTo)
             : (DateTimeOffset?)null;
 
-        var description = applicableConsents.FirstOrDefault(c => !string.IsNullOrWhiteSpace(c.RoleName))?.RoleName
+        // Interim description (INC-1 adds the stored one): a role the caller holds, deterministic by ordinal order.
+        var description = applicableConsents
+            .Where(c => c.GranteeType == GranteeType.Role && !string.IsNullOrWhiteSpace(c.RoleName))
+            .Select(c => c.RoleName!)
+            .Order(StringComparer.Ordinal)
+            .FirstOrDefault()
             ?? $"Active grant for subject {userSid.Value}";
 
         return new EffectiveTableAccessDto(
@@ -165,6 +169,20 @@ public sealed class EffectiveAccessExplanationService(
             validTo
         );
     }
+
+    /// <summary>
+    /// Allow consents that apply to the caller, by the very predicate of the access decision
+    /// (<see cref="ConsentResolutionService.IsApplicable"/>). Everything the explanation shows about grants derives from this set.
+    /// </summary>
+    internal static List<Consent> MatchingAllowConsents(
+        IReadOnlyList<Consent> consents,
+        TableIdentifier table,
+        DateTimeOffset now,
+        Sid userSid,
+        IReadOnlySet<Sid> groupSids,
+        IReadOnlySet<string> roles,
+        IReadOnlySet<Sid>? allUserSids) =>
+        consents.Where(c => c.Effect == ConsentEffect.Allow && ConsentResolutionService.IsApplicable(c, table, now, userSid, groupSids, roles, allUserSids)).ToList();
 
     private static EffectiveTableAccessDto NotFound(TableIdentifier table) => new(
         table.ToString(),
