@@ -32,7 +32,7 @@ This directory defines custom agent roles and skills for the Autheris ecosystem.
      - [`csharp-tdd-developer.md`](file:///root/autheris/.agents/agents/csharp-tdd-developer.md): Test-Driven Development (.NET 10 / C# 13, Red-Green-Refactor).
      - `frontend-developer.md`, `orchestrator-lead.md`, `qa-cro-reviewer.md`, etc.
    - `skills/`: Specialized domain skills:
-     - [`project-manager`](file:///root/autheris/.agents/skills/project-manager/SKILL.md): 6-phase delivery orchestration: (1) Product Manager -> (2) Solution Architect -> (3) Security Expert -> (4) TDD Developer(s) -> (5) Code Reviewer -> (6) Documentation Expert.
+     - [`project-manager`](file:///root/autheris/.agents/skills/project-manager/SKILL.md): 5-phase delivery orchestration: (1) Product Manager -> (2) Solution Architect -> (3) Security Expert -> (4) TDD Developer(s) -> (5) Code Reviewer, then tracker update; no documentation phase (owner rule 2026-10-17).
      - [`product-manager`](file:///root/autheris/.agents/skills/product-manager/SKILL.md): Feature discovery, intake deduplication check (`docs/features/`), industry best-practice benchmarking (OWASP, RFC, OpenFGA), gatekeeper rejection/enrichment.
      - [`documentation-expert`](file:///root/autheris/.agents/skills/documentation-expert/SKILL.md): Technical documentation, clean docs separation, feature cataloging, English standards.
      - [`csharp-tdd-developer`](file:///root/autheris/.agents/skills/csharp-tdd-developer/SKILL.md): Strict TDD workflow, xUnit, FluentAssertions, Clean Architecture.

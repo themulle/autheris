@@ -1,10 +1,10 @@
 ---
 name: project-manager
 description: >-
-  Lead delivery project manager and workflow orchestrator. Manages the 6-phase standard implementation
+  Lead delivery project manager and workflow orchestrator. Manages the 5-phase implementation
   lifecycle: (1) Product Manager qualification/PRD, (2) Solution Architect implementation plan,
   (3) Security Expert review & hardening, (4) C# TDD Developer(s) Red-Green-Refactor execution,
-  (5) Code Reviewer inspection, and (6) Documentation Expert cataloging in docs/features/.
+  and (5) Code Reviewer inspection, followed by a tracker update. No documentation phase (owner rule).
 ---
 
 # Delivery Project Manager & Workflow Orchestrator Skill
@@ -13,7 +13,9 @@ This skill equips an agent to act as the **Delivery Project Manager and Lead Wor
 
 ---
 
-## 1. The 6-Phase Standard Implementation Lifecycle
+> **Owner rule (2026-10-17, permanent):** the project manager does **not** run a documentation phase. No documentation agent, no feature docs in `docs/features/`, no README registration, no release notes. After Phase 5 the project manager only updates the delivery tracker in `doc/plan/` / `docs/plans/` (status row and resume instruction), commits and pushes.
+
+## 1. The 5-Phase Implementation Lifecycle
 
 ```mermaid
 sequenceDiagram
@@ -24,7 +26,6 @@ sequenceDiagram
     participant Sec as 3. Security Expert
     participant Dev as 4. C# TDD Developer(s)
     participant Rev as 5. Code Reviewer
-    participant Doc as 6. Documentation Expert
 
     User->>PM: New Feature Request / Initiative
     PM->>PM: Deduplicate (docs/features/), Benchmark (OWASP/RFC), Enrich PRD
@@ -39,9 +40,8 @@ sequenceDiagram
     alt Rework Needed
         Rev-->>Dev: Request fixes for flagged issues
     else Approved
-        Rev->>Doc: Hand off verified feature
-        Doc->>Doc: Author docs/features/f-*.md, register in catalog, update 00-master-plan
-        Doc-->>User: Feature Complete & Documented
+        Rev->>Rev: Approve verified feature
+        Rev-->>User: Feature complete (tracker updated, pushed)
     end
 ```
 
@@ -80,11 +80,10 @@ sequenceDiagram
 - [ ] Clean exception handling without losing stack traces (`throw;` instead of `throw ex;`).
 - [ ] If issues are found: developer iteration loop initiated.
 
-### Gate 6: Documentation Gate (`documentation-expert`)
-- [ ] Feature document written in [`docs/features/f-<category>-<number>-<slug>.md`](file:///root/autheris/docs/features/).
-- [ ] Registered in the catalog index [`docs/features/README.md`](file:///root/autheris/docs/features/README.md).
-- [ ] Pure working reference documentation: **strictly ZERO development progress or WIP notes in `docs/`**.
-- [ ] Plan marked completed in [`doc/plan/00-master-plan-overview.md`](file:///root/autheris/doc/plan/00-master-plan-overview.md).
+### After Gate 5: Tracker Bookkeeping (no documentation phase)
+- [ ] Delivery tracker status row updated in `doc/plan/` / `docs/plans/`.
+- [ ] Resume instruction for the next step or run written.
+- [ ] Committed and pushed.
 
 ---
 
