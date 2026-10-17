@@ -138,17 +138,7 @@ public sealed partial class TableAccessPolicy
             return (null, null);
         }
 
-        var names = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var filter in recipe.Allow.Concat(recipe.Deny).SelectMany(static f => f))
-        {
-            if (string.Equals(filter.ValueSource, "USER_ATTRIBUTE", StringComparison.OrdinalIgnoreCase) &&
-                filter.FilterType == RowFilterType.SimpleColumnPredicate &&
-                CallerAttributeDefinition.IsValidName(filter.UserAttribute))
-            {
-                names.Add(filter.UserAttribute!);
-            }
-        }
-
+        var names = Autheris.Application.Identity.Attributes.CallerAttributeRecipes.Names(recipe);
         if (names.Count == 0)
         {
             return (null, null);
@@ -161,25 +151,8 @@ public sealed partial class TableAccessPolicy
     private static async Task<(Autheris.Application.Identity.Attributes.CallerAttributeSet? Set, Autheris.Application.Identity.Attributes.CallerAttributePadding? Padding)> ResolveAttributeSetAsync(
         Autheris.Application.Identity.Attributes.ICallerAttributeResolver resolver, IReadOnlyCollection<string> names, TableAccessQuery query, CancellationToken ct)
     {
-        var padding = resolver.Padding;
         var subject = resolver.CreateSubject(query.Principal, query.Tenant);
-        var set = await resolver.ResolveAsync(subject, names, ct).ConfigureAwait(false);
-
-        int items = 0;
-        foreach (var name in names)
-        {
-            if (set.TryGet(name, out var result) && result.Outcome == Autheris.Application.Identity.Attributes.CallerAttributeOutcome.Resolved && result.Value is { } value)
-            {
-                items += padding.PaddedCount(value.Count);
-            }
-        }
-
-        if (items > 0 && !subject.TryReserveBinds(items, resolver.BindReserve))
-        {
-            set = new Autheris.Application.Identity.Attributes.CallerAttributeSet(
-                names.ToDictionary(n => n, _ => Autheris.Application.Identity.Attributes.CallerAttributeResult.OverCardinality(), StringComparer.Ordinal));
-        }
-
+        var (set, padding) = await Autheris.Application.Identity.Attributes.CallerAttributeRecipes.ResolveAsync(resolver, subject, names, ct).ConfigureAwait(false);
         return (set, padding);
     }
 
