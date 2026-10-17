@@ -118,3 +118,53 @@ DDL-touching steps still open: I-7 (#111), I-8 (#112 semantic manifest), I-15, I
 | OQ-1 | Two side-unique indexes instead of the pair index of R-151-5 | Yes (decision 3) |
 | OQ-2 | Delete relations whose constraint disappeared from the manifest | Not in this fix; follow-up with the I-18 relation admin path |
 | OQ-3 | Remove the single-key getters too (beyond R-151-11) | Yes (decision 1) |
+
+## Phase 3 Security Review (csharp-security-expert, 2026-10-17)
+
+**Verdict: APPROVED WITH CONDITIONS.** No plan revision blocks Phase 4; SEC-REL151-01 and -02 must be folded into decisions 7/8 by the developer (short note in the PR), the rest are binding at implementation time. Code facts checked on `origin/main`: `TreeSqlCompiler.cs:381-397` already throws on empty or unequal key lists and requires `Clear` on every parent and child key column; `CrossSourceRelationResolver.Helpers.cs:115-145` (`ValidateJoinKeysClear`) checks every pair for count, existence and `Clear`; `TryExtractKey` drops a row on any null key part (no partial-key join); the importer only links models present in the same manifest (`DbtMetadataIngestionService.cs:527-533`); the parser has `MaxDepth = 64` but no size or count bound (`DbtArtifactStreamingParser.cs:38`); V-1..V-12 confirmed.
+
+### Findings
+
+| # | Sev | Finding |
+|---|---|---|
+| F-1 | Medium | Relation name is derived from the `to` model only (`:182,248`). Two foreign keys from one child to one parent (e.g. `created_by`, `approved_by`) share the natural key `(parent, child, relation_name)`; the upsert (decision 4) then silently replaces the first key set with the last one, order-dependent. Wrong join semantics, not an access bypass, but a silent join-key swap. |
+| F-2 | Medium | Nothing bounds relations per manifest, identifier length (SQL Server `NVARCHAR(256)`), or control characters; exception and warning text carries identifiers (log forging, truncation errors). Column names reach SQL only after matching a catalog column (decision 4c), which removes injection; keep it that way. |
+| F-3 | Medium | I-18 compatibility gap: an approval (`allow_cross_data_source`, SEC-FED-DELTA-12) is granted for a specific key set. Re-import that changes keys keeps the flag (the upsert correctly never touches it), so approved relations could silently join on different columns. |
+| F-4 | Low | `LIMIT 1` id resolution is nondeterministic when two tables differ only by case (`LOWER()` match); plan adds `is_active` but not ambiguity rejection. |
+| F-5 | Low | Key rows have no FK: orphan key rows (relation deleted by a future admin path) must never surface; key columns dropped or renamed by a later catalog sync leave stale pairs. Runtime stays fail closed (compiler and `ValidateJoinKeysClear` throw on a missing column), but the schema would still advertise the field. |
+| F-6 | Low | Per-relation `LogError` on every schema build can flood logs from one bad import. |
+| F-7 | Info | Join-key oracle: closed at runtime on both executors as long as every pair position is checked on both sides; the deferred `describe_dataset` key output (WP-151-6) would re-open it if it listed non-`Clear` key columns. |
+
+### Binding conditions
+
+- **SEC-REL151-01** (F-1): Importer detects two relations with the same natural key in one import; none of them is written (fail closed, no last-wins), warning `DUPLICATE_RELATION`. Alternative allowed: deterministic disambiguating name suffix from the child column list, never from manifest order.
+- **SEC-REL151-02** (F-2): Parser caps relations per manifest (max 10 000; excess skipped with one `TOO_MANY_RELATIONS` warning), and rejects identifiers that are empty, longer than 256 characters, or contain control characters. Violations are `INVALID_IDENTIFIER` warnings. Every logged or thrown identifier is truncated to 128 characters with control characters replaced.
+- **SEC-REL151-03**: `RelationKeyRules.Validate` runs in the repository on every write regardless of caller, and the repository stores the catalog's canonical column names only. No manifest string is ever concatenated into SQL; all values are parameters.
+- **SEC-REL151-04** (F-3): Dbt import never sets `allow_cross_data_source`; `RelationRowAssembler` defaults it to `false`. `CreateRelationAsync` reports whether the key set of an existing relation changed (return value or event). I-18 must reset the approval when the keys change and re-approve per table owner; add this to decision 10 as binding for `WP-FED-07`.
+- **SEC-REL151-05**: A composite relation across sources or dialects stays non-executable by `RelationExecutability` regardless of key count; key rules never relax gating.
+- **SEC-REL151-06**: Each statement runs on one connection and one explicit transaction (decision 4); the read (decision 5) stays a single statement so a reader never sees a mixed key set. Any exception, including cancellation, rolls back relation row and key rows.
+- **SEC-REL151-07** (F-4): Table id resolution returns zero or one active match; two matches throw `InvalidRelationException` (no `LIMIT 1`).
+- **SEC-REL151-08** (F-5): Key rows are only read through the join from `TABLE_RELATIONS` (orphan key rows are ignored). Any future relation delete must remove its key rows in the same transaction. `CatalogSchemaModel` omits a relation whose key column no longer exists in the table metadata.
+- **SEC-REL151-09** (F-6): Skipped-relation logging is capped per load (one aggregated summary plus at most 10 detail lines), relation id only.
+- **SEC-REL151-10** (F-7): WP-151-6 may expose a key column name only when that column is `Clear` for the caller on its table; otherwise omit the whole relation key list. Binding for the addendum.
+- **SEC-REL151-11**: Masked or denied key columns fail the whole relation on every pair position and on both sides, on the tree compiler and on the cross-source resolver; no result row may be returned for the relation field.
+- **SEC-REL151-12**: No new DDL beyond the baseline edit (project rule); the shape verifier remains the fail-closed guard for old stores. Not a condition for an upgrade migration.
+
+### Mandatory security tests (`[Trait("Category","Security")]`)
+
+- **T-REL151-01** `CompositeRelation_FirstKeyMatchOnly_ReturnsNoChildRows` (tree, rows equal in key 1 only).
+- **T-REL151-02** `CompositeRelation_AnyKeyPositionMasked_FailsClosed` (theory: position 1..3, parent and child side, Deny and Mask).
+- **T-REL151-03** `CrossSource_CompositeRelation_NullKeyPart_NeverJoins` and `CrossSource_CompositeRelation_KeyPositionNotClear_Throws`.
+- **T-REL151-04** `Import_CrossSourceCompositeRelation_NotExecutable_UntilApproved` (SEC-REL151-04/05).
+- **T-REL151-05** `Import_TwoForeignKeysSameParent_NoLastWinsSwap` (SEC-REL151-01).
+- **T-REL151-06** `Parse_RelationCountAndIdentifierLimits_SkipWithWarning` (10 001 relations, 257-char and control-char names, 17 keys).
+- **T-REL151-07** `Import_MaliciousColumnNames_NeverReachSql_AndWarningsAreSanitized` (quotes, `;--`, newlines, 5 000 chars).
+- **T-REL151-08** `CreateRelation_KeyChange_FlagsChangeAndKeepsApprovalFlagUntouched` (SEC-REL151-04).
+- **T-REL151-09** `CreateRelation_Cancelled_OrFailed_LeavesPreviousRelationAndKeys` per engine (SEC-REL151-06).
+- **T-REL151-10** `CreateRelation_Concurrent_SingleRelationConsistentKeys` per engine.
+- **T-REL151-11** `CreateRelation_AmbiguousCaseOnlyTables_Throws` (SEC-REL151-07).
+- **T-REL151-12** `GetRelations_OrphanKeyRows_AreNotSurfaced` and `CatalogSchema_DroppedKeyColumn_OmitsRelation` (SEC-REL151-08).
+- **T-REL151-13** `GetRelations_ManyBrokenRelations_LogsBoundedLines` (SEC-REL151-09).
+- **T-REL151-14** `ImportedRelation_DoesNotAdvertiseKeys_OfMaskedColumn_ToCaller` (applies when WP-151-6 lands).
+
+Total: 14 mandatory tests (T-REL151-01..14). Compatible with I-18 (upsert `SET` limited to `cardinality`, per-table owner model independent of the key table, subject to SEC-REL151-04) and with INC-138-4 (`GetAllRelationsAsync` through `RelationRowAssembler`, no filter bypass: visibility filtering stays in the caller, not the repository).
