@@ -617,8 +617,8 @@ public partial class PostgreSqlGovernanceRepository
                 ChildTableId = Guid.Parse(reader.GetString(2)),
                 ChildTableIdentifier = cId,
                 RelationName = reader.GetString(3),
-                JoinKeyParent = reader.GetString(4),
-                JoinKeyChild = reader.GetString(5),
+                JoinKeysParent = [reader.GetString(4)],
+                JoinKeysChild = [reader.GetString(5)],
                 Cardinality = card
             });
         }
@@ -671,8 +671,8 @@ public partial class PostgreSqlGovernanceRepository
             cmd.Parameters.AddWithValue("@pId", parentTableId);
             cmd.Parameters.AddWithValue("@cId", childTableId);
             cmd.Parameters.AddWithValue("@relName", relation.RelationName);
-            cmd.Parameters.AddWithValue("@jkp", relation.JoinKeyParent);
-            cmd.Parameters.AddWithValue("@jkc", relation.JoinKeyChild);
+            cmd.Parameters.AddWithValue("@jkp", relation.JoinKeysParent.Count > 0 ? relation.JoinKeysParent[0] : string.Empty);
+            cmd.Parameters.AddWithValue("@jkc", relation.JoinKeysChild.Count > 0 ? relation.JoinKeysChild[0] : string.Empty);
             cmd.Parameters.AddWithValue("@card", relation.Cardinality.ToString());
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }

@@ -1102,8 +1102,8 @@ public partial class SqliteGovernanceRepository
                     ChildTableId = childId,
                     ChildTableIdentifier = cId,
                     RelationName = relName,
-                    JoinKeyParent = jkParent,
-                    JoinKeyChild = jkChild,
+                    JoinKeysParent = [jkParent],
+                    JoinKeysChild = [jkChild],
                     Cardinality = card
                 });
             }
@@ -1124,8 +1124,8 @@ public partial class SqliteGovernanceRepository
             cmd.Parameters.AddWithValue("@pId", relation.ParentTableId.ToString());
             cmd.Parameters.AddWithValue("@cId", relation.ChildTableId.ToString());
             cmd.Parameters.AddWithValue("@relName", relation.RelationName);
-            cmd.Parameters.AddWithValue("@jkP", relation.JoinKeyParent);
-            cmd.Parameters.AddWithValue("@jkC", relation.JoinKeyChild);
+            cmd.Parameters.AddWithValue("@jkP", relation.JoinKeysParent.Count > 0 ? relation.JoinKeysParent[0] : string.Empty);
+            cmd.Parameters.AddWithValue("@jkC", relation.JoinKeysChild.Count > 0 ? relation.JoinKeysChild[0] : string.Empty);
             cmd.Parameters.AddWithValue("@card", relation.Cardinality.ToString());
             await cmd.ExecuteNonQueryAsync(ct);
         }
