@@ -32,6 +32,36 @@ public static class RowFilterEvaluationResolver
         return new EffectiveRowFilterEvaluation(strategy, source, duration, maxKeys);
     }
 
+    /// <summary>
+    /// Resolution for a stored consent rule (SEC-RF107-06e, read side): a directly loaded rule that is not eligible (DENY, not a correlated
+    /// subquery filter, temporal) has its rule-level strategy treated as not set and the result is <see cref="RowFilterEvaluationStrategy.Exists"/>
+    /// from the rule level. Callers log one Warning per rule (no values) when <see cref="IsEligibleRule"/> is false and the rule carries settings.
+    /// </summary>
+    public static EffectiveRowFilterEvaluation ResolveForRule(
+        ConsentRowFilter rule, ConsentEffect effect, RowFilterEvaluationSettings? obj, RowFilterKeySetCacheOptions global)
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+        var stored = new RowFilterEvaluationSettings(rule.KeySetStrategy, rule.KeySetDurationSeconds, rule.KeySetMaxKeys);
+        if (IsEligibleRule(rule, effect))
+        {
+            return Resolve(stored, obj, global);
+        }
+
+        var resolved = Resolve(stored with { Strategy = RowFilterEvaluationStrategy.Exists }, obj, global);
+        return resolved with { Strategy = RowFilterEvaluationStrategy.Exists, StrategySource = RowFilterEvaluationSource.Rule };
+    }
+
+    /// <summary>True for an ALLOW, correlated subquery, non-temporal rule: the only kind a key-set strategy may apply to.</summary>
+    public static bool IsEligibleRule(ConsentRowFilter rule, ConsentEffect effect)
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+        return effect == ConsentEffect.Allow
+               && rule.FilterType == RowFilterType.SubqueryCorrelated
+               && string.IsNullOrWhiteSpace(rule.TargetTemporalColumn)
+               && string.IsNullOrWhiteSpace(rule.DependentValidFromColumn)
+               && string.IsNullOrWhiteSpace(rule.DependentValidToColumn);
+    }
+
     /// <summary>True when the stored settings of a level hold a value that cannot be honoured (undefined enum, non-positive number).</summary>
     public static bool HasInvalidStoredValue(RowFilterEvaluationSettings? settings)
         => settings is not null
@@ -82,21 +112,13 @@ public static class RowFilterEvaluationResolver
 
         if (rule is not null && IsActiveSetting(settings))
         {
-            if (effect != ConsentEffect.Allow)
+            if (effect is not { } ruleEffect || !IsEligibleRule(rule, ruleEffect))
             {
-                return "Key-set cache settings are only supported on ALLOW rules.";
-            }
-
-            if (rule.FilterType != RowFilterType.SubqueryCorrelated)
-            {
-                return "Key-set cache settings are only supported on correlated subquery row filters.";
-            }
-
-            if (!string.IsNullOrWhiteSpace(rule.TargetTemporalColumn)
-                || !string.IsNullOrWhiteSpace(rule.DependentValidFromColumn)
-                || !string.IsNullOrWhiteSpace(rule.DependentValidToColumn))
-            {
-                return "Key-set cache settings are not supported on temporal row filters.";
+                return effect != ConsentEffect.Allow
+                    ? "Key-set cache settings are only supported on ALLOW rules."
+                    : rule.FilterType != RowFilterType.SubqueryCorrelated
+                        ? "Key-set cache settings are only supported on correlated subquery row filters."
+                        : "Key-set cache settings are not supported on temporal row filters.";
             }
         }
 

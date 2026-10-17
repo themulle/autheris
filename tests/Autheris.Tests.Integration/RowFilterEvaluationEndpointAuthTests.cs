@@ -316,4 +316,48 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<WebAppl
         var repo = _factory.Services.GetRequiredService<IGovernanceRepository>();
         (await repo.GetTableMetadataAsync(table))!.RowFilterEvaluation.ShouldBeNull();
     }
+
+    [Fact]
+    public async Task AdminWithoutUserSid_IsRefused403_AndNothingIsWritten_NoPlaceholderActor()
+    {
+        var (table, ruleId) = await SeedRuleAsync();
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", OwnTenant);
+
+        var rule = await client.PutAsync(RuleUrl(ruleId), Json("""{"strategy":"KeySetCache"}"""));
+        var obj = await client.PutAsync(ObjectUrl(table.ToString()), Json("""{"strategy":"KeySetCache"}"""));
+        var del = await client.DeleteAsync(ObjectUrl(table.ToString()));
+
+        foreach (var r in new[] { rule, obj, del })
+        {
+            ((int)r.StatusCode).ShouldBeOneOf(401, 403);
+        }
+
+        var repo = _factory.Services.GetRequiredService<IGovernanceRepository>();
+        (await repo.GetTableMetadataAsync(table))!.RowFilterEvaluation.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Startup_WithInvalidKeySetCacheOptions_FailsValidation_ProvingTheValidatorIsWired()
+    {
+        var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Gateway:RowFilters:KeySetCache:MaxConcurrentKeyQueries", "0");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-wiring-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+        });
+
+        var ex = Should.Throw<Exception>(() => factory.CreateClient());
+
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (e is Microsoft.Extensions.Options.OptionsValidationException v)
+            {
+                v.Message.ShouldContain("MaxConcurrentKeyQueries");
+                return;
+            }
+        }
+
+        throw new Xunit.Sdk.XunitException("Expected an OptionsValidationException, got: " + ex);
+    }
 }

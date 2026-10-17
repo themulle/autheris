@@ -210,4 +210,57 @@ public sealed class RowFilterEvaluationResolverTests
     [Fact]
     public void Validate_RuleLevel_MissingEffect_FailsClosed()
         => RowFilterEvaluationResolver.Validate(S(RowFilterEvaluationStrategy.KeySetCache), Global, Correlated(), null).ShouldNotBeNull();
+
+    private static ConsentRowFilter StoredKeySet(RowFilterType type = RowFilterType.SubqueryCorrelated, string? temporal = null) => new()
+    {
+        FilterType = type,
+        TargetTemporalColumn = temporal,
+        KeySetStrategy = RowFilterEvaluationStrategy.KeySetCache,
+        KeySetDurationSeconds = 60
+    };
+
+    private static readonly RowFilterEvaluationSettings ObjectKeySet = new(RowFilterEvaluationStrategy.KeySetCache, null, null);
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public void ResolveForRule_StoredKeySetOnDenyRule_ResolvesToExists_SEC_RF107_06e()
+    {
+        var e = RowFilterEvaluationResolver.ResolveForRule(StoredKeySet(), ConsentEffect.Deny, ObjectKeySet, Global);
+
+        e.Strategy.ShouldBe(RowFilterEvaluationStrategy.Exists);
+        RowFilterEvaluationResolver.IsEligibleRule(StoredKeySet(), ConsentEffect.Deny).ShouldBeFalse();
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public void ResolveForRule_StoredKeySetOnNonCorrelatedRule_ResolvesToExists_SEC_RF107_06e()
+    {
+        var rule = StoredKeySet(RowFilterType.SimpleColumnPredicate);
+
+        RowFilterEvaluationResolver.ResolveForRule(rule, ConsentEffect.Allow, ObjectKeySet, Global).Strategy.ShouldBe(RowFilterEvaluationStrategy.Exists);
+        RowFilterEvaluationResolver.IsEligibleRule(rule, ConsentEffect.Allow).ShouldBeFalse();
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public void ResolveForRule_StoredKeySetOnTemporalRule_ResolvesToExists_SEC_RF107_06e()
+    {
+        var rule = StoredKeySet(temporal: "order_date");
+
+        RowFilterEvaluationResolver.ResolveForRule(rule, ConsentEffect.Allow, ObjectKeySet, Global).Strategy.ShouldBe(RowFilterEvaluationStrategy.Exists);
+        RowFilterEvaluationResolver.IsEligibleRule(rule, ConsentEffect.Allow).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void ResolveForRule_EligibleRule_ResolvesLikeResolve()
+    {
+        var rule = StoredKeySet();
+
+        var e = RowFilterEvaluationResolver.ResolveForRule(rule, ConsentEffect.Allow, null, Global);
+
+        e.Strategy.ShouldBe(RowFilterEvaluationStrategy.KeySetCache);
+        e.StrategySource.ShouldBe(RowFilterEvaluationSource.Rule);
+        e.Duration.ShouldBe(TimeSpan.FromSeconds(60));
+        RowFilterEvaluationResolver.IsEligibleRule(rule, ConsentEffect.Allow).ShouldBeTrue();
+    }
 }

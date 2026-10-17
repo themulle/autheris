@@ -506,6 +506,14 @@ public class AccessPlanningService : IAccessPlanningService
             throw new SecurityException(RowFilterNotFound);
         }
 
+        // Residual admin-vs-admin race (the check before the write is not transactional): detectable afterwards, logged without values.
+        if (result.Before != applied.Before)
+        {
+            _logger.LogWarning(
+                "Row filter evaluation plan {PlanId} was applied over settings that changed between the check and the write (level {Level}).",
+                request.PlanId, level);
+        }
+
         return new AdminApplyRowFilterEvaluationResult(
             true, request.PlanId, level, applied.Table, result.NewEpoch, "Row filter evaluation settings applied successfully.");
     }

@@ -290,8 +290,7 @@ public partial class PostgreSqlGovernanceRepository
                         : scopesStr.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                     ruleList.Add(new ConsentColumnRule
                     {
-                        // The stored row id is the stable rule id of the admin surface (issue #107); a fresh id per read would make it unaddressable.
-                        Id = Guid.Parse(reader.GetString(20)),
+                        Id = Guid.NewGuid(),
                         ConsentId = Guid.Parse(cId),
                         TableColumnId = Guid.Parse(reader.GetString(1)),
                         ColumnName = reader.GetString(2),

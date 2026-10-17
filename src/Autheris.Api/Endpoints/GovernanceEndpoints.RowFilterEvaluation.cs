@@ -99,7 +99,10 @@ public static partial class GovernanceEndpoints
 
     private static readonly JsonSerializerOptions RowFilterEvaluationJson = new() { PropertyNameCaseInsensitive = true };
 
-    private static Sid ActorOf(HttpContext httpContext) => httpContext.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN");
+    // Fail closed: a change without an identifiable actor is never written (no placeholder SID in the HMAC-chained audit).
+    private static Sid? ActorOf(HttpContext httpContext) => httpContext.User.GetUserSid();
+
+    private static IResult NoActor() => Results.StatusCode(StatusCodes.Status403Forbidden);
 
     internal static async Task<IResult> GetRowFilterRuleEvaluationAsync(
         string id,
@@ -133,11 +136,16 @@ public static partial class GovernanceEndpoints
             return bodyError!;
         }
 
+        if (ActorOf(httpContext) is not { } actor)
+        {
+            return NoActor();
+        }
+
         var tenant = EndpointSecurity.GetRequestTenant(httpContext);
         RowFilterEvaluationChange? change;
         try
         {
-            change = await service.SetRuleAsync(ruleId, tenant, settings, ActorOf(httpContext), ct).ConfigureAwait(false);
+            change = await service.SetRuleAsync(ruleId, tenant, settings, actor, ct).ConfigureAwait(false);
         }
         catch (RowFilterEvaluationValidationException ex)
         {
@@ -201,6 +209,11 @@ public static partial class GovernanceEndpoints
         HttpContext httpContext,
         CancellationToken ct)
     {
+        if (ActorOf(httpContext) is not { } actor)
+        {
+            return NoActor();
+        }
+
         var table = await DatasetIdResolver.ResolveActiveAsync(id, metadataRepository, ct).ConfigureAwait(false);
         if (table is null)
         {
@@ -210,7 +223,7 @@ public static partial class GovernanceEndpoints
         RowFilterEvaluationChange? change;
         try
         {
-            change = await service.SetObjectAsync(table.Value, settings, ActorOf(httpContext), EndpointSecurity.GetRequestTenant(httpContext), ct).ConfigureAwait(false);
+            change = await service.SetObjectAsync(table.Value, settings, actor, EndpointSecurity.GetRequestTenant(httpContext), ct).ConfigureAwait(false);
         }
         catch (RowFilterEvaluationValidationException ex)
         {
