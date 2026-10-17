@@ -67,6 +67,21 @@ public partial class SqliteGovernanceRepository
 
     public async Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
     {
+        var structural = await GetStructuralTableMetadataAsync(table, ct).ConfigureAwait(false);
+        if (structural is null)
+        {
+            return null;
+        }
+
+        // Issue #111 (A-6): tier and tags are never part of the cached entry; a fresh read is overlaid on every call, without mutating the cached record.
+        await using var scope = await ReadScopeAsync(ct, snapshot: false).ConfigureAwait(false);
+        var overlay = await DatasetCatalogStore.ReadOverlayAsync(
+            scope.Connection, null, CatalogKeyDefinitionStore.Sqlite, structural.Table.Id, _logger, ct).ConfigureAwait(false);
+        return DatasetCatalogStore.Apply(structural, overlay);
+    }
+
+    private async Task<TableMetadata?> GetStructuralTableMetadataAsync(TableIdentifier table, CancellationToken ct)
+    {
         var cacheKey = table.ToString().ToLowerInvariant();
         var nowTicks = DateTime.UtcNow.Ticks;
         if (_metadataCache.TryGetValue(cacheKey, out var entry) && (nowTicks - entry.CachedAtTicks < MetadataCacheTtlTicks))
@@ -372,6 +387,13 @@ public partial class SqliteGovernanceRepository
                 });
             }
 
+            // Issue #111: tier and tags are read fresh inside the same snapshot (two set-based queries) and degrade to Hidden per row.
+            var overlay = await DatasetCatalogStore.ReadOverlayAsync(conn, null, CatalogKeyDefinitionStore.Sqlite, null, _logger, ct).ConfigureAwait(false);
+            for (var i = 0; i < results.Count; i++)
+            {
+                results[i] = DatasetCatalogStore.Apply(results[i], overlay);
+            }
+
             return results;
         }
     }
@@ -492,6 +514,12 @@ public partial class SqliteGovernanceRepository
                         insertCmd.Parameters.AddWithValue("@longDescription", (object?)metadata.Table.LongDescription ?? DBNull.Value);
                         insertCmd.Parameters.AddWithValue("@docSource", (object?)metadata.Table.DocumentationSource ?? DBNull.Value);
                         await insertCmd.ExecuteNonQueryAsync(ct);
+
+                        // Issue #111 (A-10): the configured default tier is given to a NEW table only; the Hidden default writes no row.
+                        if (_options?.Catalog?.DefaultVisibility == DatasetVisibility.Summary)
+                        {
+                            await DatasetCatalogStore.InsertDefaultAsync(conn, tx, CatalogKeyDefinitionStore.Sqlite, tableId, DatasetVisibility.Summary, ct).ConfigureAwait(false);
+                        }
                     }
                 }
 
@@ -743,6 +771,59 @@ public partial class SqliteGovernanceRepository
         QueueMetadataInvalidation(table);
         await _epochValidationService.InvalidateEpochAsync(table, ct);
         return change;
+    }
+
+    public async Task<DatasetCatalogSettings?> GetDatasetCatalogSettingsAsync(TableIdentifier table, bool strict = true, CancellationToken ct = default)
+    {
+        await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
+        return await DatasetCatalogStore.ReadSettingsAsync(
+            scope.Connection, null, CatalogKeyDefinitionStore.Sqlite, table, strict, _logger, ct).ConfigureAwait(false);
+    }
+
+    public Task<DatasetCatalogChange?> ReplaceDatasetTagsAsync(
+        TableIdentifier table, IReadOnlyList<string> tags, DatasetTagSource source, Sid actor, CancellationToken ct = default) =>
+        WriteCatalogSettingsAsync(table, (conn, tx) =>
+            DatasetCatalogStore.ReplaceTagsAsync(conn, tx, CatalogKeyDefinitionStore.Sqlite, table, tags, source, actor, ct), ct);
+
+    public Task<DatasetCatalogChange?> ChangeDatasetTagsAsync(
+        TableIdentifier table, IReadOnlyList<string> add, IReadOnlyList<string> remove, Sid actor, CancellationToken ct = default) =>
+        WriteCatalogSettingsAsync(table, (conn, tx) =>
+            DatasetCatalogStore.ChangeTagsAsync(conn, tx, CatalogKeyDefinitionStore.Sqlite, table, add, remove, actor, ct), ct);
+
+    public Task<DatasetCatalogChange?> SetDatasetVisibilityAsync(
+        TableIdentifier table, DatasetVisibility visibility, Sid actor, CancellationToken ct = default) =>
+        WriteCatalogSettingsAsync(table, (conn, tx) =>
+            DatasetCatalogStore.SetVisibilityAsync(conn, tx, CatalogKeyDefinitionStore.Sqlite, table, visibility, actor, ct), ct);
+
+    /// <summary>Issue #111: one transaction (before read, write, after read); no epoch (tags are not policy inputs); the local metadata entry is dropped after the commit.</summary>
+    private async Task<DatasetCatalogChange?> WriteCatalogSettingsAsync(
+        TableIdentifier table, Func<SqliteConnection, SqliteTransaction, Task<DatasetCatalogChange?>> write, CancellationToken ct)
+    {
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            var change = await write(conn, tx).ConfigureAwait(false);
+            if (change is null)
+            {
+                await tx.RollbackAsync(ct);
+                return null;
+            }
+
+            await tx.CommitAsync(ct);
+            if (change.Changed)
+            {
+                QueueMetadataInvalidation(table);
+            }
+
+            return change;
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
     }
 
     /// <summary>Bumps the policy epoch inside the caller's transaction and returns the new value (issue #107).</summary>

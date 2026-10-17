@@ -9,8 +9,20 @@ namespace Autheris.Infrastructure.Persistence;
 
 public partial class PostgreSqlGovernanceRepository
 {
-    public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) =>
-        GetTableMetadataCoreAsync(table, null, ct);
+    public async Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
+    {
+        var structural = await GetTableMetadataCoreAsync(table, null, ct).ConfigureAwait(false);
+        if (structural is null)
+        {
+            return null;
+        }
+
+        // Issue #111 (A-6): tier and tags are never part of the cached entry; a fresh read is overlaid on every call, without mutating the cached record.
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        var overlay = await DatasetCatalogStore.ReadOverlayAsync(
+            conn, null, CatalogKeyDefinitionStore.PostgreSql, structural.Table.Id, _logger, ct).ConfigureAwait(false);
+        return DatasetCatalogStore.Apply(structural, overlay);
+    }
 
     private async Task<TableMetadata?> GetTableMetadataCoreAsync(
         TableIdentifier table,
@@ -211,6 +223,22 @@ public partial class PostgreSqlGovernanceRepository
             }
         }
 
+        if (result.Count == 0)
+        {
+            return result;
+        }
+
+        // Issue #111 (F-C6): rows served from the structural cache and freshly loaded rows alike get a fresh tier/tags overlay (`with`, no mutation).
+        await using (var overlayConn = await OpenConnectionAsync(ct).ConfigureAwait(false))
+        {
+            var overlay = await DatasetCatalogStore.ReadOverlayAsync(
+                overlayConn, null, CatalogKeyDefinitionStore.PostgreSql, null, _logger, ct).ConfigureAwait(false);
+            for (var i = 0; i < result.Count; i++)
+            {
+                result[i] = DatasetCatalogStore.Apply(result[i], overlay);
+            }
+        }
+
         return result;
     }
 
@@ -227,6 +255,7 @@ public partial class PostgreSqlGovernanceRepository
         try
         {
             var tableId = metadata.Table.Id == Guid.Empty ? Guid.NewGuid() : metadata.Table.Id;
+            var tableExisted = false;
 
             await using (var cmd = conn.CreateCommand())
             {
@@ -242,6 +271,7 @@ public partial class PostgreSqlGovernanceRepository
                 if (await reader.ReadAsync(ct).ConfigureAwait(false))
                 {
                     tableId = Guid.Parse(reader.GetString(0));
+                    tableExisted = true;
                 }
             }
 
@@ -285,6 +315,12 @@ public partial class PostgreSqlGovernanceRepository
                 upsertCmd.Parameters.AddWithValue("@longDesc", (object?)metadata.Table.LongDescription ?? DBNull.Value);
                 upsertCmd.Parameters.AddWithValue("@docSource", (object?)metadata.Table.DocumentationSource ?? DBNull.Value);
                 await upsertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            // Issue #111 (A-10): the configured default tier is given to a NEW table only; the Hidden default writes no row.
+            if (!tableExisted && _options?.Catalog?.DefaultVisibility == DatasetVisibility.Summary)
+            {
+                await DatasetCatalogStore.InsertDefaultAsync(conn, tx, CatalogKeyDefinitionStore.PostgreSql, tableId, DatasetVisibility.Summary, ct).ConfigureAwait(false);
             }
 
             var colIdByName = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
@@ -464,6 +500,62 @@ public partial class PostgreSqlGovernanceRepository
 
         _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
         await _epochValidationService.InvalidateEpochAsync(table, ct).ConfigureAwait(false);
+        return change;
+    }
+
+    public async Task<DatasetCatalogSettings?> GetDatasetCatalogSettingsAsync(TableIdentifier table, bool strict = true, CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        return await DatasetCatalogStore.ReadSettingsAsync(
+            conn, null, CatalogKeyDefinitionStore.PostgreSql, table, strict, _logger, ct).ConfigureAwait(false);
+    }
+
+    public Task<DatasetCatalogChange?> ReplaceDatasetTagsAsync(
+        TableIdentifier table, IReadOnlyList<string> tags, DatasetTagSource source, Sid actor, CancellationToken ct = default) =>
+        WriteCatalogSettingsAsync(table, (conn, tx) =>
+            DatasetCatalogStore.ReplaceTagsAsync(conn, tx, CatalogKeyDefinitionStore.PostgreSql, table, tags, source, actor, ct), ct);
+
+    public Task<DatasetCatalogChange?> ChangeDatasetTagsAsync(
+        TableIdentifier table, IReadOnlyList<string> add, IReadOnlyList<string> remove, Sid actor, CancellationToken ct = default) =>
+        WriteCatalogSettingsAsync(table, (conn, tx) =>
+            DatasetCatalogStore.ChangeTagsAsync(conn, tx, CatalogKeyDefinitionStore.PostgreSql, table, add, remove, actor, ct), ct);
+
+    public Task<DatasetCatalogChange?> SetDatasetVisibilityAsync(
+        TableIdentifier table, DatasetVisibility visibility, Sid actor, CancellationToken ct = default) =>
+        WriteCatalogSettingsAsync(table, (conn, tx) =>
+            DatasetCatalogStore.SetVisibilityAsync(conn, tx, CatalogKeyDefinitionStore.PostgreSql, table, visibility, actor, ct), ct);
+
+    /// <summary>Issue #111: one transaction (locked before read, write, after read); no epoch (tags are not policy inputs); the local metadata entry is dropped after the commit.</summary>
+    private async Task<DatasetCatalogChange?> WriteCatalogSettingsAsync(
+        TableIdentifier table, Func<NpgsqlConnection, NpgsqlTransaction, Task<DatasetCatalogChange?>> write, CancellationToken ct)
+    {
+        DatasetCatalogChange? change;
+        await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
+        {
+            await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
+            {
+                change = await write(conn, tx).ConfigureAwait(false);
+                if (change is null)
+                {
+                    await tx.RollbackAsync(ct).ConfigureAwait(false);
+                    return null;
+                }
+
+                await tx.CommitAsync(ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                await tx.RollbackAsync(ct).ConfigureAwait(false);
+                throw;
+            }
+        }
+
+        if (change.Changed)
+        {
+            _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
+        }
+
         return change;
     }
 

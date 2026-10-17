@@ -258,6 +258,27 @@ public sealed class CatalogVisibilityTierTests
         discovery.ShouldHaveSingleItem().CatalogView.ShouldBe(CatalogView.Summary);
     }
 
+    // ---- Policy neutrality of catalog tags (T-R2-1, T-R2-2, T-R3-1, O-6a) ----
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void T_R2_1_CatalogTags_ChangeNoContractResult_AndNoGrantClassification()
+    {
+        var plain = Table(Shared, DatasetVisibility.Full);
+        var tagged = plain with { CatalogTags = ["secret", "pii", "gdpr", "included", "excluded"] };
+
+        var excluding = new Autheris.Application.Governance.Contracts.SchemaContractDefinition("c", excludedTags: ["secret", "excluded"]);
+        var including = new Autheris.Application.Governance.Contracts.SchemaContractDefinition("c", includedTags: ["included", "secret"]);
+
+        CatalogVisibility.FilterByContract([tagged], excluding).Count.ShouldBe(CatalogVisibility.FilterByContract([plain], excluding).Count);
+        CatalogVisibility.FilterByContract([tagged], excluding).Count.ShouldBe(1);
+        CatalogVisibility.FilterByContract([tagged], including).Count.ShouldBe(CatalogVisibility.FilterByContract([plain], including).Count);
+        CatalogVisibility.FilterByContract([tagged], including).Count.ShouldBe(0);
+        Autheris.Application.Governance.Grants.GrantClassifier.IsSensitive(tagged)
+            .ShouldBe(Autheris.Application.Governance.Grants.GrantClassifier.IsSensitive(plain));
+        Autheris.Application.Governance.Grants.GrantClassifier.IsSensitive(tagged).ShouldBeFalse();
+    }
+
     // ---- Admin rows (G1) ----
 
     [Fact]
