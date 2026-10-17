@@ -541,7 +541,7 @@ public sealed partial class GovernedSqlExecutor
         catch (Exception ex)
         {
             // A driver error is reduced to a stable code first; the original is logged server-side only (see SanitizeProviderError).
-            var sanitized = SanitizeProviderError(ex, binderDialect, dsName, clientValues.Values.Any(v => v is ClientListValue));
+            var sanitized = SanitizeProviderError(ex, binderDialect, dsName, BindsValueFromTheCaller(compiled, clientValues));
             var reported = sanitized ?? ex;
 
             if (!dmlContext.IsDml)
@@ -611,6 +611,14 @@ public sealed partial class GovernedSqlExecutor
     /// or an unavailable source is classified first and keeps its own status (504, 503). Everything that is not a driver error
     /// (policy and binder refusals, cancellation, the gateway's own exceptions) passes through unchanged.
     /// </summary>
+    /// <summary>
+    /// True when the statement binds a client list (SEC-128-07) or a caller attribute value (BC-129-16): a driver message can quote such a value, so
+    /// the exception text is not logged for it.
+    /// </summary>
+    internal static bool BindsValueFromTheCaller(CompiledSql compiled, IReadOnlyDictionary<string, object?> clientValues) =>
+        clientValues.Values.Any(v => v is ClientListValue) ||
+        compiled.Parameters.Any(p => p.Origin == ParameterOrigin.Policy && p.SourceName != null && Autheris.Application.Identity.Attributes.CallerAttributeParameterName.IsReserved(p.SourceName));
+
     private GovernedSqlException? SanitizeProviderError(Exception error, TargetSqlDialect dialect, string dataSourceName, bool clientListsBound)
     {
         if (error is GovernedSqlException || !IsProviderError(error))
@@ -625,7 +633,7 @@ public sealed partial class GovernedSqlExecutor
 
         if (clientListsBound)
         {
-            // SEC-128-07: a driver message can carry a bound list element ("Conversion failed when converting the nvarchar value '...'"), so
+            // SEC-128-07 / BC-129-16: a driver message can carry a bound list element or caller attribute value ("Conversion failed when converting the nvarchar value '...'"), so
             // the exception object (message, inner exceptions) is not logged when a client list is bound; its type and number are.
             var driver = error as DbException;
             _logger?.LogWarning("WebSQL provider error on data source {DataSource} ({Dialect}); the caller receives a sanitized error. ErrorType={ErrorType} ErrorCode={ErrorCode} TraceId={TraceId}",

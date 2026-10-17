@@ -181,4 +181,33 @@ public sealed partial class CallerAttributeArchitectureTests
             text.ShouldNotContain("__gql_caller", Case.Insensitive, path);
         }
     }
+
+    /// <summary>
+    /// ST-129-10, BC-129-15: no caller-visible projection reads the audit details. Only the audit chain, the repositories (Infrastructure) and the
+    /// canonicalizer (Domain) read <c>.DetailsJson</c>; the API, GraphQL and Application layers only write it, and only the governed SQL
+    /// executor writes the <c>caller_attributes</c> fields (other executors do not write them: a forensic gap, plan section 14).
+    /// </summary>
+    [Fact]
+    public void ST_129_10_NoCallerVisibleLayer_ReadsTheAuditDetails_OrNamesTheCallerAttributeAuditFields()
+    {
+        var offenders = new List<string>();
+        foreach (var dir in new[] { "src/Autheris.Api", "src/Autheris.GraphQL", "src/Autheris.Application" })
+        {
+            foreach (var (path, text) in Sources(dir))
+            {
+                if (Regex.IsMatch(text, @"\.DetailsJson\b"))
+                {
+                    offenders.Add($"{path}: reads .DetailsJson");
+                }
+
+                bool writer = path.EndsWith("GovernedSqlExecutor.cs", StringComparison.Ordinal) || path.Contains("/Identity/Attributes/", StringComparison.Ordinal);
+                if (!writer && (text.Contains("\"caller_attributes\"", StringComparison.Ordinal) || text.Contains("\"caller_attribute_binds\"", StringComparison.Ordinal)))
+                {
+                    offenders.Add($"{path}: names a caller attribute audit field");
+                }
+            }
+        }
+
+        offenders.ShouldBeEmpty();
+    }
 }
