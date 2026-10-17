@@ -37,6 +37,13 @@ public static class GovernedSqlErrorCodes
     public const string Timeout = "SQL_TIMEOUT";
     public const string SourceUnavailable = "SQL_SOURCE_UNAVAILABLE";
 
+    // REQ-SQL-128: client list parameters. Fixed messages, never counts, names or values.
+    public const string ListParamPosition = "SQL_LIST_PARAM_POSITION";
+    public const string ListParamType = "SQL_LIST_PARAM_TYPE";
+    public const string ListParamNull = "SQL_LIST_PARAM_NULL";
+    public const string ListParamTooLarge = "SQL_LIST_PARAM_TOO_LARGE";
+    public const string ListParamUnsupported = "SQL_LIST_PARAM_UNSUPPORTED";
+
     /// <summary>The fixed, value-free message of a code. It never carries driver text, values or object names.</summary>
     public static string FixedMessage(string code) => code switch
     {
@@ -61,6 +68,11 @@ public static class GovernedSqlErrorCodes
         CompilerInvariant => "The statement could not be processed.",
         Timeout => "The SQL statement exceeded the execution time limit. Narrow the query (filter, fewer columns, LIMIT) or contact support with the trace id.",
         SourceUnavailable => "The data source is temporarily unavailable. Retry later.",
+        ListParamPosition => "A list parameter is only allowed as the single item of an IN or NOT IN list.",
+        ListParamType => "A list parameter has an invalid or mixed element type, or a scalar parameter received a list.",
+        ListParamNull => "A list parameter must not contain null or empty-string elements.",
+        ListParamTooLarge => "A list parameter exceeds the maximum number of values.",
+        ListParamUnsupported => "List parameters are not supported for this statement.",
         _ => "The statement could not be executed."
     };
 }

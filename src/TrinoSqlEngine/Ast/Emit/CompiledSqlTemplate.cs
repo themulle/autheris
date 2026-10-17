@@ -22,7 +22,9 @@ public sealed record SqlSlot(
     ParameterOrigin Origin,
     string? SourceName,
     object? LiteralValue,
-    string? ColumnType = null);
+    string? ColumnType = null,
+    int? ListIndex = null,
+    int? ListCount = null);
 
 /// <summary>
 /// Value-free cached compile output (SEC-ADG-01, INV-12). It holds the SQL text and slot descriptors; tenant, policy and

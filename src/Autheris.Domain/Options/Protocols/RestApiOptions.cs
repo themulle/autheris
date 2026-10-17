@@ -16,6 +16,12 @@ public sealed class WebSqlOptions
     public int MaxTotalStatementSessions { get; init; } = 1000;
     public int StatementRetentionMinutes { get; init; } = 5;
 
+    /// <summary>REQ-SQL-128: maximum number of distinct values of one list parameter (1..10,000). Clamped per dialect at runtime.</summary>
+    public int MaxListParameterValues { get; init; } = 1000;
+
+    /// <summary>REQ-SQL-128: maximum number of list-valued parameters per request (1..64).</summary>
+    public int MaxListParameters { get; init; } = 8;
+
     /// <summary>
     /// SEC C-03: Additional data sources (keys of DataSources.Connections) a WebSQL request may target.
     /// DefaultDataSourceName is always allowed; empty list = only DefaultDataSourceName.

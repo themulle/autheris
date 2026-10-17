@@ -79,6 +79,9 @@ public sealed record CompileRequest
 
     /// <summary>Maximum emitted length divided by the input length (floor 64 characters of input); SEC-ADG-05.</summary>
     public int MaxExpansionFactor { get; init; } = 64;
+
+    /// <summary>Value-free shapes of the client list parameters the statement references (REQ-SQL-128); part of the cache key.</summary>
+    public Ast.Emit.ClientListShapes ClientLists { get; init; } = Ast.Emit.ClientListShapes.Empty;
 }
 
 /// <summary>
