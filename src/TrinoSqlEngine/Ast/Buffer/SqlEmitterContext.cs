@@ -163,16 +163,7 @@ public sealed class SqlEmitterContext
     /// <summary>Binds a client named parameter; the binder resolves the value per request.</summary>
     public string BindClient(ParameterReference parameter)
     {
-        ArgumentNullException.ThrowIfNull(parameter);
-        if (!parameter.IsSynthetic)
-        {
-            throw new SecurityException("Positional parameters are not supported by the governed compiler; use named parameters.");
-        }
-
-        if (!ClientNameRegex.IsMatch(parameter.Name) || ReservedClientNameRegex.IsMatch(parameter.Name))
-        {
-            throw new SecurityException("The client parameter name is invalid or uses a reserved prefix.");
-        }
+        ValidateClientParameter(parameter);
 
         // List element slots (REQ-SQL-128): both members or none, and the index lies inside the count (SEC-128-10 c).
         if (parameter.ListIndex.HasValue != parameter.ListCount.HasValue
@@ -191,9 +182,35 @@ public sealed class SqlEmitterContext
     /// REQ-SQL-130 (A-4): binds a client named parameter that is used as a time zone argument. The slot carries <see cref="BoundParameter.ZoneArgument"/>;
     /// only the production binder may consume it (it maps the value through the closed zone set before the command exists).
     /// </summary>
-    public string BindZoneClient(ParameterReference parameter) => throw new NotImplementedException();
+    public string BindZoneClient(ParameterReference parameter)
+    {
+        ValidateClientParameter(parameter);
+        if (parameter.ListIndex is not null || parameter.ListCount is not null)
+        {
+            // A list element is never a zone (BC-130-5c); the validator refused it already, this is the second, independent check.
+            throw new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneArgument);
+        }
 
-    private string Bind(DedupKey key, object? value, SqlParameterType type, ParameterOrigin origin, string? sourceName, string? columnType = null, int? listIndex = null, int? listCount = null)
+        return Bind(new DedupKey(DedupKind.ClientZone, 0, 0, parameter.Name, null, 0, null), null, SqlParameterType.String, ParameterOrigin.ClientNamed, parameter.Name, null,
+            zoneArgument: true);
+    }
+
+    private static void ValidateClientParameter(ParameterReference parameter)
+    {
+        ArgumentNullException.ThrowIfNull(parameter);
+        if (!parameter.IsSynthetic)
+        {
+            throw new SecurityException("Positional parameters are not supported by the governed compiler; use named parameters.");
+        }
+
+        if (!ClientNameRegex.IsMatch(parameter.Name) || ReservedClientNameRegex.IsMatch(parameter.Name))
+        {
+            throw new SecurityException("The client parameter name is invalid or uses a reserved prefix.");
+        }
+    }
+
+    private string Bind(DedupKey key, object? value, SqlParameterType type, ParameterOrigin origin, string? sourceName, string? columnType = null, int? listIndex = null, int? listCount = null,
+        bool zoneArgument = false)
     {
         if (_bound is null || _dedup is null || Capabilities is null)
         {
@@ -212,7 +229,7 @@ public sealed class SqlEmitterContext
         }
 
         var (marker, name) = MarkerAndName(Capabilities.MarkerStyle, ordinal);
-        _bound.Add(new BoundParameter(marker, name, ordinal, value, type, origin, sourceName, columnType, listIndex, listCount));
+        _bound.Add(new BoundParameter(marker, name, ordinal, value, type, origin, sourceName, columnType, listIndex, listCount, zoneArgument));
         _dedup[key] = ordinal;
         ParameterCount = _bound.Count;
         return marker;

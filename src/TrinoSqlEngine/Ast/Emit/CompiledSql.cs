@@ -54,6 +54,22 @@ public sealed record CompiledSql(
     /// <see cref="DmlCheckOption.Enforce"/> with the affected row count before it commits; a difference rolls the transaction back.
     /// </summary>
     public bool RequiresRowCountCheck => ExpectedAffectedRows.HasValue;
+
+    /// <summary>
+    /// REQ-SQL-130 (BC-130-5d): a time zone slot is consumable only through the production binder, which maps its value through the closed zone
+    /// set before the command exists. Every other consumer of <see cref="Parameters"/> (generated-query paths, key-set providers, tree queries) calls
+    /// this first, so a zone slot never reaches a provider as an unmapped value or as <c>NULL</c>. The message carries no value and no name.
+    /// </summary>
+    public void EnsureNoZoneArguments()
+    {
+        foreach (var parameter in Parameters)
+        {
+            if (parameter.ZoneArgument)
+            {
+                throw new InvalidOperationException("The compiled SQL contains a parameter that only the governed binder may bind.");
+            }
+        }
+    }
 }
 
 /// <summary>The row-count contract of an INSERT with check-option semantics (CR-ADG-35).</summary>

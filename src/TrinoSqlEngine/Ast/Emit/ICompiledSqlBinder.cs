@@ -186,17 +186,26 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
             throw new InvalidOperationException("The command already has parameters; the binder owns all parameters of a governed command.");
         }
 
+        // REQ-SQL-130 (BC-130-5a): every time zone slot is checked and mapped before the command is touched; a refusal leaves it as it was.
+        string?[]? zones = ResolveZoneSlots(compiled, clientParameterValues);
+
         PrepareCommand(command);
         command.CommandText = compiled.Sql;
         command.CommandType = CommandType.Text;
 
-        foreach (var bound in compiled.Parameters)
+        for (int index = 0; index < compiled.Parameters.Length; index++)
         {
+            var bound = compiled.Parameters[index];
             object? value = bound.Value;
             var type = bound.Type;
 
-            // Only client named parameters read client values, and only by their own source name (SEC-ADG-19).
-            if (bound.Origin == ParameterOrigin.ClientNamed)
+            if (zones?[index] is { } mappedZone)
+            {
+                // A zone is always a string and always the registry-owned dialect value, never typed through InferType (BC-130-5b).
+                value = mappedZone;
+                type = SqlParameterType.String;
+            }
+            else if (bound.Origin == ParameterOrigin.ClientNamed)   // Only client named parameters read client values, and only by their own source name (SEC-ADG-19).
             {
                 if (bound.SourceName is null || !clientParameterValues.TryGetValue(bound.SourceName, out value))
                 {
@@ -264,6 +273,40 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
 
             command.Parameters.Add(parameter);
         }
+    }
+
+    /// <summary>
+    /// The mapped dialect value of every zone slot, by slot index (null when the statement has none). The client value must be a string of at most 64
+    /// characters that is a member of the closed zone set (exact ordinal match, never trimmed or normalized); anything else, <c>null</c> and lists
+    /// included, is <c>SQL_TIMEZONE_INVALID</c>. The refusal carries no value.
+    /// </summary>
+    private string?[]? ResolveZoneSlots(CompiledSql compiled, IReadOnlyDictionary<string, object?> clientParameterValues)
+    {
+        string?[]? zones = null;
+        for (int i = 0; i < compiled.Parameters.Length; i++)
+        {
+            var bound = compiled.Parameters[i];
+            if (!bound.ZoneArgument) continue;
+
+            if (bound.Origin != ParameterOrigin.ClientNamed || bound.SourceName is null || bound.ListIndex is not null)
+            {
+                throw new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneArgument);
+            }
+
+            if (!clientParameterValues.TryGetValue(bound.SourceName, out var value))
+            {
+                throw new MissingClientParameterException(bound.SourceName);
+            }
+
+            if (value is not string text || !TimeZoneRegistry.TryResolve(Dialect, text, out string mapped))
+            {
+                throw new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneInvalid);
+            }
+
+            (zones ??= new string?[compiled.Parameters.Length])[i] = mapped;
+        }
+
+        return zones;
     }
 
     private static SqlParameterType InferType(object? value) => value switch
