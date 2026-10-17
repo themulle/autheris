@@ -19,7 +19,7 @@ too early (minimum over foreign grants) or too late (raw `ValidTo` instead of th
 |---|---|
 | F1 | `src/Autheris.Application/Governance/Services/EffectiveAccessExplanationService.cs:34-167` `ExplainMyAccessAsync`. Inputs already computed: `userSid` (`:41`, null -> early `DENIED` `:42-54`), `roles` (`:58`), `groupSids` (`:68`), `allUserSids` (`:69`), `now` (`:78`), `activeConsents` filtered by tenant (`:79-81`). |
 | F2 | Bug: `applicableConsents` filters only `Effect == Allow && IsActive(now)` (`:146-148`); `validTo = Min(c.ValidTo)` (`:150-152`); description = first consent with non-empty `RoleName`, else `$"Active grant for subject {userSid}"` (`:154-155`). |
-| F3 | Decision side matches grantees: `ConsentResolutionService.ResolveAccess` `:31-33` filters `IsActive(now) && TableIdentifier == table && IsSubjectMatch(...)`; `IsSubjectMatch` `:313-320` calls `GranteeMatcher.Matches(GranteeType, GranteeSid, RoleName, RoleId, userSid, groupSids, roles, allUserSids)`. |
+| F3 | Decision side matches grantees: `src/Autheris.Application/Services/ConsentResolutionService.cs` `ResolveAccess` `:31-33` filters `IsActive(now) && TableIdentifier == table && IsSubjectMatch(...)`; `IsSubjectMatch` `:313-320` calls `GranteeMatcher.Matches(GranteeType, GranteeSid, RoleName, RoleId, userSid, groupSids, roles, allUserSids)`. |
 | F4 | `src/Autheris.Application/Policy/GranteeMatcher.cs` `Matches`: User/ServicePrincipal by SID or `allUserSids`; Group by `groupSids`; Role by `RoleName` or `RoleId.ToString()` in `roles`; unknown type -> `false`; throws on null `groupSids`/`roles`. |
 | F5 | `Consent.EffectiveValidTo` (`src/Autheris.Domain/Model/ConsentModels.cs:103`, via `IndividualGrantLimits.EffectiveConsentValidTo`); `IsActive` (`:105-111`) already uses it. |
 | F6 | `GetGroupSids`, `GetUserRoles`, `GetAllUserSids` (`src/Autheris.Domain/Common/Sid.cs:114,139,153`) return non-null `HashSet<>` (empty when claims are missing). |
@@ -28,11 +28,14 @@ too early (minimum over foreign grants) or too late (raw `ValidTo` instead of th
 
 ## 3. Design Decisions
 
-1. **Same matching as the decision (R-0.1).** Replace `:146-148` with a private static helper
-   `MatchingAllowConsents(activeConsents, table, now, userSid, groupSids, roles, allUserSids)` returning consents with
-   `Effect == Allow && IsActive(now) && TableIdentifier == table && GranteeMatcher.Matches(c.GranteeType, c.GranteeSid,
-   c.RoleName, c.RoleId, userSid, groupSids, roles, allUserSids)`. This is the predicate of F3 restricted to allows, so
-   the explanation never reads a consent the decision ignored. Role grants match by name or role id; group grants only
+1. **One shared applicability predicate (R-0.1, SEC-GOV158-01).** In `ConsentResolutionService` extract
+   `internal static bool IsApplicable(Consent c, TableIdentifier table, DateTimeOffset now, Sid userSid,
+   IReadOnlySet<Sid> groupSids, IReadOnlySet<string> roles, IReadOnlySet<Sid>? allUserSids)` =
+   `c.IsActive(now) && c.TableIdentifier == table && IsSubjectMatch(...)`; `ResolveAccess` `:31-33` calls it (behaviour
+   unchanged). The explanation's private static helper `MatchingAllowConsents(...)` replaces `:146-148` and is
+   `Effect == Allow && ConsentResolutionService.IsApplicable(...)`, applied to the tenant-filtered `activeConsents`
+   (`:79-81` stays first; SEC-GOV158-02). No path, including the empty match, falls back to unfiltered consents. The
+   explanation therefore never reads a consent the decision ignored, by construction. Role grants match by name or role id; group grants only
    for groups in the token; user grants by primary SID or linked SIDs.
 2. **Time validity.** Expired (`now >= EffectiveValidTo`), not-yet-valid (`ValidFrom > now`) and revoked consents are
    excluded via `IsActive(now)` even if the repository returned them. The single `now` of `:78` is reused.
@@ -40,7 +43,8 @@ too early (minimum over foreign grants) or too late (raw `ValidTo` instead of th
    caller's current effective access changes. Default taken from the PRD (minimum, not maximum); a later grant may keep
    partial access, which INC-1's `consentDescriptions` list can explain. Clamped legacy individual grants are reflected.
 4. **Description (R-0.4, interim).** `RoleName` of a matching consent with `GranteeType == Role` and non-empty
-   `RoleName`, chosen deterministically (ordinal minimum of `RoleName`, so repository order cannot change the output);
+   `RoleName` (non-whitespace), chosen deterministically (minimum by `StringComparer.Ordinal`, so repository order
+   cannot change the output; SEC-GOV158-03); a `RoleId`-matched grant shows its stored `RoleName` (S-2 accepted);
    otherwise the generic text with unchanged wording. A non-role consent's stale `RoleName` is never shown.
 5. **Empty match on the `ALLOWED` path.** Cannot occur with the real resolver (it requires at least one matching
    allow), but can with clock skew or a substituted resolver: return `validTo = null` and the generic text. The decision
@@ -50,15 +54,17 @@ too early (minimum over foreign grants) or too late (raw `ValidTo` instead of th
    null paths: the helper receives the non-null sets already in scope.
 7. **#117 parity unchanged.** Only lines `:146-155` change; denied, unknown and hidden-table paths, the DTO and both
    surface call sites are untouched. MCP and GraphQL stay identical because both delegate to the same method (F7).
-8. **No new logging, options, DDL or public API.**
+8. **No new logging, audit event, exception text, options, DDL or public API** (SEC-GOV158-06). `IsApplicable` is
+   `internal`; `Autheris.Tests.Unit` already has `InternalsVisibleTo` (`Autheris.Application.csproj:38`).
 
 ## 4. Work Package WP-158-0 (one TDD step)
 
-**Production:** `src/Autheris.Application/Governance/Services/EffectiveAccessExplanationService.cs` only
-(add `using Autheris.Application.Policy;`, helper, replace `:146-155`).
+**Production:** `src/Autheris.Application/Services/ConsentResolutionService.cs` (extract `IsApplicable`, call it
+from `ResolveAccess`) and `src/Autheris.Application/Governance/Services/EffectiveAccessExplanationService.cs`
+(helper on top of `IsApplicable`, replace `:146-155`).
 **Tests:** new `tests/Autheris.Tests.Unit/Governance/Issue158ExplainAccessMatchingTests.cs` (real
-`ConsentResolutionService`, substituted repositories as in F8 `Issue127` pattern). Existing tests must stay green
-unchanged.
+`ConsentResolutionService`, substituted repositories as in F8 `Issue127` pattern). Existing tests, including all
+resolver and `Issue117*` tests, must stay green unchanged. Security tests carry `[Trait("Category","Security")]`.
 
 | Test | Expectation |
 |---|---|
@@ -73,19 +79,35 @@ unchanged.
 | `ExpiredAndNotYetValidMatchingGrants_AreIgnored` | repository returns them; `validTo` from the active grant only |
 | `DenyAndForeignTableConsents_AreIgnoredForValidTo` | deny consent and other-table allow do not affect `validTo`/description |
 | `NonRoleConsentWithRoleName_IsNotUsedAsDescription` | user grant carrying `RoleName`: generic text |
-| `DescriptionChoice_IsIndependentOfRepositoryOrder` | two matching role grants, both orders: same description |
-| `CallerWithoutRoleClaims_RoleGrantsNeverMatch` | role grants only, no role claims: `DENIED` (decision) and no role name anywhere in the DTO |
 | `AllowedDecision_NoMatchingConsents_ReturnsNullValidToAndGenericText` | substituted allow decision, only foreign consents |
 | `McpDescribeMyAccess_EqualsServiceOutput_ForRegressionFixture` | `McpDatasetCatalog.DescribeMyAccessAsync` result equivalent to direct service call |
+| T-GOV158-S01 `ForeignRoleGrant_NameAbsentFromEntireDto` | caller role A, allows to A and B: no `B` in any field of the serialized DTO |
+| T-GOV158-S02 `ForeignRoleGrant_ExpiryDoesNotInfluenceValidTo` | B expires earlier; `validTo` == A's `EffectiveValidTo` |
+| T-GOV158-S03 `NoRoleClaims_OwnUserGrantPlusForeignRoleGrant_AllowedWithoutRoleName` | replaces the former no-role-claims test (S-3): real resolver, `ALLOWED`, generic text, `validTo` from the user grant |
+| T-GOV158-S04 `UnknownGranteeType_NeverMatchesNorDiscloses` | `(GranteeType)99` consent with `RoleName` ignored by explanation and decision |
+| T-GOV158-S05 `ExplanationApplicability_ParityWithResolver_Theory` | grantee type x match/non-match x active/expired/not-yet-valid/revoked x table: helper set == resolver allow set |
+| T-GOV158-S06 `ValidTo_BoundaryExactlyAtEffectiveValidTo_IsExcluded` | consent expiring at `now` does not count |
+| T-GOV158-S07 `GroupGrant_NotInToken_NotDisclosed` | foreign group grant with `RoleName` contributes nothing |
+| T-GOV158-S08 `OtherTenantConsent_NeverUsed` | other-tenant consent from substituted repository ignored |
+| T-GOV158-S09 `DeniedAndUnknownTablePaths_UnchangedByFix_NoExistenceOracle` | hidden and unknown table give identical DTOs (#117) |
+| T-GOV158-S10 `RoleGrantMatchedByRoleId_ShowsOnlyCallersHeldRoleGrant` | id-matched grant shown, other-id grant not |
+| T-GOV158-S11 `DescriptionAndValidTo_IndependentOfRepositoryOrder` | both orders yield equal DTOs |
+| T-GOV158-S12 `McpAndGraphQlMyAccess_ShareServiceOutput_NoForeignRole` | MCP result for the regression fixture has no foreign role name |
+
+Rows S01, S02 and S10 may be implemented as the security-tagged form of the overlapping functional rows above
+(no duplicate tests required).
 
 ## 5. Estimate and Files Touched
 
 | File | Kind | LOC |
 |---|---|---|
+| `src/Autheris.Application/Services/ConsentResolutionService.cs` | production, modify | ~10 |
 | `src/Autheris.Application/Governance/Services/EffectiveAccessExplanationService.cs` | production, modify | ~25 |
-| `tests/Autheris.Tests.Unit/Governance/Issue158ExplainAccessMatchingTests.cs` | test, new | ~280 |
+| `tests/Autheris.Tests.Unit/Governance/Issue158ExplainAccessMatchingTests.cs` | test, new | ~400 |
 
-Overlap: INC-1 (wave 2) will touch the same lines `:146-155`; no other wave-1 plan touches this file per the intake.
+Total about 435 LOC (35 production, 400 test); size stays S. Overlap: INC-1 (wave 2) will touch the explanation
+lines `:146-155`. Per the intake, no other wave-1 plan touches either production file; the PM should still check
+`ConsentResolutionService.cs` against the other wave-1 plans.
 
 ## 6. Risks
 
@@ -93,9 +115,9 @@ Overlap: INC-1 (wave 2) will touch the same lines `:146-155`; no other wave-1 pl
   is dropped from `validTo`; covered by decision 5. Low.
 - **R2 Behaviour change for clients reading `validTo`:** values become later or earlier but correct; no production
   yet (owner rule 2026-10-13). Low.
-- **R3 Drift from `ConsentResolutionService` predicate:** the helper duplicates F3's predicate. Mitigation: the
-  `CallerWithoutRoleClaims_*` and group/user tests run against the real resolver. Exposing a shared predicate is
-  deferred to INC-1 (default taken, keeps INC-0 to one file).
+- **R3 Drift from the resolver predicate:** removed by SEC-GOV158-01 (one shared `IsApplicable`); T-GOV158-S05
+  guards the parity. Residual risk: a resolver refactor changing `ResolveAccess` behaviour; covered by existing
+  resolver tests staying unchanged. Low.
 
 ## 7. Open Questions
 
