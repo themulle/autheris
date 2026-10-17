@@ -44,6 +44,12 @@ public static class GovernedSqlErrorCodes
     public const string ListParamTooLarge = "SQL_LIST_PARAM_TOO_LARGE";
     public const string ListParamUnsupported = "SQL_LIST_PARAM_UNSUPPORTED";
 
+    // REQ-SQL-130: time zone conversion. Fixed messages, never the zone, the timestamp, a count or the dialect-specific zone id.
+    public const string TimeZoneInvalid = "SQL_TIMEZONE_INVALID";
+    public const string TimeZoneArgument = "SQL_TIMEZONE_ARGUMENT";
+    public const string FunctionUnsupportedDialect = "SQL_FUNCTION_UNSUPPORTED_DIALECT";
+    public const string TimeZoneUnavailable = "SQL_TIMEZONE_UNAVAILABLE";
+
     /// <summary>The fixed, value-free message of a code. It never carries driver text, values or object names.</summary>
     public static string FixedMessage(string code) => code switch
     {
@@ -73,6 +79,10 @@ public static class GovernedSqlErrorCodes
         ListParamNull => "A list parameter contains an element that is not allowed (null, or text the data source cannot store as given).",
         ListParamTooLarge => "A list parameter exceeds the maximum number of values.",
         ListParamUnsupported => "List parameters are not supported for this statement.",
+        TimeZoneInvalid => "The time zone is not supported.",
+        TimeZoneArgument => "The time zone conversion arguments are not valid.",
+        FunctionUnsupportedDialect => "The function is not supported for this data source dialect.",
+        TimeZoneUnavailable => "Time zone conversion is temporarily unavailable.",
         _ => "The statement could not be executed."
     };
 }

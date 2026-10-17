@@ -225,6 +225,12 @@ public static class SqlFunctionAllowlists
         return result.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// The allowlist of admin-authored policy predicates (row policies, policy lint): <see cref="Build"/> without the functions that
+    /// need the governed time zone validator (BC-130-2).
+    /// </summary>
+    public static IReadOnlySet<string> BuildForPolicy(TargetSqlDialect dialect, IEnumerable<string>? additionalAllowedFunctions) => throw new NotImplementedException();
+
     private static FrozenSet<string> Create(params string[][] groups)
     {
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

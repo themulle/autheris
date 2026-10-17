@@ -112,7 +112,7 @@ public sealed class SqlEmitterContext
         return Bind(key, value, type, origin, null, columnType);
     }
 
-    private enum DedupKind { Value, Int64, Int32, Policy, PolicyLike, Client }
+    private enum DedupKind { Value, Int64, Int32, Policy, PolicyLike, Client, ClientZone }
 
     /// <summary>Identity of one bound value: a struct instead of a concatenated string (compared by every field, ordinal).</summary>
     private readonly record struct DedupKey(DedupKind Kind, int Type, int Origin, string? Name, string? ColumnType, long Number, string? Text);
@@ -180,6 +180,12 @@ public sealed class SqlEmitterContext
         long listKey = parameter.ListIndex is { } element ? element + 1L : 0L;
         return Bind(new DedupKey(DedupKind.Client, 0, 0, parameter.Name, null, listKey, null), null, SqlParameterType.String, ParameterOrigin.ClientNamed, parameter.Name, null, parameter.ListIndex, parameter.ListCount);
     }
+
+    /// <summary>
+    /// REQ-SQL-130 (A-4): binds a client named parameter that is used as a time zone argument. The slot carries <see cref="BoundParameter.ZoneArgument"/>;
+    /// only the production binder may consume it (it maps the value through the closed zone set before the command exists).
+    /// </summary>
+    public string BindZoneClient(ParameterReference parameter) => throw new NotImplementedException();
 
     private string Bind(DedupKey key, object? value, SqlParameterType type, ParameterOrigin origin, string? sourceName, string? columnType = null, int? listIndex = null, int? listCount = null)
     {
