@@ -213,7 +213,11 @@ public sealed class CallerAttributeClaimsOptions
     public IReadOnlyList<CallerAttributeTrustedIssuer> TrustedIssuers { get; init; } = [];
 
     /// <summary>Authentication types of the identity that owns a claim. Default: the JwtBearer identity only (F-6); ForwardAuth, Basic and Test are off.</summary>
-    public IReadOnlyList<string> AllowedSchemes { get; init; } = ["AuthenticationTypes.Federation", "Bearer"];
+    /// <remarks>
+    /// <c>McpAuth</c> is the identity the MCP session re-creates from the gateway's own security context (immutable SIDs, no issuer): it carries a
+    /// person key for the attribute table and service set providers, never a trusted claim (the claims provider also checks the claim issuer).
+    /// </remarks>
+    public IReadOnlyList<string> AllowedSchemes { get; init; } = ["AuthenticationTypes.Federation", "Bearer", "McpAuth"];
 
     [Range(1, 256)] public int MaxClaimValueLength { get; init; } = 256;
 

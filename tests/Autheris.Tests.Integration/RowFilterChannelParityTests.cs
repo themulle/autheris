@@ -264,6 +264,11 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
             {
                 using (batch)
                 {
+                    if (batch.Length == 0)
+                    {
+                        continue;   // an empty result carries no column data
+                    }
+
                     var column = batch.Column("id");
                     for (int i = 0; i < batch.Length; i++)
                     {
@@ -295,6 +300,15 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
 
         /// <summary>Hook for variants: more tables and rows in the SQLite source (called after the base data was written).</summary>
         protected virtual void SeedExtraData(SqliteConnection connection) { }
+
+        /// <summary>Hook for variants: more host settings (called after the base settings were applied).</summary>
+        protected virtual void ConfigureHost(IWebHostBuilder builder) { }
+
+        /// <summary>The caller of <see cref="Client"/> (default: David). Variants that compare callers set it before a channel call; the tests of one class run one after the other.</summary>
+        public string CallerSid { get; set; } = DavidSid;
+
+        /// <summary>More test headers for <see cref="Client"/> (for example an application-only caller).</summary>
+        public Dictionary<string, string> ExtraHeaders { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>Hook for variants: more governance records (called after the base records were written).</summary>
         protected virtual Task SeedExtraGovernanceAsync(IGovernanceRepository repo) => Task.CompletedTask;
@@ -355,6 +369,7 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
 
                 b.UseSetting("Gateway:Mcp:Enabled", "true");
                 b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
+                ConfigureHost(b);
             });
 
             await SeedGovernanceAsync();
@@ -372,9 +387,14 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
         public HttpClient Client()
         {
             var client = _factory!.CreateClient();
-            client.DefaultRequestHeaders.Add("X-Test-User-Sid", DavidSid);
+            client.DefaultRequestHeaders.Add("X-Test-User-Sid", CallerSid);
             client.DefaultRequestHeaders.Add("X-Test-Roles", "Reader");
             client.DefaultRequestHeaders.Add("X-Test-Tenant", Tenant);
+            foreach (var (name, value) in ExtraHeaders)
+            {
+                client.DefaultRequestHeaders.Add(name, value);
+            }
+
             return client;
         }
 

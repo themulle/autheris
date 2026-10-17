@@ -50,6 +50,12 @@ internal static partial class PolicyShapeAnalyzer
 
     private static RuleShape Compute(string? subRule, string? rlsFilter)
     {
+        // REQ-GOV-129: a rule that mentions a caller attribute placeholder can never be shared between users (it is refused at publication anyway).
+        if (Autheris.Application.VirtualFilters.CallerPlaceholders.Contains(subRule) || Autheris.Application.VirtualFilters.CallerPlaceholders.Contains(rlsFilter))
+        {
+            return new RuleShape(false, false);
+        }
+
         var readsContext = false;
 
         if (!string.IsNullOrWhiteSpace(subRule))
