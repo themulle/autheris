@@ -351,7 +351,8 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
                 c1.Name.NormalizedName.Equals(c2.Name.NormalizedName, StringComparison.OrdinalIgnoreCase),
 
             (ParameterReference p1, ParameterReference p2) =>
-                string.Equals(p1.Name, p2.Name, StringComparison.OrdinalIgnoreCase),
+                string.Equals(p1.Name, p2.Name, StringComparison.OrdinalIgnoreCase)
+                && p1.ListIndex == p2.ListIndex && p1.ListCount == p2.ListCount,
 
             (LiteralExpression l1, LiteralExpression l2) =>
                 l1.Type == l2.Type && Equals(l1.Value?.ToString(), l2.Value?.ToString()),

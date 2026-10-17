@@ -60,7 +60,7 @@ public sealed record CompiledSqlTemplate(
         {
             slots.Add(new SqlSlot(
                 p.Marker, p.Name, p.Ordinal, p.Type, p.Origin, p.SourceName,
-                p.Origin == ParameterOrigin.QueryLiteral ? p.Value : null, p.ColumnType));
+                p.Origin == ParameterOrigin.QueryLiteral ? p.Value : null, p.ColumnType, p.ListIndex, p.ListCount));
         }
 
         return slots.MoveToImmutable();
@@ -88,7 +88,7 @@ public sealed record CompiledSqlTemplate(
                 }
             }
 
-            parameters.Add(new BoundParameter(slot.Marker, slot.Name, slot.Ordinal, value, type, slot.Origin, slot.SourceName, slot.ColumnType));
+            parameters.Add(new BoundParameter(slot.Marker, slot.Name, slot.Ordinal, value, type, slot.Origin, slot.SourceName, slot.ColumnType, slot.ListIndex, slot.ListCount));
         }
 
         return new CompiledSql(Sql, parameters.ToImmutable(), Dialect, StatementClass, AppliedPredicates, CompilerVersion)

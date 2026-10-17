@@ -172,6 +172,21 @@ internal sealed class GovernedSqlCompiler
         var simplified = (SqlStatement)new AstSimplificationVisitor { CancellationToken = token }.Visit(ast);
         CheckBudget(request, clock, token);
 
+        // 5b. client lists (REQ-SQL-128): expanded on the user tree BEFORE the security visitor, so the DML guard judges the
+        // expanded predicate (an empty NOT IN list is the constant 1 = 1, SEC-128-01). The mutation control moves the pass behind it.
+        ClientListExpander? expander = null;
+        bool listsBeforeGuards = !CompilerHooks.IsDisabled(SecurityControl.ClientListExpandsBeforeGuards);
+        if (!request.ClientLists.IsEmpty)
+        {
+            expander = new ClientListExpander(request.ClientLists, caps) { CancellationToken = token };
+            if (listsBeforeGuards)
+            {
+                Pass("lists");
+                simplified = (SqlStatement)expander.Visit(simplified);
+                CheckBudget(request, clock, token);
+            }
+        }
+
         // 6. typed security injection; user literals first learn the catalog type of the column they are compared with (SEC-ADG-16 item 2)
         Pass("inject");
         var typedLiterals = (SqlStatement)new LiteralColumnTypeAnnotator(policy.Catalog) { CancellationToken = token }.Visit(simplified);
@@ -182,6 +197,12 @@ internal sealed class GovernedSqlCompiler
         CheckBudget(request, clock, token);
 
         secured = CompilerHooks.Current.InterceptInjected(secured);
+
+        if (expander is not null && !listsBeforeGuards)
+        {
+            Pass("lists");
+            secured = (SqlStatement)expander.Visit(secured);
+        }
 
         // 7. production coverage proof (does not trust the injector)
         Pass("verify");
@@ -203,8 +224,11 @@ internal sealed class GovernedSqlCompiler
             with { AppliedPredicates = applied, ExpectedAffectedRows = Ast.Security.InsertCheckOption.ExpectedRows(secured) };
 
         // 10. output budget
+        // The marker text of the lists that were actually expanded is not policy expansion (SEC-128-03): it is subtracted from the
+        // emitted length, derived from the expander counter and never from the request shapes.
         long limit = (long)request.MaxExpansionFactor * Math.Max(rawSql.Length, CompileLimits.MinimumInputForExpansion);
-        if (compiled.Sql.Length > limit)
+        long emitted = compiled.Sql.Length - (expander?.ExpandedItems ?? 0) * ClientListExpander.MarkerAllowance;
+        if (emitted > limit)
         {
             throw new SqlLimitExceededException(SqlLimitKind.PolicyExpansionFactor, request.TargetDialect, compiled.Sql.Length, limit);
         }

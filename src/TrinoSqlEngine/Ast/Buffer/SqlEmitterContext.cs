@@ -168,10 +168,20 @@ public sealed class SqlEmitterContext
             throw new SecurityException("The client parameter name is invalid or uses a reserved prefix.");
         }
 
-        return Bind(new DedupKey(DedupKind.Client, 0, 0, parameter.Name, null, 0, null), null, SqlParameterType.String, ParameterOrigin.ClientNamed, parameter.Name);
+        // List element slots (REQ-SQL-128): both members or none, and the index lies inside the count (SEC-128-10 c).
+        if (parameter.ListIndex.HasValue != parameter.ListCount.HasValue
+            || (parameter.ListIndex is { } index && (index < 0 || index >= parameter.ListCount!.Value)))
+        {
+            throw new ClientListException(GovernedSqlErrorCodes.ListParamPosition);
+        }
+
+        // The element index is part of the identity: the elements of one list are distinct slots, the same element of a list that is
+        // used twice is one slot.
+        long listKey = parameter.ListIndex is { } element ? element + 1L : 0L;
+        return Bind(new DedupKey(DedupKind.Client, 0, 0, parameter.Name, null, listKey, null), null, SqlParameterType.String, ParameterOrigin.ClientNamed, parameter.Name, null, parameter.ListIndex, parameter.ListCount);
     }
 
-    private string Bind(DedupKey key, object? value, SqlParameterType type, ParameterOrigin origin, string? sourceName, string? columnType = null)
+    private string Bind(DedupKey key, object? value, SqlParameterType type, ParameterOrigin origin, string? sourceName, string? columnType = null, int? listIndex = null, int? listCount = null)
     {
         if (_bound is null || _dedup is null || Capabilities is null)
         {
@@ -190,7 +200,7 @@ public sealed class SqlEmitterContext
         }
 
         var (marker, name) = MarkerAndName(Capabilities.MarkerStyle, ordinal);
-        _bound.Add(new BoundParameter(marker, name, ordinal, value, type, origin, sourceName, columnType));
+        _bound.Add(new BoundParameter(marker, name, ordinal, value, type, origin, sourceName, columnType, listIndex, listCount));
         _dedup[key] = ordinal;
         ParameterCount = _bound.Count;
         return marker;
