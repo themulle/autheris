@@ -163,14 +163,17 @@ public sealed class AttributeTableProvider : ICallerAttributeProvider
         {
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
+                // Ordinal tenant and issuer comparison, whatever the collation of the source says. The Max+1 row limit ran in the database
+                // before this check, so a skipped row could have crowded a real one out of the window: the result is not trustworthy and
+                // fails closed as OverCardinality (the same constant as Missing for the caller).
                 if (statement.TenantOrdinal is { } t && !string.Equals(reader.GetString(t), subject.Tenant.Value, StringComparison.Ordinal))
                 {
-                    continue;   // ordinal tenant comparison, whatever the collation of the source says
+                    return null;
                 }
 
                 if (statement.IssuerOrdinal is { } i && !string.Equals(reader.GetString(i), subject.Issuer, StringComparison.Ordinal))
                 {
-                    continue;
+                    return null;
                 }
 
                 var text = Convert.ToString(reader.GetValue(statement.ValueOrdinal), CultureInfo.InvariantCulture);
