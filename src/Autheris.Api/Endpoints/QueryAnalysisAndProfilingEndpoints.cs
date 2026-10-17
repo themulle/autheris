@@ -44,7 +44,11 @@ public sealed record ComputeDatasetProfileHttpRequest(
 /// </summary>
 public static class QueryAnalysisAndProfilingEndpoints
 {
-    public static IEndpointRouteBuilder MapQueryAnalysisAndProfilingEndpoints(this IEndpointRouteBuilder app)
+    /// <param name="mapSampleRows">
+    /// PLAN-SEC-115 C-115-1: the sample-rows route returns rows, so it belongs to the REST data family and is mapped only while
+    /// <c>Gateway:RestApi:DataEndpoint:Enabled</c> is on. The other analysis and consent routes stay unconditional.
+    /// </param>
+    public static IEndpointRouteBuilder MapQueryAnalysisAndProfilingEndpoints(this IEndpointRouteBuilder app, bool mapSampleRows = true)
     {
         app.MapPost("/api/v1/governance/queries/analyze", HandleAnalyzeQueriesAsync)
             .WithName("AnalyzeQueriesStatic")
@@ -56,10 +60,13 @@ public static class QueryAnalysisAndProfilingEndpoints
             .RequireAuthorization()
             .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRequested);
 
-        app.MapGet("/api/v1/catalog/datasets/{dataset}/sample-rows", HandleSampleRowsAsync)
-            .WithName("GetDatasetSampleRowsWithSyntheticSupport")
-            .RequireAuthorization()
-            .WithAudit(AuditLevel.Summarized, AuditEventTypes.MetadataSyntheticSample);
+        if (mapSampleRows)
+        {
+            app.MapGet("/api/v1/catalog/datasets/{dataset}/sample-rows", HandleSampleRowsAsync)
+                .WithName("GetDatasetSampleRowsWithSyntheticSupport")
+                .RequireAuthorization()
+                .WithAudit(AuditLevel.Summarized, AuditEventTypes.MetadataSyntheticSample);
+        }
 
         return app;
     }

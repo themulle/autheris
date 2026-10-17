@@ -174,7 +174,7 @@ public sealed class McpToolRegistry : IMcpToolRegistry
         ));
 
         // 6. Built-in dataset tools: catalog discovery and governed sample rows
-        foreach (var datasetTool in McpDatasetTools.Definitions())
+        foreach (var datasetTool in McpDatasetTools.Definitions(_switches))
         {
             RegisterBuiltIn(datasetTool);
         }

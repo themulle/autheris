@@ -315,7 +315,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("# Autheris Model Context Protocol (MCP) Tools Reference\n");
-        foreach (var tool in McpDatasetTools.Definitions())
+        foreach (var tool in McpDatasetTools.Definitions(_switches))
         {
             // Lists only what the switches leave on (it used to list every dataset tool regardless of the registry).
             if (_switches is not null && !_switches.IsToolEnabled(tool.Name))

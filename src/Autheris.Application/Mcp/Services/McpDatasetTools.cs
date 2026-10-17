@@ -111,6 +111,21 @@ public static class McpDatasetTools
             : null;
     }
 
+    /// <summary>
+    /// The built-in definitions as the switches leave them: when the REST data family is closed (or the Query group is off) the
+    /// <c>describe_api</c> example no longer names the closed path (PLAN-SEC-115 ST-115-13). Identical to <see cref="Definitions()"/> by default.
+    /// </summary>
+    public static IEnumerable<McpToolDefinition> Definitions(Autheris.Application.Mcp.Interfaces.IReadPathSwitches? switches)
+    {
+        var dataClosed = switches is not null && !(switches.RestDataEndpointEnabled && switches.IsGroupEnabled(McpToolGroup.Query));
+        foreach (var tool in Definitions())
+        {
+            yield return dataClosed && string.Equals(tool.Name, DescribeApi, StringComparison.Ordinal)
+                ? tool with { InputJsonSchema = tool.InputJsonSchema.Replace("'/api/v1/data/{domain}/{table}'", "'/api/v1/catalog/datasets'", StringComparison.Ordinal) }
+                : tool;
+        }
+    }
+
     public static IEnumerable<McpToolDefinition> Definitions()
     {
         yield return new McpToolDefinition(

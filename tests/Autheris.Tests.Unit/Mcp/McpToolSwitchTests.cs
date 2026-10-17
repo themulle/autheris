@@ -268,7 +268,7 @@ public sealed class McpToolSwitchTests
         }
 
         public long Count(string path) { lock (_counts) { return _counts.GetValueOrDefault(path); } }
-        public long Total() { lock (_counts) { return _counts.Values.Sum(); } }
+        public long Total() { lock (_counts) { return _counts.Where(kv => kv.Key.StartsWith("mcp_", StringComparison.Ordinal)).Sum(kv => kv.Value); } }
         public void Dispose() => _listener.Dispose();
     }
 
@@ -401,6 +401,21 @@ public sealed class McpToolSwitchTests
         var ra = await rig.Handler.HandleMessageAsync(sessionId, Rpc(disabledName));
         var rb = await rig.Handler.HandleMessageAsync(sessionId, Rpc(unknown));
         Substitute_(ra, disabledName).ShouldBe(Substitute_(rb, unknown));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ST_115_13_describe_api_example_does_not_name_the_closed_REST_data_path()
+    {
+        var closedRest = Build(new GatewayOptions { RestApi = new RestApiOptions { DataEndpoint = new RestDataEndpointOptions { Enabled = false } } }).Registry;
+        var closedQuery = Build(Opts(Off(McpToolGroup.Query))).Registry;
+        var open = Build(Opts()).Registry;
+
+        closedRest.FindTool("describe_api")!.InputJsonSchema.ShouldNotContain("/api/v1/data");
+        closedQuery.FindTool("describe_api").ShouldNotBeNull();
+        closedQuery.FindTool("describe_api")!.InputJsonSchema.ShouldNotContain("/api/v1/data");
+        open.FindTool("describe_api")!.InputJsonSchema.ShouldContain("/api/v1/data/{domain}/{table}");
+        closedRest.FindTool("describe_api")!.InputJsonSchema.ShouldContain("/api/v1/catalog/datasets");
     }
 
     // ---- ST-115-23: nothing the caller sends changes a switch ----------------------------------------------------------------
