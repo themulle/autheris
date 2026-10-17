@@ -188,9 +188,10 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
 
                     return new RawProcedureResult(columns, rows, truncated);
                 }
-                catch (DbException ex) when (TryGetBusinessError(ex, out string? message))
+                catch (DbException ex) when (TryGetBusinessError(ex, out int? errorNumber, out string? sqlState))
                 {
-                    throw new ProcedureBusinessException(message!);
+                    // Only number/SQLSTATE leave the invoker: the message text may contain data values.
+                    throw new ProcedureBusinessException(errorNumber, sqlState);
                 }
             }
             finally
@@ -320,45 +321,25 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
         }
     }
 
-    /// <summary>THROW 50000-59999 (MSSQL) or SQLSTATE P0001 (PostgreSQL) raised by the procedure is a business error; its message is returned (sanitized).</summary>
-    internal static bool TryGetBusinessError(DbException ex, out string? message)
+    /// <summary>THROW 50000-59999 (MSSQL) or SQLSTATE P0001 (PostgreSQL) raised by the procedure is a business error; only its number or SQLSTATE is returned.</summary>
+    internal static bool TryGetBusinessError(DbException ex, out int? errorNumber, out string? sqlState)
     {
-        message = null;
+        errorNumber = null;
+        sqlState = null;
         var number = ex.GetType().GetProperty("Number")?.GetValue(ex) as int?;
         if (number is >= 50000 and <= 59999)
         {
-            message = SanitizeMessage(ex.Message);
+            errorNumber = number;
             return true;
         }
 
-        if (ex.GetType().GetProperty("SqlState")?.GetValue(ex) is string sqlState && sqlState == "P0001")
+        if (ex.GetType().GetProperty("SqlState")?.GetValue(ex) is string state && state == "P0001")
         {
-            message = SanitizeMessage(ex.Message);
+            sqlState = state;
             return true;
         }
 
         return false;
-    }
-
-    internal static string SanitizeMessage(string? message)
-    {
-        if (string.IsNullOrEmpty(message))
-        {
-            return "The operation was rejected.";
-        }
-
-        var sb = new StringBuilder(Math.Min(message.Length, 500));
-        foreach (char c in message)
-        {
-            if (sb.Length >= 500)
-            {
-                break;
-            }
-
-            sb.Append(char.IsControl(c) ? ' ' : c);
-        }
-
-        return sb.ToString().Trim();
     }
 
     private static void TryCancel(DbCommand cmd)
