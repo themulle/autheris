@@ -726,6 +726,8 @@ public partial class SqliteGovernanceRepository
                     return null;
                 }
 
+                // Queued inside the write scope: the scope disposal applies it under the write gate.
+                QueueMetadataInvalidation(table);
                 await tx.CommitAsync(ct);
             }
             catch
@@ -735,7 +737,6 @@ public partial class SqliteGovernanceRepository
             }
         }
 
-        QueueMetadataInvalidation(table);
         await _epochValidationService.InvalidateEpochAsync(table, ct);
         return change;
     }
@@ -759,6 +760,8 @@ public partial class SqliteGovernanceRepository
                     return null;
                 }
 
+                // Queued inside the write scope: the scope disposal applies it under the write gate.
+                QueueMetadataInvalidation(table);
                 await tx.CommitAsync(ct);
             }
             catch
@@ -768,7 +771,6 @@ public partial class SqliteGovernanceRepository
             }
         }
 
-        QueueMetadataInvalidation(table);
         await _epochValidationService.InvalidateEpochAsync(table, ct);
         return change;
     }
