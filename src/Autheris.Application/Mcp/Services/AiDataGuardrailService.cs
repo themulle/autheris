@@ -49,6 +49,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
     private readonly IGatewayEventBus? _eventBus;
     private readonly TrinoSqlEngine.ISqlEngine? _sqlEngine;
     private readonly IReadPathSwitches? _switches;
+    private readonly Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService? _datasetCatalogAdmin;
 
     private static readonly TimeSpan DefaultRegexTimeout = TimeSpan.FromMilliseconds(250);
     private static readonly Regex EmailRegex = new(@"\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b", RegexOptions.Compiled | RegexOptions.IgnoreCase, DefaultRegexTimeout);
@@ -74,7 +75,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         IUniversalDocStore? docStore = null,
         IGatewayEventBus? eventBus = null,
         TrinoSqlEngine.ISqlEngine? sqlEngine = null,
-        IReadPathSwitches? switches = null)
+        IReadPathSwitches? switches = null,
+        Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService? datasetCatalogAdmin = null)
     {
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -95,6 +97,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         _eventBus = eventBus;
         _sqlEngine = sqlEngine;
         _switches = switches;
+        _datasetCatalogAdmin = datasetCatalogAdmin;
     }
 
     /// <summary>Closed tag set for <c>autheris_disabled_path_requests_total</c> (no tool names, no ids).</summary>
@@ -196,7 +199,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
 
             if (_accessPlanningService != null)
             {
-                return await McpAdminTools.ExecuteAdminToolAsync(tool.Name, request.ArgumentsJson ?? "{}", sessionContext, _accessPlanningService, cancellationToken).ConfigureAwait(false);
+                return await McpAdminTools.ExecuteAdminToolAsync(tool.Name, request.ArgumentsJson ?? "{}", sessionContext, _accessPlanningService, _datasetCatalogAdmin, cancellationToken).ConfigureAwait(false);
             }
         }
 

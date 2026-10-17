@@ -58,7 +58,7 @@ public static class McpToolGroups
             Autheris.Application.Mcp.Tools.McpAdminTools.PlanAccess, Autheris.Application.Mcp.Tools.McpAdminTools.ApplyAccess,
             Autheris.Application.Mcp.Tools.McpAdminTools.RegisterDatasource, Autheris.Application.Mcp.Tools.McpAdminTools.SetDatasetState,
             Autheris.Application.Mcp.Tools.McpAdminTools.ResolvePrincipal, Autheris.Application.Mcp.Tools.McpAdminTools.PlanRowFilterEvaluation,
-            Autheris.Application.Mcp.Tools.McpAdminTools.ApplyRowFilterEvaluation,
+            Autheris.Application.Mcp.Tools.McpAdminTools.ApplyRowFilterEvaluation, Autheris.Application.Mcp.Tools.McpAdminTools.SetDatasetCatalog,
             McpDocTools.SearchDocs, McpDocTools.LookupErrorCode, McpDocTools.GetProcedure,
             McpDocTools.ListDocTopics, McpDocTools.ListApplications, McpDocTools.DepositDocumentation);
 
