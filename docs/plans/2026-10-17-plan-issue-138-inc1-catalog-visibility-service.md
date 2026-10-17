@@ -115,3 +115,59 @@ New: `Application/Catalog/Interfaces/ICatalogVisibilityService.cs`, `Application
 | OQ-4 | `/datasources` under ReBAC? | Yes (shrinks only, admin endpoint) |
 | OQ-5 | GraphQL `OpenSchema` mode? | Unchanged (operator opt-in bypass) |
 | OQ-6 | Chunk size / parallelism configurable now? | No; constants 32/8, options in INC-138-3 |
+
+---
+
+## Phase 3 Security Review (csharp-security-expert, 2026-10-17)
+
+**Verdict: APPROVED WITH CONDITIONS.** The design is fail-closed in intent, only shrinks the visible set (ReBAC intersects, never unions), keeps the #111 tier core untouched and removes three divergent rules. The conditions below are binding on Phase 4 and need no plan revision. F-C1..F-C10 and W0-C1..W0-C11 are not weakened, provided SEC-CAT138-01..12 hold.
+
+**Code facts verified** (worktree, origin/main lineage): `ZanzibarRebacEvaluator.BatchCheckAsync` (`Security/Rebac/Services/ZanzibarRebacEvaluator.cs:285-307`) breaks on cancellation and leaves keys missing, denies cross-tenant items, and is sequential per call; `CatalogDiscoveryService.IsRebacAllowedAsync` (`:354`) keys on `context.SubjectId`, while the data path (`TableAccessPolicy.Consent.cs:27-28`) keys on `query.UserSid`; the data path honours `IsRebacBypassed` and `EnforceOnQueryPaths`, the discovery path checks only `evaluator.IsEnabled`; `McpDatasetCatalog.GraphQlAccessAsync` (`:658-672`) is the only relation filter.
+
+| # | Finding | Sev |
+|---|---|---|
+| F1 | Discovery ReBAC uses `IsEnabled`; data path uses `EnforceOnQueryPaths`. Catalog may hide what data allows (acceptable direction), never the reverse; must stay so. | Info |
+| F2 | ReBAC subject changes from `RequestContext.SubjectId` to `principal.GetUserSid()` (D-2). If the two differ (impersonation, service tokens), REST list could widen or narrow versus today and versus the data path (`query.UserSid`). | Medium |
+| F3 | Per-scope memo keyed on "principal reference" is unsafe if the principal is mutated or replaced mid-scope (token exchange, `IsMcpAuthBypassed` clone) and ignores the consent/ReBAC epoch inside a long-lived scope (MCP session reusing one scope, background hosts). | Medium |
+| F4 | `Parallel.ForEachAsync` over a shared `BatchCheckAsync` evaluator: a chunk exception handling that hides only that chunk must also not swallow `OperationCanceledException`; a partial result after cancellation must not be cached or returned as a complete set. | Medium |
+| F5 | `FindVisibleAsync` uses `GetTableMetadataAsync` (no `is_active` filter). Plan rejects `!IsActive`; also tenant must be re-checked on the row, not only on the lookup key. | Medium |
+| F6 | Relation targets: `FilterVisibleAsync` is the right fix, but `describe_dataset` also exposes names elsewhere (`DatasetAccess`, lineage, semantic/derived references, OData/Arrow paths, error text). Not enumerated. | Medium |
+| F7 | Missed discovery surfaces: `DynamicOpenApiGenerator` (OpenAPI per domain, lists tables), OData service document/`$metadata`, `QueryAnalysisService`/`AccessPlanningService`/`BundledConsentRequestService` (table-exists vs forbidden oracle), `CatalogVersionProvider`, Trino/Arrow metadata (S12, consent-only). The plan classifies S12 only. | Medium |
+| F8 | Error/timing oracle: describe of a ReBAC-denied table must be byte-identical to unknown (message, code, no extra ReBAC round trip skew visible in `invoke_api` envelopes). | Low |
+| F9 | Admin classes under ReBAC (OQ-1): correct and consistent, but a break-glass/operator admin with no tuples loses discovery; operator lockout of the catalog must not block consent administration endpoints. | Low |
+| F10 | Architecture test by Cecil call-site allow-list is bypassable via reflection, delegates, lambdas compiled into display classes, or a new private helper in the allow-listed `McpCatalogVisibility`. | Low |
+| F11 | Logs: "count only" is right; the memo/diagnostic `CatalogChannel` must not carry SID/tenant values into metrics tags (cardinality and confidentiality). | Low |
+
+### Binding conditions
+- **SEC-CAT138-01** Null principal, no SID, `ANONYMOUS_MCP_CLIENT`, `CallerScope.None`, null dependency or any consent/tier/visibility exception -> empty set / `null` / empty `FilterVisible`; never an unfiltered fallback. `FilterVisibleAsync` of an empty candidate list returns empty without calling the repository.
+- **SEC-CAT138-02** ReBAC enabled (`evaluator.IsEnabled`) with evaluator null, throwing outside a chunk, or returning a result without a key -> deny. ReBAC disabled -> no ReBAC term. Chunk exception hides that chunk only; `OperationCanceledException` propagates and the partial result is never memoised or returned.
+- **SEC-CAT138-03** One ReBAC rule: relation `can_query`, object `RebacTableGate.ObjectId`, tenant = `caller.Tenant` (validated non-empty), subject = `principal.GetUserSid()`. Phase 4 must prove REST subject equality with the former `context.SubjectId` for human and service tokens; if unequal, the stricter of both (both must allow) applies until a decision is logged. The data path subject (`UserSid`) must equal the catalog subject in a test.
+- **SEC-CAT138-04** Discovery may hide more than the data path, never less: where `IsRebacBypassed` or `EnforceOnQueryPaths=false` lets data pass, discovery still applies ReBAC when `IsEnabled`; the reverse (catalog shows, data path denies by ReBAC) is a defect, covered by a parity test.
+- **SEC-CAT138-05** Memo key = (principal subject SID string + group/role/scope hash used by consent cache, tenant, contract id, surface). Reference equality alone is forbidden. Memo lives only in the scoped service, is not shared with singletons, and is dropped when the scope ends; no cross-request cache in INC-1 (INC-3 must key additionally on consent epoch and ReBAC tenant generation).
+- **SEC-CAT138-06** Fixed bounds are hard: chunk 32, parallelism 8, candidate cap = the catalog size already loaded; no per-request override from callers/headers/query args. `FilterVisibleAsync` candidates are de-duplicated and capped (relations cap, for example 256) -> excess is dropped (deny), not evaluated.
+- **SEC-CAT138-07** `FindVisibleAsync`/`FilterVisibleAsync` re-check `Table.IsActive` and `row.TenantId == caller tenant` (or shared-table rule) on the loaded row, in addition to consent, tier and ReBAC; `CatalogView` default `Unmarked` still denies.
+- **SEC-CAT138-08** `Summary` rows remain exposed only via the #111 Summary DTOs: the service returns `TableMetadata` untouched; no new code path may add columns, samples or `sample_rows` for `CatalogView != Full`. Relation targets in describe are filtered through `FilterVisibleAsync` and every other table name in `describe_dataset` (access paths, lineage, semantic refs) must derive from a visible set; Phase 4 greps `McpDatasetCatalog` for other `TableIdentifier` emissions and lists them in the PR.
+- **SEC-CAT138-09** Denied, unknown, inactive and wrong-tenant describe/sample/detail return the identical exception type, code and message (R-138-1.3); no ReBAC wording in errors. Warning logs carry counts only; no SID, tenant, table name or tuple; metrics tags never carry principal or table values.
+- **SEC-CAT138-10** Surface completeness: Phase 4 records, in the PR, a disposition (migrated / consent-only by design / out of scope with reason) for `DynamicOpenApiGenerator`, OData service document and `$metadata`, `QueryAnalysisService`, `AccessPlanningService`, `BundledConsentRequestService`, `CatalogVersionProvider`, `EffectiveAccessExplanationService`; any that enumerates table names to a non-admin caller on a Discovery-like surface is migrated or opened as a tracked follow-up before merge.
+- **SEC-CAT138-11** Architecture test (D-6) additionally forbids: new callers inside `McpCatalogVisibility` beyond the DataAccess list, any discovery class referencing `IRebacEvaluator`, and the removed members `ResolvePermittedAsync`/`IsRebacAllowedAsync` (assert absent). It must fail when a type outside the allow-list references the methods, including via lambdas/closure classes (check the compiler-generated nested types by declaring type root).
+- **SEC-CAT138-12** I-7 gate: Phase 4 starts only after I-7 merged and section 2 re-verification is recorded; F-C1..F-C10 and W0-C1..W0-C11 tests stay green unmodified. `/datasources` keeps its admin-class gate before the visibility call (ReBAC only shrinks); GraphQL `OpenSchema` bypass stays operator opt-in and must be logged at startup once.
+
+### Open-question defaults
+OQ-1 yes, OQ-2 yes, OQ-3 no, OQ-4 yes, OQ-5 unchanged, OQ-6 constants: all accepted. OQ-1 consequence (F9) is a release-note item, not a blocker.
+
+### Mandatory tests (`[Trait("Category","Security")]`)
+- **T-CAT138-01** `NullPrincipal_NoSid_AnonymousMcpSid_ScopeNone_ReturnEmpty_AllThreeMethods`
+- **T-CAT138-02** `RebacEvaluatorNullOrDisabledResultMissingKey_Denies` (null evaluator while enabled, key absent -> deny)
+- **T-CAT138-03** `RebacChunkThrows_OnlyThatChunkHidden_CancellationPropagates_NoPartialMemo`
+- **T-CAT138-04** `Memo_KeyedBySidTenantContractSurface_NotReferenceOnly_ReplacedPrincipalReEvaluates`
+- **T-CAT138-05** `Batching_Chunk32_Parallel8_Enforced_RelationCandidatesCappedAndDeduped`
+- **T-CAT138-06** `FindVisible_InactiveWrongTenantUnknownRebacDenied_IdenticalErrorAndMessage` (MCP describe, sample_rows, REST detail)
+- **T-CAT138-07** `Describe_RelationTargetDenied_NoNameInRelationsAccessPathsLineageOrError`
+- **T-CAT138-08** `RestRebacSubject_EqualsDataPathSubject_ForUserAndServiceToken`
+- **T-CAT138-09** `CatalogNeverShowsWhatDataPathDeniesByRebac_Theory` (REST, MCP, GraphQL x admin/non-admin x Hidden/Summary/Full)
+- **T-CAT138-10** `SummaryRow_NoColumnsNoSamples_ThroughServiceAllChannels_RebacOnAndOff`
+- **T-CAT138-11** `AdminClass_RebacOn_NoTuples_SeesNothing_ConsentAdminEndpointsStillReachable`
+- **T-CAT138-12** `Datasources_AdminGateBeforeVisibility_RebacShrinksOnly`
+- **T-CAT138-13** `Logs_Metrics_NoSidTenantTableName_OnChunkFailureAndDeny`
+- **T-CAT138-14** `Architecture_RemovedMembersAbsent_ClosureCallersDetected_DiscoveryHasNoRebacEvaluatorReference`
+- **T-CAT138-15** `SurfaceDispositionList_OpenApiODataQueryAnalysis_NoHiddenTableNameToNonAdmin` (covers SEC-CAT138-10 outcome)
