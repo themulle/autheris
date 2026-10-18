@@ -3,6 +3,7 @@ namespace Autheris.GraphQL.Interceptors;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Autheris.Application.Analytics;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Catalog;
@@ -22,6 +23,10 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
     private readonly int _maxExecutionDepth;
     private readonly QueryCostOptions? _costOptions;
     private readonly Func<string, string, RelationCardinality?>? _relationLookup;
+    private readonly double _aggregateFieldCostWeight;
+    private readonly int _maxGroupByColumns;
+    private readonly int _maxAggregates;
+    private readonly int _maxAggregateFieldsPerOperation;
 
     // SEC M-13: Default-Seitengröße, die Resolver mit `first`-Argument (z.B. Query.GetTableAsync) ohne explizites Argument verwenden.
     internal const int DefaultPayloadPageSize = 50;
@@ -35,17 +40,26 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
         int payloadRowMultiplier = 1,
         int maxExecutionDepth = 25,
         QueryCostOptions? costOptions = null,
-        Func<string, string, RelationCardinality?>? relationLookup = null)
+        Func<string, string, RelationCardinality?>? relationLookup = null,
+        double aggregateFieldCostWeight = AggregationOptions.DefaultAggregateFieldCostWeight,
+        int maxGroupByColumns = AggregationOptions.DefaultMaxGroupByColumns,
+        int maxAggregates = AggregationOptions.DefaultMaxAggregates,
+        int maxAggregateFieldsPerOperation = GraphQLAggregationOptions.DefaultMaxFieldsPerOperation)
     {
         _costOptions = costOptions;
         _relationLookup = relationLookup;
+        _maxExecutionDepth = maxExecutionDepth > 0 ? maxExecutionDepth : 25;
+        // #112 A-7: the three weights of the typed aggregate cost model (the same ones the engine's cost calculator uses).
+        _aggregateFieldCostWeight = aggregateFieldCostWeight > 0 ? aggregateFieldCostWeight : AggregationOptions.DefaultAggregateFieldCostWeight;
+        _maxGroupByColumns = maxGroupByColumns > 0 ? maxGroupByColumns : AggregationOptions.DefaultMaxGroupByColumns;
+        _maxAggregates = maxAggregates > 0 ? maxAggregates : AggregationOptions.DefaultMaxAggregates;
+        _maxAggregateFieldsPerOperation = maxAggregateFieldsPerOperation > 0 ? maxAggregateFieldsPerOperation : GraphQLAggregationOptions.DefaultMaxFieldsPerOperation;
         _maxAllowedCost = maxAllowedCost;
         _defaultListMultiplier = costOptions?.DefaultListMultiplier > 0 ? costOptions.DefaultListMultiplier : defaultListMultiplier;
         _maxResponseRows = maxResponseRows;
         _onQueryTooComplex = onQueryTooComplex;
         _maxRootFields = maxRootFields > 0 ? maxRootFields : int.MaxValue;
         _payloadRowMultiplier = Math.Max(1, payloadRowMultiplier);
-        _maxExecutionDepth = maxExecutionDepth > 0 ? maxExecutionDepth : 25;
     }
 
     public bool IsCacheable => true;
@@ -58,14 +72,18 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
         int maxResponseRows = 1000,
         IReadOnlyDictionary<string, object?>? variableValues = null,
         QueryCostOptions? costOptions = null,
-        Func<string, string, RelationCardinality?>? relationLookup = null)
+        Func<string, string, RelationCardinality?>? relationLookup = null,
+        AggregationOptions? aggregation = null)
     {
         var rule = new QueryCostAnalyzerRule(
             int.MaxValue,
             defaultListMultiplier,
             maxResponseRows,
             costOptions: costOptions,
-            relationLookup: relationLookup);
+            relationLookup: relationLookup,
+            aggregateFieldCostWeight: aggregation?.AggregateFieldCostWeight ?? AggregationOptions.DefaultAggregateFieldCostWeight,
+            maxGroupByColumns: aggregation?.MaxGroupByColumns ?? AggregationOptions.DefaultMaxGroupByColumns,
+            maxAggregates: aggregation?.MaxAggregates ?? AggregationOptions.DefaultMaxAggregates);
         return rule.ComputeCost(document, schema, variableValues);
     }
 
@@ -115,6 +133,19 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                     .SetMessage($"The query exceeds the maximum of {_maxRootFields} root fields or aliases per operation.")
                     .SetCode("QUERY_TOO_COMPLEX")
                     .SetExtension("maxRootFields", _maxRootFields)
+                    .Build());
+            return;
+        }
+
+        // #112 SEC-112-19: every aliased aggregate or metric field counts; decided before any resolver runs, text without schema details.
+        if (CountAggregateRootFields(document, context.Schema, _maxAggregateFieldsPerOperation) > _maxAggregateFieldsPerOperation)
+        {
+            _onQueryTooComplex?.Invoke();
+            context.ReportError(
+                ErrorBuilder.New()
+                    .SetMessage("The query contains too many aggregation fields.")
+                    .SetCode("QUERY_TOO_COMPLEX")
+                    .SetExtension("maxAggregateFields", _maxAggregateFieldsPerOperation)
                     .Build());
             return;
         }
@@ -321,6 +352,14 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                 IOutputFieldDefinition? fieldDef = null;
                 currentType?.Fields.TryGetField(field.Name.Value, out fieldDef);
 
+                // #112 A-7: a typed aggregate field costs by its groupBy and aggregates, not by its row limit; the selection below it
+                // (groups, key, aggregates) is not multiplied again because the field cost already models the whole result.
+                if (fieldDef != null && IsTypedAggregateField(field.Name.Value, fieldDef))
+                {
+                    cost = SafeAdd(cost, AggregateFieldCost(field, variableDefinitions, variableValues));
+                    continue;
+                }
+
                 bool isList = false;
                 IObjectTypeDefinition? nextType = null;
 
@@ -509,6 +548,227 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
 
         return cost;
     }
+
+    /// <summary>
+    /// #112 SEC-112-19: the largest number of typed aggregate and <c>queryMetrics</c> root fields (aliases counted separately, fragments
+    /// resolved) over the operations of the document. Stops once <paramref name="stopAfter"/> is exceeded.
+    /// </summary>
+    public static int CountAggregateRootFields(DocumentNode document, ISchemaDefinition schema, int stopAfter = int.MaxValue)
+    {
+        var fragments = document.Definitions
+            .OfType<FragmentDefinitionNode>()
+            .GroupBy(f => f.Name.Value, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+        var max = 0;
+        foreach (var operation in document.Definitions.OfType<OperationDefinitionNode>())
+        {
+            if (operation.Operation != OperationType.Query)
+            {
+                continue;
+            }
+
+            var count = 0;
+            CountAggregateFields(operation.SelectionSet, schema.QueryType, schema, fragments, new HashSet<string>(StringComparer.Ordinal), ref count, stopAfter);
+            max = Math.Max(max, count);
+            if (max > stopAfter)
+            {
+                break;
+            }
+        }
+
+        return max;
+    }
+
+    private static void CountAggregateFields(
+        SelectionSetNode selectionSet,
+        IObjectTypeDefinition rootType,
+        ISchemaDefinition schema,
+        IReadOnlyDictionary<string, FragmentDefinitionNode> fragments,
+        HashSet<string> activeFragments,
+        ref int count,
+        int stopAfter)
+    {
+        foreach (var selection in selectionSet.Selections)
+        {
+            if (count > stopAfter)
+            {
+                return;
+            }
+
+            switch (selection)
+            {
+                case FieldNode field:
+                    if (rootType.Fields.TryGetField(field.Name.Value, out var def) && IsTypedAggregateField(field.Name.Value, def))
+                    {
+                        count++;
+                    }
+
+                    break;
+                case InlineFragmentNode inline:
+                    CountAggregateFields(inline.SelectionSet, rootType, schema, fragments, activeFragments, ref count, stopAfter);
+                    break;
+                case FragmentSpreadNode spread:
+                    if (fragments.TryGetValue(spread.Name.Value, out var fragment) && activeFragments.Add(fragment.Name.Value))
+                    {
+                        CountAggregateFields(fragment.SelectionSet, rootType, schema, fragments, activeFragments, ref count, stopAfter);
+                        activeFragments.Remove(fragment.Name.Value);
+                    }
+
+                    break;
+            }
+        }
+    }
+
+    /// <summary>A generated <c>T_aggregate</c> field (name and result type suffix) or the shared <c>queryMetrics</c> field.</summary>
+    private static bool IsTypedAggregateField(string fieldName, IOutputFieldDefinition definition)
+    {
+        if (string.Equals(fieldName, "queryMetrics", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return fieldName.EndsWith("_aggregate", StringComparison.Ordinal) &&
+               UnwrapType(definition.Type) is INameProvider { Name: var typeName } &&
+               typeName.EndsWith("_aggregate_result", StringComparison.Ordinal);
+    }
+
+    private int AggregateFieldCost(
+        FieldNode field,
+        IReadOnlyList<VariableDefinitionNode>? variableDefinitions,
+        IReadOnlyDictionary<string, object?>? variableValues)
+    {
+        // queryMetrics has no typed groupBy/aggregates list: it keeps the generic cost of a payload field via the base weight only.
+        double cost = _aggregateFieldCostWeight;
+
+        var groupBy = field.Arguments.FirstOrDefault(a => string.Equals(a.Name.Value, "groupBy", StringComparison.Ordinal));
+        cost += (groupBy is null ? 0 : (TryListItems(groupBy.Value, variableDefinitions, variableValues, out var groupItems) ? groupItems.Count : _maxGroupByColumns))
+                * AggregationCostCalculator.GroupByColumnWeight;
+
+        var aggregates = field.Arguments.FirstOrDefault(a => string.Equals(a.Name.Value, "aggregates", StringComparison.Ordinal));
+        if (aggregates is null)
+        {
+            if (!string.Equals(field.Name.Value, "queryMetrics", StringComparison.Ordinal))
+            {
+                cost += AggregationCostCalculator.AggregateSelectionWeight;
+            }
+        }
+        else if (TryListItems(aggregates.Value, variableDefinitions, variableValues, out var items))
+        {
+            foreach (var item in items)
+            {
+                cost += IsCountDistinct(item, variableValues)
+                    ? AggregationCostCalculator.CountDistinctWeight
+                    : AggregationCostCalculator.AggregateSelectionWeight;
+            }
+        }
+        else
+        {
+            cost += _maxAggregates * AggregationCostCalculator.CountDistinctWeight;
+        }
+
+        return (int)Math.Min(int.MaxValue, Math.Ceiling(cost));
+    }
+
+    private static bool TryListItems(
+        IValueNode? value,
+        IReadOnlyList<VariableDefinitionNode>? variableDefinitions,
+        IReadOnlyDictionary<string, object?>? variableValues,
+        out IReadOnlyList<object?> items)
+    {
+        items = [];
+        switch (value)
+        {
+            case null or NullValueNode:
+                return true;
+            case ListValueNode list:
+                items = list.Items.Cast<object?>().ToList();
+                return true;
+            case VariableNode variable:
+                if (variableValues != null && variableValues.TryGetValue(variable.Name.Value, out var runtime))
+                {
+                    return TryRuntimeItems(runtime, out items);
+                }
+
+                var definition = variableDefinitions?.FirstOrDefault(v => string.Equals(v.Variable.Name.Value, variable.Name.Value, StringComparison.Ordinal));
+                if (definition?.DefaultValue is { } defaultValue and not VariableNode)
+                {
+                    return TryListItems(defaultValue, variableDefinitions, variableValues, out items);
+                }
+
+                return false;
+            default:
+                // GraphQL list coercion: a single value stands for a one-element list.
+                items = [value];
+                return true;
+        }
+    }
+
+    private static bool TryRuntimeItems(object? runtime, out IReadOnlyList<object?> items)
+    {
+        items = [];
+        switch (runtime)
+        {
+            case null or NullValueNode:
+                return true;
+            case ListValueNode list:
+                items = list.Items.Cast<object?>().ToList();
+                return true;
+            case IValueNode single:
+                items = [single];
+                return true;
+            case System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Array } json:
+                items = json.EnumerateArray().Cast<object?>().ToList();
+                return true;
+            case string:
+                return false;
+            case System.Collections.IEnumerable enumerable:
+                items = enumerable.Cast<object?>().ToList();
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static bool IsCountDistinct(object? item, IReadOnlyDictionary<string, object?>? variableValues)
+    {
+        switch (item)
+        {
+            case ObjectValueNode obj:
+                var fn = obj.Fields.FirstOrDefault(f => string.Equals(f.Name.Value, "fn", StringComparison.Ordinal))?.Value;
+                return FunctionIsCountDistinct(fn, variableValues);
+            case VariableNode variable when variableValues != null && variableValues.TryGetValue(variable.Name.Value, out var runtime):
+                return IsCountDistinct(runtime, variableValues);
+            case System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Object } json:
+                return !json.TryGetProperty("fn", out var jsonFn) || IsDistinctName(jsonFn.GetString());
+            case System.Collections.IDictionary dictionary:
+                return IsDistinctName(dictionary.Contains("fn") ? dictionary["fn"]?.ToString() : null);
+            case IReadOnlyDictionary<string, object?> readOnly:
+                return IsDistinctName(readOnly.TryGetValue("fn", out var raw) ? raw?.ToString() : null);
+            default:
+                // Unresolvable: the worst case.
+                return true;
+        }
+    }
+
+    private static bool FunctionIsCountDistinct(IValueNode? fn, IReadOnlyDictionary<string, object?>? variableValues) => fn switch
+    {
+        EnumValueNode e => IsDistinctName(e.Value),
+        StringValueNode s => IsDistinctName(s.Value),
+        VariableNode v when variableValues != null && variableValues.TryGetValue(v.Name.Value, out var runtime) =>
+            runtime switch
+            {
+                EnumValueNode e => IsDistinctName(e.Value),
+                StringValueNode s => IsDistinctName(s.Value),
+                string text => IsDistinctName(text),
+                _ => true
+            },
+        _ => true
+    };
+
+    /// <summary>Only the exact names of the cheap functions are cheap; anything else (including a missing name) is priced as COUNT_DISTINCT.</summary>
+    private static bool IsDistinctName(string? name) =>
+        name is not ("COUNT" or "SUM" or "AVG" or "MIN" or "MAX");
 
     private static bool TryExtractPositiveInt(object? val, out int result)
     {

@@ -606,6 +606,7 @@ public static class GatewayServiceCollectionExtensions
             .AddApplicationService<ITableMetadataRepository>()
             .AddApplicationService<ITableRelationRepository>()
             .AddApplicationService<CatalogGraphQlTypeModule>()
+            .AddApplicationService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()
             .AddTypeModule(sp => sp.GetRequiredService<CatalogGraphQlTypeModule>())
             .AddErrorFilter(sp => sp.GetRequiredService<ErrorSanitizingFilter>())
             .AddQueryType<Query>()
@@ -623,7 +624,14 @@ public static class GatewayServiceCollectionExtensions
                     onQueryTooComplex: () => GatewayDiagnostics.QueryTooComplexCounter.Add(1),
                     maxRootFields: gatewayOptions.AreQueryLimitsRelaxed
                         ? (gatewayOptions.AllowInsecureWarnFlagsInProduction ? 200 : 25)
-                        : gatewayOptions.GraphQL.MaxRootFieldsPerOperation))
+                        : gatewayOptions.GraphQL.MaxRootFieldsPerOperation,
+                    aggregateFieldCostWeight: sp.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value?.Aggregation.AggregateFieldCostWeight
+                        ?? Autheris.Domain.Options.AggregationOptions.DefaultAggregateFieldCostWeight,
+                    maxGroupByColumns: sp.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value?.Aggregation.MaxGroupByColumns
+                        ?? Autheris.Domain.Options.AggregationOptions.DefaultMaxGroupByColumns,
+                    maxAggregates: sp.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value?.Aggregation.MaxAggregates
+                        ?? Autheris.Domain.Options.AggregationOptions.DefaultMaxAggregates,
+                    maxAggregateFieldsPerOperation: gatewayOptions.GraphQL.Aggregation.MaxFieldsPerOperation))
             // HotChocolate 16 adds the types __SchemaDefinition/__SearchResult (semantic introspection) to the schema.
             // Their names start with "__", which GraphQL reserves for introspection; graphql-js based clients (GraphiQL,
             // Apollo, codegen) reject the whole schema because of them. Autheris does not use the semantic search.

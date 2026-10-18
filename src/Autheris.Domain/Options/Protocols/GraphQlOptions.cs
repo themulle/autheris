@@ -48,6 +48,7 @@ public sealed class GraphQLOptions
 public sealed class GraphQLAggregationOptions
 {
     public const int MinFieldsPerOperation = 1;
+    public const int DefaultMaxFieldsPerOperation = 3;
     public const int MaxFieldsPerOperationUpperBound = 10;
 
     /// <summary>Generate the typed aggregate fields (restart or catalog change required).</summary>
@@ -57,7 +58,7 @@ public sealed class GraphQLAggregationOptions
     /// Upper bound for aliased <c>T_aggregate</c> and <c>queryMetrics</c> fields in one operation (SEC-112-19). Out of range (1..10) is a
     /// start-up failure, never clamped.
     /// </summary>
-    public int MaxFieldsPerOperation { get; init; } = 3;
+    public int MaxFieldsPerOperation { get; init; } = DefaultMaxFieldsPerOperation;
 }
 
 /// <summary>
