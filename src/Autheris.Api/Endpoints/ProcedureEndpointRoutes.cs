@@ -42,8 +42,9 @@ public static class ProcedureEndpointRoutes
         // OpenSchema (documentation mode) keeps the document reachable anonymously, but it then lists no procedure: visibility
         // depends on the caller's identity and consent.
         var openApi = group.MapGet("/openapi.json",
-                (HttpContext http, Autheris.Application.Procedures.Interfaces.IProcedureRegistry registry, IProcedureExecutionService service) =>
-                    HandleOpenApi(http, registry, service))
+                (HttpContext http, Autheris.Application.Procedures.Interfaces.IProcedureRegistry registry, IProcedureExecutionService service,
+                    Microsoft.Extensions.Options.IOptions<GatewayOptions> options) =>
+                    HandleOpenApi(http, registry, service, options))
             .WithName("GetProcedureEndpointsOpenApiSpec")
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         if (gatewayOptions.IsOpenSchemaAllowed != true)
@@ -112,8 +113,11 @@ public static class ProcedureEndpointRoutes
     internal static async Task<IResult> HandleOpenApi(
         HttpContext http,
         Autheris.Application.Procedures.Interfaces.IProcedureRegistry registry,
-        IProcedureExecutionService service)
+        IProcedureExecutionService service,
+        Microsoft.Extensions.Options.IOptions<GatewayOptions>? options = null)
     {
+        int maxRows = options?.Value.SqlEndpoints.Procedures.MaxRows ?? new ProcedureEndpointsOptions().MaxRows;
+
         // Open-schema documentation mode no longer documents procedures for anonymous callers (OQ-12): visibility needs identity.
         var paths = new Dictionary<string, object>();
         var anonymous = http.User.Identity?.IsAuthenticated != true;
@@ -129,6 +133,16 @@ public static class ProcedureEndpointRoutes
                 ["description"] = p.Description ?? $"SQL type {p.SqlType}",
                 ["schema"] = SchemaFor(p)
             }).ToList();
+
+            // SEC-PROC152I2-15: the reserved row-limit input; the maximum is the effective MaxRows (no scan-cap value is published).
+            queryParams.Add(new Dictionary<string, object?>
+            {
+                ["name"] = "limit",
+                ["in"] = "query",
+                ["required"] = false,
+                ["description"] = "Maximum number of rows to return (clamped to the configured maximum).",
+                ["schema"] = new Dictionary<string, object> { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = maxRows }
+            });
 
             var columns = reg.Validation?.ResultColumns ?? [];
             var properties = columns
@@ -382,9 +396,9 @@ public static class ProcedureEndpointRoutes
         }
         catch (ProcedureBusinessException ex)
         {
-            // Fixed message; number, SQLSTATE and the database text never reach the response (SEC-PROC152-08).
+            // Fixed or operator-declared text only; number, SQLSTATE and the database text never reach the response (SEC-PROC152-08).
             http.Response.StatusCode = StatusCodes.Status422UnprocessableEntity;
-            await http.Response.WriteAsJsonAsync(new { error = ProcedureBusinessException.FixedMessage, code = "PROCEDURE_REJECTED", traceId = ex.TraceId }, ct).ConfigureAwait(false);
+            await http.Response.WriteAsJsonAsync(new { error = ex.MappedMessage ?? ProcedureBusinessException.FixedMessage, code = ex.MappedCode ?? "PROCEDURE_REJECTED", traceId = ex.TraceId }, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

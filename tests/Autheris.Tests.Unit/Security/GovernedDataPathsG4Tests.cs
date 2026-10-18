@@ -247,7 +247,7 @@ public sealed class GovernedDataPathsG4Tests
         f.Resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
             .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), columns, null));
         f.Masking.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Do<MaskingRule>(f.MaskRules.Add)).Returns("***");
-        f.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<CancellationToken>())
+        f.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new RawProcedureResult(resultColumns, [new object?[] { 1, "x", "y", "z" }[..resultColumns.Length]], false));
         return f;
     }

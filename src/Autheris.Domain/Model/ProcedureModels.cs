@@ -63,6 +63,13 @@ public enum ProcedureKind
 }
 
 /// <summary>
+/// Operator-declared mapping of a business error (MSSQL number or provider SQLSTATE) to a stable code and a fixed message.
+/// Exactly one of <see cref="Number"/> and <see cref="SqlState"/> is set. The message is constant text, never combined with
+/// database output.
+/// </summary>
+public sealed record ProcedureErrorCode(int? Number, string? SqlState, string Code, string Message);
+
+/// <summary>
 /// Immutable declaration of a stored procedure exposed as governed REST endpoint (F-SQL-02).
 /// </summary>
 public sealed record ProcedureDefinition(
@@ -92,6 +99,9 @@ public sealed record ProcedureDefinition(
     /// denies the call (fail-closed).
     /// </summary>
     public IReadOnlyList<string> RowScopeKey { get; init; } = [];
+
+    /// <summary>Declared business error map (YAML <c>error_codes</c>); empty means every business error is the generic rejection.</summary>
+    public IReadOnlyList<ProcedureErrorCode> ErrorCodes { get; init; } = [];
 
     /// <summary>
     /// Column of <see cref="ResultTable"/> for each <see cref="RowScopeKey"/> column (same index). Equal to the result

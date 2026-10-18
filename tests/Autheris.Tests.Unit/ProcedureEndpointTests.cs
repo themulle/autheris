@@ -244,7 +244,7 @@ public class ProcedureEndpointTests
             .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), columns, rowFilter));
 
         f.Masking.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>()).Returns("***");
-        f.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<CancellationToken>())
+        f.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new RawProcedureResult(
                 ["order_id", "secret", "salary", "extra"],
                 [new object?[] { 1, "s", 1000m, "x" }, new object?[] { 2, "t", 2000m, "y" }],
@@ -360,6 +360,7 @@ public class ProcedureEndpointTests
             Arg.Any<ProcedureDefinition>(),
             Arg.Is<IReadOnlyDictionary<string, object?>>(v => (int)v["customer_id"]! == 7 && v.Count == 1),
             Arg.Is<ProcedureSecurityContext>(c => c.TenantId == "tenant-a" && c.UserSid == "S-1-5-21-1001"),
+            Arg.Any<int>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -372,7 +373,7 @@ public class ProcedureEndpointTests
         var f = Active();
         var inputs = new Dictionary<string, object?> { ["customer_id"] = 7, [name] = "other-tenant" };
         await Should.ThrowAsync<ArgumentException>(() => f.Create().ExecuteAsync("get_orders", inputs, User(), Tenant));
-        await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default);
+        await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default, default);
     }
 
     [Fact]
@@ -393,7 +394,7 @@ public class ProcedureEndpointTests
         var f = Active(rowFilter: "region = 'EMEA'");
         await Should.ThrowAsync<KeyNotFoundException>(() =>
             f.Create().ExecuteAsync("get_orders", new Dictionary<string, object?> { ["customer_id"] = 7 }, User(), Tenant));
-        await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default);
+        await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default, default);
     }
 
     [Fact]
@@ -458,7 +459,7 @@ public class ProcedureEndpointTests
     public async Task Execute_BusinessError_IsRethrownAndAudited()
     {
         var f = Active();
-        f.Invoker.ExecuteReadAsync(default!, default!, default!, default).ThrowsAsyncForAnyArgs(new ProcedureBusinessException(50001, null));
+        f.Invoker.ExecuteReadAsync(default!, default!, default!, default, default).ThrowsAsyncForAnyArgs(new ProcedureBusinessException(50001, null));
         var svc = f.Create();
 
         var ex = await Should.ThrowAsync<ProcedureBusinessException>(() =>
@@ -636,7 +637,8 @@ public class ProcedureEndpointTests
                     AllowedSchemas = ["api"],
                     AllowedDataSources = ["telemetry_db"],
                     EnableHotReload = false,
-                    AllowDeclaredValidation = true
+                    AllowDeclaredValidation = true,
+                    RequireDdlHashForDeclared = false // fixture declares no ddl_hash (INC-2 D-8)
                 }
             }
         });
@@ -727,7 +729,7 @@ public class ProcedureEndpointTests
             .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), columns, null));
         f.Masking.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>()).Returns("***");
 
-        f.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<CancellationToken>())
+        f.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new RawProcedureResult(
                 ["timestamp", "device_id", "temperature", "battery_level", "secret_token", "internal_status"],
                 [new object?[] { "2026-10-05T12:00:00Z", 42, 23.5, 95, "shh-secret", "leak" }],
@@ -765,7 +767,7 @@ public class ProcedureEndpointTests
         var svc = f.Create();
         await Should.ThrowAsync<KeyNotFoundException>(() => svc.ExecuteAsync(
             "get_telemetry", new Dictionary<string, object?> { ["device_id"] = 42 }, User("telemetry-reader"), Tenant));
-        await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default);
+        await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default, default);
     }
 
     [Fact]
@@ -864,6 +866,7 @@ public class ProcedureEndpointTests
             def,
             new Dictionary<string, object?> { ["crane_id"] = 123 },
             new ProcedureSecurityContext("t-1", "s-1", "read"),
+                        10,
             CancellationToken.None);
 
         execCmd.CommandType.ShouldBe(System.Data.CommandType.Text);
@@ -929,6 +932,7 @@ public class ProcedureEndpointTests
             def,
             new Dictionary<string, object?> { ["crane_id"] = 456 },
             new ProcedureSecurityContext("t-1", "s-1", "read"),
+                        10,
             CancellationToken.None);
 
         execCmd.CommandType.ShouldBe(System.Data.CommandType.Text);
@@ -992,6 +996,7 @@ public class ProcedureEndpointTests
             def,
             new Dictionary<string, object?> { ["crane_id"] = 789 },
             new ProcedureSecurityContext("t-1", "s-1", "read"),
+                        10,
             CancellationToken.None);
 
         execCmd.CommandType.ShouldBe(System.Data.CommandType.Text);
@@ -1051,7 +1056,7 @@ public class ProcedureEndpointTests
             """;
         var def = ProcedureDefinitionParser.ParseYaml(yaml, "x", false, 30);
 
-        await invoker.ExecuteReadAsync(def, new Dictionary<string, object?> { ["region"] = "EU" }, new ProcedureSecurityContext("t-1", "s-1", null), CancellationToken.None);
+        await invoker.ExecuteReadAsync(def, new Dictionary<string, object?> { ["region"] = "EU" }, new ProcedureSecurityContext("t-1", "s-1", null), 10, CancellationToken.None);
 
         // P-2: the client value must never land in the tenant argument.
         execCmd.CommandText.ShouldBe("SELECT * FROM api.fn_Telemetry(@tenant_id, @region)");
@@ -1352,7 +1357,7 @@ public class ProcedureEndpointTests
         var security = new ProcedureSecurityContext("invalid tenant id; DROP TABLE", "S-1-5-21-ALICE", "AUDIT");
 
         var ex = await Should.ThrowAsync<Autheris.Domain.Exceptions.GatewayForbiddenException>(() =>
-            invoker.ExecuteReadAsync(def, new Dictionary<string, object?>(), security, CancellationToken.None));
+            invoker.ExecuteReadAsync(def, new Dictionary<string, object?>(), security, 10, CancellationToken.None));
         ex.Message.ShouldBe("Invalid tenant identity.");
     }
 }

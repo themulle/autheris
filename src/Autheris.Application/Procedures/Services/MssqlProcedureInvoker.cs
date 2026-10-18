@@ -47,11 +47,14 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
         ProcedureDefinition definition,
         IReadOnlyDictionary<string, object?> clientValues,
         ProcedureSecurityContext security,
+        int rowBudget,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(clientValues);
         ArgumentNullException.ThrowIfNull(security);
+        // SEC-PROC152I2-04: fail-closed, no unbounded read and no fallback to a configured limit.
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(rowBudget, 0);
 
         var settings = _options.Value.SqlEndpoints.Procedures;
         var (connection, connOptions) = await _connections.OpenAsync(definition, ct).ConfigureAwait(false);
@@ -150,12 +153,13 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
                     var maxBytes = settings.MaxResponseBytes > 0 ? settings.MaxResponseBytes : 10 * 1024 * 1024;
                     long estimatedBytes = 0;
                     var rows = new List<object?[]>();
-                    bool truncated = false;
+                    bool moreRowsAvailable = false;
                     while (await reader.ReadAsync(ct).ConfigureAwait(false))
                     {
-                        if (rows.Count >= settings.MaxRows)
+                        if (rows.Count >= rowBudget)
                         {
-                            truncated = true;
+                            // The extra row is detected by its header only: no value read, no byte accounting.
+                            moreRowsAvailable = true;
                             TryCancel(cmd);
                             break;
                         }
@@ -186,9 +190,9 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
                         rows.Add(values);
                     }
 
-                    return new RawProcedureResult(columns, rows, truncated);
+                    return new RawProcedureResult(columns, rows, moreRowsAvailable);
                 }
-                catch (DbException ex) when (TryGetBusinessError(ex, out int? errorNumber, out string? sqlState))
+                catch (DbException ex) when (TryGetBusinessError(ex, definition, out int? errorNumber, out string? sqlState))
                 {
                     // Only number/SQLSTATE leave the invoker: the message text may contain data values.
                     throw new ProcedureBusinessException(errorNumber, sqlState);
@@ -322,7 +326,10 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
     }
 
     /// <summary>THROW 50000-59999 (MSSQL) or SQLSTATE P0001 (PostgreSQL) raised by the procedure is a business error; only its number or SQLSTATE is returned.</summary>
-    internal static bool TryGetBusinessError(DbException ex, out int? errorNumber, out string? sqlState)
+    internal static bool TryGetBusinessError(DbException ex, out int? errorNumber, out string? sqlState) =>
+        TryGetBusinessError(ex, null, out errorNumber, out sqlState);
+
+    internal static bool TryGetBusinessError(DbException ex, ProcedureDefinition? definition, out int? errorNumber, out string? sqlState)
     {
         errorNumber = null;
         sqlState = null;
@@ -333,7 +340,10 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
             return true;
         }
 
-        if (ex.GetType().GetProperty("SqlState")?.GetValue(ex) is string state && state == "P0001")
+        // SEC-PROC152I2-12: a SQLSTATE is only read from a non-MSSQL exception (one without a Number); P0001 stays business,
+        // anything else only when the procedure declares it in its error map (classes like 08/28/40/53 cannot be declared).
+        if (number is null && ex.SqlState is { } state
+            && (state == "P0001" || (definition is not null && definition.ErrorCodes.Any(e => e.SqlState == state))))
         {
             sqlState = state;
             return true;

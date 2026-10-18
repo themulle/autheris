@@ -163,14 +163,14 @@ public class PureYamlProcedureGovernanceTests
         registry.MarkActive(def.Name, validation);
 
         var invoker = Substitute.For<IProcedureInvoker>();
-        invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<CancellationToken>())
+        invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new RawProcedureResult(
                 Columns: ["order_id", "sensitive_note", "unauthorized_leak"],
                 Rows:
                 [
                     new object?[] { 100, "secret financial data", "should be dropped" }
                 ],
-                Truncated: false));
+                MoreRowsAvailable: false));
 
         var tables = Substitute.For<ITableMetadataRepository>();
         tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
@@ -271,14 +271,14 @@ public class PureYamlProcedureGovernanceTests
         registry.MarkActive(def.Name, validation);
 
         var invoker = Substitute.For<IProcedureInvoker>();
-        invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<CancellationToken>())
+        invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new RawProcedureResult(
                 Columns: ["order_id", "sensitive_note"],
                 Rows:
                 [
                     new object?[] { 100, "secret financial data" }
                 ],
-                Truncated: false));
+                MoreRowsAvailable: false));
 
         var tables = Substitute.For<ITableMetadataRepository>();
         tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
@@ -372,14 +372,14 @@ public class PureYamlProcedureGovernanceTests
         registry.MarkActive(def.Name, validation);
 
         var invoker = Substitute.For<IProcedureInvoker>();
-        invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<CancellationToken>())
+        invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new RawProcedureResult(
                 Columns: ["order_id", "sensitive_note"],
                 Rows:
                 [
                     new object?[] { 100, "secret financial data" }
                 ],
-                Truncated: false));
+                MoreRowsAvailable: false));
 
         var tables = Substitute.For<ITableMetadataRepository>();
         tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
