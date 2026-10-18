@@ -173,7 +173,8 @@ internal static class AggregateResultMapper
 /// <summary>Strict, culture-invariant conversion of driver values to the typed value shape (shared by aggregates and metrics).</summary>
 internal static class AggregateValueConverter
 {
-    public static AggregateValueDto Convert(string alias, AggregateValueKind kind, object? raw)
+    /// <param name="lenientString">A STRING value that is not a string (a GUID, say) is formatted culture-invariantly instead of rejected (dimension values).</param>
+    public static AggregateValueDto Convert(string alias, AggregateValueKind kind, object? raw, bool lenientString = false)
     {
         var empty = new AggregateValueDto(alias, kind);
         if (raw is null)
@@ -190,7 +191,11 @@ internal static class AggregateValueConverter
             case AggregateValueKind.Float:
                 return TryDouble(raw, out var d) ? empty with { FloatValue = d } : throw AggregateErrors.ResultTypeMismatch();
             case AggregateValueKind.String:
-                return raw is string s ? empty with { StringValue = s } : throw AggregateErrors.ResultTypeMismatch();
+                return raw is string s
+                    ? empty with { StringValue = s }
+                    : lenientString && raw is IFormattable f
+                        ? empty with { StringValue = f.ToString(null, CultureInfo.InvariantCulture) }
+                        : throw AggregateErrors.ResultTypeMismatch();
             case AggregateValueKind.Boolean:
                 return TryBoolean(raw, out var b) ? empty with { BooleanValue = b } : throw AggregateErrors.ResultTypeMismatch();
             case AggregateValueKind.DateTime:
