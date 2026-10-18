@@ -77,4 +77,19 @@ public static partial class SemanticVirtualTables
         return string.Equals(table.Identifier.Schema, expected, StringComparison.Ordinal) &&
                string.Equals(table.Table?.SchemaName, expected, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// SEC-112-15: the persistence boundary of the catalog keeps the virtual-table namespace to the ingestion service. A table in the
+    /// semantic domain must be a well-formed, marked virtual table, and no other table may use a tenant-hash schema name.
+    /// </summary>
+    /// <exception cref="Autheris.Domain.Exceptions.GatewayInvalidQueryException">The identity is reserved for semantic virtual tables.</exception>
+    public static void EnsureNamespaceRespected(TableMetadata table)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        var reservedDomain = IsInSemanticDomain(table.Identifier);
+        if ((reservedDomain && !IsVirtualTable(table)) || (!reservedDomain && IsTenantSchemaName(table.Identifier.Schema)))
+        {
+            throw new Autheris.Domain.Exceptions.GatewayInvalidQueryException("The table identity is reserved.", "RESERVED_TABLE_IDENTITY");
+        }
+    }
 }
