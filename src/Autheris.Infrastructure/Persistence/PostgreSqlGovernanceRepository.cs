@@ -13,7 +13,7 @@ using Npgsql;
 
 namespace Autheris.Infrastructure.Persistence;
 
-public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IConsentDescriptionRepository, Migrations.IGovernanceStoreInitializer, IAuditChainExportSource, IDisposable, IAsyncDisposable
+public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IConsentDescriptionRepository, Migrations.IGovernanceStoreInitializer, IAuditChainExportSource, IAuditPurgeKeyProvider, IDisposable, IAsyncDisposable
 {
     private readonly NpgsqlDataSource _dataSource;
     private volatile bool _ready;

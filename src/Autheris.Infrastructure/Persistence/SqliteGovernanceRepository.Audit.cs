@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -14,8 +15,9 @@ using Microsoft.Extensions.Options;
 
 namespace Autheris.Infrastructure.Persistence;
 
-public partial class SqliteGovernanceRepository : IAuditChainExportSource
+public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAuditPurgeKeyProvider
 {
+    byte[]? IAuditPurgeKeyProvider.GetAuditHmacKey() => _auditHmacKey;
     public async Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default)
     {
         // Tier-B events are only enqueued (no gate); they must not be accepted before the audit processor runs.
@@ -818,6 +820,140 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         return AuditPageSlicer.Slice(items, size);
     }
 
+    public async Task<AuditPurgeCheckpoint?> GetLatestPurgeCheckpointAsync(CancellationToken ct = default)
+    {
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        using var cmd = scope.Connection.CreateCommand();
+        cmd.CommandText = @"SELECT id, first_surviving_seq, surviving_prev_hash, purged_count, purged_through_utc, created_at, signature, external_signature
+                            FROM AUDIT_PURGE_CHECKPOINTS
+                            ORDER BY first_surviving_seq DESC
+                            LIMIT 1";
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false)) return null;
+        return new AuditPurgeCheckpoint(
+            reader.GetInt64(1),
+            reader.GetString(2),
+            reader.GetInt64(3),
+            DateTimeOffset.Parse(reader.GetString(4), CultureInfo.InvariantCulture),
+            DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture),
+            reader.GetString(6),
+            reader.IsDBNull(7) ? null : reader.GetString(7));
+    }
+
+    public async Task SavePurgeCheckpointAsync(AuditPurgeCheckpoint checkpoint, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(checkpoint);
+        var latest = await GetLatestPurgeCheckpointAsync(ct).ConfigureAwait(false);
+        if (latest != null)
+        {
+            if (checkpoint.FirstSurvivingSequence <= latest.FirstSurvivingSequence || checkpoint.PurgedCount <= latest.PurgedCount)
+            {
+                throw new InvalidOperationException(
+                    $"Purge checkpoint must be strictly monotonic. Existing first sequence: {latest.FirstSurvivingSequence}, new: {checkpoint.FirstSurvivingSequence}.");
+            }
+        }
+
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        using var cmd = scope.Connection.CreateCommand();
+        cmd.CommandText = @"INSERT INTO AUDIT_PURGE_CHECKPOINTS (id, first_surviving_seq, surviving_prev_hash, purged_count, purged_through_utc, created_at, signature, external_signature)
+                            VALUES (@id, @firstSeq, @prevHash, @purgedCount, @purgedThrough, @createdAt, @sig, @extSig)";
+        cmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString("N"));
+        cmd.Parameters.AddWithValue("@firstSeq", checkpoint.FirstSurvivingSequence);
+        cmd.Parameters.AddWithValue("@prevHash", checkpoint.SurvivingPrevHash);
+        cmd.Parameters.AddWithValue("@purgedCount", checkpoint.PurgedCount);
+        cmd.Parameters.AddWithValue("@purgedThrough", checkpoint.PurgedThroughUtc.ToUniversalTime().ToString("O"));
+        cmd.Parameters.AddWithValue("@createdAt", checkpoint.CreatedAtUtc.ToUniversalTime().ToString("O"));
+        cmd.Parameters.AddWithValue("@sig", checkpoint.Signature);
+        cmd.Parameters.AddWithValue("@extSig", (object?)checkpoint.ExternalSignature ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<(long MaxEligibleSequence, long FirstSurvivingSequence, string SurvivingPrevHash, long PurgeCount)?> PlanPurgePrefixAsync(DateTimeOffset thresholdUtc, CancellationToken ct = default)
+    {
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
+        var thresholdIso = thresholdUtc.ToUniversalTime().ToString("O");
+
+        // 1. Check oldest row
+        using (var minCmd = conn.CreateCommand())
+        {
+            minCmd.CommandText = "SELECT seq, occurred_at FROM AUDIT_LOG_ENTRIES ORDER BY seq ASC LIMIT 1";
+            using var minReader = await minCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            if (!await minReader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                return null;
+            }
+
+            var oldestOccurredAt = minReader.GetString(1);
+            if (string.CompareOrdinal(oldestOccurredAt, thresholdIso) >= 0)
+            {
+                return null;
+            }
+        }
+
+        // 2. Find first surviving entry (earliest entry with occurred_at >= thresholdIso)
+        long survivingSeq;
+        string survivingPrevHash;
+        using (var survCmd = conn.CreateCommand())
+        {
+            survCmd.CommandText = "SELECT seq, prev_hash FROM AUDIT_LOG_ENTRIES WHERE occurred_at >= @threshold ORDER BY seq ASC LIMIT 1";
+            survCmd.Parameters.AddWithValue("@threshold", thresholdIso);
+            using var survReader = await survCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            if (await survReader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                survivingSeq = survReader.GetInt64(0);
+                survivingPrevHash = survReader.GetString(1);
+            }
+            else
+            {
+                using var newestCmd = conn.CreateCommand();
+                newestCmd.CommandText = "SELECT seq, prev_hash FROM AUDIT_LOG_ENTRIES ORDER BY seq DESC LIMIT 1";
+                using var newestReader = await newestCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                if (!await newestReader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    return null;
+                }
+                survivingSeq = newestReader.GetInt64(0);
+                survivingPrevHash = newestReader.GetString(1);
+            }
+        }
+
+        // 3. Find max eligible sequence (< survivingSeq)
+        long maxEligibleSeq;
+        using (var maxCmd = conn.CreateCommand())
+        {
+            maxCmd.CommandText = "SELECT MAX(seq) FROM AUDIT_LOG_ENTRIES WHERE seq < @survivingSeq";
+            maxCmd.Parameters.AddWithValue("@survivingSeq", survivingSeq);
+            var maxObj = await maxCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+            if (maxObj == null || maxObj is DBNull)
+            {
+                return null;
+            }
+            maxEligibleSeq = Convert.ToInt64(maxObj, CultureInfo.InvariantCulture);
+        }
+
+        long purgeCount = survivingSeq - 1;
+        return (maxEligibleSeq, survivingSeq, survivingPrevHash, purgeCount);
+    }
+
+    public async Task<int> ExecutePurgeBatchAsync(long maxSequenceInclusive, int batchSize, CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(batchSize);
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"DELETE FROM AUDIT_LOG_ENTRIES
+                            WHERE rowid IN (
+                                SELECT rowid FROM AUDIT_LOG_ENTRIES
+                                WHERE seq <= @maxSeq
+                                ORDER BY seq ASC
+                                LIMIT @batchSize
+                            )";
+        cmd.Parameters.AddWithValue("@maxSeq", maxSequenceInclusive);
+        cmd.Parameters.AddWithValue("@batchSize", batchSize);
+        return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
     public async Task<bool> VerifyAuditHashChainAsync(CancellationToken ct = default)
     {
         await FlushAuditChannelAsync(ct).ConfigureAwait(false);
@@ -847,6 +983,13 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
                 return false;
             }
 
+            var checkpoint = TryLoadVerifiedPurgeCheckpoint(out var checkpointInvalid);
+            if (checkpointInvalid)
+            {
+                FlagAuditChainViolation("External audit purge checkpoint has an invalid signature or format.");
+                return false;
+            }
+
             using var cmd = conn.CreateCommand();
             cmd.CommandText = @"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column,
                                        decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq
@@ -854,12 +997,14 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
                                 ORDER BY rowid ASC";
 
             using var reader = await cmd.ExecuteReaderAsync(ct);
-            var expectedPrevHash = AuditGenesisHash;
-            long position = 0;
+            var expectedPrevHash = checkpoint != null ? checkpoint.SurvivingPrevHash : AuditGenesisHash;
+            long position = checkpoint != null ? checkpoint.FirstSurvivingSequence - 1 : 0;
             var anchorEntryMatched = anchor == null || anchor.Sequence == 0;
+            bool readAnyRows = false;
 
             while (await reader.ReadAsync(ct))
             {
+                readAnyRows = true;
                 position++;
                 var id = reader.GetString(0);
                 var occurredAt = reader.GetString(1);
@@ -875,9 +1020,15 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
                 var tenantId = reader.IsDBNull(11) ? TenantId.LegacySingleTenant.Value : reader.GetString(11);
                 long? seq = reader.IsDBNull(12) ? null : reader.GetInt64(12);
 
+                if (checkpoint != null && seq.HasValue && seq.Value < checkpoint.FirstSurvivingSequence)
+                {
+                    FlagAuditChainViolation($"Audit entry found before purge checkpoint sequence: got seq {seq.Value}, checkpoint first sequence is {checkpoint.FirstSurvivingSequence}.");
+                    return false;
+                }
+
                 if (!FixedTimeEqualsString(prevHash, expectedPrevHash))
                 {
-                    FlagAuditChainViolation($"Broken prev_hash chain at position {position} (id {id}).");
+                    FlagAuditChainViolation($"Broken prev_hash chain at position {position} (id {id}). Expected {expectedPrevHash}, got {prevHash}.");
                     return false; // Broken chain!
                 }
 
@@ -909,6 +1060,12 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
                 }
 
                 expectedPrevHash = entryHash;
+            }
+
+            if (checkpoint != null && (!readAnyRows || position < checkpoint.FirstSurvivingSequence))
+            {
+                FlagAuditChainViolation($"Audit chain missing surviving rows: checkpoint expected seq {checkpoint.FirstSurvivingSequence} but DB has none.");
+                return false;
             }
 
             // SEC H-17: compare with the external signed anchor (detects tail truncation and total deletion,
@@ -1172,6 +1329,41 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         }
 
         return anchor;
+    }
+
+    private AuditPurgeCheckpoint? TryLoadVerifiedPurgeCheckpoint(out bool invalid)
+    {
+        invalid = false;
+        AuditPurgeCheckpoint? checkpoint;
+        try
+        {
+            checkpoint = _auditAnchorStore.LoadPurgeCheckpoint();
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to read purge checkpoint anchor.");
+            invalid = true;
+            return null;
+        }
+
+        if (checkpoint == null)
+        {
+            return null;
+        }
+
+        if (checkpoint.FirstSurvivingSequence < 1 || string.IsNullOrEmpty(checkpoint.SurvivingPrevHash) || string.IsNullOrEmpty(checkpoint.Signature) || checkpoint.PurgedCount < 0)
+        {
+            invalid = true;
+            return null;
+        }
+
+        if (!AuditChainEngine.VerifyPurgeCheckpointSignature(_auditHmacKey, checkpoint))
+        {
+            invalid = true;
+            return null;
+        }
+
+        return checkpoint;
     }
 
     private void InitializeAuditChainAnchor(bool isDevOrTest)

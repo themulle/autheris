@@ -196,6 +196,17 @@ internal sealed class SqliteBaselineSchema
                 tenant_id TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS AUDIT_PURGE_CHECKPOINTS (
+                id TEXT PRIMARY KEY,
+                first_surviving_seq INTEGER NOT NULL,
+                surviving_prev_hash TEXT NOT NULL,
+                purged_count INTEGER NOT NULL,
+                purged_through_utc TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                signature TEXT NOT NULL,
+                external_signature TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS CONSENT_REQUESTS (
                 id TEXT PRIMARY KEY,
                 table_id TEXT NOT NULL,

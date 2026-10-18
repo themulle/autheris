@@ -339,6 +339,55 @@
       ]
     },
     {
+      "name": "audit_purge_checkpoints",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "first_surviving_seq",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "surviving_prev_hash",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "purged_count",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "purged_through_utc",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "signature",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "external_signature",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
       "name": "autheris_cdc_row_images",
       "columns": [
         {

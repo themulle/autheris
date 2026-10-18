@@ -1,3 +1,5 @@
+using Autheris.Domain.Audit;
+
 namespace Autheris.Application.Interfaces;
 
 public interface ITableMetadataRepository
@@ -184,6 +186,33 @@ public interface IAuditLogRepository
         TenantId? tenantId = null,
         CancellationToken ct = default);
     Task<bool> VerifyAuditHashChainAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// SEC-AUD161-02: Returns the newest persisted purge checkpoint anchor, or null if none exists.
+    /// </summary>
+    Task<AuditPurgeCheckpoint?> GetLatestPurgeCheckpointAsync(CancellationToken ct = default)
+        => Task.FromResult<AuditPurgeCheckpoint?>(null);
+
+    /// <summary>
+    /// SEC-AUD161-02: Persists a signed purge checkpoint anchor to AUDIT_PURGE_CHECKPOINTS table.
+    /// Enforces monotonic progression over existing checkpoints.
+    /// </summary>
+    Task SavePurgeCheckpointAsync(AuditPurgeCheckpoint checkpoint, CancellationToken ct = default)
+        => Task.CompletedTask;
+
+    /// <summary>
+    /// Plans a contiguous prefix purge bounded by the first entry whose retention horizon has not yet elapsed.
+    /// Returns (MaxEligibleSequence, FirstSurvivingSequence, SurvivingPrevHash, PurgeCount) or null if no eligible prefix exists.
+    /// </summary>
+    Task<(long MaxEligibleSequence, long FirstSurvivingSequence, string SurvivingPrevHash, long PurgeCount)?> PlanPurgePrefixAsync(DateTimeOffset thresholdUtc, CancellationToken ct = default)
+        => Task.FromResult<(long MaxEligibleSequence, long FirstSurvivingSequence, string SurvivingPrevHash, long PurgeCount)?>(null);
+
+    /// <summary>
+    /// SEC-AUD161-03: Deletes up to <paramref name="batchSize"/> entries with sequence numbers &lt;= <paramref name="maxSequenceInclusive"/>.
+    /// Uses transaction-scoped session context to bypass append-only triggers.
+    /// </summary>
+    Task<int> ExecutePurgeBatchAsync(long maxSequenceInclusive, int batchSize, CancellationToken ct = default)
+        => Task.FromResult(0);
 
     /// <summary>
     /// WP-SC-10: one keyset page over the audit chain (newest first, by chain sequence). Rows without a sequence number are never

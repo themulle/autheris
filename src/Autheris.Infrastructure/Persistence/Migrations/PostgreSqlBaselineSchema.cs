@@ -193,6 +193,17 @@ internal static class PostgreSqlBaselineSchema
                 tenant_id TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS AUDIT_PURGE_CHECKPOINTS (
+                id TEXT PRIMARY KEY,
+                first_surviving_seq BIGINT NOT NULL,
+                surviving_prev_hash TEXT NOT NULL,
+                purged_count BIGINT NOT NULL,
+                purged_through_utc TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                signature TEXT NOT NULL,
+                external_signature TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS CONSENT_REQUESTS (
                 id TEXT PRIMARY KEY,
                 table_id TEXT NOT NULL,
@@ -606,6 +617,9 @@ internal static class PostgreSqlBaselineSchema
         // hold INSERT/SELECT, the schema is applied with a separate migration role). One command per statement.
         ExecuteSchemaCommand(conn, @"CREATE OR REPLACE FUNCTION autheris_audit_append_only() RETURNS trigger AS $audit$
             BEGIN
+                IF TG_OP = 'DELETE' AND current_setting('autheris.audit_purge_authorized', true) = 'true' THEN
+                    RETURN OLD;
+                END IF;
                 RAISE EXCEPTION 'AUDIT_LOG_ENTRIES is append-only (%)', TG_OP USING ERRCODE = '42501';
             END;
             $audit$ LANGUAGE plpgsql");
