@@ -33,6 +33,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
     private readonly QueryAnalysisOptions _analysisOptions;
     private readonly Autheris.Domain.Interfaces.IConsentResolutionService _consentResolution;
     private readonly Microsoft.Extensions.Logging.ILogger<QueryAnalysisService>? _logger;
+    private readonly Autheris.Domain.Security.IRestrictedScopePolicy _restrictedScopes;
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     public QueryAnalysisService(
@@ -45,8 +46,11 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         IOptions<GatewayOptions>? gatewayOptions = null,
         QueryAnalysisOptions? analysisOptions = null,
         Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null,
-        Microsoft.Extensions.Logging.ILogger<QueryAnalysisService>? logger = null)
+        Microsoft.Extensions.Logging.ILogger<QueryAnalysisService>? logger = null,
+        Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null)
     {
+        // The default is the secure list (REQ-GOV-143), never "off".
+        _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
@@ -74,8 +78,11 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         IOptions<GatewayOptions>? gatewayOptions = null,
         QueryAnalysisOptions? analysisOptions = null,
         Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null,
-        Microsoft.Extensions.Logging.ILogger<QueryAnalysisService>? logger = null)
+        Microsoft.Extensions.Logging.ILogger<QueryAnalysisService>? logger = null,
+        Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null)
     {
+        // The default is the secure list (REQ-GOV-143), never "off".
+        _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _dataOwnershipRepository = dataOwnershipRepository;

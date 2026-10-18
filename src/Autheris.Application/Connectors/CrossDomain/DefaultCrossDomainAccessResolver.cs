@@ -36,7 +36,8 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
         IConsentCacheService? consentCache = null,
         IRebacEvaluator? rebacEvaluator = null,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
-        TypedPolicySources? typedPolicies = null)
+        TypedPolicySources? typedPolicies = null,
+        Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null)
     {
         _typedPolicies = typedPolicies;
         _options = options?.Value ?? new GatewayOptions();
@@ -51,7 +52,8 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
             mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
             rowPolicyFactory: typedPolicies?.RowPolicies,
             maskPolicyFactory: typedPolicies?.MaskPolicies,
-            callerAttributes: typedPolicies?.CallerAttributes);
+            callerAttributes: typedPolicies?.CallerAttributes,
+            restrictedScopes: restrictedScopes);
     }
 
     public Task<TableAccessDecision> ResolveAccessAsync(

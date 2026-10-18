@@ -41,6 +41,8 @@ public class ConsentAccessLevelFailClosedTests
             Schema = "dbo",
             TableName = "invoices",
             IsAllowed = true,
+            RestrictionLayout = CachedConsentEnvelope.CurrentRestrictionLayout,
+            RestrictionFingerprint = Autheris.Domain.Security.RestrictedScopePolicy.Default.Fingerprint,
             ColumnAccess = new Dictionary<string, int>
             {
                 ["salary"] = invalidInt,
@@ -48,7 +50,7 @@ public class ConsentAccessLevelFailClosedTests
             }
         };
 
-        var decision = env.ToDecision();
+        var decision = env.ToDecision(Autheris.Domain.Security.RestrictedScopePolicy.Default.Fingerprint)!;
         decision.ColumnAccess["salary"].ShouldBe(ColumnAccessLevel.Deny);
         decision.ColumnAccess["email"].ShouldBe(ColumnAccessLevel.Clear);
     }

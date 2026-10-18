@@ -311,6 +311,13 @@ public sealed partial class QueryAnalysisService
                 {
                     evaluations.Add(worstCase);
                 }
+
+                // REQ-GOV-143 (SEC-GOV143-12): the target may hold a restricted scope; predict that case too (only while the restriction is
+                // enabled). The minimum across evaluations keeps the prediction on the safe side.
+                if (_restrictedScopes.Scopes.Count > 0)
+                {
+                    evaluations.Add(_restrictedScopes.Scopes);
+                }
             }
 
             levels = CatalogColumnAccessResolver.ResolveGranted(_consentResolution, table, sid, groups, roles, tenantConsents, evaluations[0]);

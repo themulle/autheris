@@ -25,7 +25,7 @@ public sealed class ConsentCacheParityTests
                 var decision = ParityData.Decision(context, text);
                 var envelope = CachedConsentEnvelope.FromDecision(decision, epoch: 7);
 
-                var restored = MemoryPackSerializer.Deserialize<CachedConsentEnvelope>(MemoryPackSerializer.Serialize(envelope))!.ToDecision();
+                var restored = MemoryPackSerializer.Deserialize<CachedConsentEnvelope>(MemoryPackSerializer.Serialize(envelope))!.ToDecision(Autheris.Domain.Security.RestrictedScopePolicy.Default.Fingerprint)!;
 
                 restored.CombinedRowFilterSql.ShouldBe(string.IsNullOrEmpty(text.Sql) ? null : text.Sql, parityCase.Id);
                 // the envelope stores no values: a typed text read back from L2 has no bound parameters

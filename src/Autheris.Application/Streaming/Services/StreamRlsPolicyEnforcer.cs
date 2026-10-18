@@ -14,6 +14,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -124,6 +125,16 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         var groupSids = subscriber.GetGroupSids();
         var roles = subscriber.GetUserRoles();
 
+        // REQ-GOV-143 (SEC-GOV143-02/-13): the subscriber's token scopes (claims overload) decide whether a restricted scope is held. The scope
+        // set belongs to the token captured at subscribe time and must not outlive it: once the token has expired, nothing is delivered
+        // (the subscriber re-subscribes with a fresh token).
+        var scopes = TokenAccessScope.GetScopeSet(subscriber.Claims);
+        if (scopes.Count > 0 && IsTokenExpired(subscriber))
+        {
+            _logger.LogDebug("Streaming event '{EventId}' dropped: the subscriber token (scopes) has expired", cdcEvent.EventId);
+            return StreamSecurityDecision.Denied("Token expired");
+        }
+
         // 4. Catalog metadata is mandatory (dialect, column list, masking rules) -> fail-closed
         TableMetadata? metadata;
         TableAccessDecision decision;
@@ -137,7 +148,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
             }
 
             // 5. Consent decision (same chain as GatewayExecutionService)
-            decision = await ResolveConsentDecisionAsync(tenantId, userSid, groupSids, roles, cdcEvent.Table, metadata, ct).ConfigureAwait(false);
+            decision = await ResolveConsentDecisionAsync(tenantId, userSid, groupSids, roles, scopes, cdcEvent.Table, metadata, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -316,6 +327,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         Sid userSid,
         HashSet<Sid> groupSids,
         HashSet<string> roles,
+        IReadOnlySet<string> scopes,
         TableIdentifier table,
         TableMetadata metadata,
         CancellationToken ct)
@@ -325,7 +337,9 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
             return TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true);
         }
 
-        var contextHash = IConsentCacheService.ComputeSubjectContextHash(groupSids, roles);
+        // The scope set is part of the key: a restricted and an unrestricted subscriber never share a cached decision.
+        var resolverScopes = scopes.Count > 0 ? scopes : null;
+        var contextHash = IConsentCacheService.ComputeSubjectContextHash(groupSids, roles, resolverScopes);
         var cached = await _cacheService.GetCachedDecisionAsync(tenantId, userSid, table, contextHash, ct).ConfigureAwait(false);
         if (cached != null)
         {
@@ -343,12 +357,19 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
             .Where(c => c.TenantId == tenantId)
             .ToList();
 
-        var decision = _resolutionService.ResolveAccess(userSid, groupSids, roles, table, tenantConsents, metadata.Dialect);
+        var decision = _resolutionService.ResolveAccess(userSid, groupSids, roles, table, tenantConsents, metadata.Dialect, allUserSids: null, callerScopes: resolverScopes);
 
         var ttl = ConsentResolutionService.ComputeDecisionCacheTtl(metadata.Table.IsHighlySensitive, tenantConsents, now);
         await _cacheService.SetCachedDecisionAsync(tenantId, userSid, table, decision, ttl, contextHash, epochAtLoad, ct).ConfigureAwait(false);
 
         return decision;
+    }
+
+    private bool IsTokenExpired(ClaimsPrincipal subscriber)
+    {
+        var exp = subscriber.FindFirst("exp")?.Value;
+        return exp != null && (!long.TryParse(exp, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var expSeconds) ||
+                               expSeconds <= _time.GetUtcNow().ToUnixTimeSeconds());
     }
 
     /// <summary>
