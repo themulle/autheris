@@ -474,6 +474,40 @@ public partial class SqliteGovernanceRepository
         return filters;
     }
 
+    /// <summary>PLAN-GOV-158-INC1: opt-in load of <c>CONSENTS.description</c> (<see cref="IConsentDescriptionRepository.LoadDescriptionsAsync"/>); never part of hydration.</summary>
+    public async Task LoadDescriptionsAsync(IReadOnlyCollection<Consent> consents, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(consents);
+        if (consents.Count == 0) return;
+        await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
+        await LoadConsentDescriptionsAsync(scope.Connection, consents, ct);
+    }
+
+    private static async Task LoadConsentDescriptionsAsync(SqliteConnection conn, IReadOnlyCollection<Consent> consents, CancellationToken ct)
+    {
+        if (consents.Count == 0) return;
+        var byId = new Dictionary<string, List<Consent>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in consents)
+        {
+            if (!byId.TryGetValue(c.Id.ToString(), out var list)) byId[c.Id.ToString()] = list = [];
+            list.Add(c);
+        }
+
+        foreach (var chunk in byId.Keys.Chunk(500))
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"SELECT id, description FROM CONSENTS WHERE description IS NOT NULL AND id IN ({string.Join(",", chunk.Select((_, i) => $"@did{i}"))})";
+            for (var i = 0; i < chunk.Length; i++) cmd.Parameters.AddWithValue($"@did{i}", chunk[i]);
+            using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                if (!byId.TryGetValue(reader.GetString(0), out var targets)) continue;
+                var text = reader.GetString(1);
+                foreach (var c in targets) c.Description = text;
+            }
+        }
+    }
+
     private async Task HydrateConsentsBatchAsync(SqliteConnection conn, List<Consent> consents, CancellationToken ct)
     {
         if (consents.Count == 0) return;
@@ -1376,8 +1410,8 @@ public partial class SqliteGovernanceRepository
 
         using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, grantee_sid_norm, role_id, role_name, valid_from, valid_to, is_revoked, tenant_id)
-                            VALUES (@id, @tid, @reqId, @effect, @type, @sid, @sidNorm, @roleId, @roleName, @from, @to, 0, @tenantId)";
+        cmd.CommandText = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, grantee_sid_norm, role_id, role_name, valid_from, valid_to, is_revoked, tenant_id, description)
+                            VALUES (@id, @tid, @reqId, @effect, @type, @sid, @sidNorm, @roleId, @roleName, @from, @to, 0, @tenantId, @description)";
         cmd.Parameters.AddWithValue("@id", consent.Id.ToString());
         cmd.Parameters.AddWithValue("@tid", consent.TableId.ToString());
         cmd.Parameters.AddWithValue("@reqId", (object?)consent.ConsentRequestId?.ToString() ?? DBNull.Value);
@@ -1390,6 +1424,7 @@ public partial class SqliteGovernanceRepository
         cmd.Parameters.AddWithValue("@from", consent.ValidFrom.ToString("O"));
         cmd.Parameters.AddWithValue("@to", consent.ValidTo.ToString("O"));
         cmd.Parameters.AddWithValue("@tenantId", (object?)consent.TenantId.Value ?? TenantId.LegacySingleTenant.Value);
+        cmd.Parameters.AddWithValue("@description", (object?)consent.Description ?? DBNull.Value);
 
         await cmd.ExecuteNonQueryAsync(ct);
 

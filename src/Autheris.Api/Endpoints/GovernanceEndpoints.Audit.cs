@@ -193,12 +193,16 @@ public static partial class GovernanceEndpoints
             now,
             context.RequestAborted).ConfigureAwait(false);
 
+        await Autheris.Application.Governance.ConsentDescriptionLoader.LoadAsync(consentRepository, page.Items, context.RequestAborted).ConfigureAwait(false);
+        var descriptionMax = context.RequestServices.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GovernanceTextOptions>>()?.Value.ConsentDescriptionMaxLength
+            ?? new Autheris.Domain.Options.GovernanceTextOptions().ConsentDescriptionMaxLength;
         return Results.Ok(new
         {
             items = page.Items.Select(c => new
             {
                 id = c.Id,
                 table = c.TableIdentifier.ToString(),
+                description = Autheris.Domain.Security.ConsentDescriptionText.ForOutput(c.Description, descriptionMax),
                 granteeType = c.GranteeType.ToString(),
                 grantee = c.GranteeType == Autheris.Domain.Model.GranteeType.Role ? c.RoleName : c.GranteeSid?.Value,
                 effect = c.Effect.ToString(),

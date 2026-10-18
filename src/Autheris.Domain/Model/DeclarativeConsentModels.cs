@@ -46,4 +46,5 @@ public sealed record DeclarativeApplyResult(
     int Unchanged,
     int Revoked,
     bool DryRun,
-    IReadOnlyList<string> Details);
+    IReadOnlyList<string> Details,
+    int Updated = 0);

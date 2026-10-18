@@ -11,12 +11,15 @@ using Autheris.Application.Interfaces;
 using Autheris.Application.OpenMetadata.Interfaces;
 using Autheris.Application.OpenMetadata.Models;
 using Autheris.Application.DataCatalog.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using HotChocolate;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Autheris.GraphQL.Types;
 
@@ -125,6 +128,114 @@ public sealed class Mutation
         logger?.LogError(
             "Consent creation after the final approval step failed for consent request {RequestId} (tenant {TenantId}, {ExceptionType}); the request stays APPROVED and is recoverable by activation.",
             approved.Id, approved.TenantId.Value, ex.GetType().Name);
+    }
+
+    private static GraphQLException ConsentNotFound() => new(ErrorBuilder.New()
+        .SetCode("NOT_FOUND")
+        .SetMessage("The consent was not found.")
+        .Build());
+
+    /// <summary>
+    /// PLAN-GOV-158-INC1 decision 7: sets or clears the owner-authored description of a consent. Order (SEC-GOV158I1-04): decision guard (a person only),
+    /// tenant-scoped load, table-scoped admin/owner/delegate check, then text validation, then the write. Every refusal before the text is judged (unknown,
+    /// foreign tenant, revoked, expired, not permitted, ownership lookup failure) is the same fixed <c>NOT_FOUND</c>, so there is no validation or
+    /// existence oracle. The description never influences a decision; it is stored with a Tier-A audit row (length and hash prefix only) in one transaction.
+    /// </summary>
+    public async Task<ConsentDto> SetConsentDescriptionAsync(
+        Guid consentId,
+        string? description,
+        [Service] IConsentRepository consentRepository,
+        [Service] IConsentDescriptionRepository descriptionRepository,
+        [Service] IDataOwnershipRepository ownershipRepository,
+        [Service] IHttpContextAccessor httpContextAccessor,
+        [Service] IOptions<GovernanceTextOptions>? textOptions = null,
+        CancellationToken ct = default)
+    {
+        await EnsureDecisionPermittedAsync(httpContextAccessor, ct).ConfigureAwait(false);
+        var actorSid = GetAuthenticatedUserSid(httpContextAccessor);
+        var principal = httpContextAccessor!.HttpContext!.User;
+
+        var isCrossTenantAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        var tenantId = ResolveMutationTenantId(httpContextAccessor, principal, isCrossTenantAdmin);
+
+        var consent = await consentRepository.GetConsentByIdAsync(consentId, ct).ConfigureAwait(false);
+        if (consent == null
+            || (consent.TenantId != tenantId && !isCrossTenantAdmin)
+            || !consent.IsActive(DateTimeOffset.UtcNow))
+        {
+            throw ConsentNotFound();
+        }
+
+        var isAdmin = isCrossTenantAdmin || principal.IsInRole("GovernanceAdmin");
+        if (!isAdmin)
+        {
+            bool permitted;
+            try
+            {
+                permitted = await ownershipRepository.IsAuthorizedApproverForTableAsync(consent.TableIdentifier, actorSid, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                permitted = false; // fail closed: a failing ownership lookup denies
+            }
+
+            if (!permitted)
+            {
+                throw ConsentNotFound();
+            }
+        }
+
+        var maxLength = (textOptions?.Value ?? new GovernanceTextOptions()).ConsentDescriptionMaxLength;
+        var check = UntrustedText.Normalize(description, maxLength, allowLineFeed: false);
+        if (!check.IsValid)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("VALIDATION_ERROR")
+                .SetMessage("The description is not valid.")
+                .Build());
+        }
+
+        // The repository read does not hydrate the description (INC1 opt-in); load it so the audit row fingerprints the real old value.
+        await Autheris.Application.Governance.ConsentDescriptionLoader.LoadAsync(consentRepository, [consent], ct).ConfigureAwait(false);
+        var (oldLength, oldHash) = ConsentDescriptionText.Fingerprint(consent.Description);
+        var (newLength, newHash) = ConsentDescriptionText.Fingerprint(check.Value);
+        var audit = new AuditLogEntry
+        {
+            TenantId = consent.TenantId,
+            EventType = AuditEventTypes.ConsentDescriptionChanged,
+            ActorSid = actorSid,
+            TargetTable = consent.TableIdentifier.ToString(),
+            Decision = "UPDATED",
+            TraceId = Guid.NewGuid().ToString("N"),
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                ConsentId = consent.Id,
+                Table = consent.TableIdentifier.ToString(),
+                OldLength = oldLength,
+                OldSha256Prefix = oldHash,
+                NewLength = newLength,
+                NewSha256Prefix = newHash
+            })
+        };
+
+        if (!await descriptionRepository.UpdateConsentDescriptionWithAuditAsync(consent.Id, consent.TenantId, check.Value, audit, ct).ConfigureAwait(false))
+        {
+            throw ConsentNotFound();
+        }
+
+        return new ConsentDto
+        {
+            Id = consent.Id,
+            TableIdentifier = consent.TableIdentifier.ToString(),
+            Effect = consent.Effect.ToString(),
+            GranteeType = consent.GranteeType.ToString(),
+            GranteeSid = consent.GranteeSid?.Value,
+            RoleName = consent.RoleName,
+            ValidFrom = consent.ValidFrom,
+            ValidTo = consent.ValidTo,
+            Columns = consent.ColumnRules.Select(cr => cr.ColumnName).ToList(),
+            Description = ConsentDescriptionText.ForOutput(check.Value, maxLength)
+        };
     }
 
     private static GraphQLException NotPending() => new(ErrorBuilder.New()

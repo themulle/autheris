@@ -13,7 +13,7 @@ using Microsoft.Data.SqlClient;
 
 namespace Autheris.Infrastructure.Persistence;
 
-public partial class SqlServerGovernanceRepository : IGovernanceRepository, Migrations.IGovernanceStoreInitializer, IAuditChainExportSource, IDisposable, IAsyncDisposable
+public partial class SqlServerGovernanceRepository : IGovernanceRepository, IConsentDescriptionRepository, Migrations.IGovernanceStoreInitializer, IAuditChainExportSource, IDisposable, IAsyncDisposable
 {
     private readonly string _connectionString;
     private readonly IEpochValidationService _epochValidationService;

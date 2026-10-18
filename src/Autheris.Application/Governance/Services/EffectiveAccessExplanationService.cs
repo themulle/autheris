@@ -21,8 +21,14 @@ public sealed class EffectiveAccessExplanationService(
     IConsentRepository consentRepository,
     IConsentResolutionService resolutionService,
     IDataOwnershipRepository? ownershipRepository = null,
-    IOptions<GatewayOptions>? gatewayOptions = null) : IEffectiveAccessExplanationService
+    IOptions<GatewayOptions>? gatewayOptions = null,
+    IOptions<GovernanceTextOptions>? textOptions = null) : IEffectiveAccessExplanationService
 {
+    private int DescriptionMaxLength => (textOptions?.Value ?? new GovernanceTextOptions()).ConsentDescriptionMaxLength;
+
+    /// <summary>Upper bound of <see cref="EffectiveTableAccessDto.ConsentDescriptions"/> (decision 9).</summary>
+    internal const int MaxDescriptions = 10;
+
     private TenancyMode EffectiveTenancyMode => gatewayOptions?.Value.Tenancy.EffectiveMode ?? TenancyMode.Multi;
 
     /// <summary>Answer for tables that do not exist or that the caller may not discover (identical on purpose).</summary>
@@ -159,27 +165,29 @@ public sealed class EffectiveAccessExplanationService(
             activeRowFilters.Add(canSeeDefinition ? decision.CombinedRowFilterSql : RowFilterDescription);
         }
 
-        var applicableConsents = MatchingAllowConsents(activeConsents, table, now, userSid.Value, groupSids, roles, allUserSids);
+        var applicableConsents = MatchingAllowConsents(activeConsents, table, now, userSid.Value, groupSids, roles, allUserSids).ToList();
+        await ConsentDescriptionLoader.LoadAsync(consentRepository, applicableConsents, ct).ConfigureAwait(false);
 
-        // Earliest moment at which the caller's current effective access changes (clamped expiry of matching grants only);
-        // interim description (INC-1 adds the stored one): a held role name, deterministic by ordinal order.
+        // Earliest moment at which the caller's current effective access changes (clamped expiry of matching grants only).
         DateTimeOffset? validTo = null;
-        string? roleName = null;
         foreach (var c in applicableConsents)
         {
             if (validTo is null || c.EffectiveValidTo < validTo)
             {
                 validTo = c.EffectiveValidTo;
             }
-
-            if (c.GranteeType == GranteeType.Role && !string.IsNullOrWhiteSpace(c.RoleName)
-                && (roleName is null || string.CompareOrdinal(c.RoleName, roleName) < 0))
-            {
-                roleName = c.RoleName;
-            }
         }
 
-        var description = roleName ?? $"Active grant for subject {userSid.Value}";
+        // PLAN-GOV-158-INC1 decision 9 (SEC-GOV158I1-09): descriptions come only from the contributing consents (the set above), the most specific
+        // grantee first (user or service principal, then group, then role), then the earliest expiry, then the id. Output only through ForOutput.
+        var describing = applicableConsents
+            .OrderBy(c => GranteeSpecificity(c.GranteeType))
+            .ThenBy(c => c.EffectiveValidTo)
+            .ThenBy(c => c.Id)
+            .Select(c => ConsentDescriptionText.ForOutput(c.Description, DescriptionMaxLength))
+            .ToList();
+        var descriptions = describing.OfType<string>().Distinct(StringComparer.Ordinal).Take(MaxDescriptions).ToList();
+        var description = descriptions.FirstOrDefault();
 
         return new EffectiveTableAccessDto(
             table.ToString(),
@@ -192,8 +200,19 @@ public sealed class EffectiveAccessExplanationService(
             validTo,
             restrictedScope,
             scopeClearRequired
-        );
+        )
+        {
+            ConsentDescriptions = descriptions
+        };
     }
+
+    private static int GranteeSpecificity(GranteeType type) => type switch
+    {
+        GranteeType.User or GranteeType.ServicePrincipal => 0,
+        GranteeType.Group => 1,
+        GranteeType.Role => 2,
+        _ => 3
+    };
 
     /// <summary>
     /// Allow consents that apply to the caller, by the very predicate of the access decision

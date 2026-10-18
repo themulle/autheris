@@ -208,6 +208,7 @@ public sealed class Query
         int? after = null,
         [Service] IConsentRepository consentRepository = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
+        [Service] IOptions<GovernanceTextOptions>? textOptions = null,
         CancellationToken ct = default)
     {
         var principal = httpContextAccessor?.HttpContext?.User;
@@ -241,8 +242,10 @@ public sealed class Query
             consents = await consentRepository.GetAllActiveConsentsForSubjectsAsync(allSubjects, roles, now, tenantId, ct).ConfigureAwait(false);
         }
 
-        var dtos = consents
-            .Where(c => c.IsActive(now) && c.TenantId == tenantId)
+        var descriptionMax = (textOptions?.Value ?? new GovernanceTextOptions()).ConsentDescriptionMaxLength;
+        var activeConsents = consents.Where(c => c.IsActive(now) && c.TenantId == tenantId).ToList();
+        await Autheris.Application.Governance.ConsentDescriptionLoader.LoadAsync(consentRepository, activeConsents, ct).ConfigureAwait(false);
+        var dtos = activeConsents
             .Select(c => new ConsentDto
             {
                 Id = c.Id,
@@ -253,7 +256,8 @@ public sealed class Query
                 RoleName = c.RoleName,
                 ValidFrom = c.ValidFrom,
                 ValidTo = c.ValidTo,
-                Columns = c.ColumnRules.Select(cr => cr.ColumnName).ToList()
+                Columns = c.ColumnRules.Select(cr => cr.ColumnName).ToList(),
+                Description = ConsentDescriptionText.ForOutput(c.Description, descriptionMax)
             });
 
         if (after.HasValue && after.Value > 0)
