@@ -496,6 +496,7 @@ Above the PRD size L estimate for production code because the plan adds the engi
 - 2026-10-16: Revision 1 (Phase 2).
 - 2026-10-16: Phase 3 security review appended (APPROVED WITH CONDITIONS; WP-0 split recommended; SEC-112-01..12).
 
+- 2026-10-18: P1 A1-2/A1-12 delivered. `NoisyCacheKey` (internal, `Application/Analytics`) hashes a length-prefixed canonical input to SHA-256 hex; decision fingerprint covers column levels, row filters, typed bound values and the caller-attribute `Generation`. `GovernedAggregationService` gained an optional `ICallerAttributeRegistry` ctor parameter (absent registry = generation 0; registry fault = no cache read/write, no value logged) and evicts only the oldest entry when the cache is full (was: clear all).
 ---
 
 ## Phase 3 Security Review (2026-10-16)

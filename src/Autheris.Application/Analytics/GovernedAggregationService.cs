@@ -15,6 +15,7 @@ using Autheris.Application.Data.Interfaces;
 using Autheris.Application.Data.Services;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Services;
+using Autheris.Application.Identity.Attributes;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Sql.Interfaces;
@@ -57,6 +58,9 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
     private readonly bool _hasExplicitAnalyticsOptions;
     private readonly IDifferentialPrivacyEngine? _dpEngine;
     private readonly ConcurrentDictionary<string, (string UtcDay, AggregationResult Result)> _noisyResultCache = new(StringComparer.Ordinal);
+    private readonly Queue<string> _noisyInsertionOrder = new();
+    private readonly object _noisyCacheLock = new();
+    private readonly ICallerAttributeRegistry? _callerAttributeRegistry;
 
     [ActivatorUtilitiesConstructor]
     public GovernedAggregationService(
@@ -72,7 +76,8 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         IAuditWriter? auditWriter = null,
         IOptions<AnalyticsOptions>? analyticsOptions = null,
         IGovernedTableReadPlanner? planner = null,
-        IDifferentialPrivacyEngine? dpEngine = null)
+        IDifferentialPrivacyEngine? dpEngine = null,
+        ICallerAttributeRegistry? callerAttributeRegistry = null)
     {
         ArgumentNullException.ThrowIfNull(auditLogRepository);
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
@@ -88,6 +93,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         _hasExplicitAnalyticsOptions = analyticsOptions?.Value != null;
         _analyticsOptions = analyticsOptions?.Value ?? new AnalyticsOptions();
         _dpEngine = dpEngine ?? new DifferentialPrivacyEngine(auditLogRepository, analyticsOptions: analyticsOptions);
+        _callerAttributeRegistry = callerAttributeRegistry;
     }
 
     public GovernedAggregationService(
@@ -102,7 +108,8 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         IAuditWriter? auditWriter = null,
         IOptions<AnalyticsOptions>? analyticsOptions = null,
         IGovernedTableReadPlanner? planner = null,
-        IDifferentialPrivacyEngine? dpEngine = null)
+        IDifferentialPrivacyEngine? dpEngine = null,
+        ICallerAttributeRegistry? callerAttributeRegistry = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _pdp = pdp;
@@ -117,6 +124,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         _hasExplicitAnalyticsOptions = analyticsOptions?.Value != null;
         _analyticsOptions = analyticsOptions?.Value ?? new AnalyticsOptions();
         _dpEngine = dpEngine ?? (metadataRepository is IAuditLogRepository dpAudit ? new DifferentialPrivacyEngine(dpAudit, analyticsOptions: analyticsOptions) : null);
+        _callerAttributeRegistry = callerAttributeRegistry;
     }
 
     public async Task<AggregationResult> ExecuteAggregationAsync(
@@ -199,10 +207,16 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         string utcDay = DateTimeOffset.UtcNow.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
         if (_analyticsOptions.Privacy.Noise.Enabled)
         {
-            noiseCacheKey = BuildNoisyCacheKey(tenantId, userSid, metadata.Identifier, groupByColumns, resolvedAggregates, query.Where, query.OrderBy, requestedLimit, effectiveMinGroupSize, effectiveStrategy, utcDay);
-            if (_noisyResultCache.TryGetValue(noiseCacheKey, out var cached) && string.Equals(cached.UtcDay, utcDay, StringComparison.Ordinal))
+            // SEC-112-21/-26: the key carries the decision fingerprint (bound values + caller-attribute generation).
+            // An attribute-resolution fault means no cache reuse: the request is neither served from nor stored in the cache.
+            var generation = await TryGetAttributeGenerationAsync(ct).ConfigureAwait(false);
+            if (generation.HasValue)
             {
-                return cached.Result;
+                noiseCacheKey = NoisyCacheKey.Build(tenantId, userSid, metadata.Identifier, groupByColumns, resolvedAggregates, query.Where, query.OrderBy, requestedLimit, effectiveMinGroupSize, effectiveStrategy, utcDay, NoisyCacheKey.Fingerprint(decision, metadata, generation.Value));
+                if (_noisyResultCache.TryGetValue(noiseCacheKey, out var cached) && string.Equals(cached.UtcDay, utcDay, StringComparison.Ordinal))
+                {
+                    return cached.Result;
+                }
             }
         }
 
@@ -366,12 +380,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
 
         if (noiseApplied && noiseCacheKey != null)
         {
-            if (_noisyResultCache.Count >= Math.Max(1, _analyticsOptions.Privacy.Noise.CacheMaxEntries))
-            {
-                _noisyResultCache.Clear();
-            }
-
-            _noisyResultCache[noiseCacheKey] = (utcDay, finalResult);
+            StoreNoisyResult(noiseCacheKey, utcDay, finalResult);
         }
 
         return finalResult;
@@ -440,15 +449,45 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         throw new GatewayInvalidQueryException($"Differential privacy noise requires configured MeasureBounds for column '{column}'.");
     }
 
-    private static string BuildNoisyCacheKey(
-        TenantId tenantId, Sid userSid, TableIdentifier table, IReadOnlyList<string> groupBy,
-        IReadOnlyList<AggregateSelection> aggregates, TableFilterClause? where, IReadOnlyList<TableOrderBy>? orderBy,
-        int limit, int minGroupSize, SmallGroupStrategy strategy, string utcDay)
+    private async ValueTask<long?> TryGetAttributeGenerationAsync(CancellationToken ct)
     {
-        var gb = string.Join(",", groupBy);
-        var aggs = string.Join(",", aggregates.Select(a => $"{a.Function}:{a.Column}:{a.EffectiveAlias}"));
-        var ord = orderBy is { Count: > 0 } ? string.Join(",", orderBy.Select(o => $"{o.Column}:{(o.Descending ? "D" : "A")}")) : string.Empty;
-        return $"{tenantId.Value}|{userSid.Value}|{table}|{gb}|{aggs}|{where?.SqlPredicate}|{ord}|{limit}|{minGroupSize}|{strategy}|{utcDay}";
+        if (_callerAttributeRegistry is null)
+        {
+            return 0L;
+        }
+
+        try
+        {
+            return (await _callerAttributeRegistry.GetAsync(ct).ConfigureAwait(false)).Generation;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Stores a noisy result; a full cache evicts only the oldest entry (never the whole cache).</summary>
+    private void StoreNoisyResult(string key, string utcDay, AggregationResult result)
+    {
+        var max = Math.Max(1, _analyticsOptions.Privacy.Noise.CacheMaxEntries);
+        lock (_noisyCacheLock)
+        {
+            if (!_noisyResultCache.ContainsKey(key))
+            {
+                while (_noisyInsertionOrder.Count >= max && _noisyInsertionOrder.TryDequeue(out var oldest))
+                {
+                    _noisyResultCache.TryRemove(oldest, out _);
+                }
+
+                _noisyInsertionOrder.Enqueue(key);
+            }
+
+            _noisyResultCache[key] = (utcDay, result);
+        }
     }
 
     private async Task<(List<ComputedBucket> Buckets, double ConsumedEpsilon, double RemainingEpsilon)> ApplyDifferentialPrivacyNoiseAsync(
