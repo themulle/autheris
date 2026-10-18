@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -105,7 +106,7 @@ public partial class SqliteGovernanceRepository
 
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source
+                cmd.CommandText = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json
                                     FROM TABLES
                                     WHERE source_name = @domain COLLATE NOCASE AND schema_name = @schema COLLATE NOCASE AND table_name = @table COLLATE NOCASE";
                 cmd.Parameters.AddWithValue("@domain", table.Domain);
@@ -122,6 +123,11 @@ public partial class SqliteGovernanceRepository
                     var httpEndpoint = !string.IsNullOrWhiteSpace(httpEndpointJson)
                         ? JsonSerializer.Deserialize<HttpEndpointDescriptor>(httpEndpointJson)
                         : null;
+                    var reqFiltersJson = reader.IsDBNull(15) ? null : reader.GetString(15);
+                    var reqFilters = string.IsNullOrWhiteSpace(reqFiltersJson)
+                        ? ImmutableArray<string>.Empty
+                        : JsonSerializer.Deserialize<ImmutableArray<string>>(reqFiltersJson);
+                    if (reqFilters.IsDefault) reqFilters = ImmutableArray<string>.Empty;
 
                     tableEntity = new Table
                     {
@@ -139,7 +145,8 @@ public partial class SqliteGovernanceRepository
                         PluginName = pluginName,
                         Description = reader.IsDBNull(12) ? null : reader.GetString(12),
                         LongDescription = reader.IsDBNull(13) ? null : reader.GetString(13),
-                        DocumentationSource = reader.IsDBNull(14) ? null : reader.GetString(14)
+                        DocumentationSource = reader.IsDBNull(14) ? null : reader.GetString(14),
+                        RequiredFilterColumns = reqFilters
                     };
                 }
             }
@@ -224,6 +231,7 @@ public partial class SqliteGovernanceRepository
                 Indexes = indexes,
                 RowFilterEvaluation = rowFilterEvaluation
             };
+            result.ValidateRequiredFilterColumns();
 
             if (AfterMetadataSnapshotForTesting is { } hook)
             {
@@ -254,7 +262,8 @@ public partial class SqliteGovernanceRepository
                                            t.display_name, t.sensitivity, t.requires_four_eyes, t.is_active,
                                            COALESCE(t.source_name, p.domain, 'default') as domain,
                                            t.data_source_type, t.http_endpoint_json, t.plugin_name,
-                                           t.description, t.long_description, t.doc_source
+                                           t.description, t.long_description, t.doc_source,
+                                           t.required_filter_columns_json
                                     FROM TABLES t
                                     LEFT JOIN POLICY_EPOCHS p ON t.id = p.table_id
                                     WHERE t.is_active = 1";
@@ -274,6 +283,11 @@ public partial class SqliteGovernanceRepository
                     var httpEndpoint = !string.IsNullOrWhiteSpace(httpEndpointJson)
                         ? JsonSerializer.Deserialize<HttpEndpointDescriptor>(httpEndpointJson)
                         : null;
+                    var reqFiltersJson = reader.IsDBNull(16) ? null : reader.GetString(16);
+                    var reqFilters = string.IsNullOrWhiteSpace(reqFiltersJson)
+                        ? ImmutableArray<string>.Empty
+                        : JsonSerializer.Deserialize<ImmutableArray<string>>(reqFiltersJson);
+                    if (reqFilters.IsDefault) reqFilters = ImmutableArray<string>.Empty;
 
                     var table = new Table
                     {
@@ -291,7 +305,8 @@ public partial class SqliteGovernanceRepository
                         PluginName = pluginName,
                         Description = reader.IsDBNull(13) ? null : reader.GetString(13),
                         LongDescription = reader.IsDBNull(14) ? null : reader.GetString(14),
-                        DocumentationSource = reader.IsDBNull(15) ? null : reader.GetString(15)
+                        DocumentationSource = reader.IsDBNull(15) ? null : reader.GetString(15),
+                        RequiredFilterColumns = reqFilters
                     };
                     tableRows.Add((id, domain, name, table));
                   }
@@ -377,7 +392,7 @@ public partial class SqliteGovernanceRepository
                     continue;
                 }
 
-                results.Add(new TableMetadata
+                var meta = new TableMetadata
                 {
                     Table = table,
                     Identifier = identifier,
@@ -385,7 +400,17 @@ public partial class SqliteGovernanceRepository
                     ColumnMaskingRules = new Dictionary<string, MaskingRule>(),
                     PrimaryKeyColumns = pkColumns,
                     Indexes = indexes
-                });
+                };
+                try
+                {
+                    meta.ValidateRequiredFilterColumns();
+                }
+                catch (CatalogValidationException ex)
+                {
+                    _logger?.LogWarning(ex, "Catalog table {Table} was omitted: required filter column definition is invalid.", identifier);
+                    continue;
+                }
+                results.Add(meta);
             }
 
             // Issue #111: tier and tags are read fresh inside the same snapshot (two set-based queries) and degrade to Hidden per row.
@@ -413,6 +438,8 @@ public partial class SqliteGovernanceRepository
 
     public async Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
     {
+        metadata.ValidateRequiredFilterColumns();
+
         // Only a replacing write validates (and later persists) the definition; any other upsert never reads or rewrites it (SEC-94-01).
         if (metadata.ReplaceKeyDefinition)
         {
@@ -475,7 +502,8 @@ public partial class SqliteGovernanceRepository
                                                       plugin_name = @pluginName,
                                                       description = @description,
                                                       long_description = @longDescription,
-                                                      doc_source = @docSource
+                                                      doc_source = @docSource,
+                                                      required_filter_columns_json = @requiredFilterColumnsJson
                                                   WHERE id = @id";
                         updateCmd.Parameters.AddWithValue("@sourceType", metadata.Table.SourceType);
                         updateCmd.Parameters.AddWithValue("@displayName", metadata.Table.DisplayName);
@@ -488,6 +516,7 @@ public partial class SqliteGovernanceRepository
                         updateCmd.Parameters.AddWithValue("@description", (object?)targetDesc ?? DBNull.Value);
                         updateCmd.Parameters.AddWithValue("@longDescription", (object?)targetLongDesc ?? DBNull.Value);
                         updateCmd.Parameters.AddWithValue("@docSource", (object?)targetDocSource ?? DBNull.Value);
+                        updateCmd.Parameters.AddWithValue("@requiredFilterColumnsJson", metadata.RequiredFilterColumns.IsDefaultOrEmpty ? (object)DBNull.Value : JsonSerializer.Serialize(metadata.RequiredFilterColumns));
                         updateCmd.Parameters.AddWithValue("@id", tableId.ToString());
                         await updateCmd.ExecuteNonQueryAsync(ct);
                     }
@@ -497,8 +526,8 @@ public partial class SqliteGovernanceRepository
                         tableId = metadata.Table.Id == Guid.Empty ? Guid.NewGuid() : metadata.Table.Id;
                         using var insertCmd = conn.CreateCommand();
                         insertCmd.Transaction = tx;
-                        insertCmd.CommandText = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source)
-                                                  VALUES (@id, @sourceType, @sourceName, @schemaName, @tableName, @displayName, @sensitivity, @requiresFourEyes, @isActive, @dataSourceType, @httpEndpointJson, @pluginName, @description, @longDescription, @docSource)";
+                        insertCmd.CommandText = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json)
+                                                  VALUES (@id, @sourceType, @sourceName, @schemaName, @tableName, @displayName, @sensitivity, @requiresFourEyes, @isActive, @dataSourceType, @httpEndpointJson, @pluginName, @description, @longDescription, @docSource, @requiredFilterColumnsJson)";
                         insertCmd.Parameters.AddWithValue("@id", tableId.ToString());
                         insertCmd.Parameters.AddWithValue("@sourceType", metadata.Table.SourceType);
                         insertCmd.Parameters.AddWithValue("@sourceName", metadata.Identifier.Domain);
@@ -514,6 +543,7 @@ public partial class SqliteGovernanceRepository
                         insertCmd.Parameters.AddWithValue("@description", (object?)metadata.Table.Description ?? DBNull.Value);
                         insertCmd.Parameters.AddWithValue("@longDescription", (object?)metadata.Table.LongDescription ?? DBNull.Value);
                         insertCmd.Parameters.AddWithValue("@docSource", (object?)metadata.Table.DocumentationSource ?? DBNull.Value);
+                        insertCmd.Parameters.AddWithValue("@requiredFilterColumnsJson", metadata.RequiredFilterColumns.IsDefaultOrEmpty ? (object)DBNull.Value : JsonSerializer.Serialize(metadata.RequiredFilterColumns));
                         await insertCmd.ExecuteNonQueryAsync(ct);
 
                         // Issue #111 (A-10): the configured default tier is given to a NEW table only; the Hidden default writes no row.

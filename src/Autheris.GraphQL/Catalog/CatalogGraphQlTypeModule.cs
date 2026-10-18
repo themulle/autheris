@@ -555,6 +555,13 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         {
             throw new GraphQLException(ErrorBuilder.New().SetMessage("The requested aggregation query is invalid.").SetCode("INVALID_QUERY").Build());
         }
+        catch (TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing))
+                .SetCode(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing)
+                .Build());
+        }
         catch (ArgumentException)
         {
             throw new GraphQLException(ErrorBuilder.New().SetMessage("The requested aggregation arguments are invalid.").SetCode("AGGREGATION_ARGUMENT_INVALID").Build());
@@ -649,6 +656,13 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         catch (GatewayInvalidQueryException ex)
         {
             throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode("INVALID_QUERY").Build());
+        }
+        catch (TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing))
+                .SetCode(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing)
+                .Build());
         }
         catch (GatewayForbiddenException)
         {

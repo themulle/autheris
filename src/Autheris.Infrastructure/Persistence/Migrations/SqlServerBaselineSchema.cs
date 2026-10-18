@@ -34,6 +34,7 @@ CREATE TABLE dbo.TABLES (
     data_source_type INT NOT NULL DEFAULT 0,
     http_endpoint_json NVARCHAR(MAX) NULL,
     plugin_name NVARCHAR(256) NULL,
+    required_filter_columns_json NVARCHAR(MAX) NULL,
     source_name_lc AS LOWER(source_name) PERSISTED,
     schema_name_lc AS LOWER(schema_name) PERSISTED,
     table_name_lc AS LOWER(table_name) PERSISTED

@@ -129,6 +129,36 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         for (int i = 0; i < tables.Count; i++)
         {
             GovernedSqlExecutionService.EnforceMaskedColumnGuardrails(tables[i].Target, tables[i].Metadata, tableDecisions[i], metadata);
+
+            var t = tables[i];
+            var dec = tableDecisions[i];
+            if (t.Metadata.RequiredFilterColumns.Length > 0)
+            {
+                foreach (var reqCol in t.Metadata.RequiredFilterColumns)
+                {
+                    if (t.Metadata.TenantColumnName != null &&
+                        string.Equals(t.Metadata.TenantColumnName, reqCol, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (dec.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rls &&
+                        rls.Predicate.ReferencedColumns.Contains(reqCol.ToLowerInvariant()))
+                    {
+                        continue;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(dec.CombinedRowFilterSql) &&
+                        dec.CombinedRowFilterSql.Contains(reqCol, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    throw new GatewaySecurityException(
+                        GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.RequiredFilterColumnMissing),
+                        GovernedSqlErrorCodes.RequiredFilterColumnMissing);
+                }
+            }
         }
 
         // A Virtual Filter plan for a table that is not part of the query cannot be attached; deny instead of ignoring it.

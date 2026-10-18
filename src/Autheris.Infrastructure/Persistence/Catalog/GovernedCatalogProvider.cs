@@ -343,6 +343,7 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
             identity,
             exposed.Select(static c => new CatalogColumn(c.Name, c.NativeType, c.Collation)).ToImmutableArray(),
             tenantColumn,
+            metadata.RequiredFilterColumns,
             CatalogColumnVersion.Compute(exposed));
         return (entry, Fingerprint(connectionOptions, metadata));
     }

@@ -1378,6 +1378,11 @@
           "name": "plugin_name",
           "type": "TEXT",
           "family": "string"
+        },
+        {
+          "name": "required_filter_columns_json",
+          "type": "TEXT",
+          "family": "string"
         }
       ],
       "primaryKey": [

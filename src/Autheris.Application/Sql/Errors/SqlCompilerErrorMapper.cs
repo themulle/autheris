@@ -136,6 +136,7 @@ public static class SqlCompilerErrorMapper
         // Gateway defects fail closed. They precede the generic SecurityException row because they derive from it.
         e => e is SecurityCoverageException or EmittedSqlInvariantViolationException or SqlCompileConfigurationException ? Of(500, GovernedSqlErrorCodes.CompilerInvariant) : null,
         e => e is MaskedAggregationException ? Of(403, GovernedSqlErrorCodes.AggregationOnMaskedColumn) : null,
+        e => e is RequiredFilterColumnMissingException ? Of(400, GovernedSqlErrorCodes.RequiredFilterColumnMissing) : null,
         e => e is SecurityException ? Of(403, GovernedSqlErrorCodes.PolicyViolation) : null,
         e => e is GovernedSqlException governed ? MapGoverned(governed.Code) : null,
         // Phase 5 M4: a data source that cannot hand out a correctly pinned session (missing or invalid default schema, a pin that did
@@ -155,6 +156,7 @@ public static class SqlCompilerErrorMapper
 
     private static SqlErrorMapping? MapGoverned(string code) => code switch
     {
+        GovernedSqlErrorCodes.RequiredFilterColumnMissing => Of(400, code),
         GovernedSqlErrorCodes.CheckOptionViolation => Of(403, code),
         GovernedSqlErrorCodes.ConstraintViolation => Of(409, code),
         GovernedSqlErrorCodes.AffectedRowsLimit => Of(422, code),

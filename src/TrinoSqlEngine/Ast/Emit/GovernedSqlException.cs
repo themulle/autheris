@@ -38,6 +38,7 @@ public static class GovernedSqlErrorCodes
     public const string SourceUnavailable = "SQL_SOURCE_UNAVAILABLE";
 
     // REQ-SQL-128: client list parameters. Fixed messages, never counts, names or values.
+    public const string RequiredFilterColumnMissing = "REQUIRED_FILTER_COLUMN_MISSING";
     public const string ListParamPosition = "SQL_LIST_PARAM_POSITION";
     public const string ListParamType = "SQL_LIST_PARAM_TYPE";
     public const string ListParamNull = "SQL_LIST_PARAM_NULL";
@@ -83,6 +84,7 @@ public static class GovernedSqlErrorCodes
         TimeZoneArgument => "The time zone conversion arguments are not valid.",
         FunctionUnsupportedDialect => "The function is not supported for this data source dialect.",
         TimeZoneUnavailable => "Time zone conversion is temporarily unavailable.",
+        RequiredFilterColumnMissing => "A required filter column was not constrained by the query or an active row policy.",
         _ => "The statement could not be executed."
     };
 }
@@ -128,4 +130,16 @@ public sealed class CheckedExecutionRequiredException : GovernedSqlException
         : base(GovernedSqlErrorCodes.CheckedExecutionRequired, dialect)
     {
     }
+}
+
+/// <summary>
+/// Issue #163: A table-level required filter column was not constrained by the query or an active row policy (fail closed, 400).
+/// </summary>
+public sealed class RequiredFilterColumnMissingException : GovernedSqlException
+{
+    public RequiredFilterColumnMissingException(TargetSqlDialect dialect = TargetSqlDialect.PostgreSql)
+        : base(GovernedSqlErrorCodes.RequiredFilterColumnMissing, dialect) { }
+
+    public RequiredFilterColumnMissingException(string message)
+        : base(GovernedSqlErrorCodes.RequiredFilterColumnMissing, TargetSqlDialect.PostgreSql) { }
 }

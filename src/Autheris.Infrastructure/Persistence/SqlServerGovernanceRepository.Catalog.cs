@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Data;
 using System.Text.Json;
 using Autheris.Domain.Common;
@@ -44,7 +45,7 @@ public partial class SqlServerGovernanceRepository
         {
             await using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source
+                cmd.CommandText = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json
                                     FROM TABLES
                                     WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
                 cmd.Parameters.AddWithValue("@domain", table.Domain);
@@ -61,6 +62,11 @@ public partial class SqlServerGovernanceRepository
                     var httpEndpoint = !string.IsNullOrWhiteSpace(httpEndpointJson)
                         ? JsonSerializer.Deserialize<HttpEndpointDescriptor>(httpEndpointJson)
                         : null;
+                    var reqFiltersJson = reader.IsDBNull(15) ? null : reader.GetString(15);
+                    var reqFilters = string.IsNullOrWhiteSpace(reqFiltersJson)
+                        ? ImmutableArray<string>.Empty
+                        : JsonSerializer.Deserialize<ImmutableArray<string>>(reqFiltersJson);
+                    if (reqFilters.IsDefault) reqFilters = ImmutableArray<string>.Empty;
 
                     tableEntity = new Table
                     {
@@ -78,7 +84,8 @@ public partial class SqlServerGovernanceRepository
                         PluginName = pluginName,
                         Description = reader.IsDBNull(12) ? null : reader.GetString(12),
                         LongDescription = reader.IsDBNull(13) ? null : reader.GetString(13),
-                        DocumentationSource = reader.IsDBNull(14) ? null : reader.GetString(14)
+                        DocumentationSource = reader.IsDBNull(14) ? null : reader.GetString(14),
+                        RequiredFilterColumns = reqFilters
                     };
                 }
             }
@@ -168,6 +175,7 @@ public partial class SqlServerGovernanceRepository
                 Indexes = indexes,
                 RowFilterEvaluation = rowFilterEvaluation
             };
+            result.ValidateRequiredFilterColumns();
 
             _metadataCache[cacheKey] = (result, DateTime.UtcNow.Ticks);
             return result;
@@ -245,6 +253,8 @@ public partial class SqlServerGovernanceRepository
 
     public async Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
     {
+        metadata.ValidateRequiredFilterColumns();
+
         // Only a replacing write validates (and later persists) the definition; any other upsert never reads or rewrites it (SEC-94-01).
         if (metadata.ReplaceKeyDefinition)
         {
@@ -300,9 +310,10 @@ public partial class SqlServerGovernanceRepository
                                               plugin_name = @plugin,
                                               description = COALESCE(@desc, t.description),
                                               long_description = COALESCE(@longDesc, t.long_description),
-                                              doc_source = COALESCE(@docSource, t.doc_source)
-                                          WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source)
-                                              VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource);";
+                                              doc_source = COALESCE(@docSource, t.doc_source),
+                                              required_filter_columns_json = @requiredFilterColumnsJson
+                                          WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json)
+                                              VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson);";
                 upsertCmd.Parameters.AddWithValue("@id", tableId.ToString());
                 upsertCmd.Parameters.AddWithValue("@sourceType", metadata.Table.SourceType);
                 upsertCmd.Parameters.AddWithValue("@domain", metadata.Identifier.Domain);
@@ -318,6 +329,7 @@ public partial class SqlServerGovernanceRepository
                 upsertCmd.Parameters.AddWithValue("@desc", (object?)metadata.Table.Description ?? DBNull.Value);
                 upsertCmd.Parameters.AddWithValue("@longDesc", (object?)metadata.Table.LongDescription ?? DBNull.Value);
                 upsertCmd.Parameters.AddWithValue("@docSource", (object?)metadata.Table.DocumentationSource ?? DBNull.Value);
+                upsertCmd.Parameters.AddWithValue("@requiredFilterColumnsJson", metadata.RequiredFilterColumns.IsDefaultOrEmpty ? (object)DBNull.Value : JsonSerializer.Serialize(metadata.RequiredFilterColumns));
                 await upsertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
