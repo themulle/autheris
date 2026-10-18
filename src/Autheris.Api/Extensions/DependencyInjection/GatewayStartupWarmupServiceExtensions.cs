@@ -1,6 +1,7 @@
 namespace Autheris.Api.Extensions.DependencyInjection;
 
 using Autheris.Api.Hosting.Warmup;
+using HotChocolate.Execution.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -81,9 +82,26 @@ public static class GatewayStartupWarmupServiceExtensions
         }
     }
 
+    /// <summary>
+    /// Registers <see cref="GraphQlExecutorWarmupTask"/> as a HotChocolate warm-up task that also applies to rebuilds
+    /// (<c>ApplyOnlyOnStartup = false</c>). The task is activated from the application services, which must provide
+    /// <see cref="GraphQlWarmupProof"/>, the gateway options, a logger and optionally <c>IHttpContextAccessor</c>.
+    /// </summary>
+    public static IRequestExecutorBuilder AddGraphQlExecutorWarmupTask(this IRequestExecutorBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        builder.Services.TryAddSingleton<GraphQlExecutorWarmupTask>();
+        return builder
+            .AddApplicationService<GraphQlExecutorWarmupTask>()
+            .AddWarmupTask<GraphQlExecutorWarmupTask>(sp => sp.GetRequiredService<GraphQlExecutorWarmupTask>(), skipIf: false);
+    }
+
     /// <summary>A-150-3: registered unconditionally, independent of <see cref="StartupWarmupOptions"/>.</summary>
     private static void AddGraphQlExecutorGate(IServiceCollection services)
     {
+        services.AddHttpContextAccessor();
+        services.AddSingleton<GraphQlWarmupProof>();
+        services.AddGraphQLServer().AddGraphQlExecutorWarmupTask();
         services.AddSingleton<GraphQlExecutorGate>();
         services.AddSingleton<IGraphQlExecutorGate>(sp => sp.GetRequiredService<GraphQlExecutorGate>());
         services.AddHostedService(sp => sp.GetRequiredService<GraphQlExecutorGate>());

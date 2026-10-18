@@ -33,6 +33,7 @@ public static class GatewayMcpServiceExtensions
         services.AddSingleton<IMcpProvenanceEnricher, McpProvenanceEnricher>();
         services.AddSingleton<IMcpSessionStore, McpSessionStore>();
         services.AddSingleton<IMcpToolRegistry, McpToolRegistry>();
+        services.AddSingleton<Autheris.Api.Hosting.Warmup.IStartupWarmup, Autheris.Api.Hosting.Warmup.McpSerializationWarmup>();
         services.AddSingleton<ISemanticToolPruner, SemanticToolPruner>();
         services.AddSingleton<IPersistedToolValidator, PersistedToolValidator>();
         services.AddScoped<IApiDispatcherService, ApiDispatcherService>();

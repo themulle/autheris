@@ -20,13 +20,16 @@ public sealed partial class ColdPathTimingListener(ILogger<ColdPathTimingListene
     private int _compile;
     private int _execute;
 
-    public override IDisposable ParseDocument(RequestContext context) => Stage("parse", ref _parse);
+    public override IDisposable ParseDocument(RequestContext context) => IsWarmup(context) ? EmptyScope : Stage("parse", ref _parse);
 
-    public override IDisposable ValidateDocument(RequestContext context) => Stage("validate", ref _validate);
+    public override IDisposable ValidateDocument(RequestContext context) => IsWarmup(context) ? EmptyScope : Stage("validate", ref _validate);
 
-    public override IDisposable CompileOperation(RequestContext context) => Stage("compile", ref _compile);
+    public override IDisposable CompileOperation(RequestContext context) => IsWarmup(context) ? EmptyScope : Stage("compile", ref _compile);
 
-    public override IDisposable ExecuteOperation(RequestContext context) => Stage("execute", ref _execute);
+    public override IDisposable ExecuteOperation(RequestContext context) => IsWarmup(context) ? EmptyScope : Stage("execute", ref _execute);
+
+    // SEC-OPS150-18: the in-process warm-up request is neither logged nor counted against the budget (the null guard serves unit tests).
+    private static bool IsWarmup(RequestContext context) => context is not null && context.IsWarmupRequest();
 
     // Each stage is counted separately: HotChocolate raises the parse event before the request scope opens, so a shared
     // per-operation counter would misattribute it. The first MaxOperations occurrences of every stage are logged.

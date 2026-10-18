@@ -411,9 +411,9 @@ public sealed class StartupWarmupTests
     }
 
     [Fact]
-    public void WarmupDisabled_ReadyImmediately_NoHostedService()
+    public async Task WarmupDisabled_ReadyImmediately_NoHostedService()
     {
-        using var sp = BuildWithConfig(new() { ["Gateway:Startup:Warmup:Enabled"] = "false" });
+        await using var sp = BuildWithConfig(new() { ["Gateway:Startup:Warmup:Enabled"] = "false" });
 
         sp.GetServices<IHostedService>().Any(h => h is StartupWarmupService).ShouldBeFalse();
         sp.GetRequiredService<IStartupWarmupState>().Phase.ShouldBe(WarmupPhase.Ready);
@@ -423,10 +423,10 @@ public sealed class StartupWarmupTests
     [Theory]
     [InlineData("false", "true")]
     [InlineData("true", "false")]
-    public void Ready_WarmupDisabledOrNotRequired_ExecutorGateStillEnforced(string enabled, string required)
+    public async Task Ready_WarmupDisabledOrNotRequired_ExecutorGateStillEnforced(string enabled, string required)
     {
         // T-OPS150-01 / SEC-OPS150-01: the gate is registered unconditionally and starts Pending (503) whatever the switches say.
-        using var sp = BuildWithConfig(new()
+        await using var sp = BuildWithConfig(new()
         {
             ["Gateway:Startup:Warmup:Enabled"] = enabled,
             ["Gateway:Startup:Warmup:RequireForReadiness"] = required,
@@ -437,9 +437,9 @@ public sealed class StartupWarmupTests
     }
 
     [Fact]
-    public void WarmupDefault_Enabled_StartsPendingWithHostedService()
+    public async Task WarmupDefault_Enabled_StartsPendingWithHostedService()
     {
-        using var sp = BuildWithConfig([]);
+        await using var sp = BuildWithConfig([]);
 
         sp.GetServices<IHostedService>().Any(h => h is StartupWarmupService).ShouldBeTrue();
         sp.GetRequiredService<IStartupWarmupState>().Phase.ShouldBe(WarmupPhase.Pending);

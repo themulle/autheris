@@ -339,7 +339,7 @@ public static class GatewayMcpServer
     }
 
     /// <summary>Low (JSON injection): only well-formed object schemas are passed on; anything else becomes an empty object schema.</summary>
-    private static JsonElement Schema(string? json)
+    internal static JsonElement Schema(string? json)
     {
         if (string.IsNullOrWhiteSpace(json))
         {
