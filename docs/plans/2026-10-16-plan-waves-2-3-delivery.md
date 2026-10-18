@@ -103,6 +103,28 @@ Not blocking Phase 4 (recorded, default taken; owner confirmation is due at the 
 
 Q-6 (both table owners approve `AllowCrossDataSource`, `SEC-FED-DELTA-12`): cannot be implemented on the current model. `TableMetadata` has only `OwnerTenantId` (a tenant), `DataOwner` is a global role, and `AllowCrossDataSource` is init-only and not persisted, so every table currently counts as "without owner" and the flag cannot be enabled (fail closed, safe). The review makes the per-table owner model a binding part of `WP-FED-07` (step **I-18**): tenant-scoped per-table owner designation (principal SID or group) set through an audited path; approval per (relation id, parent epoch, child epoch); distinct principals; `GovernanceAdmin` plus both owner approvals; unreadable store evaluates `false`; epoch bump invalidates; audit, schema cache invalidation. Consequences: I-18 grows from M to L (DDL x3 plus shapes, owner admin path); before I-18 starts the architect adds a short addendum to the `WP-FED-07` spec (check whether the existing table owner/delegate approver records used by #113/#114 can be reused). It does **not** block Phase 4 start nor I-9..I-17 (SQL-text federation does not use the relation flag). It **does** gate GraphQL cross-source relations: `WP-FED-08` (I-19) depends on I-18, and relations stay hidden (PR #139 gating) and unusable until the owner model is merged. No owner decision is needed, only the architect addendum.
 
+## 3.4 Handover 2026-10-18 (read this first)
+
+All lanes are stopped; the remaining work moves to a new orchestrator agent. State on `main` (40f0c0b5):
+
+| Item | State |
+|---|---|
+| Waves 2/3 chunk 1 (I-1..I-6, 1.6, 1.9, 1.10), I-25 #129, I-25b #158 INC-1 A, 1.8 #151 | merged (#164, #165, #167, #168); released v1.1.18 / v1.1.19 / v1.1.20 |
+| I-4 #115, I-7 #111, I-7a #138 INC-1, I-7b #146 A | merged (#169), released v1.1.20 |
+| P-2.9 #152-#154 INC-2 | merged (#170), released v1.1.20 |
+| P-2.7 #143, P-2.8 #150 | merged (#173, #172); **not yet released** (next tag v1.1.21) |
+| Plans 2.7-2.11, agent definitions | merged (#166, #171) |
+
+**Open, in order:**
+
+1. **I-8 #112 typed aggregations** - branch `feat/issue-112-typed-aggregations` (pushed, head `e793d8c4`, contains main 40f0c0b5). Phase 4 done (P1-P3), **Phase 5 review not started**. Reviewer residuals: `semantic` namespace guarded only at the repository boundary; SEC-112-27 read as global ordinal collision order; new error code `AGGREGATION_DISABLED`; follow-up `ResolveRootQueryAsync` still returns `GatewayInvalidQueryException.Message`. Details: lane B note below and plan section 13.
+2. **Release v1.1.21** after I-8 merges (#143, #150, #112).
+3. **Rest of wave 2:** I-22 #113 increment A -> I-22b #158 INC-1 part B (WP-158-5) -> I-23 #114 -> I-24 #113 increment B (all planned; I-7 dependency is merged). One lane, sequential (shared `ConsentModels.cs`, baseline DDL).
+4. **Follow-ups:** #174 (ReadyToRun measurement for #150 WP-D; revert `4d78a07c` if warm median regresses > 10 %), #160, #161.
+5. **Wave 3:** chunks 3-6 (federation I-9..I-21, I-26; BL-06 I-27..I-30) and the wave-3 intake items 3.8-3.10 (Phase 2/3 still needed). Then wave 4 (#99 branches `feat/issue-99-i1-a/b/c` kept).
+
+**Working rules (owner):** run PM work as the `project-manager` agent type (definitions in `.agents/claude-code/agents/`, install to `~/.claude/agents/`); context-mode tools mandatory for every agent; parallel lanes only for independent areas (11 GB RAM: `-m:4 -nodeReuse:false`); worktrees under `/work/wt` from `/work/autheris`, `NUGET_PACKAGES=/work/nuget`; push only when a task is finished; lead consolidates PRs, squash-merges after green CI, releases (next patch tag, then title/highlights), closes or comments issues, deletes merged branches and worktrees. TDD developers on Sonnet only; no documentation phase; no LOC estimates.
+
 ## 3.5 Delivery progress and handoff (updated 2026-10-17)
 
 Delivery mode (owner): one developer, strictly sequential; branches are **stacked** (each step branches from the previous step) and pushed when a step is done; PRs target the previous step's branch. Subagent models: architects on Opus, all other roles on Sonnet.
