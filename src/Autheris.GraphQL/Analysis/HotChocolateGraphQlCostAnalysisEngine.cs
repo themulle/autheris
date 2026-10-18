@@ -57,14 +57,19 @@ public sealed class HotChocolateGraphQlCostAnalysisEngine : IGraphQlCostAnalysis
         var executor = await _executorProvider.GetExecutorAsync(cancellationToken: ct).ConfigureAwait(false);
         var schema = executor.Schema;
 
+        var defaultListMultiplier = _options.QueryCost?.DefaultListMultiplier > 0
+            ? _options.QueryCost.DefaultListMultiplier
+            : 10;
+
         var rule = new QueryCostAnalyzerRule(
             maxAllowedCost: _options.GraphQL.MaxAllowedComplexity > 0 ? _options.GraphQL.MaxAllowedComplexity : 500,
-            defaultListMultiplier: 10,
+            defaultListMultiplier: defaultListMultiplier,
             maxResponseRows: _options.GraphQL.MaxResponseRows > 0 ? _options.GraphQL.MaxResponseRows : 1000,
             onQueryTooComplex: null,
             maxRootFields: maxRootFields,
             payloadRowMultiplier: 1,
-            maxExecutionDepth: _options.GraphQL.MaxAllowedExecutionDepth > 0 ? _options.GraphQL.MaxAllowedExecutionDepth : 25);
+            maxExecutionDepth: _options.GraphQL.MaxAllowedExecutionDepth > 0 ? _options.GraphQL.MaxAllowedExecutionDepth : 25,
+            costOptions: _options.QueryCost);
 
         var (totalCost, rootFieldCosts) = rule.ComputeCostDetails(document, schema, variableValues);
 

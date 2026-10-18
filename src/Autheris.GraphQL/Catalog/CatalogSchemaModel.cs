@@ -33,7 +33,8 @@ public sealed record CatalogRelationField(
     string TargetTypeName,
     bool IsList,
     IReadOnlyList<string> ParentColumns,
-    IReadOnlyList<string> ChildColumns);
+    IReadOnlyList<string> ChildColumns,
+    RelationCardinality Cardinality = RelationCardinality.OneToMany);
 
 public sealed record CatalogTableType(
     TableIdentifier Identifier,
@@ -334,7 +335,8 @@ public sealed partial class CatalogSchemaModel
                         targetTable.TypeName,
                         isList,
                         rel.JoinKeysParent,
-                        rel.JoinKeysChild));
+                        rel.JoinKeysChild,
+                        rel.Cardinality));
                 }
             }
 
@@ -370,8 +372,14 @@ public sealed partial class CatalogSchemaModel
                         continue;
                     }
 
-                    // Reverse: IsList is opposite (e.g. parent-to-child 1:N -> child-to-parent N:1 -> IsList = false)
-                    var isList = rel.Cardinality != RelationCardinality.OneToMany;
+                    // Reverse: IsList is opposite (e.g. parent-to-child 1:N -> child-to-parent N:1 -> IsList = false; 1:1 stays 1:1)
+                    var revCardinality = rel.Cardinality switch
+                    {
+                        RelationCardinality.OneToMany => RelationCardinality.ManyToOne,
+                        RelationCardinality.ManyToOne => RelationCardinality.OneToMany,
+                        _ => RelationCardinality.OneToOne
+                    };
+                    var isList = revCardinality == RelationCardinality.OneToMany;
                     var parentTableName = other.Metadata.Identifier.TableName;
                     var revFieldName = SanitizeGraphQlName($"{parentTableName}_by_{rel.RelationName}");
                     if (usedRelationFieldNames.Contains(revFieldName) || reservedFilterKeywords.Contains(revFieldName))
@@ -391,7 +399,8 @@ public sealed partial class CatalogSchemaModel
                         other.TypeName,
                         isList,
                         rel.JoinKeysChild,  // Parent from child's perspective
-                        rel.JoinKeysParent)); // Child from child's perspective
+                        rel.JoinKeysParent, // Child from child's perspective
+                        revCardinality));
                 }
             }
 

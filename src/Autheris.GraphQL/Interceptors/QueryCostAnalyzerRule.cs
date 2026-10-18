@@ -1,7 +1,11 @@
 namespace Autheris.GraphQL.Interceptors;
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using Autheris.GraphQL.Catalog;
 using HotChocolate;
 using HotChocolate.Language;
 using HotChocolate.Types;
@@ -16,6 +20,8 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
     private readonly int _maxRootFields;
     private readonly int _payloadRowMultiplier;
     private readonly int _maxExecutionDepth;
+    private readonly QueryCostOptions? _costOptions;
+    private readonly Func<string, string, RelationCardinality?>? _relationLookup;
 
     // SEC M-13: Default-Seitengröße, die Resolver mit `first`-Argument (z.B. Query.GetTableAsync) ohne explizites Argument verwenden.
     internal const int DefaultPayloadPageSize = 50;
@@ -27,10 +33,14 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
         Action? onQueryTooComplex = null,
         int maxRootFields = 10,
         int payloadRowMultiplier = 1,
-        int maxExecutionDepth = 25)
+        int maxExecutionDepth = 25,
+        QueryCostOptions? costOptions = null,
+        Func<string, string, RelationCardinality?>? relationLookup = null)
     {
+        _costOptions = costOptions;
+        _relationLookup = relationLookup;
         _maxAllowedCost = maxAllowedCost;
-        _defaultListMultiplier = defaultListMultiplier;
+        _defaultListMultiplier = costOptions?.DefaultListMultiplier > 0 ? costOptions.DefaultListMultiplier : defaultListMultiplier;
         _maxResponseRows = maxResponseRows;
         _onQueryTooComplex = onQueryTooComplex;
         _maxRootFields = maxRootFields > 0 ? maxRootFields : int.MaxValue;
@@ -46,9 +56,16 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
         ISchemaDefinition schema,
         int defaultListMultiplier = 10,
         int maxResponseRows = 1000,
-        IReadOnlyDictionary<string, object?>? variableValues = null)
+        IReadOnlyDictionary<string, object?>? variableValues = null,
+        QueryCostOptions? costOptions = null,
+        Func<string, string, RelationCardinality?>? relationLookup = null)
     {
-        var rule = new QueryCostAnalyzerRule(int.MaxValue, defaultListMultiplier, maxResponseRows);
+        var rule = new QueryCostAnalyzerRule(
+            int.MaxValue,
+            defaultListMultiplier,
+            maxResponseRows,
+            costOptions: costOptions,
+            relationLookup: relationLookup);
         return rule.ComputeCost(document, schema, variableValues);
     }
 
@@ -65,9 +82,16 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
         ISchemaDefinition schema,
         int defaultListMultiplier = 10,
         int maxResponseRows = 1000,
-        IReadOnlyDictionary<string, object?>? variableValues = null)
+        IReadOnlyDictionary<string, object?>? variableValues = null,
+        QueryCostOptions? costOptions = null,
+        Func<string, string, RelationCardinality?>? relationLookup = null)
     {
-        var rule = new QueryCostAnalyzerRule(int.MaxValue, defaultListMultiplier, maxResponseRows);
+        var rule = new QueryCostAnalyzerRule(
+            int.MaxValue,
+            defaultListMultiplier,
+            maxResponseRows,
+            costOptions: costOptions,
+            relationLookup: relationLookup);
         return rule.ComputeCostDetails(document, schema, variableValues);
     }
 
@@ -401,22 +425,47 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                 else
                 {
                     // Non-paginated entity, scalar, or unpaginated relation list
-                    // SEC M-9: an unpaginated list is assumed to return UnpaginatedListAssumedRows rows (the default list multiplier);
-                    // the child cost is multiplied by that fan-out, so nested unpaginated lists grow multiplicatively.
-                    int assumedRows = Math.Min(Math.Max(1, _defaultListMultiplier), _maxResponseRows);
-                    cost = SafeAdd(cost, isList ? assumedRows : 1);
                     if (field.SelectionSet != null)
                     {
-                        var childCost = CalculateSelectionSetCost(field.SelectionSet, nextType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions, variableDefinitions, variableValues, currentDepth + 1);
+                        var childCost = CalculateSelectionSetCost(
+                            field.SelectionSet,
+                            nextType,
+                            fragments,
+                            activeFragments,
+                            fragmentCostCache,
+                            maskingCostCache,
+                            schema,
+                            ref spreadCounter,
+                            maxSpreadExpansions,
+                            variableDefinitions,
+                            variableValues,
+                            currentDepth + 1);
+
                         if (isList)
                         {
+                            int assumedRows = Math.Min(Math.Max(1, _defaultListMultiplier), _maxResponseRows);
+                            cost = SafeAdd(cost, assumedRows);
                             var nestedCost = (int)Math.Min((long)int.MaxValue, (long)childCost * assumedRows);
                             cost = SafeAdd(cost, nestedCost);
                         }
                         else
                         {
-                            cost = SafeAdd(cost, childCost);
+                            // SEC-GOV177-05: Single object selection (1:1 / N:1 vs uncataloged/ambiguous)
+                            bool isVerifiedSingle = IsVerifiedSingleObjectRelation(currentType, field.Name.Value, fieldDef);
+                            int rowMultiplier = isVerifiedSingle
+                                ? (_costOptions?.CostPerSingleRowLookup ?? 1)
+                                : _defaultListMultiplier;
+
+                            cost = SafeAdd(cost, rowMultiplier);
+                            var nestedCost = (int)Math.Min((long)int.MaxValue, (long)childCost * rowMultiplier);
+                            cost = SafeAdd(cost, nestedCost);
                         }
+                    }
+                    else
+                    {
+                        // Scalar field
+                        int assumedRows = Math.Min(Math.Max(1, _defaultListMultiplier), _maxResponseRows);
+                        cost = SafeAdd(cost, isList ? assumedRows : 1);
                     }
                 }
             }
@@ -564,5 +613,69 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
             current = wrapper.InnerType;
         }
         return current;
+    }
+
+    private bool IsVerifiedSingleObjectRelation(
+        IObjectTypeDefinition? currentType,
+        string fieldName,
+        IOutputFieldDefinition? fieldDef)
+    {
+        // SEC-GOV177-05: Multiplier 1.0 is ONLY permitted when the schema field and catalog metadata
+        // explicitly verify RelationCardinality.OneToOne or RelationCardinality.ManyToOne and IsListType == false.
+        // Ambiguous, uncataloged, union, interface, or unverified field types MUST fail closed and apply DefaultListMultiplier (10).
+
+        if (fieldDef != null && IsListType(fieldDef.Type))
+        {
+            return false;
+        }
+
+        string? typeName = currentType?.Name;
+
+        // 1. Direct relation lookup delegate if provided
+        if (_relationLookup != null && !string.IsNullOrEmpty(typeName))
+        {
+            var card = _relationLookup(typeName, fieldName);
+            if (card is RelationCardinality.OneToOne or RelationCardinality.ManyToOne)
+            {
+                return true;
+            }
+        }
+
+        // 2. CatalogRelationRegistry check
+        if (!string.IsNullOrEmpty(typeName) && CatalogRelationRegistry.TryGetCardinality(typeName, fieldName, out var registryCard))
+        {
+            if (registryCard is RelationCardinality.OneToOne or RelationCardinality.ManyToOne)
+            {
+                return true;
+            }
+        }
+
+        // 3. Schema directive check on field definition
+        if (fieldDef is IDirectivesProvider dirProvider)
+        {
+            var dir = dirProvider.Directives.FirstOrDefault("relation") ??
+                      dirProvider.Directives.FirstOrDefault("cardinality");
+            if (dir != null)
+            {
+                if (dir.Arguments.TryGetValue("cardinality", out var cVal) && cVal is StringValueNode sn)
+                {
+                    if (Enum.TryParse<RelationCardinality>(sn.Value, true, out var parsedCard) &&
+                        parsedCard is RelationCardinality.OneToOne or RelationCardinality.ManyToOne)
+                    {
+                        return true;
+                    }
+                }
+                if (dir.Arguments.TryGetValue("value", out var vVal) && vVal is StringValueNode svn)
+                {
+                    if (Enum.TryParse<RelationCardinality>(svn.Value, true, out var parsedCard) &&
+                        parsedCard is RelationCardinality.OneToOne or RelationCardinality.ManyToOne)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 }

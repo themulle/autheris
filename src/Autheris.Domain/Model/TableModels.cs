@@ -318,7 +318,8 @@ public enum DeletedKeyPolicy
 public enum RelationCardinality
 {
     OneToMany = 1,
-    ManyToOne = 2
+    ManyToOne = 2,
+    OneToOne = 3
 }
 
 public sealed class TableRelation
