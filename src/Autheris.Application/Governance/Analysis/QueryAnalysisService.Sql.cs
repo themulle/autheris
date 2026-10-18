@@ -8,11 +8,16 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Services;
+using Autheris.Application.Sql.Federation.Conjuncts;
+using Autheris.Application.Sql.Federation.Pushdown;
+using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Analysis;
+using TrinoSqlEngine.Ast.Builder;
+using TrinoSqlEngine.Ast.Nodes;
 
 public sealed partial class QueryAnalysisService
 {
@@ -53,10 +58,12 @@ public sealed partial class QueryAnalysisService
         }
 
         SqlQueryMetadata metadata;
+        SqlStatement? parsedStatement = null;
         try
         {
             var normalizedSql = SqlParameterExtractor.NormalizeForAst(trimmed);
             var (tree, _) = FastSqlEngine.Default.Parse(normalizedSql.AsMemory());
+            parsedStatement = new SqlAstBuilder().BuildStatement(tree);
             var analyzer = new SqlQueryAnalyzer();
             metadata = analyzer.Analyze(tree);
         }
@@ -163,6 +170,124 @@ public sealed partial class QueryAnalysisService
                 selectAllColumns: selectAll && tableCols.Count == 0,
                 outcome,
                 ct).ConfigureAwait(false);
+        }
+
+        // Issue #122: Populate Federation analysis if query routes cross-source
+        var resolvedTables = new List<ResolvedSourceTable>();
+        foreach (var target in metadata.ReferencedTables)
+        {
+            var key = !string.IsNullOrWhiteSpace(target.FullName) ? target.FullName : target.TableName;
+            if (tableLookup.TryGetValue(key, out var catTable))
+            {
+                var ds = string.IsNullOrWhiteSpace(catTable.Table.SourceName)
+                    ? catTable.Identifier.Domain
+                    : catTable.Table.SourceName;
+                resolvedTables.Add(new ResolvedSourceTable(target, catTable.Identifier, catTable, ds));
+            }
+        }
+
+        if (parsedStatement != null && (resolvedTables.Count > 1 || resolvedTables.Any(t => t.Metadata.DataSourceType != DataSourceType.Sql)))
+        {
+            var conjuncts = SqlConjunctSplitter.Split(parsedStatement);
+            var classification = SingleTableConjunctClassifier.Classify(conjuncts, resolvedTables);
+
+            var singleConjunctsByTable = classification.SingleTableConjuncts
+                .GroupBy(c => c.Table)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var defaultPushOptions = new PredicatePushdownOptions();
+
+            foreach (var table in resolvedTables)
+            {
+                var pushedPredicates = new List<AnalyzedPushedPredicate>();
+                var residualPredicates = new List<AnalyzedResidualPredicate>();
+
+                if (table.Metadata.DataSourceType != DataSourceType.Sql)
+                {
+                    if (singleConjunctsByTable.TryGetValue(table.ResolvedIdentifier, out var tableConjuncts))
+                    {
+                        foreach (var sc in tableConjuncts)
+                        {
+                            foreach (var col in sc.Columns)
+                            {
+                                residualPredicates.Add(new AnalyzedResidualPredicate(col, RejectionReason.NotSqlSource));
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    var columnLevels = new Dictionary<string, ColumnAccessLevel>();
+                    foreach (var col in table.Metadata.Columns)
+                    {
+                        bool isMasked = outcome.OutputColumns.Any(o =>
+                            string.Equals(o.Dataset, FormatDatasetId(table.ResolvedIdentifier), StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(o.Column, col.ColumnName, StringComparison.OrdinalIgnoreCase) &&
+                            o.IsMasked);
+
+                        columnLevels[col.ColumnName] = isMasked ? ColumnAccessLevel.Mask : ColumnAccessLevel.Clear;
+                    }
+                    var decision = TableAccessDecision.Allowed(table.ResolvedIdentifier, columnLevels, hasUnconstrainedColumnAllow: true);
+
+                    if (singleConjunctsByTable.TryGetValue(table.ResolvedIdentifier, out var tableConjuncts))
+                    {
+                        foreach (var sc in tableConjuncts)
+                        {
+                            var evalResult = PushabilityEvaluator.Evaluate(
+                                sc,
+                                table.Metadata,
+                                decision,
+                                table.Metadata.Dialect,
+                                null,
+                                defaultPushOptions);
+
+                            if (evalResult.IsPushable)
+                            {
+                                var tempClause = PushedClauseBuilder.Build([sc], table.Metadata);
+                                if (tempClause.PushdownPredicates != null)
+                                {
+                                    foreach (var p in tempClause.PushdownPredicates)
+                                    {
+                                        pushedPredicates.Add(new AnalyzedPushedPredicate(p.Column, p.Operator));
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                foreach (var col in sc.Columns)
+                                {
+                                    residualPredicates.Add(new AnalyzedResidualPredicate(col, evalResult.RejectionReason ?? RejectionReason.UnsupportedExpression));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                foreach (var mc in classification.MultiTableConjuncts)
+                {
+                    if (mc.Tables.Contains(table.ResolvedIdentifier))
+                    {
+                        var colRefs = new List<ColumnReference>();
+                        SingleTableConjunctClassifier.CollectColumnReferences(mc.Predicate, colRefs);
+                        foreach (var colRef in colRefs)
+                        {
+                            var colName = colRef.Name.Parts[^1].Value;
+                            if (table.Metadata.HasColumn(colName))
+                            {
+                                residualPredicates.Add(new AnalyzedResidualPredicate(colName, RejectionReason.MultiTable));
+                            }
+                        }
+                    }
+                }
+
+                var tableName = !string.IsNullOrWhiteSpace(table.Target.FullName) ? table.Target.FullName : table.Target.TableName;
+                outcome.FederatedTables.Add(new AnalyzedFederatedTable(
+                    Table: tableName,
+                    DataSource: table.EffectiveDataSource,
+                    PushdownApplied: pushedPredicates.Count > 0,
+                    PushedPredicates: pushedPredicates,
+                    ResidualPredicates: residualPredicates));
+            }
         }
 
         var fieldCount = Math.Max(1, metadata.ProjectedColumns.Count);
