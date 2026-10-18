@@ -12,6 +12,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Types;
 using Autheris.Tests.Unit.Catalog;
+using Autheris.Tests.Unit.TestSupport;
 using HotChocolate;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
@@ -51,10 +52,12 @@ public sealed class CatalogTierShapingTests
     {
         var accessor = Substitute.For<IHttpContextAccessor>();
         accessor.HttpContext.Returns(new DefaultHttpContext { User = user });
+        var tables = Wp0.Tables(Tables);
+        var consents = Wp0.Consents();
         return new Query().GetCatalogAsync(
             domain: null, first: null, after: null, search: search, tag: tag,
-            Wp0.Tables(Tables), Wp0.Consents(), approvalRepository: null, dataOwnershipRepository: null,
-            accessor, Options.Create(options));
+            tables, consents, approvalRepository: null, dataOwnershipRepository: null,
+            accessor, Options.Create(options), CatalogVisibilityTestFactory.Create(tables, consents, options));
     }
 
     private static ClaimsPrincipal Subject(string? tenant = "tenant-a") => Wp0.User("S-USER", tenant);
@@ -110,7 +113,11 @@ public sealed class CatalogTierShapingTests
         var accessor = Substitute.For<IHttpContextAccessor>();
         accessor.HttpContext.Returns(new DefaultHttpContext { User = caller == "subject" ? Subject() : Subject(null) });
 
-        var result = await new Query().GetCatalogAsync(null, null, null, null, null, Wp0.Tables(hiddenOnly), Wp0.Consents(), null, null, accessor, Options.Create(Opts(TenancyMode.Multi)));
+        var hiddenTables = Wp0.Tables(hiddenOnly);
+        var hiddenConsents = Wp0.Consents();
+        var hiddenOptions = Opts(TenancyMode.Multi);
+        var result = await new Query().GetCatalogAsync(null, null, null, null, null, hiddenTables, hiddenConsents, null, null, accessor, Options.Create(hiddenOptions),
+            CatalogVisibilityTestFactory.Create(hiddenTables, hiddenConsents, hiddenOptions));
 
         result.ShouldBeEmpty();
     }

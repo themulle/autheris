@@ -419,7 +419,8 @@ public sealed class Wave3CatalogOwnershipTests
             approvalRepository: null,
             dataOwnershipRepository: null,
             httpContextAccessor: httpContextAccessor,
-            options: TierOptions());
+            options: TierOptions(),
+            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(metadataRepo, consentRepo, TierOptions().Value));
 
         // Assert
         result.Count.ShouldBe(1);
