@@ -70,6 +70,9 @@ public sealed class ConsentRowFilter
     public int? KeySetMaxKeys { get; init; }
 }
 
+/// <summary>PLAN-GOV-158-INC1: an in-place description change of a non-revoked consent (applied inside <c>ReplaceConsentsAsync</c>; never touches validity, rules or the epoch).</summary>
+public sealed record ConsentDescriptionUpdate(Guid ConsentId, TenantId Tenant, string? Description);
+
 public sealed class Consent
 {
     public Guid Id { get; init; } = Guid.NewGuid();

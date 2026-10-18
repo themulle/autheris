@@ -131,6 +131,20 @@ public interface IConsentRepository
         string reason,
         IReadOnlyList<AuditLogEntry>? auditEntries = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// PLAN-GOV-158-INC1: <see cref="ReplaceConsentsAsync(IReadOnlyList{Guid}, IReadOnlyList{Consent}, Sid, string, IReadOnlyList{AuditLogEntry}?, CancellationToken)"/>
+    /// plus in-place description updates of non-revoked consents in the SAME transaction. A description update changes no other column and bumps no epoch;
+    /// a revoked, expired, unknown or foreign-tenant target changes nothing (no error, no resurrection).
+    /// </summary>
+    Task ReplaceConsentsAsync(
+        IReadOnlyList<Guid> revokeConsentIds,
+        IReadOnlyList<Consent> create,
+        Sid actor,
+        string reason,
+        IReadOnlyList<AuditLogEntry>? auditEntries,
+        IReadOnlyList<ConsentDescriptionUpdate>? descriptionUpdates,
+        CancellationToken ct);
 }
 
 

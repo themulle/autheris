@@ -13,6 +13,9 @@ internal sealed class FakeConsentRepository : IConsentRepository
     public int ReplaceCalls { get; private set; }
     public int DirectCreateCalls { get; private set; }
     public int DirectRevokeCalls { get; private set; }
+    public int DescriptionUpdateCount { get; private set; }
+    public int LastCreateCount { get; private set; }
+    public int LastRevokeCount { get; private set; }
 
     public List<AuditLogEntry> ReplaceAuditEntries { get; } = [];
 
@@ -21,9 +24,14 @@ internal sealed class FakeConsentRepository : IConsentRepository
     public Task<Autheris.Application.Governance.Paging.ConsentPage> GetConsentPageAsync(Autheris.Application.Governance.Paging.ConsentPageQuery query, CancellationToken ct = default) =>
         throw new NotImplementedException();
 
-    public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, IReadOnlyList<AuditLogEntry>? auditEntries = null, CancellationToken ct = default)
+    public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, IReadOnlyList<AuditLogEntry>? auditEntries = null, CancellationToken ct = default) =>
+        ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, auditEntries, null, ct);
+
+    public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, IReadOnlyList<AuditLogEntry>? auditEntries, IReadOnlyList<ConsentDescriptionUpdate>? descriptionUpdates, CancellationToken ct)
     {
         ReplaceCalls++;
+        LastCreateCount = create.Count;
+        LastRevokeCount = revokeConsentIds.Count;
         ReplaceAuditEntries.AddRange(auditEntries ?? []);
         if (FailReplace)
         {
@@ -36,6 +44,13 @@ internal sealed class FakeConsentRepository : IConsentRepository
             if (i >= 0) _consents[i] = Clone(_consents[i], revoked: true);
         }
 
+        foreach (var u in descriptionUpdates ?? [])
+        {
+            var existing = _consents.FirstOrDefault(c => c.Id == u.ConsentId && c.TenantId == u.Tenant && !c.IsRevoked);
+            if (existing is not null) existing.Description = u.Description;
+        }
+
+        DescriptionUpdateCount += descriptionUpdates?.Count ?? 0;
         _consents.AddRange(create);
         return Task.CompletedTask;
     }
@@ -44,7 +59,7 @@ internal sealed class FakeConsentRepository : IConsentRepository
     {
         Id = c.Id, TableId = c.TableId, TableIdentifier = c.TableIdentifier, TenantId = c.TenantId, Effect = c.Effect,
         GranteeType = c.GranteeType, GranteeSid = c.GranteeSid, RoleName = c.RoleName, ValidFrom = c.ValidFrom, ValidTo = c.ValidTo,
-        IsRevoked = revoked, ColumnRules = c.ColumnRules, RowFilters = c.RowFilters
+        IsRevoked = revoked, ColumnRules = c.ColumnRules, RowFilters = c.RowFilters, Description = c.Description
     };
 
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default) =>

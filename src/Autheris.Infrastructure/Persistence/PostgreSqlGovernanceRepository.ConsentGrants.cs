@@ -75,6 +75,15 @@ public partial class PostgreSqlGovernanceRepository
         Sid actor,
         string reason,
         IReadOnlyList<AuditLogEntry>? auditEntries = null,
+        CancellationToken ct = default) =>
+        await ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, auditEntries, null, ct).ConfigureAwait(false);
+
+    public async Task ReplaceConsentsAsync(
+        IReadOnlyList<Guid> revokeConsentIds,
+        IReadOnlyList<Consent> create,
+        Sid actor,
+        string reason,
+        IReadOnlyList<AuditLogEntry>? auditEntries, IReadOnlyList<ConsentDescriptionUpdate>? descriptionUpdates,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(revokeConsentIds);
@@ -84,7 +93,7 @@ public partial class PostgreSqlGovernanceRepository
             consent.Validate();
         }
 
-        if (revokeConsentIds.Count == 0 && create.Count == 0)
+        if (revokeConsentIds.Count == 0 && create.Count == 0 && (descriptionUpdates is null || descriptionUpdates.Count == 0))
         {
             return;
         }
@@ -107,6 +116,12 @@ public partial class PostgreSqlGovernanceRepository
             {
                 await InsertConsentCoreAsync(conn, tx, consent, ct).ConfigureAwait(false);
                 tables[consent.TableIdentifier.ToString()] = consent.TableIdentifier;
+            }
+
+            // PLAN-GOV-158-INC1 (SEC-GOV158I1-05/07): description-only updates of non-revoked consents; no epoch effect, no table is added to the bump set.
+            foreach (var update in descriptionUpdates ?? [])
+            {
+                await UpdateConsentDescriptionInTransactionAsync(conn, tx, update, ct).ConfigureAwait(false);
             }
 
             foreach (var table in tables.Values)
@@ -135,6 +150,37 @@ public partial class PostgreSqlGovernanceRepository
             _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
             await _epochValidationService.InvalidateEpochAsync(table, ct).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Sets <c>CONSENTS.description</c> of one non-revoked, unexpired consent of the tenant inside <paramref name="tx"/>; touches no other column.
+    /// Returns false (no row changed) for an unknown, foreign-tenant, revoked or expired consent (SEC-GOV158I1-05).
+    /// </summary>
+    private async Task<bool> UpdateConsentDescriptionInTransactionAsync(NpgsqlConnection conn, NpgsqlTransaction tx, ConsentDescriptionUpdate update, CancellationToken ct)
+    {
+        // valid_to is stored as ISO text with the writer's offset, so the expiry is compared as a timestamp, not as text.
+        string? validTo;
+        await using (var sel = conn.CreateCommand())
+        {
+            sel.Transaction = tx;
+            sel.CommandText = "SELECT valid_to FROM CONSENTS WHERE id = @id AND tenant_id = @t AND is_revoked = 0";
+            sel.Parameters.AddWithValue("@id", update.ConsentId.ToString());
+            sel.Parameters.AddWithValue("@t", update.Tenant.Value);
+            validTo = await sel.ExecuteScalarAsync(ct).ConfigureAwait(false) as string;
+        }
+
+        if (validTo is null || DateTimeOffset.Parse(validTo, System.Globalization.CultureInfo.InvariantCulture) <= DateTimeOffset.UtcNow)
+        {
+            return false;
+        }
+
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "UPDATE CONSENTS SET description = @d WHERE id = @id AND tenant_id = @t AND is_revoked = 0";
+        cmd.Parameters.AddWithValue("@d", (object?)update.Description ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@id", update.ConsentId.ToString());
+        cmd.Parameters.AddWithValue("@t", update.Tenant.Value);
+        return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
     }
 
     /// <summary>Revokes one consent inside <paramref name="tx"/> with the authorisation and audit of <c>RevokeConsentAsync</c>. Returns null when it was already revoked.</summary>

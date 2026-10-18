@@ -17,4 +17,19 @@ public static class ConsentDescriptionText
         var check = UntrustedText.Normalize(stored, maxLength, allowLineFeed: false);
         return check.IsValid ? check.Value : null;
     }
+
+    /// <summary>
+    /// SEC-GOV158I1-06: what an audit record may carry about a description instead of the text: its length and the first 8 hex characters of its
+    /// SHA-256 (<c>null</c> hash for no description). Never the text, never the full hash.
+    /// </summary>
+    public static (int Length, string? HashPrefix) Fingerprint(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return (0, null);
+        }
+
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text));
+        return (text.Length, Convert.ToHexString(hash, 0, 4).ToLowerInvariant());
+    }
 }

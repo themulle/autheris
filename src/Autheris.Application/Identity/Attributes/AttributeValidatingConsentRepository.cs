@@ -40,15 +40,24 @@ public sealed class AttributeValidatingConsentRepository : IConsentRepository
     }
 
     public async Task ReplaceConsentsAsync(
+        IReadOnlyList<Guid> revokeConsentIds,
+        IReadOnlyList<Consent> create,
+        Sid actor,
+        string reason,
+        IReadOnlyList<AuditLogEntry>? auditEntries = null,
+        CancellationToken ct = default) =>
+        await ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, auditEntries, null, ct).ConfigureAwait(false);
+
+    public async Task ReplaceConsentsAsync(
         IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason,
-        IReadOnlyList<AuditLogEntry>? auditEntries = null, CancellationToken ct = default)
+        IReadOnlyList<AuditLogEntry>? auditEntries, IReadOnlyList<ConsentDescriptionUpdate>? descriptionUpdates, CancellationToken ct = default)
     {
         foreach (var consent in create)
         {
             await ValidateAsync(consent, ct).ConfigureAwait(false);
         }
 
-        await _inner.ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, auditEntries, ct).ConfigureAwait(false);
+        await _inner.ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, auditEntries, descriptionUpdates, ct).ConfigureAwait(false);
     }
 
     private async Task ValidateAsync(Consent consent, CancellationToken ct)

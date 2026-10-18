@@ -118,6 +118,55 @@ public abstract class ConsentDescriptionRepositoryContractBase : IAsyncLifetime
         await Should.ThrowAsync<DbException>(() => cmd.ExecuteNonQueryAsync());
     }
 
+    [Fact]
+    public async Task Replace_DescriptionUpdate_ChangesOnlyTheDescription()
+    {
+        if (!Available) return;
+        var (table, tableId) = await SeedTableAsync();
+        var consent = await Repo.CreateConsentAsync(NewConsent(tableId, table, GranteeType.User, "before"));
+
+        await Repo.ReplaceConsentsAsync([], [], Admin, "desc", null, [new ConsentDescriptionUpdate(consent.Id, Tenant, "after")], CancellationToken.None);
+
+        var loaded = (await Repo.GetConsentByIdAsync(consent.Id))!;
+        loaded.Description.ShouldBe("after");
+        loaded.IsRevoked.ShouldBeFalse();
+        loaded.ValidTo.ShouldBe(consent.ValidTo);
+        loaded.Effect.ShouldBe(consent.Effect);
+
+        await Repo.ReplaceConsentsAsync([], [], Admin, "desc", null, [new ConsentDescriptionUpdate(consent.Id, Tenant, null)], CancellationToken.None);
+        (await Repo.GetConsentByIdAsync(consent.Id))!.Description.ShouldBeNull();
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task Apply_DescriptionOnly_ConcurrentRevoke_NotResurrected()
+    {
+        // T-GOV158I1-09 (SEC-GOV158I1-05/07): the in-place update never touches a revoked consent and never un-revokes it.
+        if (!Available) return;
+        var (table, tableId) = await SeedTableAsync();
+        var consent = await Repo.CreateConsentAsync(NewConsent(tableId, table, GranteeType.User, "before"));
+        await Repo.RevokeConsentAsync(consent.Id, Alice, "revoked in between");
+
+        await Repo.ReplaceConsentsAsync([], [], Admin, "desc", null, [new ConsentDescriptionUpdate(consent.Id, Tenant, "after")], CancellationToken.None);
+
+        var loaded = (await Repo.GetConsentByIdAsync(consent.Id))!;
+        loaded.IsRevoked.ShouldBeTrue();
+        loaded.Description.ShouldBe("before");
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task Replace_DescriptionUpdate_OtherTenant_ChangesNothing()
+    {
+        if (!Available) return;
+        var (table, tableId) = await SeedTableAsync();
+        var consent = await Repo.CreateConsentAsync(NewConsent(tableId, table, GranteeType.User, "before"));
+
+        await Repo.ReplaceConsentsAsync([], [], Admin, "desc", null, [new ConsentDescriptionUpdate(consent.Id, new TenantId("tenant-other"), "after")], CancellationToken.None);
+
+        (await Repo.GetConsentByIdAsync(consent.Id))!.Description.ShouldBe("before");
+    }
+
     private static void AddParameter(DbCommand cmd, string name, object value)
     {
         var p = cmd.CreateParameter();
