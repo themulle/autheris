@@ -8,6 +8,7 @@ using Autheris.Application.Olap;
 using Autheris.Application.Sql.Federation.Conjuncts;
 using Autheris.Application.Sql.Federation.KeySet;
 using Autheris.Application.Sql.Federation.Pushdown;
+using Autheris.Application.Sql.Federation.Subtrees;
 using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -293,13 +294,79 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             statement = new SqlAstBuilder().BuildStatement(tree);
         }
 
-        var stagingRequests = new List<StagingTableRequest>(plannedTables.Count);
-        var stagingNames = new List<string>(plannedTables.Count);
+        // Issue #123 (WP-123-1): AST Subtree Graph Partitioning
+        var partitionResult = SubtreeGraphPartitioner.Partition(statement, tables, options.MaxTablesPerSubtree);
+        var subtreePlans = new List<SubtreeExecutionPlan>();
 
-        for (int i = 0; i < plannedTables.Count; i++)
+        foreach (var st in partitionResult.Subtrees)
         {
-            var t = plannedTables[i];
-            string stagingName = $"s{i}";
+            var plan = SubtreeCompiler.Compile(st, decisions, options, _sqlEngine);
+            subtreePlans.Add(plan);
+        }
+
+        // SEC-DATA123-03: Validate that cross-source joins do not target masked subtree output columns (SEC-FED-19)
+        if (metadata.JoinColumnReferences != null && metadata.JoinColumnReferences.Count > 0)
+        {
+            foreach (var stPlan in subtreePlans)
+            {
+                foreach (var maskedCol in stPlan.MaskedColumns)
+                {
+                    if (metadata.JoinColumnReferences.Any(jc => string.Equals(jc.ColumnName, maskedCol, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        throw new WebSqlPolicyException($"Security Policy Violation: Column '{maskedCol}' in subtree '{stPlan.SubtreeId}' is protected by masking and cannot be used in a relational JOIN predicate across data sources (SEC-FED-19).");
+                    }
+                }
+            }
+        }
+
+        var stagingRequests = new List<StagingTableRequest>();
+        var stagingNames = new List<string>();
+        int stagingIndex = 0;
+
+        // Process Subtrees first (WP-123-3)
+        foreach (var stPlan in subtreePlans)
+        {
+            string stagingName = $"s{stagingIndex++}";
+            stagingNames.Add(stagingName);
+
+            foreach (var m in stPlan.MemberTables)
+            {
+                var identifier = DecisionKey(m);
+                identifierToStaging[identifier] = stagingName;
+                MapName(targetToStaging, m.Target.FullName, stagingName, shortName: false);
+                MapName(targetToStaging, identifier.ToString(), stagingName, shortName: false);
+                MapName(targetToStaging, identifier.ToQualifiedName(), stagingName, shortName: true);
+                MapName(targetToStaging, m.Target.TableName, stagingName, shortName: true);
+
+                identifierToAlias[identifier] = stagingName;
+                targetToAlias[m.Target.FullName] = stagingName;
+                targetToAlias[identifier.ToString()] = stagingName;
+                targetToAlias[identifier.ToQualifiedName()] = stagingName;
+                targetToAlias[m.Target.TableName] = stagingName;
+                if (!string.IsNullOrWhiteSpace(m.Target.Alias))
+                {
+                    targetToAlias[m.Target.Alias] = stagingName;
+                }
+            }
+
+            var rootMember = stPlan.MemberTables[0];
+            var rootDecision = RequireDecision(decisions, rootMember);
+
+            stagingRequests.Add(new StagingTableRequest(
+                Reference: rootMember.Target,
+                Metadata: stPlan.SyntheticMetadata,
+                Decision: rootDecision,
+                StagingName: stagingName,
+                Projection: stPlan.ProjectedColumns,
+                PushdownFilter: null,
+                VirtualFilterPlan: null,
+                Subtree: stPlan));
+        }
+
+        // Process remaining single tables
+        foreach (var t in partitionResult.RemainingSingleTables)
+        {
+            string stagingName = $"s{stagingIndex++}";
             stagingNames.Add(stagingName);
 
             string? alias = t.Target.Alias;
@@ -429,7 +496,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             _timeZoneState?.IsAvailable(TargetSqlDialect.DuckDb) ?? false,
             (qualifier, column) => IsMaskedOrDenied(qualifier, column, tables, tableDecisions));
 
-        var rewriter = new FederationAstRewriter(targetToStaging, targetToAlias, plannedTables);
+        var rewriter = new FederationAstRewriter(targetToStaging, targetToAlias, tables, subtreePlans);
         var rewrittenAst = (SqlStatement)rewriter.Visit(statement);
 
         if (parameters?.ListShapes is { IsEmpty: false } listShapes)
@@ -488,15 +555,57 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         private readonly Dictionary<string, string> _targetToAlias;
         private readonly IReadOnlyList<ResolvedSourceTable> _tables;
         private readonly HashSet<string> _cteNames = new(StringComparer.OrdinalIgnoreCase);
+        private readonly IReadOnlyList<SubtreeExecutionPlan>? _subtrees;
 
         public FederationAstRewriter(
             Dictionary<string, string> targetToStaging,
             Dictionary<string, string> targetToAlias,
-            IReadOnlyList<ResolvedSourceTable> tables)
+            IReadOnlyList<ResolvedSourceTable> tables,
+            IReadOnlyList<SubtreeExecutionPlan>? subtrees = null)
         {
             _targetToStaging = targetToStaging;
             _targetToAlias = targetToAlias;
             _tables = tables;
+            _subtrees = subtrees;
+        }
+
+        public override SqlNode VisitJoinedTableSource(JoinedTableSource node)
+        {
+            if (_subtrees != null && _subtrees.Count > 0)
+            {
+                foreach (var st in _subtrees)
+                {
+                    if (MatchesSubtree(node, st))
+                    {
+                        var stagingName = _targetToStaging[st.MemberTables[0].Target.FullName];
+                        return new NamedTableSource(
+                            new SqlQualifiedName([new SqlIdentifier(stagingName, false)]),
+                            new SqlIdentifier(stagingName, false));
+                    }
+                }
+            }
+            return base.VisitJoinedTableSource(node);
+        }
+
+        private static bool MatchesSubtree(TableSource node, SubtreeExecutionPlan plan)
+        {
+            var tableNamesInNode = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            CollectTableNames(node, tableNamesInNode);
+            var memberNames = new HashSet<string>(plan.MemberTables.Select(m => m.Target.TableName), StringComparer.OrdinalIgnoreCase);
+            return tableNamesInNode.Count > 0 && tableNamesInNode.SetEquals(memberNames);
+        }
+
+        private static void CollectTableNames(TableSource source, HashSet<string> names)
+        {
+            if (source is NamedTableSource named)
+            {
+                names.Add(named.Name.Parts[^1].Value);
+            }
+            else if (source is JoinedTableSource joined)
+            {
+                CollectTableNames(joined.Left, names);
+                CollectTableNames(joined.Right, names);
+            }
         }
 
         public override SqlNode VisitCommonTableExpression(CommonTableExpression node)

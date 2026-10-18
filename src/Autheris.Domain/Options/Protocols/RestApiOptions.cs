@@ -109,6 +109,11 @@ public sealed class CrossSourceOptions
     public int TimeoutSeconds { get; init; } = 30;
 
     /// <summary>
+    /// Issue #123 (SEC-DATA123-04): Maximum number of tables permitted in a single same-source AST subtree pushdown (default 12).
+    /// </summary>
+    public int MaxTablesPerSubtree { get; init; } = 12;
+
+    /// <summary>
     /// Upper bound (1..16) on parallel source reads. Currently staging reads sources sequentially, which trivially satisfies the bound.
     /// DuckDB memory and spill limits are configured with <c>Gateway:DuckDbOlap:MaxMemory</c> and <c>MaxTempDirectorySize</c>.
     /// </summary>

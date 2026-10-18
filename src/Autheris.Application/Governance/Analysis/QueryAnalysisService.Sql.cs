@@ -348,6 +348,23 @@ public sealed partial class QueryAnalysisService
                     }
                 }
             }
+
+            // Issue #123 (WP-123-4): Subtree pushdown analysis
+            if (parsedStatement != null && resolvedTables.Count >= 2)
+            {
+                var partitionResult = Autheris.Application.Sql.Federation.Subtrees.SubtreeGraphPartitioner.PartitionSubtrees(parsedStatement, resolvedTables);
+                foreach (var st in partitionResult.Subtrees)
+                {
+                    var gen = TrinoSqlEngine.Ast.Generators.SqlDialectGeneratorFactory.GetGenerator(st.Dialect);
+                    var genSql = gen.GenerateSql(new SelectStatement(null, new QuerySpecification(false, st.ProjectedItems, st.RootTableSource, null, null, null), null, null));
+                    outcome.Subtrees.Add(new AnalyzedSubtree(
+                        SubtreeId: st.SubtreeId,
+                        SourceName: st.SourceName,
+                        MemberTables: st.MemberTables.Select(m => m.Metadata.Identifier.ToString()).ToList(),
+                        GeneratedSql: genSql,
+                        ProjectedColumns: st.ProjectedItems.OfType<ColumnSelectItem>().Select(p => p.Alias?.Value ?? "col").ToList()
+                    ));
+                }
             }
         }
 

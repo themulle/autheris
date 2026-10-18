@@ -174,11 +174,12 @@ public sealed record QueryAccessRequirementsReport(
 }
 
 /// <summary>
-/// Issue #122 / #124 / #132: Query federation, predicate pushdown, dynamic key-sets, and co-located group analysis.
+/// Issue #122 / #123 / #124 / #132: Query federation, predicate pushdown, dynamic key-sets, same-source subtrees, and co-located group analysis.
 /// </summary>
 public sealed record QueryFederationAnalysis(
     IReadOnlyList<AnalyzedFederatedTable> Tables,
     IReadOnlyList<AnalyzedKeySetPushdown>? KeySetPushdowns = null,
+    IReadOnlyList<AnalyzedSubtree>? Subtrees = null,
     IReadOnlyList<CoLocatedGroupPlan>? CoLocatedGroups = null);
 
 public sealed record AnalyzedKeySetPushdown(
@@ -196,6 +197,16 @@ public sealed record CoLocatedGroupPlan(
     IReadOnlyList<string> Databases,
     IReadOnlyList<string> MemberTables,
     bool SingleStatementExecuted);
+
+/// <summary>
+/// Issue #123 (WP-123-4): Analysis of planned same-source AST subtree pushdown.
+/// </summary>
+public sealed record AnalyzedSubtree(
+    string SubtreeId,
+    string SourceName,
+    IReadOnlyList<string> MemberTables,
+    string GeneratedSql,
+    IReadOnlyList<string> ProjectedColumns);
 
 public sealed record AnalyzedFederatedTable(
     string Table,
