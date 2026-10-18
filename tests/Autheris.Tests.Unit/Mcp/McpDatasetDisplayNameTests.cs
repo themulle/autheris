@@ -102,7 +102,7 @@ public sealed class McpDatasetDisplayNameTests
     [Fact]
     public async Task DescribeDataset_EmptyDisplayName_FallsBackToTableName()
     {
-        var d = await Catalog([Row(" ​ ")]).DescribeDatasetAsync(Subject(), SharedId);
+        var d = await Catalog([Row(" \u200B ")]).DescribeDatasetAsync(Subject(), SharedId);
 
         d.DisplayName.ShouldBe("shared_t");
     }
@@ -120,7 +120,7 @@ public sealed class McpDatasetDisplayNameTests
     [Fact]
     public async Task DisplayName_OversizedAndControlChars_SanitisedInBothTools()
     {
-        var raw = "A\n" + new string('x', 400) + "‮";
+        var raw = "A\n" + new string('x', 400) + "\u202E";
         var catalog = Catalog([Row(raw)]);
 
         var listed = (await catalog.ListDatasetsAsync(Subject())).Datasets.Single().DisplayName;
@@ -128,7 +128,7 @@ public sealed class McpDatasetDisplayNameTests
 
         listed.Length.ShouldBe(256);
         listed.ShouldStartWith("A xxx");
-        listed.ShouldNotContain("‮");
+        listed.ShouldNotContain("\u202E");
         described.ShouldBe(listed);
     }
 
@@ -184,7 +184,7 @@ public sealed class McpDatasetDisplayNameTests
     [Fact]
     public async Task Paging_TotalUnaffectedByDisplayName()
     {
-        var rows = new[] { Row("", name: "a_t"), Row(Distinct, name: "b_t"), Row("​​", name: "c_t") };
+        var rows = new[] { Row("", name: "a_t"), Row(Distinct, name: "b_t"), Row("\u200B\u200B", name: "c_t") };
         var catalog = Catalog(rows);
 
         var all = await catalog.ListDatasetsAsync(Subject());
@@ -220,7 +220,7 @@ public sealed class McpDatasetDisplayNameTests
     {
         // SEC-CAT146A-01 / T-CAT146A-06: the compiled per-table tool falls back to the display name when Description is empty; it must be sanitised.
         var tags = string.Concat("ignore".Select(c => char.ConvertFromUtf32(0xE0000 + c)));
-        var raw = $"Evil‮{tags}\nname";
+        var raw = $"Evil\u202E{tags}\nname";
         var table = Wp0.Table("sales", "orders", "", ["id"]);
         table = table with { Table = table.Table with { DisplayName = raw } };
         var repo = Substitute.For<ITableMetadataRepository>();
@@ -230,10 +230,37 @@ public sealed class McpDatasetDisplayNameTests
         var tool = await compiler.CompileToolAsync("query_orders", table.Identifier);
 
         tool.Description.ShouldContain("Evil name");
-        tool.Description.ShouldNotContain("‮");
+        tool.Description.ShouldNotContain("\u202E");
         tool.Description.ShouldNotContain(char.ConvertFromUtf32(0xE0069));
         tool.Description.ShouldNotContain("\n");
         // The static MCP tool list never interpolates catalog text.
         Json(McpDatasetTools.Definitions()).ShouldNotContain(Distinct);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task CompiledToolDescription_LongDescription_CutOnRuneBoundary()
+    {
+        // Review finding 3: the 107-unit cut must not split a surrogate pair.
+        var table = Wp0.Table("sales", "orders", new string('a', 106) + "\U0001F600" + new string('b', 30), ["id"]);
+        var repo = Substitute.For<ITableMetadataRepository>();
+        repo.GetTableMetadataAsync(table.Identifier, Arg.Any<CancellationToken>()).Returns(table);
+        var compiler = new SemanticMcpCompiler(repo, Microsoft.Extensions.Logging.Abstractions.NullLogger<SemanticMcpCompiler>.Instance);
+
+        var tool = await compiler.CompileToolAsync("query_orders", table.Identifier);
+
+        tool.Description.ShouldNotBeNull();
+        for (var i = 0; i < tool.Description.Length; i++)
+        {
+            if (char.IsHighSurrogate(tool.Description[i]))
+            {
+                (i + 1 < tool.Description.Length && char.IsLowSurrogate(tool.Description[i + 1])).ShouldBeTrue();
+                i++;
+            }
+            else
+            {
+                char.IsLowSurrogate(tool.Description[i]).ShouldBeFalse();
+            }
+        }
     }
 }

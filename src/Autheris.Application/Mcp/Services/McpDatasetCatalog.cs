@@ -347,8 +347,8 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
 
     /// <summary>
     /// Issue #111 A-4: the <c>Summary</c> answer is built from an allow-list (a property added to <see cref="McpDatasetDescription"/> is
-    /// excluded until it is listed here): identifier, sanitised display name (PLAN-CAT-146-A, same trust as the description), description, sensitivity, four-eyes flag, tags, display-name-only owners, access
-    /// status and the view marker. No long description, columns, examples, GraphQL block, access hints, keys or profiles.
+    /// excluded until it is listed here): identifier, sanitised display name (PLAN-CAT-146-A, same trust as the description), description,
+    /// sensitivity, four-eyes flag, tags, display-name-only owners, access status and the view marker. No long description, columns, examples, GraphQL block, access hints, keys or profiles.
     /// </summary>
     private async Task<McpDatasetDescription> BuildSummaryDescriptionAsync(TableMetadata table, string accessStatus, CancellationToken ct)
     {

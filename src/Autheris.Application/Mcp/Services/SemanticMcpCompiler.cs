@@ -33,6 +33,10 @@ public sealed class SemanticMcpCompiler(
     private readonly IOptions<GatewayOptions>? _options = options;
     private static readonly JsonSerializerOptions CachedIndentedOptions = new() { WriteIndented = true };
 
+    /// <summary>First <paramref name="length"/> UTF-16 units of <paramref name="text"/>, never ending on a lone high surrogate.</summary>
+    private static string CutOnRuneBoundary(string text, int length) =>
+        length > 0 && char.IsHighSurrogate(text[length - 1]) ? text[..(length - 1)] : text[..length];
+
     public async Task<McpToolDefinition> CompileToolAsync(
         string toolName,
         TableIdentifier targetTable,
@@ -46,11 +50,11 @@ public sealed class SemanticMcpCompiler(
                 : McpCatalogText.DisplayName(meta.Table.DisplayName, targetTable.TableName)); // SEC-CAT146A-01: externally authored text, never raw
 
         // Enforce Dynamic Compactor constraint: Short description < 120 chars for LLM Tool Picker
-        var shortDesc = tableDesc.Length > 110 ? tableDesc[..107] + "..." : tableDesc;
+        var shortDesc = tableDesc.Length > 110 ? CutOnRuneBoundary(tableDesc, 107) + "..." : tableDesc;
         shortDesc = $"{shortDesc} ({targetTable.Domain}.{targetTable.TableName})";
         if (shortDesc.Length > 120)
         {
-            shortDesc = shortDesc[..117] + "...";
+            shortDesc = CutOnRuneBoundary(shortDesc, 117) + "...";
         }
 
         var properties = new Dictionary<string, object>
