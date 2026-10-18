@@ -236,6 +236,10 @@ public class ReadOnlyTokenTests
     [InlineData("POST", "/api/v1/queries/open_invoices", true)]
     [InlineData("POST", "/api/v1/queries", false)]
     [InlineData("POST", "/api/v1/queries/", false)]
+    [InlineData("POST", "/api/v1/governance/queries/analyze", true)]
+    [InlineData("POST", "/api/v1/governance/queries/analyze/", true)]
+    [InlineData("POST", "/api/v1/governance/queries/analyze/sub", false)]
+    [InlineData("POST", "/api/v1/governance/consents/bundle", false)]
     [InlineData("GET", "/api/governance/sunsetting/rules", true)]
     public async Task ReadOnlyToken_HttpRequest_IsLimitedToQueryEndpoints(string method, string path, bool expectedPassed)
     {

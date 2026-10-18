@@ -374,6 +374,7 @@ public sealed partial class QueryAnalysisService
         HashSet<string> deprecatedKeys,
         List<RequestableConsentItem> missingConsents,
         HashSet<string> missingConsentKeys,
+        Dictionary<string, int> rootFieldCosts,
         ref bool hasRowFilters,
         ref bool hasMandatoryVirtualFilters,
         ref bool isBlockedByMandatoryFilter,
@@ -381,6 +382,13 @@ public sealed partial class QueryAnalysisService
         ref int totalEstimatedCost)
     {
         diagnostics.AddRange(source.Diagnostics);
+
+        foreach (var (field, cost) in source.RootFieldCosts)
+        {
+            rootFieldCosts[field] = rootFieldCosts.TryGetValue(field, out var existing)
+                ? (int)Math.Min((long)int.MaxValue, (long)existing + cost)
+                : cost;
+        }
 
         foreach (var col in source.OutputColumns)
         {
@@ -423,6 +431,7 @@ public sealed partial class QueryAnalysisService
         public List<AnalyzedOutputColumn> OutputColumns { get; } = new();
         public List<DeprecatedFieldReference> DeprecatedFields { get; } = new();
         public List<RequestableConsentItem> MissingConsents { get; } = new();
+        public Dictionary<string, int> RootFieldCosts { get; } = new(StringComparer.Ordinal);
         public bool HasRowFilters { get; set; }
         public bool HasMandatoryVirtualFilters { get; set; }
         public bool IsBlockedByMandatoryFilter { get; set; }

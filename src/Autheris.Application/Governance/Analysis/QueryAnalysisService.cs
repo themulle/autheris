@@ -34,6 +34,8 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
     private readonly Autheris.Domain.Interfaces.IConsentResolutionService _consentResolution;
     private readonly Microsoft.Extensions.Logging.ILogger<QueryAnalysisService>? _logger;
     private readonly Autheris.Domain.Security.IRestrictedScopePolicy _restrictedScopes;
+    private readonly IGraphQlCostAnalysisEngine? _costAnalysisEngine;
+    private readonly int _maxRootFields;
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     public QueryAnalysisService(
@@ -47,7 +49,8 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         QueryAnalysisOptions? analysisOptions = null,
         Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null,
         Microsoft.Extensions.Logging.ILogger<QueryAnalysisService>? logger = null,
-        Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null)
+        Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
+        IGraphQlCostAnalysisEngine? costAnalysisEngine = null)
     {
         // The default is the secure list (REQ-GOV-143), never "off".
         _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
@@ -61,6 +64,10 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         _accessProfileRepository = accessProfileRepository;
         _sunsettingService = sunsettingService;
         _gatewayOptions = gatewayOptions?.Value ?? new GatewayOptions();
+        _costAnalysisEngine = costAnalysisEngine;
+        _maxRootFields = _gatewayOptions.GraphQL.MaxRootFieldsPerOperation > 0
+            ? _gatewayOptions.GraphQL.MaxRootFieldsPerOperation
+            : 10;
         _analysisOptions = analysisOptions ?? new QueryAnalysisOptions
         {
             MaxAllowedCost = _gatewayOptions.GraphQL.MaxAllowedComplexity > 0
@@ -79,7 +86,8 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         QueryAnalysisOptions? analysisOptions = null,
         Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null,
         Microsoft.Extensions.Logging.ILogger<QueryAnalysisService>? logger = null,
-        Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null)
+        Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
+        IGraphQlCostAnalysisEngine? costAnalysisEngine = null)
     {
         // The default is the secure list (REQ-GOV-143), never "off".
         _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
@@ -92,6 +100,10 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         _accessProfileRepository = accessProfileRepository;
         _sunsettingService = sunsettingService;
         _gatewayOptions = gatewayOptions?.Value ?? new GatewayOptions();
+        _costAnalysisEngine = costAnalysisEngine;
+        _maxRootFields = _gatewayOptions.GraphQL.MaxRootFieldsPerOperation > 0
+            ? _gatewayOptions.GraphQL.MaxRootFieldsPerOperation
+            : 10;
         _analysisOptions = analysisOptions ?? new QueryAnalysisOptions
         {
             MaxAllowedCost = _gatewayOptions.GraphQL.MaxAllowedComplexity > 0
@@ -154,6 +166,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         var isBlockedByMandatoryFilter = false;
         var hiddenMissingDatasetsCount = 0;
         var totalEstimatedCost = 0;
+        var aggregatedRootFieldCosts = new Dictionary<string, int>(StringComparer.Ordinal);
 
         for (var i = 0; i < queries.Count; i++)
         {
@@ -192,6 +205,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     deprecatedKeys,
                     missingConsents,
                     missingConsentKeys,
+                    aggregatedRootFieldCosts,
                     ref hasRowFilters,
                     ref hasMandatoryVirtualFilters,
                     ref isBlockedByMandatoryFilter,
@@ -230,6 +244,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     deprecatedKeys,
                     missingConsents,
                     missingConsentKeys,
+                    aggregatedRootFieldCosts,
                     ref hasRowFilters,
                     ref hasMandatoryVirtualFilters,
                     ref isBlockedByMandatoryFilter,
@@ -270,6 +285,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                         deprecatedKeys,
                         missingConsents,
                         missingConsentKeys,
+                        aggregatedRootFieldCosts,
                         ref hasRowFilters,
                         ref hasMandatoryVirtualFilters,
                         ref isBlockedByMandatoryFilter,
@@ -300,6 +316,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                         deprecatedKeys,
                         missingConsents,
                         missingConsentKeys,
+                        aggregatedRootFieldCosts,
                         ref hasRowFilters,
                         ref hasMandatoryVirtualFilters,
                         ref isBlockedByMandatoryFilter,
@@ -330,6 +347,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     deprecatedKeys,
                     missingConsents,
                     missingConsentKeys,
+                    aggregatedRootFieldCosts,
                     ref hasRowFilters,
                     ref hasMandatoryVirtualFilters,
                     ref isBlockedByMandatoryFilter,
@@ -346,16 +364,27 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         }
 
         var maxAllowedCost = _analysisOptions.MaxAllowedCost > 0 ? _analysisOptions.MaxAllowedCost : 500;
+        if (totalEstimatedCost > maxAllowedCost)
+        {
+            var queryName = queries.Count == 1 ? (queries[0].Name ?? "query_1") : null;
+            diagnostics.Add(new QueryValidationDiagnostic(
+                QueryDiagnosticCodes.QueryTooComplex,
+                $"The query exceeds the complexity budget of {maxAllowedCost} (calculated cost: {totalEstimatedCost}).",
+                QueryName: queryName));
+        }
+
         var costEstimate = new QueryCostEstimate(
             EstimatedCost: totalEstimatedCost,
             MaxAllowedCost: maxAllowedCost,
-            IsWithinCostLimit: totalEstimatedCost <= maxAllowedCost);
+            IsWithinCostLimit: totalEstimatedCost <= maxAllowedCost,
+            RootFieldCosts: aggregatedRootFieldCosts.Count > 0 ? aggregatedRootFieldCosts : null);
 
         var isValid = diagnostics.All(d =>
             !string.Equals(d.Code, QueryDiagnosticCodes.SyntaxError, StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(d.Code, QueryDiagnosticCodes.UnknownTable, StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(d.Code, QueryDiagnosticCodes.UnknownColumn, StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(d.Code, QueryDiagnosticCodes.ReferencedTablesMismatch, StringComparison.OrdinalIgnoreCase));
+            !string.Equals(d.Code, QueryDiagnosticCodes.ReferencedTablesMismatch, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(d.Code, QueryDiagnosticCodes.QueryTooComplex, StringComparison.OrdinalIgnoreCase));
 
         var validationReport = new QueryValidationReport(
             IsValid: isValid,

@@ -29,6 +29,7 @@ public static class GatewayCatalogServiceExtensions
         services.TryAddSingleton<IColumnValueProfileService, ColumnValueProfileService>();
         services.TryAddSingleton<ISyntheticSampleRowGenerator, SyntheticSampleRowGenerator>();
         services.TryAddScoped<IQueryAnalysisService, QueryAnalysisService>();
+        services.TryAddScoped<IGraphQlCostAnalysisEngine, Autheris.GraphQL.Analysis.HotChocolateGraphQlCostAnalysisEngine>();
         services.TryAddScoped<IBundledConsentRequestService, BundledConsentRequestService>();
         return services;
     }

@@ -16,6 +16,7 @@ public static class QueryDiagnosticCodes
     public const string UnknownColumn = "UNKNOWN_COLUMN";
     public const string MaskedColumnInFilter = "MASKED_COLUMN_IN_FILTER";
     public const string ReferencedTablesMismatch = "REFERENCED_TABLES_MISMATCH";
+    public const string QueryTooComplex = "QUERY_TOO_COMPLEX";
 
     /// <summary>Informational: the analysis target is another principal whose token scopes are unknown (issue #127).</summary>
     public const string TargetScopesUnknown = "TARGET_SCOPES_UNKNOWN";
@@ -117,7 +118,8 @@ public sealed record DeprecatedFieldReference(
 public sealed record QueryCostEstimate(
     int EstimatedCost,
     int MaxAllowedCost,
-    bool IsWithinCostLimit);
+    bool IsWithinCostLimit,
+    IReadOnlyDictionary<string, int>? RootFieldCosts = null);
 
 /// <summary>
 /// Issue #79: Output 1 of static query analysis — validation report (syntax, schema, output columns, filter flags, cost, deprecations).
