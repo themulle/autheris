@@ -3,6 +3,8 @@ namespace Autheris.Tests.Unit.Hosting;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Api.Hosting.Warmup;
 using Microsoft.Extensions.Configuration;
@@ -95,9 +97,16 @@ public sealed class ColdPathTimingTests
         for (var i = 0; i < 6; i++)
         {
             listener.ParseDocument(null!).Dispose();
+            listener.ValidateDocument(null!).Dispose();
+            listener.CompileOperation(null!).Dispose();
+            listener.ExecuteOperation(null!).Dispose();
         }
 
-        logger.Messages.Count.ShouldBe(3);
+        logger.Messages.Count.ShouldBe(12);
+        foreach (var stage in new[] { "parse", "validate", "compile", "execute" })
+        {
+            logger.Messages.Count(m => m.Contains($"stage {stage} ")).ShouldBe(3);
+        }
     }
 
     [Trait("Category", "Security")]
@@ -139,6 +148,10 @@ public sealed class ColdPathTimingTests
 
         using var sp = services.BuildServiceProvider();
 
-        Should.Throw<OptionsValidationException>(() => sp.GetRequiredService<IOptions<ColdPathTimingOptions>>().Value);
+        // ValidateOnStart registers the validation with IStartupValidator, which the host runs before it starts; nobody reads the options here.
+        var validator = sp.GetRequiredService<IStartupValidator>();
+        var ex = Should.Throw<Exception>(validator.Validate);
+        (ex is OptionsValidationException || ex.InnerException is OptionsValidationException || ex is AggregateException { InnerExceptions: [OptionsValidationException, ..] })
+            .ShouldBeTrue();
     }
 }

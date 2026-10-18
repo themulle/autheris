@@ -32,12 +32,9 @@ public sealed partial class ColdPathTimingListener(ILogger<ColdPathTimingListene
     // per-operation counter would misattribute it. The first MaxOperations occurrences of every stage are logged.
     private IDisposable Stage(string stage, ref int counter)
     {
-        if (Volatile.Read(ref counter) >= MaxOperations)
-        {
-            return EmptyScope;
-        }
-
-        return new StageScope(logger, stage, Interlocked.Increment(ref counter));
+        // Exact bound under concurrency: the increment itself decides, so at most MaxOperations scopes are ever created.
+        var occurrence = Interlocked.Increment(ref counter);
+        return occurrence > MaxOperations ? EmptyScope : new StageScope(logger, stage, occurrence);
     }
 
     [LoggerMessage(EventId = 15001, Level = LogLevel.Information, Message = "ColdPath stage {Stage} occurrence {Occurrence} took {ElapsedMs:F1} ms")]
