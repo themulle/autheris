@@ -1,9 +1,11 @@
 using System.Data;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Autheris.Application.Audit;
 using Autheris.Application.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -15,6 +17,176 @@ namespace Autheris.Infrastructure.Persistence;
 
 public partial class SqlServerGovernanceRepository
 {
+    byte[]? IAuditPurgeKeyProvider.GetAuditHmacKey() => _auditHmacKey;
+
+    public async Task<AuditPurgeCheckpoint?> GetLatestPurgeCheckpointAsync(CancellationToken ct = default)
+    {
+        await FlushAuditChannelAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"SELECT TOP 1 first_surviving_seq, surviving_prev_hash, purged_count, purged_through_utc, created_at, signature, external_signature
+                            FROM dbo.AUDIT_PURGE_CHECKPOINTS
+                            ORDER BY first_surviving_seq DESC";
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var firstSeq = reader.GetInt64(0);
+            var prevHash = reader.GetString(1);
+            var purgedCount = reader.GetInt64(2);
+            var purgedThroughUtc = DateTimeOffset.Parse(reader.GetString(3), CultureInfo.InvariantCulture);
+            var createdAtUtc = DateTimeOffset.Parse(reader.GetString(4), CultureInfo.InvariantCulture);
+            var sig = reader.GetString(5);
+            var extSig = reader.IsDBNull(6) ? null : reader.GetString(6);
+            return new AuditPurgeCheckpoint(firstSeq, prevHash, purgedCount, purgedThroughUtc, createdAtUtc, sig, extSig);
+        }
+
+        return null;
+    }
+
+    public async Task SavePurgeCheckpointAsync(AuditPurgeCheckpoint checkpoint, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(checkpoint);
+        await FlushAuditChannelAsync(ct).ConfigureAwait(false);
+
+        _auditAnchorStore?.SavePurgeCheckpoint(checkpoint);
+
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"INSERT INTO dbo.AUDIT_PURGE_CHECKPOINTS
+                            (id, first_surviving_seq, surviving_prev_hash, purged_count, purged_through_utc, created_at, signature, external_signature)
+                            VALUES (@id, @firstSeq, @prevHash, @purgedCount, @purgedThrough, @createdAt, @sig, @extSig)";
+        cmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString("N"));
+        cmd.Parameters.AddWithValue("@firstSeq", checkpoint.FirstSurvivingSequence);
+        cmd.Parameters.AddWithValue("@prevHash", checkpoint.SurvivingPrevHash);
+        cmd.Parameters.AddWithValue("@purgedCount", checkpoint.PurgedCount);
+        cmd.Parameters.AddWithValue("@purgedThrough", checkpoint.PurgedThroughUtc.ToString("O"));
+        cmd.Parameters.AddWithValue("@createdAt", checkpoint.CreatedAtUtc.ToString("O"));
+        cmd.Parameters.AddWithValue("@sig", checkpoint.Signature);
+        cmd.Parameters.AddWithValue("@extSig", (object?)checkpoint.ExternalSignature ?? DBNull.Value);
+
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<(long MaxEligibleSequence, long FirstSurvivingSequence, string SurvivingPrevHash, long PurgeCount)?> PlanPurgePrefixAsync(
+        DateTimeOffset thresholdUtc,
+        CancellationToken ct = default)
+    {
+        await FlushAuditChannelAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        var thresholdIso = thresholdUtc.ToUniversalTime().ToString("O");
+
+        // 1. Check oldest row
+        await using (var minCmd = conn.CreateCommand())
+        {
+            minCmd.CommandText = "SELECT TOP 1 seq, occurred_at FROM dbo.AUDIT_LOG_ENTRIES ORDER BY seq ASC";
+            await using var minReader = await minCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            if (!await minReader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                return null;
+            }
+
+            var oldestOccurredAt = minReader.GetString(1);
+            if (string.CompareOrdinal(oldestOccurredAt, thresholdIso) >= 0)
+            {
+                return null;
+            }
+        }
+
+        // 2. Find first surviving entry (earliest entry with occurred_at >= thresholdIso)
+        long survivingSeq;
+        string survivingPrevHash;
+        await using (var survCmd = conn.CreateCommand())
+        {
+            survCmd.CommandText = "SELECT TOP 1 seq, prev_hash FROM dbo.AUDIT_LOG_ENTRIES WHERE occurred_at >= @threshold ORDER BY seq ASC";
+            survCmd.Parameters.AddWithValue("@threshold", thresholdIso);
+            await using var survReader = await survCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            if (await survReader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                survivingSeq = survReader.GetInt64(0);
+                survivingPrevHash = survReader.GetString(1);
+            }
+            else
+            {
+                await using var newestCmd = conn.CreateCommand();
+                newestCmd.CommandText = "SELECT TOP 1 seq, prev_hash FROM dbo.AUDIT_LOG_ENTRIES ORDER BY seq DESC";
+                await using var newestReader = await newestCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                if (!await newestReader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    return null;
+                }
+                survivingSeq = newestReader.GetInt64(0);
+                survivingPrevHash = newestReader.GetString(1);
+            }
+        }
+
+        // 3. Find max eligible sequence (< survivingSeq)
+        long maxEligibleSeq;
+        await using (var maxCmd = conn.CreateCommand())
+        {
+            maxCmd.CommandText = "SELECT MAX(seq) FROM dbo.AUDIT_LOG_ENTRIES WHERE seq < @survivingSeq";
+            maxCmd.Parameters.AddWithValue("@survivingSeq", survivingSeq);
+            var maxObj = await maxCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+            if (maxObj == null || maxObj is DBNull)
+            {
+                return null;
+            }
+            maxEligibleSeq = Convert.ToInt64(maxObj, CultureInfo.InvariantCulture);
+        }
+
+        long purgeCount = survivingSeq - 1;
+        return (maxEligibleSeq, survivingSeq, survivingPrevHash, purgeCount);
+    }
+
+    public async Task<int> ExecutePurgeBatchAsync(long maxSequenceInclusive, int batchSize, CancellationToken ct = default)
+    {
+        await FlushAuditChannelAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var tx = conn.BeginTransaction();
+        try
+        {
+            await using (var authCmd = conn.CreateCommand())
+            {
+                authCmd.Transaction = tx;
+                authCmd.CommandText = "EXEC sp_set_session_context @key = N'audit_purge_authorized', @value = 1;";
+                await authCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            int rowsPurged;
+            await using (var delCmd = conn.CreateCommand())
+            {
+                delCmd.Transaction = tx;
+                delCmd.CommandText = @"WITH CTE AS (
+                                          SELECT TOP (@batchSize) id
+                                          FROM dbo.AUDIT_LOG_ENTRIES
+                                          WHERE seq <= @maxSeq
+                                          ORDER BY seq ASC
+                                      )
+                                      DELETE FROM CTE;";
+                delCmd.Parameters.AddWithValue("@maxSeq", maxSequenceInclusive);
+                delCmd.Parameters.AddWithValue("@batchSize", batchSize);
+                rowsPurged = await delCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+            return rowsPurged;
+        }
+        catch
+        {
+            try { await tx.RollbackAsync(ct).ConfigureAwait(false); } catch { }
+            throw;
+        }
+        finally
+        {
+            try
+            {
+                await using var resetCmd = conn.CreateCommand();
+                resetCmd.CommandText = "EXEC sp_set_session_context @key = N'audit_purge_authorized', @value = NULL;";
+                await resetCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            catch { }
+        }
+    }
+
     public async Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default)
     {
         // Tier-B events are only enqueued (no connection); they must not be accepted before the audit processor runs.
@@ -891,8 +1063,15 @@ public partial class SqlServerGovernanceRepository
         }
 
         string? hashAtKnownSeq = null;
-        var expectedPrevHash = AuditGenesisHash;
-        long position = 0;
+        AuditPurgeCheckpoint? checkpoint = TryLoadVerifiedPurgeCheckpoint(out bool checkpointInvalid);
+        if (checkpointInvalid)
+        {
+            FlagAuditChainViolation("External audit purge checkpoint has an invalid signature or format.");
+            return false;
+        }
+
+        var expectedPrevHash = checkpoint != null ? checkpoint.SurvivingPrevHash : AuditGenesisHash;
+        long position = checkpoint != null ? checkpoint.FirstSurvivingSequence - 1 : 0;
         AuditChainAnchor? anchor = TryLoadVerifiedAnchor(out bool anchorInvalid);
         if (anchorInvalid)
         {
@@ -900,10 +1079,12 @@ public partial class SqlServerGovernanceRepository
         }
 
         bool anchorEntryMatched = false;
+        bool readAnyRows = false;
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
+            readAnyRows = true;
             position++;
             var id = reader.GetString(0);
             var occurredAt = DateTimeOffset.Parse(reader.GetString(1));
@@ -918,6 +1099,12 @@ public partial class SqlServerGovernanceRepository
             var entryHash = reader.GetString(10);
             long? sequence = reader.IsDBNull(11) ? null : reader.GetInt64(11);
             var tenantId = reader.IsDBNull(12) ? TenantId.LegacySingleTenant.Value : reader.GetString(12);
+
+            if (checkpoint != null && sequence.HasValue && sequence.Value < checkpoint.FirstSurvivingSequence)
+            {
+                FlagAuditChainViolation($"Audit entry found before purge checkpoint sequence: got seq {sequence.Value}, checkpoint first sequence is {checkpoint.FirstSurvivingSequence}.");
+                return false;
+            }
 
             if (sequence.HasValue && sequence.Value != position)
             {
@@ -969,6 +1156,12 @@ public partial class SqlServerGovernanceRepository
             expectedPrevHash = entryHash;
         }
 
+        if (checkpoint != null && (!readAnyRows || position < checkpoint.FirstSurvivingSequence))
+        {
+            FlagAuditChainViolation($"Audit chain missing surviving rows: checkpoint expected seq {checkpoint.FirstSurvivingSequence} but DB has none.");
+            return false;
+        }
+
         // The anchor may lag behind the chain (other replicas, anchor written after commit); it must never be ahead of it.
         if (anchor != null && anchor.Sequence > 0 && (anchor.Sequence > position || !anchorEntryMatched))
         {
@@ -978,7 +1171,7 @@ public partial class SqlServerGovernanceRepository
 
         // Review PG-1: a longer chain than this process knew is normal (other replicas / concurrent writers); a shorter one,
         // or a different hash at the known position, is a violation.
-        if (knownSeq > 0 && (position < knownSeq || !FixedTimeEqualsString(hashAtKnownSeq, knownHash)))
+        if (knownSeq > 0 && knownSeq >= (checkpoint?.FirstSurvivingSequence ?? 1) && (position < knownSeq || !FixedTimeEqualsString(hashAtKnownSeq, knownHash)))
         {
             FlagAuditChainViolation($"Tail divergence: last known (seq {knownSeq}, hash {knownHash}) vs scanned chain (seq {position}, hash at known seq {hashAtKnownSeq ?? "n/a"}).");
             return false;
@@ -1186,6 +1379,39 @@ public partial class SqlServerGovernanceRepository
         }
 
         return anchor;
+    }
+
+    private AuditPurgeCheckpoint? TryLoadVerifiedPurgeCheckpoint(out bool invalid)
+    {
+        invalid = false;
+        AuditPurgeCheckpoint? checkpoint;
+        try
+        {
+            checkpoint = _auditAnchorStore?.LoadPurgeCheckpoint();
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to load audit purge checkpoint from external store.");
+            invalid = true;
+            return null;
+        }
+
+        if (checkpoint == null) return null;
+
+        if (checkpoint.FirstSurvivingSequence < 1 || string.IsNullOrEmpty(checkpoint.SurvivingPrevHash) || string.IsNullOrEmpty(checkpoint.Signature) || checkpoint.PurgedCount < 0)
+        {
+            invalid = true;
+            return null;
+        }
+
+        if (!AuditChainEngine.VerifyPurgeCheckpointSignature(_auditHmacKey, checkpoint))
+        {
+            _logger?.LogCritical("External audit purge checkpoint signature INVALID at sequence {Sequence}.", checkpoint.FirstSurvivingSequence);
+            invalid = true;
+            return null;
+        }
+
+        return checkpoint;
     }
 
     private void InitializeAuditChainAnchor()

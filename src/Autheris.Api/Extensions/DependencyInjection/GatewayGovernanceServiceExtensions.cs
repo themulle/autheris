@@ -1,6 +1,6 @@
 namespace Autheris.Api.Extensions.DependencyInjection;
 
-using System;
+using Autheris.Application.Audit;
 using Autheris.Application.DataCatalog.Interfaces;
 using Autheris.Application.Events.Interfaces;
 using Autheris.Application.DataCatalog.Services;
@@ -50,6 +50,12 @@ public static class GatewayGovernanceServiceExtensions
         GatewayOptions gatewayOptions)
     {
         services.AddSingleton<Autheris.Application.Audit.IAuditWriter, Autheris.Application.Audit.AuditWriter>();
+
+        services.AddOptions<AuditRetentionOptions>()
+            .BindConfiguration(GatewaySections.AuditRetention)
+            .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<AuditRetentionOptions>, AuditRetentionOptionsValidator>();
+        services.AddHostedService<AuditRetentionPurgeWorker>();
 
         // Issue #107: admin surface of the row filter key-set cache settings and the startup validation of its global options
         // (runs with the GatewayOptions ValidateOnStart; SEC-RF107-16).
@@ -280,6 +286,7 @@ public static class GatewayGovernanceServiceExtensions
             IVirtualFilterRepository,
             ICallerAttributeRepository,
             IAuditChainExportSource,
+            IAuditPurgeKeyProvider,
             ICdcWatermarkRepository,
             ICloudEventSubscriptionStore
         where TMigrationRunner : class, IGovernanceMigrationRunner
@@ -297,6 +304,7 @@ public static class GatewayGovernanceServiceExtensions
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>()));
         services.AddSingleton<IConsentRepository>(sp => sp.GetRequiredService<Autheris.Application.Identity.Attributes.AttributeValidatingConsentRepository>());
         services.AddSingleton<IAuditLogRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<IAuditPurgeKeyProvider>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IPolicyEpochRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsentApprovalRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsentDescriptionRepository>(sp => sp.GetRequiredService<Autheris.Application.Identity.Attributes.AttributeValidatingConsentRepository>()); // PLAN-GOV-158-INC1 (same validating decorator instance as IConsentRepository)

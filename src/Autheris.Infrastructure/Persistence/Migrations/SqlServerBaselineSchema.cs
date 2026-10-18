@@ -215,6 +215,18 @@ CREATE TABLE dbo.AUDIT_DEAD_LETTER (
     tenant_id NVARCHAR(128) NOT NULL
 );
 
+IF OBJECT_ID(N'dbo.AUDIT_PURGE_CHECKPOINTS', N'U') IS NULL
+CREATE TABLE dbo.AUDIT_PURGE_CHECKPOINTS (
+    id NVARCHAR(128) NOT NULL PRIMARY KEY,
+    first_surviving_seq BIGINT NOT NULL,
+    surviving_prev_hash NVARCHAR(128) NOT NULL,
+    purged_count BIGINT NOT NULL,
+    purged_through_utc NVARCHAR(64) NOT NULL,
+    created_at NVARCHAR(64) NOT NULL,
+    signature NVARCHAR(128) NOT NULL,
+    external_signature NVARCHAR(MAX) NULL
+);
+
 IF OBJECT_ID(N'dbo.CONSENT_REQUESTS', N'U') IS NULL
 CREATE TABLE dbo.CONSENT_REQUESTS (
     id NVARCHAR(128) NOT NULL PRIMARY KEY,
@@ -709,6 +721,13 @@ INSTEAD OF UPDATE, DELETE
 AS
 BEGIN
     SET NOCOUNT ON;
+    IF CAST(SESSION_CONTEXT(N'audit_purge_authorized') AS bit) = 1
+    BEGIN
+        DELETE e
+        FROM dbo.AUDIT_LOG_ENTRIES e
+        INNER JOIN deleted d ON e.id = d.id;
+        RETURN;
+    END;
     THROW 50042, 'AUDIT_LOG_ENTRIES is append-only', 1;
 END");
     }

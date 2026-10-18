@@ -342,6 +342,55 @@
       ]
     },
     {
+      "name": "AUDIT_PURGE_CHECKPOINTS",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "first_surviving_seq",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "surviving_prev_hash",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "purged_count",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "purged_through_utc",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "signature",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "external_signature",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
       "name": "CALLER_ATTRIBUTES",
       "columns": [
         {

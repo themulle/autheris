@@ -1,3 +1,4 @@
+using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
 
 namespace Autheris.Application.Interfaces;
@@ -32,6 +33,12 @@ public interface IAuditChainAnchorStore
 
     /// <summary>Atomically replaces the persisted anchor.</summary>
     void Save(AuditChainAnchor anchor);
+
+    /// <summary>Returns the last persisted purge checkpoint anchor or <c>null</c> if none exists yet.</summary>
+    AuditPurgeCheckpoint? LoadPurgeCheckpoint() => null;
+
+    /// <summary>Atomically replaces the persisted purge checkpoint anchor.</summary>
+    void SavePurgeCheckpoint(AuditPurgeCheckpoint checkpoint) { }
 }
 
 /// <summary>A contiguous slice (by rowid) of the audit chain.</summary>

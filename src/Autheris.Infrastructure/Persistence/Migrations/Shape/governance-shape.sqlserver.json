@@ -358,6 +358,55 @@
       "indexes": []
     },
     {
+      "name": "AUDIT_PURGE_CHECKPOINTS",
+      "columns": [
+        {
+          "name": "id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "first_surviving_seq",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "surviving_prev_hash",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "purged_count",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "purged_through_utc",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "signature",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "external_signature",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
       "name": "autheris_cdc_row_images",
       "columns": [
         {
