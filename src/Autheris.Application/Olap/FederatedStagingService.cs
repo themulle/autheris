@@ -269,7 +269,9 @@ public sealed class FederatedStagingService : IFederatedStagingService
                     ["pushedPredicateCount"] = req.PushdownFilter?.PushdownPredicates?.Count ?? (req.PushdownFilter != null ? 1 : 0),
                     ["pushedPredicates"] = req.PushdownFilter?.PushdownPredicates != null
                         ? req.PushdownFilter.PushdownPredicates.Select(p => new Dictionary<string, string> { ["column"] = p.Column, ["operator"] = p.Operator }).ToList()
-                        : (object)Array.Empty<Dictionary<string, string>>()
+                        : (object)Array.Empty<Dictionary<string, string>>(),
+                    ["parameterNames"] = req.ParameterAudit?.ParameterNames ?? (object)Array.Empty<string>(),
+                    ["listParameterCounts"] = req.ParameterAudit?.ListParameterCounts ?? (object)new Dictionary<string, int>()
                 };
                 if (vfPlan != null)
                 {

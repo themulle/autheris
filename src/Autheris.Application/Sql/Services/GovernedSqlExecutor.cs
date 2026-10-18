@@ -246,20 +246,7 @@ public sealed partial class GovernedSqlExecutor
             ? _dataSourceResolver.ResolveAllowedDataSource(request.DataSourceName, tenantId)
             : null;
 
-        if (request.Parameters != null)
-        {
-            foreach (var paramName in request.Parameters.Keys)
-            {
-                var trimmed = paramName.TrimStart('@');
-                if (trimmed.StartsWith(InternalParameterPrefix, StringComparison.OrdinalIgnoreCase) ||
-                    trimmed.StartsWith("p_rls_", StringComparison.OrdinalIgnoreCase) ||
-                    trimmed.StartsWith(KeySetParameterPrefix, StringComparison.OrdinalIgnoreCase) ||
-                    trimmed.StartsWith("rls_", StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new WebSqlPolicyException("A request parameter uses a reserved gateway parameter name.");
-                }
-            }
-        }
+        GovernedSqlExecutionService.EnsureClientParameterNames(request.Parameters);
 
         string sqlForRewrite = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, request.Parameters, out var referencedNames);
 

@@ -13,6 +13,7 @@ using Autheris.Domain.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TrinoSqlEngine.Ast.Emit;
 
 namespace Autheris.Application.Olap;
 
@@ -87,7 +88,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
 
         // REQ-SQL-130 (BC-130-5d): a time zone slot is bound only by the production binder, which maps its value through the closed zone set. This path
         // binds BoundParameter.Value as it is (null for a client slot), so it refuses a zone slot until the federated binding exists (#131).
-        if (query.Parameters is not null)
+        if (query.Compiled == null && query.Parameters is not null)
         {
             foreach (var parameter in query.Parameters)
             {
@@ -99,7 +100,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         }
 
         // Gateway-compiled SQL (all values bound): not client text, so the client-text floor and the client AST policy do not apply.
-        return ExecuteCoreAsync(new OlapQueryRequest(query.Sql, sources, limit, query.Parameters), trustedGeneratedSql: true, ct);
+        return ExecuteCoreAsync(new OlapQueryRequest(query.Sql, sources, limit, query.Parameters, Compiled: query.Compiled, ClientValues: query.ClientValues), trustedGeneratedSql: true, ct);
     }
 
     public Task<OlapQueryResult> ExecuteOlapQueryAsync(
@@ -117,7 +118,8 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         var sw = Stopwatch.StartNew();
 
         // 1. Early validation of SQL before any staging or connection allocation
-        ValidateUserSql(request.Sql, request.Sources, request.Parameters?.Count, enforceTextFloor: !trustedGeneratedSql);
+        int? boundCount = request.Compiled?.Parameters.Length ?? request.Parameters?.Count;
+        ValidateUserSql(request.Sql, request.Sources, boundCount, enforceTextFloor: !trustedGeneratedSql);
 
         // SEC-OLAP-02: Enforce MaxStagedRowsPerTable limits before opening DuckDB
         if (request.Sources != null)
@@ -199,12 +201,26 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
 
             using (var queryCmd = connection.CreateCommand())
             {
-                queryCmd.CommandText = request.Sql;
-                if (request.Parameters is { Count: > 0 } bound)
+                if (request.Compiled != null)
                 {
-                    foreach (var parameter in bound)
+                    CompiledSqlBinders.For(TrinoSqlEngine.TargetSqlDialect.DuckDb).Bind(
+                        queryCmd,
+                        request.Compiled,
+                        request.ClientValues ?? System.Collections.Frozen.FrozenDictionary<string, object?>.Empty);
+                }
+                else
+                {
+                    queryCmd.CommandText = request.Sql;
+                    if (request.Parameters is { Count: > 0 } bound)
                     {
-                        queryCmd.Parameters.Add(new DuckDBParameter(parameter.Name, parameter.Value ?? DBNull.Value));
+                        foreach (var parameter in bound)
+                        {
+                            if (parameter.Origin == ParameterOrigin.ClientNamed)
+                            {
+                                throw new InvalidOperationException("ClientNamed parameter slot cannot be bound without compiled binder.");
+                            }
+                            queryCmd.Parameters.Add(new DuckDBParameter(parameter.Name, parameter.Value ?? DBNull.Value));
+                        }
                     }
                 }
 
