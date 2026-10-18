@@ -6,6 +6,7 @@ using Autheris.Domain.Model;
 using Shouldly;
 using TrinoSqlEngine.Ast.Emit;
 using Xunit;
+using RequiredFilterColumnMissingException = TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException;
 
 namespace Autheris.Tests.Unit.GraphQL;
 

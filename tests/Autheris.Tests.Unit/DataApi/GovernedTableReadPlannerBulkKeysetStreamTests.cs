@@ -25,7 +25,7 @@ public sealed class GovernedTableReadPlannerBulkKeysetStreamTests
                 SchemaName = "dbo",
                 SourceName = "sales",
                 SourceType = "PostgreSQL",
-                RequiredFilterColumns = requiredFilters ?? Array.Empty<string>()
+                RequiredFilterColumns = [.. (requiredFilters ?? [])]
             },
             PrimaryKeyColumns = primaryKeys ?? ["id"],
             Columns =
