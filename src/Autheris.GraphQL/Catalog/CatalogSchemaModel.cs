@@ -185,8 +185,12 @@ public sealed partial class CatalogSchemaModel
             "Query", "Mutation", "Subscription", "AutherisSortDirection",
             "AutherisStringFilter", "AutherisIntFilter", "AutherisLongFilter",
             "AutherisFloatFilter", "AutherisDecimalFilter", "AutherisBooleanFilter",
-            "AutherisDateTimeFilter", "AutherisAggregationResult"
+            "AutherisDateTimeFilter"
         };
+        foreach (var shared in AggregateTypeNames.SharedTypeNames)
+        {
+            usedSchemaTypeNames.Add(shared);
+        }
 
         var reservedFilterKeywords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -253,7 +257,13 @@ public sealed partial class CatalogSchemaModel
             if (usedSchemaTypeNames.Contains(typeName)) collidingName = typeName;
             else if (usedSchemaTypeNames.Contains(filterTypeName)) collidingName = filterTypeName;
             else if (usedSchemaTypeNames.Contains(orderTypeName)) collidingName = orderTypeName;
-            else if (usedSchemaTypeNames.Contains(aggregateFieldName)) collidingName = aggregateFieldName;
+            else
+            {
+                // #112 A1-11: the typed aggregate names (and the T_aggregate root field) are reserved per table. The table list is
+                // sorted ordinally, so the omission is deterministic and independent of the caller (SEC-112-27: the schema is global).
+                var aggregateNames = AggregateTypeNames.For(typeName);
+                collidingName = aggregateNames.All().FirstOrDefault(usedSchemaTypeNames.Contains);
+            }
 
             if (collidingName != null)
             {
@@ -268,7 +278,10 @@ public sealed partial class CatalogSchemaModel
             usedSchemaTypeNames.Add(typeName);
             usedSchemaTypeNames.Add(filterTypeName);
             usedSchemaTypeNames.Add(orderTypeName);
-            usedSchemaTypeNames.Add(aggregateFieldName);
+            foreach (var aggregateName in AggregateTypeNames.For(typeName).All())
+            {
+                usedSchemaTypeNames.Add(aggregateName);
+            }
 
             var queryFieldName = typeName; // Same name for root query field and object type
             tableBuilders.Add((meta, typeName, queryFieldName, filterTypeName, orderTypeName, columns));
