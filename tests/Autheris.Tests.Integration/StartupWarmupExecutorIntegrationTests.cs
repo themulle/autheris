@@ -3,6 +3,7 @@ using System.Text;
 using Autheris.Api.Hosting.Warmup;
 using Autheris.Application.Audit;
 using Autheris.Application.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Interfaces;
 using HotChocolate.Execution;
 using HotChocolate.Execution.Instrumentation;
@@ -90,9 +91,11 @@ public sealed class StartupWarmupExecutorIntegrationTests
 
         await WaitForStartupAsync(factory);
 
-        // The only startup audit entry is the pre-existing ReBAC seed; the warm-up adds none (the chain length is that baseline).
+        // The only startup audit entries come from pre-existing hosted services (ReBAC seed, catalog governance ingestion);
+        // the warm-up adds none (the chain length is that baseline).
+        string[] startupBaseline = [AuditEventTypes.RebacTupleSeed, AuditEventTypes.CatalogVisibilityChanged];
         audit.ReceivedCalls().SelectMany(c => c.GetArguments().OfType<Autheris.Domain.Model.AuditLogEntry>())
-            .ShouldAllBe(e => e.EventType == "REBAC_TUPLE_SEED");
+            .Select(e => e.EventType).ShouldAllBe(t => startupBaseline.Contains(t));
         dataSource.ReceivedCalls().ShouldBeEmpty();
         consent.ReceivedCalls().ShouldBeEmpty();
         rateLimiter.ReceivedCalls().ShouldBeEmpty();
