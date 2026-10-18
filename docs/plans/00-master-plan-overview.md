@@ -69,7 +69,7 @@ Guiding rule (owner): rights are checked by the backend, not by the calling agen
 | 2.2 | **#115** switches for the remaining read paths (REST data endpoint, MCP tool groups) — closes uncontrollable read paths | S | ✅ | ✅ Phase 4 + Phase 5 done (step I-4, lane B, `feat/issue-115-read-path-switches`); awaiting consolidated PR |
 | 2.3 | **#128** list parameters (`IN`/`NOT IN`) — prerequisite of #129 and #131 | M | ✅ | Phase 4 (step I-5) |
 | 2.4 | **#130** governed time zone conversion | S-M | ✅ | Phase 4 (step I-6) |
-| 2.5 | **#111** persisted dataset tags and catalog visibility | M | ✅ | Phase 4 (steps B-1 security fix, then I-7) |
+| 2.5 | **#111** persisted dataset tags and catalog visibility | M | ✅ | ✅ B-1 merged; I-7 Phase 4 + Phase 5 done (lane B, `feat/issue-111-dataset-tags-visibility`); awaiting consolidated PR |
 | 2.6 | **#112** typed aggregations in GraphQL for read-only tokens | M | ✅ | Phase 4 (steps B-2 security fix, then I-8) |
 
 ### Priority Wave 3: feature completion (medium and large)
