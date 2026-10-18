@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -704,8 +705,8 @@ public partial class SqliteGovernanceRepository
             var reqIdsJson = request.RequesterIdentifiers.Count > 0
                 ? JsonSerializer.Serialize(request.RequesterIdentifiers)
                 : null;
-            cmd.CommandText = @"INSERT INTO CONSENT_REQUESTS (id, table_id, requester_sid, requested_grantee_type, requested_grantee_ref, business_justification, status, requested_at, requested_valid_to, itsm_ticket_id, tenant_id, requester_identifiers_json)
-                                VALUES (@id, @tid, @req, @type, @ref, @just, @stat, @at, @to, @ticketId, @tenantId, @reqIds)";
+            cmd.CommandText = @"INSERT INTO CONSENT_REQUESTS (id, table_id, requester_sid, requested_grantee_type, requested_grantee_ref, business_justification, status, requested_at, requested_valid_to, itsm_ticket_id, tenant_id, requester_identifiers_json, context_json)
+                                VALUES (@id, @tid, @req, @type, @ref, @just, @stat, @at, @to, @ticketId, @tenantId, @reqIds, @ctx)";
             cmd.Parameters.AddWithValue("@id", request.Id.ToString());
             cmd.Parameters.AddWithValue("@tid", request.TableId.ToString());
             cmd.Parameters.AddWithValue("@req", request.RequesterSid.Value);
@@ -718,6 +719,7 @@ public partial class SqliteGovernanceRepository
             cmd.Parameters.AddWithValue("@ticketId", (object?)request.ItsmTicketId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@tenantId", request.TenantId.Value);
             cmd.Parameters.AddWithValue("@reqIds", (object?)reqIdsJson ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ctx", (object?)request.ContextJson ?? DBNull.Value);
 
             await cmd.ExecuteNonQueryAsync(ct);
             return request;
@@ -733,7 +735,7 @@ public partial class SqliteGovernanceRepository
             cmd.CommandText = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
                                        COALESCE(t.source_name, p.domain, 'default'), t.schema_name, t.table_name,
-                                       r.itsm_ticket_id, r.tenant_id, r.requester_identifiers_json
+                                       r.itsm_ticket_id, r.tenant_id, r.requester_identifiers_json, r.context_json
                                 FROM CONSENT_REQUESTS r
                                 JOIN TABLES t ON r.table_id = t.id
                                 LEFT JOIN POLICY_EPOCHS p ON t.id = p.table_id
@@ -762,7 +764,8 @@ public partial class SqliteGovernanceRepository
                     TableIdentifier = new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
                     ItsmTicketId = reader.IsDBNull(12) ? null : reader.GetString(12),
                     TenantId = reader.IsDBNull(13) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(13)),
-                    RequesterIdentifiers = reqIds
+                    RequesterIdentifiers = reqIds,
+                    ContextJson = reader.IsDBNull(15) ? null : reader.GetString(15)
                 };
             }
             return null;
@@ -787,7 +790,7 @@ public partial class SqliteGovernanceRepository
             cmd.CommandText = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
                                        COALESCE(t.source_name, p.domain, 'default'), t.schema_name, t.table_name,
-                                       r.itsm_ticket_id, r.tenant_id, r.requester_identifiers_json
+                                        r.itsm_ticket_id, r.tenant_id, r.requester_identifiers_json, r.context_json
                                 FROM CONSENT_REQUESTS r
                                 JOIN TABLES t ON r.table_id = t.id
                                 LEFT JOIN POLICY_EPOCHS p ON t.id = p.table_id
@@ -821,7 +824,8 @@ public partial class SqliteGovernanceRepository
                     TableIdentifier = new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
                     ItsmTicketId = reader.IsDBNull(12) ? null : reader.GetString(12),
                     TenantId = reader.IsDBNull(13) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(13)),
-                    RequesterIdentifiers = reqIds
+                    RequesterIdentifiers = reqIds,
+                    ContextJson = reader.IsDBNull(15) ? null : reader.GetString(15)
                 };
             }
             return null;
@@ -1381,6 +1385,121 @@ public partial class SqliteGovernanceRepository
             tx.Commit();
             OnTransactionCommitted(tx);
             return req;
+        }
+    }
+
+    public async Task<bool> WithdrawConsentRequestAsync(Guid requestId, Sid requesterSid, CancellationToken ct = default)
+    {
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = @"UPDATE CONSENT_REQUESTS 
+                                SET status = 'WITHDRAWN' 
+                                WHERE id = @id AND requester_sid = @sid AND status IN ('PENDING', 'PENDING_SECOND_APPROVAL')";
+            cmd.Parameters.AddWithValue("@id", requestId.ToString());
+            cmd.Parameters.AddWithValue("@sid", requesterSid.Value);
+            var affected = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            if (affected != 1)
+            {
+                await tx.RollbackAsync(ct).ConfigureAwait(false);
+                return false;
+            }
+
+            var req = await GetConsentRequestAsync(requestId, ct).ConfigureAwait(false);
+            if (req != null)
+            {
+                req.Status = "WITHDRAWN";
+                await RecordAuditEventInternalAsync(conn,
+                    ConsentApprovalPolicy.BuildStepAudit(req, requesterSid, AuditEventTypes.ConsentWithdrawn, "WITHDRAWN", "WITHDRAWN", null, "Access request withdrawn by requester."),
+                    ct, tx).ConfigureAwait(false);
+            }
+
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+            OnTransactionCommitted(tx);
+            return true;
+        }
+        catch
+        {
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
+            OnTransactionRolledBack(tx);
+            throw;
+        }
+    }
+
+    public async Task<Consent> ExecuteAtomicApprovalWithConsentAsync(
+        Guid requestId,
+        ApprovalStep step,
+        Consent consent,
+        IReadOnlyList<ConsentRowFilter> rowFilters,
+        IReadOnlyList<ConsentColumnRule> columnRules,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+        ArgumentNullException.ThrowIfNull(consent);
+
+        consent.RowFilters = rowFilters ?? Array.Empty<ConsentRowFilter>();
+        consent.ColumnRules = columnRules ?? Array.Empty<ConsentColumnRule>();
+        consent.Validate();
+
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            string currentStatus;
+            using (var checkCmd = conn.CreateCommand())
+            {
+                checkCmd.Transaction = tx;
+                checkCmd.CommandText = "SELECT status FROM CONSENT_REQUESTS WHERE id = @id";
+                checkCmd.Parameters.AddWithValue("@id", requestId.ToString());
+                var statusObj = await checkCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+                if (statusObj == null) throw new InvalidOperationException($"Request {requestId} not found.");
+                currentStatus = statusObj.ToString()!;
+            }
+
+            ConsentApprovalPolicy.EnsureApprovableStatus(requestId, currentStatus, isExternalItsmApproval: false);
+
+            // 1. Insert approval step
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"INSERT INTO APPROVAL_STEPS (id, consent_request_id, step_number, approver_sid, decision, decided_at)
+                                    VALUES (@id, @reqId, @step, @appr, 'APPROVED', @now)";
+                cmd.Parameters.AddWithValue("@id", step.Id.ToString());
+                cmd.Parameters.AddWithValue("@reqId", requestId.ToString());
+                cmd.Parameters.AddWithValue("@step", step.StepNumber);
+                cmd.Parameters.AddWithValue("@appr", step.ApproverSid.Value);
+                cmd.Parameters.AddWithValue("@now", (step.DecidedAt ?? DateTimeOffset.UtcNow).ToString("O"));
+                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            // 2. Guarded status update to APPROVED
+            await ApplyGuardedStatusAsync(conn, tx, requestId, "APPROVED", currentStatus, ct).ConfigureAwait(false);
+
+            // 3. Insert consent, column rules, row filters and audit entry
+            await InsertConsentCoreAsync(conn, tx, consent, ct).ConfigureAwait(false);
+
+            // 4. Increment table epoch in POLICY_EPOCHS
+            await IncrementTableEpochInternalAsync(conn, consent.TableIdentifier, tx, ct).ConfigureAwait(false);
+
+            // 5. Commit transaction
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+            OnTransactionCommitted(tx);
+
+            // 6. Post-commit: invalidate in-memory epoch cache immediately
+            await _epochValidationService.InvalidateEpochAsync(consent.TableIdentifier, ct).ConfigureAwait(false);
+
+            return consent;
+        }
+        catch
+        {
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
+            OnTransactionRolledBack(tx);
+            throw;
         }
     }
 

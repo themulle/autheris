@@ -19,6 +19,7 @@ public sealed class ConsentRequestDto
     public DateTimeOffset RequestedAt { get; init; }
     public DateTimeOffset? RequestedValidTo { get; init; }
     public string? ItsmTicketId { get; init; }
+    public string? ContextJson { get; init; }
 }
 
 /// <summary>

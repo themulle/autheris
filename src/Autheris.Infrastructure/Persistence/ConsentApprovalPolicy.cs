@@ -13,6 +13,8 @@ internal static class ConsentApprovalPolicy
     public const string PendingSecond = "PENDING_SECOND_APPROVAL";
     public const string PendingExternal = "PENDING_EXTERNAL_APPROVAL";
     public const string Approved = "APPROVED";
+    public const string Withdrawn = "WITHDRAWN";
+    public const string RequestStatusWithdrawn = "WITHDRAWN";
 
     /// <summary>
     /// Identity of an approver independent of the actor prefix: the part after the last ':' (e.g. the ITSM-reported account in

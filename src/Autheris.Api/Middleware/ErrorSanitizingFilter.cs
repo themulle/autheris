@@ -41,13 +41,15 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "ROW_FILTER_KEY_SET_UNAVAILABLE",
         // WP-0 (PLAN-GOV-113): fixed messages without ids or names; expected business outcomes, not server faults.
         "DECISION_NOT_PERMITTED",
-        "ACCESS_REQUEST_NOT_PENDING"
+        "ACCESS_REQUEST_NOT_PENDING",
+        "READ_ONLY_TOKEN"
     };
 
     private static readonly HashSet<string> ExpectedOutcomeCodes = new(StringComparer.OrdinalIgnoreCase)
     {
         "DECISION_NOT_PERMITTED",
-        "ACCESS_REQUEST_NOT_PENDING"
+        "ACCESS_REQUEST_NOT_PENDING",
+        "READ_ONLY_TOKEN"
     };
 
     private static readonly string[] SensitivePatterns =

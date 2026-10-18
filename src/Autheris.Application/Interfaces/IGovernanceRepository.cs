@@ -295,6 +295,26 @@ public interface IConsentApprovalRepository
     /// </summary>
     Task ActivateConsentAsync(Guid requestId, Sid? approvedBy, CancellationToken ct = default)
         => ActivateConsentAsync(requestId, ct);
+
+    /// <summary>
+    /// SEC-GOV113-02: Atomically withdraws a pending consent request owned by <paramref name="requesterSid"/>.
+    /// Returns true if updated to WITHDRAWN, false if not found or no longer pending.
+    /// </summary>
+    Task<bool> WithdrawConsentRequestAsync(Guid requestId, Sid requesterSid, CancellationToken ct = default)
+        => Task.FromResult(false);
+
+    /// <summary>
+    /// SEC-GOV113-05: Atomically records the approval step, updates the request status to APPROVED, creates the active consent
+    /// and its column rules and row filters, and bumps the table policy epoch in a single database transaction.
+    /// </summary>
+    Task<Consent> ExecuteAtomicApprovalWithConsentAsync(
+        Guid requestId,
+        ApprovalStep step,
+        Consent consent,
+        IReadOnlyList<ConsentRowFilter> rowFilters,
+        IReadOnlyList<ConsentColumnRule> columnRules,
+        CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement atomic approval.");
 }
 
 public interface IDataOwnershipRepository

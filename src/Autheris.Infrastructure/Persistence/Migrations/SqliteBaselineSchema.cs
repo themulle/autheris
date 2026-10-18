@@ -219,7 +219,8 @@ internal sealed class SqliteBaselineSchema
                 requested_valid_to TEXT NOT NULL,
                 itsm_ticket_id TEXT,
                 tenant_id TEXT,
-                requester_identifiers_json TEXT
+                requester_identifiers_json TEXT,
+                context_json TEXT
             );
 
             CREATE TABLE IF NOT EXISTS APPROVAL_STEPS (

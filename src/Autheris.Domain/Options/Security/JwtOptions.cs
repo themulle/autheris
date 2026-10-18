@@ -194,6 +194,12 @@ public sealed class EntraIdAuthOptions
     /// <summary>Configured <see cref="ReadOnlyScopes"/> or the default list (Agent.Read, App.Read).</summary>
     public IReadOnlyList<string> GetEffectiveReadOnlyScopes() => ReadOnlyScopes ?? (IReadOnlyList<string>)DefaultReadOnlyScopes;
 
+    /// <summary>
+    /// SEC-GOV113-01: Scopes that permit self-service access requests for read-only tokens.
+    /// A token carrying these scopes remains read-only (writes rejected), but is permitted to execute self-service mutations.
+    /// </summary>
+    public List<string> ReadOnlySelfServiceScopes { get; init; } = ["data.access.request"];
+
     /// <summary>How app-only tokens (client credentials, no signed-in person) are treated. Defaults to ReadOnly.</summary>
     public AppOnlyTokenAccess AppOnlyTokens { get; init; } = AppOnlyTokenAccess.ReadOnly;
 }

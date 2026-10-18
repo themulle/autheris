@@ -24,6 +24,16 @@ public static class TokenAccessScope
     public static bool IsReadOnly(this ClaimsPrincipal? principal) =>
         principal?.HasClaim(c => c.Type == ClaimType && c.Value == ReadOnlyValue && c.Issuer == Issuer) == true;
 
+    /// <summary>
+    /// Checks whether the principal carries the specified delegated scope (comparing bare names).
+    /// </summary>
+    public static bool HasScope(this ClaimsPrincipal? principal, string scope)
+    {
+        if (principal == null || string.IsNullOrWhiteSpace(scope)) return false;
+        var bareTarget = ScopeNames.ToBareName(scope.Trim());
+        return GetScopes(principal).Any(s => string.Equals(ScopeNames.ToBareName(s), bareTarget, StringComparison.OrdinalIgnoreCase));
+    }
+
     public static void MarkReadOnly(ClaimsIdentity identity)
     {
         ArgumentNullException.ThrowIfNull(identity);
@@ -34,12 +44,14 @@ public static class TokenAccessScope
     }
 
     /// <summary>Delegated scopes of the token (space-separated <c>scp</c>, raw or mapped by JwtBearer).</summary>
-    public static IReadOnlyList<string> GetScopes(ClaimsPrincipal principal) =>
-        ScopeClaimTypes
-            .SelectMany(principal.FindAll)
-            .SelectMany(c => c.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
+    public static IReadOnlyList<string> GetScopes(ClaimsPrincipal? principal) =>
+        principal == null
+            ? Array.Empty<string>()
+            : ScopeClaimTypes
+                .SelectMany(principal.FindAll)
+                .SelectMany(c => c.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
 
     public static IReadOnlySet<string> GetScopeSet(ClaimsPrincipal? principal)
     {

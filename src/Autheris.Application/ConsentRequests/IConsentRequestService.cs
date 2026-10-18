@@ -27,7 +27,8 @@ public sealed record ConsentRequestSubmission(
     string? IdempotencyKey,
     Sid UserSid,
     ClaimsPrincipal? Principal,
-    TenantId ContextTenant);
+    TenantId ContextTenant,
+    AccessRequestContextInput? Context = null);
 
 /// <summary>Outcome of a consent request submission.</summary>
 public sealed class SubmitConsentRequestResult
@@ -54,6 +55,7 @@ public sealed class ConsentRequestException : Exception
 public interface IConsentRequestService
 {
     Task<SubmitConsentRequestResult> SubmitAsync(ConsentRequestSubmission command, CancellationToken ct = default);
+    Task<bool> WithdrawAsync(Guid requestId, ClaimsPrincipal principal, CancellationToken ct = default);
 }
 
 /// <summary>
