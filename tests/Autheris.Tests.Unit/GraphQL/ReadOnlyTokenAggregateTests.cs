@@ -1,11 +1,9 @@
-namespace Autheris.Tests.Unit.GraphQL;
-
 using System.Security.Claims;
+using Autheris.Api.Middleware;
 using Autheris.Application.Analytics;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Common;
-using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
@@ -21,453 +19,151 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-/// <summary>
-/// PLAN-DATA-112 WP-0: Hardening tests for read-only tokens accessing aggregations, fail-closed security,
-/// and Hot Chocolate schema generation for empty/colliding tables and aggregation filtering.
-/// </summary>
+namespace Autheris.Tests.Unit.GraphQL;
+
+/// <summary>#112 FR-112-7 / C-9 / T-S-10: a read-only token runs the typed aggregate fields through the real middleware pair, and nothing else.</summary>
 public sealed class ReadOnlyTokenAggregateTests
 {
-    private readonly ITableMetadataRepository _metadataRepo = Substitute.For<ITableMetadataRepository>();
-    private readonly ITableRelationRepository _relationRepo = Substitute.For<ITableRelationRepository>();
-    private readonly IGovernedAggregationService _aggregationService = Substitute.For<IGovernedAggregationService>();
-    private readonly IGovernedTreeQueryService _treeService = Substitute.For<IGovernedTreeQueryService>();
+    private const string Aggregate = "{ sales_dbo_orders_aggregate(aggregates: [{ fn: COUNT, alias: \"n\" }]) { count } }";
+    private const string Metrics = "{ queryMetrics(metrics: [\"revenue\"]) { count } }";
 
-    private readonly TableIdentifier _custTableId = new("sales", "dbo", "customers");
-
-    public ReadOnlyTokenAggregateTests()
+    private static ClaimsPrincipal ReadOnlyPrincipal()
     {
-        var custTable = new TableMetadata
-        {
-            Identifier = _custTableId,
-            Table = new Table
-            {
-                IsActive = true,
-                SourceType = "PostgreSql",
-                DataSourceType = DataSourceType.Sql
-            },
-            Columns =
-            [
-                new TableColumn { ColumnName = "id", DataType = "int" },
-                new TableColumn { ColumnName = "name", DataType = "nvarchar(100)" },
-                new TableColumn { ColumnName = "ssn", DataType = "nvarchar(11)" }
-            ],
-            PrimaryKeyColumns = ["id"]
-        };
-
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([custTable]);
-
-        _relationRepo.GetRelationsForTableAsync(_custTableId, Arg.Any<CancellationToken>())
-            .Returns([]);
-    }
-
-    private static ClaimsPrincipal CreateReadOnlyPrincipal(string name = "agent-ro", string tenantId = "T1")
-    {
-        var identity = new ClaimsIdentity(
-        [
-            new Claim(ClaimTypes.Name, name),
-            new Claim("tenant_id", tenantId),
-            new Claim("oid", "00000000-0000-0000-0000-000000000001")
-        ], "Bearer");
+        var identity = new ClaimsIdentity([new Claim("oid", "33333333-3333-3333-3333-333333333333"), new Claim("tenant_id", "T1")], "Bearer");
         TokenAccessScope.MarkReadOnly(identity);
         return new ClaimsPrincipal(identity);
     }
 
-    private async Task<IRequestExecutor> CreateExecutorAsync(HttpContext? httpContext = null)
+    public sealed class TouchMutation
     {
-        var services = new ServiceCollection();
-        services.AddSingleton(_metadataRepo);
-        services.AddSingleton(_relationRepo);
-        services.AddSingleton(_aggregationService);
-        services.AddSingleton(_treeService);
-
-        var ctx = httpContext ?? new DefaultHttpContext();
-        services.AddSingleton<IHttpContextAccessor>(new HttpContextAccessor { HttpContext = ctx });
-        services.AddSingleton(Options.Create(new GatewayOptions()));
-
-        return await services
-            .AddGraphQLServer()
-            .AddQueryType<Query>()
-            .AddMutationType<TestMutation>()
-            .UseDocumentParser()
-            .UseDocumentValidation()
-            .UseRequest<ReadOnlyOperationMiddleware>()
-            .UseOperationResolver()
-            .UseOperationVariableCoercion()
-            .UseOperationExecution()
-            .AddTypeModule(sp => new CatalogGraphQlTypeModule(
-                sp.GetRequiredService<ITableMetadataRepository>(),
-                sp.GetRequiredService<ITableRelationRepository>()))
-            .BuildRequestExecutorAsync();
+        public bool Touch() => true;
     }
 
-    public sealed class TestMutation
+    private sealed class Rig
     {
-        public static int Calls { get; set; }
+        public IGovernedAggregationService Aggregation { get; } = Substitute.For<IGovernedAggregationService>();
 
-        public bool MutateTable()
+        public ISemanticMetricQueryService MetricService { get; } = Substitute.For<ISemanticMetricQueryService>();
+
+        public IGovernedTreeQueryService Tree { get; } = Substitute.For<IGovernedTreeQueryService>();
+
+        public async Task<IRequestExecutor> BuildAsync(ClaimsPrincipal principal)
         {
-            Calls++;
-            return true;
+            Aggregation.ExecuteAggregationAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<AggregationQuery>(), Arg.Any<CancellationToken>())
+                .Returns(_ => TypedAggregateTestHost.Result([], 3));
+            MetricService.QueryMetricsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<MetricQueryRequest>(), Arg.Any<CancellationToken>())
+                .Returns(_ => new MetricQueryResult(
+                    ["revenue"], "v1", [],
+                    new AggregationGroupRow(new Dictionary<string, object?>(), 2, new Dictionary<string, object?>()),
+                    new AggregationMetadata(5, SmallGroupStrategy.Suppress, false, 0, 0, false, false),
+                    new Dictionary<string, Autheris.Application.Dbt.Services.MetricDefinitionSummary>()));
+
+            var table = TypedAggregateTestHost.DefaultTable();
+            var metadataRepo = Substitute.For<ITableMetadataRepository>();
+            metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([table]);
+            var relationRepo = Substitute.For<ITableRelationRepository>();
+            relationRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns([]);
+            var accessor = Substitute.For<IHttpContextAccessor>();
+            accessor.HttpContext.Returns(new DefaultHttpContext { User = principal });
+
+            return await new ServiceCollection()
+                .AddSingleton(Aggregation)
+                .AddSingleton(MetricService)
+                .AddSingleton(Tree)
+                .AddSingleton(accessor)
+                .AddSingleton(Options.Create(new AnalyticsOptions()))
+                .AddGraphQLServer()
+                .AddQueryType<Query>()
+                .AddMutationType<TouchMutation>()
+                .AddTypeModule(_ => new CatalogGraphQlTypeModule(metadataRepo, relationRepo))
+                .UseDocumentParser()
+                .UseDocumentValidation()
+                .UseRequest<ReadOnlyOperationMiddleware>()
+                .UseOperationResolver()
+                .UseOperationVariableCoercion()
+                .UseOperationExecution()
+                .BuildRequestExecutorAsync();
         }
     }
 
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task ExecuteAggregate_WithReadOnlyToken_WhenTableAllowed_ReturnsAggregationResult()
+    private static async Task<IExecutionResult> RunAsync(Rig rig, ClaimsPrincipal principal, string document, string? operationName = null)
     {
-        // Arrange
-        var principal = CreateReadOnlyPrincipal();
-        var httpContext = new DefaultHttpContext { User = principal };
-        _aggregationService.ExecuteAggregationAsync(
-                Arg.Any<ClaimsPrincipal>(),
-                Arg.Is<AggregationQuery>(q => q.Table == _custTableId),
-                Arg.Any<CancellationToken>())
-            .Returns(new AggregationResult(
-                _custTableId,
-                [],
-                new AggregationGroupRow(new Dictionary<string, object?>(), 42, new Dictionary<string, object?>()),
-                new AggregationMetadata(
-                    MinimumGroupSize: 5,
-                    Strategy: SmallGroupStrategy.Suppress,
-                    Suppressed: false,
-                    SuppressedGroupsCount: 0,
-                    SuppressedRowsCount: 0,
-                    MergedIntoOther: false,
-                    Truncated: false)));
-
-        var executor = await CreateExecutorAsync(httpContext);
-
-        // Act
-        var request = OperationRequestBuilder.New()
-            .SetDocument("{ sales_dbo_customers_aggregate { count suppressed minimumGroupSize } }")
+        var executor = await rig.BuildAsync(principal);
+        return await executor.ExecuteAsync(OperationRequestBuilder.New()
+            .SetDocument(document)
+            .SetOperationName(operationName)
             .AddGlobalState(nameof(ClaimsPrincipal), principal)
-            .Build();
-        var result = await executor.ExecuteAsync(request);
-
-        // Assert
-        var json = result.ToJson();
-        json.ShouldNotContain("errors");
-        json.ShouldContain("\"count\": 42");
-        json.ShouldContain("\"suppressed\": false");
-        json.ShouldContain("\"minimumGroupSize\": 5");
+            .Build());
     }
 
     [Fact]
-    [Trait("Category", "Security")]
-    public async Task ExecuteAggregate_WithReadOnlyToken_WhenTableDenied_FailsClosedWithAccessDenied()
+    public async Task ReadOnlyToken_RunsTheTypedAggregateField_ThroughTheMiddleware()
     {
-        // Arrange: Underlying table read permission is denied
-        var principal = CreateReadOnlyPrincipal();
-        var httpContext = new DefaultHttpContext { User = principal };
-        _aggregationService.ExecuteAggregationAsync(
-                Arg.Any<ClaimsPrincipal>(),
-                Arg.Any<AggregationQuery>(),
-                Arg.Any<CancellationToken>())
-            .Returns<AggregationResult>(_ => throw new GatewayForbiddenException("Access denied."));
+        var rig = new Rig();
 
-        var executor = await CreateExecutorAsync(httpContext);
+        var result = await RunAsync(rig, ReadOnlyPrincipal(), Aggregate);
 
-        // Act
-        var request = OperationRequestBuilder.New()
-            .SetDocument("{ sales_dbo_customers_aggregate { count } }")
-            .AddGlobalState(nameof(ClaimsPrincipal), principal)
-            .Build();
-        var result = await executor.ExecuteAsync(request);
-
-        // Assert: Fail-closed with ACCESS_DENIED
-        var json = result.ToJson();
-        json.ShouldContain("errors");
-        json.ShouldContain("ACCESS_DENIED");
-        json.ShouldContain("Access denied.");
+        TypedAggregateTestHost.Errors(result).ShouldBeEmpty();
+        await rig.Aggregation.Received(1).ExecuteAggregationAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<AggregationQuery>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    [Trait("Category", "Security")]
-    public async Task ExecuteAggregate_WithReadOnlyToken_WhenTableNotFound_ReturnsAccessDenied_WithoutEchoingName()
+    public async Task ReadOnlyToken_RunsQueryMetrics_ThroughTheMiddleware()
     {
-        // Arrange: Missing table gives indistinguishable ACCESS_DENIED error (anti-enumeration)
-        var principal = CreateReadOnlyPrincipal();
-        var httpContext = new DefaultHttpContext { User = principal };
-        _aggregationService.ExecuteAggregationAsync(
-                Arg.Any<ClaimsPrincipal>(),
-                Arg.Any<AggregationQuery>(),
-                Arg.Any<CancellationToken>())
-            .Returns<AggregationResult>(_ => throw new TableNotFoundException(_custTableId));
+        var rig = new Rig();
 
-        var executor = await CreateExecutorAsync(httpContext);
+        var result = await RunAsync(rig, ReadOnlyPrincipal(), Metrics);
 
-        // Act
-        var request = OperationRequestBuilder.New()
-            .SetDocument("{ sales_dbo_customers_aggregate { count } }")
-            .AddGlobalState(nameof(ClaimsPrincipal), principal)
-            .Build();
-        var result = await executor.ExecuteAsync(request);
+        TypedAggregateTestHost.Errors(result).ShouldBeEmpty();
+        await rig.MetricService.Received(1).QueryMetricsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<MetricQueryRequest>(), Arg.Any<CancellationToken>());
+    }
 
-        // Assert: Same code and message as denied table; no table name echo
-        var opResult = (OperationResult)result;
-        opResult.Errors.ShouldNotBeNull();
-        opResult.Errors.Count.ShouldBeGreaterThan(0);
-        opResult.Errors[0].Code.ShouldBe("ACCESS_DENIED");
-        opResult.Errors[0].Message.ShouldBe("Access denied.");
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task ReadOnlyToken_StillGetsReadOnlyTokenForAMutation_AlsoInAMixedDocument_C9()
+    {
+        var rig = new Rig();
+
+        var mutation = await RunAsync(rig, ReadOnlyPrincipal(), "mutation { touch }");
+        var mixed = await RunAsync(rig, ReadOnlyPrincipal(), "query Q { sales_dbo_orders_aggregate(aggregates: [{ fn: COUNT, alias: \"n\" }]) { count } } mutation M { touch }", "M");
+
+        TypedAggregateTestHost.Errors(mutation).Select(e => e.Code).ShouldContain("READ_ONLY_TOKEN");
+        TypedAggregateTestHost.Errors(mixed).Select(e => e.Code).ShouldContain("READ_ONLY_TOKEN");
+        await rig.Aggregation.DidNotReceive().ExecuteAggregationAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<AggregationQuery>(), Arg.Any<CancellationToken>());
+    }
+
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData("POST", "/api/extensions/dbt/semantic-manifest")]
+    [InlineData("POST", "/api/extensions/dbt/sync")]
+    [InlineData("POST", "/api/extensions/dbt/governance")]
+    [InlineData("PUT", "/api/v1/analytics/metrics")]
+    public async Task ReadOnlyToken_CannotReachAnImportOrAnyOtherWriteRoute_C9(string method, string path)
+    {
+        var passed = false;
+        var middleware = new ReadOnlyTokenMiddleware(_ => { passed = true; return Task.CompletedTask; }, "/graphql", "/mcp");
+        var context = new DefaultHttpContext { User = ReadOnlyPrincipal() };
+        context.Request.Method = method;
+        context.Request.Path = path;
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context);
+
+        passed.ShouldBeFalse();
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
     }
 
     [Fact]
-    [Trait("Category", "Security")]
-    public async Task ExecuteAggregate_WhenColumnMasked_ReturnsAggregationOnMaskedColumn_FixedMessage()
+    public async Task ReadOnlyToken_GraphQlEndpoint_PassesTheMiddleware()
     {
-        // Arrange: MaskedAggregationException thrown by aggregation engine
-        var principal = CreateReadOnlyPrincipal();
-        var httpContext = new DefaultHttpContext { User = principal };
-        _aggregationService.ExecuteAggregationAsync(
-                Arg.Any<ClaimsPrincipal>(),
-                Arg.Any<AggregationQuery>(),
-                Arg.Any<CancellationToken>())
-            .Returns<AggregationResult>(_ => throw new MaskedAggregationException("ssn"));
+        var passed = false;
+        var middleware = new ReadOnlyTokenMiddleware(_ => { passed = true; return Task.CompletedTask; }, "/graphql", "/mcp");
+        var context = new DefaultHttpContext { User = ReadOnlyPrincipal() };
+        context.Request.Method = "POST";
+        context.Request.Path = "/graphql";
 
-        var executor = await CreateExecutorAsync(httpContext);
+        await middleware.InvokeAsync(context);
 
-        // Act
-        var request = OperationRequestBuilder.New()
-            .SetDocument("{ sales_dbo_customers_aggregate { count } }")
-            .AddGlobalState(nameof(ClaimsPrincipal), principal)
-            .Build();
-        var result = await executor.ExecuteAsync(request);
-
-        // Assert: Fixed message and code without leaking column name
-        var json = result.ToJson();
-        json.ShouldContain("errors");
-        json.ShouldContain("AGGREGATION_ON_MASKED_COLUMN");
-        json.ShouldContain(MaskedAggregationException.FixedMessage);
-        json.ShouldNotContain("\"ssn\"");
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task ExecuteAggregate_WhenColumnUnavailable_ReturnsAggregationColumnUnavailable_FixedMessage()
-    {
-        // Arrange: Denied or unknown column in groupBy or where
-        var principal = CreateReadOnlyPrincipal();
-        var httpContext = new DefaultHttpContext { User = principal };
-        _aggregationService.ExecuteAggregationAsync(
-                Arg.Any<ClaimsPrincipal>(),
-                Arg.Any<AggregationQuery>(),
-                Arg.Any<CancellationToken>())
-            .Returns<AggregationResult>(_ => throw new AggregationColumnUnavailableException());
-
-        var executor = await CreateExecutorAsync(httpContext);
-
-        // Act
-        var request = OperationRequestBuilder.New()
-            .SetDocument("{ sales_dbo_customers_aggregate(groupBy: [\"secret\"]) { count } }")
-            .AddGlobalState(nameof(ClaimsPrincipal), principal)
-            .Build();
-        var result = await executor.ExecuteAsync(request);
-
-        // Assert: Fixed message and code without existence oracle
-        var json = result.ToJson();
-        json.ShouldContain("errors");
-        json.ShouldContain("AGGREGATION_COLUMN_UNAVAILABLE");
-        json.ShouldContain(AggregationColumnUnavailableException.FixedMessage);
-        json.ShouldNotContain("secret");
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task ExecuteAggregate_WhenRowCapExceeded_ReturnsAggregationRowCapExceeded_FixedMessage()
-    {
-        // Arrange
-        var principal = CreateReadOnlyPrincipal();
-        var httpContext = new DefaultHttpContext { User = principal };
-        _aggregationService.ExecuteAggregationAsync(
-                Arg.Any<ClaimsPrincipal>(),
-                Arg.Any<AggregationQuery>(),
-                Arg.Any<CancellationToken>())
-            .Returns<AggregationResult>(_ => throw new AggregationRowCapExceededException());
-
-        var executor = await CreateExecutorAsync(httpContext);
-
-        // Act
-        var request = OperationRequestBuilder.New()
-            .SetDocument("{ sales_dbo_customers_aggregate { count } }")
-            .AddGlobalState(nameof(ClaimsPrincipal), principal)
-            .Build();
-        var result = await executor.ExecuteAsync(request);
-
-        // Assert
-        var json = result.ToJson();
-        json.ShouldContain("errors");
-        json.ShouldContain("AGGREGATION_ROW_CAP_EXCEEDED");
-        json.ShouldContain(AggregationRowCapExceededException.FixedMessage);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task ExecuteAggregate_WhenArgumentInvalid_ReturnsAggregationArgumentInvalid()
-    {
-        // Arrange: ArgumentException thrown by aggregation validation
-        var principal = CreateReadOnlyPrincipal();
-        var httpContext = new DefaultHttpContext { User = principal };
-        _aggregationService.ExecuteAggregationAsync(
-                Arg.Any<ClaimsPrincipal>(),
-                Arg.Any<AggregationQuery>(),
-                Arg.Any<CancellationToken>())
-            .Returns<AggregationResult>(_ => throw new ArgumentException("Duplicate aggregate functions."));
-
-        var executor = await CreateExecutorAsync(httpContext);
-
-        // Act
-        var request = OperationRequestBuilder.New()
-            .SetDocument("{ sales_dbo_customers_aggregate { count } }")
-            .AddGlobalState(nameof(ClaimsPrincipal), principal)
-            .Build();
-        var result = await executor.ExecuteAsync(request);
-
-        // Assert: Clean error code and message without exception stack or internal details
-        var json = result.ToJson();
-        json.ShouldContain("errors");
-        json.ShouldContain("AGGREGATION_ARGUMENT_INVALID");
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task ExecuteMutation_WithReadOnlyToken_IsRejectedByReadOnlyMiddleware()
-    {
-        // Arrange
-        TestMutation.Calls = 0;
-        var principal = CreateReadOnlyPrincipal();
-        var httpContext = new DefaultHttpContext { User = principal };
-        var executor = await CreateExecutorAsync(httpContext);
-
-        // Act
-        var request = OperationRequestBuilder.New()
-            .SetDocument("mutation { mutateTable }")
-            .AddGlobalState(nameof(ClaimsPrincipal), principal)
-            .Build();
-        var result = await executor.ExecuteAsync(request);
-
-        // Assert
-        var json = result.ToJson();
-        json.ShouldContain("errors");
-        json.ShouldContain("READ_ONLY_TOKEN");
-        TestMutation.Calls.ShouldBe(0);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task ExecuteMixedDocument_WithoutOperationName_WithReadOnlyToken_IsRejectedByReadOnlyMiddleware()
-    {
-        // Arrange
-        TestMutation.Calls = 0;
-        var principal = CreateReadOnlyPrincipal();
-        var httpContext = new DefaultHttpContext { User = principal };
-        var executor = await CreateExecutorAsync(httpContext);
-
-        // Act
-        var request = OperationRequestBuilder.New()
-            .SetDocument("query Q { sales_dbo_customers_aggregate { count } } mutation M { mutateTable }")
-            .SetOperationName("M")
-            .AddGlobalState(nameof(ClaimsPrincipal), principal)
-            .Build();
-        var result = await executor.ExecuteAsync(request);
-
-        // Assert: Fails closed when document has mutation
-        var json = result.ToJson();
-        json.ShouldContain("errors");
-        json.ShouldContain("READ_ONLY_TOKEN");
-        TestMutation.Calls.ShouldBe(0);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task Schema_WithEmptyCatalog_BuildsSuccessfullyWithoutThrowing()
-    {
-        // Arrange: Catalog has no tables at all
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([]);
-        _relationRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns([]);
-
-        // Act & Assert: Schema build should succeed without 'Query extension has no fields' error
-        var executor = await CreateExecutorAsync();
-        executor.Schema.ShouldNotBeNull();
-        executor.Schema.QueryType.Fields.TryGetField("sales_dbo_customers_aggregate", out _).ShouldBeFalse();
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task Schema_WithCollidingAggregateTable_OmitsCollidingTable_AndBuildsSuccessfully()
-    {
-        // Arrange: Table 1 is 'customers' (creates sales_dbo_customers and sales_dbo_customers_aggregate)
-        // Table 2 is 'customers_aggregate' (would collide on field sales_dbo_customers_aggregate)
-        var table1 = new TableMetadata
-        {
-            Identifier = new TableIdentifier("sales", "dbo", "customers"),
-            Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql },
-            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }],
-            PrimaryKeyColumns = ["id"]
-        };
-        var table2 = new TableMetadata
-        {
-            Identifier = new TableIdentifier("sales", "dbo", "customers_aggregate"),
-            Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql },
-            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }],
-            PrimaryKeyColumns = ["id"]
-        };
-
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([table1, table2]);
-
-        // Act: Schema build should not crash with duplicate field name error
-        var executor = await CreateExecutorAsync();
-
-        // Assert: Schema built cleanly, one table omitted due to collision
-        executor.Schema.ShouldNotBeNull();
-        executor.Schema.QueryType.Fields.TryGetField("sales_dbo_customers", out _).ShouldBeTrue();
-        executor.Schema.QueryType.Fields.TryGetField("sales_dbo_customers_aggregate", out _).ShouldBeTrue();
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task Schema_RegistersAutherisAggregationResultType_Cleanly()
-    {
-        // Act: Schema build with standard catalog
-        var executor = await CreateExecutorAsync();
-
-        // Assert: AutherisAggregationResult is registered and unique
-        executor.Schema.ShouldNotBeNull();
-        executor.Schema.Types.ContainsName("AutherisAggregationResult").ShouldBeTrue();
-        executor.Schema.Types.Count(t => t.Name == "AutherisAggregationResult").ShouldBe(1);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task Schema_WithCollidingAggregateTable_ReverseOrder_OmitsCollidingTable_AndBuildsSuccessfully()
-    {
-        // Arrange: Table 1 is 'customers_aggregate', Table 2 is 'customers' (reverse discovery order)
-        var table1 = new TableMetadata
-        {
-            Identifier = new TableIdentifier("sales", "dbo", "customers_aggregate"),
-            Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql },
-            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }],
-            PrimaryKeyColumns = ["id"]
-        };
-        var table2 = new TableMetadata
-        {
-            Identifier = new TableIdentifier("sales", "dbo", "customers"),
-            Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql },
-            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }],
-            PrimaryKeyColumns = ["id"]
-        };
-
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([table1, table2]);
-
-        // Act: Schema build should not crash with duplicate field name error
-        var executor = await CreateExecutorAsync();
-
-        // Assert: Schema built cleanly despite reverse ordering collision
-        executor.Schema.ShouldNotBeNull();
-        executor.Schema.QueryType.Fields.TryGetField("sales_dbo_customers_aggregate", out _).ShouldBeTrue();
+        passed.ShouldBeTrue();
     }
 }

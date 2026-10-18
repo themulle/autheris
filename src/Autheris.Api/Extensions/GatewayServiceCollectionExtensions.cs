@@ -547,7 +547,8 @@ public static class GatewayServiceCollectionExtensions
             sp.GetRequiredService<ITableMetadataRepository>(),
             sp.GetRequiredService<ITableRelationRepository>(),
             sp.GetService<ILogger<CatalogGraphQlTypeModule>>(),
-            TimeSpan.FromSeconds(gatewayOptions.GraphQL.CatalogSchemaRefreshSeconds)));
+            TimeSpan.FromSeconds(gatewayOptions.GraphQL.CatalogSchemaRefreshSeconds),
+            aggregationEnabled: gatewayOptions.GraphQL.Aggregation.Enabled));
         services.AddSingleton<ICatalogSchemaDiagnostics>(sp => sp.GetRequiredService<CatalogGraphQlTypeModule>());
         services.AddSingleton<ISocketTokenValidator, JwtSocketTokenValidator>();
         services.AddOptions<RevocationWatchOptions>()

@@ -795,12 +795,16 @@ public sealed class CatalogGraphQlSchemaTests
         var sdl = executor.Schema.ToString();
 
         Assert.Contains("orders(", TypeBlock(sdl, "sales_dbo_customers")); // the relation exists on the object type only
-        Assert.DoesNotContain("orders", TypeBlock(sdl, "AutherisAggregationResult"));
+        foreach (var typed in new[] { "sales_dbo_customers_aggregate_key", "sales_dbo_customers_aggregate_group", "sales_dbo_customers_aggregate_result" })
+        {
+            Assert.DoesNotContain("orders", TypeBlock(sdl, typed));
+        }
+
         var aggregateStart = sdl.IndexOf("sales_dbo_customers_aggregate(", StringComparison.Ordinal);
         Assert.True(aggregateStart >= 0);
         var aggregateField = sdl[aggregateStart..sdl.IndexOf(')', aggregateStart)];
-        Assert.Contains("groupBy", aggregateField);
-        Assert.Contains("where: String", aggregateField);
+        Assert.Contains("groupBy: [sales_dbo_customers_column!]", aggregateField);
+        Assert.DoesNotContain("where: String", aggregateField);
         Assert.DoesNotContain("orders", aggregateField);
         if (sdl.Contains("type Subscription ", StringComparison.Ordinal))
         {

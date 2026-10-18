@@ -64,7 +64,7 @@ public sealed class TypedAggregateSchemaTests
 
     [Trait("Category", "Security")]
     [Fact]
-    public async Task Aggregate_TableNamedCollision_OmissionIsIndependentOfInputOrder_SEC_112_27()
+    public async Task Aggregate_TableNamedCollision_HiddenTableDoesNotAffectVisibleSchema()
     {
         var x = Table("sales", "dbo", "x");
         var clash = Table("sales", "dbo", "x_aggregate_result");

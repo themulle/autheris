@@ -30,6 +30,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
     private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _versionProvider;
     private readonly Microsoft.Extensions.Logging.ILogger<CatalogGraphQlTypeModule>? _logger;
     private readonly TimeSpan _refreshInterval;
+    private readonly bool _aggregationEnabled;
     private readonly object _timerLock = new();
     private Timer? _refreshTimer;
     private sealed record BuiltState(string? Fingerprint, IReadOnlyList<CatalogOmittedTable> OmittedTables);
@@ -44,8 +45,10 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         ITableRelationRepository relationRepo,
         Microsoft.Extensions.Logging.ILogger<CatalogGraphQlTypeModule>? logger = null,
         TimeSpan? refreshInterval = null,
-        Autheris.Application.Catalog.ICatalogVersionProvider? versionProvider = null)
+        Autheris.Application.Catalog.ICatalogVersionProvider? versionProvider = null,
+        bool aggregationEnabled = true)
     {
+        _aggregationEnabled = aggregationEnabled;
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _relationRepo = relationRepo ?? throw new ArgumentNullException(nameof(relationRepo));
         _logger = logger;
@@ -170,29 +173,8 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
 
         RegisterOperatorFilterTypes(types);
 
-        types.Add(new ObjectType(d =>
-        {
-            d.Name("AutherisAggregationResult");
-            d.Description("Governed aggregation result with k-anonymity and differential privacy metadata.");
-            d.Field("count").Type(new NonNullTypeNode(new NamedTypeNode("Long")))
-                .Resolve(ctx => ctx.Parent<AggregationResult>().Totals?.Count ?? 0L);
-            d.Field("suppressed").Type(new NonNullTypeNode(new NamedTypeNode("Boolean")))
-                .Resolve(ctx => ctx.Parent<AggregationResult>().Suppressed);
-            d.Field("suppressedGroupsCount").Type(new NonNullTypeNode(new NamedTypeNode("Int")))
-                .Resolve(ctx => ctx.Parent<AggregationResult>().SuppressedGroupsCount);
-            d.Field("suppressedRowsCount").Type(new NonNullTypeNode(new NamedTypeNode("Long")))
-                .Resolve(ctx => ctx.Parent<AggregationResult>().SuppressedRowsCount);
-            d.Field("minimumGroupSize").Type(new NonNullTypeNode(new NamedTypeNode("Int")))
-                .Resolve(ctx => ctx.Parent<AggregationResult>().MinimumGroupSize);
-            d.Field("mergedIntoOther").Type(new NonNullTypeNode(new NamedTypeNode("Boolean")))
-                .Resolve(ctx => ctx.Parent<AggregationResult>().MergedIntoOther);
-            d.Field("truncated").Type(new NonNullTypeNode(new NamedTypeNode("Boolean")))
-                .Resolve(ctx => ctx.Parent<AggregationResult>().Truncated);
-            d.Field("noiseApplied").Type(new NonNullTypeNode(new NamedTypeNode("Boolean")))
-                .Resolve(ctx => ctx.Parent<AggregationResult>().NoiseApplied);
-            d.Field("groupsJson").Type(new NonNullTypeNode(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode("String")))))
-                .Resolve(ctx => ctx.Parent<AggregationResult>().Groups.Select(g => JsonSerializer.Serialize(g)).ToList());
-        }));
+        AggregateGraphQlTypes.RegisterShared(types);
+        MetricGraphQlTypes.Register(types);
 
         foreach (var table in schemaModel.Tables)
         {
@@ -259,6 +241,11 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                     }
                 }
             }));
+
+            if (_aggregationEnabled)
+            {
+                AggregateGraphQlTypes.RegisterTable(types, table);
+            }
         }
 
         if (schemaModel.Tables.Count > 0)
@@ -266,6 +253,8 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
             types.Add(new ObjectTypeExtension(d =>
             {
                 d.Name("Query");
+
+                MetricGraphQlTypes.AddQueryField(d);
 
                 foreach (var table in schemaModel.Tables)
                 {
@@ -278,13 +267,10 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                         .Argument("offset", a => a.Type(new NamedTypeNode("Int")).DefaultValue(0))
                         .Resolve(async ctx => await ResolveRootQueryAsync(ctx, table, schemaModel).ConfigureAwait(false));
 
-                    d.Field($"{table.QueryFieldName}_aggregate")
-                        .Description($"Governed aggregation for {table.TypeName} with k-anonymity and differential privacy.")
-                        .Type(new NonNullTypeNode(new NamedTypeNode("AutherisAggregationResult")))
-                        .Argument("groupBy", a => a.Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode("String")))))
-                        .Argument("where", a => a.Type(new NamedTypeNode("String")))
-                        .Argument("limit", a => a.Type(new NamedTypeNode("Int")).DefaultValue(100))
-                        .Resolve(async ctx => await ResolveTableAggregateAsync(ctx, table).ConfigureAwait(false));
+                    if (_aggregationEnabled)
+                    {
+                        AggregateGraphQlTypes.AddQueryField(d, table);
+                    }
                 }
             }));
         }
@@ -505,77 +491,6 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         return prop;
     }
 
-    private static async Task<AggregationResult> ResolveTableAggregateAsync(
-        IResolverContext ctx,
-        CatalogTableType table)
-    {
-        var aggregationService = ctx.Service<IGovernedAggregationService>();
-        var httpContext = ctx.Service<IHttpContextAccessor>()?.HttpContext;
-        var principal = (ctx.ContextData.TryGetValue(nameof(ClaimsPrincipal), out var cp) && cp is ClaimsPrincipal p)
-            ? p
-            : httpContext?.User ?? new ClaimsPrincipal();
-
-        var groupBy = ctx.ArgumentValue<IReadOnlyList<string>?>("groupBy");
-        var whereStr = ctx.ArgumentValue<string?>("where");
-        var limit = ctx.ArgumentValue<int?>("limit");
-        var whereClause = !string.IsNullOrWhiteSpace(whereStr)
-            ? TableFilterClause.FromTrinoText(whereStr, Array.Empty<string>())
-            : null;
-
-        try
-        {
-            var aggQuery = new AggregationQuery(
-                Table: table.Metadata.Identifier,
-                GroupBy: groupBy,
-                Aggregates: [new AggregateSelection(AggregateFunction.Count)],
-                Where: whereClause,
-                Limit: limit,
-                Transport: "graphql");
-            return await aggregationService.ExecuteAggregationAsync(principal, aggQuery, ctx.RequestAborted).ConfigureAwait(false);
-        }
-        catch (PrivacyBudgetExhaustedException)
-        {
-            throw new GraphQLException(ErrorBuilder.New().SetMessage("Privacy budget exhausted.").SetCode("PRIVACY_BUDGET_EXHAUSTED").Build());
-        }
-        catch (MaskedAggregationException)
-        {
-            throw new GraphQLException(ErrorBuilder.New().SetMessage(MaskedAggregationException.FixedMessage).SetCode(MaskedAggregationException.ErrorCodeConst).Build());
-        }
-        catch (AggregationColumnUnavailableException)
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetMessage(AggregationColumnUnavailableException.FixedMessage)
-                .SetCode(AggregationColumnUnavailableException.ErrorCodeConst)
-                .Build());
-        }
-        catch (AggregationRowCapExceededException)
-        {
-            throw new GraphQLException(ErrorBuilder.New().SetMessage(AggregationRowCapExceededException.FixedMessage).SetCode(AggregationRowCapExceededException.ErrorCodeConst).Build());
-        }
-        catch (GatewayInvalidQueryException)
-        {
-            throw new GraphQLException(ErrorBuilder.New().SetMessage("The requested aggregation query is invalid.").SetCode("INVALID_QUERY").Build());
-        }
-        catch (TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException)
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing))
-                .SetCode(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing)
-                .Build());
-        }
-        catch (ArgumentException)
-        {
-            throw new GraphQLException(ErrorBuilder.New().SetMessage("The requested aggregation arguments are invalid.").SetCode("AGGREGATION_ARGUMENT_INVALID").Build());
-        }
-        catch (TableNotFoundException)
-        {
-            throw new GraphQLException(ErrorBuilder.New().SetMessage("Access denied.").SetCode("ACCESS_DENIED").Build());
-        }
-        catch (GatewayForbiddenException)
-        {
-            throw new GraphQLException(ErrorBuilder.New().SetMessage("Access denied.").SetCode("ACCESS_DENIED").Build());
-        }
-    }
 
     private static async Task<IReadOnlyList<JsonElement>> ResolveRootQueryAsync(
         IResolverContext ctx,
