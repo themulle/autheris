@@ -1,13 +1,12 @@
 namespace Autheris.Tests.Unit.Catalog;
 
 using System.Security.Claims;
-using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Policy;
 using Autheris.Application.Security.Rebac.Interfaces;
-using Autheris.Application.Services;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Types;
@@ -19,22 +18,39 @@ using Shouldly;
 using Xunit;
 
 /// <summary>
-/// #138 INC-1 P3 (T-CAT138-09, F-C7, SEC-CAT138-04): REST list, MCP <c>list_datasets</c> and GraphQL <c>catalog</c> answer the same set for
-/// the same caller, and a table the ReBAC data-path rule denies (<c>can_query</c>) never shows up on any channel, for administrator and
-/// non-administrator callers and for every tier (Hidden, Summary, Full).
+/// #138 INC-1 P3 (T-CAT138-09, F-C7, SEC-CAT138-04): REST, MCP and GraphQL answer the same tables with the same column sets for the same
+/// caller, and a table the ReBAC data-path rule denies (<c>can_query</c>) never shows up on any channel. Matrix: caller class (subject,
+/// ClusterAdmin, tenant-scoped GovernanceAdmin in Multi, Unrestricted in Single) x tier (hidden without consent, hidden with consent,
+/// Summary, Full) x ReBAC on/off, with explicit expectations of presence and absence.
 /// </summary>
 [Trait("Category", "Security")]
 public sealed class CatalogChannelParityMatrixTests
 {
-    private static TableMetadata Row(string name, DatasetVisibility tier)
+    private static readonly string[] AllColumns = ["id", "secret_col"];
+
+    public enum CallerClass { Subject, ClusterAdmin, TenantGovernanceAdmin, UnrestrictedSingle }
+
+    public enum Tier { HiddenNoConsent, HiddenWithConsent, Summary, Full }
+
+    private sealed record ChannelColumns(
+        Dictionary<string, string[]> Rest, Dictionary<string, string[]> Mcp, Dictionary<string, string[]> GraphQl);
+
+    private static TableMetadata Row(string name, Tier tier)
     {
-        var t = Wp0.Table("sales", name, "Short " + name, ["id", "secret_col"]);
-        return t with { Table = t.Table with { Visibility = tier } };
+        var t = Wp0.Table("sales", name, "Short " + name, AllColumns);
+        var visibility = tier switch
+        {
+            Tier.Summary => DatasetVisibility.Summary,
+            Tier.Full => DatasetVisibility.Full,
+            _ => DatasetVisibility.Hidden
+        };
+        return t with { Table = t.Table with { Visibility = visibility } };
     }
 
-    private static GatewayOptions Opts(bool rebac) => new()
+    private static GatewayOptions Opts(bool rebac, CallerClass caller, params TableMetadata[] rows) => new()
     {
-        Tenancy = new TenancyOptions { Mode = nameof(TenancyMode.Multi) },
+        Tenancy = new TenancyOptions { Mode = (caller == CallerClass.UnrestrictedSingle ? TenancyMode.Single : TenancyMode.Multi).ToString() },
+        Catalog = new DataCatalogOptions { SharedTables = rows.Select(r => r.Identifier.ToString()).ToArray() },
         Rebac = new RebacOptions { Enabled = rebac }
     };
 
@@ -48,14 +64,21 @@ public sealed class CatalogChannelParityMatrixTests
         return evaluator.WithBatchFromCheck();
     }
 
-    private static ClaimsPrincipal Caller(bool admin) =>
-        admin ? Wp0.User("S-ADMIN", "tenant-a", ["ClusterAdmin"]) : Wp0.User("S-USER", "tenant-a");
-
-    private static async Task<(string[] RestNames, string[] McpNames, string[] GraphQlNames)> ListAsync(
-        ClaimsPrincipal user, TableMetadata[] rows, GatewayOptions options, IRebacEvaluator? rebac)
+    private static ClaimsPrincipal Principal(CallerClass caller) => caller switch
     {
+        CallerClass.ClusterAdmin => Wp0.User("S-USER", "tenant-a", ["ClusterAdmin"]),
+        CallerClass.TenantGovernanceAdmin => Wp0.User("S-USER", "tenant-a", ["GovernanceAdmin"]),
+        CallerClass.UnrestrictedSingle => Wp0.User("S-USER", null, ["GovernanceAdmin"]),
+        _ => Wp0.User("S-USER", "tenant-a")
+    };
+
+    private static async Task<ChannelColumns> ListAsync(
+        CallerClass callerClass, TableMetadata[] rows, bool consentHidden, GatewayOptions options, IRebacEvaluator? rebac)
+    {
+        var user = Principal(callerClass);
         var tables = Wp0.Tables(rows);
-        var consents = Wp0.Consents(rows.Select(r => Wp0.Allow(r.Identifier, "S-USER", Wp0.TenantA, "id")).ToArray());
+        var consentRows = consentHidden ? rows : [];
+        var consents = Wp0.Consents(consentRows.Select(r => Wp0.Allow(r.Identifier, "S-USER", Wp0.TenantA, "id")).ToArray());
         var service = CatalogVisibilityTestFactory.Create(tables, consents, options, rebac);
         var mcp = new McpDatasetCatalog(
             tables, consents, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
@@ -63,53 +86,115 @@ public sealed class CatalogChannelParityMatrixTests
         var rest = new CatalogDiscoveryService(tables, Substitute.For<IAuditLogRepository>(), Options.Create(options), service);
         var accessor = Substitute.For<IHttpContextAccessor>();
         accessor.HttpContext.Returns(new DefaultHttpContext { User = user });
+        var context = Wp0.Context(user);
 
-        var restNames = (await rest.ListDatasetsAsync(Wp0.Context(user))).Select(d => d.Table).Order().ToArray();
-        var mcpNames = (await mcp.ListDatasetsAsync(user)).Datasets.Select(d => d.Id.Split('.')[^1]).Order().ToArray();
-        var gqlNames = (await new Query().GetCatalogAsync(
-            null, null, null, null, null, tables, consents, null, null, accessor, Options.Create(options), service))
-            .Select(t => t.TableName).Order().ToArray();
-        return (restNames, mcpNames, gqlNames);
+        var restColumns = new Dictionary<string, string[]>();
+        foreach (var summary in await rest.ListDatasetsAsync(context))
+        {
+            var detail = await rest.GetDatasetDetailAsync(new TableIdentifier(summary.Domain, summary.Schema, summary.Table), context);
+            detail.ShouldNotBeNull();
+            restColumns[summary.Table] = detail.Columns.Select(c => c.Name).Order().ToArray();
+        }
+
+        var mcpColumns = new Dictionary<string, string[]>();
+        foreach (var dataset in (await mcp.ListDatasetsAsync(user)).Datasets)
+        {
+            var description = await mcp.DescribeDatasetAsync(user, dataset.Id);
+            mcpColumns[dataset.Id.Split('.')[^1]] = description.Columns.Select(c => c.Name).Order().ToArray();
+        }
+
+        var graphQlColumns = (await new Query().GetCatalogAsync(
+                null, null, null, null, null, tables, consents, null, null, accessor, Options.Create(options), service))
+            .ToDictionary(t => t.TableName, t => t.Columns.Order().ToArray());
+        return new ChannelColumns(restColumns, mcpColumns, graphQlColumns);
+    }
+
+    private static void ShouldAgree(ChannelColumns result)
+    {
+        result.Mcp.Keys.Order().ShouldBe(result.Rest.Keys.Order());
+        result.GraphQl.Keys.Order().ShouldBe(result.Rest.Keys.Order());
+        foreach (var (name, columns) in result.Rest)
+        {
+            result.Mcp[name].ShouldBe(columns, $"MCP columns of {name}");
+            result.GraphQl[name].ShouldBe(columns, $"GraphQL columns of {name}");
+        }
+    }
+
+    /// <summary>Expected columns of a visible table, or null when the caller must not see it at all.</summary>
+    private static string[]? ExpectedColumns(CallerClass caller, Tier tier)
+    {
+        if (caller != CallerClass.Subject)
+        {
+            return [.. AllColumns.Order()];
+        }
+
+        return tier switch
+        {
+            Tier.HiddenNoConsent => null,
+            Tier.HiddenWithConsent => ["id"],
+            Tier.Summary => [],
+            _ => [.. AllColumns.Order()]
+        };
+    }
+
+    public static TheoryData<CallerClass, Tier> Matrix()
+    {
+        var data = new TheoryData<CallerClass, Tier>();
+        foreach (var caller in Enum.GetValues<CallerClass>())
+        {
+            foreach (var tier in Enum.GetValues<Tier>())
+            {
+                data.Add(caller, tier);
+            }
+        }
+
+        return data;
     }
 
     [Theory]
-    [InlineData(false, DatasetVisibility.Hidden)]
-    [InlineData(false, DatasetVisibility.Summary)]
-    [InlineData(false, DatasetVisibility.Full)]
-    [InlineData(true, DatasetVisibility.Hidden)]
-    [InlineData(true, DatasetVisibility.Summary)]
-    [InlineData(true, DatasetVisibility.Full)]
-    public async Task CatalogNeverShowsWhatDataPathDeniesByRebac_Theory(bool admin, DatasetVisibility tier)
+    [MemberData(nameof(Matrix))]
+    public async Task CatalogNeverShowsWhatDataPathDeniesByRebac_Theory(CallerClass caller, Tier tier)
     {
         var allowed = Row("allowed_t", tier);
         var denied = Row("denied_t", tier);
         var rows = new[] { allowed, denied };
-        var user = Caller(admin);
+        var consentHidden = tier == Tier.HiddenWithConsent;
+        var expected = ExpectedColumns(caller, tier);
 
-        var (rest, mcp, graphQl) = await ListAsync(user, rows, Opts(rebac: true), Evaluator(denied));
+        var on = await ListAsync(caller, rows, consentHidden, Opts(rebac: true, caller, rows), Evaluator(denied));
+        var off = await ListAsync(caller, rows, consentHidden, Opts(rebac: false, caller, rows), null);
 
-        // One rule: all channels agree, and the ReBAC-denied table is on none of them.
-        mcp.ShouldBe(rest);
-        graphQl.ShouldBe(rest);
-        rest.ShouldNotContain("denied_t");
+        ShouldAgree(on);
+        ShouldAgree(off);
+        on.Rest.ShouldNotContainKey("denied_t");
+        if (expected == null)
+        {
+            on.Rest.ShouldBeEmpty();
+            off.Rest.ShouldBeEmpty();
+            return;
+        }
 
-        // ReBAC only shrinks: without it the same channels still agree, and the allowed table keeps its answer.
-        var (restOff, mcpOff, graphQlOff) = await ListAsync(user, rows, Opts(rebac: false), null);
-        mcpOff.ShouldBe(restOff);
-        graphQlOff.ShouldBe(restOff);
-        rest.ShouldBe(restOff.Where(n => n != "denied_t").ToArray());
+        on.Rest.Keys.ShouldBe(["allowed_t"]);
+        on.Rest["allowed_t"].ShouldBe(expected);
+        off.Rest.Keys.Order().ShouldBe(["allowed_t", "denied_t"]);
+        off.Rest["denied_t"].ShouldBe(expected);
     }
 
-    [Fact]
-    public async Task ReBacEnabledWithoutTuples_ConsentedCaller_SeesNothing_OnAllThreeChannels()
+    [Theory]
+    [InlineData(CallerClass.Subject)]
+    [InlineData(CallerClass.ClusterAdmin)]
+    [InlineData(CallerClass.TenantGovernanceAdmin)]
+    [InlineData(CallerClass.UnrestrictedSingle)]
+    public async Task ReBacEnabledWithoutTuples_ConsentedCaller_SeesNothing_OnAllThreeChannels(CallerClass caller)
     {
-        var a = Row("a_t", DatasetVisibility.Full);
-        var b = Row("b_t", DatasetVisibility.Full);
+        var a = Row("a_t", Tier.Full);
+        var b = Row("b_t", Tier.Full);
+        var rows = new[] { a, b };
 
-        var (rest, mcp, graphQl) = await ListAsync(Caller(admin: false), [a, b], Opts(rebac: true), Evaluator(a, b));
+        var result = await ListAsync(caller, rows, consentHidden: true, Opts(rebac: true, caller, rows), Evaluator(a, b));
 
-        rest.ShouldBeEmpty();
-        mcp.ShouldBeEmpty();
-        graphQl.ShouldBeEmpty();
+        result.Rest.ShouldBeEmpty();
+        result.Mcp.ShouldBeEmpty();
+        result.GraphQl.ShouldBeEmpty();
     }
 }

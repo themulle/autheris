@@ -307,7 +307,7 @@ public partial class SqliteGovernanceRepository
             var columnsByTable = new Dictionary<Guid, List<TableColumn>>();
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = @"SELECT id, table_id, column_name, data_type, is_sensitive, description, long_description, meta_json, doc_source FROM TABLE_COLUMNS";
+                cmd.CommandText = @"SELECT id, table_id, column_name, data_type, is_sensitive, description, long_description, meta_json, doc_source FROM TABLE_COLUMNS ORDER BY rowid";
                 using var reader = await cmd.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct))
                 {

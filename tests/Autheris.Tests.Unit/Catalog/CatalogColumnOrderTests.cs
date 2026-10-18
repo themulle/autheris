@@ -51,4 +51,22 @@ public sealed class CatalogColumnOrderTests : IDisposable
         list.ShouldBe(Registered);
         single.ShouldBe(Registered);
     }
+
+    [Fact]
+    public async Task Reingest_UpdatedMiddleColumnAndAppendedColumn_KeepsRegistrationOrderPlusNew()
+    {
+        await SeedAsync(withMasking: false);
+        var columns = Registered.Select(n => new TableColumn { ColumnName = n, DataType = n == "serial_number" ? "INTEGER" : "TEXT", Description = n == "serial_number" ? "changed" : null }).ToList();
+        columns.Add(new TableColumn { ColumnName = "appended", DataType = "TEXT" });
+        await _repo.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Identifier = Id,
+            Table = new Table { Id = Guid.NewGuid(), SourceName = Id.Domain, SchemaName = Id.Schema, TableName = Id.TableName, DisplayName = "cranes", IsActive = true },
+            Columns = columns
+        });
+
+        string[] expected = [.. Registered, "appended"];
+        (await _repo.GetTableMetadataAsync(Id))!.Columns.Select(c => c.ColumnName).ToArray().ShouldBe(expected);
+        (await _repo.GetAllTablesAsync()).Single(t => t.Identifier == Id).Columns.Select(c => c.ColumnName).ToArray().ShouldBe(expected);
+    }
 }

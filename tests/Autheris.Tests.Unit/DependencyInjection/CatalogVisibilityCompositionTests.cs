@@ -7,7 +7,15 @@ using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
+using Autheris.Application.Interfaces;
 using Autheris.Domain.Options;
+using Autheris.Tests.Unit.Catalog;
+using Autheris.Domain.Interfaces;
+using Autheris.Domain.Model;
+using Autheris.GraphQL.Types;
+using HotChocolate;
+using HotChocolate.Execution;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -61,5 +69,35 @@ public sealed class CatalogVisibilityCompositionTests
         var mcp = scope.ServiceProvider.GetRequiredService<IMcpDatasetCatalog>();
         Injected(rest).ShouldBeSameAs(service);
         Injected(mcp).ShouldBeSameAs(service);
+    }
+
+    [Fact]
+    public async Task GraphQl_CatalogField_ReceivesTheDiResolvedService_NotSilentlyEmpty()
+    {
+        var table = Wp0.Table("sales", "orders", "Orders", ["id"]) with { CatalogView = CatalogView.Granted };
+        var options = new GatewayOptions { Rebac = new RebacOptions { Enabled = false } };
+        var user = Wp0.User("S-USER", "tenant-a");
+        var accessor = Substitute.For<IHttpContextAccessor>();
+        accessor.HttpContext.Returns(new DefaultHttpContext { User = user });
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddSingleton(Substitute.For<IAuditLogRepository>());
+        services.AddSingleton(Wp0.Tables(table));
+        services.AddSingleton(Wp0.Consents(Wp0.Allow(table.Identifier, "S-USER", Wp0.TenantA, "id")));
+        services.AddSingleton(Substitute.For<IConsentApprovalRepository>());
+        services.AddSingleton(Substitute.For<IDataOwnershipRepository>());
+        services.AddSingleton(accessor);
+        services.AddSingleton<IOptions<GatewayOptions>>(Options.Create(options));
+        services.AddAutherisCatalog();
+        services.AddGraphQLServer().AddQueryType<Query>();
+
+        await using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        var executor = await provider.GetRequiredService<IRequestExecutorProvider>().GetExecutorAsync();
+        var result = await executor.ExecuteAsync("{ catalog { tableName } }");
+
+        var operation = result.ExpectOperationResult();
+        (operation.Errors ?? []).ShouldBeEmpty(operation.Errors?.FirstOrDefault()?.Message);
+        result.ToJson().ShouldContain("orders");
     }
 }

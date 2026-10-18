@@ -185,6 +185,26 @@ public sealed class CatalogVisibilityServiceArchitectureTests
     }
 
     [Fact]
+    public void EngineRowReturningMethods_AreTheGuardedSetPlusTheNarrowingOnlyContractFilter()
+    {
+        // A new public method that returns catalog rows must be added to the guarded set (or consciously allowed here), otherwise a new
+        // visibility entry point could bypass ICatalogVisibilityService unnoticed. FilterByContract only narrows by a schema contract
+        // (no consent or tier decision), so it is allowed everywhere; ComputeAccessStatus returns a status string, not rows.
+        string[] narrowingOnly = ["FilterByContract"];
+        var module = CecilModuleCache.For(typeof(Autheris.Application.Services.ConsentResolutionService).Assembly);
+        var engine = module.GetType(Engine);
+
+        var rowReturning = engine.Methods
+            .Where(m => m.IsPublic && m.ReturnType.FullName.Contains("TableMetadata", StringComparison.Ordinal))
+            .Select(m => m.Name)
+            .Distinct()
+            .Order()
+            .ToArray();
+
+        rowReturning.ShouldBe([.. EngineMethods.Concat(narrowingOnly).Order()]);
+    }
+
+    [Fact]
     public void RemovedMembersAbsent_ResolvePermittedAsync_IsRebacAllowedAsync()
     {
         var removed = new[] { "ResolvePermittedAsync", "IsRebacAllowedAsync" };
