@@ -213,6 +213,7 @@ public static class GatewayApplicationBuilderExtensions
         app.MapFinOpsEndpoints();
         app.MapRebacEndpoints();
         app.MapVirtualFilterEndpoints();
+        app.MapCallerAttributeAdminEndpoints();
         if (gatewayOptions.Arrow.Enabled)
         {
             app.MapArrowExportEndpoints();

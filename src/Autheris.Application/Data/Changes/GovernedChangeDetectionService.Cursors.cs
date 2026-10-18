@@ -295,19 +295,8 @@ public sealed partial class GovernedChangeDetectionService
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql) &&
-            !StreamingRowFilterAstEvaluator.Matches(row, decision.CombinedRowFilterSql))
-        {
-            return false;
-        }
-
-        if (!string.IsNullOrWhiteSpace(decision.MandatoryRowPredicateSql) &&
-            !StreamingRowFilterAstEvaluator.Matches(row, decision.MandatoryRowPredicateSql))
-        {
-            return false;
-        }
-
-        return true;
+        // REQ-GOV-129 (A-8): typed policy first (bound caller attributes), text only for a decision without one.
+        return InMemoryRowFilterEvaluator.RowPassesDecision(row, decision, metadata);
     }
 
     private static IReadOnlyList<string> ResolveProjectedColumns(

@@ -137,6 +137,24 @@ public static class GatewayGovernanceServiceExtensions
 
         services.AddSingleton<VirtualFilterAdministrationService>();
         services.AddSingleton<IVirtualFilterSnapshotProvider, VirtualFilterSnapshotProvider>();
+        // REQ-GOV-129: caller attribute registry and its administration (four-eyes).
+        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeProvider, Autheris.Application.Identity.Attributes.ClaimsAttributeProvider>();
+        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeProvider, Autheris.Application.Identity.Attributes.ServiceAttributeProvider>();
+        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeProvider, Autheris.Application.Identity.Attributes.AttributeTableProvider>();
+        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeDefinitionValidator, Autheris.Application.Identity.Attributes.ClaimsAttributeDefinitionValidator>();
+        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeDefinitionValidator, Autheris.Application.Identity.Attributes.AttributeTableDefinitionValidator>();
+        services.AddSingleton<Autheris.Application.Identity.Attributes.CallerAttributeResolver>();
+        services.AddSingleton<Autheris.Application.Identity.Attributes.CallerAttributeSimulationService>();
+        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeResolver>(sp => sp.GetRequiredService<Autheris.Application.Identity.Attributes.CallerAttributeResolver>());
+        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeCacheInvalidator>(sp => sp.GetRequiredService<Autheris.Application.Identity.Attributes.CallerAttributeResolver>());
+        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeRegistry, Autheris.Application.Identity.Attributes.CallerAttributeRegistry>();
+        services.AddSingleton<Autheris.Application.Identity.Attributes.CallerAttributeAdministrationService>(sp => new Autheris.Application.Identity.Attributes.CallerAttributeAdministrationService(
+            sp.GetRequiredService<Autheris.Domain.Interfaces.ICallerAttributeRepository>(),
+            sp.GetRequiredService<Autheris.Application.Identity.Attributes.ICallerAttributeRegistry>(),
+            sp.GetRequiredService<Autheris.Application.Interfaces.IAuditLogRepository>(),
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>(),
+            sp.GetService<TimeProvider>() ?? TimeProvider.System,
+            sp.GetServices<Autheris.Application.Identity.Attributes.ICallerAttributeDefinitionValidator>()));
         services.AddSingleton<IVirtualFilterPredicateBuilder, StructuredFilterSqlBuilder>();
         services.AddSingleton<MandatoryRowFilterResolver>();
         services.AddSingleton<IMandatoryRowFilterResolver>(sp => sp.GetRequiredService<MandatoryRowFilterResolver>());
@@ -235,6 +253,7 @@ public static class GatewayGovernanceServiceExtensions
             IItsmOutboxRepository,
             IWebhookOutbox,
             IVirtualFilterRepository,
+            ICallerAttributeRepository,
             IAuditChainExportSource,
             ICdcWatermarkRepository,
             ICloudEventSubscriptionStore
@@ -245,7 +264,12 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IGovernanceMigrationRunner, TMigrationRunner>();
         services.AddSingleton<IGovernanceRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ITableMetadataRepository>(sp => sp.GetRequiredService<TRepository>());
-        services.AddSingleton<IConsentRepository>(sp => sp.GetRequiredService<TRepository>());
+        // REQ-GOV-129 (A-9): the one write seam for consents checks caller attribute filters against the registry; reads pass through.
+        services.AddSingleton<IConsentRepository>(sp => new Autheris.Application.Identity.Attributes.AttributeValidatingConsentRepository(
+            sp.GetRequiredService<TRepository>(),
+            sp.GetRequiredService<Autheris.Application.Identity.Attributes.ICallerAttributeRegistry>(),
+            sp.GetRequiredService<TRepository>(),
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>()));
         services.AddSingleton<IAuditLogRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IPolicyEpochRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsentApprovalRepository>(sp => sp.GetRequiredService<TRepository>());
@@ -254,6 +278,7 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IWebhookOutbox>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IVirtualFilterRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<ICallerAttributeRepository>(sp => sp.GetRequiredService<TRepository>());
         // WP-SC-03: every engine persists access profiles; the in-memory repository is a test double only.
         services.AddSingleton<IAccessProfileRepository>(sp => (IAccessProfileRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<TRepository>());

@@ -43,6 +43,12 @@ public sealed partial class CasbinEnforcementService
 
     private static void ValidateSubRuleTokens(string subRule, string? rlsFilter)
     {
+        // REQ-GOV-129 (A-8, ST-129-18): a Casbin rule never carries a caller attribute (a shared decision must not embed one); refused on publish, import and sync alike.
+        if (Autheris.Application.VirtualFilters.CallerPlaceholders.Contains(subRule) || Autheris.Application.VirtualFilters.CallerPlaceholders.Contains(rlsFilter))
+        {
+            throw new ArgumentException("Security validation error: a Casbin rule cannot use a caller attribute placeholder.", nameof(rlsFilter));
+        }
+
         ArgumentException.ThrowIfNullOrWhiteSpace(subRule);
 
         if (subRule.Length > 500)
