@@ -171,8 +171,28 @@ public sealed partial class QueryAnalysisService
             }
         }
 
-        outcome.EstimatedCost = Math.Max(1, totalFields) * Math.Max(1, _analysisOptions.CostPerRequestedField)
-            + Math.Max(0, maxDepth - 1) * _analysisOptions.CostPerJoin;
+        if (_costAnalysisEngine != null)
+        {
+            var costResult = await _costAnalysisEngine.CalculateCostAsync(document, variables, ct).ConfigureAwait(false);
+            outcome.EstimatedCost = costResult.TotalCost;
+            foreach (var (rfName, rfCost) in costResult.RootFieldCosts)
+            {
+                outcome.RootFieldCosts[rfName] = rfCost;
+            }
+
+            if (costResult.MaxRootFieldsCount > _maxRootFields)
+            {
+                outcome.Diagnostics.Add(new QueryValidationDiagnostic(
+                    QueryDiagnosticCodes.QueryTooComplex,
+                    $"The query exceeds the maximum of {_maxRootFields} root fields or aliases per operation.",
+                    QueryName: queryName));
+            }
+        }
+        else
+        {
+            outcome.EstimatedCost = Math.Max(1, totalFields) * Math.Max(1, _analysisOptions.CostPerRequestedField)
+                + Math.Max(0, maxDepth - 1) * _analysisOptions.CostPerJoin;
+        }
 
         return outcome;
     }
@@ -187,7 +207,11 @@ public sealed partial class QueryAnalysisService
         {
             var argName = arg.Name.Value;
             if (string.Equals(argName, "where", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(argName, "filter", StringComparison.OrdinalIgnoreCase))
+                string.Equals(argName, "filter", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(argName, "orderBy", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(argName, "order_by", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(argName, "sort", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(argName, "sortBy", StringComparison.OrdinalIgnoreCase))
             {
                 ExtractFilterFieldsFromValueNode(arg.Value, variables, filterColumns, providedFilterColumns);
             }
@@ -229,16 +253,57 @@ public sealed partial class QueryAnalysisService
                 ExtractFilterFieldsFromValueNode(item, variables, filterColumns, providedFilterColumns);
             }
         }
+        else if (valueNode is StringValueNode strNode)
+        {
+            var baseCol = StripGraphQlOperatorSuffix(strNode.Value);
+            filterColumns.Add(baseCol);
+            providedFilterColumns.Add(baseCol);
+        }
+        else if (valueNode is EnumValueNode enumNode)
+        {
+            var baseCol = StripGraphQlOperatorSuffix(enumNode.Value);
+            filterColumns.Add(baseCol);
+            providedFilterColumns.Add(baseCol);
+        }
         else if (valueNode is VariableNode varNode &&
                  variables != null &&
-                 variables.TryGetValue(varNode.Name.Value, out var varObj) &&
-                 varObj is IEnumerable<KeyValuePair<string, object?>> dict)
+                 variables.TryGetValue(varNode.Name.Value, out var varObj))
         {
-            foreach (var kvp in dict)
+            if (varObj is IEnumerable<KeyValuePair<string, object?>> dict)
             {
-                var baseCol = StripGraphQlOperatorSuffix(kvp.Key);
+                foreach (var kvp in dict)
+                {
+                    var baseCol = StripGraphQlOperatorSuffix(kvp.Key);
+                    filterColumns.Add(baseCol);
+                    providedFilterColumns.Add(baseCol);
+                }
+            }
+            else if (varObj is string strVal)
+            {
+                var baseCol = StripGraphQlOperatorSuffix(strVal);
                 filterColumns.Add(baseCol);
                 providedFilterColumns.Add(baseCol);
+            }
+            else if (varObj is IEnumerable<object?> listVal)
+            {
+                foreach (var item in listVal)
+                {
+                    if (item is string itemStr)
+                    {
+                        var baseCol = StripGraphQlOperatorSuffix(itemStr);
+                        filterColumns.Add(baseCol);
+                        providedFilterColumns.Add(baseCol);
+                    }
+                    else if (item is IEnumerable<KeyValuePair<string, object?>> itemDict)
+                    {
+                        foreach (var kvp in itemDict)
+                        {
+                            var baseCol = StripGraphQlOperatorSuffix(kvp.Key);
+                            filterColumns.Add(baseCol);
+                            providedFilterColumns.Add(baseCol);
+                        }
+                    }
+                }
             }
         }
     }
@@ -264,7 +329,7 @@ public sealed partial class QueryAnalysisService
         ref int maxDepth,
         ref int totalFields)
     {
-        if (selectionSet == null)
+        if (selectionSet == null || currentDepth > 25)
         {
             return;
         }

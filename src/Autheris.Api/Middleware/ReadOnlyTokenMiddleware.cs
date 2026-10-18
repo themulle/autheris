@@ -93,6 +93,13 @@ public sealed class ReadOnlyTokenMiddleware
             return false;
         }
 
+        // SEC-GOV175-01: Pre-flight query analysis is a zero-side-effect read operation permitted for read-only tokens
+        if (request.Path.Equals(GovernanceQueryAnalyzePath, StringComparison.OrdinalIgnoreCase) ||
+            request.Path.Equals(GovernanceQueryAnalyzePath + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         if (IsProcedureExecutionPath(request.Path.Value))
         {
             return true;
@@ -101,6 +108,7 @@ public sealed class ReadOnlyTokenMiddleware
         return _queryPaths.Any(p => request.Path.StartsWithSegments(p, StringComparison.OrdinalIgnoreCase));
     }
 
+    private const string GovernanceQueryAnalyzePath = "/api/v1/governance/queries/analyze";
     private const string ProceduresPrefix = "/api/v1/procedures";
 
     /// <summary>
