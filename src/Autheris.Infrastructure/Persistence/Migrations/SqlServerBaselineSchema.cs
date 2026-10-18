@@ -240,7 +240,8 @@ CREATE TABLE dbo.CONSENT_REQUESTS (
     requested_valid_to NVARCHAR(64) NOT NULL,
     itsm_ticket_id NVARCHAR(256) NULL,
     tenant_id NVARCHAR(128) NULL,
-    requester_identifiers_json NVARCHAR(MAX) NULL
+    requester_identifiers_json NVARCHAR(MAX) NULL,
+    context_json NVARCHAR(MAX) NULL
 );
 
 IF OBJECT_ID(N'dbo.APPROVAL_STEPS', N'U') IS NULL

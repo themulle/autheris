@@ -135,7 +135,8 @@ public sealed class Query
             Status = r.Status,
             RequestedAt = r.RequestedAt,
             RequestedValidTo = r.RequestedValidTo,
-            ItsmTicketId = r.ItsmTicketId
+            ItsmTicketId = r.ItsmTicketId,
+            ContextJson = r.ContextJson
         });
 
         if (after.HasValue && after.Value > 0)
@@ -186,7 +187,8 @@ public sealed class Query
             Status = r.Status,
             RequestedAt = r.RequestedAt,
             RequestedValidTo = r.RequestedValidTo,
-            ItsmTicketId = r.ItsmTicketId
+            ItsmTicketId = r.ItsmTicketId,
+            ContextJson = r.ContextJson
         });
 
         if (after.HasValue && after.Value > 0)

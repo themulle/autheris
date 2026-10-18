@@ -64,6 +64,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.ConsentGranted] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ConsentDenied] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ConsentRevoked] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ConsentWithdrawn] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ConsentApplied] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ConsentDescriptionChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ProfileInvalidationFailed] = AuditFailurePolicy.FailClosed,

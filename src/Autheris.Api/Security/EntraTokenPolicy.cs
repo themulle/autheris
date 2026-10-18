@@ -80,8 +80,11 @@ public static class EntraTokenPolicy
         }
 
         var readOnlyScopes = options.GetEffectiveReadOnlyScopes();
-        if (scopes.Count > 0 && readOnlyScopes.Count > 0 &&
-            scopes.All(s => readOnlyScopes.Any(r => IsSameScope(r, s))))
+        var selfServiceScopes = options.ReadOnlySelfServiceScopes ?? [];
+        var permittedReadOnlyScopes = readOnlyScopes.Concat(selfServiceScopes).ToList();
+
+        if (scopes.Count > 0 && permittedReadOnlyScopes.Count > 0 &&
+            scopes.All(s => permittedReadOnlyScopes.Any(r => IsSameScope(r, s))))
         {
             TokenAccessScope.MarkReadOnly(identity);
         }

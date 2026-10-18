@@ -1130,6 +1130,11 @@
           "name": "requester_identifiers_json",
           "type": "TEXT",
           "family": "string"
+        },
+        {
+          "name": "context_json",
+          "type": "TEXT",
+          "family": "string"
         }
       ],
       "primaryKey": [

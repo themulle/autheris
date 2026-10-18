@@ -38,19 +38,19 @@ internal static class DecisionPrincipals
 
     /// <summary>Entra v2 delegated token with raw claim names (no inbound mapping), including a human name.</summary>
     public static ClaimsPrincipal EntraDelegatedRaw(string oid, params string[] roles) =>
-        Build("Bearer", [new("oid", oid), new("upn", "alice@corp.example"), new("preferred_username", "alice@corp.example"), new("azp", "app-client"), new("scp", "Autheris.Access")], roles);
+        Build("Bearer", [new("oid", oid), new("upn", "alice@corp.example"), new("preferred_username", "alice@corp.example"), new("azp", "app-client"), new("scp", "Autheris.Access data.access.review")], roles);
 
     /// <summary>Entra delegated token after JwtBearer claim mapping (oid and scp as URIs, upn as ClaimTypes.Upn).</summary>
     public static ClaimsPrincipal EntraDelegatedMapped(string oid, params string[] roles) =>
-        Build("AuthenticationTypes.Federation", [new(ObjectIdUri, oid), new(ClaimTypes.Upn, "alice@corp.example"), new("azp", "app-client"), new(ScopeUri, "Autheris.Access"), new(ClaimTypes.NameIdentifier, "sub-1")], roles);
+        Build("AuthenticationTypes.Federation", [new(ObjectIdUri, oid), new(ClaimTypes.Upn, "alice@corp.example"), new("azp", "app-client"), new(ScopeUri, "Autheris.Access data.access.review"), new(ClaimTypes.NameIdentifier, "sub-1")], roles);
 
     /// <summary>Delegated Entra token with scp, oid and azp but NO upn, preferred_username or email (W-11).</summary>
     public static ClaimsPrincipal EntraDelegatedNoHumanName(string oid, params string[] roles) =>
-        Build("Bearer", [new("oid", oid), new("azp", "app-client"), new("scp", "Autheris.Access")], roles);
+        Build("Bearer", [new("oid", oid), new("azp", "app-client"), new("scp", "Autheris.Access data.access.review")], roles);
 
     /// <summary>The same token after JwtBearer mapping: oid and scp as URIs, unique_name as ClaimTypes.Name, no human claim the resolver tests.</summary>
     public static ClaimsPrincipal EntraDelegatedMappedNoHumanName(string oid, params string[] roles) =>
-        Build("AuthenticationTypes.Federation", [new(ObjectIdUri, oid), new(ClaimTypes.Name, "Alice Example"), new("azp", "app-client"), new(ScopeUri, "Autheris.Access")], roles);
+        Build("AuthenticationTypes.Federation", [new(ObjectIdUri, oid), new(ClaimTypes.Name, "Alice Example"), new("azp", "app-client"), new(ScopeUri, "Autheris.Access data.access.review")], roles);
 
     /// <summary>ADFS access token after JwtBearer mapping: upn and unique_name mapped, sub as NameIdentifier, appid and the scope URI.</summary>
     public static ClaimsPrincipal AdfsMapped(string sid, params string[] roles) =>

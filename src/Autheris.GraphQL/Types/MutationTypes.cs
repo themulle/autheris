@@ -7,12 +7,14 @@ using System.Threading.Tasks;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants;
+using Autheris.Application.Governance.Validation;
 using Autheris.Application.Interfaces;
 using Autheris.Application.OpenMetadata.Interfaces;
 using Autheris.Application.OpenMetadata.Models;
 using Autheris.Application.DataCatalog.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
@@ -327,7 +329,8 @@ public sealed class Mutation
         await idempotencyStore.SetIfNotExistsAsync(compositeKey, payload, TimeSpan.FromHours(24), ct).ConfigureAwait(false);
     }
 
-    public async Task<ConsentRequestPayload> RequestTableAccessAsync(
+    [GraphQLIgnore]
+    public Task<ConsentRequestPayload> RequestTableAccessAsync(
         string domain,
         string schema,
         string tableName,
@@ -336,6 +339,19 @@ public sealed class Mutation
         string? idempotencyKey,
         [Service] IConsentRequestService consentRequestService,
         [Service] IHttpContextAccessor httpContextAccessor,
+        CancellationToken ct = default)
+        => RequestTableAccessAsync(domain, schema, tableName, justification, durationDays, idempotencyKey, null, consentRequestService, httpContextAccessor, ct);
+
+    public async Task<ConsentRequestPayload> RequestTableAccessAsync(
+        string domain,
+        string schema,
+        string tableName,
+        string justification,
+        int durationDays,
+        string? idempotencyKey,
+        AccessRequestContextInput? context = null,
+        [Service] IConsentRequestService consentRequestService = default!,
+        [Service] IHttpContextAccessor httpContextAccessor = default!,
         CancellationToken ct = default)
     {
         var userSid = GetAuthenticatedUserSid(httpContextAccessor);
@@ -346,7 +362,7 @@ public sealed class Mutation
             var result = await consentRequestService.SubmitAsync(
                 new ConsentRequestSubmission(
                     domain, schema, tableName, justification, durationDays, idempotencyKey,
-                    userSid, principal, GetContextTenantId(httpContextAccessor)),
+                    userSid, principal, GetContextTenantId(httpContextAccessor), context),
                 ct);
 
             return new ConsentRequestPayload
@@ -363,6 +379,37 @@ public sealed class Mutation
         }
     }
 
+    public async Task<ConsentRequestPayload> WithdrawAccessRequestAsync(
+        Guid requestId,
+        [Service] IConsentRequestService consentRequestService = default!,
+        [Service] IHttpContextAccessor httpContextAccessor = default!,
+        CancellationToken ct = default)
+    {
+        var principal = httpContextAccessor?.HttpContext?.User;
+        if (principal == null || principal.Identity?.IsAuthenticated != true)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("UNAUTHORIZED")
+                .SetMessage("Authentication is required.")
+                .Build());
+        }
+
+        try
+        {
+            await consentRequestService.WithdrawAsync(requestId, principal, ct).ConfigureAwait(false);
+            return new ConsentRequestPayload
+            {
+                RequestId = requestId,
+                Status = "WITHDRAWN",
+                Message = "Consent request withdrawn."
+            };
+        }
+        catch (ConsentRequestException ex)
+        {
+            throw new GraphQLException(ErrorBuilder.New().SetCode(ex.Code).SetMessage(ex.Message).Build());
+        }
+    }
+
     [GraphQLIgnore]
     public Task<ConsentRequestPayload> ApproveConsentRequestAsync(
         Guid requestId,
@@ -371,7 +418,7 @@ public sealed class Mutation
         [Service] IHttpContextAccessor httpContextAccessor,
         [Service] IIdempotencyStore idempotencyStore = default!,
         CancellationToken ct = default)
-        => ApproveConsentRequestAsync(requestId, idempotencyKey, repository, repository, repository, repository, httpContextAccessor, idempotencyStore, ct);
+        => ApproveConsentRequestAsync(requestId, idempotencyKey, repository, repository, repository, repository, httpContextAccessor, idempotencyStore, null, null, ct);
 
     [GraphQLIgnore]
     public Task<ConsentRequestPayload> ApproveConsentRequestAsync(
@@ -391,6 +438,8 @@ public sealed class Mutation
             (approvalRepository as ITableMetadataRepository) ?? (consentRepository as ITableMetadataRepository)!,
             httpContextAccessor,
             default!,
+            null,
+            null,
             ct);
 
     public async Task<ConsentRequestPayload> ApproveConsentRequestAsync(
@@ -402,14 +451,26 @@ public sealed class Mutation
         [Service] ITableMetadataRepository metadataRepository = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] IIdempotencyStore idempotencyStore = default!,
+        RowFilterInput? rowFilter = null,
+        ColumnMaskingInput? columnMasking = null,
         CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(httpContextAccessor);
         await EnsureDecisionPermittedAsync(httpContextAccessor, ct).ConfigureAwait(false);
         var policy = RequireDecisionService<IGrantPolicy>(httpContextAccessor);
 
         var approverSid = GetAuthenticatedUserSid(httpContextAccessor);
 
-        var approvePrincipal = httpContextAccessor?.HttpContext?.User;
+        var approvePrincipal = httpContextAccessor.HttpContext?.User ?? new ClaimsPrincipal();
+        var scopes = TokenAccessScope.GetScopes(approvePrincipal);
+        if (scopes.Count > 0 && !TokenAccessScope.HasScope(approvePrincipal, "data.access.review"))
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("FORBIDDEN")
+                .SetMessage("The 'data.access.review' scope is required to review consent requests.")
+                .Build());
+        }
+
         var approveFingerprint = IdempotencyFingerprint(
             ResolveMutationTenantId(httpContextAccessor, approvePrincipal, Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(approvePrincipal)).Value,
             requestId);
@@ -493,56 +554,172 @@ public sealed class Mutation
             }
         }
 
-        ConsentRequest approved;
-        try
-        {
-            approved = await approvalRepository.ApproveConsentRequestStepAsync(requestId, approverSid, ct);
-        }
-        catch (ConsentRequestStatusConflictException)
-        {
-            throw NotPending();
-        }
+        TableMetadata? tableMeta = metadataRepository != null
+            ? await metadataRepository.GetTableMetadataAsync(req.TableIdentifier, ct)
+            : null;
 
-        // Automatically create active consent ONLY upon final full approval (Fix 2.4: honor RequestedGranteeType)
-        if (string.Equals(approved.Status, "APPROVED", StringComparison.OrdinalIgnoreCase))
+        IReadOnlyList<ConsentRowFilter> builtRowFilters = Array.Empty<ConsentRowFilter>();
+        if (rowFilter != null && rowFilter.Predicates != null && rowFilter.Predicates.Count > 0)
         {
-            var isRole = approved.RequestedGranteeType == GranteeType.Role;
-            var columnRules = new List<ConsentColumnRule>();
-
-            if (metadataRepository != null)
+            if (tableMeta == null)
             {
-                var tableMeta = await metadataRepository.GetTableMetadataAsync(approved.TableIdentifier, ct);
-                if (tableMeta != null && tableMeta.Columns.Count > 0)
-                {
-                    // POL-3 / R-POL-11: same snapshot rule as the ITSM activation in the repositories.
-                    columnRules.AddRange(ConsentColumnSnapshot.FromMetadata(tableMeta));
-                }
+                throw new GraphQLException(ErrorBuilder.New()
+                    .SetCode("BAD_REQUEST")
+                    .SetMessage($"Metadata for table '{req.TableIdentifier}' could not be resolved for row filter validation.")
+                    .Build());
             }
-
-            var consent = new Consent
-            {
-                TableId = approved.TableId,
-                TableIdentifier = approved.TableIdentifier,
-                ConsentRequestId = approved.Id,
-                TenantId = approved.TenantId,
-                Effect = ConsentEffect.Allow,
-                GranteeType = approved.RequestedGranteeType,
-                GranteeSid = isRole ? (Sid?)null : new Sid(approved.RequestedGranteeRef),
-                RoleName = isRole ? approved.RequestedGranteeRef : null,
-                ValidFrom = DateTimeOffset.UtcNow,
-                ValidTo = approved.RequestedValidTo,
-                CreatedBySid = approverSid,
-                ColumnRules = columnRules
-            };
             try
             {
-                await consentRepository.CreateConsentAsync(consent, ct);
+                builtRowFilters = RowFilterAstValidator.BuildRowFilters(rowFilter, tableMeta, Guid.NewGuid());
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (ConsentRequestException ex)
             {
-                // Residual until the activation is atomic with the final step: the request is APPROVED without a consent and stays recoverable.
-                LogConsentCreationFailed(httpContextAccessor, approved, ex);
-                throw;
+                throw new GraphQLException(ErrorBuilder.New().SetCode(ex.Code).SetMessage(ex.Message).Build());
+            }
+        }
+
+        if (columnMasking != null && columnMasking.Rules != null && columnMasking.Rules.Count > 0)
+        {
+            if (tableMeta == null)
+            {
+                throw new GraphQLException(ErrorBuilder.New()
+                    .SetCode("BAD_REQUEST")
+                    .SetMessage($"Metadata for table '{req.TableIdentifier}' could not be resolved for column masking validation.")
+                    .Build());
+            }
+            var validCols = tableMeta.Columns.ToDictionary(c => c.ColumnName, c => c, StringComparer.OrdinalIgnoreCase);
+            foreach (var rule in columnMasking.Rules)
+            {
+                if (!validCols.ContainsKey(rule.ColumnName))
+                {
+                    throw new GraphQLException(ErrorBuilder.New()
+                        .SetCode("BAD_REQUEST")
+                        .SetMessage($"Column '{rule.ColumnName}' does not exist on table '{req.TableIdentifier}'.")
+                        .Build());
+                }
+            }
+        }
+
+        var columnRules = new List<ConsentColumnRule>();
+        if (tableMeta != null && tableMeta.Columns.Count > 0)
+        {
+            var baseRules = ConsentColumnSnapshot.FromMetadata(tableMeta);
+            if (columnMasking?.Rules != null && columnMasking.Rules.Count > 0)
+            {
+                var maskMap = columnMasking.Rules.ToDictionary(r => r.ColumnName, r => r, StringComparer.OrdinalIgnoreCase);
+                columnRules.AddRange(baseRules.Select(r =>
+                {
+                    if (maskMap.TryGetValue(r.ColumnName, out var maskRule))
+                    {
+                        var lvl = string.Equals(maskRule.MaskingType, "None", StringComparison.OrdinalIgnoreCase)
+                            ? ColumnAccessLevel.Clear
+                            : ColumnAccessLevel.Mask;
+                        return new ConsentColumnRule
+                        {
+                            Id = r.Id,
+                            ConsentId = r.ConsentId,
+                            TableColumnId = r.TableColumnId,
+                            ColumnName = r.ColumnName,
+                            AccessLevel = lvl,
+                            ApplicableScopes = r.ApplicableScopes
+                        };
+                    }
+                    return r;
+                }));
+            }
+            else
+            {
+                columnRules.AddRange(baseRules);
+            }
+        }
+
+        bool requiresFourEyes = tableMeta?.Table.RequiresFourEyes ?? false;
+        bool isFinalStep = !(requiresFourEyes && req.ApprovalSteps.Count == 0);
+
+        ConsentRequest approved;
+        if (isFinalStep && (builtRowFilters.Count > 0 || (columnMasking?.Rules != null && columnMasking.Rules.Count > 0)))
+        {
+            var isRole = req.RequestedGranteeType == GranteeType.Role;
+            var step = new ApprovalStep
+            {
+                Id = Guid.NewGuid(),
+                ConsentRequestId = requestId,
+                StepNumber = req.ApprovalSteps.Count + 1,
+                ApproverSid = approverSid,
+                Decision = "APPROVED",
+                DecidedAt = DateTimeOffset.UtcNow
+            };
+            var consent = new Consent
+            {
+                Id = Guid.NewGuid(),
+                TableId = req.TableId,
+                TableIdentifier = req.TableIdentifier,
+                ConsentRequestId = req.Id,
+                TenantId = req.TenantId,
+                Effect = ConsentEffect.Allow,
+                GranteeType = req.RequestedGranteeType,
+                GranteeSid = isRole ? (Sid?)null : new Sid(req.RequestedGranteeRef),
+                RoleName = isRole ? req.RequestedGranteeRef : null,
+                ValidFrom = DateTimeOffset.UtcNow,
+                ValidTo = req.RequestedValidTo,
+                CreatedBySid = approverSid,
+                ColumnRules = columnRules,
+                RowFilters = builtRowFilters
+            };
+
+            try
+            {
+                await approvalRepository.ExecuteAtomicApprovalWithConsentAsync(
+                    requestId, step, consent, builtRowFilters, columnRules, ct).ConfigureAwait(false);
+                approved = req;
+                approved.Status = "APPROVED";
+            }
+            catch (ConsentRequestStatusConflictException)
+            {
+                throw NotPending();
+            }
+        }
+        else
+        {
+            try
+            {
+                approved = await approvalRepository.ApproveConsentRequestStepAsync(requestId, approverSid, ct);
+            }
+            catch (ConsentRequestStatusConflictException)
+            {
+                throw NotPending();
+            }
+
+            // Automatically create active consent ONLY upon final full approval (Fix 2.4: honor RequestedGranteeType)
+            if (string.Equals(approved.Status, "APPROVED", StringComparison.OrdinalIgnoreCase))
+            {
+                var isRole = approved.RequestedGranteeType == GranteeType.Role;
+                var consent = new Consent
+                {
+                    TableId = approved.TableId,
+                    TableIdentifier = approved.TableIdentifier,
+                    ConsentRequestId = approved.Id,
+                    TenantId = approved.TenantId,
+                    Effect = ConsentEffect.Allow,
+                    GranteeType = approved.RequestedGranteeType,
+                    GranteeSid = isRole ? (Sid?)null : new Sid(approved.RequestedGranteeRef),
+                    RoleName = isRole ? approved.RequestedGranteeRef : null,
+                    ValidFrom = DateTimeOffset.UtcNow,
+                    ValidTo = approved.RequestedValidTo,
+                    CreatedBySid = approverSid,
+                    ColumnRules = columnRules,
+                    RowFilters = builtRowFilters
+                };
+                try
+                {
+                    await consentRepository.CreateConsentAsync(consent, ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // Residual until the activation is atomic with the final step: the request is APPROVED without a consent and stays recoverable.
+                    LogConsentCreationFailed(httpContextAccessor, approved, ex);
+                    throw;
+                }
             }
         }
 
@@ -582,8 +759,19 @@ public sealed class Mutation
         [Service] IIdempotencyStore idempotencyStore = default!,
         CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(httpContextAccessor);
         await EnsureDecisionPermittedAsync(httpContextAccessor, ct).ConfigureAwait(false);
         _ = RequireDecisionService<IGrantPolicy>(httpContextAccessor); // composition fail-fast: both decision resolvers need the same services
+
+        var rejectPrincipal = httpContextAccessor.HttpContext?.User ?? new ClaimsPrincipal();
+        var scopes = TokenAccessScope.GetScopes(rejectPrincipal);
+        if (scopes.Count > 0 && !TokenAccessScope.HasScope(rejectPrincipal, "data.access.review"))
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("FORBIDDEN")
+                .SetMessage("The 'data.access.review' scope is required to review consent requests.")
+                .Build());
+        }
 
         var approverSid = GetAuthenticatedUserSid(httpContextAccessor);
 
@@ -603,7 +791,6 @@ public sealed class Mutation
                 .Build());
         }
 
-        var rejectPrincipal = httpContextAccessor?.HttpContext?.User;
         var rejectFingerprint = IdempotencyFingerprint(
             ResolveMutationTenantId(httpContextAccessor, rejectPrincipal, Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(rejectPrincipal)).Value,
             requestId, reason.Trim());
@@ -613,7 +800,7 @@ public sealed class Mutation
             return existing;
         }
 
-        var principal = httpContextAccessor?.HttpContext?.User;
+        var principal = rejectPrincipal;
 
         var req = await approvalRepository.GetConsentRequestAsync(requestId, ct);
         if (req == null)

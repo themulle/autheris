@@ -24,6 +24,16 @@ public static class TokenAccessScope
     public static bool IsReadOnly(this ClaimsPrincipal? principal) =>
         principal?.HasClaim(c => c.Type == ClaimType && c.Value == ReadOnlyValue && c.Issuer == Issuer) == true;
 
+    /// <summary>
+    /// Checks whether the principal carries the specified delegated scope (comparing bare names).
+    /// </summary>
+    public static bool HasScope(this ClaimsPrincipal? principal, string scope)
+    {
+        if (principal == null || string.IsNullOrWhiteSpace(scope)) return false;
+        var bareTarget = ScopeNames.ToBareName(scope.Trim());
+        return GetScopes(principal).Any(s => string.Equals(ScopeNames.ToBareName(s), bareTarget, StringComparison.OrdinalIgnoreCase));
+    }
+
     public static void MarkReadOnly(ClaimsIdentity identity)
     {
         ArgumentNullException.ThrowIfNull(identity);
