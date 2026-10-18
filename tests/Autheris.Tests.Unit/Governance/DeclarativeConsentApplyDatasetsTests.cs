@@ -116,4 +116,35 @@ public sealed class DeclarativeConsentApplyDatasetsTests
         result.Applied.ShouldBe(0);
         result.Details.ShouldContain(d => d.Contains("not available"));
     }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task SEC_111_11_RealService_TenantGovernanceAdminInMulti_ForeignAndNonexistentDataset_AreIndistinguishable()
+    {
+        var tables = Substitute.For<ITableMetadataRepository>();
+        var foreign = new TableIdentifier("sales", "dbo", "foreign_t");
+        tables.GetActiveTableIdentifierAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.Arg<TableIdentifier>().Equals(foreign) ? foreign : (TableIdentifier?)null);
+        var owners = Substitute.For<IDataOwnershipRepository>();
+        var audit = Substitute.For<Autheris.Application.Audit.IAuditWriter>();
+        var service = new DatasetCatalogAdminService(tables, owners, audit,
+            new Autheris.Tests.Common.StaticOptionsMonitor<Autheris.Domain.Options.GatewayOptions>(new Autheris.Domain.Options.GatewayOptions()), TimeProvider.System);
+        var tenantAdmin = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-TA"), new Claim("tenant_id", "tenant-a"),
+            new Claim(ClaimTypes.Role, "GovernanceAdmin"), new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN")
+        ], "test"));
+        var apply = new DeclarativeConsentApplyService(Substitute.For<ITableMetadataRepository>(), _consents, Substitute.For<IAuditLogRepository>(), null, service);
+
+        var foreignResult = await apply.ApplyManifestAsync(tenantAdmin, Manifest(new DeclarativeDatasetCatalog("sales", "dbo", "foreign_t", ["x"], "Summary")));
+        var missingResult = await apply.ApplyManifestAsync(tenantAdmin, Manifest(new DeclarativeDatasetCatalog("sales", "dbo", "ghost_t", ["x"], "Summary")));
+
+        foreignResult.Applied.ShouldBe(missingResult.Applied);
+        foreignResult.Unchanged.ShouldBe(missingResult.Unchanged);
+        foreignResult.TotalEvaluated.ShouldBe(missingResult.TotalEvaluated);
+        foreignResult.Details.Select(d => d.Replace("foreign_t", "N")).ShouldBe(missingResult.Details.Select(d => d.Replace("ghost_t", "N")));
+        await tables.DidNotReceiveWithAnyArgs().SetDatasetVisibilityAsync(default, default, default, default);
+        // The skipped entries are one aggregated probe audit per manifest.
+        await audit.Received(2).RecordBestEffortAsync(Arg.Is<AuditLogEntry>(e => e.DetailsJson.Contains("\"source\":\"manifest\"")), Arg.Any<CancellationToken>());
+    }
 }

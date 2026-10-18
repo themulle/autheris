@@ -58,5 +58,8 @@ public interface IDatasetCatalogAdminService
     /// </summary>
     Task<DatasetCatalogResult> ApplyAsync(ClaimsPrincipal? caller, string datasetId, DatasetCatalogEdit edit, string source, CancellationToken ct, bool dryRun = false);
 
+    /// <summary>One aggregated, throttled probe audit entry for the entries a manifest skipped as unknown or not manageable (non-administrators only).</summary>
+    Task RecordManifestProbesAsync(ClaimsPrincipal? caller, int attempts, CancellationToken ct);
+
     Task<DatasetCatalogResult> GetAsync(ClaimsPrincipal? caller, string datasetId, CancellationToken ct);
 }

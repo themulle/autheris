@@ -393,4 +393,81 @@ public sealed class DatasetCatalogAdminServiceTests
         await _tables.DidNotReceiveWithAnyArgs().SetDatasetVisibilityAsync(default, default, default, default);
         await _audit.DidNotReceiveWithAnyArgs().RecordRequiredAsync(default!, default);
     }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task SEC_111_12_ProbeTracking_IsBounded_AndSuppressedCountsAreAggregatedNotLost()
+    {
+        var svc = Create();
+        // One principal exhausts its budget (5 suppressed) and then never returns.
+        for (var i = 0; i < 25; i++)
+        {
+            await svc.ApplyAsync(Stranger("S-1-5-21-gone"), "sales.dbo.orders", Vis("Summary"), "admin", default);
+        }
+
+        // More distinct principals than the hard cap in the same window.
+        for (var i = 0; i < DatasetCatalogAdminService.MaxTrackedPrincipals + 99; i++)
+        {
+            await svc.ApplyAsync(Stranger("S-1-5-21-p" + i), "sales.dbo.orders", Vis("Summary"), "admin", default);
+        }
+
+        svc.TrackedProbePrincipalsForTesting.ShouldBeLessThanOrEqualTo(DatasetCatalogAdminService.MaxTrackedPrincipals);
+        _audit.ClearReceivedCalls();
+
+        // The next window sweeps once: the departed principal's suppressed count and the overflow bucket are flushed.
+        _time.Now += TimeSpan.FromMinutes(6);
+        await svc.ApplyAsync(Stranger("S-1-5-21-late"), "sales.dbo.orders", Vis("Summary"), "admin", default);
+
+        await _audit.Received(1).RecordBestEffortAsync(Arg.Is<AuditLogEntry>(e =>
+            e.EventType == AuditEventTypes.CatalogProbeSuppressed && e.ActorSid.Value == "S-1-5-21-gone" && e.DetailsJson.Contains("\"count\":5")), Arg.Any<CancellationToken>());
+        // 100 principals (one slot is taken by the departed one) fell into the shared overflow bucket (budget 20): 80 suppressed, aggregated in one entry.
+        await _audit.Received(1).RecordBestEffortAsync(Arg.Is<AuditLogEntry>(e =>
+            e.EventType == AuditEventTypes.CatalogProbeSuppressed && e.DetailsJson.Contains("\"overflow\":true") && e.DetailsJson.Contains("\"count\":80")), Arg.Any<CancellationToken>());
+        svc.TrackedProbePrincipalsForTesting.ShouldBeLessThanOrEqualTo(2);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task SEC_111_12_TagChangeAudit_SurvivesAFailingVisibilityWrite()
+    {
+        _tables.SetDatasetVisibilityAsync(Orders, Arg.Any<DatasetVisibility>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("db"));
+
+        await Should.ThrowAsync<InvalidOperationException>(() =>
+            Create().ApplyAsync(Admin(), "sales.dbo.orders", new DatasetCatalogEdit(["pii"], null, null, "Summary"), "admin", default));
+
+        _state.Tags.Single().Tag.ShouldBe("pii");
+        await _audit.Received(1).RecordRequiredAsync(Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.CatalogTagsChanged), CancellationToken.None);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task SEC_111_08_GuidPath_StoreFault_IsUnavailable_AndOwnershipStoreDown_Is503Too()
+    {
+        var id = Guid.NewGuid().ToString("D");
+        _tables.GetActiveTableIdentifierByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).ThrowsAsync(new InvalidOperationException("db"));
+
+        (await Create().ApplyAsync(Admin(), id, Vis("Summary"), "admin", default)).Outcome.ShouldBe(DatasetCatalogOutcome.Unavailable);
+        (await Create().ApplyAsync(Stranger(), id, Vis("Summary"), "admin", default)).Outcome.ShouldBe(DatasetCatalogOutcome.Unavailable);
+
+        _tables.GetActiveTableIdentifierByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((TableIdentifier?)null);
+        _owners.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("db"));
+        (await Create().ApplyAsync(Stranger(), id, Vis("Summary"), "admin", default)).Outcome.ShouldBe(DatasetCatalogOutcome.Unavailable);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task SEC_111_12_ManifestProbes_AreAuditedAsOneAggregatedEntryPerManifest_ForNonAdminsOnly()
+    {
+        var svc = Create();
+
+        await svc.RecordManifestProbesAsync(Stranger(), 3, default);
+        await svc.RecordManifestProbesAsync(Admin(), 3, default);
+        await svc.RecordManifestProbesAsync(Stranger(), 0, default);
+
+        await _audit.Received(1).RecordBestEffortAsync(Arg.Is<AuditLogEntry>(e =>
+            e.Decision == "DENY" && e.DetailsJson.Contains("\"attempts\":3") && e.DetailsJson.Contains("\"source\":\"manifest\"")), Arg.Any<CancellationToken>());
+        await _audit.ReceivedWithAnyArgs(1).RecordBestEffortAsync(default!, default);
+    }
 }

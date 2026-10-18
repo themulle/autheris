@@ -25,7 +25,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
 {
     internal const int ProbeAuditBudget = 20;
     internal static readonly TimeSpan ProbeWindow = TimeSpan.FromMinutes(5);
-    private const int MaxTrackedPrincipals = 10_000;
+    internal const int MaxTrackedPrincipals = 10_000;
 
     // Used for the ownership lookup when the identifier does not parse or resolve, so every non-admin call costs the same.
     private static readonly TableIdentifier ProbePlaceholder = new("catalog", "probe", "placeholder");
@@ -36,7 +36,16 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
     private readonly IOptionsMonitor<GatewayOptions> _options;
     private readonly TimeProvider _time;
     private readonly ICatalogVisibilityMetrics? _metrics;
-    private readonly ConcurrentDictionary<string, ProbeWindowState> _probes = new(StringComparer.Ordinal);
+    // Probe throttle state: bounded (hard cap, then one shared overflow bucket), swept at most once per window under the lock.
+    private readonly Dictionary<string, ProbeWindowState> _probes = new(StringComparer.Ordinal);
+    private readonly object _probeLock = new();
+    private ProbeWindowState? _overflow;
+    private DateTimeOffset _nextSweep = DateTimeOffset.MinValue;
+
+    internal int TrackedProbePrincipalsForTesting
+    {
+        get { lock (_probeLock) { return _probes.Count; } }
+    }
 
     public DatasetCatalogAdminService(
         ITableMetadataRepository tables,
@@ -54,8 +63,10 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         _metrics = metrics;
     }
 
-    private sealed class ProbeWindowState(DateTimeOffset start)
+    private sealed class ProbeWindowState(DateTimeOffset start, Caller owner, bool overflow = false)
     {
+        public Caller Owner { get; } = owner;
+        public bool Overflow { get; } = overflow;
         public DateTimeOffset Start { get; set; } = start;
         public int Written { get; set; }
         public int Suppressed { get; set; }
@@ -189,6 +200,12 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
                 tagChange = tagChange is null ? change : new DatasetCatalogChange(table, tagChange.Before, change.After);
             }
 
+            // The tag change is committed: audit it before the visibility write, so a failing visibility write cannot lose the record.
+            if (tagChange?.Changed == true)
+            {
+                await AuditChangeAsync(AuditEventTypes.CatalogTagsChanged, actor, table, source, tagChange.Before, tagChange.After).ConfigureAwait(false);
+            }
+
             if (requested is { } visibility)
             {
                 visibilityChange = await _tables.SetDatasetVisibilityAsync(table, visibility, actorSid, ct).ConfigureAwait(false);
@@ -212,11 +229,6 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
 
         var tagsChanged = tagChange?.Changed == true;
         var visibilityChanged = visibilityChange?.Changed == true;
-        if (tagsChanged)
-        {
-            await AuditChangeAsync(AuditEventTypes.CatalogTagsChanged, actor, table, source, tagChange!.Before, tagChange.After).ConfigureAwait(false);
-        }
-
         if (visibilityChanged)
         {
             await AuditChangeAsync(AuditEventTypes.CatalogVisibilityChanged, actor, table, source, visibilityChange!.Before, visibilityChange.After).ConfigureAwait(false);
@@ -228,7 +240,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
             table, after, IsTierEffective(table));
     }
 
-    /// <summary>Dry run: the state the edit would produce, computed from the strict before-state like the repositories do (admin rows only are touched).</summary>
+    /// <summary>Dry run (same non-atomic cap semantics as <see cref="ExceedsCap"/>): the state the edit would produce, computed from the strict before-state like the repositories do (admin rows only are touched).</summary>
     private DatasetCatalogResult Simulate(
         TableIdentifier table, DatasetCatalogSettings before, IReadOnlyList<string>? replace, IReadOnlyList<string>? add, IReadOnlyList<string>? remove, DatasetVisibility? requested)
     {
@@ -271,7 +283,16 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         var sid = principal.GetUserSid() ?? new Sid(principal.Identity?.Name ?? "ANONYMOUS");
         var caller = new Caller(sid, scope is CallerScope.Global or CallerScope.Unrestricted, TenantOf(principal), principal.Identity?.AuthenticationType ?? string.Empty);
 
-        var parsed = await ParseAsync(datasetId, ct).ConfigureAwait(false);
+        TableIdentifier? parsed;
+        try
+        {
+            parsed = await ParseAsync(datasetId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return new Gate(new DatasetCatalogResult(DatasetCatalogOutcome.Unavailable), caller.IsAdmin ? null : caller, default);
+        }
+
         var isOwner = false;
         if (!caller.IsAdmin)
         {
@@ -293,7 +314,14 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         TableIdentifier? resolved = null;
         if (parsed is { } id)
         {
-            resolved = await _tables.GetActiveTableIdentifierAsync(id, ct).ConfigureAwait(false);
+            try
+            {
+                resolved = await _tables.GetActiveTableIdentifierAsync(id, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return new Gate(new DatasetCatalogResult(DatasetCatalogOutcome.Unavailable), caller.IsAdmin ? null : caller, default);
+            }
         }
 
         if (resolved is not { } table || (!caller.IsAdmin && !isOwner))
@@ -353,7 +381,11 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         return true;
     }
 
-    /// <summary>Total tags across both sources after the edit, computed from the strict before-state (the repository does not enforce the total).</summary>
+    /// <summary>
+    /// Total tags across both sources after the edit, computed from the strict before-state (the repository does not enforce the total). The check is not
+    /// atomic with a concurrent <c>ChangeDatasetTagsAsync</c> on the same dataset (admin path): two racing edits can together exceed the cap by their
+    /// own size; accepted, the cap is a hygiene limit and the next edit is checked against the then-current state.
+    /// </summary>
     private static bool ExceedsCap(
         DatasetCatalogSettings before, IReadOnlyList<string>? replace, IReadOnlyList<string>? add, IReadOnlyList<string>? remove, int max)
     {
@@ -425,30 +457,66 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
     /// <summary>
     /// Probe signal for a caller who cannot manage the dataset (unknown, inactive and foreign datasets all end here, so the response and the work
     /// are identical): at most <see cref="ProbeAuditBudget"/> DENY entries per principal and window; later attempts are counted and flushed as one
-    /// aggregated entry when the next window of that principal starts.
+    /// aggregated entry when the window of that principal ends. The state is bounded: expired entries (suppressed counts included, written as the
+    /// aggregate on eviction) are swept at most once per window, and beyond <see cref="MaxTrackedPrincipals"/> principals a shared overflow bucket
+    /// with its own budget and aggregate is used.
     /// </summary>
-    private async Task AuditProbeAsync(Caller probe, CancellationToken ct)
+    private async Task AuditProbeAsync(Caller probe, CancellationToken ct, int attempts = 1, string? source = null)
     {
         var now = _time.GetUtcNow();
         var key = probe.Sid.Value;
-        int? flushed = null;
+        var flushes = new List<(Caller Owner, bool Overflow, int Count)>();
         var write = false;
-        lock (_probes)
+        lock (_probeLock)
         {
-            if (_probes.Count > MaxTrackedPrincipals)
+            if (now >= _nextSweep)
             {
-                foreach (var stale in _probes.Where(kv => now - kv.Value.Start >= ProbeWindow && kv.Value.Suppressed == 0).Select(kv => kv.Key).ToList())
+                foreach (var (k, v) in _probes)
                 {
-                    _probes.TryRemove(stale, out _);
+                    if (now - v.Start >= ProbeWindow)
+                    {
+                        if (v.Suppressed > 0)
+                        {
+                            flushes.Add((v.Owner, false, v.Suppressed));
+                        }
+
+                        _probes.Remove(k);
+                    }
                 }
+
+                if (_overflow is { } o && now - o.Start >= ProbeWindow)
+                {
+                    if (o.Suppressed > 0)
+                    {
+                        flushes.Add((o.Owner, true, o.Suppressed));
+                    }
+
+                    _overflow = null;
+                }
+
+                _nextSweep = now + ProbeWindow;
             }
 
-            var state = _probes.GetOrAdd(key, _ => new ProbeWindowState(now));
+            ProbeWindowState state;
+            if (_probes.TryGetValue(key, out var existing))
+            {
+                state = existing;
+            }
+            else if (_probes.Count < MaxTrackedPrincipals)
+            {
+                state = _probes[key] = new ProbeWindowState(now, probe);
+            }
+            else
+            {
+                state = _overflow ??= new ProbeWindowState(now, probe with { Sid = new Sid("overflow") }, overflow: true);
+            }
+
             if (now - state.Start >= ProbeWindow)
             {
+                // The principal's own window ended between sweeps.
                 if (state.Suppressed > 0)
                 {
-                    flushed = state.Suppressed;
+                    flushes.Add((state.Owner, state.Overflow, state.Suppressed));
                 }
 
                 state.Start = now;
@@ -467,16 +535,16 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
             }
         }
 
-        if (flushed is { } count)
+        foreach (var (owner, overflow, count) in flushes)
         {
             await _audit.RecordBestEffortAsync(new AuditLogEntry
             {
-                TenantId = probe.Tenant,
+                TenantId = owner.Tenant,
                 EventType = AuditEventTypes.CatalogProbeSuppressed,
-                ActorSid = probe.Sid,
+                ActorSid = owner.Sid,
                 TargetTable = string.Empty,
                 Decision = "DENY",
-                DetailsJson = JsonSerializer.Serialize(new { count, windowSeconds = (int)ProbeWindow.TotalSeconds })
+                DetailsJson = JsonSerializer.Serialize(new { count, overflow, windowSeconds = (int)ProbeWindow.TotalSeconds })
             }, ct).ConfigureAwait(false);
         }
 
@@ -489,8 +557,29 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
                 ActorSid = probe.Sid,
                 TargetTable = string.Empty,
                 Decision = "DENY",
-                DetailsJson = JsonSerializer.Serialize(new { reason = "not_manageable", authType = probe.AuthType, tenant = probe.Tenant.Value })
+                DetailsJson = JsonSerializer.Serialize(new { reason = "not_manageable", attempts, source, authType = probe.AuthType, tenant = probe.Tenant.Value })
             }, ct).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// A manifest skipped <paramref name="attempts"/> entries as unknown or not manageable: one aggregated probe entry per manifest, throttled like
+    /// the other probes. Administrators are no probes (an unknown dataset is simply unknown to them).
+    /// </summary>
+    public async Task RecordManifestProbesAsync(ClaimsPrincipal? caller, int attempts, CancellationToken ct)
+    {
+        if (attempts <= 0)
+        {
+            return;
+        }
+
+        var scope = CallerScopeResolver.Resolve(caller, _options.CurrentValue.Tenancy.EffectiveMode);
+        if (scope == CallerScope.None || caller is null || scope is CallerScope.Global or CallerScope.Unrestricted)
+        {
+            return;
+        }
+
+        var sid = caller.GetUserSid() ?? new Sid(caller.Identity?.Name ?? "ANONYMOUS");
+        await AuditProbeAsync(new Caller(sid, false, TenantOf(caller), caller.Identity?.AuthenticationType ?? string.Empty), ct, attempts, "manifest").ConfigureAwait(false);
     }
 }

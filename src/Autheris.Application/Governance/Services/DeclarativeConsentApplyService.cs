@@ -268,6 +268,7 @@ public sealed class DeclarativeConsentApplyService(
             }
             else
             {
+                var skipped = 0;
                 foreach (var entry in manifest.Datasets!)
                 {
                     totalEvaluated++;
@@ -278,6 +279,7 @@ public sealed class DeclarativeConsentApplyService(
                     {
                         case DatasetCatalogOutcome.NotFound:
                             details.Add($"Dataset '{datasetId}' not found in catalog; skipped catalog settings.");
+                            skipped++;
                             break;
                         case DatasetCatalogOutcome.Applied:
                             applied++;
@@ -291,6 +293,12 @@ public sealed class DeclarativeConsentApplyService(
                         default:
                             throw new DeclarativeDatasetCatalogException(planned.Outcome);
                     }
+                }
+
+                // The dry-run pass writes no per-entry probe audit; the skipped entries are one aggregated entry per manifest (throttled).
+                if (skipped > 0)
+                {
+                    await datasetCatalog.RecordManifestProbesAsync(caller, skipped, ct).ConfigureAwait(false);
                 }
             }
         }
@@ -309,6 +317,7 @@ public sealed class DeclarativeConsentApplyService(
                 ct).ConfigureAwait(false);
         }
 
+        // Not atomic with the consent commit above: validation is all-or-nothing, a storage fault in the middle is not rolled back across the two stores.
         if (!dryRun)
         {
             foreach (var (datasetId, edit) in datasetEdits)
