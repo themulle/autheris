@@ -315,7 +315,7 @@ public sealed class McpDatasetToolWiringTests
     {
         var catalog = Substitute.For<IMcpDatasetCatalog>();
         catalog.DescribeDatasetAsync(Arg.Any<ClaimsPrincipal>(), "sales.public.orders", Arg.Any<CancellationToken>())
-            .Returns(new McpDatasetDescription("sales.public.orders", "sales", "public", "orders", "Orders", null, "INTERNAL", false,
+            .Returns(new McpDatasetDescription("sales.public.orders", "orders", "sales", "public", "orders", "Orders", null, "INTERNAL", false,
                 [new McpDatasetColumn("id", "int", "Key", false, true)], []));
 
         var json = await Executor(catalog).ExecuteOperationAsync(Tool("describe_dataset"), """{"dataset":"sales.public.orders"}""", Session());
@@ -346,11 +346,39 @@ public sealed class McpDatasetToolWiringTests
     {
         var catalog = Substitute.For<IMcpDatasetCatalog>();
         catalog.ListDatasetsAsync(Arg.Any<ClaimsPrincipal>(), "order", "sales", Arg.Any<CancellationToken>())
-            .Returns(new McpDatasetList([new McpDatasetSummary("sales.public.orders", "Orders", "INTERNAL", 3)], 1, false));
+            .Returns(new McpDatasetList([new McpDatasetSummary("sales.public.orders", "orders", "Orders", "INTERNAL", 3)], 1, false));
 
         var json = await Executor(catalog).ExecuteOperationAsync(Tool("list_datasets"), """{"search":"order","domain":"sales"}""", Session());
 
         json.ShouldContain("sales.public.orders");
+    }
+
+    [Fact]
+    public async Task ListDatasets_Json_HasCamelCaseDisplayNameAfterId()
+    {
+        var catalog = Substitute.For<IMcpDatasetCatalog>();
+        catalog.ListDatasetsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new McpDatasetList([new McpDatasetSummary("sales.public.orders", "Aufträge", "Orders", "INTERNAL", 3)], 1, false));
+
+        var json = await Executor(catalog).ExecuteOperationAsync(Tool("list_datasets"), "{}", Session());
+
+        using var doc = JsonDocument.Parse(json);
+        var row = doc.RootElement.GetProperty("datasets")[0];
+        row.EnumerateObject().Select(p => p.Name).Take(2).ShouldBe(["id", "displayName"]);
+        row.GetProperty("displayName").GetString().ShouldBe("Aufträge");
+    }
+
+    [Fact]
+    public async Task DescribeDataset_Json_HasDisplayName()
+    {
+        var catalog = Substitute.For<IMcpDatasetCatalog>();
+        catalog.DescribeDatasetAsync(Arg.Any<ClaimsPrincipal>(), "sales.public.orders", Arg.Any<CancellationToken>())
+            .Returns(new McpDatasetDescription("sales.public.orders", "Aufträge", "sales", "public", "orders", "Orders", null, "INTERNAL", false, [], []));
+
+        var json = await Executor(catalog).ExecuteOperationAsync(Tool("describe_dataset"), """{"dataset":"sales.public.orders"}""", Session());
+
+        using var doc = JsonDocument.Parse(json);
+        doc.RootElement.GetProperty("displayName").GetString().ShouldBe("Aufträge");
     }
 
     [Fact]

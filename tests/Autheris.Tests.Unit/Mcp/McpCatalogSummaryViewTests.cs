@@ -105,7 +105,7 @@ public sealed class McpCatalogSummaryViewTests
         var nonAllowListed = new[] { "LongDescription", "Columns", "Examples", "GraphQl", "OtherAccess", "Indexes" };
         var allowListed = new[]
         {
-            "Id", "Domain", "Schema", "Table", "Description", "Sensitivity", "RequiresApproval", "Tags", "DataOwner", "DataOwnerDelegates", "AccessStatus", "View"
+            "Id", "DisplayName", "Domain", "Schema", "Table", "Description", "Sensitivity", "RequiresApproval", "Tags", "DataOwner", "DataOwnerDelegates", "AccessStatus", "View"
         };
 
         var all = typeof(McpDatasetDescription).GetProperties(BindingFlags.Public | BindingFlags.Instance)

@@ -7,6 +7,7 @@ using Autheris.Domain.Common;
 /// <param name="GraphQlField">Root query field of the dataset in the GraphQL API; null when the dataset is not in the GraphQL schema.</param>
 public sealed record McpDatasetSummary(
     string Id,
+    string DisplayName,
     string? Description,
     string Sensitivity,
     int ColumnCount,
@@ -98,6 +99,7 @@ public sealed record McpDatasetExample(
 /// <summary>Result of the MCP <c>describe_dataset</c> tool.</summary>
 public sealed record McpDatasetDescription(
     string Id,
+    string DisplayName,
     string Domain,
     string Schema,
     string Table,

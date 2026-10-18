@@ -41,7 +41,9 @@ public sealed class SemanticMcpCompiler(
         var meta = await _metadataRepo.GetTableMetadataAsync(targetTable, ct).ConfigureAwait(false);
         var tableDesc = !string.IsNullOrWhiteSpace(meta?.Table.Description)
             ? meta.Table.Description
-            : (meta?.Table.DisplayName ?? $"Dataset for {targetTable.Domain}.{targetTable.TableName}");
+            : (meta is null
+                ? $"Dataset for {targetTable.Domain}.{targetTable.TableName}"
+                : McpCatalogText.DisplayName(meta.Table.DisplayName, targetTable.TableName)); // SEC-CAT146A-01: externally authored text, never raw
 
         // Enforce Dynamic Compactor constraint: Short description < 120 chars for LLM Tool Picker
         var shortDesc = tableDesc.Length > 110 ? tableDesc[..107] + "..." : tableDesc;

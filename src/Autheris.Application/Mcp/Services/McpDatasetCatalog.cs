@@ -185,6 +185,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             // 4b.1: Only short description in summary; long description only in describe_dataset
             datasets.Add(new McpDatasetSummary(
                 DatasetId(t.Identifier),
+                McpCatalogText.DisplayName(t.Table.DisplayName, t.Identifier.TableName),
                 t.Table.Description,
                 t.Table.Sensitivity,
                 summaryOnly ? 0 : t.Columns.Count,
@@ -281,6 +282,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
 
         return new McpDatasetDescription(
             DatasetId(id),
+            McpCatalogText.DisplayName(table.Table.DisplayName, id.TableName),
             id.Domain,
             id.Schema,
             id.TableName,
@@ -345,7 +347,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
 
     /// <summary>
     /// Issue #111 A-4: the <c>Summary</c> answer is built from an allow-list (a property added to <see cref="McpDatasetDescription"/> is
-    /// excluded until it is listed here): identifier, description, sensitivity, four-eyes flag, tags, display-name-only owners, access
+    /// excluded until it is listed here): identifier, sanitised display name (PLAN-CAT-146-A, same trust as the description), description, sensitivity, four-eyes flag, tags, display-name-only owners, access
     /// status and the view marker. No long description, columns, examples, GraphQL block, access hints, keys or profiles.
     /// </summary>
     private async Task<McpDatasetDescription> BuildSummaryDescriptionAsync(TableMetadata table, string accessStatus, CancellationToken ct)
@@ -354,6 +356,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         var (owner, delegates) = await LoadOwnersAsync(id, displayNameOnly: true, ct).ConfigureAwait(false);
         return new McpDatasetDescription(
             DatasetId(id),
+            McpCatalogText.DisplayName(table.Table.DisplayName, id.TableName),
             id.Domain,
             id.Schema,
             id.TableName,
