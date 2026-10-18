@@ -32,7 +32,6 @@ public sealed class Issue158ExplainAccessMatchingTests
     private const string GroupMember = "S-1-GRP-MEMBER";
     private const string GroupForeign = "S-1-GRP-FOREIGN";
     private const string LinkedSid = "S-1-LINKED";
-    private const string Generic = "Active grant for subject " + UserSid;
 
     private static readonly DateTimeOffset Start = DateTimeOffset.UtcNow;
 
@@ -104,7 +103,7 @@ public sealed class Issue158ExplainAccessMatchingTests
         var dto = await Explain(RegressionFixture(), Caller(roles: [RoleA]));
 
         dto.Decision.ShouldBe("ALLOWED");
-        dto.ConsentDescription.ShouldBe(RoleA);
+        dto.ConsentDescription.ShouldBeNull();
     }
 
     [Fact]
@@ -117,12 +116,12 @@ public sealed class Issue158ExplainAccessMatchingTests
     }
 
     [Fact]
-    public async Task OnlyForeignRoleGrantPlusOwnUserGrant_UsesGenericDescription()
+    public async Task OnlyForeignRoleGrantPlusOwnUserGrant_HasNoDescription_NoInterimText()
     {
         var own = UserGrant(20);
         var dto = await Explain([RoleGrant(RoleB, 1), own], Caller(roles: [RoleA]));
 
-        dto.ConsentDescription.ShouldBe(Generic);
+        dto.ConsentDescription.ShouldBeNull();
         ShouldBeSameWithin(dto.ValidTo, own.EffectiveValidTo);
     }
 
@@ -199,7 +198,7 @@ public sealed class Issue158ExplainAccessMatchingTests
         var byId = Grant(GranteeType.Role, 30, roleName: "stored-label", roleId: id);
         var dto = await Explain([byId], Caller(roles: [id.ToString()]));
 
-        dto.ConsentDescription.ShouldBe("stored-label");
+        dto.ConsentDescription.ShouldBeNull();
     }
 
     [Fact]
@@ -223,7 +222,7 @@ public sealed class Issue158ExplainAccessMatchingTests
 
         dto.Decision.ShouldBe("ALLOWED");
         ShouldBeSameWithin(dto.ValidTo, own.EffectiveValidTo);
-        dto.ConsentDescription.ShouldBe(Generic);
+        dto.ConsentDescription.ShouldBeNull();
     }
 
     [Fact]
@@ -231,11 +230,11 @@ public sealed class Issue158ExplainAccessMatchingTests
     {
         var dto = await Explain([UserGrant(30, roleName: "stale-user-label")], Caller());
 
-        dto.ConsentDescription.ShouldBe(Generic);
+        dto.ConsentDescription.ShouldBeNull();
     }
 
     [Fact]
-    public async Task AllowedDecision_NoMatchingConsents_ReturnsNullValidToAndGenericText()
+    public async Task AllowedDecision_NoMatchingConsents_ReturnsNullValidToAndNoDescription()
     {
         var resolver = ResolverReturning(() => TableAccessDecision.Allowed(Orders, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear }));
         var (service, _, _) = CreateService([RoleGrant(RoleB, 1)], resolver);
@@ -244,7 +243,7 @@ public sealed class Issue158ExplainAccessMatchingTests
 
         dto.Decision.ShouldBe("ALLOWED");
         dto.ValidTo.ShouldBeNull();
-        dto.ConsentDescription.ShouldBe(Generic);
+        dto.ConsentDescription.ShouldBeNull();
     }
 
     private static McpDatasetCatalog CatalogOver(EffectiveAccessExplanationService service, ITableMetadataRepository tables, IConsentRepository consents) =>
@@ -287,7 +286,7 @@ public sealed class Issue158ExplainAccessMatchingTests
         var dto = await Explain([RoleGrant(RoleB, 1), own], Caller());
 
         dto.Decision.ShouldBe("ALLOWED");
-        dto.ConsentDescription.ShouldBe(Generic);
+        dto.ConsentDescription.ShouldBeNull();
         JsonSerializer.Serialize(dto).ShouldNotContain(RoleB);
         ShouldBeSameWithin(dto.ValidTo, own.EffectiveValidTo);
     }
@@ -302,7 +301,7 @@ public sealed class Issue158ExplainAccessMatchingTests
         new ConsentResolutionService().ResolveAccess(new Sid(UserSid), caller.GetGroupSids(), caller.GetUserRoles(), Orders, [unknown]).IsAllowed.ShouldBeFalse();
 
         var dto = await Explain([unknown, own], caller);
-        dto.ConsentDescription.ShouldBe(Generic);
+        dto.ConsentDescription.ShouldBeNull();
         JsonSerializer.Serialize(dto).ShouldNotContain(RoleB);
         ShouldBeSameWithin(dto.ValidTo, own.EffectiveValidTo);
     }
@@ -362,7 +361,7 @@ public sealed class Issue158ExplainAccessMatchingTests
         var foreign = Grant(GranteeType.Group, 1, GroupForeign, roleName: RoleB);
         var dto = await Explain([foreign, UserGrant(30)], Caller(groups: [GroupMember]));
 
-        dto.ConsentDescription.ShouldBe(Generic);
+        dto.ConsentDescription.ShouldBeNull();
         JsonSerializer.Serialize(dto).ShouldNotContain(RoleB);
     }
 
@@ -372,7 +371,7 @@ public sealed class Issue158ExplainAccessMatchingTests
         var own = UserGrant(30);
         var dto = await Explain([Grant(GranteeType.User, 1, UserSid, tenant: "tenant-other"), Grant(GranteeType.Role, 1, roleName: RoleA, tenant: "tenant-other"), own], Caller(roles: [RoleA]));
 
-        dto.ConsentDescription.ShouldBe(Generic);
+        dto.ConsentDescription.ShouldBeNull();
         ShouldBeSameWithin(dto.ValidTo, own.EffectiveValidTo);
     }
 
@@ -402,7 +401,8 @@ public sealed class Issue158ExplainAccessMatchingTests
             [Grant(GranteeType.Role, 1, roleName: "label-of-other-id", roleId: other), Grant(GranteeType.Role, 30, roleName: "label-of-held-id", roleId: held)],
             Caller(roles: [held.ToString()]));
 
-        dto.ConsentDescription.ShouldBe("label-of-held-id");
+        dto.ConsentDescription.ShouldBeNull(); // INC-1: role names are no longer shown as an interim description
+        JsonSerializer.Serialize(dto).ShouldNotContain("label-of-other-id");
     }
 
     [Fact]
@@ -415,7 +415,7 @@ public sealed class Issue158ExplainAccessMatchingTests
         var reversed = await Explain(Enumerable.Reverse(consents).ToList(), caller);
 
         Json(forward).ShouldBe(Json(reversed));
-        forward.ConsentDescription.ShouldBe("role-a-held");
+        forward.ConsentDescription.ShouldBeNull();
     }
 
     [Fact]
@@ -432,7 +432,7 @@ public sealed class Issue158ExplainAccessMatchingTests
 
         Json(viaMcp).ShouldNotContain(RoleB);
         Json(viaGraphQl).ShouldNotContain(RoleB);
-        viaGraphQl.ConsentDescription.ShouldBe(RoleA);
+        viaGraphQl.ConsentDescription.ShouldBeNull();
         Json(viaGraphQl).ShouldBe(Json(viaMcp));
     }
 }

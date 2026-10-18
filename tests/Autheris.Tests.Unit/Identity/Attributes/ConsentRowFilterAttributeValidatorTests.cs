@@ -212,6 +212,28 @@ public sealed class ConsentRowFilterAttributeValidatorTests
     }
 
     [Fact]
+    public async Task Decorator_ReplaceWithDescriptionUpdates_ValidatesEveryNewConsent_AndForwardsToTheDescriptionSeam()
+    {
+        // PLAN-GOV-158-INC1: the description overload lives on IConsentDescriptionRepository; it must not bypass the registry validation.
+        var inner = Substitute.For<IConsentRepository, IConsentDescriptionRepository>();
+        var registry = Substitute.For<ICallerAttributeRegistry>();
+        registry.GetAsync(Arg.Any<CancellationToken>()).Returns(Snapshot());
+        var tables = Substitute.For<ITableMetadataRepository>();
+        tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(Meta());
+        var repo = new AttributeValidatingConsentRepository(inner, registry, tables,
+            Microsoft.Extensions.Options.Options.Create(new GatewayOptions { CallerAttributes = Options(true) }));
+        var seam = (IConsentDescriptionRepository)repo;
+        var updates = new List<ConsentDescriptionUpdate> { new(Guid.NewGuid(), TenantId.LegacySingleTenant, "text") };
+
+        await Should.ThrowAsync<InvalidOperationException>(() => seam.ReplaceConsentsAsync([], [ConsentOf(Attr(name: "unknown"))], new Sid("S-1"), "r", null, updates, default));
+        await ((IConsentDescriptionRepository)inner).DidNotReceive().ReplaceConsentsAsync(default!, default!, default, default!, default, default, default);
+
+        await seam.ReplaceConsentsAsync([], [ConsentOf(Attr("IN"))], new Sid("S-1"), "r", null, updates, default);
+        await ((IConsentDescriptionRepository)inner).Received(1).ReplaceConsentsAsync(
+            Arg.Any<IReadOnlyList<Guid>>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<IReadOnlyList<AuditLogEntry>?>(), updates, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Decorator_Replace_ValidatesEveryNewConsent()
     {
         var (repo, inner) = Decorator();
