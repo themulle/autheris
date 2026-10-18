@@ -22,6 +22,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TrinoSqlEngine.Ast.Emit;
 
 public sealed class FederatedStagingService : IFederatedStagingService
 {
@@ -88,6 +89,40 @@ public sealed class FederatedStagingService : IFederatedStagingService
             Autheris.Application.Sql.Services.DataSourceAllowlistGuard.EnsureAllowed(
                 _gatewayOptions.Value.WebSql ?? new WebSqlOptions(), tenantId,
                 req.Metadata.Identifier.Domain);
+
+            if (req.Metadata.RequiredFilterColumns.Length > 0)
+            {
+                foreach (var reqCol in req.Metadata.RequiredFilterColumns)
+                {
+                    if (req.Metadata.TenantColumnName != null &&
+                        string.Equals(req.Metadata.TenantColumnName, reqCol, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (req.Decision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rls &&
+                        rls.Predicate.ReferencedColumns.Contains(reqCol.ToLowerInvariant()))
+                    {
+                        continue;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(req.Decision.CombinedRowFilterSql) &&
+                        req.Decision.CombinedRowFilterSql.Contains(reqCol, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (req.PushdownFilter != null &&
+                        req.PushdownFilter.ReferencedColumns.Any(c => string.Equals(c, reqCol, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    throw new GatewaySecurityException(
+                        GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.RequiredFilterColumnMissing),
+                        GovernedSqlErrorCodes.RequiredFilterColumnMissing);
+                }
+            }
 
             // HTTP descriptor checks (E-3, INV-8)
             if (req.Metadata.Table.DataSourceType == DataSourceType.HttpDeclarative &&

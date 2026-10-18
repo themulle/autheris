@@ -121,6 +121,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         // The table and derived-source lists are computed once per visit and consumed by every guard below, before the recursion into
         // the children: nested specifications refill the same fields, so nothing may read them after base.VisitQuerySpecification.
         PrepareSpecSources(node);
+        EnsureRequiredFilterColumnsSatisfied(node);
 
         // Fail-Closed Predicate Guard: Check WHERE, HAVING, and JOIN conditions for masked columns
         if (_options.RejectMaskedColumnsInPredicates && node.From != null)

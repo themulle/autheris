@@ -366,6 +366,8 @@ public static partial class TreeSqlCompiler
             ValidateFilterColumns(node.Where, metadata, tableAccess.Decision, depth: 0);
         }
 
+        EnsureRequiredFilterColumnsSatisfied(metadata, tableAccess, node.Where);
+
         var children = new List<(TreeRelationNode Relation, NodePlan Child)>();
         foreach (var relation in node.Relations)
         {
@@ -464,6 +466,75 @@ public static partial class TreeSqlCompiler
             default:
                 throw new GatewayInvalidQueryException("Unsupported filter.");
         }
+    }
+
+    private static void EnsureRequiredFilterColumnsSatisfied(
+        TableMetadata metadata,
+        TreeTableAccess tableAccess,
+        TreeFilter? where)
+    {
+        if (metadata.RequiredFilterColumns.Length == 0)
+        {
+            return;
+        }
+
+        foreach (var reqCol in metadata.RequiredFilterColumns)
+        {
+            // 1. Tenant column
+            if (tableAccess.TenantColumn != null &&
+                string.Equals(tableAccess.TenantColumn, reqCol, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // 2. Active RLS
+            if (tableAccess.Decision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rlsPolicy &&
+                rlsPolicy.Predicate.ReferencedColumns.Contains(reqCol.ToLowerInvariant()))
+            {
+                continue;
+            }
+
+            // 3. Query filter
+            if (IsColumnConstrained(where, reqCol))
+            {
+                continue;
+            }
+
+            throw new TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException(
+                TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(
+                    TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing));
+        }
+    }
+
+    private static bool IsColumnConstrained(TreeFilter? filter, string column)
+    {
+        if (filter == null) return false;
+
+        return filter switch
+        {
+            TreeComparison comp =>
+                string.Equals(comp.Column, column, StringComparison.OrdinalIgnoreCase) &&
+                (comp.Operator is TreeFilterOperator.Eq
+                               or TreeFilterOperator.Gt
+                               or TreeFilterOperator.Gte
+                               or TreeFilterOperator.Lt
+                               or TreeFilterOperator.Lte
+                               or TreeFilterOperator.IsNull
+                               or TreeFilterOperator.Contains
+                               or TreeFilterOperator.StartsWith
+                               or TreeFilterOperator.EndsWith ||
+                 (comp.Operator == TreeFilterOperator.In && comp.Value is IEnumerable list && list.Cast<object?>().Any())),
+
+            TreeAndFilter andFilter =>
+                andFilter.Items.Any(item => IsColumnConstrained(item, column)),
+
+            TreeOrFilter orFilter =>
+                orFilter.Items.Count > 0 && orFilter.Items.All(item => IsColumnConstrained(item, column)),
+
+            TreeNotFilter => false,
+
+            _ => false
+        };
     }
 
     private static string Echo(string? name) =>

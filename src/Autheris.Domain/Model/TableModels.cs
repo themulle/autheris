@@ -1,5 +1,8 @@
 namespace Autheris.Domain.Model;
 
+using System.Collections.Immutable;
+using Autheris.Domain.Exceptions;
+
 public enum ConsentEffect
 {
     Allow = 1,
@@ -67,7 +70,8 @@ public sealed record Table
     public string? RlsExpression { get; init; }
     public int? MinGroupSize { get; init; }
     public SmallGroupStrategy? SmallGroupStrategy { get; init; }
-    public IReadOnlyList<string> RequiredFilterColumns { get; init; } = Array.Empty<string>();
+    /// <summary>Issue #163: Table-level required filter columns enforced across every read path.</summary>
+    public ImmutableArray<string> RequiredFilterColumns { get; init; } = ImmutableArray<string>.Empty;
 
     /// <summary>Rank of a sensitivity class; unknown classes rank like HIGH (fail-closed). Empty means NORMAL.</summary>
     public static int SensitivityRank(string? sensitivity)
@@ -209,6 +213,40 @@ public sealed record TableMetadata
     public DataSourceType DataSourceType => Table.DataSourceType;
     public HttpEndpointDescriptor? HttpEndpoint => Table.HttpEndpoint;
     public string? PluginName => Table.PluginName;
+    /// <summary>Issue #163: Table-level required filter columns enforced across every read path.</summary>
+    public ImmutableArray<string> RequiredFilterColumns =>
+        Table.RequiredFilterColumns.IsDefault ? ImmutableArray<string>.Empty : Table.RequiredFilterColumns;
+
+    /// <summary>
+    /// Validates required filter columns on catalog ingestion or load (SEC-GOV163-01, fail closed).
+    /// </summary>
+    public void ValidateRequiredFilterColumns()
+    {
+        if (RequiredFilterColumns.IsDefaultOrEmpty)
+        {
+            return;
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var colName in RequiredFilterColumns)
+        {
+            if (string.IsNullOrWhiteSpace(colName))
+            {
+                throw new CatalogValidationException($"Table '{Identifier}' contains an empty required filter column name.");
+            }
+
+            var trimmed = colName.Trim();
+            if (!HasColumn(trimmed))
+            {
+                throw new CatalogValidationException($"Required filter column '{trimmed}' does not exist in table '{Identifier}'.");
+            }
+
+            if (!seen.Add(trimmed))
+            {
+                throw new CatalogValidationException($"Table '{Identifier}' lists required filter column '{trimmed}' more than once.");
+            }
+        }
+    }
 
     public DatabaseDialect Dialect => Table.Dialect;
 
