@@ -154,16 +154,6 @@ public sealed class CatalogDiscoveryTierVisibilityTests
     }
 
     [Fact]
-    public void ShapeStage_NonAdminUnmarkedOrUnknownView_IsDropped_AdminKept()
-    {
-        var unmarked = Tables[1] with { CatalogView = CatalogView.Unmarked };
-        var unknown = Tables[1] with { CatalogView = (CatalogView)42 };
-
-        CatalogDiscoveryService.ApplyShape([unmarked, unknown], isAdminView: false).ShouldBeEmpty();
-        CatalogDiscoveryService.ApplyShape([unmarked, unknown], isAdminView: true).Count.ShouldBe(2);
-    }
-
-    [Fact]
     public async Task Claimless_GovernanceAdmin_Multi_NeverFullOutput()
     {
         var context = Wp0.Context(Wp0.User("gov", null, ["GovernanceAdmin"]));

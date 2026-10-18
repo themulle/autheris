@@ -8,6 +8,7 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Tests.Unit.Catalog;
+using Autheris.Tests.Unit.TestSupport;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
@@ -16,7 +17,7 @@ using Xunit;
 /// <summary>
 /// Issue #111 (F-C11, early review of DWP-2): pipeline-level guards. The engine stamps every row it returns, so a non-admin row without a
 /// recognised view is fed to the real list and describe paths through the engine-output seam. Each test fails when its guard is removed
-/// (list filter, <c>FindVisibleAsync</c> shape check); #138 INC-1 must re-home these guards and keeps these tests as the check.
+/// (the shape step of <c>CatalogVisibilityService</c>; #138 INC-1 re-homed it there, mutation-checked).
 /// </summary>
 [Trait("Category", "Security")]
 public sealed class McpCatalogPipelineGuardTests
@@ -29,11 +30,15 @@ public sealed class McpCatalogPipelineGuardTests
 
     private static McpDatasetCatalog Catalog(params TableMetadata[] engineOutput)
     {
-        var catalog = new McpDatasetCatalog(
-            Wp0.Tables(engineOutput), Wp0.Consents(), Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
-            options: Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Multi" } }));
-        catalog.VisibleTablesForTesting = (_, _) => Task.FromResult<IReadOnlyList<TableMetadata>>(engineOutput);
-        return catalog;
+        var tables = Wp0.Tables(engineOutput);
+        var consents = Wp0.Consents();
+        var gateway = new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Multi" } };
+        // The real service with the engine-output seam: the shape step inside the service is what these tests guard.
+        var visibility = CatalogVisibilityTestFactory.Create(
+            tables, consents, gateway, engineOutput: (_, _, _) => Task.FromResult<IReadOnlyList<TableMetadata>>(engineOutput));
+        return new McpDatasetCatalog(
+            tables, consents, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
+            options: Options.Create(gateway), visibilityService: visibility);
     }
 
     private static ClaimsPrincipal Subject() => Wp0.User("S-USER", "tenant-a");

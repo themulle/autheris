@@ -444,6 +444,9 @@ public sealed class McpDatasetCatalogScopeLevelTests
         services.AddSingleton(Substitute.For<IGatewayExecutionService>());
         services.AddSingleton(Substitute.For<IAuditLogRepository>());
         services.AddSingleton<IConsentResolutionService>(spy);
+        services.AddSingleton(Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.DisabledRebac());
+        services.AddSingleton(Microsoft.Extensions.Options.Options.Create(new GatewayOptions { Catalog = new Autheris.Domain.Options.DataCatalogOptions { SharedTables = [table.Identifier.ToString()] } }));
+        services.AddScoped<Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService, Autheris.Application.Catalog.Services.CatalogVisibilityService>();
         services.AddScoped<IMcpDatasetCatalog, McpDatasetCatalog>();
         services.AddScoped<IQueryAnalysisService, QueryAnalysisService>();
 

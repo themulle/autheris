@@ -55,7 +55,8 @@ public sealed class McpCatalogChannelsWp0Tests
             Substitute.For<ILineageGraphStore>(),
             tables,
             gatewayOptions: gatewayOptions);
-        var datasets = new McpDatasetCatalog(tables, consentRepo, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(), options: gatewayOptions);
+        var datasets = new McpDatasetCatalog(tables, consentRepo, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(), options: gatewayOptions,
+            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tables, consentRepo, options));
         return new Harness(new McpResourceProvider(discovery, dispatcher), dispatcher, tools, datasets);
     }
 
@@ -236,7 +237,8 @@ public sealed class McpCatalogChannelsWp0Tests
         var tables = Wp0.Tables(released);
         var consents = Wp0.Consents(Wp0.Allow(released.Identifier, "S-GRANTED", Wp0.TenantA));
         var options = Options.Create(Wp0.Options(TenancyMode.Multi, "sales.dbo.orders_a"));
-        var catalog = new McpDatasetCatalog(tables, consents, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(), options: options);
+        var catalog = new McpDatasetCatalog(tables, consents, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(), options: options,
+            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tables, consents, options.Value));
 
         // The tier branch of the visibility filter lists the table for a consent-less caller; the guard must still refuse it.
         await Should.ThrowAsync<GatewayForbiddenException>(() =>

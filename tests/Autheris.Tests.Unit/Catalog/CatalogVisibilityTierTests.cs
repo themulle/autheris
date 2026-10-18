@@ -247,17 +247,6 @@ public sealed class CatalogVisibilityTierTests
         dataAccess.ShouldBeEmpty();
     }
 
-    [Fact]
-    public async Task McpVisibleTables_Discovery_Overload_AppliesTiers()
-    {
-        var tables = new[] { Table(Shared, DatasetVisibility.Summary) };
-        var options = new GatewayOptions { Catalog = new DataCatalogOptions { SharedTables = SharedList } };
-
-        var discovery = await McpCatalogVisibility.VisibleTablesAsync(tables, User(TenantA), ConsentRepo([]), options, CatalogSurface.Discovery, CancellationToken.None);
-
-        discovery.ShouldHaveSingleItem().CatalogView.ShouldBe(CatalogView.Summary);
-    }
-
     // ---- Policy neutrality of catalog tags (T-R2-1, T-R2-2, T-R3-1, O-6a) ----
 
     [Fact]

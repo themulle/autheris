@@ -26,9 +26,8 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
 {
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly IAuditLogRepository _auditLogRepository;
-    private readonly IConsentRepository _consentRepository;
     private readonly GatewayOptions _gatewayOptions;
-    private readonly IRebacEvaluator? _rebacEvaluator;
+    private readonly ICatalogVisibilityService? _visibility;
     private readonly IKeyVaultSecretProvider? _secretProvider;
     private readonly IOpenApiIngestionService? _openApiIngestionService;
     private readonly ICatalogSearchEngine? _searchEngine;
@@ -45,7 +44,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         IAuditLogRepository auditLogRepository,
         IConsentRepository consentRepository,
         IOptions<GatewayOptions> gatewayOptions,
-        IRebacEvaluator? rebacEvaluator = null,
+        ICatalogVisibilityService? visibilityService = null,
         IKeyVaultSecretProvider? secretProvider = null,
         IOpenApiIngestionService? openApiIngestionService = null,
         ICatalogSearchEngine? searchEngine = null,
@@ -56,10 +55,10 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         _maxSpecDownloadBytes = options?.Value.MaxSpecDownloadBytes ?? new CatalogDiscoveryOptions().MaxSpecDownloadBytes;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
-        _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
+        ArgumentNullException.ThrowIfNull(consentRepository);
         _gatewayOptions = (gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions))).Value
             ?? throw new ArgumentNullException(nameof(gatewayOptions));
-        _rebacEvaluator = rebacEvaluator;
+        _visibility = visibilityService;
         _secretProvider = secretProvider;
         _openApiIngestionService = openApiIngestionService;
         _searchEngine = searchEngine;
@@ -83,33 +82,19 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         ArgumentNullException.ThrowIfNull(context);
         ct.ThrowIfCancellationRequested();
 
-        var scope = CallerScopeResolver.Resolve(context.User, TenancyMode);
-        if (scope == CallerScope.None)
+        // An unknown table and one the caller may not see (consent, tier, ReBAC) take the same path and answer null (404): no existence oracle.
+        var row = _visibility == null
+            ? null
+            : await _visibility.FindVisibleAsync(CallerOf(context), table, ct).ConfigureAwait(false);
+        if (row is not { } visibleRow)
         {
             return null;
         }
 
-        var stored = await _metadataRepository.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
-        if (stored == null)
-        {
-            return null;
-        }
-
-        // An unknown table and one the caller may not see take the same path and answer null (404): no existence oracle.
-        var visible = await VisibleAsync([stored], context, scope, ct).ConfigureAwait(false);
-        var metadata = visible.FirstOrDefault(t => t.Identifier == stored.Identifier);
-        if (metadata == null)
-        {
-            return null;
-        }
-
-        if (!await IsRebacAllowedAsync(table, context, ct).ConfigureAwait(false))
-        {
-            return null;
-        }
+        var metadata = visibleRow.Table;
 
         // Summary (issue #111): identifier, sensitivity and activity only; no columns, keys or indexes.
-        if (CatalogViewShaping.Resolve(CallerScopeResolver.IsAdminView(scope), metadata.CatalogView) == CatalogOutputShape.Summary)
+        if (visibleRow.Shape == CatalogOutputShape.Summary)
         {
             return new CatalogDatasetDetail(
                 DatasetId: metadata.Identifier.ToString(),
@@ -268,8 +253,9 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             return [];
         }
 
-        var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
-        var tables = await VisibleAsync(allTables, context, scope, ct).ConfigureAwait(false);
+        var tables = _visibility == null
+            ? []
+            : (await _visibility.GetVisibleAsync(CallerOf(context), contract: null, ct).ConfigureAwait(false)).Tables;
 
         // Group by distinct endpoint base URL and domain
         var sources = new Dictionary<string, CatalogDatasourceSummary>(StringComparer.OrdinalIgnoreCase);
@@ -304,96 +290,30 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     }
 
     /// <summary>
-    /// The tables the caller may discover (consent-based visibility, tenant-confined administrator view, ReBAC as an additional
-    /// intersection) together with the unfiltered catalog (only used to tell which columns a caller cannot see). Any failure of a
-    /// dependency yields the empty set, never the unfiltered catalog.
+    /// The channel caller. The REST subject (<c>context.SubjectId</c>) and the principal SID must agree (SEC-CAT138-03: the stricter of
+    /// both applies); a mismatch answers as no caller, so the service returns the empty set.
+    /// </summary>
+    private static CatalogCaller CallerOf(RequestContext context)
+    {
+        var sid = context.User.GetUserSid();
+        var principal = sid != null && string.Equals(sid.Value.Value, context.SubjectId.Value, StringComparison.Ordinal) ? context.User : null;
+        return new CatalogCaller(principal, context.TenantId, CatalogChannel.Rest);
+    }
+
+    /// <summary>
+    /// The tables the caller may discover (one visibility service: consent, tier shaping and ReBAC) together with the unfiltered
+    /// catalog (only used to tell which columns a caller cannot see). Any failure answers the empty set, never the unfiltered catalog.
     /// </summary>
     private async Task<(IReadOnlyList<TableMetadata> Permitted, IReadOnlyList<TableMetadata> All)> ResolvePermittedAsync(RequestContext context, CancellationToken ct)
     {
-        var scope = CallerScopeResolver.Resolve(context.User, TenancyMode);
-        CallerScopeDiagnostics.ReportIfClaimlessAdmin(_logger, context.User, scope);
-        if (scope == CallerScope.None)
+        if (_visibility == null)
         {
             return ([], []);
         }
 
-        var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
-        if (allTables.Count == 0)
-        {
-            return ([], []);
-        }
-
-        var visible = await VisibleAsync(allTables, context, scope, ct).ConfigureAwait(false);
-        if (visible.Count == 0 || _rebacEvaluator is not { IsEnabled: true })
-        {
-            return (visible, allTables);
-        }
-
-        // ReBAC stays an additional filter: the result is the intersection of consent visibility and ReBAC, never a union.
-        var checks = visible.Select(async table =>
-        {
-            var allowed = await IsRebacAllowedAsync(table.Identifier, context, ct).ConfigureAwait(false);
-            return allowed ? table : null;
-        });
-
-        var results = await Task.WhenAll(checks).ConfigureAwait(false);
-        return (results.Where(t => t != null).Select(t => t!).ToList(), allTables);
-    }
-
-    /// <summary>Test seam: replaces the visibility engine output so a row the engine never produces (non-admin, no recognised view) reaches <see cref="ApplyShape"/>.</summary>
-    internal Func<IReadOnlyList<TableMetadata>, RequestContext, CancellationToken, Task<IReadOnlyList<TableMetadata>>>? EngineOutputForTesting { get; set; }
-
-    private async Task<IReadOnlyList<TableMetadata>> VisibleAsync(
-        IReadOnlyList<TableMetadata> tables, RequestContext context, CallerScope scope, CancellationToken ct)
-    {
-        try
-        {
-            // Issue #111: the REST discovery surface applies the persisted tiers. The same resolver result (scope, same tenancy mode)
-            // that drives the list selects the shaping, so a row without a recognised view never reaches a non-administrator.
-            var visible = EngineOutputForTesting is { } seam
-                ? await seam(tables, context, ct).ConfigureAwait(false)
-                : await CatalogVisibility.VisibleTablesAsync(
-                    tables,
-                    context.User,
-                    context.TenantId,
-                    _consentRepository,
-                    contract: null,
-                    TenancyMode,
-                    _gatewayOptions.Catalog.SharedTables,
-                    CatalogSurface.Discovery,
-                    ct).ConfigureAwait(false);
-            return ApplyShape(visible, CallerScopeResolver.IsAdminView(scope));
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Catalog visibility could not be evaluated (caller class {Scope}); answering with an empty catalog.", scope);
-            return [];
-        }
-    }
-
-    /// <summary>F-C11 / G1: drops rows that do not exist for the caller (non-administrator without a recognised view).</summary>
-    internal static IReadOnlyList<TableMetadata> ApplyShape(IReadOnlyList<TableMetadata> rows, bool isAdminView) =>
-        rows.Where(t => CatalogViewShaping.Resolve(isAdminView, t.CatalogView) != CatalogOutputShape.NotFound).ToList();
-
-    private async Task<bool> IsRebacAllowedAsync(TableIdentifier table, RequestContext context, CancellationToken ct)
-    {
-        if (_rebacEvaluator is not { IsEnabled: true })
-        {
-            return true;
-        }
-
-        var checkResult = await _rebacEvaluator.CheckAsync(
-            new RebacCheckRequest(
-                TenantId: context.TenantId.Value,
-                User: context.SubjectId.Value,
-                Relation: RebacTableGate.Relation,
-                Object: RebacTableGate.ObjectId(table)),
-            ct).ConfigureAwait(false);
-        return checkResult.Allowed;
+        var set = await _visibility.GetVisibleAsync(CallerOf(context), contract: null, ct).ConfigureAwait(false);
+        CallerScopeDiagnostics.ReportIfClaimlessAdmin(_logger, context.User, set.Scope);
+        return (set.Tables, set.AllTables);
     }
 
     private static CatalogDatasetSummary ToSummary(TableMetadata table) => ToSummary(table, table.Table.DataSourceType.ToString());

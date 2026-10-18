@@ -53,9 +53,12 @@ public sealed class McpCatalogSummaryViewTests
         var graphQl = Substitute.For<IGraphQlCatalogMap>();
         graphQl.GetTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(ci =>
             Task.FromResult<GraphQlTableMapping?>(new GraphQlTableMapping(ci.Arg<TableIdentifier>(), "salesQuery", "T", "TFilter", "TOrder", [], [])));
+        var tableRepo = Wp0.Tables(tables.ToArray());
+        var consentRepo = Wp0.Consents(consents);
         return new McpDatasetCatalog(
-            Wp0.Tables(tables.ToArray()), Wp0.Consents(consents), Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
-            options: Options.Create(options), graphQlMap: graphQl, dataOwnershipRepository: owners);
+            tableRepo, consentRepo, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
+            options: Options.Create(options), graphQlMap: graphQl, dataOwnershipRepository: owners,
+            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tableRepo, consentRepo, options));
     }
 
     private static ClaimsPrincipal Subject(string tenant = "tenant-a") => Wp0.User("S-USER", tenant);

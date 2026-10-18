@@ -787,7 +787,9 @@ public sealed class QueryAnalysisAndValueProfilingTests
             options: Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Single" } }),
             profileService: profileService,
             syntheticRowGenerator: syntheticGenerator,
-            auditLogRepository: auditRepo);
+            auditLogRepository: auditRepo,
+            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(
+                Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeSingleReadsFromCatalog(metadataRepo), consentRepo, new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Single" } }));
 
         var viewer = CreatePrincipal("catalog-viewer-1");
 

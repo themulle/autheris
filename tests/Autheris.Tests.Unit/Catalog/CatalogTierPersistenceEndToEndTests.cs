@@ -57,7 +57,8 @@ public sealed class CatalogTierPersistenceEndToEndTests : IDisposable
         consents.GetAllActiveConsentsForSubjectsAsync(
                 Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>([]));
-        return new McpDatasetCatalog(_repo, consents, Substitute.For<IGatewayExecutionService>(), options: Shared);
+        return new McpDatasetCatalog(_repo, consents, Substitute.For<IGatewayExecutionService>(), options: Shared,
+            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(_repo, consents, Shared.Value));
     }
 
     [Fact]

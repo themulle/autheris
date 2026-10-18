@@ -1,6 +1,9 @@
 namespace Autheris.Tests.Unit.Catalog;
 
 using Autheris.Application.Catalog.Services;
+using Autheris.Application.Interfaces;
+using Autheris.Tests.Unit.TestSupport;
+using NSubstitute;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -9,8 +12,8 @@ using Xunit;
 
 /// <summary>
 /// Issue #111 (F-C11, early review of DWP-2): the engine stamps every row, so a non-admin row without a recognised view is fed to the real REST
-/// list, detail and search paths through the engine-output seam. Each test fails when the <c>ApplyShape</c> call in <c>VisibleAsync</c> is removed;
-/// #138 INC-1 re-homes that call and keeps these tests as the check.
+/// list, detail and search paths through the engine-output seam. Each test fails when the shape step of <c>CatalogVisibilityService</c> is removed
+/// (#138 INC-1 re-homed it there; mutation-checked).
 /// </summary>
 [Trait("Category", "Security")]
 public sealed class CatalogDiscoveryPipelineGuardTests
@@ -19,9 +22,14 @@ public sealed class CatalogDiscoveryPipelineGuardTests
 
     private static CatalogDiscoveryService Service(params TableMetadata[] engineOutput)
     {
-        var service = Wp0.Service(Wp0.Tables(engineOutput), Wp0.Consents(), Wp0.Options(TenancyMode.Multi, []));
-        service.EngineOutputForTesting = (_, _, _) => Task.FromResult<IReadOnlyList<TableMetadata>>(engineOutput);
-        return service;
+        var tables = Wp0.Tables(engineOutput);
+        var consents = Wp0.Consents();
+        var options = Wp0.Options(TenancyMode.Multi, []);
+        // The real service with the engine-output seam: the shape step inside the service is what these tests guard.
+        var visibility = CatalogVisibilityTestFactory.Create(
+            tables, consents, options, engineOutput: (_, _, _) => Task.FromResult<IReadOnlyList<TableMetadata>>(engineOutput));
+        return new CatalogDiscoveryService(
+            tables, Substitute.For<IAuditLogRepository>(), consents, Microsoft.Extensions.Options.Options.Create(options), visibility);
     }
 
     private static RequestContext Subject() => Wp0.Context(Wp0.User("S-USER", "tenant-a"));

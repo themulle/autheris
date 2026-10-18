@@ -35,6 +35,8 @@ public sealed class CatalogDiscoveryWiringTests
             services.AddSingleton(Wp0.Consents(Wp0.Allow(new Autheris.Domain.Common.TableIdentifier("sales", "dbo", "orders_a"), "S-A-USER", Wp0.TenantA)));
         }
 
+        // Production registers the evaluator unconditionally; ReBAC configured on without one denies (SEC-CAT138-02).
+        services.AddSingleton(Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.DisabledRebac());
         services.AddAutherisCatalog();
         return services;
     }

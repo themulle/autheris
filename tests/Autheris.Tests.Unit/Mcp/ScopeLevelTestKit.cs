@@ -150,6 +150,7 @@ internal static class ScopeLevelTestKit
     {
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
+        repo.GetTableMetadataAsync(table.Identifier, Arg.Any<CancellationToken>()).Returns(Task.FromResult<TableMetadata?>(table));
         return repo;
     }
 
@@ -161,17 +162,21 @@ internal static class ScopeLevelTestKit
         GatewayOptions? gatewayOptions = null)
     {
         var profileService = new ColumnValueProfileService();
+        var tableRepo = MetadataRepository(table);
+        var consentRepo = ConsentRepository(consents);
+        var effectiveOptions = gatewayOptions ?? new GatewayOptions { Catalog = new Autheris.Domain.Options.DataCatalogOptions { SharedTables = [table.Identifier.ToString()] } };
         return new McpDatasetCatalog(
-            MetadataRepository(table),
-            ConsentRepository(consents),
+            tableRepo,
+            consentRepo,
             Substitute.For<IGatewayExecutionService>(),
             auditLogRepository: Substitute.For<IAuditLogRepository>(),
             // Persisted tiers (issue #111) apply on shared tables in Multi mode: the table under test is shared so tier fixtures stay meaningful.
-            options: Options.Create(gatewayOptions ?? new GatewayOptions { Catalog = new Autheris.Domain.Options.DataCatalogOptions { SharedTables = [table.Identifier.ToString()] } }),
+            options: Options.Create(effectiveOptions),
             profileService: profileService,
             syntheticRowGenerator: new SyntheticSampleRowGenerator(profileService),
             consentResolution: resolver,
-            logger: logger);
+            logger: logger,
+            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tableRepo, consentRepo, effectiveOptions));
     }
 
     public static IConsentResolutionService ResolverReturning(Func<TableAccessDecision?> decision)

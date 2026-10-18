@@ -47,12 +47,14 @@ public sealed class CatalogKeyDefinitionReportTests
     {
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Id, Arg.Any<CancellationToken>()).Returns(Table());
+        var consents = Substitute.For<IConsentRepository>();
+        var options = Wp0.Options(Autheris.Domain.Options.TenancyMode.Single);
         var service = new CatalogDiscoveryService(
             repo,
             Substitute.For<IAuditLogRepository>(),
-            Substitute.For<IConsentRepository>(),
-            Microsoft.Extensions.Options.Options.Create(Wp0.Options(Autheris.Domain.Options.TenancyMode.Single)),
-            Substitute.For<IRebacEvaluator>(),
+            consents,
+            Microsoft.Extensions.Options.Options.Create(options),
+            Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(repo, consents, options, Substitute.For<IRebacEvaluator>()),
             Substitute.For<IKeyVaultSecretProvider>(),
             Substitute.For<IOpenApiIngestionService>(),
             Substitute.For<ICatalogSearchEngine>(),

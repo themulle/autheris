@@ -118,7 +118,8 @@ public sealed class CatalogVisibilityServiceTests
     private static CatalogVisibilityService Svc(
         ITableMetadataRepository? tables, IConsentRepository? consents, IRebacEvaluator? rebac = null,
         GatewayOptions? options = null, ILogger<CatalogVisibilityService>? logger = null)
-        => CatalogVisibilityTestFactory.Create(tables, consents, options ?? Opts(rebacEnabled: rebac != null), rebac, logger);
+        => CatalogVisibilityTestFactory.Create(tables, consents, options ?? Opts(rebacEnabled: rebac != null), rebac, logger,
+            omitEvaluator: rebac == null && options?.Rebac?.Enabled == true);
 
     private static CatalogCaller Caller(ClaimsPrincipal? p) => CatalogVisibilityTestFactory.Caller(p);
 

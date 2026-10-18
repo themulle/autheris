@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Tests.Unit.TestSupport;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -99,7 +100,8 @@ public sealed class Wave3CatalogOwnershipTests
         var gatewayExec = Substitute.For<IGatewayExecutionService>();
         var user = CreateUser();
 
-        var catalog = new McpDatasetCatalog(metadataRepo, consentRepo, gatewayExec, options: TierOptions());
+        var catalog = new McpDatasetCatalog(metadataRepo, consentRepo, gatewayExec, options: TierOptions(),
+            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(metadataRepo.ServeSingleReadsFromCatalog(), consentRepo, TierOptions().Value));
 
         // Act: Filter by tag "financial"
         var financialList = await catalog.ListDatasetsAsync(user, tag: "financial");
@@ -159,7 +161,8 @@ public sealed class Wave3CatalogOwnershipTests
             consentRepo,
             gatewayExec,
             dataOwnershipRepository: dataOwnerRepo,
-            options: TierOptions());
+            options: TierOptions(),
+            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(metadataRepo.ServeSingleReadsFromCatalog(), consentRepo, TierOptions().Value));
 
         var user = CreateUser();
 

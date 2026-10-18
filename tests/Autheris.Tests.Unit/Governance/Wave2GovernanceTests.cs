@@ -246,7 +246,8 @@ public sealed class Wave2GovernanceTests
             goldenQueryService: null,
             options: null,
             graphQlMap: null,
-            explanationService: explanationService);
+            explanationService: explanationService,
+            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tableRepo, consentRepo));
 
         var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1")], "test"));
 

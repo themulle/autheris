@@ -31,12 +31,14 @@ public sealed class CatalogDiscoveryServiceTests
     private CatalogDiscoveryService CreateService(ICatalogSearchEngine? searchEngine = null)
     {
         // Single-tenant deployment: a GovernanceAdmin without tenant claim is the unrestricted administrator view; ReBAC still intersects.
+        var consents = Substitute.For<IConsentRepository>();
+        var options = Wp0.Options(Autheris.Domain.Options.TenancyMode.Single);
         return new CatalogDiscoveryService(
             _metadataRepository,
             _auditLogRepository,
-            Substitute.For<IConsentRepository>(),
-            Microsoft.Extensions.Options.Options.Create(Wp0.Options(Autheris.Domain.Options.TenancyMode.Single)),
-            _rebacEvaluator,
+            consents,
+            Microsoft.Extensions.Options.Options.Create(options),
+            Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(_metadataRepository, consents, options, Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.WithBatchFromCheck(_rebacEvaluator)),
             _secretProvider,
             _openApiIngestionService,
             searchEngine ?? _searchEngine,
