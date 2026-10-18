@@ -72,6 +72,19 @@ public static class GatewayDiagnostics
     public static readonly Histogram<double> LineageTraversalDuration =
         Meter.CreateHistogram<double>("autheris_lineage_traversal_duration_ms", "ms", description: "Duration of cycle-safe lineage traversal");
 
+    // Issue #107 (SEC-RF107-09 d): tags are limited to dialect, outcome and reason; never tenant, table, rule id or key counts.
+    public static readonly Counter<long> RowFilterKeySetHits =
+        Meter.CreateCounter<long>("autheris.rowfilter.keyset.hits", description: "Correlated row-filter sites served from a cached key set");
+
+    public static readonly Counter<long> RowFilterKeySetMisses =
+        Meter.CreateCounter<long>("autheris.rowfilter.keyset.misses", description: "Correlated row-filter sites whose key set was loaded for the statement");
+
+    public static readonly Counter<long> RowFilterKeySetFallbacks =
+        Meter.CreateCounter<long>("autheris.rowfilter.keyset.fallbacks", description: "Correlated row-filter sites that kept the exact EXISTS form, by reason");
+
+    public static readonly Histogram<double> RowFilterKeyQueryDuration =
+        Meter.CreateHistogram<double>("autheris.rowfilter.keyset.key_query.duration", "ms", description: "Duration of a row-filter key query");
+
     // Versioned PII allow-list per span type (Frozen for zero-allocation thread-safe lookups)
     private static readonly FrozenDictionary<string, FrozenSet<string>> SpanTagAllowList = new Dictionary<string, FrozenSet<string>>
     {

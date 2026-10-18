@@ -15,10 +15,11 @@ using TrinoSqlEngine.Governance;
 /// </summary>
 internal static class CorrelatedKeySetSubstitution
 {
-    /// <summary>The sites of a predicate: the ones a stage may substitute and the registered ones it must leave as <c>EXISTS</c> (reason <c>Deny_Negated</c>).</summary>
+    /// <summary>The sites of a predicate: the ones a stage may substitute and the registered ones it must leave as <c>EXISTS</c> (reason <c>Deny_Negated</c>, or <c>Deny_Shared</c> for a node instance that occurs more than once).</summary>
     internal sealed record SiteScan(
         IReadOnlyList<(ExistsExpression Node, CorrelatedFilterSite Site)> Eligible,
-        IReadOnlyList<(ExistsExpression Node, CorrelatedFilterSite Site)> Excluded);
+        IReadOnlyList<(ExistsExpression Node, CorrelatedFilterSite Site)> Excluded,
+        IReadOnlySet<ExistsExpression> Shared);
 
     /// <summary>Positive-polarity registered sites of the predicate that occur once, in a stable pre-order.</summary>
     public static IReadOnlyList<(ExistsExpression Node, CorrelatedFilterSite Site)> FindSites(PolicyPredicate predicate) => Scan(predicate).Eligible;
@@ -76,25 +77,33 @@ internal static class CorrelatedKeySetSubstitution
         }
 
         var excluded = new List<(ExistsExpression, CorrelatedFilterSite)>();
+        var shared = new HashSet<ExistsExpression>(ReferenceEqualityComparer.Instance);
         foreach (var node in order)
         {
+            if (total[node] > 1)
+            {
+                shared.Add(node);
+            }
+
             if (!seenEligible.Contains(node) && CorrelatedFilterSiteRegistry.TryGet(node, out var site))
             {
                 excluded.Add((node, site));
             }
         }
 
-        return new SiteScan(eligible, excluded);
+        return new SiteScan(eligible, excluded, shared);
     }
 
     /// <summary>
     /// Replaces each given node (reference identity) by its IN list, or by <c>1 = 0</c> for an empty key set, and returns a new predicate.
     /// A node that is not an eligible site of <paramref name="predicate"/> (negated, shared, unregistered) is refused with an
     /// <see cref="InvalidOperationException"/>: the substitution never widens a filter by a caller's mistake (fail closed).
+    /// D-WPC-6: the list form builds the reference-equality map itself, so two structurally equal <see cref="ExistsExpression"/> records
+    /// can never be collapsed by a caller's default-comparer dictionary; the same node instance twice is an <see cref="InvalidOperationException"/>.
     /// </summary>
     public static PolicyPredicate Substitute(
         PolicyPredicate predicate,
-        IReadOnlyDictionary<ExistsExpression, KeySetReplacement> replacements,
+        IReadOnlyList<(ExistsExpression Node, KeySetReplacement Replacement)> replacements,
         TargetSqlDialect dialect)
     {
         ArgumentNullException.ThrowIfNull(predicate);
@@ -110,6 +119,11 @@ internal static class CorrelatedKeySetSubstitution
         var chosen = new Dictionary<ExistsExpression, KeySetReplacement>(ReferenceEqualityComparer.Instance);
         foreach (var (node, replacement) in replacements)
         {
+            if (chosen.ContainsKey(node))
+            {
+                throw new InvalidOperationException("The same correlated filter site is replaced twice.");
+            }
+
             if (!eligible.Contains(node))
             {
                 throw new InvalidOperationException("A key-set replacement targets a node that is not a substitutable correlated filter site.");

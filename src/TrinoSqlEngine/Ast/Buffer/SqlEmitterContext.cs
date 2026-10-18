@@ -38,6 +38,12 @@ public sealed class SqlEmitterContext
     public int MaxParameterBudget { get; init; }
     public int ParameterCount { get; set; }
     public bool InPredicateContext { get; set; }
+
+    /// <summary>
+    /// REQ-SQL-130 (BC-130-12): set by the compiler or the federated planner after the time zone call validator ran over the statement. The default is
+    /// false: a generator refuses to emit <c>convert_timezone</c> for an unvalidated statement, so a future emit site that skips the validator fails closed.
+    /// </summary>
+    internal bool TimeZoneCallsValidated { get; init; }
     public bool InProjectionContext { get; set; }
     public int IndentLevel { get; set; }
 
@@ -112,7 +118,7 @@ public sealed class SqlEmitterContext
         return Bind(key, value, type, origin, null, columnType);
     }
 
-    private enum DedupKind { Value, Int64, Int32, Policy, PolicyLike, Client }
+    private enum DedupKind { Value, Int64, Int32, Policy, PolicyLike, Client, ClientZone }
 
     /// <summary>Identity of one bound value: a struct instead of a concatenated string (compared by every field, ordinal).</summary>
     private readonly record struct DedupKey(DedupKind Kind, int Type, int Origin, string? Name, string? ColumnType, long Number, string? Text);
@@ -157,6 +163,40 @@ public sealed class SqlEmitterContext
     /// <summary>Binds a client named parameter; the binder resolves the value per request.</summary>
     public string BindClient(ParameterReference parameter)
     {
+        ValidateClientParameter(parameter);
+
+        // List element slots (REQ-SQL-128): both members or none, and the index lies inside the count (SEC-128-10 c).
+        if (parameter.ListIndex.HasValue != parameter.ListCount.HasValue
+            || (parameter.ListIndex is { } index && (index < 0 || index >= parameter.ListCount!.Value)))
+        {
+            throw new ClientListException(GovernedSqlErrorCodes.ListParamPosition);
+        }
+
+        // The element index is part of the identity: the elements of one list are distinct slots, the same element of a list that is
+        // used twice is one slot.
+        long listKey = parameter.ListIndex is { } element ? element + 1L : 0L;
+        return Bind(new DedupKey(DedupKind.Client, 0, 0, parameter.Name, null, listKey, null), null, SqlParameterType.String, ParameterOrigin.ClientNamed, parameter.Name, null, parameter.ListIndex, parameter.ListCount);
+    }
+
+    /// <summary>
+    /// REQ-SQL-130 (A-4): binds a client named parameter that is used as a time zone argument. The slot carries <see cref="BoundParameter.ZoneArgument"/>;
+    /// only the production binder may consume it (it maps the value through the closed zone set before the command exists).
+    /// </summary>
+    public string BindZoneClient(ParameterReference parameter)
+    {
+        ValidateClientParameter(parameter);
+        if (parameter.ListIndex is not null || parameter.ListCount is not null)
+        {
+            // A list element is never a zone (BC-130-5c); the validator refused it already, this is the second, independent check.
+            throw new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneArgument);
+        }
+
+        return Bind(new DedupKey(DedupKind.ClientZone, 0, 0, parameter.Name, null, 0, null), null, SqlParameterType.String, ParameterOrigin.ClientNamed, parameter.Name, null,
+            zoneArgument: true);
+    }
+
+    private static void ValidateClientParameter(ParameterReference parameter)
+    {
         ArgumentNullException.ThrowIfNull(parameter);
         if (!parameter.IsSynthetic)
         {
@@ -167,11 +207,10 @@ public sealed class SqlEmitterContext
         {
             throw new SecurityException("The client parameter name is invalid or uses a reserved prefix.");
         }
-
-        return Bind(new DedupKey(DedupKind.Client, 0, 0, parameter.Name, null, 0, null), null, SqlParameterType.String, ParameterOrigin.ClientNamed, parameter.Name);
     }
 
-    private string Bind(DedupKey key, object? value, SqlParameterType type, ParameterOrigin origin, string? sourceName, string? columnType = null)
+    private string Bind(DedupKey key, object? value, SqlParameterType type, ParameterOrigin origin, string? sourceName, string? columnType = null, int? listIndex = null, int? listCount = null,
+        bool zoneArgument = false)
     {
         if (_bound is null || _dedup is null || Capabilities is null)
         {
@@ -190,7 +229,7 @@ public sealed class SqlEmitterContext
         }
 
         var (marker, name) = MarkerAndName(Capabilities.MarkerStyle, ordinal);
-        _bound.Add(new BoundParameter(marker, name, ordinal, value, type, origin, sourceName, columnType));
+        _bound.Add(new BoundParameter(marker, name, ordinal, value, type, origin, sourceName, columnType, listIndex, listCount, zoneArgument));
         _dedup[key] = ordinal;
         ParameterCount = _bound.Count;
         return marker;

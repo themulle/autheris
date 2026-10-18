@@ -31,8 +31,9 @@ internal static class GovernedTestSupport
     /// <summary>The execution guard of unit tests that run no provider statement under a timeout (the host registers the real guard; the service requires one).</summary>
     public static Autheris.Application.Sql.Interfaces.IProviderExecutionGuard Guard => Autheris.Application.Sql.Interfaces.PassThroughExecutionGuard.Instance;
 
-    public static GovernancePolicyFactory PolicyFactory(ITableMetadataRepository? repository, IOptions<GatewayOptions>? options = null) =>
-        new(new MetadataCatalogProvider(repository), repository ?? Substitute.For<ITableMetadataRepository>(), options ?? Options.Create(new GatewayOptions()));
+    public static GovernancePolicyFactory PolicyFactory(
+        ITableMetadataRepository? repository, IOptions<GatewayOptions>? options = null, Autheris.Application.Sql.Policy.RowFilterKeySets.IRowFilterKeySetStage? keySetStage = null) =>
+        new(new MetadataCatalogProvider(repository), repository ?? Substitute.For<ITableMetadataRepository>(), options ?? Options.Create(new GatewayOptions()), keySetStage);
 
     /// <param name="options">The gateway options of the service under test (the HMAC key reference lives in them).</param>
     /// <param name="secrets">The secret provider of the service under test; without it an HMAC mask degrades to Redact (fail closed).</param>

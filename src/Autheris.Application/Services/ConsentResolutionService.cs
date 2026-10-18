@@ -30,7 +30,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
 
         // 1. Identify applicable active consents for Subject Set S
         var applicable = activeConsents
-            .Where(c => c.IsActive(now) && c.TableIdentifier == table && IsSubjectMatch(c, userSid, subjectGroupSids, userRoles, allUserSids))
+            .Where(c => IsApplicable(c, table, now, userSid, subjectGroupSids, userRoles, allUserSids))
             .ToList();
 
         // Separate into A (ALLOW) and D (DENY)
@@ -309,6 +309,20 @@ public sealed class ConsentResolutionService : IConsentResolutionService
 
         return effectiveLevel;
     }
+
+    /// <summary>
+    /// The single applicability predicate of the access decision: active at <paramref name="now"/>, for the table and
+    /// granted to the caller. The access explanation reuses it so it never reads a consent the decision ignores (#158).
+    /// </summary>
+    internal static bool IsApplicable(
+        Consent consent,
+        TableIdentifier table,
+        DateTimeOffset now,
+        Sid userSid,
+        IReadOnlySet<Sid> subjectGroupSids,
+        IReadOnlySet<string> userRoles,
+        IReadOnlySet<Sid>? allUserSids = null) =>
+        consent.IsActive(now) && consent.TableIdentifier == table && IsSubjectMatch(consent, userSid, subjectGroupSids, userRoles, allUserSids);
 
     private static bool IsSubjectMatch(
         Consent consent,

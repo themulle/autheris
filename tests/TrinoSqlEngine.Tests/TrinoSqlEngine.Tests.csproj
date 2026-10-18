@@ -31,6 +31,7 @@
     <None Update="Conformance\Fixtures\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="TimeZones\Cldr\*" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures\RawJava\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

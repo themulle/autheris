@@ -294,10 +294,27 @@ CREATE TABLE dbo.TABLE_RELATIONS (
     parent_table_id NVARCHAR(128) NOT NULL,
     child_table_id NVARCHAR(128) NOT NULL,
     relation_name NVARCHAR(256) NOT NULL,
-    join_key_parent NVARCHAR(256) NOT NULL,
-    join_key_child NVARCHAR(256) NOT NULL,
     cardinality NVARCHAR(64) NOT NULL
 );
+
+-- Issue #151: composite-key relations. One row per ordered key pair; column names are validated on write.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_TABLE_RELATIONS_NATURAL' AND object_id = OBJECT_ID(N'dbo.TABLE_RELATIONS'))
+    CREATE UNIQUE INDEX UX_TABLE_RELATIONS_NATURAL ON dbo.TABLE_RELATIONS (parent_table_id, child_table_id, relation_name);
+
+IF OBJECT_ID(N'dbo.TABLE_RELATION_KEYS', N'U') IS NULL
+CREATE TABLE dbo.TABLE_RELATION_KEYS (
+    relation_id NVARCHAR(128) NOT NULL,
+    key_ordinal INT NOT NULL CONSTRAINT CK_TABLE_RELATION_KEYS_ordinal CHECK (key_ordinal >= 1),
+    parent_column NVARCHAR(256) NOT NULL,
+    child_column NVARCHAR(256) NOT NULL,
+    CONSTRAINT PK_TABLE_RELATION_KEYS PRIMARY KEY (relation_id, key_ordinal)
+);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_TABLE_RELATION_KEYS_PARENT' AND object_id = OBJECT_ID(N'dbo.TABLE_RELATION_KEYS'))
+    CREATE UNIQUE INDEX UX_TABLE_RELATION_KEYS_PARENT ON dbo.TABLE_RELATION_KEYS (relation_id, parent_column);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_TABLE_RELATION_KEYS_CHILD' AND object_id = OBJECT_ID(N'dbo.TABLE_RELATION_KEYS'))
+    CREATE UNIQUE INDEX UX_TABLE_RELATION_KEYS_CHILD ON dbo.TABLE_RELATION_KEYS (relation_id, child_column);
 
 IF OBJECT_ID(N'dbo.ITSM_OUTBOX', N'U') IS NULL
 CREATE TABLE dbo.ITSM_OUTBOX (

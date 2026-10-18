@@ -23,6 +23,25 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
     protected override bool SupportsTryCast => true;
     protected override bool SupportsJoinUsing => false;
 
+    protected override bool EmitsTimeZoneConversion => true;
+
+    /// <summary>
+    /// <c>CAST(((ts) AT TIME ZONE from) AT TIME ZONE to AS datetime2)</c>: the first operator reads the plain value as local time of <c>from</c>, the second
+    /// moves the instant to <c>to</c>, and the cast to <c>datetime2</c> keeps the local date and time and drops the offset. Both zones are bound (Windows ids).
+    /// </summary>
+    protected override void FormatConvertTimeZone(ref ValueStringBuilder builder, FunctionCallExpression fn, SqlEmitterContext context)
+    {
+        builder.Append("CAST(((");
+        GenerateExpression(fn.Arguments[2], ref builder, context);
+        builder.Append(") AT TIME ZONE ");
+        AppendZoneArgument(ref builder, fn.Arguments[0], context);
+        builder.Append(") AT TIME ZONE ");
+        AppendZoneArgument(ref builder, fn.Arguments[1], context);
+        builder.Append(" AS ");
+        AppendStructural(ref builder, context, "datetime2");
+        builder.Append(')');
+    }
+
     /// <summary>
     /// T-SQL requires a terminating semicolon after MERGE. It is appended exactly once, as the last character, and registered with
     /// the emitted-text checker, which allows a semicolon nowhere else (SEC-ADG-08 c).

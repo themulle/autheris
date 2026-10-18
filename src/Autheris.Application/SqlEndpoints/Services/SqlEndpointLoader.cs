@@ -25,10 +25,31 @@ public sealed class SqlEndpointLoader : IDisposable
         RegexOptions.Compiled | RegexOptions.Multiline,
         TimeSpan.FromSeconds(2));
 
+    // REQ-SQL-128 (A-8, SEC-128-14): the colon form "name: type[][!] [= default]". Anchored, no nested quantifiers.
     private static readonly Regex ParamHeaderRegex = new(
-        @"\A([a-zA-Z0-9_]+)\s*:\s*([a-zA-Z0-9_]+)(\!)?(?:\s*=\s*(.+))?\z",
-        RegexOptions.Compiled,
+        @"\A([A-Za-z0-9_]+)\s*:\s*([A-Za-z0-9_]+)(\[\])?(\!)?(?:\s*=\s*(.+))?\z",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(2));
+
+    // A value that starts as a colon declaration. The description-only form (no colon after the first token) is not one and stays ignored.
+    private static readonly Regex ParamColonFormRegex = new(
+        @"\A([A-Za-z0-9_]+)\s*:",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(2));
+
+    private static readonly Dictionary<string, Type> ParamTypeAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["int"] = typeof(int), ["integer"] = typeof(int), ["int32"] = typeof(int), ["smallint"] = typeof(int), ["tinyint"] = typeof(int),
+        ["long"] = typeof(long), ["bigint"] = typeof(long), ["int64"] = typeof(long),
+        ["decimal"] = typeof(decimal), ["numeric"] = typeof(decimal), ["money"] = typeof(decimal),
+        ["float"] = typeof(double), ["double"] = typeof(double), ["real"] = typeof(double),
+        ["bool"] = typeof(bool), ["boolean"] = typeof(bool), ["bit"] = typeof(bool),
+        ["date"] = typeof(DateTimeOffset), ["datetime"] = typeof(DateTimeOffset), ["datetime2"] = typeof(DateTimeOffset),
+        ["smalldatetime"] = typeof(DateTimeOffset), ["datetimeoffset"] = typeof(DateTimeOffset), ["timestamp"] = typeof(DateTimeOffset),
+        ["guid"] = typeof(Guid), ["uuid"] = typeof(Guid), ["uniqueidentifier"] = typeof(Guid),
+        ["string"] = typeof(string), ["text"] = typeof(string), ["varchar"] = typeof(string), ["nvarchar"] = typeof(string),
+        ["char"] = typeof(string), ["nchar"] = typeof(string)
+    };
 
     private readonly ISqlEndpointRegistry _registry;
     private readonly ISqlEngine _sqlEngine;
@@ -186,7 +207,7 @@ public sealed class SqlEndpointLoader : IDisposable
         string? dataSource = null;
         string httpMethod = "GET";
         int timeoutSeconds = 30;
-        var headerParams = new Dictionary<string, (Type Type, bool IsRequired, object? DefaultVal, string? Desc)>(StringComparer.OrdinalIgnoreCase);
+        var headerParams = new Dictionary<string, (Type Type, bool IsRequired, object? DefaultVal, string? Desc, bool IsList)>(StringComparer.OrdinalIgnoreCase);
 
         var matches = HeaderRegex.Matches(content);
         foreach (Match match in matches)
@@ -212,7 +233,7 @@ public sealed class SqlEndpointLoader : IDisposable
                     timeoutSeconds = t;
                     break;
                 case "param":
-                    ParseParamHeader(val, headerParams);
+                    ParseParamHeader(val, headerParams, defaultName);
                     break;
             }
         }
@@ -260,6 +281,7 @@ public sealed class SqlEndpointLoader : IDisposable
                 bool isRequired = true;
                 object? defaultVal = null;
                 string? desc = null;
+                bool isList = false;
 
                 if (headerParams.TryGetValue(p.Name, out var hp))
                 {
@@ -267,6 +289,7 @@ public sealed class SqlEndpointLoader : IDisposable
                     isRequired = hp.IsRequired;
                     defaultVal = hp.DefaultVal;
                     desc = hp.Desc;
+                    isList = hp.IsList;
                 }
 
                 finalParams.Add(new SqlEndpointParameter(
@@ -278,7 +301,8 @@ public sealed class SqlEndpointLoader : IDisposable
                     Description: desc,
                     TargetColumn: p.TargetColumn,
                     TargetTable: p.TargetTable,
-                    ComparisonOperator: p.ComparisonOperator));
+                    ComparisonOperator: p.ComparisonOperator,
+                    IsList: isList));
             }
         }
 
@@ -447,8 +471,9 @@ public sealed class SqlEndpointLoader : IDisposable
                 string? safeDefault = p.DefaultValue != null
                     ? SanitizeHeaderValue(Convert.ToString(p.DefaultValue, CultureInfo.InvariantCulture))?.Replace("\"", string.Empty, StringComparison.Ordinal)
                     : null;
-                string def = safeDefault != null ? $" = \"{safeDefault}\"" : "";
-                sw.WriteLine($"-- @param {p.Name}: {MapClrTypeToName(p.ClrType)}{req}{def}");
+                string def = safeDefault != null && !p.IsList ? $" = \"{safeDefault}\"" : "";
+                string list = p.IsList ? "[]" : "";
+                sw.WriteLine($"-- @param {p.Name}: {MapClrTypeToName(p.ClrType)}{list}{req}{def}");
             }
         }
         sw.WriteLine();
@@ -520,46 +545,95 @@ public sealed class SqlEndpointLoader : IDisposable
 
     private static void ParseParamHeader(
         string text,
-        Dictionary<string, (Type Type, bool IsRequired, object? DefaultVal, string? Desc)> headerParams)
+        Dictionary<string, (Type Type, bool IsRequired, object? DefaultVal, string? Desc, bool IsList)> headerParams,
+        string endpointName)
     {
-        var match = ParamHeaderRegex.Match(text);
-        if (!match.Success) return;
-
-        string name = match.Groups[1].Value;
-        string typeStr = match.Groups[2].Value.ToLowerInvariant();
-        bool isRequired = match.Groups[3].Success;
-        string? defaultRaw = match.Groups[4].Success ? match.Groups[4].Value.Trim(' ', '"', '\'') : null;
-
-        Type clrType = typeStr switch
+        var colonForm = ParamColonFormRegex.Match(text);
+        if (!colonForm.Success)
         {
-            "int" or "integer" or "int32" => typeof(int),
-            "long" or "bigint" or "int64" => typeof(long),
-            "decimal" or "numeric" or "money" => typeof(decimal),
-            "float" or "double" or "real" => typeof(double),
-            "bool" or "boolean" => typeof(bool),
-            "date" or "datetime" or "timestamp" => typeof(DateTimeOffset),
-            "guid" or "uuid" => typeof(Guid),
-            _ => typeof(string)
-        };
-
-        object? defaultVal = null;
-        if (defaultRaw != null)
-        {
-            try
-            {
-                if (clrType == typeof(int) && int.TryParse(defaultRaw, out int iv)) defaultVal = iv;
-                else if (clrType == typeof(long) && long.TryParse(defaultRaw, out long lv)) defaultVal = lv;
-                else if (clrType == typeof(decimal) && decimal.TryParse(defaultRaw, NumberStyles.Any, CultureInfo.InvariantCulture, out decimal dv)) defaultVal = dv;
-                else if (clrType == typeof(bool) && bool.TryParse(defaultRaw, out bool bv)) defaultVal = bv;
-                else defaultVal = defaultRaw;
-            }
-            catch
-            {
-                defaultVal = defaultRaw;
-            }
+            return;   // description-only form: ignored, as before
         }
 
-        headerParams[name] = (clrType, isRequired, defaultVal, null);
+        // From here the line is a colon declaration and must parse completely. The diagnostic names the file and the parameter (the
+        // name is limited to [A-Za-z0-9_]) and never any other text of the line (SEC-128-07).
+        string name = colonForm.Groups[1].Value;
+        string Invalid(string reason) =>
+            $"SQL endpoint '{SanitizeHeaderValue(endpointName)}': the declaration of parameter '{name}' is invalid ({reason}). Expected '-- @param name: type[[]][!] [= default]'.";
+
+        var match = ParamHeaderRegex.Match(text);
+        if (!match.Success)
+        {
+            throw new FormatException(Invalid("syntax"));
+        }
+
+        if (!ParamTypeAliases.TryGetValue(match.Groups[2].Value, out var clrType))
+        {
+            throw new FormatException(Invalid("unknown type"));
+        }
+
+        bool isList = match.Groups[3].Success;
+        bool isRequired = match.Groups[4].Success;
+        string? defaultText = match.Groups[5].Success ? match.Groups[5].Value.Trim() : null;
+
+        object? defaultVal = null;
+        if (defaultText != null)
+        {
+            defaultVal = isList ? ParseListDefault(defaultText, clrType, Invalid) : ParseScalarDefault(defaultText.Trim(' ', '"', '\''), clrType);
+        }
+
+        headerParams[name] = (clrType, isRequired, defaultVal, null, isList);
+    }
+
+    private static object? ParseScalarDefault(string defaultRaw, Type clrType)
+    {
+        try
+        {
+            if (clrType == typeof(int) && int.TryParse(defaultRaw, out int iv)) return iv;
+            if (clrType == typeof(long) && long.TryParse(defaultRaw, out long lv)) return lv;
+            if (clrType == typeof(decimal) && decimal.TryParse(defaultRaw, NumberStyles.Any, CultureInfo.InvariantCulture, out decimal dv)) return dv;
+            if (clrType == typeof(bool) && bool.TryParse(defaultRaw, out bool bv)) return bv;
+            return defaultRaw;
+        }
+        catch
+        {
+            return defaultRaw;
+        }
+    }
+
+    /// <summary>
+    /// A list default is a flat JSON array of scalars, validated at load (the dialect is not known then, so against the raw ceiling) through the
+    /// same normalizer as a request, with the declared element type. An invalid default refuses the file.
+    /// </summary>
+    private static IReadOnlyList<object?> ParseListDefault(string defaultText, Type element, Func<string, string> invalid)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(defaultText, new System.Text.Json.JsonDocumentOptions { MaxDepth = 2 });
+            if (document.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array)
+            {
+                throw new FormatException(invalid("list default must be a JSON array"));
+            }
+
+            var declared = Autheris.Application.Sql.ListParameters.ListElementTypes.For(element, out bool guid);
+            var limits = new Autheris.Application.Sql.ListParameters.ListParameterLimits(Autheris.Application.Sql.ListParameters.ListParameterLimits.MaxConfigurable, 1);
+            var list = Autheris.Application.Sql.ListParameters.ListParameterNormalizer.Normalize(document.RootElement.Clone(), limits, declared, guid);
+            var values = new List<object?>(list.Count);
+            for (int i = 0; i < list.Count; i++)
+            {
+                values.Add(list[i]);
+            }
+
+            return values;
+        }
+        catch (FormatException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // JsonException, ClientListException: only the fact is reported, never the text or the cause (which could carry an element).
+            throw new FormatException(invalid("invalid list default"));
+        }
     }
 
     private static string MapClrTypeToName(Type type)

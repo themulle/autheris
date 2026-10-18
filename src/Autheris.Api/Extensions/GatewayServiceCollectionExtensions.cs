@@ -541,6 +541,7 @@ public static class GatewayServiceCollectionExtensions
             sp.GetRequiredService<ITableRelationRepository>(),
             sp.GetService<ILogger<CatalogGraphQlTypeModule>>(),
             TimeSpan.FromSeconds(gatewayOptions.GraphQL.CatalogSchemaRefreshSeconds)));
+        services.AddSingleton<ICatalogSchemaDiagnostics>(sp => sp.GetRequiredService<CatalogGraphQlTypeModule>());
         services.AddSingleton<ISocketTokenValidator, JwtSocketTokenValidator>();
         services.AddOptions<RevocationWatchOptions>()
             .BindConfiguration(RevocationWatchOptions.SectionName)

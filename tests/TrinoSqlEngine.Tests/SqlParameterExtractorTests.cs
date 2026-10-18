@@ -1,6 +1,7 @@
 namespace TrinoSqlEngine;
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using TrinoSqlEngine.Analysis;
 using Xunit;
@@ -72,5 +73,32 @@ public sealed class SqlParameterExtractorTests
         Assert.Equal("amount", minAmountParam.TargetColumn);
         Assert.Equal("o", minAmountParam.TargetTable);
         Assert.Equal(">=", minAmountParam.ComparisonOperator);
+    }
+
+    private IReadOnlyList<ExtractedParameter> Analyze(string rawSql)
+    {
+        var tokens = SqlParameterExtractor.ExtractTokens(rawSql);
+        var (tree, _) = _engine.Parse(SqlParameterExtractor.NormalizeForAst(rawSql).AsMemory());
+        return SqlParameterExtractor.AnalyzeAstParameters(tree, tokens);
+    }
+
+    [Theory]
+    [InlineData("SELECT id FROM t WHERE status IN (@ids)", "status", "IN")]
+    [InlineData("SELECT id FROM t WHERE status NOT IN (@ids)", "status", "NOT IN")]
+    [InlineData("SELECT id FROM t x WHERE x.status IN (@ids)", "status", "IN")]
+    public void AnalyzeAstParameters_AssociatesTheSoleInListItemWithItsColumnAndOperator(string sql, string column, string op)
+    {
+        var p = Analyze(sql).Single(x => x.Name == "ids");
+        Assert.Equal(column, p.TargetColumn);
+        Assert.Equal(op, p.ComparisonOperator);
+    }
+
+    [Theory]
+    [InlineData("SELECT id FROM t WHERE status IN (@ids, 'x')")]
+    [InlineData("SELECT id FROM t WHERE status IN (@ids, @other)")]
+    public void AnalyzeAstParameters_DoesNotAssociateAParameterThatSharesTheInList(string sql)
+    {
+        var p = Analyze(sql).Single(x => x.Name == "ids");
+        Assert.Null(p.TargetColumn);
     }
 }

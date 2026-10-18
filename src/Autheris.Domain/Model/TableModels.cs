@@ -289,21 +289,9 @@ public sealed class TableRelation
     public Guid ChildTableId { get; init; }
     public TableIdentifier ChildTableIdentifier { get; init; }
     public string RelationName { get; init; } = string.Empty;
-    public IReadOnlyList<string> JoinKeysParent { get; init; } = new[] { "id" };
+    public IReadOnlyList<string> JoinKeysParent { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> JoinKeysChild { get; init; } = Array.Empty<string>();
     public bool IsComposite => JoinKeysParent.Count > 1;
-
-    public string JoinKeyParent
-    {
-        get => JoinKeysParent.Count > 0 ? JoinKeysParent[0] : "id";
-        init => JoinKeysParent = new[] { value };
-    }
-
-    public string JoinKeyChild
-    {
-        get => JoinKeysChild.Count > 0 ? JoinKeysChild[0] : string.Empty;
-        init => JoinKeysChild = new[] { value };
-    }
 
     public RelationCardinality Cardinality { get; init; } = RelationCardinality.OneToMany;
 
