@@ -391,6 +391,22 @@ public sealed partial class GovernedAggregationService
         return MergePreAggregatedBuckets(emptyKey, survivingBuckets, aggregates, isMergedOther: false).ToGroupRow();
     }
 
+    internal static int ResolveEffectiveMinGroupSize(TableMetadata metadata, AggregationQuery query, int defaultMinGroupSize = 1)
+    {
+        int resolved = defaultMinGroupSize;
+        if (metadata.EffectiveMinGroupSize.HasValue)
+        {
+            resolved = Math.Max(resolved, metadata.EffectiveMinGroupSize.Value);
+        }
+
+        if (query.MinGroupSizeOverride.HasValue)
+        {
+            resolved = Math.Max(resolved, query.MinGroupSizeOverride.Value);
+        }
+
+        return Math.Max(1, resolved);
+    }
+
     private int ResolveEffectiveMinGroupSize(AggregationQuery query, TableMetadata metadata)
     {
         int resolved = _hasExplicitAnalyticsOptions
@@ -417,17 +433,7 @@ public sealed partial class GovernedAggregationService
 
         // WP-0 (SEC-112-02): every lower-trust source (table metadata, a manifest metric or measure, a request) may only RAISE the
         // floor resolved from the operator configuration; none of them can lower it.
-        if (metadata.EffectiveMinGroupSize.HasValue)
-        {
-            resolved = Math.Max(resolved, metadata.EffectiveMinGroupSize.Value);
-        }
-
-        if (query.MinGroupSizeOverride.HasValue)
-        {
-            resolved = Math.Max(resolved, query.MinGroupSizeOverride.Value);
-        }
-
-        return Math.Max(1, resolved);
+        return ResolveEffectiveMinGroupSize(metadata, query, resolved);
     }
 
     private SmallGroupStrategy ResolveEffectiveSmallGroupStrategy(AggregationQuery query, TableMetadata metadata)

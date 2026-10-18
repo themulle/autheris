@@ -221,6 +221,13 @@ public sealed class TypedAggregateSdlTests
         typeof(Autheris.GraphQL.Types.Query).Assembly.GetType("Autheris.GraphQL.Types.AnalyticsQueryExtensions").ShouldBeNull();
     }
 
+    [Fact]
+    public async Task GroupByFieldsEnum_ExistsInSchema()
+    {
+        var sdl = await SdlAsync();
+        TypeBlock(sdl, "sales_dbo_orders_group_by_fields").ShouldNotBeNull();
+    }
+
     private static string FindRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

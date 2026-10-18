@@ -62,6 +62,12 @@ internal static class NoisyCacheKey
     }
 
     public static string Build(
+        TenantId tenantId, Sid userSid, AggregationQuery query, string decisionFingerprint,
+        int limit = 100, int minGroupSize = 5, SmallGroupStrategy strategy = SmallGroupStrategy.Suppress, string? utcDay = null) =>
+        Build(tenantId, userSid, query.Table, query.GroupBy ?? [], query.Aggregates ?? [], query.Where, query.OrderBy,
+            limit, minGroupSize, strategy, utcDay ?? "2026-10-18", decisionFingerprint);
+
+    public static string Build(
         TenantId tenantId, Sid userSid, TableIdentifier table, IReadOnlyList<string> groupBy,
         IReadOnlyList<AggregateSelection> aggregates, TableFilterClause? where, IReadOnlyList<TableOrderBy>? orderBy,
         int limit, int minGroupSize, SmallGroupStrategy strategy, string utcDay, string decisionFingerprint)

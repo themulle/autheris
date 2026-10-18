@@ -17,14 +17,21 @@ internal sealed record AggregateValueDto(
     DateTimeOffset? DateTimeValue = null,
     bool? BooleanValue = null);
 
-internal sealed record AggregateGroupDto(
+/// <summary>WP-112-3: Typed group row containing key fields, row count and aggregate results.</summary>
+internal record AutherisAggregationRow(
     IReadOnlyDictionary<string, object?> Key,
     long RowCount,
     bool IsMergedOther,
     IReadOnlyList<AggregateValueDto> Aggregates);
 
-/// <summary>The typed result. It deliberately has no suppressed-row count (#112 O-4, SEC-112-20).</summary>
-internal sealed record AggregateResultDto(
+internal sealed record AggregateGroupDto(
+    IReadOnlyDictionary<string, object?> Key,
+    long RowCount,
+    bool IsMergedOther,
+    IReadOnlyList<AggregateValueDto> Aggregates) : AutherisAggregationRow(Key, RowCount, IsMergedOther, Aggregates);
+
+/// <summary>WP-112-3: The typed result. It deliberately has no suppressed-row count (#112 O-4, SEC-112-20).</summary>
+internal record AutherisTypedAggregationResult(
     IReadOnlyList<AggregateGroupDto> Groups,
     long Count,
     bool Suppressed,
@@ -33,6 +40,16 @@ internal sealed record AggregateResultDto(
     bool MergedIntoOther,
     bool Truncated,
     bool NoiseApplied);
+
+internal sealed record AggregateResultDto(
+    IReadOnlyList<AggregateGroupDto> Groups,
+    long Count,
+    bool Suppressed,
+    int SuppressedGroupsCount,
+    int MinimumGroupSize,
+    bool MergedIntoOther,
+    bool Truncated,
+    bool NoiseApplied) : AutherisTypedAggregationResult(Groups, Count, Suppressed, SuppressedGroupsCount, MinimumGroupSize, MergedIntoOther, Truncated, NoiseApplied);
 
 /// <summary>
 /// #112 A-4: pure mapping of an engine result to the typed GraphQL shape. Kinds are static (function and column type), conversion is

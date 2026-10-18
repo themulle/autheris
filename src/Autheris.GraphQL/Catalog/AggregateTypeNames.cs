@@ -45,10 +45,15 @@ internal readonly record struct AggregateTypeNames(
             Field: tableTypeName + "_aggregate");
     }
 
+    public string GroupByFields => Column.EndsWith("_column", StringComparison.Ordinal)
+        ? Column[..^7] + "_group_by_fields"
+        : Column + "_group_by_fields";
+
     /// <summary>All names the table reserves besides its entity, filter and order-by types.</summary>
     public IEnumerable<string> All()
     {
         yield return Column;
+        yield return GroupByFields;
         yield return Input;
         yield return OrderBy;
         yield return Key;

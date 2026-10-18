@@ -46,6 +46,7 @@ public sealed class TypedAggregateSchemaTests
 
     [Theory]
     [InlineData("column")]
+    [InlineData("group_by_fields")]
     [InlineData("aggregate_input")]
     [InlineData("aggregate_order_by")]
     [InlineData("aggregate_key")]

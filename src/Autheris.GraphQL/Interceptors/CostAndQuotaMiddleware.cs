@@ -125,7 +125,7 @@ public sealed class CostAndQuotaMiddleware
             maxResponseRows: maxResponseRows,
             variableValues: runtimeVariables,
             costOptions: gatewayOptions?.QueryCost,
-            aggregation: httpContext.RequestServices.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value?.Aggregation);
+            aggregation: services?.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value?.Aggregation);
 
         int maxAllowedCost = clientContext.Policy.MaxCostPerQuery;
         if (gatewayOptions is not null)

@@ -87,6 +87,16 @@ internal static class AggregateGraphQlTypes
             }
         }));
 
+        types.Add(new EnumType(d =>
+        {
+            d.Name(names.GroupByFields);
+            d.Description($"Group by field identifiers of {table.TypeName}.");
+            foreach (var (value, _) in columnEnum)
+            {
+                d.Value(value).Name(value);
+            }
+        }));
+
         types.Add(new InputObjectType(d =>
         {
             d.Name(names.Input);
