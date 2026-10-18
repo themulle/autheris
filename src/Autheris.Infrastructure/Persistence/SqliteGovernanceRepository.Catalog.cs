@@ -156,7 +156,8 @@ public partial class SqliteGovernanceRepository
                                            c.description, c.long_description, c.meta_json, c.doc_source
                                     FROM TABLE_COLUMNS c
                                     LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
-                                    WHERE c.table_id = @tid";
+                                    WHERE c.table_id = @tid
+                                    ORDER BY c.rowid"; // registration order, equal to the list read (a natural-key index scan would sort by name)
                 cmd.Parameters.AddWithValue("@tid", tableId.Value.ToString());
 
                 using var reader = await cmd.ExecuteReaderAsync(ct);

@@ -150,8 +150,7 @@ INSERT INTO mcp_cranes VALUES (1,'LTM-1100','Mobilkran',100,'a@x.test'),(2,'LTM-
         var (describeError, description) = await CallAsync(client, "describe_dataset", new { dataset = "default.main.mcp_cranes" });
         describeError.ShouldBeFalse(description.ToString());
         description.GetProperty("columns").EnumerateArray().Select(c => c.GetProperty("name").GetString())
-            // The single-row repository read (describe) does not promise the column order of the list read.
-            .ShouldBe(["id", "serial_number", "crane_type", "tonnage"], ignoreOrder: true);
+            .ShouldBe(["id", "serial_number", "crane_type", "tonnage"]);
 
         var (sampleError, sample) = await CallAsync(client, "sample_rows", new { dataset = "default.main.mcp_cranes", count = 2 });
         sampleError.ShouldBeFalse(sample.ToString());
