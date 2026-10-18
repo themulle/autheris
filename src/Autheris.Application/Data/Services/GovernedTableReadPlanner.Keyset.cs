@@ -104,7 +104,7 @@ public sealed partial class GovernedTableReadPlanner
         }
 
         // 3. Enforce Required Filter Columns (#163 / SEC-DATA178-04)
-        if (metadata.RequiredFilterColumns.Count > 0)
+        if (metadata.RequiredFilterColumns.Length > 0)
         {
             foreach (var req in metadata.RequiredFilterColumns)
             {

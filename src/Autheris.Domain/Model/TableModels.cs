@@ -198,7 +198,6 @@ public sealed record TableMetadata
     public SmallGroupStrategy? EffectiveSmallGroupStrategy => SmallGroupStrategy ?? Table.SmallGroupStrategy;
 
     public bool IsCompositePrimaryKey => PrimaryKeyColumns.Count > 1;
-    public IReadOnlyList<string> RequiredFilterColumns => Table.RequiredFilterColumns;
 
     /// <summary>
     /// D-5: the record's generated ToString() printed every property, including masking rules with their HMAC key ids.
