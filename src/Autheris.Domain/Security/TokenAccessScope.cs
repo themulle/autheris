@@ -44,12 +44,14 @@ public static class TokenAccessScope
     }
 
     /// <summary>Delegated scopes of the token (space-separated <c>scp</c>, raw or mapped by JwtBearer).</summary>
-    public static IReadOnlyList<string> GetScopes(ClaimsPrincipal principal) =>
-        ScopeClaimTypes
-            .SelectMany(principal.FindAll)
-            .SelectMany(c => c.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
+    public static IReadOnlyList<string> GetScopes(ClaimsPrincipal? principal) =>
+        principal == null
+            ? Array.Empty<string>()
+            : ScopeClaimTypes
+                .SelectMany(principal.FindAll)
+                .SelectMany(c => c.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
 
     public static IReadOnlySet<string> GetScopeSet(ClaimsPrincipal? principal)
     {

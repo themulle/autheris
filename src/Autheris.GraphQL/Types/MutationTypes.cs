@@ -455,13 +455,12 @@ public sealed class Mutation
         ColumnMaskingInput? columnMasking = null,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(httpContextAccessor);
         await EnsureDecisionPermittedAsync(httpContextAccessor, ct).ConfigureAwait(false);
         var policy = RequireDecisionService<IGrantPolicy>(httpContextAccessor);
 
         var approverSid = GetAuthenticatedUserSid(httpContextAccessor);
 
-        var approvePrincipal = httpContextAccessor.HttpContext?.User ?? new ClaimsPrincipal();
+        var approvePrincipal = httpContextAccessor.HttpContext?.User;
         var scopes = TokenAccessScope.GetScopes(approvePrincipal);
         if (scopes.Count > 0 && !TokenAccessScope.HasScope(approvePrincipal, "data.access.review"))
         {
@@ -759,11 +758,10 @@ public sealed class Mutation
         [Service] IIdempotencyStore idempotencyStore = default!,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(httpContextAccessor);
         await EnsureDecisionPermittedAsync(httpContextAccessor, ct).ConfigureAwait(false);
         _ = RequireDecisionService<IGrantPolicy>(httpContextAccessor); // composition fail-fast: both decision resolvers need the same services
 
-        var rejectPrincipal = httpContextAccessor.HttpContext?.User ?? new ClaimsPrincipal();
+        var rejectPrincipal = httpContextAccessor.HttpContext?.User;
         var scopes = TokenAccessScope.GetScopes(rejectPrincipal);
         if (scopes.Count > 0 && !TokenAccessScope.HasScope(rejectPrincipal, "data.access.review"))
         {

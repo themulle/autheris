@@ -54,11 +54,11 @@ internal static class DecisionPrincipals
 
     /// <summary>ADFS access token after JwtBearer mapping: upn and unique_name mapped, sub as NameIdentifier, appid and the scope URI.</summary>
     public static ClaimsPrincipal AdfsMapped(string sid, params string[] roles) =>
-        Build("AuthenticationTypes.Federation", [new(ClaimTypes.NameIdentifier, sid), new(ClaimTypes.Upn, "alice@corp.example"), new(ClaimTypes.Name, "CORP\\alice"), new("appid", "adfs-client"), new(ScopeUri, "openid profile")], roles);
+        Build("AuthenticationTypes.Federation", [new(ClaimTypes.NameIdentifier, sid), new(ClaimTypes.Upn, "alice@corp.example"), new(ClaimTypes.Name, "CORP\\alice"), new("appid", "adfs-client"), new(ScopeUri, "openid profile data.access.review")], roles);
 
     /// <summary>ADFS token whose only name claim is unique_name (mapped to ClaimTypes.Name), carrying a scope.</summary>
     public static ClaimsPrincipal AdfsMappedUniqueNameOnly(string sid, params string[] roles) =>
-        Build("AuthenticationTypes.Federation", [new(ClaimTypes.NameIdentifier, sid), new(ClaimTypes.PrimarySid, sid), new(ClaimTypes.Name, "CORP\\alice"), new("appid", "adfs-client"), new(ScopeUri, "openid")], roles);
+        Build("AuthenticationTypes.Federation", [new(ClaimTypes.NameIdentifier, sid), new(ClaimTypes.PrimarySid, sid), new(ClaimTypes.Name, "CORP\\alice"), new("appid", "adfs-client"), new(ScopeUri, "openid data.access.review")], roles);
 
     public static ClaimsPrincipal AppOnlyIdtyp(string oid, params string[] roles) =>
         Build("Bearer", [new("idtyp", "app"), new("oid", oid), new("sub", oid), new("appid", "app-client")], roles);
