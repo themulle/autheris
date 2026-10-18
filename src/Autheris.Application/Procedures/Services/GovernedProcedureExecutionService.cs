@@ -175,10 +175,17 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 userSid.Value,
                 user.FindFirst("purpose")?.Value ?? user.FindFirst("purpose_id")?.Value);
 
+            // 6a. Row budget, decided before the invoke from the visibility decisions (SEC-PROC152I2-01): a scoped call scans up
+            // to MaxScanRows raw rows (the limit is applied after the row scope), an unscoped call reads the limit itself.
+            var procedureOptions = _options.Value.SqlEndpoints.Procedures;
+            int effectiveLimit = procedureOptions.MaxRows;
+            bool scoped = IsRowScoped(definition, decisions, out var resultDecision);
+            int rowBudget = scoped ? procedureOptions.EffectiveMaxScanRows : effectiveLimit;
+
             RawProcedureResult raw;
             try
             {
-                raw = await _invoker.ExecuteReadAsync(definition, values, context, ct).ConfigureAwait(false);
+                raw = await _invoker.ExecuteReadAsync(definition, values, context, rowBudget, ct).ConfigureAwait(false);
             }
             catch (ProcedureBusinessException bex)
             {
@@ -210,15 +217,19 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 throw;
             }
 
-            // 6b. Row scope: keep only the rows the consent row filter of the result table allows
+            // 6b. Row scope: keep only the rows the consent row filter of the result table allows, THEN cut to the limit
+            // (SEC-PROC152I2-02: the cut never precedes the scope; a scope failure stays fail-closed).
             int rowsRemovedByScope = 0;
-            if (definition.ResultTable != null &&
-                decisions.TryGetValue(definition.ResultTable, out var resultDecision) &&
-                !string.IsNullOrWhiteSpace(resultDecision.Decision.CombinedRowFilterSql))
+            bool truncated = raw.MoreRowsAvailable;
+            bool scanCapReached = scoped && raw.MoreRowsAvailable;
+            if (scoped)
             {
-                var scoped = await ApplyRowScopeAsync(definition, raw, resultDecision.Decision, resultDecision.Meta, registered.Validation.ResultColumnSources, context, tenantId, userSid, traceId, ct).ConfigureAwait(false);
-                rowsRemovedByScope = raw.Rows.Count - scoped.Rows.Count;
-                raw = scoped;
+                var scopedRaw = await ApplyRowScopeAsync(definition, raw, resultDecision.Decision, resultDecision.Meta, registered.Validation.ResultColumnSources, context, tenantId, userSid, traceId, ct).ConfigureAwait(false);
+                rowsRemovedByScope = raw.Rows.Count - scopedRaw.Rows.Count;
+                truncated = scopedRaw.Rows.Count > effectiveLimit || raw.MoreRowsAvailable;
+                raw = scopedRaw.Rows.Count > effectiveLimit
+                    ? new RawProcedureResult(scopedRaw.Columns, scopedRaw.Rows.Take(effectiveLimit).ToList(), raw.MoreRowsAvailable)
+                    : scopedRaw;
             }
 
             // 7. Result-set governance (deny / mask / drop unknown columns)
@@ -235,7 +246,9 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 {
                     mode = definition.Mode.ToString(),
                     rowCount = governed.Rows.Count,
-                    truncated = raw.Truncated,
+                    truncated,
+                    scanCapReached,
+                    effectiveLimit,
                     rowsRemovedByScope,
                     virtual_filters = decisions
                         .Where(d => d.Value.Decision.AppliedVirtualFilters is { Count: > 0 })
@@ -247,7 +260,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 traceId,
                 ct).ConfigureAwait(false);
 
-            return new GovernedProcedureResult(governed.Columns, governed.Rows, governed.Rows.Count, raw.Truncated, sw.ElapsedMilliseconds);
+            return new GovernedProcedureResult(governed.Columns, governed.Rows, governed.Rows.Count, truncated, sw.ElapsedMilliseconds);
         }
         finally
         {
@@ -670,6 +683,18 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     /// filter of the result table does not allow. Fail-closed: a missing key column, a key column the caller may not use
     /// in a filter, or a failing lookup denies the call; rows with a NULL key part are removed.
     /// </summary>
+    /// <summary>
+    /// SEC-PROC152I2-01: the single predicate for "a row filter is active on the result table". The invoker budget and the
+    /// row scope branch both use it.
+    /// </summary>
+    private static bool IsRowScoped(ProcedureDefinition definition, Dictionary<string, TableDecision> decisions, out TableDecision resultDecision)
+    {
+        resultDecision = default;
+        return definition.ResultTable != null &&
+               decisions.TryGetValue(definition.ResultTable, out resultDecision) &&
+               !string.IsNullOrWhiteSpace(resultDecision.Decision.CombinedRowFilterSql);
+    }
+
     private async Task<RawProcedureResult> ApplyRowScopeAsync(
         ProcedureDefinition definition,
         RawProcedureResult raw,
@@ -729,7 +754,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             }
         }
 
-        return new RawProcedureResult(raw.Columns, kept, raw.Truncated);
+        return new RawProcedureResult(raw.Columns, kept, raw.MoreRowsAvailable);
     }
 
     private (IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows) GovernResult(

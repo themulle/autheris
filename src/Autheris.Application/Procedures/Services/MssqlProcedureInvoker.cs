@@ -47,11 +47,14 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
         ProcedureDefinition definition,
         IReadOnlyDictionary<string, object?> clientValues,
         ProcedureSecurityContext security,
+        int rowBudget,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(clientValues);
         ArgumentNullException.ThrowIfNull(security);
+        // SEC-PROC152I2-04: fail-closed, no unbounded read and no fallback to a configured limit.
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(rowBudget, 0);
 
         var settings = _options.Value.SqlEndpoints.Procedures;
         var (connection, connOptions) = await _connections.OpenAsync(definition, ct).ConfigureAwait(false);
@@ -150,12 +153,13 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
                     var maxBytes = settings.MaxResponseBytes > 0 ? settings.MaxResponseBytes : 10 * 1024 * 1024;
                     long estimatedBytes = 0;
                     var rows = new List<object?[]>();
-                    bool truncated = false;
+                    bool moreRowsAvailable = false;
                     while (await reader.ReadAsync(ct).ConfigureAwait(false))
                     {
-                        if (rows.Count >= settings.MaxRows)
+                        if (rows.Count >= rowBudget)
                         {
-                            truncated = true;
+                            // The extra row is detected by its header only: no value read, no byte accounting.
+                            moreRowsAvailable = true;
                             TryCancel(cmd);
                             break;
                         }
@@ -186,7 +190,7 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
                         rows.Add(values);
                     }
 
-                    return new RawProcedureResult(columns, rows, truncated);
+                    return new RawProcedureResult(columns, rows, moreRowsAvailable);
                 }
                 catch (DbException ex) when (TryGetBusinessError(ex, out int? errorNumber, out string? sqlState))
                 {

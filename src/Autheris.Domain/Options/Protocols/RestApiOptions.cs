@@ -159,6 +159,19 @@ public sealed class ProcedureEndpointsOptions
     [Range(0, 60000)] public int LockTimeoutMs { get; init; } = 5000;
     [Range(1, 100000)] public int MaxRows { get; init; } = 5000;
 
+    /// <summary>
+    /// Upper bound of raw rows one call with an active row filter (consent row scope) may read before the scope is applied.
+    /// Null resolves to <c>Math.Min(10 * MaxRows, 100000)</c> (see <see cref="EffectiveMaxScanRows"/>). It must not be below
+    /// <see cref="MaxRows"/> and not above 100000 (startup validation). Cost: the row scope resolver checks the candidates in
+    /// batches of at most 1000 keys, so a scoped call can cost up to <c>MaxScanRows / 1000</c> resolver round trips (100 at the
+    /// cap) on the procedure connection while the concurrency lease is held; <see cref="MaxResponseBytes"/> keeps bounding the
+    /// raw scan, and exceeding it is a fixed RESPONSE_TOO_LARGE error without a partial answer.
+    /// </summary>
+    [Range(1, 100000)] public int? MaxScanRows { get; init; }
+
+    /// <summary>Effective raw scan cap: <c>MaxScanRows ?? Math.Min(10 * MaxRows, 100000)</c> (overflow-safe).</summary>
+    public int EffectiveMaxScanRows => MaxScanRows ?? (int)Math.Min(10L * MaxRows, 100000L);
+
     /// <summary>R-SQL-8: response budget of one procedure call (estimated JSON size; binary values count as Base64).</summary>
     [Range(1024, 104857600)] public long MaxResponseBytes { get; init; } = 10485760;
     [Range(1, 1000000)] public int MaxStringParameterLength { get; init; } = 4000;
