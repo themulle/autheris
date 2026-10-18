@@ -465,7 +465,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
     {
         var now = _time.GetUtcNow();
         var key = probe.Sid.Value;
-        var flushes = new List<(Caller Owner, bool Overflow, int Count)>();
+        List<(Caller Owner, bool Overflow, int Count)>? flushes = null;
         var write = false;
         lock (_probeLock)
         {
@@ -477,7 +477,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
                     {
                         if (v.Suppressed > 0)
                         {
-                            flushes.Add((v.Owner, false, v.Suppressed));
+                            (flushes ??= []).Add((v.Owner, false, v.Suppressed));
                         }
 
                         _probes.Remove(k);
@@ -488,7 +488,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
                 {
                     if (o.Suppressed > 0)
                     {
-                        flushes.Add((o.Owner, true, o.Suppressed));
+                        (flushes ??= []).Add((o.Owner, true, o.Suppressed));
                     }
 
                     _overflow = null;
@@ -516,7 +516,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
                 // The principal's own window ended between sweeps.
                 if (state.Suppressed > 0)
                 {
-                    flushes.Add((state.Owner, state.Overflow, state.Suppressed));
+                    (flushes ??= []).Add((state.Owner, state.Overflow, state.Suppressed));
                 }
 
                 state.Start = now;
@@ -535,7 +535,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
             }
         }
 
-        foreach (var (owner, overflow, count) in flushes)
+        foreach (var (owner, overflow, count) in flushes ?? [])
         {
             await _audit.RecordBestEffortAsync(new AuditLogEntry
             {

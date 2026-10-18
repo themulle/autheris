@@ -147,4 +147,18 @@ public sealed class DeclarativeConsentApplyDatasetsTests
         // The skipped entries are one aggregated probe audit per manifest.
         await audit.Received(2).RecordBestEffortAsync(Arg.Is<AuditLogEntry>(e => e.DetailsJson.Contains("\"source\":\"manifest\"")), Arg.Any<CancellationToken>());
     }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task SEC_111_12_DryRun_WritesNoProbeAudit_RealApplyDoes()
+    {
+        Returns(DatasetCatalogOutcome.NotFound);
+        var manifest = Manifest(new DeclarativeDatasetCatalog("sales", "dbo", "ghost", ["x"], null));
+
+        await Create(_datasets).ApplyManifestAsync(Caller, manifest, dryRun: true);
+        await _datasets.DidNotReceiveWithAnyArgs().RecordManifestProbesAsync(default, default, default);
+
+        await Create(_datasets).ApplyManifestAsync(Caller, manifest, dryRun: false);
+        await _datasets.Received(1).RecordManifestProbesAsync(Caller, 1, Arg.Any<CancellationToken>());
+    }
 }

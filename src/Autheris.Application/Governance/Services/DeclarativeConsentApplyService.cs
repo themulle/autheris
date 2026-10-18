@@ -295,8 +295,8 @@ public sealed class DeclarativeConsentApplyService(
                     }
                 }
 
-                // The dry-run pass writes no per-entry probe audit; the skipped entries are one aggregated entry per manifest (throttled).
-                if (skipped > 0)
+                // The dry-run pass writes no per-entry probe audit; a real apply writes one aggregated entry per manifest (throttled). A dry run writes no audit.
+                if (skipped > 0 && !dryRun)
                 {
                     await datasetCatalog.RecordManifestProbesAsync(caller, skipped, ct).ConfigureAwait(false);
                 }
