@@ -66,8 +66,18 @@ public sealed record DbtRelationshipDefinition(
     string Name,
     string ParentModelOrTable,
     string ChildModelOrTable,
-    string ParentColumn,
-    string ChildColumn
+    IReadOnlyList<string> ParentColumns,
+    IReadOnlyList<string> ChildColumns
+);
+
+/// <summary>
+/// Result of parsing a dbt manifest: models, relation definitions (all ordered key pairs, issue #151) and parser warnings
+/// (reason-coded, free of manifest free text).
+/// </summary>
+public sealed record DbtManifestParseResult(
+    IReadOnlyList<DbtModelDefinition> Models,
+    IReadOnlyList<DbtRelationshipDefinition> Relationships,
+    IReadOnlyList<string> Warnings
 );
 
 public sealed record DbtSyncResult(

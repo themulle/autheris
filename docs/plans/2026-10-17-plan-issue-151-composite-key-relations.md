@@ -168,3 +168,14 @@ DDL-touching steps still open: I-7 (#111), I-8 (#112 semantic manifest), I-15, I
 - **T-REL151-14** `ImportedRelation_DoesNotAdvertiseKeys_OfMaskedColumn_ToCaller` (applies when WP-151-6 lands).
 
 Total: 14 mandatory tests (T-REL151-01..14). Compatible with I-18 (upsert `SET` limited to `cardinality`, per-table owner model independent of the key table, subject to SEC-REL151-04) and with INC-138-4 (`GetAllRelationsAsync` through `RelationRowAssembler`, no filter bypass: visibility filtering stays in the caller, not the repository).
+
+## Changelog
+
+- **2026-10-17, Phase 4/5 implementation drift (WP-151-1..5; reviewer finding CR151-01).**
+  a. Sequencing: WP-151-2 added `TABLE_RELATION_KEYS` and the natural index only; the `join_key_*` columns were dropped in WP-151-3 together with the repository rewrite, so every WP stayed green.
+  b. Decision 8 / SEC-REL151-01: entries of one natural-key group with identical ordered key sets (case-insensitive), e.g. a column-level `foreign_key` plus a `relationships` test for the same pair, collapse into one relation. Only groups whose ordered key sets differ (including the same pairs in another order) are skipped whole with `DUPLICATE_RELATION`. Order-independent, no last-wins; accepted by the reviewer.
+  c. Decision 7: additional reason codes `MISSING_TARGET` (foreign key without `to`), `COUNT_MISMATCH`, `DUPLICATE_COLUMN`, `TOO_WIDE` (one per `RelationKeyViolation`). The `TOO_MANY_RELATIONS` cap counts attempts (accepted plus skipped), which also bounds the warnings. A missing `to_columns` now yields `MISSING_COLUMNS` instead of the former `"id"` default (behaviour change, intended by R-151). `PERSIST_FAILED` carries the code only; `PARENT_KEY_NOT_UNIQUE` reads `... imported with warning: PARENT_KEY_NOT_UNIQUE`.
+  d. Repository exceptions for an unknown, inactive or ambiguous table, an unknown column and invalid keys are `InvalidRelationException`; identifiers in messages pass `RelationWriteSupport.Safe` (Infrastructure); the dbt side uses `DbtIdentifierSanitizer.ForLog` (Extensions).
+  e. T-REL151-11 is a no-op on SQL Server: the case-insensitive collation plus `ux_tables_natural` make case-only twin tables impossible; the repository check applies on all engines and the test runs on SQLite and PostgreSQL.
+  f. T-REL151-04 and T-REL151-08 assert `AllowCrossDataSource == false` (the column arrives with I-18). The end-to-end "survives restart" test reads back through a fresh connection (the repositories hold no relation cache).
+  g. SEC-REL151-09: the `CatalogSchemaModel` cap applies per schema build; the `RelationRowAssembler` cap applies per repository read call (one call per table).

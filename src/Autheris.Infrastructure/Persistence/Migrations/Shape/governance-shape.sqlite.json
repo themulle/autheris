@@ -1638,16 +1638,6 @@
           "family": "string"
         },
         {
-          "name": "join_key_parent",
-          "type": "TEXT",
-          "family": "string"
-        },
-        {
-          "name": "join_key_child",
-          "type": "TEXT",
-          "family": "string"
-        },
-        {
           "name": "cardinality",
           "type": "TEXT",
           "family": "string"
@@ -1656,7 +1646,64 @@
       "primaryKey": [
         "id"
       ],
-      "indexes": []
+      "indexes": [
+        {
+          "name": "UX_TABLE_RELATIONS_NATURAL",
+          "unique": true,
+          "columns": [
+            "parent_table_id",
+            "child_table_id",
+            "relation_name"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "TABLE_RELATION_KEYS",
+      "columns": [
+        {
+          "name": "relation_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "key_ordinal",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "parent_column",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "child_column",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "relation_id",
+        "key_ordinal"
+      ],
+      "indexes": [
+        {
+          "name": "UX_TABLE_RELATION_KEYS_CHILD",
+          "unique": true,
+          "columns": [
+            "relation_id",
+            "child_column"
+          ]
+        },
+        {
+          "name": "UX_TABLE_RELATION_KEYS_PARENT",
+          "unique": true,
+          "columns": [
+            "relation_id",
+            "parent_column"
+          ]
+        }
+      ]
     },
     {
       "name": "TABLE_ROW_FILTER_STRATEGIES",

@@ -234,8 +234,8 @@ public class InfrastructureTests : IDisposable
         itemsRel.ShouldNotBeNull();
         itemsRel.ChildTableIdentifier.Domain.ShouldBe("finance");
         itemsRel.ChildTableIdentifier.TableName.ShouldBe("finance_items");
-        itemsRel.JoinKeyParent.ShouldBe("id");
-        itemsRel.JoinKeyChild.ShouldBe("parent_id");
+        itemsRel.JoinKeysParent.ShouldBe(["id"]);
+        itemsRel.JoinKeysChild.ShouldBe(["parent_id"]);
         itemsRel.Cardinality.ShouldBe(RelationCardinality.OneToMany);
     }
 

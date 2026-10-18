@@ -215,7 +215,10 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
 
         try
         {
-            (models, relationships) = await DbtArtifactStreamingParser.ParseManifestWithRelationshipsAsync(manifestStream, ct).ConfigureAwait(false);
+            var parsed = await DbtArtifactStreamingParser.ParseManifestWithRelationshipsAsync(manifestStream, ct).ConfigureAwait(false);
+            models = parsed.Models;
+            relationships = parsed.Relationships;
+            warnings.AddRange(parsed.Warnings);
         }
         catch (Exception ex)
         {
@@ -520,52 +523,11 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             }
         }
 
-        // R-31: Persist relationships into the governance repository
+        // R-31 / issue #151: persist relationships (all ordered key pairs, reason-coded warnings, dry-run parity)
         var importedRelations = 0;
         if (_relationRepository != null && relationships.Count > 0)
         {
-            var modelNameToTableId = new Dictionary<string, TableIdentifier>(StringComparer.OrdinalIgnoreCase);
-            foreach (var m in models)
-            {
-                modelNameToTableId[m.Name] = m.ToTableIdentifier();
-                modelNameToTableId[m.UniqueId] = m.ToTableIdentifier();
-            }
-
-            foreach (var rel in relationships)
-            {
-                if (modelNameToTableId.TryGetValue(rel.ParentModelOrTable, out var parentId) &&
-                    modelNameToTableId.TryGetValue(rel.ChildModelOrTable, out var childId))
-                {
-                    var tableRel = new TableRelation
-                    {
-                        Id = Guid.NewGuid(),
-                        ParentTableIdentifier = parentId,
-                        ChildTableIdentifier = childId,
-                        RelationName = rel.Name,
-                        JoinKeysParent = [rel.ParentColumn],
-                        JoinKeysChild = [rel.ChildColumn],
-                        Cardinality = RelationCardinality.OneToMany
-                    };
-
-                    if (!dryRun)
-                    {
-                        try
-                        {
-                            await _relationRepository.CreateRelationAsync(tableRel, ct).ConfigureAwait(false);
-                            importedRelations++;
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Failed to import table relation '{Relation}' between {Parent} and {Child}.",
-                                rel.Name, parentId, childId);
-                        }
-                    }
-                    else
-                    {
-                        importedRelations++;
-                    }
-                }
-            }
+            importedRelations = await ImportRelationsAsync(models, relationships, dryRun, warnings, ct).ConfigureAwait(false);
         }
 
         // Apply lineage updates
@@ -587,6 +549,181 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             ImportedRelationsCount: importedRelations
         );
     }
+
+    private sealed record ResolvedRelation(
+        DbtRelationshipDefinition Definition,
+        DbtModelDefinition Parent,
+        DbtModelDefinition Child,
+        TableIdentifier ParentId,
+        TableIdentifier ChildId);
+
+    private async Task<int> ImportRelationsAsync(
+        IReadOnlyList<DbtModelDefinition> models,
+        IReadOnlyList<DbtRelationshipDefinition> relationships,
+        bool dryRun,
+        List<string> warnings,
+        CancellationToken ct)
+    {
+        var modelByName = new Dictionary<string, DbtModelDefinition>(StringComparer.OrdinalIgnoreCase);
+        foreach (var m in models)
+        {
+            modelByName[m.Name] = m;
+            modelByName[m.UniqueId] = m;
+        }
+
+        // 1. Resolve models (UNKNOWN_MODEL).
+        var resolved = new List<ResolvedRelation>(relationships.Count);
+        foreach (var rel in relationships)
+        {
+            if (modelByName.TryGetValue(rel.ParentModelOrTable, out var parent) && modelByName.TryGetValue(rel.ChildModelOrTable, out var child))
+            {
+                resolved.Add(new ResolvedRelation(rel, parent, child, parent.ToTableIdentifier(), child.ToTableIdentifier()));
+            }
+            else
+            {
+                warnings.Add(SkipWarning(rel, "UNKNOWN_MODEL"));
+            }
+        }
+
+        // 2. Natural-key grouping (SEC-REL151-01): a group whose key sets differ is skipped as a whole, never last-wins and
+        // independent of manifest order. Entries with identical ordered pairs are the same relation and collapse to one.
+        var groups = resolved
+            .GroupBy(r => $"{r.ParentId}\u0001{r.ChildId}\u0001{r.Definition.Name}", StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var metaCache = new Dictionary<TableIdentifier, TableMetadata?>();
+        var imported = 0;
+        foreach (var group in groups)
+        {
+            ct.ThrowIfCancellationRequested();
+            var entries = group.ToList();
+            var distinctKeySets = entries
+                .Select(e => string.Join('\u0002', e.Definition.ParentColumns.Zip(e.Definition.ChildColumns, (p, c) => $"{p.ToUpperInvariant()}\u0003{c.ToUpperInvariant()}")))
+                .Distinct(StringComparer.Ordinal)
+                .Count();
+            if (distinctKeySets > 1)
+            {
+                warnings.Add(SkipWarning(entries[0].Definition, "DUPLICATE_RELATION"));
+                continue;
+            }
+
+            var entry = entries[0];
+            var rel = entry.Definition;
+
+            var parentMeta = await GetStoredAsync(metaCache, entry.ParentId, ct).ConfigureAwait(false);
+            var childMeta = await GetStoredAsync(metaCache, entry.ChildId, ct).ConfigureAwait(false);
+            var parentColumns = ResolveCanonicalColumns(rel.ParentColumns, parentMeta, entry.Parent);
+            var childColumns = ResolveCanonicalColumns(rel.ChildColumns, childMeta, entry.Child);
+            if (parentColumns is null || childColumns is null)
+            {
+                warnings.Add(SkipWarning(rel, "UNKNOWN_COLUMN"));
+                continue;
+            }
+
+            var notUnique = !IsDeclaredUnique(parentColumns, parentMeta, entry.Parent);
+
+            var tableRel = new TableRelation
+            {
+                Id = Guid.NewGuid(),
+                ParentTableIdentifier = entry.ParentId,
+                ChildTableIdentifier = entry.ChildId,
+                RelationName = rel.Name,
+                JoinKeysParent = parentColumns,
+                JoinKeysChild = childColumns,
+                Cardinality = RelationCardinality.OneToMany
+                // AllowCrossDataSource is never set by the importer (SEC-REL151-04).
+            };
+
+            if (!dryRun)
+            {
+                try
+                {
+                    await _relationRepository!.CreateRelationAsync(tableRel, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to import table relation '{Relation}' between {Parent} and {Child}.",
+                        DbtIdentifierSanitizer.ForLog(rel.Name), entry.ParentId, entry.ChildId);
+                    warnings.Add(SkipWarning(rel, "PERSIST_FAILED"));
+                    continue;
+                }
+            }
+
+            imported++;
+            if (notUnique)
+            {
+                warnings.Add($"Relation '{DbtIdentifierSanitizer.ForLog(rel.Name)}' ({DbtIdentifierSanitizer.ForLog(rel.ChildModelOrTable)} -> {DbtIdentifierSanitizer.ForLog(rel.ParentModelOrTable)}) imported with warning: PARENT_KEY_NOT_UNIQUE");
+            }
+        }
+
+        return imported;
+    }
+
+    private static string SkipWarning(DbtRelationshipDefinition rel, string code) =>
+        $"Relation '{DbtIdentifierSanitizer.ForLog(rel.Name)}' ({DbtIdentifierSanitizer.ForLog(rel.ChildModelOrTable)} -> {DbtIdentifierSanitizer.ForLog(rel.ParentModelOrTable)}) skipped: {code}";
+
+    private async Task<TableMetadata?> GetStoredAsync(Dictionary<TableIdentifier, TableMetadata?> cache, TableIdentifier id, CancellationToken ct)
+    {
+        if (!cache.TryGetValue(id, out var meta))
+        {
+            meta = await _metadataRepository.GetTableMetadataAsync(id, ct).ConfigureAwait(false);
+            cache[id] = meta;
+        }
+
+        return meta;
+    }
+
+    /// <summary>Canonical catalog names of the key columns: stored metadata when the table is stored, the manifest columns otherwise (dry run). Null when any column is unknown.</summary>
+    private static List<string>? ResolveCanonicalColumns(IReadOnlyList<string> requested, TableMetadata? stored, DbtModelDefinition model)
+    {
+        var result = new List<string>(requested.Count);
+        foreach (var name in requested)
+        {
+            string? canonical;
+            if (stored is not null)
+            {
+                canonical = stored.GetColumn(name)?.ColumnName;
+            }
+            else
+            {
+                canonical = model.Columns.TryGetValue(name, out var def) ? def.Name : null;
+            }
+
+            if (string.IsNullOrEmpty(canonical))
+            {
+                return null;
+            }
+
+            result.Add(canonical);
+        }
+
+        return result;
+    }
+
+    /// <summary>True when the parent key columns equal (as a set) the primary key or a unique index, stored or declared in the manifest.</summary>
+    private static bool IsDeclaredUnique(IReadOnlyList<string> parentColumns, TableMetadata? stored, DbtModelDefinition model)
+    {
+        if (stored is not null)
+        {
+            if (SameSet(parentColumns, stored.PrimaryKeyColumns) || stored.Indexes.Any(i => i.IsUnique && SameSet(parentColumns, i.Columns)))
+            {
+                return true;
+            }
+        }
+
+        var declared = model.DeclaredKeys;
+        return declared is { Invalid: false } &&
+            ((declared.PrimaryKey is not null && SameSet(parentColumns, declared.PrimaryKey)) ||
+             declared.UniqueConstraints.Any(u => SameSet(parentColumns, u)));
+    }
+
+    private static bool SameSet(IReadOnlyList<string> left, IReadOnlyList<string> right) =>
+        left.Count > 0 && left.Count == right.Count &&
+        new HashSet<string>(left, StringComparer.OrdinalIgnoreCase).SetEquals(right);
 
     private static readonly HashSet<string> ValidMaskingRuleTypes = new(StringComparer.OrdinalIgnoreCase)
     {
