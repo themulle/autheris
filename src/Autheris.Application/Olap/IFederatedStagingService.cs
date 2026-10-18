@@ -27,7 +27,8 @@ public sealed record StagingTableRequest(
     TableFilterClause? PushdownFilter = null,
     VirtualFilterTablePlan? VirtualFilterPlan = null,
     PushedParameterAudit? ParameterAudit = null,
-    KeySetPlanInfo? KeySetPlan = null);
+    KeySetPlanInfo? KeySetPlan = null,
+    Autheris.Application.Sql.Federation.Subtrees.SubtreeExecutionPlan? Subtree = null);
 
 public sealed record FederationBudget(
     int MaxTableCount,

@@ -81,6 +81,25 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
         GovernedQueryStages.EnsureCanonicalClusterAdminClaim(context.Principal, metadata.Identifier);
 
         var tenant = ResolveTenant(context);
+
+        if (context.Items.TryGetValue("SubtreePlan", out var stObj) && stObj is Autheris.Application.Sql.Federation.Subtrees.SubtreeExecutionPlan subtreePlan)
+        {
+            var subtreeService = _executionService();
+            var subtreeResult = await subtreeService.ExecuteQueryBufferedAsync(
+                new GovernedSqlQueryRequest(
+                    subtreePlan.Compiled.Sql,
+                    subtreePlan.Parameters,
+                    Transport: SqlTransports.WebSql,
+                    PlannedTableRead: true),
+                context.Principal,
+                tenant,
+                ct).ConfigureAwait(false);
+
+            context.Items[InDbColumnMaskingExecutedKey] = true;
+            context.Items[RlsPushdownExecutedKey] = true;
+            return subtreeResult.Rows;
+        }
+
         var selected = ResolveSelectedColumns(context);
         RejectSpatialColumns(metadata, decision, selected);
 

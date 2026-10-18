@@ -162,6 +162,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         var populatedReferencedTables = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var federatedTables = new List<AnalyzedFederatedTable>();
         var keySetPushdowns = new List<AnalyzedKeySetPushdown>();
+        var plannedSubtrees = new List<AnalyzedSubtree>();
         var coLocatedGroups = new List<CoLocatedGroupPlan>();
 
         var hasRowFilters = false;
@@ -216,6 +217,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     ref totalEstimatedCost,
                     federatedTables,
                     keySetPushdowns,
+                    plannedSubtrees,
                     coLocatedGroups);
             }
             else if (item.SqlEndpoint != null)
@@ -258,6 +260,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     ref totalEstimatedCost,
                     federatedTables,
                     keySetPushdowns,
+                    plannedSubtrees,
                     coLocatedGroups);
             }
             else if (item.StoredProcedure != null)
@@ -302,6 +305,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                         ref totalEstimatedCost,
                         federatedTables,
                     keySetPushdowns,
+                    plannedSubtrees,
                     coLocatedGroups);
                 }
                 else
@@ -336,6 +340,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                         ref totalEstimatedCost,
                         federatedTables,
                     keySetPushdowns,
+                    plannedSubtrees,
                     coLocatedGroups);
                 }
             }
@@ -370,6 +375,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     ref totalEstimatedCost,
                     federatedTables,
                     keySetPushdowns,
+                    plannedSubtrees,
                     coLocatedGroups);
             }
             else
@@ -448,10 +454,11 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
             }, ct).ConfigureAwait(false);
         }
 
-        var federation = (federatedTables.Count > 0 || keySetPushdowns.Count > 0 || coLocatedGroups.Count > 0)
+        var federation = (federatedTables.Count > 0 || keySetPushdowns.Count > 0 || plannedSubtrees.Count > 0 || coLocatedGroups.Count > 0)
             ? new QueryFederationAnalysis(
                 federatedTables,
                 keySetPushdowns.Count > 0 ? keySetPushdowns : null,
+                plannedSubtrees.Count > 0 ? plannedSubtrees : null,
                 coLocatedGroups.Count > 0 ? coLocatedGroups : null)
             : null;
 

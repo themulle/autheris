@@ -183,6 +183,146 @@ public sealed class FederatedStagingService : IFederatedStagingService
 
         foreach (var req in orderedTables)
         {
+            if (req.Subtree != null)
+            {
+                var subtree = req.Subtree;
+                var subtreeConnector = ResolveConnector(subtree.MemberTables[0].Metadata);
+                if (subtreeConnector == null)
+                {
+                    _logger.LogWarning("No active connector available for subtree {Subtree}", subtree.SubtreeId);
+                    throw new GatewaySecurityException($"No active connector available for table '{subtree.MemberTables[0].Metadata.Identifier}'.", "CONNECTOR_UNAVAILABLE");
+                }
+
+                var subtreeSessionArgs = new Dictionary<string, object?> { ["limit"] = budget.MaxStagedRowsPerTable + 1 };
+                var subtreeSession = new ConnectorSessionContext(
+                    Principal: user,
+                    Tenant: tenantId,
+                    AccessDecision: req.Decision,
+                    ProjectedColumns: subtree.ProjectedColumns.Count > 0 ? subtree.ProjectedColumns : subtree.SyntheticMetadata.Columns.Select(c => c.ColumnName).ToList(),
+                    Arguments: subtreeSessionArgs,
+                    PushdownFilterSql: subtree.Compiled.Sql,
+                    Limit: budget.MaxStagedRowsPerTable + 1,
+                    Offset: 0);
+
+                subtreeSession.Items["TableMetadata"] = subtree.SyntheticMetadata;
+                subtreeSession.Items["Subtree"] = subtree;
+                subtreeSession.Items["SubtreePlan"] = subtree;
+                subtreeSession.Items["SubtreeSql"] = subtree.Compiled.Sql;
+                if (subtree.Parameters != null)
+                {
+                    subtreeSession.Items["SubtreeParameters"] = subtree.Parameters;
+                }
+
+                var subtreeRowPolicy = new GovernedRowPolicy(
+                    MaskingProvider: _maskingProvider,
+                    HmacKeyId: _gatewayOptions.Value.DataMasking?.HmacKeyId,
+                    MaskingDisabled: _gatewayOptions.Value.IsColumnMaskingDisabled,
+                    MaxRows: budget.MaxStagedRowsPerTable,
+                    MaxBytes: budget.MaxStagedBytesPerTable);
+
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                GovernedReadResult subtreeReadResult;
+                try
+                {
+                    subtreeReadResult = await GovernedConnectorReader.ReadAsync(
+                        subtreeConnector,
+                        subtreeSession,
+                        subtree.SyntheticMetadata,
+                        subtreeRowPolicy,
+                        ct).ConfigureAwait(false);
+                }
+                catch (Autheris.Application.Connectors.ConnectorRowLimitExceededException ex)
+                {
+                    _logger.LogWarning("Subtree {Subtree} exceeded staging limit of {Limit} rows.", subtree.SubtreeId, ex.MaxRows);
+                    throw new GatewaySecurityException($"Subtree '{subtree.SubtreeId}' exceeds maximum allowed staging rows ({ex.MaxRows}).", "ROW_LIMIT_EXCEEDED");
+                }
+                clock.Stop();
+
+                var subtreeRows = subtreeReadResult.Rows;
+                totalStagedRows += subtreeRows.Count;
+                if (totalStagedRows > budget.MaxTotalStagedRows)
+                {
+                    _logger.LogWarning("Federated staging exceeded total row limit: {Total} > {Max}", totalStagedRows, budget.MaxTotalStagedRows);
+                    throw new GatewaySecurityException($"Federated query exceeds maximum allowed total staged rows of {budget.MaxTotalStagedRows}.", "TOTAL_ROW_LIMIT_EXCEEDED");
+                }
+
+                long subtreeTableBytes = GovernedConnectorReader.EstimateBytes(subtreeRows);
+                totalStagedBytes += subtreeTableBytes;
+                if (totalStagedBytes > budget.MaxTotalStagedBytes)
+                {
+                    _logger.LogWarning("Federated staging exceeded total byte limit: {Total} > {Max}", totalStagedBytes, budget.MaxTotalStagedBytes);
+                    throw new GatewaySecurityException($"Federated query exceeds maximum allowed total staged bytes of {budget.MaxTotalStagedBytes}.", "TOTAL_BYTES_LIMIT_EXCEEDED");
+                }
+
+                // WP-123-4: Dual-Tier Audit Logging (SEC-DATA123-05)
+                try
+                {
+                    var subtreeAuditDetails = new Dictionary<string, object?>
+                    {
+                        ["subtreeId"] = subtree.SubtreeId,
+                        ["sourceName"] = subtree.SourceName,
+                        ["stagingName"] = req.StagingName,
+                        ["dialect"] = subtree.Dialect.ToString(),
+                        ["memberTables"] = subtree.MemberTables.Select(m => m.Metadata.Identifier.ToString()).ToList(),
+                        ["rowCount"] = subtreeRows.Count,
+                        ["stagedRowCount"] = subtreeRows.Count,
+                        ["stagedBytes"] = subtreeTableBytes,
+                        ["executionMs"] = clock.ElapsedMilliseconds
+                    };
+
+                    await _auditRepo.RecordAuditEventAsync(new AuditLogEntry
+                    {
+                        TenantId = tenantId.Value,
+                        EventType = AuditEventTypes.WebSqlCrossSourceSubtreeRead,
+                        ActorSid = actorSid,
+                        TargetTable = string.Join(",", subtree.MemberTables.Select(m => m.Metadata.Identifier.ToString())),
+                        Decision = "ALLOW",
+                        TraceId = budget.AuditCorrelationId ?? Guid.NewGuid().ToString("N"),
+                        DetailsJson = JsonSerializer.Serialize(subtreeAuditDetails)
+                    }, ct).ConfigureAwait(false);
+
+                    foreach (var member in subtree.MemberTables)
+                    {
+                        var memberAuditDetails = new Dictionary<string, object?>
+                        {
+                            ["table"] = member.Metadata.Identifier.ToString(),
+                            ["stagingName"] = req.StagingName,
+                            ["dataSourceType"] = member.Metadata.Table.DataSourceType.ToString(),
+                            ["sourceName"] = subtree.SourceName,
+                            ["subtreeId"] = subtree.SubtreeId,
+                            ["rowCount"] = subtreeRows.Count,
+                            ["rlsPushedDown"] = true,
+                            ["inDbMaskingExecuted"] = true
+                        };
+
+                        await _auditRepo.RecordAuditEventAsync(new AuditLogEntry
+                        {
+                            TenantId = tenantId.Value,
+                            EventType = AuditEventTypes.WebSqlCrossSourceSourceRead,
+                            ActorSid = actorSid,
+                            TargetTable = member.Metadata.Identifier.ToString(),
+                            Decision = "ALLOW",
+                            TraceId = budget.AuditCorrelationId ?? Guid.NewGuid().ToString("N"),
+                            DetailsJson = JsonSerializer.Serialize(memberAuditDetails)
+                        }, ct).ConfigureAwait(false);
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.Error(ex, "Federated staging audit write failed for subtree {Subtree}; failing closed.", subtree.SubtreeId);
+                    throw new InvalidOperationException($"Audit logging failed for subtree '{subtree.SubtreeId}'; federated staging aborted.", ex);
+                }
+
+                stagedSources.Add(new OlapTableSource(
+                    Table: subtree.SyntheticMetadata.Identifier,
+                    GovernedRows: subtreeRows,
+                    Metadata: subtree.SyntheticMetadata,
+                    StagingTableName: req.StagingName,
+                    MaskedColumns: subtree.MaskedColumns));
+
+                continue;
+            }
+
             var connector = ResolveConnector(req.Metadata);
             if (connector == null)
             {
