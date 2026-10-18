@@ -722,6 +722,14 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         try
         {
             var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // REQ-GOV-143 (SEC-GOV143-08): a caller holding a restricted scope never gets a contract lift: such a column carries no rule, so it
+            // can never carry the scope-specific Clear the restriction asks for. This set is the single source of every procedure lift.
+            if (decision.ScopeClearance is not null)
+            {
+                return set;
+            }
+
             foreach (var column in meta.Columns)
             {
                 if (decision.ColumnAccess.ContainsKey(column.ColumnName))

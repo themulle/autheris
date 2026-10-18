@@ -19,6 +19,9 @@ using Autheris.Domain.Security;
 
 public sealed partial class SemanticMetricQueryService
 {
+    /// <summary>The production resolver with its secure default (restricted <c>Agent.Read</c>), used when none was injected.</summary>
+    private static readonly IConsentResolutionService FallbackResolver = new ConsentResolutionService();
+
     private async Task<(TableAccessDecision Decision, bool HasMetricConsent)> ResolveMetricAndTableDecisionAsync(
         ClaimsPrincipal principal,
         Sid userSid,
@@ -153,47 +156,24 @@ public sealed partial class SemanticMetricQueryService
                     .ToList();
 
                 var scopes = TokenAccessScope.GetScopeSet(principal.Claims);
-                if (_resolutionService != null)
+
+                // REQ-GOV-143 (D-7): without an injected resolver the production resolver (secure default list) decides, with the claims scope
+                // set, instead of a copy of the rule logic that knew neither row filters nor the restricted-scope clearance.
+                var resolver = _resolutionService ?? FallbackResolver;
+                var metricDecision = resolver.ResolveAccess(
+                    userSid,
+                    groupSids,
+                    roles,
+                    table,
+                    projectedConsents,
+                    tableMetadata.Dialect,
+                    allSids.Count > 1 ? allSids : null,
+                    scopes.Count > 0 ? scopes : null);
+
+                if (metricDecision is { IsAllowed: true })
                 {
-                    var metricDecision = _resolutionService.ResolveAccess(
-                        userSid,
-                        groupSids,
-                        roles,
-                        table,
-                        projectedConsents,
-                        tableMetadata.Dialect,
-                        allSids.Count > 1 ? allSids : null,
-                        scopes.Count > 0 ? scopes : null);
-
-                    if (metricDecision is { IsAllowed: true })
-                    {
-                        return (metricDecision, true);
-                    }
+                    return (metricDecision, true);
                 }
-
-                // Fallback when no IConsentResolutionService was provided in unit test construction
-                var colAccess = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
-                foreach (var col in tableMetadata.Columns)
-                {
-                    colAccess[col.ColumnName] = col.IsSensitive || tableMetadata.ColumnMaskingRules.ContainsKey(col.ColumnName)
-                        ? ColumnAccessLevel.Mask
-                        : ColumnAccessLevel.Clear;
-                }
-
-                // Scope-aware and order independent (issue #116): resolve per consent with the shared semantics and
-                // combine consents by the most permissive level, like ConsentResolutionService.
-                var ruleColumns = projectedConsents
-                    .SelectMany(c => c.ColumnRules)
-                    .Select(r => r.ColumnName)
-                    .Distinct(StringComparer.OrdinalIgnoreCase);
-                foreach (var ruleColumn in ruleColumns)
-                {
-                    colAccess[ruleColumn] = projectedConsents
-                        .Where(c => c.ColumnRules.Any(r => string.Equals(r.ColumnName, ruleColumn, StringComparison.OrdinalIgnoreCase)))
-                        .Max(c => ConsentResolutionService.ResolveConsentColumnLevel(c, ruleColumn, scopes.Count > 0 ? scopes : null));
-                }
-
-                return (TableAccessDecision.Allowed(table, colAccess, hasUnconstrainedColumnAllow: true), true);
             }
         }
 

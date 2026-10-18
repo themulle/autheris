@@ -36,6 +36,8 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
     private readonly Autheris.Application.Governance.Contracts.ISchemaContractManager? _contractManager;
     private readonly TypedPolicySources? _typedPolicies;
 
+    private readonly Autheris.Domain.Security.IRestrictedScopePolicy? _restrictedScopes;
+
     public UnifiedPolicyDecisionPoint(
         IConsentRepository consentRepository,
         IConsentResolutionService resolutionService,
@@ -46,8 +48,10 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
         IRebacEvaluator? rebacEvaluator = null,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
         Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null,
-        TypedPolicySources? typedPolicies = null)
+        TypedPolicySources? typedPolicies = null,
+        Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null)
     {
+        _restrictedScopes = restrictedScopes;
         _typedPolicies = typedPolicies;
         _contractManager = contractManager;
         _mandatoryFilters = mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance;
@@ -96,7 +100,8 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
             _mandatoryFilters,
             _contractManager,
             rowPolicyFactory: _typedPolicies?.RowPolicies,
-            maskPolicyFactory: _typedPolicies?.MaskPolicies)
+            maskPolicyFactory: _typedPolicies?.MaskPolicies,
+            restrictedScopes: _restrictedScopes)
             .DecideAsync(query, ct).ConfigureAwait(false);
         if (!decision.IsAllowed)
         {

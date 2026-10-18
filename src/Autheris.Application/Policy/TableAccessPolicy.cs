@@ -103,6 +103,7 @@ public sealed partial class TableAccessPolicy
     private readonly Autheris.Application.Identity.Attributes.ICallerAttributeResolver? _callerAttributes;
     private readonly ISchemaContractManager? _contractManager;
     private readonly IAccessProfileRepository? _accessProfileRepository;
+    private readonly Autheris.Domain.Security.IRestrictedScopePolicy _restrictedScopes;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
     private readonly Autheris.Application.Policy.Interfaces.IAccessProfileCache? _accessProfileCache;
 
@@ -125,8 +126,10 @@ public sealed partial class TableAccessPolicy
         Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null,
         RowPolicyFactory? rowPolicyFactory = null,
         ColumnMaskPolicyFactory? maskPolicyFactory = null,
-        Autheris.Application.Identity.Attributes.ICallerAttributeResolver? callerAttributes = null)
+        Autheris.Application.Identity.Attributes.ICallerAttributeResolver? callerAttributes = null,
+        Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null)
     {
+        _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
         _callerAttributes = callerAttributes;
         _rowPolicyFactory = rowPolicyFactory;
         _maskPolicyFactory = maskPolicyFactory;
@@ -273,6 +276,14 @@ public sealed partial class TableAccessPolicy
         TableAccessDecision decision = consentBypassed
             ? TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true)
             : await ResolveConsentAsync(query, ct).ConfigureAwait(false);
+
+        // REQ-GOV-143 (SEC-GOV143-13/-14): a query without any claims (absent, not merely without scp) has unknown token scopes and is treated as
+        // holding every restricted scope with no clearance. Applied after the cache read and the rebuilds above; the cache holds the plain
+        // decision of the (scope-less) key and never this copy. Claims without scp stay unrestricted (scope-less and app-only tokens).
+        if (query.Claims is null && decision.IsAllowed && RestrictedScopeClearance.Unknown(_restrictedScopes) is { } unknown)
+        {
+            decision = decision with { ScopeClearance = unknown };
+        }
 
         if (profile != null && decision.IsAllowed)
         {

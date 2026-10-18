@@ -130,7 +130,9 @@ public sealed class AccessProfileTests
             Tenant: TenantLiebherr,
             GroupSids: new HashSet<Sid>(),
             Roles: new HashSet<string> { "TelemetryLead" },
-            Metadata: meta);
+            Metadata: meta,
+            // A scope-less token: an absent claims list would be treated as holding a restricted scope (REQ-GOV-143), which an Unmasked profile does not override.
+            Claims: System.Array.Empty<System.Security.Claims.Claim>());
 
         var decision = await policy.DecideAsync(query, CancellationToken.None);
 
@@ -380,7 +382,7 @@ public sealed class AccessProfileTests
             },
             rowFilterSql: "crane_id = 'C1'");
         var policy = CreatePolicyWithConsent(repo, consent);
-        var query = new TableAccessQuery(new Sid("srm07-user3"), TenantLiebherr, new HashSet<Sid>(), new HashSet<string>(), meta);
+        var query = new TableAccessQuery(new Sid("srm07-user3"), TenantLiebherr, new HashSet<Sid>(), new HashSet<string>(), meta, System.Array.Empty<System.Security.Claims.Claim>());
 
         var decision = await policy.DecideAsync(query, CancellationToken.None);
 

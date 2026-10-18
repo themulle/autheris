@@ -223,17 +223,12 @@ public static class GovernedConnectorReader
         var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var col in metadata.Columns)
         {
-            var access = decision.GetColumnAccess(col.ColumnName);
+            // Zero-Trust: sensitive columns in the catalog never leave in clear text without an explicit Clear rule (for a holder of a
+            // restricted scope a scope-specific one, REQ-GOV-143). The decision owns that rule; no path-local copy of it.
+            var access = decision.GetEffectiveColumnAccess(col.ColumnName, metadata);
             if (access == ColumnAccessLevel.Deny)
             {
                 continue;
-            }
-
-            // Zero-Trust: sensitive columns in the catalog never leave in clear text without an explicit Clear rule.
-            bool isSensitiveInCatalog = col.IsSensitive || metadata.ColumnMaskingRules.ContainsKey(col.ColumnName);
-            if (isSensitiveInCatalog && !decision.HasExplicitClear(col.ColumnName))
-            {
-                access = ColumnAccessLevel.Mask;
             }
 
             if (!rawRow.TryGetValue(col.ColumnName, out var value))

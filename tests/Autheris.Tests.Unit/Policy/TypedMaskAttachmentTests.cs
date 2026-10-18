@@ -53,7 +53,7 @@ public sealed class TypedMaskAttachmentTests
             maskPolicyFactory: masks);
     }
 
-    private static TableAccessQuery Query(TableMetadata meta) => new(User, Tenant, new HashSet<Sid>(), new HashSet<string>(), meta);
+    private static TableAccessQuery Query(TableMetadata meta) => new(User, Tenant, new HashSet<Sid>(), new HashSet<string>(), meta, System.Array.Empty<System.Security.Claims.Claim>()); // a scope-less token (absent claims count as restricted, REQ-GOV-143)
 
     private static TableAccessDecision Allowed(params (string Column, ColumnAccessLevel Level)[] levels) =>
         TableAccessDecision.Allowed(Orders, levels.ToDictionary(l => l.Column, l => l.Level), hasUnconstrainedColumnAllow: true);

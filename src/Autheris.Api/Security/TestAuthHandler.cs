@@ -100,6 +100,12 @@ public sealed class TestAuthHandler : AuthenticationHandler<AuthenticationScheme
             claims.Add(new Claim("idtyp", idTypHeader.ToString().Trim()));
         }
 
+        if (headers.TryGetValue("X-Test-Scope", out var scopeHeader) && !string.IsNullOrWhiteSpace(scopeHeader))
+        {
+            // Delegated token scopes (space separated 'scp'), e.g. the restricted scope of REQ-GOV-143.
+            claims.Add(new Claim("scp", scopeHeader.ToString().Trim()));
+        }
+
         if (headers.TryGetValue("X-Test-Tier", out var tierHeader) && !string.IsNullOrWhiteSpace(tierHeader))
         {
             claims.Add(new Claim("tier", tierHeader.ToString().Trim()));

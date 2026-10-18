@@ -297,7 +297,11 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             .Where(c => c.TenantId == tenant && c.TableIdentifier == tableId && c.IsActive(now))
             .ToList();
 
-        var decision = _consentService.ResolveAccess(userSid, groupSids, roles, tableId, activeConsents, tableMeta.Dialect);
+        // REQ-GOV-143 (SEC-GOV143-02/-15): the token scopes decide whether the caller holds a restricted scope, so a base Clear alone does not
+        // release a sensitive column to a restricted holder. Claims overload only (it also reads a plain 'scope' claim); empty maps to null.
+        var scopes = Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims);
+        var decision = _consentService.ResolveAccess(
+            userSid, groupSids, roles, tableId, activeConsents, tableMeta.Dialect, allUserSids: null, callerScopes: scopes.Count > 0 ? scopes : null);
         if (!decision.IsAllowed)
         {
             _logger.LogWarning("Consent denied for user {User} accessing Iceberg table {TableId}", userSid, tableId);
