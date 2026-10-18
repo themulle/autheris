@@ -195,6 +195,8 @@ public sealed class Mutation
                 .Build());
         }
 
+        // The repository read does not hydrate the description (INC1 opt-in); load it so the audit row fingerprints the real old value.
+        await Autheris.Application.Governance.ConsentDescriptionLoader.LoadAsync(consentRepository, [consent], ct).ConfigureAwait(false);
         var (oldLength, oldHash) = ConsentDescriptionText.Fingerprint(consent.Description);
         var (newLength, newHash) = ConsentDescriptionText.Fingerprint(check.Value);
         var audit = new AuditLogEntry

@@ -98,6 +98,23 @@ public sealed class SetConsentDescriptionTests : IDisposable
     }
 
     [Fact]
+    public async Task SetDescription_Twice_SecondAuditRowCarriesFingerprintOfFirstValue()
+    {
+        var consent = await NewConsentAsync(description: null);
+
+        await SetAsync(consent.Id, "first value", Admin());
+        await SetAsync(consent.Id, "second", Admin());
+
+        var (firstLength, firstHash) = Autheris.Domain.Security.ConsentDescriptionText.Fingerprint("first value");
+        var rows = await AuditRowsAsync();
+        rows.Count.ShouldBe(2);
+        var details = rows.Select(r => System.Text.Json.JsonDocument.Parse(r.Details).RootElement)
+            .Single(d => d.GetProperty("NewLength").GetInt32() == "second".Length);
+        details.GetProperty("OldLength").GetInt32().ShouldBe(firstLength);
+        details.GetProperty("OldSha256Prefix").GetString().ShouldBe(firstHash);
+    }
+
+    [Fact]
     public async Task SetDescription_Null_Clears()
     {
         var consent = await NewConsentAsync();
