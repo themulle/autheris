@@ -144,6 +144,10 @@ Assessment: [`INTAKE-2026-10-17B`](2026-10-17-issue-intake-assessment-2.md). Bot
 | D-10 | `PUT /datasets/{id}/keys` placeholder audit actor | Follow-up GitHub issue #160 |
 | D-11 | #99 increment I1 branches `feat/issue-99-i1-a/b/c` | Kept; picked up when wave 4 starts |
 | D-12 | `documentation-expert` agent and skill | Removed (no documentation phase) |
+| D-13 | #158 INC-1 Q-1 / Q-S1 / Q-S2 (2026-10-18) | `description` dropped from the bulk API; table delegates may set it (owner-authored marker plus audit); the grantee may not edit it |
+| D-14 | #150 Q-150-A (2026-10-18) | A failed first GraphQL schema build keeps the node unready beyond 30 s (first build only; no flag opens the gate) |
+| D-15 | #143 OQ-A / OQ-B / OQ-C / config key (2026-10-18) | `RestrictedScopes:Enabled=false` outside Development fails startup; restriction extended to the Iceberg and stream paths; a custom scope list without `Agent.Read` only warns; key `Gateway:Governance:RestrictedScopes` with an explicit `Enabled` switch |
+| D-16 | #152-#154 INC-2 (2026-10-18) | `MaxScanRows` default `min(10 x MaxRows, 100000)`; `RequireDdlHashForDeclared` true outside Development |
 
 ## 1. 🚀 Active Execution Tracks & Plan Matrix
 

@@ -251,6 +251,15 @@ The owner re-grouped the remaining delivery into thematic chunks; one project-ma
 - **1.8** `PLAN-REL-151` (#151, DDL step): chunk 2, in the first free DDL slot after I-7, before I-8.
 - **I-7a** `PLAN-CAT-138-INC1` (#138 INC-1, wave-1 item 1.7): chunk 2, right after I-7 (after 1.8), before I-8.
 
+**Wave-2 remainder insertions (2026-10-18; plans on `docs/wave2-rest-plans`, Phase 2/3 done, owner decisions D-13..D-16 in the master plan). Delivery runs in parallel lanes from `main`; each lane edits only its own rows and its own resume note:**
+
+- **I-7b** `PLAN-CAT-146-A` (#146 step A, `displayName` in MCP catalog tools, S): lane B, after I-7a, before I-8.
+- **I-25b** `PLAN-GOV-158-INC1` part A (#158 INC-1 WP-158-1..4, baseline DDL x3, M): lane A, stacked on I-25.
+- **I-22b** `PLAN-GOV-158-INC1` part B (WP-158-5, approval argument, S): right after I-22, before I-23/I-24.
+- **P-2.9** `PLAN-PROC-152-INC2` (#152-#154 INC-2, procedure limits, M, no DDL): own lane from `main` (needs 1.6, merged); never in parallel with another procedure step or with P-2.7.
+- **P-2.7** `PLAN-GOV-143` (#143 restricted-scope sensitive columns, M): after P-2.9 in the same lane, and after I-25 is on `main`.
+- **P-2.8** `PLAN-OPS-150` (#150 startup warm-up and readiness gate, M): own lane from `main`; WP-A (measurement) first, WP-D only if WP-A justifies it; merge before BL-06 I-27.
+
 **Owner instruction (permanent, 2026-10-17): Phase 6 is removed from the per-step workflow.** No documentation agent, no feature docs in `docs/features/`, no `docs/features/README.md` registrations, no release notes and no master plan edits per step. Only the tracker bookkeeping in this file (section 3/3.5 status row, resume instruction) is kept. Per step: Phase 4 -> lead build and test -> Phase 5 review loop -> tracker update -> commit and push -> next step. (F-GOV-23 was written for I-1/I-2 before this instruction and is not extended further.)
 
 Dependency check: I-25 needs I-3 and I-5 (both in chunk 1, earlier); I-7 needs I-4 (chunk 2, earlier); I-24 needs I-3 (chunk 1) and I-22 (chunk 2, earlier); I-9 needs B-0 and I-4 (chunk 2); I-16 needs I-13 (chunk 3); I-26 needs I-5 (chunk 1), I-14, I-15, I-17 (chunk 4, earlier); I-19 needs I-13 (chunk 3) and I-18. Owner waiver (2026-10-17): no lines-of-code estimate is required before Phase 4 for the rest of waves 2/3 and for wave 4.
