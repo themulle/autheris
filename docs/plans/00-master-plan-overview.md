@@ -70,7 +70,7 @@ Guiding rule (owner): rights are checked by the backend, not by the calling agen
 | 2.3 | **#128** list parameters (`IN`/`NOT IN`) — prerequisite of #129 and #131 | M | ✅ | Phase 4 (step I-5) |
 | 2.4 | **#130** governed time zone conversion | S-M | ✅ | Phase 4 (step I-6) |
 | 2.5 | **#111** persisted dataset tags and catalog visibility | M | ✅ | ✅ B-1 merged; I-7 Phase 4 + Phase 5 done (lane B, `feat/issue-111-dataset-tags-visibility`); awaiting consolidated PR |
-| 2.6 | **#112** typed aggregations in GraphQL for read-only tokens | M | ✅ | Phase 4 (steps B-2 security fix, then I-8) |
+| 2.6 | **#112** typed aggregations in GraphQL for read-only tokens | M | ✅ | **COMPLETED & VERIFIED ✅** (PR #201, [`PLAN-DATA-112`](2026-10-16-plan-issue-112-typed-aggregations-graphql.md), closed) |
 | 2.7 | **#175** query analysis for read-only tokens with execution cost model (`REQ-GOV-175`) | S-M | ✅ | **COMPLETED & VERIFIED ✅** (PR #180, `PLAN-GOV-175`) |
 | 2.8a | **#174** measure ReadyToRun impact for #150 WP-D (`REQ-OPS-174`) | S | ✅ | **COMPLETED & VERIFIED ✅** (PR #186, closed) |
 | 2.12 | **#163** required filter columns per table in catalog (`REQ-GOV-163`) | M | ✅ | **COMPLETED & VERIFIED ✅** (PR #187, closed) |
