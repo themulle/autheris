@@ -107,11 +107,12 @@ public sealed record AggregationResult(
 public sealed class MaskedAggregationException : GatewaySecurityException
 {
     public const string ErrorCodeConst = "AGGREGATION_ON_MASKED_COLUMN";
+    public const string FixedMessage = "The requested column is masked and cannot be used in an aggregation query.";
     public string ColumnName { get; }
 
     public MaskedAggregationException(string columnName, string? message = null)
         : base(
-            message ?? $"Column '{columnName}' is masked for the current caller and cannot be used in an aggregation or GROUP BY clause.",
+            message ?? FixedMessage,
             ErrorCodeConst)
     {
         ColumnName = columnName;
