@@ -129,6 +129,7 @@ public static class GatewayServiceCollectionExtensions
         IHostEnvironment environment)
     {
         Autheris.Api.Extensions.DependencyInjection.CdcWebhooksFeature.Capture(services, configuration);
+        Autheris.Api.Extensions.DependencyInjection.GatewayStartupWarmupServiceExtensions.CaptureColdPathTiming(services, configuration);
 
         services.TryAddSingleton<IHostEnvironment>(environment);
         services.TryAddSingleton<IFileSystemProbe>(PhysicalFileSystemProbe.Instance);
@@ -217,6 +218,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddAutherisExecution(gatewayOptions, hostEnv);
         services.AddAutherisDataApi();
         services.AddAutherisMcp(gatewayOptions);
+        services.AddAutherisStartupWarmup();
         services.AddAutherisCore(gatewayOptions, hostEnv);
 
         return services;

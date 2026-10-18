@@ -147,3 +147,48 @@ Resolves the WP-C blocker SEC-OPS150-02 and states how SEC-OPS150-01, -03 and -0
 - **T-OPS150-18** `ExecutorGate_AmbientHttpContextPresent_StaysPending_NeverReady` (16)
 - **T-OPS150-19** `ExecutorGate_GetExecutorNeverReturns_Stays503_LogsOnceAfterTimeout` (16)
 - The A-150-7 tests and `WarmupTask_EvictedOnRequestThread_DoesNotSeeCallerHttpContext` are promoted to `[Trait("Category","Security")]` and map to T-OPS150-01..04, 07. WP-C merge gate now includes T-OPS150-17..19.
+
+## 9. WP-A measurement results (2026-10-18)
+
+**Method.** `benchmarks/load/scripts/cold-start.sh`: Release build of `Autheris.Api` (`AutherisIncludeTestAuth=true`), started as a separate process on `127.0.0.1` (Development, test auth, anonymous dev access, SQLite governance db with the seeded demo catalog of 101 tables, `Gateway:Startup:ColdPathTiming:Enabled=true`). Per restart: poll `/health/ready` every 50 ms, wait 5 s, then per probe one first request and 20 warm requests (`curl -w time_total`); the probe order rotates per restart (restart 1: GraphQL, `describe_dataset`, `describe_my_access`; restart 2 and 3 rotated) so the position effect is visible. 3 restarts, median reported. `dotnet-counters collect` (`System.Runtime` `time-in-jit`, `methods-jitted-count`, 1 s interval) ran per restart. GraphQL probe: `{ billing_dbo_billing_table_1(first: 1) { __typename } }` (full pipeline up to the resolver, which returns `ACCESS_DENIED` for the anonymous guest; no connector or data source call). MCP probes: `tools/call` over streamable HTTP, stateless.
+
+**Environment caveats.** WSL2 dev container, shared with other agent lanes running builds and tests at the same time, so absolute numbers are noisy (restart spread up to 3x). No IdP: test auth only, so **the OIDC metadata fetch was not exercised and has no number**. No Testcontainers database: SQLite, no real data source. The in-process listener reports `validate`, `compile`, `execute`; HotChocolate 16.6.8 emits no `ParseDocument` event on this path (parse happens in the HTTP layer), so there is no `parse` line. JIT counters are process-wide and include background Tier-1 re-JIT, so the JIT share below is an upper-bound estimate.
+
+| Metric | Restart 1 | Restart 2 | Restart 3 | Median |
+|---|---|---|---|---|
+| Process start to `/health/ready` 200 (ms) | 1952 | 6132 | 2199 | **2199** |
+| GraphQL first request (ms) / probe position | 794 / 1 | 330 / 3 | 844 / 2 | **794** |
+| GraphQL warm median (ms) | 19.1 | 11.9 | 19.1 | **19.1** |
+| `describe_dataset` first (ms) / position | 872 / 2 | 492 / 1 | 157 / 3 | **492** |
+| `describe_dataset` warm median (ms) | 40.5 | 23.6 | 45.5 | **40.5** |
+| `describe_my_access` first (ms) / position | 57 / 3 | 48 / 2 | 451 / 1 | **57** |
+| `describe_my_access` warm median (ms) | 20.2 | 12.2 | 13.9 | **13.9** |
+| First GraphQL operation: validate / compile / execute (ms) | 74 / 36 / 284 | 43 / 24 / 123 | 205 / 51 / 215 | **74 / 36 / 215** |
+| Warm stage cost (listener occurrences 2-3, ms) | validate 0.5, execute 13-30 | validate 0.4, execute 8-14 | validate 0.3, execute 9-41 | validate under 1, execute about 10-30 |
+| `methods-jitted-count` (idle, then after the 3 probes) | 13.8k to 28.6k | 15.6k to 30.0k | 14.9k to 28.7k | about 14k to 29k |
+| JIT ms in the second covering the first requests | 696 | 400 to 520 | 560 | **about 560** |
+
+Cold minus warm (medians): GraphQL **775 ms**, `describe_dataset` **452 ms**, `describe_my_access` **43 ms** (but 450 ms when it is the first MCP call of the process: the cost sits in the shared MCP stack, not in the tool). Sum over the three probes: about 1270 ms.
+
+**Decision rule applied** (stage is a WP-C target if cold-minus-warm is at least 100 ms or at least 10 % of the total cold delta, about 127 ms):
+
+| Stage or area | Cold minus warm | Result |
+|---|---|---|
+| GraphQL validate | about 74 ms (about 10 % of the GraphQL delta, 6 % of the total) | Below the thresholds on its own; covered anyway by the executor step (`{ __typename }` runs the validator). |
+| GraphQL compile | about 36 ms | Below; covered by the executor step. |
+| GraphQL execute (resolver stack, middlewares, error formatting) | about 200 ms | **Target.** Not covered by `UseSkipWarmupExecution` (see gap G-150-A). |
+| MCP shared stack (first `tools/call`: tool registry, JSON serialisation, transport) | about 400 ms for the first MCP call, about 40 ms for later tools | **Target: D-150-11 selected** (`McpSerializationWarmup`). Per-tool step not needed. |
+| OIDC metadata prefetch (D-150-10) | not measured (no IdP in this setup) | **Dropped for now**: the plan makes measurement the gate (D-150-1). Re-measure with a local metadata stub before WP-C; select only if the first authenticated request shows at least 100 ms. |
+| DI pre-resolution of hot singletons | no separate stage; any DI cost is inside the execute and MCP deltas | **Dropped**: the executor step and the MCP step already resolve the same services. |
+| JIT | about 560 to 700 ms JIT in the second of the first requests against a 794 ms first GraphQL request; 13k to 15k methods are jitted by the three probes | **At least 25 % of the cold delta by a wide margin (estimated 50 to 90 %): WP-D (ReadyToRun) opens.** The estimate is an upper bound (see caveats); WP-D must report the measured cold delta with R2R on the same harness. |
+
+**WP-C step selection:** GraphQL executor step (required, D-150-4/-5) plus D-150-11 (MCP serialisation). D-150-10 (OIDC) and DI pre-resolution are dropped on this evidence. **WP-D: go.**
+
+**Findings for the plan.**
+- **A-150-2 resolved (test `CatalogSchemaRebuild_RunsWarmupTasksBeforeNewExecutorServes`).** With HotChocolate 16.6.8, `WarmupExecutorAsync` runs inside the executor build: after `IRequestExecutorManager.EvictExecutor`, the new executor returned by `GetExecutorAsync` has already been through every registered `IRequestExecutorWarmupTask` (the task must report `ApplyOnlyOnStartup = false` to run again on rebuilds). The task-run path is therefore the primary path; the gate-run path stays only as the defensive fallback required by SEC-OPS150-01.
+- **G-150-A (design gap, for the architect).** D-150-5 skips `UseOperationExecution` for the warm-up request, but the execute stage is the largest GraphQL cold cost (about 200 ms). `{ __typename }` is resolved without a connector, so executing it instead of skipping it would warm the execution machinery at no side-effect cost. Decide in WP-C whether to drop `UseSkipWarmupExecution` for the constant `__typename` document (SEC-OPS150-06/-07 allow a skip only; executing a constant introspection-free `__typename` selection does not touch a resolver with side effects) or to keep the skip and accept the cold execute stage.
+- `HostStartup_UserHostedServicesStartBeforeKestrelListens` pins that `GenericWebHostService` is registered after `RequestExecutorWarmupService`, so a warm-up run inside `StartAsync` delays the listener while a `BackgroundService` (D-150-7) does not.
+
+## Changelog
+
+- 2026-10-18: Added section 9 with the WP-A measurement results, the decision-rule outcome (WP-C: executor step plus MCP serialisation; OIDC and DI pre-resolution dropped; WP-D opened), the A-150-2 resolution and gap G-150-A.
