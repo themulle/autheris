@@ -39,7 +39,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
     private readonly GatewayOptions? _options;
     private readonly IRebacEvaluator? _rebacEvaluator;
     private readonly ILogger<CatalogVisibilityService> _logger;
-    private readonly object _memoLock = new();
+    private readonly Lock _memoLock = new();
     private readonly Dictionary<MemoKey, CatalogVisibleSet> _memo = [];
 
     /// <summary>A null dependency is allowed at construction and answers empty (SEC-CAT138-01), so a mis-wired host never widens.</summary>
@@ -62,7 +62,8 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
 
     private readonly record struct MemoKey(string Subject, string Claims, string Tenant, string Contract, string Surface);
 
-    private sealed record Context(ClaimsPrincipal Principal, Sid Sid, CallerScope Scope, TenantId Tenant, TenancyMode Mode, IReadOnlyCollection<string> SharedTables)
+    private sealed record Context(
+        ClaimsPrincipal Principal, Sid Sid, CallerScope Scope, TenantId Tenant, TenancyMode Mode, IReadOnlyCollection<string> SharedTables, MemoKey BaseKey)
     {
         public bool IsAdminView => CallerScopeResolver.IsAdminView(Scope);
     }
@@ -86,7 +87,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         {
             all = await _metadataRepository!.GetAllTablesAsync(ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             LogFailure(ex);
             return CatalogVisibleSet.Empty;
@@ -120,7 +121,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         {
             row = await _metadataRepository!.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             LogFailure(ex);
             return null;
@@ -158,26 +159,76 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         }
 
         // De-duplicated and capped: the excess is denied, never evaluated (SEC-CAT138-06).
-        var wanted = candidates.Distinct().Take(MaxCandidates).ToHashSet();
+        var wanted = new HashSet<TableIdentifier>(Math.Min(candidates.Count, MaxCandidates));
+        foreach (var candidate in candidates)
+        {
+            if (wanted.Count == MaxCandidates)
+            {
+                break;
+            }
+
+            wanted.Add(candidate);
+        }
+
         if (TryGetMemo(KeyOf(context, null), out var memoised))
         {
-            return wanted.Where(memoised.Contains).ToHashSet();
+            var fromMemo = new HashSet<TableIdentifier>(wanted.Count);
+            foreach (var id in wanted)
+            {
+                if (memoised.Contains(id))
+                {
+                    fromMemo.Add(id);
+                }
+            }
+
+            return fromMemo;
         }
 
-        IReadOnlyList<TableMetadata> all;
-        try
+        // Bounded read: only the candidates are loaded (no whole-catalog read), at most MaxParallelChunks reads in flight.
+        var ordered = wanted.ToArray();
+        var loaded = new TableMetadata?[ordered.Length];
+        var failedReads = 0;
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, ordered.Length),
+            new ParallelOptions { MaxDegreeOfParallelism = MaxParallelChunks, CancellationToken = ct },
+            async (index, token) =>
+            {
+                try
+                {
+                    loaded[index] = await _metadataRepository!.GetTableMetadataAsync(ordered[index], token).ConfigureAwait(false);
+                }
+                catch (Exception) when (!token.IsCancellationRequested)
+                {
+                    Interlocked.Increment(ref failedReads);
+                }
+            }).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
+        if (failedReads > 0)
         {
-            all = await _metadataRepository!.GetAllTablesAsync(ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            LogFailure(ex);
-            return new HashSet<TableIdentifier>();
+            _logger.LogError("Catalog visibility could not read {FailedReads} candidate tables; they are denied (fail-closed).", failedReads);
         }
 
-        var rows = all.Where(t => t.Table.IsActive && wanted.Contains(t.Identifier)).ToList();
+        var rows = new List<TableMetadata>(ordered.Length);
+        for (var i = 0; i < ordered.Length; i++)
+        {
+            // The repository does not filter is_active on a single read, and the row must be the one asked for (SEC-CAT138-07).
+            if (loaded[i] is { Table.IsActive: true } row && row.Identifier == ordered[i])
+            {
+                rows.Add(row);
+            }
+        }
+
         var visible = rows.Count == 0 ? null : await EvaluateAsync(context, rows, null, ct).ConfigureAwait(false);
-        return visible == null ? new HashSet<TableIdentifier>() : visible.Select(t => t.Identifier).ToHashSet();
+        var result = new HashSet<TableIdentifier>(visible?.Count ?? 0);
+        if (visible != null)
+        {
+            foreach (var table in visible)
+            {
+                result.Add(table.Identifier);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>One resolution of the caller class; null means "empty answer" (no repository, ReBAC or memo is touched).</summary>
@@ -201,9 +252,24 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
 
         var mode = _options.Tenancy.EffectiveMode;
         var scope = CallerScopeResolver.Resolve(principal, mode);
-        return scope == CallerScope.None
-            ? null
-            : new Context(principal, sid.Value, scope, caller.Tenant, mode, _options.Catalog.SharedTables ?? []);
+        if (scope == CallerScope.None)
+        {
+            return null;
+        }
+
+        // The memo key reads the tenant claim, which throws on an invalid value: computed once, here, under the fail-closed rule.
+        MemoKey baseKey;
+        try
+        {
+            baseKey = BaseKeyOf(principal, sid.Value, scope, caller.Tenant);
+        }
+        catch (Exception ex)
+        {
+            LogFailure(ex);
+            return null;
+        }
+
+        return new Context(principal, sid.Value, scope, caller.Tenant, mode, _options.Catalog.SharedTables ?? [], baseKey);
     }
 
     /// <summary>Engine -> shape -> ReBAC. Null = a dependency failed (already logged); cancellation propagates.</summary>
@@ -232,7 +298,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
 
             return await ApplyRebacAsync(context, shaped, ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             LogFailure(ex);
             return null;
@@ -258,6 +324,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         var chunks = rows.Chunk(ChunkSize).ToArray();
         var allowed = new bool[chunks.Length][];
         var failedTables = 0;
+        string? failureType = null;
 
         await Parallel.ForEachAsync(
             Enumerable.Range(0, chunks.Length),
@@ -279,11 +346,12 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
                         flags[i] = result?.Decisions != null && result.Decisions.TryGetValue(checks[i], out var ok) && ok;
                     }
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex) when (!token.IsCancellationRequested)
                 {
+                    // A timeout surfaces as OperationCanceledException with an uncancelled token: a failure, not a cancellation.
                     Interlocked.Add(ref failedTables, chunk.Length);
+                    Interlocked.CompareExchange(ref failureType, ex.GetType().Name, null);
                     Array.Clear(flags);
-                    _ = ex;
                 }
 
                 allowed[index] = flags;
@@ -294,7 +362,8 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
 
         if (failedTables > 0)
         {
-            _logger.LogWarning("ReBAC evaluation failed for {HiddenTables} catalog tables; they are hidden (fail-closed).", failedTables);
+            _logger.LogWarning(
+                "ReBAC evaluation failed for {HiddenTables} catalog tables ({FailureType}); they are hidden (fail-closed).", failedTables, failureType);
         }
 
         var visible = new List<TableMetadata>(rows.Count);
@@ -324,15 +393,17 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
     /// SEC-CAT138-05: subject SID, everything the consent engine reads from the principal (groups, roles, token scopes, caller class),
     /// the channel-supplied tenant, the contract and the surface. Never the principal reference alone.
     /// </summary>
-    private static MemoKey KeyOf(Context context, SchemaContractDefinition? contract)
+    private static MemoKey BaseKeyOf(ClaimsPrincipal principal, Sid sid, CallerScope scope, TenantId tenant)
     {
-        var principal = context.Principal;
         var groups = string.Join(',', principal.GetGroupSids().Select(g => g.Value).OrderBy(x => x, StringComparer.Ordinal));
         var roles = string.Join(',', principal.GetUserRoles().OrderBy(x => x, StringComparer.Ordinal));
         var scopes = string.Join(',', Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims).OrderBy(x => x, StringComparer.Ordinal));
-        var claims = $"{context.Scope}|{principal.GetTenantId().Value}|g:{groups}|r:{roles}|s:{scopes}";
-        return new MemoKey(context.Sid.Value, claims, context.Tenant.Value, ContractKey(contract), nameof(CatalogSurface.Discovery));
+        var claims = $"{scope}|{principal.GetTenantId().Value}|g:{groups}|r:{roles}|s:{scopes}";
+        return new MemoKey(sid.Value, claims, tenant.Value, string.Empty, nameof(CatalogSurface.Discovery));
     }
+
+    private static MemoKey KeyOf(Context context, SchemaContractDefinition? contract) =>
+        contract == null ? context.BaseKey : context.BaseKey with { Contract = ContractKey(contract) };
 
     private static string ContractKey(SchemaContractDefinition? contract) => contract == null
         ? string.Empty

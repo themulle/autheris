@@ -705,15 +705,15 @@ public sealed class CatalogVisibilityServiceTests
         }
 
         current.ShouldNotBeNull();
-        var src = Path.Combine(current.FullName, "src");
-        var offenders = Directory.EnumerateFiles(src, "*.cs", SearchOption.AllDirectories)
-            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
-            .Where(f => File.ReadAllLines(f).Any(l =>
-                l.Contains("EngineOutputForTesting", StringComparison.Ordinal) &&
-                !l.Contains("internal Func<", StringComparison.Ordinal) &&
-                !l.TrimStart().StartsWith("///", StringComparison.Ordinal) &&
-                !l.TrimStart().StartsWith("//", StringComparison.Ordinal) &&
-                !l.Contains("is { } seam", StringComparison.Ordinal)))
+        // Every non-test project (src, benchmarks, tools, samples): no assignment of the seam, whatever the spelling (`x.Seam = ...` or an initializer).
+        var assignment = new System.Text.RegularExpressions.Regex(@"\bEngineOutputForTesting\s*=(?![=>])");
+        var testRoot = $"{Path.DirectorySeparatorChar}tests{Path.DirectorySeparatorChar}";
+        var offenders = Directory.EnumerateFiles(current.FullName, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") &&
+                        !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}") &&
+                        !f.Contains(testRoot, StringComparison.Ordinal) &&
+                        !f.Contains($"{Path.DirectorySeparatorChar}.git{Path.DirectorySeparatorChar}"))
+            .Where(f => assignment.IsMatch(File.ReadAllText(f)))
             .Select(Path.GetFileName)
             .ToList();
 
