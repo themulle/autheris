@@ -291,6 +291,7 @@ public static class GatewayGovernanceServiceExtensions
             IAuditChainExportSource,
             IAuditPurgeKeyProvider,
             ICdcWatermarkRepository,
+            Autheris.Application.Dbt.Interfaces.ISemanticManifestStore,
             ICloudEventSubscriptionStore
         where TMigrationRunner : class, IGovernanceMigrationRunner
     {
@@ -322,6 +323,8 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsumerAggregationRepository>(sp => sp.GetRequiredService<TRepository>());
+        // #112 A-9: per-tenant persisted semantic manifest.
+        services.AddSingleton<Autheris.Application.Dbt.Interfaces.ISemanticManifestStore>(sp => sp.GetRequiredService<TRepository>());
         if (cdcWebhooksEnabled)
         {
             services.AddSingleton<ICloudEventSubscriptionStore>(sp => sp.GetRequiredService<TRepository>());

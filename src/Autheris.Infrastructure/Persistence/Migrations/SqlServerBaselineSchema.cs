@@ -713,6 +713,21 @@ CREATE TABLE dbo.TABLE_CATALOG_SETTINGS (
     updated_by NVARCHAR(256) NOT NULL,
     updated_at NVARCHAR(64) NOT NULL
 );
+
+-- Issue #112: one validated semantic (dbt) manifest per tenant (latest version only); a save replaces the row atomically.
+-- No foreign key (tenant registry rows are optional in single-tenant installs). content_hash is the SHA-256 hex of manifest_json.
+IF OBJECT_ID(N'dbo.SEMANTIC_MANIFESTS', N'U') IS NULL
+CREATE TABLE dbo.SEMANTIC_MANIFESTS (
+    tenant_id NVARCHAR(128) NOT NULL PRIMARY KEY,
+    manifest_version NVARCHAR(128) NOT NULL,
+    content_hash CHAR(64) NOT NULL,
+    format_version INT NOT NULL,
+    models_count INT NOT NULL,
+    metrics_count INT NOT NULL,
+    manifest_json NVARCHAR(MAX) NOT NULL,
+    imported_by NVARCHAR(256) NOT NULL,
+    imported_at NVARCHAR(64) NOT NULL
+);
 ");
 
             // Append-only audit table (a table owner can still drop the trigger; the runtime login should only

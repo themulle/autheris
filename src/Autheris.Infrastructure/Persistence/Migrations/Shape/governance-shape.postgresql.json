@@ -1696,6 +1696,60 @@
       "indexes": []
     },
     {
+      "name": "semantic_manifests",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "manifest_version",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "content_hash",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "format_version",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "models_count",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "metrics_count",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "manifest_json",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "imported_by",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "imported_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id"
+      ],
+      "indexes": []
+    },
+    {
       "name": "table_catalog_settings",
       "columns": [
         {
