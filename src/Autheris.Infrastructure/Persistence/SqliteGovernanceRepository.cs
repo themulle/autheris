@@ -54,6 +54,9 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IConsen
 
     internal void InvalidateMetadataCacheForTesting() => _metadataCache.Clear();
 
+    /// <summary>Test seam: invalidation keys queued and not yet applied by a write scope.</summary>
+    internal int PendingMetadataInvalidationCountForTesting => _pendingMetadataInvalidations.Count;
+
     private void ApplyMetadataInvalidations()
     {
         if (_pendingMetadataInvalidations.Count == 0)

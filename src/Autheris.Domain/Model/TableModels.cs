@@ -14,6 +14,18 @@ public enum GranteeType
     ServicePrincipal = 4
 }
 
+/// <summary>
+/// Issue #111: which restriction produced a catalog row. <see cref="Unmarked"/> (0) is the default and the most restrictive value:
+/// consumers check positively (<c>== Full</c>, <c>== Granted</c> with a consent) and never treat <see cref="Unmarked"/> as granted.
+/// </summary>
+public enum CatalogView
+{
+    Unmarked = 0,
+    Granted = 1,
+    Summary = 2,
+    Full = 3
+}
+
 public enum DatasetVisibility
 {
     Hidden = 0,
@@ -153,10 +165,16 @@ public sealed record TableMetadata
     /// <summary>Issue #107: object-level row filter evaluation settings (loaded from TABLE_ROW_FILTER_STRATEGIES, never written by the metadata upsert). Null = inherit global.</summary>
     public RowFilterEvaluationSettings? RowFilterEvaluation { get; init; }
 
+    /// <summary>Issue #111: which restriction applied to this row; set explicitly by the visibility filter, default <see cref="Model.CatalogView.Unmarked"/> (most restrictive).</summary>
+    public CatalogView CatalogView { get; init; } = CatalogView.Unmarked;
+
+    /// <summary>Issue #111: persisted dataset tags (admin and dbt source), overlaid by the repositories. <see cref="Table.Tags"/> is never written by repositories; tags are not policy inputs.</summary>
+    public IReadOnlyList<string> CatalogTags { get; init; } = Array.Empty<string>();
+
     /// <summary>Write intent: the upsert replaces the stored key/index definition only when true; otherwise it keeps it.</summary>
     public bool ReplaceKeyDefinition { get; init; }
 
-    /// <summary>Issue #80: When true, callers with Summary or Full catalog visibility may view coarsened value profiles and request synthetic sample rows without an active table consent.</summary>
+    /// <summary>Issue #80: When true, callers with Full catalog visibility may view coarsened value profiles and request synthetic sample rows without an active table consent.</summary>
     public bool ReleaseProfileToCatalogViewers { get; init; }
 
     /// <summary>Issue #80: Controls whether full coarsened ranges/distinct counts or only format + empty share are published when row filters apply.</summary>

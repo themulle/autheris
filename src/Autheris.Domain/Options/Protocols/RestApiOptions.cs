@@ -2,6 +2,21 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Autheris.Domain.Options;
 
+/// <summary>PLAN-SEC-115: REST read-path switches (startup only; a restart is required).</summary>
+public sealed class RestApiOptions
+{
+    public RestDataEndpointOptions DataEndpoint { get; init; } = new();
+}
+
+/// <summary>
+/// Switch for the REST data family: <c>/api/v1/data/*</c> (GET, change-token, POST changes) and the sample-rows route.
+/// Off means the routes are not mapped (router 404).
+/// </summary>
+public sealed class RestDataEndpointOptions
+{
+    public bool Enabled { get; init; } = true;
+}
+
 public sealed class WebSqlOptions
 {
     // SEC C-01/C-03: WebSQL is opt-in (secure default).

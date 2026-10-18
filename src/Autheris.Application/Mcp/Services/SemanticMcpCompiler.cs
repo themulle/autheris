@@ -23,7 +23,8 @@ public sealed class SemanticMcpCompiler(
     ILogger<SemanticMcpCompiler> logger,
     IGoldenQueryService? goldenQueryService = null,
     IConsentRepository? consentRepo = null,
-    IOptions<GatewayOptions>? options = null) : ISemanticMcpCompiler
+    IOptions<GatewayOptions>? options = null,
+    IReadPathSwitches? switches = null) : ISemanticMcpCompiler
 {
     private readonly ITableMetadataRepository _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
     private readonly ILogger<SemanticMcpCompiler> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -31,6 +32,10 @@ public sealed class SemanticMcpCompiler(
     private readonly IConsentRepository? _consentRepo = consentRepo;
     private readonly IOptions<GatewayOptions>? _options = options;
     private static readonly JsonSerializerOptions CachedIndentedOptions = new() { WriteIndented = true };
+
+    /// <summary>First <paramref name="length"/> UTF-16 units of <paramref name="text"/>, never ending on a lone high surrogate.</summary>
+    private static string CutOnRuneBoundary(string text, int length) =>
+        length > 0 && char.IsHighSurrogate(text[length - 1]) ? text[..(length - 1)] : text[..length];
 
     public async Task<McpToolDefinition> CompileToolAsync(
         string toolName,
@@ -40,14 +45,16 @@ public sealed class SemanticMcpCompiler(
         var meta = await _metadataRepo.GetTableMetadataAsync(targetTable, ct).ConfigureAwait(false);
         var tableDesc = !string.IsNullOrWhiteSpace(meta?.Table.Description)
             ? meta.Table.Description
-            : (meta?.Table.DisplayName ?? $"Dataset for {targetTable.Domain}.{targetTable.TableName}");
+            : (meta is null
+                ? $"Dataset for {targetTable.Domain}.{targetTable.TableName}"
+                : McpCatalogText.DisplayName(meta.Table.DisplayName, targetTable.TableName)); // SEC-CAT146A-01: externally authored text, never raw
 
         // Enforce Dynamic Compactor constraint: Short description < 120 chars for LLM Tool Picker
-        var shortDesc = tableDesc.Length > 110 ? tableDesc[..107] + "..." : tableDesc;
+        var shortDesc = tableDesc.Length > 110 ? CutOnRuneBoundary(tableDesc, 107) + "..." : tableDesc;
         shortDesc = $"{shortDesc} ({targetTable.Domain}.{targetTable.TableName})";
         if (shortDesc.Length > 120)
         {
-            shortDesc = shortDesc[..117] + "...";
+            shortDesc = CutOnRuneBoundary(shortDesc, 117) + "...";
         }
 
         var properties = new Dictionary<string, object>
@@ -106,6 +113,12 @@ public sealed class SemanticMcpCompiler(
         System.Security.Claims.ClaimsPrincipal? principal = null,
         CancellationToken ct = default)
     {
+        // PLAN-SEC-115 A-6: semantic resources render catalog metadata, so they follow the Catalog group (no repository call when off).
+        if (switches is not null && !switches.IsGroupEnabled(McpToolGroup.Catalog))
+        {
+            return [];
+        }
+
         var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
         // SEC H-02: OpenSchema no longer opens MCP resources; only the explicit (production-blocked) MCP auth bypass does.
         var isMcpAuthBypassed = _options?.Value.IsMcpAuthBypassed == true;

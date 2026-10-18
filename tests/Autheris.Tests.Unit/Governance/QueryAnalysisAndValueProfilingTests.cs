@@ -741,7 +741,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             "crm",
             "public",
             "contacts",
-            DatasetVisibility.Summary,
+            DatasetVisibility.Full,
             columns,
             releaseProfileToCatalogViewers: true,
             estimatedRowCount: 1000);
@@ -787,7 +787,9 @@ public sealed class QueryAnalysisAndValueProfilingTests
             options: Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Single" } }),
             profileService: profileService,
             syntheticRowGenerator: syntheticGenerator,
-            auditLogRepository: auditRepo);
+            auditLogRepository: auditRepo,
+            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(
+                Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeSingleReadsFromCatalog(metadataRepo), consentRepo, new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Single" } }));
 
         var viewer = CreatePrincipal("catalog-viewer-1");
 
@@ -804,8 +806,9 @@ public sealed class QueryAnalysisAndValueProfilingTests
         emailCol.ValueProfile!.SampleValues.Should().BeNull();
 
         // 2. sample_rows(synthetic: true) returns synthetic rows without calling IGatewayExecutionService
-        // WP-0: the consent-less "released to catalog viewers" branch is closed; only an administrator view or an active consent may sample.
-        await Assert.ThrowsAsync<Autheris.Domain.Exceptions.GatewayForbiddenException>(() => catalog.SampleRowsAsync(viewer, "crm.public.contacts", count: 5, synthetic: true));
+        // Issue #111 (A-4): the consent-less branch is open only for a tier-Full row explicitly released to catalog viewers (this table); an
+        // administrator view or an active consent may always sample.
+        (await catalog.SampleRowsAsync(viewer, "crm.public.contacts", count: 5, synthetic: true)).IsSynthetic.Should().BeTrue();
         var administrator = Autheris.Tests.Unit.Catalog.Wp0.User("catalog-admin-1", null, ["GovernanceAdmin"]);
         var sample = await catalog.SampleRowsAsync(administrator, "crm.public.contacts", count: 5, synthetic: true);
         sample.IsSynthetic.Should().BeTrue();
@@ -823,7 +826,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
         }
 
         // Verify METADATA_SYNTHETIC_SAMPLE audit event with Query populated
-        recordedAudits.Should().ContainSingle(a =>
+        recordedAudits.Should().Contain(a =>
             a.EventType == AuditEventTypes.MetadataSyntheticSample &&
             a.TargetTable == "crm.public.contacts" &&
             !string.IsNullOrWhiteSpace(a.Query) &&

@@ -21,6 +21,7 @@ public sealed class DeclarativeConsentApplyService(
     IConsentRepository consentRepository,
     IAuditLogRepository auditLogRepository,
     IGrantPolicy? grantPolicy = null,
+    IDatasetCatalogAdminService? datasetCatalog = null,
     IOptions<GovernanceTextOptions>? textOptions = null) : IDeclarativeConsentApplyService
 {
     // WP-SC-16: the policy is stateless; without an injected instance the built-in maxima apply (never "no policy").
@@ -65,13 +66,15 @@ public sealed class DeclarativeConsentApplyService(
         int updated = 0;
         var details = new List<string>();
 
-        if (manifest.Policies == null || manifest.Policies.Count == 0)
+        var hasDatasets = manifest.Datasets is { Count: > 0 };
+        if ((manifest.Policies == null || manifest.Policies.Count == 0) && !hasDatasets)
         {
             return new DeclarativeApplyResult(0, 0, 0, 0, dryRun, ["Empty manifest; 0 policies processed."]);
         }
 
+        var policies = manifest.Policies ?? [];
         var seenTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var p in manifest.Policies)
+        foreach (var p in policies)
         {
             var key = $"{p.Domain}|{p.Schema}|{p.TableName}|{(string.Equals(p.GranteeType, "Role", StringComparison.OrdinalIgnoreCase) ? "Role" : "Sid")}|{p.GranteeRef}";
             if (!seenTargets.Add(key))
@@ -83,10 +86,10 @@ public sealed class DeclarativeConsentApplyService(
 
         // PLAN-GOV-158-INC1 decision 6: normalise every description before anything is read or written (also in dry-run); a violation
         // rejects the whole manifest with a neutral message that names only the policy index (SEC-GOV158I1-03).
-        var descriptions = new string?[manifest.Policies.Count];
-        for (var i = 0; i < manifest.Policies.Count; i++)
+        var descriptions = new string?[policies.Count];
+        for (var i = 0; i < policies.Count; i++)
         {
-            var check = UntrustedText.Normalize(manifest.Policies[i].Description, _descriptionMaxLength, allowLineFeed: false);
+            var check = UntrustedText.Normalize(policies[i].Description, _descriptionMaxLength, allowLineFeed: false);
             if (!check.IsValid)
             {
                 throw new DeclarativeManifestValidationException(i);
@@ -100,9 +103,9 @@ public sealed class DeclarativeConsentApplyService(
         var createList = new List<Consent>();
         var auditEntries = new List<AuditLogEntry>();
 
-        for (var policyIndex = 0; policyIndex < manifest.Policies.Count; policyIndex++)
+        for (var policyIndex = 0; policyIndex < policies.Count; policyIndex++)
         {
-            var policy = manifest.Policies[policyIndex];
+            var policy = policies[policyIndex];
             var description = descriptions[policyIndex];
             totalEvaluated++;
             var tableId = new TableIdentifier(policy.Domain, policy.Schema, policy.TableName);
@@ -314,6 +317,52 @@ public sealed class DeclarativeConsentApplyService(
             details.Add($"{(dryRun ? "[DryRun] Would apply" : "Applied")} policy for '{tableId}' -> '{policy.GranteeRef}'.");
         }
 
+        // Issue #111 (A-7, BC-11): the dataset entries run the service dry run first (same authorization, tenant rule and validation as the
+        // apply), so one rejected entry stops the whole manifest before anything is written.
+        var datasetEdits = new List<(string Id, DatasetCatalogEdit Edit)>();
+        if (hasDatasets)
+        {
+            if (datasetCatalog is null)
+            {
+                details.Add($"Dataset catalog settings are not available; {manifest.Datasets!.Count} dataset entries were not applied.");
+            }
+            else
+            {
+                var skipped = 0;
+                foreach (var entry in manifest.Datasets!)
+                {
+                    totalEvaluated++;
+                    var datasetId = new TableIdentifier(entry.Domain, entry.Schema, entry.TableName).ToString();
+                    var edit = new DatasetCatalogEdit(entry.Tags, null, null, entry.Visibility);
+                    var planned = await datasetCatalog.ApplyAsync(caller, datasetId, edit, "manifest", ct, dryRun: true).ConfigureAwait(false);
+                    switch (planned.Outcome)
+                    {
+                        case DatasetCatalogOutcome.NotFound:
+                            details.Add($"Dataset '{datasetId}' not found in catalog; skipped catalog settings.");
+                            skipped++;
+                            break;
+                        case DatasetCatalogOutcome.Applied:
+                            applied++;
+                            datasetEdits.Add((datasetId, edit));
+                            details.Add($"{(dryRun ? "[DryRun] Would apply" : "Applied")} catalog settings for '{datasetId}'.");
+                            break;
+                        case DatasetCatalogOutcome.Unchanged:
+                            unchanged++;
+                            details.Add($"Catalog settings for '{datasetId}' are unchanged.");
+                            break;
+                        default:
+                            throw new DeclarativeDatasetCatalogException(planned.Outcome);
+                    }
+                }
+
+                // The dry-run pass writes no per-entry probe audit; a real apply writes one aggregated entry per manifest (throttled). A dry run writes no audit.
+                if (skipped > 0 && !dryRun)
+                {
+                    await datasetCatalog.RecordManifestProbesAsync(caller, skipped, ct).ConfigureAwait(false);
+                }
+            }
+        }
+
         // WP-SC-02: one transaction and one epoch bump for the whole manifest; a fault leaves nothing changed and writes no audit.
         // M2: the APPLIED audit entries travel into the same transaction, so a committed change always has its (Tier-A, anchored) record and a failing
         // epoch invalidation after the commit cannot lose it.
@@ -329,6 +378,19 @@ public sealed class DeclarativeConsentApplyService(
                 var descriptionWriter = consentRepository as IConsentDescriptionRepository
                     ?? throw new InvalidOperationException("The consent repository does not support in-place description updates.");
                 await descriptionWriter.ReplaceConsentsAsync(revokeIds, createList, actorSid, supersededReason, auditEntries, descriptionUpdates, ct).ConfigureAwait(false);
+            }
+        }
+
+        // Not atomic with the consent commit above: validation is all-or-nothing, a storage fault in the middle is not rolled back across the two stores.
+        if (!dryRun)
+        {
+            foreach (var (datasetId, edit) in datasetEdits)
+            {
+                var result = await datasetCatalog!.ApplyAsync(caller, datasetId, edit, "manifest", ct).ConfigureAwait(false);
+                if (!result.IsSuccess && result.Outcome != DatasetCatalogOutcome.NotFound)
+                {
+                    throw new DeclarativeDatasetCatalogException(result.Outcome);
+                }
             }
         }
 
@@ -387,4 +449,27 @@ public sealed class DeclarativeConsentApplyService(
 
         return true;
     }
+}
+
+/// <summary>Issue #111: a dataset entry of the manifest was rejected by the admin service; the whole manifest is refused with a stable code.</summary>
+public sealed class DeclarativeDatasetCatalogException(DatasetCatalogOutcome outcome) : Exception("A dataset catalog entry of the manifest was rejected.")
+{
+    public DatasetCatalogOutcome Outcome { get; } = outcome;
+
+    public string ErrorCode => Outcome switch
+    {
+        DatasetCatalogOutcome.InvalidTag => "INVALID_TAG",
+        DatasetCatalogOutcome.TagLimitExceeded => "TAG_LIMIT_EXCEEDED",
+        DatasetCatalogOutcome.InvalidVisibility => "INVALID_VISIBILITY",
+        DatasetCatalogOutcome.Forbidden => "FORBIDDEN",
+        DatasetCatalogOutcome.Unavailable => "UNAVAILABLE",
+        _ => "INVALID_REQUEST"
+    };
+
+    public int StatusCode => Outcome switch
+    {
+        DatasetCatalogOutcome.Forbidden => 403,
+        DatasetCatalogOutcome.Unavailable => 503,
+        _ => 400
+    };
 }

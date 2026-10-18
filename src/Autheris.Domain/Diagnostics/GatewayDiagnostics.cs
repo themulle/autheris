@@ -31,6 +31,14 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> UnroutedRequestCounter =
         Meter.CreateCounter<long>("autheris_unrouted_requests_total", description: "Requests answered by the router without a matching endpoint (404/405/400); not written to the audit chain");
 
+    /// <summary>PLAN-SEC-115: calls to a read path the operator switched off. Tag <c>path</c> is a closed set (no tool names, no ids).</summary>
+    public static readonly Counter<long> DisabledPathRequestCounter =
+        Meter.CreateCounter<long>("autheris_disabled_path_requests_total", description: "Requests or tool calls that reached a read path switched off by configuration");
+
+    /// <summary>Issue #111 (A-6/A-9): a persisted catalog tag or tier could not be read or was malformed and degraded to Hidden without tags. No table names or ids as tags.</summary>
+    public static readonly Counter<long> CatalogVisibilityDegradedCounter =
+        Meter.CreateCounter<long>("autheris_catalog_visibility_degraded_total", description: "Catalog tier or tag reads that degraded to Hidden because the stored settings were unreadable or malformed");
+
     public static readonly Counter<long> QueryTooComplexCounter =
         Meter.CreateCounter<long>("autheris_query_too_complex_total", description: "Number of requests rejected due to AST complexity");
 

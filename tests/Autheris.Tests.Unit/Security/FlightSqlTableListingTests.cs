@@ -26,7 +26,7 @@ public sealed class FlightSqlTableListingTests
     private static readonly TenantId Tenant = new("tenant_finance");
 
     private static readonly ClaimsPrincipal Admin =
-        new(new ClaimsIdentity([new Claim(ClaimTypes.Name, "admin"), new Claim(ClaimTypes.Role, "GovernanceAdmin")], "Bearer"));
+        new(new ClaimsIdentity([new Claim(ClaimTypes.Name, "admin"), new Claim(ClaimTypes.PrimarySid, "admin"), new Claim(ClaimTypes.Role, "GovernanceAdmin")], "Bearer"));
 
     private static TableMetadata Table(string domain, string schema, string table) => new()
     {

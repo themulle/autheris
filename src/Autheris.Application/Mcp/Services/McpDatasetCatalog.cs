@@ -17,6 +17,7 @@ using Microsoft.Extensions.Options;
 using Autheris.Domain.Options;
 using static Autheris.Application.Mcp.Services.McpDatasetTools;
 using Autheris.Application.Catalog.Services;
+using Autheris.Application.Catalog.Interfaces;
 
 /// <summary>
 /// MCP dataset tools (list_datasets, describe_dataset, sample_rows). Visibility follows the GraphQL catalog
@@ -51,6 +52,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
     private readonly Autheris.Application.Governance.Interfaces.ISchemaSunsettingService? sunsettingService;
     private readonly Autheris.Domain.Interfaces.IConsentResolutionService consentResolution;
     private readonly ILogger<McpDatasetCatalog>? logger;
+    private readonly ICatalogVisibilityService? visibility;
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     public McpDatasetCatalog(
@@ -68,7 +70,8 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator = null,
         Autheris.Application.Governance.Interfaces.ISchemaSunsettingService? sunsettingService = null,
         Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null,
-        ILogger<McpDatasetCatalog>? logger = null)
+        ILogger<McpDatasetCatalog>? logger = null,
+        ICatalogVisibilityService? visibilityService = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -86,6 +89,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         // The default is the production resolver (stateless), never a weaker one (issue #127).
         this.consentResolution = consentResolution ?? new ConsentResolutionService();
         this.logger = logger;
+        this.visibility = visibilityService;
     }
 
     public McpDatasetCatalog(
@@ -102,7 +106,8 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator = null,
         Autheris.Application.Governance.Interfaces.ISchemaSunsettingService? sunsettingService = null,
         Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null,
-        ILogger<McpDatasetCatalog>? logger = null)
+        ILogger<McpDatasetCatalog>? logger = null,
+        ICatalogVisibilityService? visibilityService = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -119,6 +124,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         // The default is the production resolver (stateless), never a weaker one (issue #127).
         this.consentResolution = consentResolution ?? new ConsentResolutionService();
         this.logger = logger;
+        this.visibility = visibilityService;
     }
 
     public Task<McpDatasetList> ListDatasetsAsync(
@@ -146,12 +152,17 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         string? tag = null,
         CancellationToken ct = default)
     {
-        var visible = await VisibleTablesAsync(principal, ct).ConfigureAwait(false);
+        // F-C11: the service has already dropped every row the shaping rule maps to NotFound; the check below is the second line of
+        // defence (SEC-CAT138-16) so such a row never reaches the filters, the total or the paging.
+        var (allVisible, isAdminView) = await VisibleSetAsync(principal, ct).ConfigureAwait(false);
+        var visible = allVisible
+            .Where(t => Shape(isAdminView, t) != CatalogOutputShape.NotFound)
+            .ToList();
 
         var matches = visible
             .Where(t => string.IsNullOrWhiteSpace(domain) || string.Equals(t.Identifier.Domain, domain.Trim(), StringComparison.OrdinalIgnoreCase))
             .Where(t => string.IsNullOrWhiteSpace(search) || Matches(t, search.Trim()))
-            .Where(t => string.IsNullOrWhiteSpace(tag) || (t.Table.Tags != null && t.Table.Tags.Any(tg => string.Equals(tg, tag.Trim(), StringComparison.OrdinalIgnoreCase))))
+            .Where(t => string.IsNullOrWhiteSpace(tag) || t.CatalogTags.Any(tg => string.Equals(tg, tag.Trim(), StringComparison.OrdinalIgnoreCase)))
             .OrderBy(t => DatasetId(t.Identifier), StringComparer.Ordinal)
             .ToList();
 
@@ -165,7 +176,8 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
 
         foreach (var t in pagedMatches)
         {
-            var graphQl = graphQlMap == null ? null : await graphQlMap.GetTableAsync(t.Identifier, ct).ConfigureAwait(false);
+            var summaryOnly = Shape(isAdminView, t) == CatalogOutputShape.Summary;
+            var graphQl = graphQlMap == null || summaryOnly ? null : await graphQlMap.GetTableAsync(t.Identifier, ct).ConfigureAwait(false);
             var status = options?.Value.IsMcpAuthBypassed == true
                 ? "GRANTED"
                 : CatalogVisibility.ComputeAccessStatus(t.Identifier, activeConsents, pendingRequests, isAdmin);
@@ -173,11 +185,12 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             // 4b.1: Only short description in summary; long description only in describe_dataset
             datasets.Add(new McpDatasetSummary(
                 DatasetId(t.Identifier),
+                McpCatalogText.DisplayName(t.Table.DisplayName, t.Identifier.TableName),
                 t.Table.Description,
                 t.Table.Sensitivity,
-                t.Columns.Count,
+                summaryOnly ? 0 : t.Columns.Count,
                 graphQl?.QueryField,
-                Tags: t.Table.Tags ?? Array.Empty<string>(),
+                Tags: t.CatalogTags,
                 AccessStatus: status));
         }
 
@@ -198,7 +211,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
 
     public async Task<McpDatasetDescription> DescribeDatasetAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct = default)
     {
-        var table = await FindVisibleAsync(principal, dataset, ct).ConfigureAwait(false);
+        var (table, shape) = await FindVisibleAsync(principal, dataset, ct).ConfigureAwait(false);
         var id = table.Identifier;
 
         var (activeConsents, pendingRequests, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
@@ -206,8 +219,14 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             ? "GRANTED"
             : CatalogVisibility.ComputeAccessStatus(id, activeConsents, pendingRequests, isAdmin);
 
+        if (shape == CatalogOutputShape.Summary)
+        {
+            return await BuildSummaryDescriptionAsync(table, accessStatus, ct).ConfigureAwait(false);
+        }
+
+        // Positive check (fail closed): the catalog-viewer release applies to a tier-Full row only, never to an unmarked or consent row.
         bool canViewProfile = string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase) ||
-                              table.ReleaseProfileToCatalogViewers;
+                              (table.CatalogView == CatalogView.Full && table.ReleaseProfileToCatalogViewers);
 
         var columnAccessLevels = ResolveColumnLevels(principal, table, activeConsents, isAdmin, isGranted: options?.Value.IsMcpAuthBypassed != true && string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase),
             bypass: options?.Value.IsMcpAuthBypassed == true);
@@ -259,41 +278,11 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
                 .ToList();
         }
 
-        string? dataOwner = null;
-        List<string>? dataOwnerDelegates = null;
-        if (dataOwnershipRepository != null)
-        {
-            try
-            {
-                var owners = await dataOwnershipRepository.GetDataOwnersForTableAsync(id, ct).ConfigureAwait(false);
-                var activeOwners = owners.Where(o => o.IsActive).ToList();
-                if (activeOwners.Count > 0)
-                {
-                    var primary = activeOwners[0];
-                    dataOwner = !string.IsNullOrWhiteSpace(primary.DisplayName) && !string.IsNullOrWhiteSpace(primary.Email)
-                        ? $"{primary.DisplayName} <{primary.Email}>"
-                        : (!string.IsNullOrWhiteSpace(primary.DisplayName)
-                            ? primary.DisplayName
-                            : (!string.IsNullOrWhiteSpace(primary.Email) ? primary.Email : primary.AdAccount));
-
-                    if (activeOwners.Count > 1)
-                    {
-                        dataOwnerDelegates = activeOwners.Skip(1).Select(o =>
-                            !string.IsNullOrWhiteSpace(o.DisplayName) && !string.IsNullOrWhiteSpace(o.Email)
-                                ? $"{o.DisplayName} <{o.Email}>"
-                                : (!string.IsNullOrWhiteSpace(o.DisplayName) ? o.DisplayName : (o.Email ?? o.AdAccount))
-                        ).ToList();
-                    }
-                }
-            }
-            catch
-            {
-                // Fail-safe
-            }
-        }
+        var (dataOwner, dataOwnerDelegates) = await LoadOwnersAsync(id, displayNameOnly: false, ct).ConfigureAwait(false);
 
         return new McpDatasetDescription(
             DatasetId(id),
+            McpCatalogText.DisplayName(table.Table.DisplayName, id.TableName),
             id.Domain,
             id.Schema,
             id.TableName,
@@ -305,12 +294,95 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             examples,
             graphQl == null ? null : await GraphQlAccessAsync(principal, graphQl, columns, ct).ConfigureAwait(false),
             DatasetAccess(id),
-            Tags: table.Table.Tags ?? Array.Empty<string>(),
+            Tags: table.CatalogTags,
             DataOwner: dataOwner,
             DataOwnerDelegates: dataOwnerDelegates,
             AccessStatus: accessStatus,
             Indexes: keyView.Indexes);
     }
+
+    /// <summary>
+    /// Active owners of a dataset. <paramref name="displayNameOnly"/> (the <c>Summary</c> view, BC-14) reports display names only, never
+    /// SIDs, e-mail addresses or accounts; an owner without a display name is omitted.
+    /// </summary>
+    private async Task<(string? DataOwner, IReadOnlyList<string>? Delegates)> LoadOwnersAsync(TableIdentifier id, bool displayNameOnly, CancellationToken ct)
+    {
+        if (dataOwnershipRepository == null)
+        {
+            return (null, null);
+        }
+
+        try
+        {
+            var owners = await dataOwnershipRepository.GetDataOwnersForTableAsync(id, ct).ConfigureAwait(false);
+            var activeOwners = owners.Where(o => o.IsActive).ToList();
+            if (displayNameOnly)
+            {
+                var names = activeOwners
+                    .Select(o => o.DisplayName)
+                    .Where(n => !string.IsNullOrWhiteSpace(n))
+                    .Select(n => n!)
+                    .ToList();
+                return (names.FirstOrDefault(), names.Count > 1 ? names.Skip(1).ToList() : null);
+            }
+
+            if (activeOwners.Count == 0)
+            {
+                return (null, null);
+            }
+
+            static string Label(Autheris.Domain.Model.DataOwner o) =>
+                !string.IsNullOrWhiteSpace(o.DisplayName) && !string.IsNullOrWhiteSpace(o.Email)
+                    ? $"{o.DisplayName} <{o.Email}>"
+                    : (!string.IsNullOrWhiteSpace(o.DisplayName) ? o.DisplayName : (!string.IsNullOrWhiteSpace(o.Email) ? o.Email : o.AdAccount));
+
+            return (Label(activeOwners[0]), activeOwners.Count > 1 ? activeOwners.Skip(1).Select(Label).ToList() : null);
+        }
+        catch
+        {
+            // Fail-safe
+            return (null, null);
+        }
+    }
+
+    /// <summary>
+    /// Issue #111 A-4: the <c>Summary</c> answer is built from an allow-list (a property added to <see cref="McpDatasetDescription"/> is
+    /// excluded until it is listed here): identifier, sanitised display name (PLAN-CAT-146-A, same trust as the description), description,
+    /// sensitivity, four-eyes flag, tags, display-name-only owners, access status and the view marker. No long description, columns, examples, GraphQL block, access hints, keys or profiles.
+    /// </summary>
+    private async Task<McpDatasetDescription> BuildSummaryDescriptionAsync(TableMetadata table, string accessStatus, CancellationToken ct)
+    {
+        var id = table.Identifier;
+        var (owner, delegates) = await LoadOwnersAsync(id, displayNameOnly: true, ct).ConfigureAwait(false);
+        return new McpDatasetDescription(
+            DatasetId(id),
+            McpCatalogText.DisplayName(table.Table.DisplayName, id.TableName),
+            id.Domain,
+            id.Schema,
+            id.TableName,
+            table.Table.Description,
+            LongDescription: null,
+            table.Table.Sensitivity,
+            table.Table.RequiresFourEyes,
+            Columns: [],
+            Examples: [],
+            GraphQl: null,
+            OtherAccess: null,
+            Tags: table.CatalogTags,
+            DataOwner: owner,
+            DataOwnerDelegates: delegates,
+            AccessStatus: accessStatus,
+            Indexes: null,
+            View: SummaryView);
+    }
+
+    /// <summary>Value of <see cref="McpDatasetDescription.View"/> for the allow-listed summary.</summary>
+    public const string SummaryView = "summary";
+
+    private TenancyMode TenancyMode => options?.Value.Tenancy.EffectiveMode ?? Autheris.Domain.Options.TenancyMode.Multi;
+
+    internal static CatalogOutputShape Shape(bool isAdminView, TableMetadata table) =>
+        CatalogViewShaping.Resolve(isAdminView, table.CatalogView);
 
     private async Task<IReadOnlyList<FieldSunsettingRule>> LoadSunsettingRulesAsync(CancellationToken ct)
     {
@@ -583,7 +655,13 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
 
     public async Task<McpDatasetSample> SampleRowsAsync(ClaimsPrincipal principal, string dataset, int? count, bool synthetic, CancellationToken ct = default)
     {
-        var table = await FindVisibleAsync(principal, dataset, ct).ConfigureAwait(false);
+        var (table, shape) = await FindVisibleAsync(principal, dataset, ct).ConfigureAwait(false);
+        if (shape != CatalogOutputShape.Full)
+        {
+            // SEC-CAT138-15: rows are read only for a Full shape; a Summary row exposes no sample rows.
+            throw new GatewayForbiddenException("Sample rows require full catalog access to the dataset.");
+        }
+
         var rowCount = Math.Clamp(count ?? DefaultSampleRows, 1, MaxSampleRows);
 
         if (synthetic)
@@ -595,10 +673,10 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
 
             bool isGranted = string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase);
 
-            // Positive guard (fail closed): administrator view or an active table consent. The consent-less "released to catalog
-            // viewers" branch is closed in this change: the flag is not persisted and no tier marks a table as explicitly released.
-            // A later catalog-view tier adds a positive "Full" check as a third term; every other value stays refused.
-            if (!(isAdmin || isGranted))
+            // Positive guard (fail closed): administrator view, an active table consent, or a tier-Full row explicitly released to
+            // catalog viewers (DENY columns excluded by the level resolution). Summary, Unmarked and every other value stay refused.
+            var releasedFull = table.CatalogView == CatalogView.Full && table.ReleaseProfileToCatalogViewers;
+            if (!(isAdmin || isGranted || releasedFull))
             {
                 throw new GatewayForbiddenException("Synthetic sample rows require an active table consent.");
             }
@@ -662,9 +740,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         CancellationToken ct)
     {
         // Relations are offered only to datasets the caller can see, so hidden table names do not leak.
-        var visibleIds = (await VisibleTablesAsync(principal, ct).ConfigureAwait(false))
-            .Select(t => DatasetId(t.Identifier))
-            .ToHashSet(StringComparer.Ordinal);
+        var visibleIds = await VisibleRelationTargetsAsync(principal, graphQl, ct).ConfigureAwait(false);
         var relations = graphQl.Relations
             .Select(r => new McpGraphQlRelation(r.Field, DatasetId(r.Target), r.IsList))
             .Where(r => visibleIds.Contains(r.Dataset))
@@ -782,34 +858,79 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         return true;
     }
 
-    private async Task<TableMetadata> FindVisibleAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct)
+    private bool IsBypassed => options?.Value.IsMcpAuthBypassed == true;
+
+    private CatalogCaller CallerOf(ClaimsPrincipal principal) =>
+        new(principal, McpCatalogVisibility.SafeTenantId(principal), CatalogChannel.Mcp);
+
+    /// <summary>
+    /// The discoverable tables and the admin view that shaped them. SEC H-02: only the explicit (production-blocked) MCP auth bypass
+    /// opens the whole catalog; it keeps its own admin view and never widens the shaping of the service (SEC-CAT138-13).
+    /// </summary>
+    private async Task<(IReadOnlyList<TableMetadata> Tables, bool IsAdminView)> VisibleSetAsync(ClaimsPrincipal principal, CancellationToken ct)
+    {
+        if (IsBypassed)
+        {
+            return (await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false), true);
+        }
+
+        if (visibility == null)
+        {
+            return ([], false);
+        }
+
+        var set = await visibility.GetVisibleAsync(CallerOf(principal), contract: null, ct).ConfigureAwait(false);
+        return (set.Tables, set.IsAdminView);
+    }
+
+    private async Task<HashSet<string>> VisibleRelationTargetsAsync(ClaimsPrincipal principal, GraphQlTableMapping graphQl, CancellationToken ct)
+    {
+        if (IsBypassed)
+        {
+            var all = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
+            return all.Select(t => DatasetId(t.Identifier)).ToHashSet(StringComparer.Ordinal);
+        }
+
+        if (visibility == null)
+        {
+            return new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        var targets = graphQl.Relations.Select(r => r.Target).Distinct().ToList();
+        var visible = await visibility.FilterVisibleAsync(CallerOf(principal), targets, ct).ConfigureAwait(false);
+        return visible.Select(DatasetId).ToHashSet(StringComparer.Ordinal);
+    }
+
+    private async Task<(TableMetadata Table, CatalogOutputShape Shape)> FindVisibleAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct)
     {
         if (!TryParseDatasetId(dataset, out var requested))
         {
             throw new ArgumentException("The dataset id must have the form 'domain.schema.table'.", nameof(dataset));
         }
 
-        var visible = await VisibleTablesAsync(principal, ct).ConfigureAwait(false);
-        var requestedId = DatasetId(requested);
+        // A table the caller may not see (consent, tier, ReBAC), an inactive and an unknown one are reported identically
+        // (no enumeration oracle).
+        if (IsBypassed)
+        {
+            var all = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
+            var found = all.FirstOrDefault(t => t.Identifier == requested);
+            return found != null && Shape(true, found) != CatalogOutputShape.NotFound
+                ? (found, Shape(true, found))
+                : throw new TableNotFoundException(requested);
+        }
 
-        // A table the caller may not see is reported exactly like one that does not exist (no enumeration oracle).
-        return visible.FirstOrDefault(t => string.Equals(DatasetId(t.Identifier), requestedId, StringComparison.Ordinal))
-            ?? throw new TableNotFoundException(requested);
-    }
-
-    private async Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(ClaimsPrincipal principal, CancellationToken ct)
-    {
-        var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
-        // SEC H-02: only the explicit (production-blocked) MCP auth bypass opens the whole catalog.
-        return options?.Value.IsMcpAuthBypassed == true
-            ? allTables
-            : await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepository, options?.Value, ct).ConfigureAwait(false);
+        var row = visibility == null ? null : await visibility.FindVisibleAsync(CallerOf(principal), requested, ct).ConfigureAwait(false);
+        // Second line of defence (SEC-CAT138-16): a NotFound shape is unrepresentable in CatalogVisibleRow, but is never served.
+        return row is { Shape: not CatalogOutputShape.NotFound } visible
+            ? (visible.Table, visible.Shape)
+            : throw new TableNotFoundException(requested);
     }
 
     private static bool Matches(TableMetadata table, string search) =>
         DatasetId(table.Identifier).Contains(search, StringComparison.OrdinalIgnoreCase) ||
         (table.Table.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
-        table.Columns.Any(c =>
+        // A Summary row matches on identifier and description only; Full rows carry no DENY-masked column (removed by the engine).
+        (table.CatalogView != CatalogView.Summary && table.Columns.Any(c =>
             c.ColumnName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-            (c.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false));
+            (c.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)));
 }

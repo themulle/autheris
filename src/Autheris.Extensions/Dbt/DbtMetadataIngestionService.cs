@@ -29,6 +29,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
     private readonly ITableRelationRepository? _relationRepository;
     private readonly VirtualFilterAdministrationService? _virtualFilterAdmin;
     private readonly IRebacStore? _rebacStore;
+    private readonly Autheris.Application.Governance.Interfaces.IDatasetTagImportService? _tagImport;
     private readonly ILogger<DbtMetadataIngestionService> _logger;
 
     public DbtMetadataIngestionService(
@@ -121,7 +122,24 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         VirtualFilterAdministrationService? virtualFilterAdmin,
         IRebacStore? rebacStore,
         ILogger<DbtMetadataIngestionService> logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, rebacStore, null, logger)
     {
+    }
+
+    public DbtMetadataIngestionService(
+        IDbtProposalRepository proposalRepository,
+        ITableMetadataRepository metadataRepository,
+        ILineageGraphStore lineageGraphStore,
+        IPolicyEpochRepository? epochRepository,
+        Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
+        Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
+        ITableRelationRepository? relationRepository,
+        VirtualFilterAdministrationService? virtualFilterAdmin,
+        IRebacStore? rebacStore,
+        Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
+        ILogger<DbtMetadataIngestionService> logger)
+    {
+        _tagImport = tagImport;
         _proposalRepository = proposalRepository ?? throw new ArgumentNullException(nameof(proposalRepository));
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _lineageGraphStore = lineageGraphStore ?? throw new ArgumentNullException(nameof(lineageGraphStore));
@@ -132,6 +150,28 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         _virtualFilterAdmin = virtualFilterAdmin;
         _rebacStore = rebacStore;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// Issue #111 (A-2): the model-level tags (never the column tags) become dbt-source dataset tags after the upsert; the upsert itself neither reads
+    /// nor writes tags. A failing import never fails the ingestion; counts (no values) are reported as warnings.
+    /// </summary>
+    private async Task ImportModelTagsAsync(TableIdentifier table, IReadOnlyList<string> tags, List<string> warnings, CancellationToken ct)
+    {
+        if (_tagImport is null)
+        {
+            return;
+        }
+
+        var outcome = await _tagImport.ImportDbtTagsAsync(table, tags, ct).ConfigureAwait(false);
+        if (outcome.Failed)
+        {
+            warnings.Add($"Table '{table}': the dbt tags were not imported (the tag store is unavailable).");
+        }
+        else if (outcome.InvalidDropped > 0 || outcome.OverflowDropped > 0)
+        {
+            warnings.Add($"Table '{table}': dbt tags were reduced ({outcome.InvalidDropped} invalid, {outcome.OverflowDropped} over the cap dropped).");
+        }
     }
 
     private TableMetadata ApplyDeclaredKeys(TableMetadata metadata, DbtDeclaredKeys declared)
@@ -495,6 +535,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
 
                     await _metadataRepository.UpsertTableMetadataAsync(updatedMetadata, ct).ConfigureAwait(false);
                     await SeedRebacStructureTuplesAsync(updatedMetadata.Identifier, ct).ConfigureAwait(false);
+                    await ImportModelTagsAsync(updatedMetadata.Identifier, model.Tags, warnings, ct).ConfigureAwait(false);
                 }
             }
 

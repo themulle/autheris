@@ -59,6 +59,23 @@ public sealed class GovernanceSchemaShapeSnapshotTests
     }
 
     [Theory]
+    [InlineData("sqlite", "TABLE_TAGS", "TABLE_CATALOG_SETTINGS")]
+    [InlineData("postgresql", "table_tags", "table_catalog_settings")]
+    [InlineData("sqlserver", "TABLE_TAGS", "TABLE_CATALOG_SETTINGS")]
+    public void EmbeddedSnapshot_CoversTheCatalogTagAndSettingsTables(string engine, string tags, string settings)
+    {
+        var shape = GovernanceSchemaShapeLoader.LoadEmbedded(engine);
+
+        var tagTable = shape.Tables.Single(t => t.Name == tags);
+        tagTable.Columns.Select(c => c.Name).ShouldBe(["table_id", "tag", "source", "created_by", "created_at"]);
+        tagTable.PrimaryKey.ShouldBe(["table_id", "tag"]);
+
+        var settingsTable = shape.Tables.Single(t => t.Name == settings);
+        settingsTable.Columns.Select(c => c.Name).ShouldBe(["table_id", "visibility", "updated_by", "updated_at"]);
+        settingsTable.PrimaryKey.ShouldBe(["table_id"]);
+    }
+
+    [Theory]
     [InlineData("sqlite", "TABLE_ROW_FILTER_STRATEGIES", "CONSENT_ROW_FILTERS")]
     [InlineData("postgresql", "table_row_filter_strategies", "consent_row_filters")]
     [InlineData("sqlserver", "TABLE_ROW_FILTER_STRATEGIES", "CONSENT_ROW_FILTERS")]

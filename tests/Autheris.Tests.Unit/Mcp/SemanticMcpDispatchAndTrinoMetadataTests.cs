@@ -211,8 +211,8 @@ public sealed class SemanticMcpDispatchAndTrinoMetadataTests
         capturedMeta.Should().NotBeNull();
         capturedMeta!.Identifier.Should().Be(new TableIdentifier("semantic", "semantic", "orders"));
         capturedMeta.Table.Description.Should().Be("Orders semantic model");
-        capturedMeta.Table.Tags.Should().Contain("dbt");
-        capturedMeta.Table.Tags.Should().Contain("semantic-model");
+        // Issue #111: the upsert ignores Table.Tags; the synthetic tags are imported as dbt dataset tags (see DbtDatasetTagTests).
+        capturedMeta.Table.Tags.Should().BeEmpty();
         var columnPairs = capturedMeta.Columns.Select(c => $"{c.ColumnName}:{c.DataType}").ToList();
         columnPairs.Should().Contain("order_id:varchar");
         columnPairs.Should().Contain("region:varchar");

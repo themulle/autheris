@@ -30,11 +30,16 @@ public sealed class McpResourceProvider : IMcpResourceProvider
     private readonly ICatalogDiscoveryService _discovery;
     private readonly IApiDispatcherService _dispatcher;
 
-    public McpResourceProvider(ICatalogDiscoveryService discovery, IApiDispatcherService dispatcher)
+    private readonly IReadPathSwitches? _switches;
+
+    public McpResourceProvider(ICatalogDiscoveryService discovery, IApiDispatcherService dispatcher, IReadPathSwitches? switches = null)
     {
         _discovery = discovery ?? throw new ArgumentNullException(nameof(discovery));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
+        _switches = switches;
     }
+
+    public bool IsResourceEnabled(string uri) => _switches?.IsResourceEnabled(uri) ?? true;
 
     public bool IsNativeResource(string uri) =>
         uri.StartsWith("autheris://catalog/", StringComparison.OrdinalIgnoreCase) ||
@@ -45,6 +50,12 @@ public sealed class McpResourceProvider : IMcpResourceProvider
     {
         ArgumentNullException.ThrowIfNull(uri);
         ArgumentNullException.ThrowIfNull(session);
+
+        // PLAN-SEC-115 C-115-6: first statement; a closed resource never reaches a catalog or dispatcher call and answers like an unknown URI.
+        if (!IsResourceEnabled(uri))
+        {
+            throw new McpResourceNotFoundException(uri);
+        }
 
         if (Is(uri, CatalogSummaryUri))
         {

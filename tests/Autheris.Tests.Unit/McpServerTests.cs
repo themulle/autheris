@@ -175,7 +175,7 @@ public sealed class McpServerTests
     {
         // Arrange
         var datasetCatalog = Substitute.For<IMcpDatasetCatalog>();
-        var summary = new McpDatasetSummary("sales.public.orders", "Orders table", "Confidential", 10);
+        var summary = new McpDatasetSummary("sales.public.orders", "orders", "Orders table", "Confidential", 10);
         datasetCatalog.ListDatasetsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(new McpDatasetList([summary], 1, false, Offset: 0, Limit: 50, NextOffset: null)));
 

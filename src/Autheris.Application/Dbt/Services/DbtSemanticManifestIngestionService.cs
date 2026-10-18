@@ -17,12 +17,16 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
     private readonly ISemanticCatalogService _catalogService;
     private readonly ILogger<DbtSemanticManifestIngestionService> _logger;
     private readonly ITableMetadataRepository? _tableRepository;
+    private readonly Autheris.Application.Governance.Interfaces.IDatasetTagImportService? _tagImport;
+    private static readonly string?[] SemanticModelTags = ["dbt", "semantic-model"];
 
     public DbtSemanticManifestIngestionService(
         ISemanticCatalogService catalogService,
         ILogger<DbtSemanticManifestIngestionService> logger,
-        ITableMetadataRepository? tableRepository = null)
+        ITableMetadataRepository? tableRepository = null,
+        Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport = null)
     {
+        _tagImport = tagImport;
         _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _tableRepository = tableRepository;
@@ -329,14 +333,19 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
                         DisplayName = model.Name,
                         Description = model.Description,
                         DocumentationSource = "dbt",
-                        IsActive = true,
-                        Tags = ["dbt", "semantic-model"]
+                        IsActive = true
                     },
                     Columns = columns,
                     PrimaryKeyColumns = primaryKeys
                 };
 
                 await _tableRepository.UpsertTableMetadataAsync(tableMeta, cancellationToken).ConfigureAwait(false);
+
+                // Issue #111 (A-2): the upsert ignores Table.Tags; the synthetic tags become dbt-source dataset tags (same cap and audit as dbt model tags).
+                if (_tagImport is not null)
+                {
+                    await _tagImport.ImportDbtTagsAsync(tableMeta.Identifier, SemanticModelTags, cancellationToken).ConfigureAwait(false);
+                }
             }
         }
 

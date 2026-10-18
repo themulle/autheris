@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Mcp;
 
+using Autheris.Tests.Unit.TestSupport;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -76,7 +77,8 @@ public sealed class McpDatasetCatalogKeyVisibilityTests
         golden.GetGoldenQueriesAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(ValueTask.FromResult<IReadOnlyList<GoldenQuery>>([]));
         var catalog = new McpDatasetCatalog(_metadata, _consents, Substitute.For<IGatewayExecutionService>(), golden,
-            Options.Create(new GatewayOptions()), Substitute.For<IGraphQlCatalogMap>());
+            Options.Create(new GatewayOptions()), Substitute.For<IGraphQlCatalogMap>(),
+            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(_metadata.ServeSingleReadsFromCatalog(), _consents));
         var user = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.PrimarySid, "S-1-USER"), new Claim("tenant_id", Tenant)], "MCP"));
 

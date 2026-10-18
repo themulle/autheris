@@ -45,8 +45,9 @@ public static class CallerScopeResolver
             return CallerScope.None;
         }
 
-        var sid = user.GetUserSid();
-        if (sid == null && string.IsNullOrWhiteSpace(user.Identity?.Name))
+        // SEC-CAT138-14: the no-SID rule lives here only. A principal without a SID (a name-only synthetic identity) is never a catalog
+        // caller of any class; every real authentication path (cert, ForwardAuth, Basic, API key, JWT) carries one.
+        if (user.GetUserSid() == null)
         {
             return CallerScope.None;
         }

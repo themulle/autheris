@@ -680,6 +680,25 @@ CREATE TABLE dbo.TABLE_ROW_FILTER_STRATEGIES (
     updated_by NVARCHAR(256) NOT NULL,
     updated_at NVARCHAR(64) NOT NULL
 );
+
+-- Issue #111: dataset catalog tags (admin / dbt source) and visibility tier; separate from TABLES because ingestion upserts rewrite TABLES.
+-- No foreign keys and no CHECK constraints (as TABLE_ROW_FILTER_STRATEGIES): validity is enforced on write and re-validated on read.
+IF OBJECT_ID(N'dbo.TABLE_TAGS', N'U') IS NULL
+CREATE TABLE dbo.TABLE_TAGS (
+    table_id NVARCHAR(128) NOT NULL,
+    tag NVARCHAR(64) NOT NULL,
+    source NVARCHAR(16) NOT NULL,
+    created_by NVARCHAR(256) NOT NULL,
+    created_at NVARCHAR(64) NOT NULL,
+    CONSTRAINT PK_TABLE_TAGS PRIMARY KEY (table_id, tag)
+);
+IF OBJECT_ID(N'dbo.TABLE_CATALOG_SETTINGS', N'U') IS NULL
+CREATE TABLE dbo.TABLE_CATALOG_SETTINGS (
+    table_id NVARCHAR(128) NOT NULL PRIMARY KEY,
+    visibility INT NOT NULL,
+    updated_by NVARCHAR(256) NOT NULL,
+    updated_at NVARCHAR(64) NOT NULL
+);
 ");
 
             // Append-only audit table (a table owner can still drop the trigger; the runtime login should only

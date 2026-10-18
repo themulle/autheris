@@ -29,6 +29,12 @@ public interface IMcpResourceProvider
     /// <summary>True if <paramref name="uri"/> belongs to a native resource scheme handled by this provider.</summary>
     bool IsNativeResource(string uri);
 
+    /// <summary>
+    /// PLAN-SEC-115: false when the read-path switches close this resource (its group is off). An unknown URI is reported enabled,
+    /// so <see cref="ReadAsync"/> stays the single producer of the not-found answer.
+    /// </summary>
+    bool IsResourceEnabled(string uri);
+
     /// <exception cref="McpResourceNotFoundException">The resource does not exist or is not visible to the caller.</exception>
     Task<McpResourceContent> ReadAsync(string uri, McpSessionContext session, CancellationToken ct = default);
 }

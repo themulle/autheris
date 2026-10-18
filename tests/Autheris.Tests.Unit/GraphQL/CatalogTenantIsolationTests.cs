@@ -11,6 +11,8 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Types;
+using Autheris.Tests.Unit.Catalog;
+using Autheris.Tests.Unit.TestSupport;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -78,7 +80,8 @@ public sealed class CatalogTenantIsolationTests
         => new Query().GetCatalogAsync(
             domain: null, first: null, after: null, search: null, tag: null,
             repos.Metadata, repos.Consents, approvalRepository: null, dataOwnershipRepository: null,
-            accessor, Options.Create(options ?? new GatewayOptions()));
+            accessor, Options.Create(options ?? new GatewayOptions()),
+            CatalogVisibilityTestFactory.Create(repos.Metadata, repos.Consents, options ?? new GatewayOptions()));
 
     [Fact]
     public async Task GovernanceAdmin_SeesOnlyTenantTables()
