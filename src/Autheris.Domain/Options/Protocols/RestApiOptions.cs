@@ -87,7 +87,6 @@ public sealed class WebSqlOptions
 public sealed class CrossSourceOptions
 {
     public bool Enabled { get; init; } = false;
-    public PredicatePushdownOptions PredicatePushdown { get; init; } = new();
     /// <summary>
     /// Transport opt-in for federated (cross-source) queries. Valid names are the constants of <c>SqlTransports</c>:
     /// WebSql, Trino, Rest, Mcp, ArrowExport, FlightSql, SqlEndpoints, AsyncJob and Olap; an unknown name aborts the start.
@@ -134,12 +133,6 @@ public sealed class CrossSourceOptions
 
     /// <summary>Issue #122: Governed WebSQL filter pushdown to remote relational SQL data sources.</summary>
     public PredicatePushdownOptions PredicatePushdown { get; init; } = new();
-}
-
-public sealed class PredicatePushdownOptions
-{
-    public bool Enabled { get; init; } = true;
-    public int MaxInListCount { get; init; } = 1000;
 }
 
 public sealed class PredicatePushdownOptions
