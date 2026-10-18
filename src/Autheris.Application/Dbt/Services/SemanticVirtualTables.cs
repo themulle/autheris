@@ -54,4 +54,27 @@ public static partial class SemanticVirtualTables
     public static bool IsVirtualIdentity(TableIdentifier id) =>
         string.Equals(id.Domain, Domain, StringComparison.OrdinalIgnoreCase) &&
         (string.Equals(id.Schema, SingleModeSchema, StringComparison.Ordinal) || IsTenantSchemaName(id.Schema));
+
+    /// <summary>
+    /// True for every identifier in the semantic catalog domain, well-formed or not. The visibility engine drops such a table unless it
+    /// <see cref="BelongsToTenant"/> (a malformed or empty schema belongs to nobody: fail closed).
+    /// </summary>
+    public static bool IsInSemanticDomain(TableIdentifier id) => string.Equals(id.Domain, Domain, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True when <paramref name="table"/> is a virtual table in the tenant schema of <paramref name="tenant"/>. The legacy tenant id has no
+    /// tenant schema (it cannot import in Multi), so it owns nothing.
+    /// </summary>
+    public static bool BelongsToTenant(TableMetadata table, TenantId tenant)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        if (tenant == TenantId.LegacySingleTenant || !IsVirtualTable(table))
+        {
+            return false;
+        }
+
+        var expected = TenantSchema(tenant);
+        return string.Equals(table.Identifier.Schema, expected, StringComparison.Ordinal) &&
+               string.Equals(table.Table?.SchemaName, expected, StringComparison.Ordinal);
+    }
 }

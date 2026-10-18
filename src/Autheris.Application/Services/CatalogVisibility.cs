@@ -1,5 +1,6 @@
 namespace Autheris.Application.Services;
 
+using Autheris.Application.Dbt.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -77,6 +78,9 @@ public static class CatalogVisibility
     {
         ArgumentNullException.ThrowIfNull(allTables);
         ArgumentNullException.ThrowIfNull(activeConsents);
+
+        // #112 A1-13 (defence in depth): a foreign tenant's virtual table is dropped before any consent or tier is looked at.
+        allTables = DropForeignVirtualTables(allTables, tenantId, tenancyMode);
 
         var tiersApply = surface == CatalogSurface.Discovery;
         HashSet<TableIdentifier>? tierTables = null;
@@ -207,6 +211,25 @@ public static class CatalogVisibility
     }
 
     /// <summary>
+    /// #112 A1-13 (SEC-112-15, -22, -23): in <see cref="TenancyMode.Multi"/> a table of the semantic catalog domain (the virtual tables a
+    /// manifest import creates) stays only when it lives in the <c>t_&lt;hash&gt;</c> schema of <paramref name="tenantId"/>; every other one,
+    /// including a malformed or empty schema, is dropped. <see cref="TenancyMode.Single"/> has no foreign tenant, so the rule is skipped by
+    /// mode (never by tenant string). The one place that recognises a virtual table is <see cref="SemanticVirtualTables"/>.
+    /// </summary>
+    internal static IReadOnlyList<TableMetadata> DropForeignVirtualTables(IEnumerable<TableMetadata> tables, TenantId tenantId, TenancyMode tenancyMode)
+    {
+        ArgumentNullException.ThrowIfNull(tables);
+        if (tenancyMode == TenancyMode.Single)
+        {
+            return tables as IReadOnlyList<TableMetadata> ?? tables.ToList();
+        }
+
+        return tables
+            .Where(t => !SemanticVirtualTables.IsInSemanticDomain(t.Identifier) || SemanticVirtualTables.BelongsToTenant(t, tenantId))
+            .ToList();
+    }
+
+    /// <summary>
     /// SR-L-21 / decision G-11: restricts <paramref name="tables"/> to those that belong to <paramref name="tenantId"/>.
     /// <c>TableMetadata</c> has no owner tenant, so ownership is derived from consents: a table is tenant-visible when the
     /// tenant holds at least one consent record on it (<paramref name="tenantConsentTables"/>, Allow or Deny) or when it is
@@ -217,9 +240,13 @@ public static class CatalogVisibility
         IEnumerable<TableMetadata> tables,
         TenantId tenantId,
         IEnumerable<TableIdentifier>? tenantConsentTables,
-        IEnumerable<string>? sharedTables)
+        IEnumerable<string>? sharedTables,
+        TenancyMode tenancyMode = TenancyMode.Multi)
     {
         ArgumentNullException.ThrowIfNull(tables);
+
+        // #112 A1-13 (defence in depth): consents and SharedTables never re-admit a foreign tenant's virtual table.
+        tables = DropForeignVirtualTables(tables, tenantId, tenancyMode);
 
         if (tenantId == TenantId.LegacySingleTenant)
         {
@@ -348,12 +375,17 @@ public static class CatalogVisibility
                 }
 
                 // Same confinement rule as the GraphQL catalog (consent-derived ownership plus Gateway:Catalog:SharedTables).
+                // #112 A1-13 (SEC-112-22/-23): the foreign virtual-table drop runs on the full list first, with the claim tenant.
                 var claimTenant = principal.GetTenantId();
+                var ownVirtual = DropForeignVirtualTables(allTables, claimTenant, tenancyMode);
                 var tenantConsentTables = await consentRepository.GetTablesWithConsentsForTenantAsync(claimTenant, ct).ConfigureAwait(false);
-                var confined = FilterToTenant(allTables, claimTenant, tenantConsentTables, sharedTables);
+                var confined = FilterToTenant(ownVirtual, claimTenant, tenantConsentTables, sharedTables, tenancyMode);
                 return FilterByContract(confined, contract);
             }
         }
+
+        // Subject and Claimless: the drop uses the tenant the consent query below uses, before any consent is evaluated.
+        allTables = DropForeignVirtualTables(allTables, tenantId, tenancyMode);
 
         var roles = principal.GetUserRoles();
         var userSid = principal.GetUserSid() ?? (!string.IsNullOrWhiteSpace(principal.Identity?.Name) ? new Sid(principal.Identity.Name) : (Sid?)null);
