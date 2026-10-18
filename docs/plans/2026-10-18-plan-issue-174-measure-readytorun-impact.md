@@ -223,15 +223,46 @@ The results of the spike directly govern whether `PublishReadyToRun=true` is app
 
 ## 8. Verification Checklist & Deliverables
 
-- [ ] `benchmarks/Autheris.Benchmarks/ReadyToRunBenchmark.cs` authored and runnable via `dotnet run -c Release --project benchmarks/Autheris.Benchmarks -- r2r`.
-- [ ] `benchmarks/load/scripts/measure-r2r-impact.sh` authored with `chmod +x`, supporting automated dual-publish and metrics extraction.
-- [ ] Automated size inspection records:
+- [x] `benchmarks/Autheris.Benchmarks/ReadyToRunBenchmark.cs` authored and runnable via `dotnet run -c Release --project benchmarks/Autheris.Benchmarks -- r2r`.
+- [x] `benchmarks/load/scripts/measure-r2r-impact.sh` authored with `chmod +x`, supporting automated dual-publish and metrics extraction.
+- [x] Automated size inspection records:
   - `Autheris.Api.dll` size delta.
   - Publish folder size delta.
   - Docker uncompressed and compressed image size delta.
-- [ ] Automated latency metrics recorded (10 cold restarts, 1,000 warm queries):
+- [x] Automated latency metrics recorded (10 cold restarts, 1,000 warm queries):
   - Cold time to `/health/ready` 200 OK (P50, mean, IQR).
   - Time spent in JIT (`System.Runtime` counter delta).
   - Warm query P50 (median) and P99 latency.
-- [ ] SC-04 verified: `ReleaseBuildExcludesTestAuthTests` passes on R2R binary.
-- [ ] Decision gate criteria evaluated against empirical data to close #150 OQ-9.
+- [x] SC-04 verified: `ReleaseBuildExcludesTestAuthTests` passes on R2R binary.
+- [x] Decision gate criteria evaluated against empirical data to close #150 OQ-9.
+
+---
+
+## 9. Empirical Decision & Archival (Resolving #150 OQ-9)
+
+### 9.1 Decision Matrix Evaluation
+
+| Gate | Criterion | Target Threshold | Measured Empirical Delta | Status |
+|---|---|---|---|---|
+| **Gate 1** | Cold-Start Ready Reduction (P50) | $\ge 25.0\%$ | **-23.3%** (4523.6 ms $\to$ 5576.9 ms) | **FAIL** |
+| **Gate 2** | Warm Query P50 Non-Regression | $\le +5.0\%$ (ceiling $+10\%$) | **+154.1%** (1.17 ms $\to$ 2.97 ms) | **FAIL** |
+| **Gate 3** | Warm Query Tail Latency (P99) | $\le +10.0\%$ | **+195.6%** (3.47 ms $\to$ 10.24 ms) | **FAIL** |
+| **Gate 4** | Container Image Footprint Penalty | $\le +60\text{ MB}$ uncompressed | **+68.0 MB** (+30.3 MB compressed) | **FAIL** |
+| **Gate 5** | SC-04 Metadata Security Check | 100% PASS (0 TestAuth) | **PASS** (Zero TestAuth in PE metadata) | **PASS** |
+
+### 9.2 Final Decision
+
+**NO-GO (REJECT ReadyToRun for Production Container Publish)**
+
+- **Rationale:**
+  1. ReadyToRun produced a **negative** cold-start improvement (-23.3% slower to ready), likely due to the extra I/O of loading larger PE composite native images without JIT elimination of the dynamic schema compilation phase (HotChocolate dynamic GraphQL type generation and LINQ expression trees).
+  2. Steady-state throughput degraded significantly: Warm query P50 regressed by +154.1% and P99 regressed by +195.6% due to deferred Tiered PGO loop optimization on pre-compiled native stubs.
+  3. Binary bloat exceeded target thresholds: `Autheris.Api.dll` expanded by +55.9% (+1.88 MB), publish directory expanded by +45.2% (+67 MB), and Docker container image grew by +68.0 MB uncompressed (+30.3 MB compressed).
+  4. While security verification (Gate 5 / SC-04) passed completely with 0 test-auth markers, operational gates 1 through 4 failed decisively.
+
+### 9.3 Recommendations for Future Optimization
+
+1. **Retain In-Process Warm-Up (WP-B / WP-C):** Rely on in-process `GraphQlWarmupTask` (`{ __typename }`) and `McpSerializationWarmup` which achieve the primary warm-up goal without binary bloat or Tiered PGO interference.
+2. **Re-evaluate Native AOT / Trimming Profile:** If startup latency becomes a constraint in serverless environments, investigate full Native AOT when HotChocolate and ASP.NET Core support trimming and source-generated GraphQL schemas without dynamic code generation.
+3. **PGO Optimization Profiles:** If ahead-of-time compilation is revisited in the future, evaluate Dynamic PGO with pre-recorded training runs (Mibc) rather than default Crossgen2 ReadyToRun.
+
