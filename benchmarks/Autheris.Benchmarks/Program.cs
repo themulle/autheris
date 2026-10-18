@@ -51,6 +51,12 @@ public static class BenchmarkRunnerApp
             return;
         }
 
+        if (args.Length > 0 && args[0].Equals("r2r", StringComparison.OrdinalIgnoreCase))
+        {
+            ReadyToRunBenchmark.Run(args[1..]);
+            return;
+        }
+
         // 0. Full Scale Enterprise Spike (50,000 tables, 250,000 columns, 5,000 users)
         var scaleBenchmark = new ScaleCatalogBenchmark();
         scaleBenchmark.ExecuteFullScaleSpike();

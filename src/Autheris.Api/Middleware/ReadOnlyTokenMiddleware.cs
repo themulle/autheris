@@ -105,6 +105,12 @@ public sealed class ReadOnlyTokenMiddleware
             return true;
         }
 
+        // SEC-DATA178-01: Bulk table keyset streaming is a governed single-table read permitted for read-only tokens
+        if (IsDataBulkStreamPath(request.Path.Value))
+        {
+            return true;
+        }
+
         return _queryPaths.Any(p => request.Path.StartsWithSegments(p, StringComparison.OrdinalIgnoreCase));
     }
 
@@ -130,6 +136,72 @@ public sealed class ReadOnlyTokenMiddleware
             segment.Contains("%2F", StringComparison.OrdinalIgnoreCase) ||
             segment.SequenceEqual(".") || segment.SequenceEqual("..") ||
             segment.Equals("openapi.json", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private const string DataPrefix = "/api/v1/data";
+
+    /// <summary>
+    /// SEC-DATA178-01: Permits POST /api/v1/data/{domain}/{schema}/{table}/(stream|bulk) for read-only tokens.
+    /// Strict segment count, fail-closed against traversal, encoded characters, and mutation endpoints.
+    /// </summary>
+    internal static bool IsDataBulkStreamPath(string? path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return false;
+        }
+
+        // Must reject directory traversal sequences, non-normalized separators, encoded delimiters, semicolons, query parameters
+        if (path.Contains("..", StringComparison.Ordinal) ||
+            path.Contains('\\', StringComparison.Ordinal) ||
+            path.Contains(';', StringComparison.Ordinal) ||
+            path.Contains("%2F", StringComparison.OrdinalIgnoreCase) ||
+            path.Contains("%2f", StringComparison.OrdinalIgnoreCase) ||
+            path.Contains("%5C", StringComparison.OrdinalIgnoreCase) ||
+            path.Contains("%5c", StringComparison.OrdinalIgnoreCase) ||
+            path.Contains('?', StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!path.StartsWith(DataPrefix + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // Expected segments: ["api", "v1", "data", "{domain}", "{schema}", "{table}", "stream" or "bulk"]
+        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length != 7)
+        {
+            return false;
+        }
+
+        if (!string.Equals(segments[0], "api", StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(segments[1], "v1", StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(segments[2], "data", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var domain = segments[3];
+        var schema = segments[4];
+        var table = segments[5];
+        var action = segments[6];
+
+        if (string.IsNullOrWhiteSpace(domain) || domain == "." || domain == ".." ||
+            string.IsNullOrWhiteSpace(schema) || schema == "." || schema == ".." ||
+            string.IsNullOrWhiteSpace(table) || table == "." || table == "..")
+        {
+            return false;
+        }
+
+        if (!string.Equals(action, "stream", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(action, "bulk", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }

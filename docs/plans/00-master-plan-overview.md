@@ -71,11 +71,11 @@ Guiding rule (owner): rights are checked by the backend, not by the calling agen
 | 2.4 | **#130** governed time zone conversion | S-M | ✅ | Phase 4 (step I-6) |
 | 2.5 | **#111** persisted dataset tags and catalog visibility | M | ✅ | ✅ B-1 merged; I-7 Phase 4 + Phase 5 done (lane B, `feat/issue-111-dataset-tags-visibility`); awaiting consolidated PR |
 | 2.6 | **#112** typed aggregations in GraphQL for read-only tokens | M | ✅ | Phase 4 (steps B-2 security fix, then I-8) |
-| 2.7 | **#175** query analysis for read-only tokens with execution cost model (`REQ-GOV-175`) | S-M | ✅ | Phase 4 (step I-175, lane Cost-Model; `PLAN-GOV-175`) |
-| 2.8a | **#174** measure ReadyToRun impact for #150 WP-D (`REQ-OPS-174`) | S | ✅ | Phase 2 in design (`PLAN-OPS-174`) |
-| 2.12 | **#163** required filter columns per table in catalog (`REQ-GOV-163`) | M | ✅ | Phase 2 in design (`PLAN-GOV-163`) |
-| 2.13 | **#177** cost admission coarse for nested single-row lookups (`REQ-GOV-177`) | M | ✅ | Phase 2 plan (pairs with #175 cost engine) |
-| 2.14 | **#178** bulk read of one table for read-only tokens (`REQ-DATA-178`) | M-L | ✅ | Phase 2 plan (reusable streaming core) |
+| 2.7 | **#175** query analysis for read-only tokens with execution cost model (`REQ-GOV-175`) | S-M | ✅ | **COMPLETED & VERIFIED ✅** (PR #180, `PLAN-GOV-175`) |
+| 2.8a | **#174** measure ReadyToRun impact for #150 WP-D (`REQ-OPS-174`) | S | ✅ | Phase 4 TDD in progress (`feat/issue-174-readytorun-spike`, `PLAN-OPS-174`) |
+| 2.12 | **#163** required filter columns per table in catalog (`REQ-GOV-163`) | M | ✅ | Phase 4 TDD in progress (`feat/issue-163-required-filter-columns`, `PLAN-GOV-163`) |
+| 2.13 | **#177** cost admission coarse for nested single-row lookups (`REQ-GOV-177`) | M | ✅ | Phase 2 plan done (`PLAN-GOV-177`), Phase 3 Security Audit in progress |
+| 2.14 | **#178** bulk read of one table for read-only tokens (`REQ-DATA-178`) | M-L | ✅ | Phase 2 plan done (`PLAN-DATA-178`), Phase 3 Security Audit in progress |
 
 ### Priority Wave 3: feature completion (medium and large)
 
@@ -146,7 +146,7 @@ Assessment: [`INTAKE-2026-10-17B`](2026-10-17-issue-intake-assessment-2.md). Bot
 | D-7 | B-3 (#113 WP-0) | Confirmed: O-9 (app-only tokens and mTLS subjects cannot decide consent requests), ADFS `unique_name` + app id counts as application, ITSM webhook acknowledges a lost status race without effect, error-sanitizer whitelist extension |
 | D-8 | I-3 Oracle fix | `OracleDialectGenerator.FormatIdentifier` alias fix and the changed Oracle goldens confirmed |
 | D-9 | `INDIVIDUAL_GRANT_*` error codes masked outside Development | Fixed within #113 increment A (I-22) |
-| D-10 | `PUT /datasets/{id}/keys` placeholder audit actor | Follow-up GitHub issue #160 |
+| D-10 | `PUT /datasets/{id}/keys` placeholder audit actor | **COMPLETED & VERIFIED ✅** (#160, PR #183, commit `967bc5b4`): requires authenticated caller SID, fails closed with 403 Forbidden |
 | D-11 | #99 increment I1 branches `feat/issue-99-i1-a/b/c` | Kept; picked up when wave 4 starts |
 | D-12 | `documentation-expert` agent and skill | Removed (no documentation phase) |
 | D-13 | #158 INC-1 Q-1 / Q-S1 / Q-S2 (2026-10-18) | `description` dropped from the bulk API; table delegates may set it (owner-authored marker plus audit); the grantee may not edit it |

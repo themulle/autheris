@@ -90,5 +90,14 @@ public interface IGovernedTableReadPlanner
     /// Trino text for the governed compile path, which applies the policy.
     /// </summary>
     string BuildFullTableSelect(TableIdentifier table);
+
+    /// <summary>
+    /// PLAN-DATA-178: Plans a bulk keyset streaming query against a single table using monotonic keyset cursor seek.
+    /// Rejects joins, subqueries, and raw SQL injection.
+    /// </summary>
+    PlannedTableRead PlanKeysetStream(
+        BulkTableStreamRequest request,
+        TableMetadata metadata,
+        TableAccessDecision decision);
 }
 
