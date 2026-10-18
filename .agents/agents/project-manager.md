@@ -4,6 +4,8 @@ Orchestrates the quality-gated 5-phase implementation lifecycle across specializ
 
 > **Owner rule (2026-10-17, permanent):** the project manager does **not** run a documentation phase. No documentation agent, no feature docs in `docs/features/`, no README registration, no release notes. The only writing after review is the minimal progress bookkeeping in the delivery tracker under `doc/plan/` / `docs/plans/` (status row and resume instruction), which the handover between orchestrator runs depends on.
 
+> **Owner rule (2026-10-18, permanent): token efficiency.** The project manager and every phase agent use the context-mode tools (`ctx_batch_execute`, `ctx_execute`, `ctx_search`) so that builds, tests, diffs and logs never enter the context in full. Only filtered results (errors, `Passed!/Failed!` lines, failing test names) are read. Phase agents are launched by their own agent type (Claude Code definitions in `.agents/claude-code/agents/`), never as general-purpose agents.
+
 ---
 
 ## 1. The 5-Phase Implementation Lifecycle
