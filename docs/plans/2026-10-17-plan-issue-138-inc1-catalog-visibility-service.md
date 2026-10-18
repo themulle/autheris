@@ -171,3 +171,80 @@ OQ-1 yes, OQ-2 yes, OQ-3 no, OQ-4 yes, OQ-5 unchanged, OQ-6 constants: all accep
 - **T-CAT138-13** `Logs_Metrics_NoSidTenantTableName_OnChunkFailureAndDeny`
 - **T-CAT138-14** `Architecture_RemovedMembersAbsent_ClosureCallersDetected_DiscoveryHasNoRebacEvaluatorReference`
 - **T-CAT138-15** `SurfaceDispositionList_OpenApiODataQueryAnalysis_NoHiddenTableNameToNonAdmin` (covers SEC-CAT138-10 outcome)
+
+## Addendum A-1 (2026-10-18): integration with #111
+
+Verified against `feat/issue-111-dataset-tags-visibility` `aa6bc6b1` (I-7). The design stays. These decisions are binding for Phase 4; F-C11..F-C15 and SEC-CAT138-01..12 still apply.
+
+1. **Single resolver, shaping inside the service (F-C11).** `CatalogVisibilityService` calls `CallerScopeResolver.Resolve(principal, options.Tenancy.EffectiveMode)` exactly once per evaluation and passes the same mode to the 9-param `CatalogVisibility.VisibleTablesAsync(..., CatalogSurface.Discovery, ct)`. It then drops rows with `CatalogViewShaping.Resolve(isAdminView, row.CatalogView) == NotFound` (this replaces `ApplyShape` and the MCP list/describe/relation NotFound filters), and only after that runs ReBAC on the remaining rows. Order: engine -> shape -> ReBAC -> memo.
+2. **D-1 return types carry the shape.** `CatalogVisibleSet` gains `bool IsAdminView` and `CatalogOutputShape ShapeOf(TableIdentifier)`. `FindVisibleAsync` returns `CatalogVisibleRow?` (`readonly record struct CatalogVisibleRow(TableMetadata Table, CatalogOutputShape Shape)`; `Shape` is never `NotFound`). Channels choose Summary vs Full only from these values: REST detail `:112`, MCP describe `:215` and list `:172`, GraphQL `ToCatalogDto(t, set.IsAdminView, status)`. No channel calls `CallerScopeResolver.IsAdminView` for shaping any more. The exception is MCP `IsAdminView` for the H-02 bypass, which keeps the whole catalog in `McpDatasetCatalog` as today. Tests: `Shape_ComesFromServiceResolver_NotRecomputedByChannel`, `SummaryRow_ShapeSummary_AllThreeMethods`.
+3. **Defence in depth stays.** `Query.ToCatalogDtos`/`ToCatalogDto` and the MCP `Shape(...) != NotFound` checks remain after the service call. `CatalogTierShapingTests.ShapeLoop_*` and `ShapeStage_*` stay unchanged and green.
+4. **Seams move to one place.** New `internal Func<IReadOnlyList<TableMetadata>, CallerScope, CancellationToken, Task<IReadOnlyList<TableMetadata>>>? EngineOutputForTesting` on `CatalogVisibilityService`. `McpDatasetCatalog.VisibleTablesForTesting` and `CatalogDiscoveryService.EngineOutputForTesting` are deleted. `McpCatalogPipelineGuardTests` and `CatalogDiscoveryPipelineGuardTests` keep their names and assertions but build the real service with the seam (non-admin `Unmarked` row) and inject it. They must still fail when step 1's NotFound filter is removed. New `CatalogVisibilityServiceTests.Pipeline_NonAdminUnmarkedRow_DroppedBeforeRebacAndMemo`.
+5. **Call-site guard.** `CatalogSurfaceCallSiteGuardTests.OnlyTheDiscoveryCallSites_PassCatalogSurfaceDiscovery` changes its allow-list to `CatalogSurface.cs`, `CatalogVisibility.cs`, `McpCatalogVisibility.cs`, `CatalogVisibilityService.cs`. `McpDatasetCatalog.cs`, `QueryTypes.cs` and `CatalogDiscoveryService.cs` are removed from it (each package removes its file once it is migrated). The surface overload of `McpCatalogVisibility` (`:45-75`) is deleted once its last caller is gone; the DataAccess overloads stay. `T_R3_2` is unchanged (the service never reads `CatalogTags`). D-6/T-CAT138-14 is an additional Cecil test in `Tests.Architecture`; it does not replace these source guards.
+6. **GraphQL `Unrestricted` (behaviour delta).** Today GraphQL confines `CallerScope.Unrestricted` (Single mode, GovernanceAdmin without a tenant claim) through `FilterToTenant(LegacySingleTenant, ...)`. REST and MCP (the engine) return the whole catalog for it. One rule means the engine rule, so GraphQL widens to match REST/MCP for this class only (default taken; Phase 3 confirms in its narrow review). Test: `GraphQl_Unrestricted_SameSetAsRestAndMcp`. The GraphQL prelude errors (`UNAUTHORIZED` for no SID or a bad tenant) and the OpenSchema branch (F-C12) stay unchanged.
+7. **No-SID fallback (behaviour delta).** The engine falls back to `Identity.Name` when there is no SID (`CatalogVisibility.cs:359`). Under SEC-CAT138-01 the service returns empty before calling the engine when `GetUserSid()` is null, so REST narrows. Test: `NameOnlyPrincipal_NoSid_Empty_AllChannels`.
+8. **AccessStatus stays local.** GraphQL keeps its own consent and pending-request load (`:415-432`), but only for `ComputeAccessStatus` and never to filter. A second consent query per GraphQL catalog call is accepted until INC-138-3.
+9. **ReBAC removal.** The `IRebacEvaluator?` constructor parameter of `CatalogDiscoveryService` is removed together with `ResolvePermittedAsync` and `IsRebacAllowedAsync` (SEC-CAT138-11). `ListDatasourcesAsync` keeps its admin gate `:265` and then calls `GetVisibleAsync` (T-CAT138-12).
+10. **Test factory.** To keep SEC-CAT138-01 (null service -> empty) without weakening production defaults, add `tests/Autheris.Tests.Unit/TestSupport/CatalogVisibilityTestFactory.cs`, used by the existing `McpDatasetCatalog`, `CatalogDiscoveryService` and `GetCatalogAsync` tests. The `[GraphQLIgnore]` overloads (`:284-303`) do not create a default service.
+11. **No registry change.** INC-1 adds no MCP tool (`McpToolGroups` unchanged) and no route. `RestApiOptions` gates only the data family, so `/datasources` and GraphQL `catalog` need no switch.
+```
+
+
+### A-1 drift table (plan reference -> current code)
+
+| Plan reference | Current code (laneB) |
+|---|---|
+| S1 `McpDatasetCatalog.cs:140-160`, private `VisibleTablesAsync` `:800-807` | `ListDatasetsAsync` `:140`, NotFound filter `:151-152`; `VisibleTablesAsync` `:879-891` (bypass `:888`, `McpCatalogVisibility(..., Discovery)` `:890`); seam `VisibleTablesForTesting` `:877`; `IsAdminView` `:379-381` (bypass counts as admin); `Shape` `:383` |
+| S2/S4 `FindVisibleAsync` `:785-798`, `sample_rows` `:584-600` | `FindVisibleAsync(principal, dataset, isAdminView, ct)` `:858-873`; describe `:204-215` (Summary branch `:215`); `SampleRowsAsync` `:655-657` |
+| S3 `GraphQlAccessAsync` `:658-672` | `:729-745`, takes `isAdminView`, applies its own NotFound filter |
+| S8 `ResolvePermittedAsync` `:296-325`, `VisibleAsync` `:331-352`, `IsRebacAllowedAsync` `:354-367` | `:311-341` (`Task.WhenAll` `:334-339`); `VisibleAsync` `:346-376` (Discovery `:363`, `ApplyShape` `:365`, seam `EngineOutputForTesting` `:344`); `ApplyShape` `:379-380`; `IsRebacAllowedAsync` `:382-396` (`SubjectId` `:392`); detail `:81-130` (Summary shape `:112`, recomputes `IsAdminView(scope)`); ctor parameter `IRebacEvaluator?` `:48` |
+| S9 `/datasources` `:241-262` | `ListDatasourcesAsync` `:256-302` (admin gate `:265`, `VisibleAsync` `:272`, no ReBAC). The REST route already exists (`CatalogApiEndpoints.cs:60`); nothing new is added |
+| S10 `QueryTypes.cs:434-450`, OpenSchema ends `:362` | OpenSchema `:343-362`; prelude errors (`UNAUTHORIZED` for no SID or a bad tenant) `:365-396`; contract `:410-413`; consents/pending for `AccessStatus` `:415-432`; branches `:435-453` (Global: all, **Unrestricted + Tenant: `FilterToTenant`**, else `FilterForSubject(Discovery)` `:448-452`); `ToCatalogDtos` `:463-479`; `ToCatalogDto` `:485-505` |
+| `CatalogVisibility.VisibleTablesAsync(..., Discovery, tenancyMode, SharedTables)` | 9-param `(all, principal, tenantId, consentRepo, contract, tenancyMode, sharedTables, surface, ct)` `:321`; 8-param `:309` delegates with `DataAccess`; Claimless gets `sharedTables=null` inside the engine `:370`; **no-SID fallback to `Identity.Name` `:359`** |
+| `McpCatalogVisibility` "anonymous handling + surface pass-through" | still true; surface overload `:45-75`; the only Discovery caller is `McpDatasetCatalog.cs:890` |
+| Shaping rule (implicit in D-1) | `Application/Services/CatalogViewShaping.Resolve(isAdmin, view)` -> `CatalogOutputShape { NotFound, Summary, Full }` |
+| D-6 "Cecil test, extend #111 T-3" | #111 guard tests are source-level (text) in `tests/Autheris.Tests.Unit/Catalog/CatalogSurfaceCallSiteGuardTests.cs`: `OnlyTheDiscoveryCallSites_PassCatalogSurfaceDiscovery` (allow-list: `CatalogSurface.cs`, `CatalogVisibility.cs`, `McpCatalogVisibility.cs`, `McpDatasetCatalog.cs`, `QueryTypes.cs`, `CatalogDiscoveryService.cs`), `DataPathAndMetadataSurfaces_NeverReferenceTheDiscoverySurface`, `DiscoverySurface_IsNeverTheDefaultOfAnyVisibilityOverload`, `T_R2_1_...`, `T_R3_2_CatalogTagsReferences_AreLimitedToTheAllowList` |
+| Guard tests (#111 INC-1 handover) | `Tests.Unit/Mcp/McpCatalogPipelineGuardTests.cs` (3 tests, `VisibleTablesForTesting`), `Tests.Unit/Catalog/CatalogDiscoveryPipelineGuardTests.cs` (2 tests, `EngineOutputForTesting`), `Tests.Unit/GraphQL/CatalogTierShapingTests.cs` (`ShapeLoop_NonAdminRowsWithoutRecognisedView_NeverReachTheResult_AdminKeepsThem`, `ShapeStage_*`, `Shaping_IsAdmin_ComesFromSameResolverAsListFilter`, `OpenSchema_Branch_NotAffectedByTierShaping`) |
+| Section 5 `CatalogDiscoveryVisibilityTests` | `Tests.Unit/Catalog/CatalogDiscoveryConsentVisibilityTests.cs` and `CatalogDiscoveryTierVisibilityTests.cs` |
+| `McpToolGroups.cs` (#115) | no new MCP tool in INC-1, so no change |
+| `RestApiOptions` (#115) | covers only the REST data family (`/api/v1/data/*`, sample rows). Catalog routes, `/datasources` and GraphQL `catalog` are not gated, so no change |
+| Test churn under SEC-CAT138-01 (null service -> empty) | 11 `new McpDatasetCatalog(` sites (9 files), 3 `new CatalogDiscoveryService(` sites, 49 `GetCatalogAsync(` test calls. They need a shared test factory |
+
+
+### A-1 developer packages
+
+1. **P1 Service.** Contracts (D-1 as amended by A-1 decision 2), `CatalogVisibilityService` (resolver, engine, shape, chunked `BatchCheckAsync`, memo), DI, seam, test factory. Unit tests T-CAT138-01..05 and -13, plus section 5 service tests and the new pipeline test. Add `CatalogVisibilityService.cs` to the guard allow-list. No call-site change.
+2. **P2 Application channels.** Migrate `CatalogDiscoveryService` (list, search, detail, datasources, ctor) and `McpDatasetCatalog` (list, describe, relations, sample). Re-home the two pipeline guard tests and delete the two seams, the `McpCatalogVisibility` surface overload and the two allow-list entries. Tests T-CAT138-06..08, -10..12 for REST/MCP.
+3. **P3 GraphQL and closure.** Collapse `QueryTypes.GetCatalogAsync` branches into `GetVisibleAsync` (A-1 decisions 6 and 8) and remove `QueryTypes.cs` from the allow-list. Add the Cecil test T-CAT138-14, the parity matrix (T-CAT138-09 and F-C7 tier fixtures), the SEC-CAT138-10 surface disposition (T-CAT138-15), the DI composition test and the release note (OQ-1, A-1 decisions 6 and 7).
+
+
+Lead note (2026-10-18): owner rule 2026-10-17 removes release notes and the documentation phase; wherever this plan or SEC-CAT138-14 asks for a release note, the behaviour delta is recorded as a dated bullet in this plan's changelog instead.
+
+### Phase 3 narrow review of Addendum A-1 (2026-10-18)
+
+**Verdict: APPROVED WITH CONDITIONS.** Facts verified in laneB: `CallerScopeResolver.Resolve` returns `None` only without authentication or when both SID and `Identity.Name` are missing, so a Name-only principal is today resolved as a normal class (even Global/Tenant); `GetUserSid()` already falls back over PrimarySid, objectSid, oid, NameIdentifier, sub, appid, client_id, azp; `ClaimsNormalizer` adds `cert:<thumbprint>` PrimarySid for certificates, ForwardAuth and Basic set PrimarySid/objectSid. Real auth paths therefore always carry a SID; only synthetic principals are Name-only.
+
+1. Ordering (engine -> shape -> ReBAC -> memo) is correct and fail-closed: shaping before ReBAC means an unmarked/unknown row never reaches the evaluator or the memo, and the engine stays the only visibility source. OpenSchema untouched is acceptable.
+2. Change A (GraphQL `Unrestricted` widens): acceptable. `Unrestricted` is produced only in Single mode for a GovernanceAdmin without tenant claim, so there is one tenant and no cross-tenant exposure; REST/MCP already return the whole catalog for it. Multi mode never yields `Unrestricted` (a claimless Multi principal is `Claimless`, consent path only), which must be pinned by a test.
+3. Change B (no SID -> empty): acceptable and fail-closed, no real auth path is broken. But decision 7 as written creates a second, divergent gate (service) next to the resolver, which still lets Name-only through, and it also empties Global/Tenant admins without SID.
+
+**Binding conditions**
+- SEC-CAT138-13: The service resolves `CallerScope` once and uses that value for engine, shape and `IsAdminView`; no channel recomputes scope or shape (tests per A-1 decision 2). The H-02 MCP bypass keeps its own `IsAdminView` only for the bypass, never to widen shaping.
+- SEC-CAT138-14: The no-SID rule is enforced in one place. Preferred: `CallerScopeResolver` returns `None` when `GetUserSid()` is null (drop the Name-only exception), and the service returns empty on `None` before any repository call. If the resolver is left unchanged, the service must still return empty for every class (including Global/Unrestricted/Tenant) without SID and must not call engine, ReBAC or memo. The release note names the delta (OQ-1).
+- SEC-CAT138-15: Shape stage keeps the #111 rules exactly: non-admin `Unmarked`/unknown/unrecognised view -> not found (list, search, detail, describe, relations, `sample_rows`), Summary rows never expose columns, `sample_rows` keeps the Full term and requires `Shape == Full` from the service. A `Shape` of `NotFound` is unrepresentable in `CatalogVisibleRow`; the service throws or drops, never defaults to Full.
+- SEC-CAT138-16: The channel checks (`ToCatalogDto(s)`, MCP `Shape(...) != NotFound`) stay as a second line of defence in every package; no package removes a channel check or a guard test before its replacement is green in the same commit. Pipeline guard tests re-homed to the service seam must be mutation-checked (remove the shape filter -> test fails) in the same commit that deletes the old seam.
+- SEC-CAT138-17: `EngineOutputForTesting` stays `internal` (InternalsVisibleTo only to the test assembly), is null in all DI registrations, is never settable from options/config, and a source guard asserts no production file assigns it.
+- SEC-CAT138-18: The call-site allow-list shrinks per package (P2 removes `McpDatasetCatalog.cs`/`CatalogDiscoveryService.cs`, P3 `QueryTypes.cs`); each file leaves the list only in the commit that removes its last `Discovery` call. `DataPathAndMetadataSurfaces_NeverReferenceTheDiscoverySurface` and `DiscoverySurface_IsNeverTheDefaultOfAnyVisibilityOverload` stay unchanged.
+- SEC-CAT138-19: GraphQL `AccessStatus` consent load is for status only and must never add or remove rows; GraphQL OpenSchema errors (`UNAUTHORIZED` prelude) are unchanged.
+
+**Mandatory tests** (`[Trait("Category","Security")]`)
+- `GraphQl_Unrestricted_SameSetAsRestAndMcp`
+- `Multi_Mode_NoTenantClaim_NeverUnrestricted_ConsentPathOnly`
+- `NameOnlyPrincipal_NoSid_Empty_AllChannels` (parameterised over Global, Tenant, Subject classes; asserts no repository/ReBAC call)
+- `RealAuthPaths_CertForwardAuthBasicApiKey_HaveSid_CatalogNotEmpty`
+- `Pipeline_NonAdminUnmarkedRow_DroppedBeforeRebacAndMemo` (asserts evaluator not invoked for the dropped row)
+- `Pipeline_ShapeFilterRemoved_GuardTestsFail` (mutation-style: the re-homed MCP and REST guard tests fail without the shape step)
+- `SampleRows_SummaryShape_Denied_FullRequired`
+- `CatalogVisibleRow_NeverCarriesNotFound`
+- `EngineOutputForTesting_NotAssignedInProduction` (source guard)
+- `GraphQl_AccessStatus_DoesNotChangeRowSet`
