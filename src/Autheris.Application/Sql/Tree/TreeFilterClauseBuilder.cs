@@ -22,6 +22,12 @@ public static class TreeFilterClauseBuilder
     /// </summary>
     public const string ParameterPrefix = "@__gql_tf_";
 
+    /// <summary>B-2: most comparison leaves one filter tree may carry (an IN list is one leaf).</summary>
+    public const int MaxLeafCount = 64;
+
+    /// <summary>B-2: longest string value (characters) one filter value may carry.</summary>
+    public const int MaxStringValueLength = 1_024;
+
     public static TableFilterClause Build(TreeFilter filter, Func<string, ColumnRef?> resolveColumn)
     {
         ArgumentNullException.ThrowIfNull(filter);
@@ -29,7 +35,8 @@ public static class TreeFilterClauseBuilder
 
         // Resolve and coerce once into a normalized tree: referenced columns and values are then exact and render-independent.
         var referenced = new List<string>();
-        var normalized = Normalize(filter, resolveColumn, referenced, 0);
+        var leaves = 0;
+        var normalized = Normalize(filter, resolveColumn, referenced, 0, ref leaves);
 
         // SqlPredicate is the form the in-memory evaluator reads (no redundant ESCAPE clause); the Trino factory always carries it.
         var identity = new BuilderTarget(static c => c, alwaysEmitLikeEscape: false);
@@ -44,7 +51,7 @@ public static class TreeFilterClauseBuilder
         };
     }
 
-    private static TreeFilter Normalize(TreeFilter filter, Func<string, ColumnRef?> resolve, List<string> referenced, int depth)
+    private static TreeFilter Normalize(TreeFilter filter, Func<string, ColumnRef?> resolve, List<string> referenced, int depth, ref int leaves)
     {
         if (depth > TreeSqlCompiler.MaxFilterDepth)
         {
@@ -55,13 +62,20 @@ public static class TreeFilterClauseBuilder
         switch (filter)
         {
             case TreeAndFilter and:
-                return new TreeAndFilter(and.Items.Select(i => Normalize(i, resolve, referenced, depth + 1)).ToList());
+                return new TreeAndFilter(NormalizeItems(and.Items, resolve, referenced, depth, ref leaves));
             case TreeOrFilter or:
-                return new TreeOrFilter(or.Items.Select(i => Normalize(i, resolve, referenced, depth + 1)).ToList());
+                return new TreeOrFilter(NormalizeItems(or.Items, resolve, referenced, depth, ref leaves));
             case TreeNotFilter not:
-                return new TreeNotFilter(Normalize(not.Item, resolve, referenced, depth + 1));
+                return new TreeNotFilter(Normalize(not.Item, resolve, referenced, depth + 1, ref leaves));
             case TreeComparison comparison:
             {
+                if (++leaves > MaxLeafCount)
+                {
+                    throw new Autheris.Domain.Exceptions.GatewayInvalidQueryException(
+                        $"The filter has more than {MaxLeafCount} conditions.");
+                }
+
+                EnsureStringLength(comparison.Value);
                 var column = resolve(comparison.Column) ?? throw new AggregationColumnUnavailableException();
                 referenced.Add(column.CatalogName);
                 var value = FilterValueCoercion.Coerce(comparison.Value, column.Kind, comparison.Operator);
@@ -69,6 +83,35 @@ public static class TreeFilterClauseBuilder
             }
             default:
                 throw new Autheris.Domain.Exceptions.GatewayInvalidQueryException("Unsupported filter.");
+        }
+    }
+
+    private static List<TreeFilter> NormalizeItems(
+        IReadOnlyList<TreeFilter> items, Func<string, ColumnRef?> resolve, List<string> referenced, int depth, ref int leaves)
+    {
+        var result = new List<TreeFilter>(items.Count);
+        foreach (var item in items)
+        {
+            result.Add(Normalize(item, resolve, referenced, depth + 1, ref leaves));
+        }
+
+        return result;
+    }
+
+    private static void EnsureStringLength(object? value)
+    {
+        switch (value)
+        {
+            case string s when s.Length > MaxStringValueLength:
+                throw new Autheris.Domain.Exceptions.GatewayInvalidQueryException(
+                    $"A filter value is longer than {MaxStringValueLength} characters.");
+            case System.Collections.IEnumerable list when value is not string:
+                foreach (var entry in list)
+                {
+                    EnsureStringLength(entry);
+                }
+
+                break;
         }
     }
 
