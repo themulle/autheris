@@ -90,6 +90,7 @@ public sealed class Issue143RestrictedScopeParityTests : IClassFixture<Issue143R
     {
         _fixture.CallerSid = RowFilterChannelParityTests.Fixture.DavidSid;
         _fixture.ExtraHeaders.Clear();
+        _fixture.ExtraHeaders["X-Test-Tier"] = "Internal"; // GraphQL cost quota: keep the per-tier budget out of the comparison
         if (scope != null)
         {
             _fixture.ExtraHeaders["X-Test-Scope"] = scope;
