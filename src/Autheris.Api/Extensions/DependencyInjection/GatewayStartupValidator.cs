@@ -46,6 +46,7 @@ public static class GatewayStartupValidator
         ValidateDefaultSchemas(options);
         ValidateTenantCollisions(options, environment, logger);
         ValidateWebhookSubscriptions(options);
+        ValidateQueryCostOptions(options.QueryCost, environment);
 
         // SEC E-01: the egress allowlist is validated in every environment; invalid or too broad entries abort the start.
         var egressErrors = EgressAllowlist.Validate(options.Egress);
@@ -1141,6 +1142,23 @@ public static class GatewayStartupValidator
                 {
                     ValidateObjectRecursively(val);
                 }
+            }
+        }
+    }
+
+    private static void ValidateQueryCostOptions(QueryCostOptions? queryCost, IHostEnvironment environment)
+    {
+        if (queryCost == null)
+        {
+            throw new ValidationException("QueryCostOptions must not be null.");
+        }
+
+        if (!environment.IsDevelopment())
+        {
+            if (queryCost.BaseCost < 1 || queryCost.RowCostFactor < 0 || queryCost.FailureFee < 1 ||
+                queryCost.CostPerSingleRowLookup < 1 || queryCost.DefaultListMultiplier < 1 || queryCost.NestedCostFactor < 0)
+            {
+                throw new ValidationException("Invalid QueryCost configuration outside Development: BaseCost and FailureFee must be >= 1, RowCostFactor and NestedCostFactor must be >= 0.");
             }
         }
     }

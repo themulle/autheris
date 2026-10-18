@@ -239,6 +239,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
 
                 foreach (var rel in table.Relations)
                 {
+                    CatalogRelationRegistry.Register(table.TypeName, rel.FieldName, rel.Cardinality);
                     if (rel.IsList)
                     {
                         d.Field(rel.FieldName)
@@ -640,6 +641,13 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
             {
                 list.Add(item);
             }
+
+            lock (ctx.ContextData)
+            {
+                var currentRows = ctx.ContextData.TryGetValue("AutherisRowsReturned", out var rObj) && rObj is long rVal ? rVal : 0L;
+                ctx.ContextData["AutherisRowsReturned"] = currentRows + list.Count;
+            }
+
             return list;
         }
         catch (AggregationColumnUnavailableException)

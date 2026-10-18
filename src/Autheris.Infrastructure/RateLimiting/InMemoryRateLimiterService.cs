@@ -347,33 +347,48 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
     }
 
     public Task<CostQuotaResult> ReserveCostQuotaAsync(string key, int reservedCost, ClientQuotaPolicy policy, CancellationToken ct = default)
-        => CheckCostQuotaAsync(key, reservedCost, policy, ct);
+    {
+        return CheckCostQuotaAsync(key, reservedCost, policy, ct);
+    }
 
     public Task<CostQuotaResult> SettleCostQuotaAsync(string key, int reservedCost, int actualCost, ClientQuotaPolicy policy, CancellationToken ct = default)
     {
+        if (reservedCost < 0) reservedCost = 0;
+        if (actualCost < 0) actualCost = 0;
+
         var currentTimestamp = Stopwatch.GetTimestamp();
+
         if (!_costBuckets.TryGetValue(key, out var bucket))
         {
-            return Task.FromResult(new CostQuotaResult(true, policy.MaxTokensCapacity, 0));
+            if (Volatile.Read(ref _costBucketCount) >= MaxCostBuckets)
+            {
+                EvictOldest(_costBuckets, b => { lock (b.Lock) { return b.LastRefillTimestamp; } }, ref _costBucketCount, ref _isEvictingCost);
+            }
+
+            bucket = _costBuckets.GetOrAdd(key, _ =>
+            {
+                Interlocked.Increment(ref _costBucketCount);
+                return new TokenBucket
+                {
+                    Tokens = policy.MaxTokensCapacity,
+                    LastRefillTimestamp = currentTimestamp
+                };
+            });
         }
 
         lock (bucket.Lock)
         {
-            var elapsedSeconds = Stopwatch.GetElapsedTime(bucket.LastRefillTimestamp, currentTimestamp).TotalSeconds;
-            bucket.Tokens = Math.Min(policy.MaxTokensCapacity, bucket.Tokens + (elapsedSeconds * policy.TokenRefillRatePerSecond));
-            bucket.LastRefillTimestamp = currentTimestamp;
+            // SEC-GOV177-04: Monotonic time progression
+            if (currentTimestamp > bucket.LastRefillTimestamp)
+            {
+                var elapsedSeconds = Stopwatch.GetElapsedTime(bucket.LastRefillTimestamp, currentTimestamp).TotalSeconds;
+                bucket.Tokens = Math.Min(policy.MaxTokensCapacity, bucket.Tokens + (elapsedSeconds * policy.TokenRefillRatePerSecond));
+                bucket.LastRefillTimestamp = currentTimestamp;
+            }
 
+            // SEC-GOV177-01 & SEC-GOV177-02: delta = reservedCost - actualCost, clamped to [0, MaxTokensCapacity]
             var delta = reservedCost - actualCost;
-            if (delta > 0)
-            {
-                // Refund unused tokens up to capacity
-                bucket.Tokens = Math.Min(policy.MaxTokensCapacity, bucket.Tokens + delta);
-            }
-            else if (delta < 0)
-            {
-                // Additional debit clamped at 0
-                bucket.Tokens = Math.Max(0, bucket.Tokens + delta);
-            }
+            bucket.Tokens = Math.Clamp(bucket.Tokens + delta, 0, policy.MaxTokensCapacity);
 
             return Task.FromResult(new CostQuotaResult(true, (int)Math.Floor(bucket.Tokens), 0));
         }

@@ -51,6 +51,7 @@ public static class GatewaySections
     public const string SystemMetrics = "Gateway:SystemMetrics";
     public const string TrafficShadowing = "Gateway:TrafficShadowing";
     public const string FinOps = "Gateway:FinOps";
+    public const string QueryCost = "Gateway:Governance:QueryCost";
 
     // Storage & Caching
     public const string GovernanceDb = "Gateway:GovernanceDb";

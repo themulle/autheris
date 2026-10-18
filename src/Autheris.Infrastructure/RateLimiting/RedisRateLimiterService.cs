@@ -77,7 +77,7 @@ public sealed class RedisRateLimiterService : IRateLimiterService
         else
             local elapsed_sec = math.max(0, (now_ms - last_refill) / 1000.0)
             tokens = math.min(capacity, tokens + (elapsed_sec * refill_rate))
-            last_refill = now_ms
+            last_refill = math.max(last_refill, now_ms)
         end
 
         local allowed = 0
@@ -98,9 +98,41 @@ public sealed class RedisRateLimiterService : IRateLimiterService
         return { allowed, math.floor(tokens), wait_seconds }
     ";
 
+    private const string CostTokenBucketSettleScript = @"
+        local key = KEYS[1]
+        local reserved_cost = tonumber(ARGV[1])
+        local actual_cost = tonumber(ARGV[2])
+        local capacity = tonumber(ARGV[3])
+        local refill_rate = tonumber(ARGV[4])
+        local now_ms = tonumber(ARGV[5])
+        local ttl_seconds = tonumber(ARGV[6])
+
+        local data = redis.call('HMGET', key, 'tokens', 'last_refill')
+        local tokens = tonumber(data[1])
+        local last_refill = tonumber(data[2])
+
+        if not tokens then
+            tokens = capacity
+            last_refill = now_ms
+        else
+            local elapsed_sec = math.max(0, (now_ms - last_refill) / 1000.0)
+            tokens = math.min(capacity, tokens + (elapsed_sec * refill_rate))
+            last_refill = math.max(last_refill, now_ms)
+        end
+
+        local delta = reserved_cost - actual_cost
+        tokens = math.max(0, math.min(capacity, tokens + delta))
+
+        redis.call('HSET', key, 'tokens', tostring(tokens), 'last_refill', tostring(last_refill))
+        redis.call('EXPIRE', key, ttl_seconds)
+
+        return { 1, math.floor(tokens), 0 }
+    ";
+
     private static readonly LuaScript PreparedPreAuthIpScript = LuaScript.Prepare(PreAuthIpScript);
     private static readonly LuaScript PreparedPostAuthSidScript = LuaScript.Prepare(PostAuthSidScript);
     private static readonly LuaScript PreparedCostTokenBucketScript = LuaScript.Prepare(CostTokenBucketScript);
+    private static readonly LuaScript PreparedCostTokenBucketSettleScript = LuaScript.Prepare(CostTokenBucketSettleScript);
 
     public RedisRateLimiterService(
         IConnectionMultiplexer multiplexer,
@@ -289,6 +321,58 @@ public sealed class RedisRateLimiterService : IRateLimiterService
 
     public async Task<CostQuotaResult> SettleCostQuotaAsync(string key, int reservedCost, int actualCost, ClientQuotaPolicy policy, CancellationToken ct = default)
     {
-        return await _inMemoryFallback.SettleCostQuotaAsync(key, reservedCost, actualCost, policy, ct).ConfigureAwait(false);
+        if (reservedCost < 0) reservedCost = 0;
+        if (actualCost < 0) actualCost = 0;
+
+        try
+        {
+            var sanitizedKey = key.Replace("{", "_").Replace("}", "_");
+            var redisKey = (RedisKey)$"{_prefix}ratelimit:quota:{sanitizedKey}";
+            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var ttlSeconds = 600;
+
+            var res = (RedisResult[]?)await PreparedCostTokenBucketSettleScript.EvaluateAsync(
+                _db,
+                new
+                {
+                    KEYS = new RedisKey[] { redisKey },
+                    ARGV = new RedisValue[]
+                    {
+                        (RedisValue)reservedCost,
+                        (RedisValue)actualCost,
+                        (RedisValue)policy.MaxTokensCapacity,
+                        (RedisValue)policy.TokenRefillRatePerSecond,
+                        (RedisValue)nowMs,
+                        (RedisValue)ttlSeconds
+                    }
+                }
+            ).ConfigureAwait(false);
+
+            if (res != null && res.Length >= 3)
+            {
+                var allowed = (long)res[0] == 1;
+                var remaining = (int)(long)res[1];
+                var waitSeconds = (int)(long)res[2];
+                return new CostQuotaResult(allowed, remaining, waitSeconds);
+            }
+
+            RateLimiterRedisErrors.WithLabels("cost_quota_settle").Inc();
+            _logger.LogWarning("Redis cost quota settlement returned unexpected result for key {Key}. Falling back to in-memory limiter.", key);
+            return await _inMemoryFallback.SettleCostQuotaAsync(key, reservedCost, actualCost, policy, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            RateLimiterRedisErrors.WithLabels("cost_quota_settle").Inc();
+            _logger.LogWarning(ex, "Redis cost quota settlement failed for key {Key}. Falling back to in-memory limiter.", key);
+            try
+            {
+                return await _inMemoryFallback.SettleCostQuotaAsync(key, reservedCost, actualCost, policy, ct).ConfigureAwait(false);
+            }
+            catch (Exception fallbackEx)
+            {
+                _logger.LogError(fallbackEx, "In-memory rate limiting fallback failed for key {Key}. Failing closed.", key);
+                return new CostQuotaResult(true, 0, 0);
+            }
+        }
     }
 }
