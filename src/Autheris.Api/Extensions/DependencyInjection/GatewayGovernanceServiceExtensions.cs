@@ -251,6 +251,9 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<ILineageGraphStore, LineageGraphStore>();
         services.AddScoped<ILineageImpactAnalyzerService, LineageImpactAnalyzerService>();
         services.AddSingleton<IGdprAuditReportExporter, GdprAuditReportPdfExporter>();
+        services.AddSingleton<Autheris.Infrastructure.Observability.ConsumerUsageRecorder>();
+        services.AddSingleton<IConsumerUsageRecorder>(sp => sp.GetRequiredService<Autheris.Infrastructure.Observability.ConsumerUsageRecorder>());
+        services.AddHostedService<Autheris.Infrastructure.Observability.ConsumerUsageFlushWorker>();
 
         // AI Assisted Governance (Triage)
         services.AddScoped<IJustificationTriageService, JustificationTriageService>();
@@ -318,6 +321,7 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IAccessProfileRepository>(sp => (IAccessProfileRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<IConsumerAggregationRepository>(sp => sp.GetRequiredService<TRepository>());
         if (cdcWebhooksEnabled)
         {
             services.AddSingleton<ICloudEventSubscriptionStore>(sp => sp.GetRequiredService<TRepository>());

@@ -328,7 +328,8 @@ public interface IGovernanceRepository :
     IConsentApprovalRepository,
     IDataOwnershipRepository,
     ITableRelationRepository,
-    IItsmOutboxRepository
+    IItsmOutboxRepository,
+    IConsumerAggregationRepository
 {
 }
 
