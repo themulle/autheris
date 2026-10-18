@@ -123,7 +123,8 @@ CREATE TABLE dbo.CONSENTS (
     revoked_at NVARCHAR(64) NULL,
     revoke_reason NVARCHAR(MAX) NULL,
     tenant_id NVARCHAR(128) NOT NULL DEFAULT 'legacy-single-tenant',
-    renewal_count INT NOT NULL CONSTRAINT DF_CONSENTS_renewals DEFAULT 0
+    renewal_count INT NOT NULL CONSTRAINT DF_CONSENTS_renewals DEFAULT 0,
+    description NVARCHAR(2000) NULL
 );
 
 IF OBJECT_ID(N'dbo.CONSENT_COLUMN_RULES', N'U') IS NULL

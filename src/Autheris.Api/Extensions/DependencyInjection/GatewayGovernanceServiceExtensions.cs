@@ -202,6 +202,10 @@ public static class GatewayGovernanceServiceExtensions
                 Microsoft.Extensions.Configuration.ConfigurationBinder.Bind(cfg.GetSection(Autheris.Domain.Options.IndividualGrantOptions.SectionName), o))
             .ValidateDataAnnotations()
             .ValidateOnStart();
+        services.AddOptions<Autheris.Domain.Options.GovernanceTextOptions>() // PLAN-GOV-158-INC1
+            .BindConfiguration(Autheris.Domain.Options.GovernanceTextOptions.SectionName)
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
         Autheris.Application.Governance.Grants.IndividualGrantServiceCollectionExtensions.AddIndividualGrantPolicy(services);
         services.AddSingleton<Autheris.Application.Governance.Interfaces.IDeclarativeConsentApplyService, Autheris.Application.Governance.Services.DeclarativeConsentApplyService>();
 

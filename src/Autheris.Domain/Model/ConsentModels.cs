@@ -95,6 +95,13 @@ public sealed class Consent
     /// <summary>WP-SC-16: number of approved renewals (extensions) of this grant; persisted by the repositories.</summary>
     public int RenewalCount { get; init; }
 
+    /// <summary>
+    /// PLAN-GOV-158-INC1: owner-authored explanation of why this grant exists (persisted, normalised by <c>UntrustedText</c>). Settable because
+    /// the repositories hydrate it after the row mapper. Untrusted text: it never influences a decision; output only through
+    /// <c>ConsentDescriptionText.ForOutput</c>.
+    /// </summary>
+    public string? Description { get; set; }
+
     public IReadOnlyList<ConsentColumnRule> ColumnRules { get; set; } = Array.Empty<ConsentColumnRule>();
     public IReadOnlyList<ConsentRowFilter> RowFilters { get; set; } = Array.Empty<ConsentRowFilter>();
     public string? RowFilterCondition { get; init; }

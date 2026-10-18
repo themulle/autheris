@@ -294,9 +294,38 @@ public partial class SqlServerGovernanceRepository
         return string.Join(",", names);
     }
 
+    /// <summary>PLAN-GOV-158-INC1: loads <c>CONSENTS.description</c> for the given consents (single choke point for every read path).</summary>
+    private async Task LoadConsentDescriptionsAsync(SqlConnection conn, List<Consent> consents, CancellationToken ct)
+    {
+        if (consents.Count == 0) return;
+        var byId = new Dictionary<string, List<Consent>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in consents)
+        {
+            if (!byId.TryGetValue(c.Id.ToString(), out var list)) byId[c.Id.ToString()] = list = [];
+            list.Add(c);
+        }
+
+        var ids = byId.Keys.ToList();
+        for (int offset = 0; offset < ids.Count; offset += ConsentHydrateBatchSize)
+        {
+            var batch = ids.GetRange(offset, Math.Min(ConsentHydrateBatchSize, ids.Count - offset));
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT id, description FROM CONSENTS WHERE description IS NOT NULL AND id IN (" + BuildConsentIdInClause(cmd, "did", batch) + ")";
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                if (!byId.TryGetValue(reader.GetString(0), out var targets)) continue;
+                var text = reader.GetString(1);
+                foreach (var c in targets) c.Description = text;
+            }
+        }
+    }
+
     private async Task HydrateConsentsBatchAsync(SqlConnection conn, List<Consent> consents, CancellationToken ct)
     {
         if (consents.Count == 0) return;
+
+        await LoadConsentDescriptionsAsync(conn, consents, ct).ConfigureAwait(false);
 
         var consentIds = consents.Select(c => c.Id.ToString()).ToList();
         var rulesMap = consents.ToDictionary(c => c.Id.ToString(), _ => new List<ConsentColumnRule>(), StringComparer.OrdinalIgnoreCase);
@@ -474,8 +503,8 @@ public partial class SqlServerGovernanceRepository
         await using (var cmd = conn.CreateCommand())
         {
             cmd.Transaction = tx;
-            cmd.CommandText = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, grantee_sid_norm, role_id, role_name, valid_from, valid_to, is_revoked, tenant_id)
-                                VALUES (@id, @tid, @reqId, @effect, @granteeType, @granteeSid, @sidNorm, @roleId, @roleName, @validFrom, @validTo, 0, @tenantId)";
+            cmd.CommandText = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, grantee_sid_norm, role_id, role_name, valid_from, valid_to, is_revoked, tenant_id, description)
+                                VALUES (@id, @tid, @reqId, @effect, @granteeType, @granteeSid, @sidNorm, @roleId, @roleName, @validFrom, @validTo, 0, @tenantId, @description)";
             cmd.Parameters.AddWithValue("@id", consentId.ToString());
             cmd.Parameters.AddWithValue("@tid", tableId.ToString());
             cmd.Parameters.AddWithValue("@reqId", (object?)consent.ConsentRequestId?.ToString() ?? DBNull.Value);
@@ -488,6 +517,7 @@ public partial class SqlServerGovernanceRepository
             cmd.Parameters.AddWithValue("@validFrom", consent.ValidFrom.ToString("O"));
             cmd.Parameters.AddWithValue("@validTo", consent.ValidTo.ToString("O"));
             cmd.Parameters.AddWithValue("@tenantId", tenantIdStr);
+            cmd.Parameters.AddWithValue("@description", (object?)consent.Description ?? DBNull.Value);
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
 
@@ -587,7 +617,8 @@ public partial class SqlServerGovernanceRepository
             IsRevoked = consent.IsRevoked,
             TenantId = consent.TenantId,
             ColumnRules = consent.ColumnRules,
-            RowFilters = consent.RowFilters
+            RowFilters = consent.RowFilters,
+            Description = consent.Description
         };
     }
 

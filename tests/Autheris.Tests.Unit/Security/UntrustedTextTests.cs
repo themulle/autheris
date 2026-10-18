@@ -134,3 +134,20 @@ public sealed class UntrustedTextTests
         UntrustedText.Normalize(" \u202e ", 500, allowLineFeed: false).IsValid.ShouldBeFalse();
     }
 }
+
+public sealed class ConsentDescriptionTextTests
+{
+    [Fact]
+    public void ForOutput_ValidValue_ReturnedNullStaysNull()
+    {
+        ConsentDescriptionText.ForOutput("Sales analysts", 500).ShouldBe("Sales analysts");
+        ConsentDescriptionText.ForOutput(null, 500).ShouldBeNull();
+    }
+
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData("evil‮text", 500)]
+    [InlineData("0123456789", 5)]
+    public void ForOutput_BidiOrOverCap_ReturnsNull(string stored, int cap) =>
+        ConsentDescriptionText.ForOutput(stored, cap).ShouldBeNull();
+}
