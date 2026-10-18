@@ -301,6 +301,12 @@ public static class CatalogApiEndpoints
         HttpContext httpContext,
         CancellationToken ct)
     {
+        if (httpContext.User.GetUserSid() is not { } actorSid)
+        {
+            // Fail closed: a change without an identifiable actor is never written (no placeholder SID in the HMAC-chained audit).
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
         if (request == null)
         {
             return Results.BadRequest(new { error = "Key definition payload is required." });
@@ -350,7 +356,7 @@ public static class CatalogApiEndpoints
         {
             TenantId = EndpointSecurity.GetRequestTenant(httpContext),
             EventType = AuditEventTypes.CatalogKeyDefinitionChanged,
-            ActorSid = httpContext.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+            ActorSid = actorSid,
             TargetTable = tableId.Value.ToString(),
             Decision = "ALLOW",
             TraceId = httpContext.TraceIdentifier,
