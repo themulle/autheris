@@ -143,16 +143,27 @@ public sealed class EffectiveAccessExplanationService(
             activeRowFilters.Add(canSeeDefinition ? decision.CombinedRowFilterSql : RowFilterDescription);
         }
 
-        var applicableConsents = activeConsents
-            .Where(c => c.Effect == ConsentEffect.Allow && c.IsActive(now))
-            .ToList();
+        var applicableConsents = MatchingAllowConsents(activeConsents, table, now, userSid.Value, groupSids, roles, allUserSids);
 
-        var validTo = applicableConsents.Count > 0
-            ? applicableConsents.Min(c => c.ValidTo)
-            : (DateTimeOffset?)null;
+        // Earliest moment at which the caller's current effective access changes (clamped expiry of matching grants only);
+        // interim description (INC-1 adds the stored one): a held role name, deterministic by ordinal order.
+        DateTimeOffset? validTo = null;
+        string? roleName = null;
+        foreach (var c in applicableConsents)
+        {
+            if (validTo is null || c.EffectiveValidTo < validTo)
+            {
+                validTo = c.EffectiveValidTo;
+            }
 
-        var description = applicableConsents.FirstOrDefault(c => !string.IsNullOrWhiteSpace(c.RoleName))?.RoleName
-            ?? $"Active grant for subject {userSid.Value}";
+            if (c.GranteeType == GranteeType.Role && !string.IsNullOrWhiteSpace(c.RoleName)
+                && (roleName is null || string.CompareOrdinal(c.RoleName, roleName) < 0))
+            {
+                roleName = c.RoleName;
+            }
+        }
+
+        var description = roleName ?? $"Active grant for subject {userSid.Value}";
 
         return new EffectiveTableAccessDto(
             table.ToString(),
@@ -165,6 +176,20 @@ public sealed class EffectiveAccessExplanationService(
             validTo
         );
     }
+
+    /// <summary>
+    /// Allow consents that apply to the caller, by the very predicate of the access decision
+    /// (<see cref="ConsentResolutionService.IsApplicable"/>). Everything the explanation shows about grants derives from this set.
+    /// </summary>
+    internal static List<Consent> MatchingAllowConsents(
+        IReadOnlyList<Consent> consents,
+        TableIdentifier table,
+        DateTimeOffset now,
+        Sid userSid,
+        IReadOnlySet<Sid> groupSids,
+        IReadOnlySet<string> roles,
+        IReadOnlySet<Sid>? allUserSids) =>
+        consents.Where(c => c.Effect == ConsentEffect.Allow && ConsentResolutionService.IsApplicable(c, table, now, userSid, groupSids, roles, allUserSids)).ToList();
 
     private static EffectiveTableAccessDto NotFound(TableIdentifier table) => new(
         table.ToString(),

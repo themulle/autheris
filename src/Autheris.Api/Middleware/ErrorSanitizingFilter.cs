@@ -37,6 +37,8 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "FILTER_ON_MASKED_COLUMN",
         "COST_LIMIT",
         "ROW_LIMIT",
+        // Issue #107: fixed message without table or rule names (SEC-RF107-08).
+        "ROW_FILTER_KEY_SET_UNAVAILABLE",
         // WP-0 (PLAN-GOV-113): fixed messages without ids or names; expected business outcomes, not server faults.
         "DECISION_NOT_PERMITTED",
         "ACCESS_REQUEST_NOT_PENDING"

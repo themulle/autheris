@@ -1,4 +1,3 @@
-using System.Security;
 using System.Security.Claims;
 using Autheris.Api.Endpoints;
 using Autheris.Application.Interfaces;
@@ -197,7 +196,7 @@ public class ProcedureEndpointTests
         {
             Audit.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(AuditEntries.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
             return new GovernedProcedureExecutionService(
-                Registry, Invoker, Options.Create(new GatewayOptions()), Audit, Tables, Consents, Resolution, Masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+                Registry, Invoker, Options.Create(new GatewayOptions()), Audit, Tables, Consents, Resolution, Masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance);
         }
     }
 
@@ -329,11 +328,12 @@ public class ProcedureEndpointTests
     }
 
     [Fact]
-    public async Task Execute_PendingEndpoint_IsUnavailable()
+    public async Task Execute_PendingEndpoint_WithoutVisibility_IsNotFound()
     {
+        // 503 is only visible to callers that pass the visibility stage (see ProcedureSecurityInc1Tests)
         var f = new Fixture();
         f.Registry.Register(ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60));
-        await Should.ThrowAsync<ProcedureUnavailableException>(() => f.Create().ExecuteAsync("get_orders", null, User(), Tenant));
+        await Should.ThrowAsync<KeyNotFoundException>(() => f.Create().ExecuteAsync("get_orders", null, User(), Tenant));
     }
 
     [Fact]
@@ -391,7 +391,7 @@ public class ProcedureEndpointTests
     public async Task Execute_ConsentWithRowFilter_DeniesBecauseItCannotBeEnforced()
     {
         var f = Active(rowFilter: "region = 'EMEA'");
-        await Should.ThrowAsync<SecurityException>(() =>
+        await Should.ThrowAsync<KeyNotFoundException>(() =>
             f.Create().ExecuteAsync("get_orders", new Dictionary<string, object?> { ["customer_id"] = 7 }, User(), Tenant));
         await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default);
     }
@@ -401,7 +401,7 @@ public class ProcedureEndpointTests
     {
         var f = Active();
         f.Tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns((TableMetadata?)null);
-        await Should.ThrowAsync<SecurityException>(() =>
+        await Should.ThrowAsync<KeyNotFoundException>(() =>
             f.Create().ExecuteAsync("get_orders", new Dictionary<string, object?> { ["customer_id"] = 7 }, User(), Tenant));
     }
 
@@ -438,7 +438,7 @@ public class ProcedureEndpointTests
         var f = Active();
         f.Audit.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).Returns(Task.FromException(new IOException("audit down")));
         var svc = new GovernedProcedureExecutionService(
-            f.Registry, f.Invoker, Options.Create(new GatewayOptions()), f.Audit, f.Tables, f.Consents, f.Resolution, f.Masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            f.Registry, f.Invoker, Options.Create(new GatewayOptions()), f.Audit, f.Tables, f.Consents, f.Resolution, f.Masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance);
 
         var ex = await Should.ThrowAsync<Autheris.Application.Audit.AuditUnavailableException>(() =>
             svc.ExecuteAsync("get_orders", new Dictionary<string, object?> { ["customer_id"] = 7 }, User(), Tenant));
@@ -451,19 +451,20 @@ public class ProcedureEndpointTests
         var f = Active();
         Should.Throw<ArgumentNullException>(() =>
             new GovernedProcedureExecutionService(
-                f.Registry, f.Invoker, Options.Create(new GatewayOptions()), audit: null!, f.Tables, f.Consents, f.Resolution, f.Masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance));
+                f.Registry, f.Invoker, Options.Create(new GatewayOptions()), audit: null!, f.Tables, f.Consents, f.Resolution, f.Masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance));
     }
 
     [Fact]
     public async Task Execute_BusinessError_IsRethrownAndAudited()
     {
         var f = Active();
-        f.Invoker.ExecuteReadAsync(default!, default!, default!, default).ThrowsAsyncForAnyArgs(new ProcedureBusinessException("Order locked"));
+        f.Invoker.ExecuteReadAsync(default!, default!, default!, default).ThrowsAsyncForAnyArgs(new ProcedureBusinessException(50001, null));
         var svc = f.Create();
 
         var ex = await Should.ThrowAsync<ProcedureBusinessException>(() =>
             svc.ExecuteAsync("get_orders", new Dictionary<string, object?> { ["customer_id"] = 7 }, User(), Tenant));
-        ex.Message.ShouldBe("Order locked");
+        ex.Message.ShouldBe("The procedure rejected the request.");
+        ex.ErrorNumber.ShouldBe(50001);
         f.AuditEntries.ShouldContain(e => e.EventType == "PROCEDURE_REJECTED");
     }
 
@@ -762,7 +763,7 @@ public class ProcedureEndpointTests
             .Returns(ci => TableAccessDecision.Denied(ci.ArgAt<TableIdentifier>(3), "no consent"));
 
         var svc = f.Create();
-        await Should.ThrowAsync<SecurityException>(() => svc.ExecuteAsync(
+        await Should.ThrowAsync<KeyNotFoundException>(() => svc.ExecuteAsync(
             "get_telemetry", new Dictionary<string, object?> { ["device_id"] = 42 }, User("telemetry-reader"), Tenant));
         await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default);
     }
@@ -1253,8 +1254,15 @@ public class ProcedureEndpointTests
 
     // ---------- OpenAPI documentation (OpenSchema mode) ----------
 
+    private static IProcedureExecutionService VisibleService()
+    {
+        var service = Substitute.For<IProcedureExecutionService>();
+        service.IsVisibleAsync(default!, default!, default, default).ReturnsForAnyArgs(Task.FromResult(true));
+        return service;
+    }
+
     [Fact]
-    public void HandleOpenApi_AnonymousCaller_WhenDocumentAllForAnonymousFalse_OmitsEndpoints()
+    public async Task HandleOpenApi_AnonymousCaller_WhenDocumentAllForAnonymousFalse_OmitsEndpoints()
     {
         var registry = new InMemoryProcedureRegistry();
         var def = ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60);
@@ -1264,14 +1272,14 @@ public class ProcedureEndpointTests
         var httpContext = new DefaultHttpContext();
         httpContext.User = new ClaimsPrincipal(new ClaimsIdentity()); // unauthenticated
 
-        var result = ProcedureEndpointRoutes.HandleOpenApi(httpContext, registry, documentAllForAnonymous: false);
+        var result = await ProcedureEndpointRoutes.HandleOpenApi(httpContext, registry, VisibleService());
         var ok = result.ShouldBeOfType<Ok<Dictionary<string, object>>>();
         var paths = (Dictionary<string, object>)ok.Value!["paths"];
         paths.ShouldBeEmpty();
     }
 
     [Fact]
-    public void HandleOpenApi_AnonymousCaller_WhenDocumentAllForAnonymousTrue_IncludesActiveEndpoints()
+    public async Task HandleOpenApi_AnonymousCaller_OpenSchema_ListsNoEndpoints()
     {
         var registry = new InMemoryProcedureRegistry();
         var def = ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60);
@@ -1281,14 +1289,14 @@ public class ProcedureEndpointTests
         var httpContext = new DefaultHttpContext();
         httpContext.User = new ClaimsPrincipal(new ClaimsIdentity()); // unauthenticated
 
-        var result = ProcedureEndpointRoutes.HandleOpenApi(httpContext, registry, documentAllForAnonymous: true);
+        var result = await ProcedureEndpointRoutes.HandleOpenApi(httpContext, registry, VisibleService());
         var ok = result.ShouldBeOfType<Ok<Dictionary<string, object>>>();
         var paths = (Dictionary<string, object>)ok.Value!["paths"];
-        paths.ShouldContainKey("/api/v1/procedures/get_orders");
+        paths.ShouldBeEmpty(); // OQ-12: open-schema anonymous documentation lists no procedure
     }
 
     [Fact]
-    public void HandleOpenApi_AuthenticatedCaller_IncludesEndpoints()
+    public async Task HandleOpenApi_AuthenticatedCaller_IncludesEndpoints()
     {
         var registry = new InMemoryProcedureRegistry();
         var def = ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60);
@@ -1298,7 +1306,7 @@ public class ProcedureEndpointTests
         var httpContext = new DefaultHttpContext();
         httpContext.User = User(); // authenticated
 
-        var result = ProcedureEndpointRoutes.HandleOpenApi(httpContext, registry, documentAllForAnonymous: false);
+        var result = await ProcedureEndpointRoutes.HandleOpenApi(httpContext, registry, VisibleService());
         var ok = result.ShouldBeOfType<Ok<Dictionary<string, object>>>();
         var paths = (Dictionary<string, object>)ok.Value!["paths"];
         paths.ShouldContainKey("/api/v1/procedures/get_orders");

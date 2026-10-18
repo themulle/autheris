@@ -46,7 +46,7 @@ public static class PolicyParserSetup
         context = new PolicyParseContext(
             new TableIdentity(table.Table.SchemaName, table.Table.TableName),
             table.Columns.Select(c => c.ColumnName).ToList(),
-            SqlFunctionAllowlists.Build(target, additionalAllowedFunctions),
+            SqlFunctionAllowlists.BuildForPolicy(target, additionalAllowedFunctions),   // BC-130-2: a policy predicate runs no time zone validator
             new Dictionary<string, PolicyValue>(),
             catalogVersion)
         {

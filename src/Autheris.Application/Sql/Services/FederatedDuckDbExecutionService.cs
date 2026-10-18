@@ -143,6 +143,13 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         return new Sid(sidString);
     }
 
+    /// <summary>
+    /// SEC-128-12: the federated path never binds client parameters, so a list would be dropped silently. Every dispatch path ends in one of the
+    /// entries below; each refuses a request with a list-valued RAW parameter (a JSON array, a collection or a <c>ClientListValue</c>) until #131.
+    /// </summary>
+    private static void RejectListParameters(GovernedSqlQueryRequest request) =>
+        Autheris.Application.Sql.ListParameters.ClientListParameters.RejectForFederation(request.Parameters);
+
     public async Task ExecuteGovernedQueryAsync(
         GovernedSqlQueryRequest request,
         ClaimsPrincipal user,
@@ -152,6 +159,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(rowWriter);
+        RejectListParameters(request);
 
         var (duckDbResult, _) = await ExecuteFederatedInternalAsync(request, user, tenantId, ct).ConfigureAwait(false);
 
@@ -167,6 +175,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        RejectListParameters(request);
 
         var (duckDbResult, plan) = await ExecuteFederatedInternalAsync(request, user, tenantId, ct).ConfigureAwait(false);
 

@@ -60,7 +60,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.SqlServer, SqlServerRewrites),
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "MSSQL-CAP",
-        DmlStatements: AllDml);
+        DmlStatements: AllDml,
+        SupportsTimeZoneConversion: true);   // REQ-SQL-130: convert_timezone has a generator rule
 
     private static readonly DialectCapabilities DuckDb = new(
         Dialect: TargetSqlDialect.DuckDb,
@@ -89,7 +90,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.DuckDb),
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "DUCK-PREP",
-        DmlStatements: AllDml);
+        DmlStatements: AllDml,
+        SupportsTimeZoneConversion: true);   // REQ-SQL-130: convert_timezone has a generator rule
 
     private static readonly DialectCapabilities PostgreSql = new(
         Dialect: TargetSqlDialect.PostgreSql,
@@ -118,7 +120,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.PostgreSql),
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "PG-PROTO",
-        DmlStatements: AllDml);
+        DmlStatements: AllDml,
+        SupportsTimeZoneConversion: true);   // REQ-SQL-130: convert_timezone has a generator rule
 
     private static readonly DialectCapabilities Oracle = new(
         Dialect: TargetSqlDialect.Oracle,

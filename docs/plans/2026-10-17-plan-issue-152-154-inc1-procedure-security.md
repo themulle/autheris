@@ -34,7 +34,7 @@ All paths under `src/`. `GPES` = `Autheris.Application/Procedures/Services/Gover
 
 **D-1 Visibility stage (R-153-1).** New internal record `ProcedureVisibility(bool Visible, string Reason, IReadOnlyDictionary<string,(TableAccessDecision Decision, TableMetadata Meta)> Decisions)` and `GPES.EvaluateVisibilityAsync(RegisteredProcedure, ClaimsPrincipal, TenantId, ct)` (async, because consent is async; replaces the PRD's static `IsVisible`). Visible only if: SID present or consent bypass; role gate passes; table set non-empty; every table passes `EvaluateTableAsync` with the existing row-filter rule. Table set: Active = `Validation.ReferencedTables` + `ResultTable`; non-Active = `ResultTable` only (none -> not visible). **Zero tables in any mode = not visible** (closes F-7; default taken, fail closed). **Any exception except `OperationCanceledException` inside the stage = not visible**, logged at Error with procedure name, exception type and trace id, audited `reason=visibility-error` (closes F-8). Public seam for list, OpenAPI and later INC-4/MCP: `IProcedureExecutionService.IsVisibleAsync(RegisteredProcedure, ClaimsPrincipal, TenantId, ct)` returning `Visible && State == Active`.
 
-**D-2 Fixed order in `ExecuteAsync` (R-153-3).** trace id -> registry lookup -> visibility (404) -> availability (503, visible callers only) -> lease (429) -> `ValidateInputs` (400) -> invoke -> row scope -> `GovernResult` -> audit `PROCEDURE_EXECUTE` -> release lease (`finally`). The visibility `Decisions` are reused by row scope and `GovernResult` (no second consent evaluation). Consent is not re-evaluated during a long call (S-6, accepted, same as the SQL path).
+**D-2 Fixed order in `ExecuteAsync` (R-153-3).** trace id -> registry lookup -> visibility (404) -> availability (503, visible callers only) -> lease (429) -> `ValidateInputs` (400) -> invoke -> row scope -> `GovernResult` -> audit `PROCEDURE_EXECUTE` -> release lease (`finally`). The visibility `Decisions` are reused by row scope and `GovernResult` (no second consent evaluation). Consent is not re-evaluated during a long call (S-6, accepted risk, same as the SQL path; the visibility `Decisions` are computed once before invocation).
 
 **D-3 One not-found exception.** Every pre-visibility failure (unknown, missing SID, role, consent, zero tables, visibility error, unavailable-but-invisible) throws `KeyNotFoundException` with the constant message `"Procedure endpoint not found."`; the route keeps the single 404 writer. `SecurityException` is no longer thrown by `GPES`; the `PER` 403 branch is removed (no remaining producer). Row-scope key unusable and row-scope lookup failure (F-9) throw `ProcedureUnavailableException` -> 503 (R-153-2a, default taken for the lookup failure as well: both are operator errors after visibility).
 
@@ -119,8 +119,8 @@ I-1/I-2 are merged; I-3, I-5, I-6 (chunk 1) and #138 INC-1 (1.7) share no file. 
 
 - **R-1** Visibility on list/OpenAPI evaluates consent per procedure and table per request; acceptable with the consent decision cache, measured in the integration test (no new limit).
 - **R-2** Hiding visibility-stage misconfiguration as 404 slows operations diagnosis; mitigated by Error log + audit reason + trace id.
-- **R-3** Timing (closed by decision, SEC-PROC152-04): no latency floor. The unknown-name path performs exactly one audit write through the same writer as the denied paths; the remaining difference (consent lookup) is accepted.
-- **R-6 (S-3)** Anonymous (consent-bypass / open-schema) callers share the SID `anonymous`, so the lease key is one shared budget per table and one anonymous client can cause 429 for all others. Accepted risk per SEC-PROC152-07 (lease SID computed as in `GovernedSqlExecutor`: PrimarySid, then `sub`, then `anonymous`).
+- **R-3** Timing (closed by decision SEC-PROC152-04, no latency floor): no latency floor. The unknown-name path performs exactly one audit write through the same writer as the denied paths; the remaining difference (consent lookup) is accepted.
+- **R-6 (S-3, accepted)** Anonymous (consent-bypass / open-schema) callers share the SID `anonymous`, so the lease key is one shared budget per table and one anonymous client can cause 429 for all others. Accepted risk per SEC-PROC152-07 (lease SID computed as in `GovernedSqlExecutor`: PrimarySid, then `sub`, then `anonymous`).
 - **R-4** Callers that parsed procedure text from 422 lose it (no production; INC-2 adds fixed codes).
 - **R-5** Zero-table catalog procedures stop working (F-7); intended fail-closed change.
 
@@ -181,3 +181,17 @@ I-1/I-2 are merged; I-3, I-5, I-6 (chunk 1) and #138 INC-1 (1.7) share no file. 
 - **T-PROC152-14** `Route_NoSecurityExceptionBranch_NoParameterValuesInErrorLogs`.
 
 Plan edits to apply by the architect/developer without re-review: add S-3 and the closed R-3 decision to section 9, and note S-6 in D-2.
+
+---
+
+## Changelog (Phase 4 developer)
+
+- 2026-10-17 G-PLAN-REBASE: code facts F-1..F-13 re-verified on branch `fix/procedure-inc1-security` (merge base `origin/main` + I-3). Drift: `GovernedSqlExecutor` lives in `Autheris.Application/Sql/Services/`; `GatewayThrottledException` in `Autheris.Domain/Exceptions`; `GovernedSqlExecutor.cs` is not touched (SID logic duplicated in `GPES.AcquireLeases`, three lines, instead of a shared helper, to stay out of the parallel #128 work).
+- 2026-10-17 Deviation D-A: the unknown-name audit limiter needs process-wide state, so `ProcedureDenialAuditLimiter` is registered as a singleton in `GatewaySqlEngineServiceExtensions` (the plan said "no DI change"). Fixed one-minute window per tenant and SID, default 30, at most 10000 tracked keys (excess keys are dropped, fail closed for the audit write only).
+- 2026-10-17 Deviation D-B: `GatewayStorageOptionsValidator` checks `DataSources.MaxConcurrentReadsPerUserAndTable` in 0..1000 (nested data annotations are not evaluated), test `GatewayStorageOptionsValidator_RejectsOutOfRangeProcedureConcurrency`.
+- 2026-10-17 Deviation D-C: OpenAPI no longer takes `documentAllForAnonymous` (open-schema anonymous documents no procedure). The 403 entry of the OpenAPI responses is replaced by 404; 429 is added.
+- 2026-10-17 Deviation D-D: the invoker has no client spans/activities, so SEC-PROC152-08 (spans without exception text) holds trivially; the route logs `DbException` by type only.
+- 2026-10-17 Deviation D-E: default `MaxConcurrentReadsPerUserAndTable` is 4, so `GovernedProcedureExecutionService` without a gate fails closed by default; existing unit fixtures pass a `GrantAllReadConcurrencyGate` test double.
+- 2026-10-17 Deviation D-F: container integration tests of section 6.2 are not part of this change (the differential check T-PROC152-01 is implemented at route level in the unit suite against the real service).
+- 2026-10-17 Open follow-up D-F2 (Phase 5): the section 6.2 container integration tests are still open because no procedure integration fixture exists; owner to confirm at PR whether they are tracked as a follow-up item.
+- 2026-10-17 Phase 5 fixes: `ProcedureDenialAuditLimiter` now uses one short lock, sweeps expired keys at most once per window and drops new keys at the bound (counted in `Dropped`); generic exception logging in the service and route logs the type name only (SEC-PROC152-08); `AcquireLeases` uses a case-insensitive `HashSet` plus ordinal sort (same key format).

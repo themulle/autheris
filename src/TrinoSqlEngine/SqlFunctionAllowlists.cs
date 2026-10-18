@@ -31,7 +31,7 @@ public static class SqlFunctionAllowlists
         // Math
         "abs", "round", "floor", "ceil", "ceiling", "mod", "power", "sqrt", "exp", "ln", "log", "log10", "sign",
         // Date / time and conversion helpers
-        "extract", "cast", "current_date", "current_timestamp",
+        "extract", "cast", "current_date", "current_timestamp", "convert_timezone",
     ];
 
     private static readonly string[] PostgreSqlFunctions =
@@ -215,7 +215,7 @@ public static class SqlFunctionAllowlists
                 }
 
                 string name = entry.Trim().ToLowerInvariant();
-                if (!SqlFunctionPolicy.IsDeniedByDefault(name))
+                if (!SqlFunctionPolicy.IsDeniedByDefault(name) && !IsTimeZoneFunctionName(name))
                 {
                     result.Add(name);
                 }
@@ -224,6 +224,44 @@ public static class SqlFunctionAllowlists
 
         return result.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
     }
+
+    private static readonly FrozenSet<string> TimeZoneFunctionNames = new[]
+    {
+        "timezone", "at_timezone", "with_timezone", "switchoffset", "todatetimeoffset", "timezone_hour", "timezone_minute", "convert_timezone"
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// REQ-SQL-130 (BC-130-9): true for the names of the time zone functions of the dialects and for <c>convert_timezone</c> itself, whatever the case,
+    /// quoting or qualification of the entry. A function of that family that is not <c>convert_timezone</c> has no closed zone set behind it, so neither
+    /// <see cref="Build"/> nor the options validation lets configuration admit one.
+    /// </summary>
+    public static bool IsTimeZoneFunctionName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return false;
+        string last = name.Trim();
+        int dot = last.LastIndexOf('.');
+        if (dot >= 0) last = last[(dot + 1)..];
+        last = last.Trim().Trim('"', '[', ']', '`').Trim();
+        return TimeZoneFunctionNames.Contains(last);
+    }
+
+    /// <summary>
+    /// The allowlist of admin-authored policy predicates (row policies, policy lint): <see cref="Build"/> without the functions that
+    /// need the governed time zone validator (BC-130-2).
+    /// </summary>
+    public static IReadOnlySet<string> BuildForPolicy(TargetSqlDialect dialect, IEnumerable<string>? additionalAllowedFunctions)
+    {
+        var result = new HashSet<string>(Build(dialect, additionalAllowedFunctions), StringComparer.OrdinalIgnoreCase);
+        foreach (var name in GovernedOnlyFunctions)
+        {
+            result.Remove(name);
+        }
+
+        return result.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Functions whose arguments are checked by a dedicated governed validator that policy predicates do not run (REQ-SQL-130).</summary>
+    private static readonly string[] GovernedOnlyFunctions = ["convert_timezone"];
 
     private static FrozenSet<string> Create(params string[][] groups)
     {

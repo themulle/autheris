@@ -3,7 +3,6 @@ namespace Autheris.Tests.Unit.VirtualFilters;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Security;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -70,7 +69,7 @@ public sealed class ProcedureVirtualFilterTests
             return new GovernedProcedureExecutionService(
                 Registry, Invoker, Options.Create(options ?? new GatewayOptions()), Audit, Tables,
                 withConsents ? Consents : null, withConsents ? Resolution : null, masking: null,
-                policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, rowScope: RowScope, mandatoryFilters: resolver);
+                policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance, rowScope: RowScope, mandatoryFilters: resolver);
         }
     }
 
@@ -125,7 +124,7 @@ public sealed class ProcedureVirtualFilterTests
     {
         var f = Active(Header.Replace("-- @row-scope-key serial_number", string.Empty));
 
-        await Should.ThrowAsync<SecurityException>(() => f.Create(new RecordingResolver(Applied)).ExecuteAsync("get_cranes", null, User(), Tenant));
+        await Should.ThrowAsync<KeyNotFoundException>(() => f.Create(new RecordingResolver(Applied)).ExecuteAsync("get_cranes", null, User(), Tenant));
         await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default);
     }
 
@@ -134,7 +133,7 @@ public sealed class ProcedureVirtualFilterTests
     {
         var f = Active();
 
-        await Should.ThrowAsync<SecurityException>(() => f.Create(new RecordingResolver(MandatoryFilterOutcome.Deny("uncovered"))).ExecuteAsync("get_cranes", null, User(), Tenant));
+        await Should.ThrowAsync<KeyNotFoundException>(() => f.Create(new RecordingResolver(MandatoryFilterOutcome.Deny("uncovered"))).ExecuteAsync("get_cranes", null, User(), Tenant));
         await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default);
     }
 

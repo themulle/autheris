@@ -33,6 +33,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- REQ-SQL-130: the closed time zone set is data, embedded and hash-checked (BC-130-6). No runtime download, no file path. -->
+    <EmbeddedResource Include="TimeZones\iana-windows-zones.txt" LogicalName="TrinoSqlEngine.TimeZones.iana-windows-zones.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="TrinoSqlEngine.Tests" />
     <InternalsVisibleTo Include="Autheris.Tests.Unit" />
     <!-- The controls of these assemblies ask the same ICompilerHooks (CompilerHooks.IsDisabled); production never installs a hook. -->

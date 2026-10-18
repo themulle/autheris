@@ -99,7 +99,7 @@ public sealed class RowPolicyFactory
         var context = new PolicyParseContext(
             table,
             columns,
-            SqlFunctionAllowlists.Build(target, null),
+            SqlFunctionAllowlists.BuildForPolicy(target, null),   // BC-130-2: a policy predicate runs no time zone validator
             new Dictionary<string, PolicyValue>(),
             CatalogVersion: 0)
         {

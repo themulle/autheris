@@ -2,24 +2,27 @@ namespace Autheris.Application.Procedures.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
-using System.Security;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TableDecision = (Autheris.Domain.Interfaces.TableAccessDecision Decision, Autheris.Domain.Model.TableMetadata Meta, System.Collections.Generic.IReadOnlySet<string>? SensitivityOnlyMasked);
 
 /// <summary>
 /// F-SQL-02 (phase 1, read): Governed execution of a declared stored procedure.
@@ -29,7 +32,14 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public sealed class GovernedProcedureExecutionService : IProcedureExecutionService
 {
-    private const string DeniedMessage = "Access to the procedure is denied.";
+    /// <summary>The one message of every pre-visibility failure (SEC-PROC152-03); never contains the name or the reason.</summary>
+    public const string NotFoundMessage = "Procedure endpoint not found.";
+
+    internal const string UnavailableMessage = "Procedure endpoint is currently unavailable.";
+    private const string InvalidTargetMarker = "<invalid>";
+
+    private static readonly Regex TargetNameRegex = new(
+        @"^[A-Za-z0-9_.\-]{1,128}\z", RegexOptions.Compiled | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
 
     private readonly IConsentCacheService? _consentCache;
     private readonly IProcedureRegistry _registry;
@@ -46,6 +56,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly IProcedureRowScopeResolver? _rowScope;
     private readonly ILogger<GovernedProcedureExecutionService>? _logger;
+    private readonly ITableReadConcurrencyGate? _concurrencyGate;
+    private readonly ProcedureDenialAuditLimiter _denialAuditLimiter;
 
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? _mandatoryFilters;
     private readonly Autheris.Application.Policy.TypedPolicySources? _typedPolicies;
@@ -73,8 +85,12 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
         Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null,
         Autheris.Application.Policy.TypedPolicySources? typedPolicies = null,
-        Autheris.Application.Audit.IAuditWriter? auditWriter = null)
+        Autheris.Application.Audit.IAuditWriter? auditWriter = null,
+        ITableReadConcurrencyGate? concurrencyGate = null,
+        ProcedureDenialAuditLimiter? denialAuditLimiter = null)
     {
+        _concurrencyGate = concurrencyGate;
+        _denialAuditLimiter = denialAuditLimiter ?? new ProcedureDenialAuditLimiter();
         _typedPolicies = typedPolicies;
         _mandatoryFilters = mandatoryFilters;
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
@@ -104,133 +120,311 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         TenantId tenantId,
         CancellationToken ct = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(user);
+        string traceId = Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
 
-        if (!_registry.TryGet(name, out var registered) || registered == null)
+        // 1. Registry lookup. An unknown name is audited through the same writer as every denial (one awaited write, no early
+        // return) and answered exactly like an invisible procedure (SEC-PROC152-03/04).
+        if (string.IsNullOrWhiteSpace(name) || !_registry.TryGet(name, out var registered) || registered == null)
         {
-            throw new KeyNotFoundException($"Procedure endpoint '{name}' is not registered.");
+            await AuditUnknownAsync(name, user, tenantId, traceId, ct).ConfigureAwait(false);
+            throw new KeyNotFoundException(NotFoundMessage);
         }
 
         var definition = registered.Definition;
         var sw = Stopwatch.StartNew();
-        bool consentBypassed = _options.Value.IsConsentBypassed;
+        var userSid = user.GetUserSid() ?? new Sid("anonymous");
 
-        // 1. Identity and role gate. SEC (Low): the role/visibility check comes BEFORE the health check, and a caller
-        // that may not see the endpoint gets the same 404 as for an unknown name (no existence/health oracle).
-        var userSidNullable = user.GetUserSid();
-        if (userSidNullable == null && !consentBypassed)
+        // 2. Visibility (404): identity, role gate, table set and consent. Nothing caller-controlled (parameters, state) is
+        // looked at before this stage has passed (no existence, health or parameter oracle).
+        var visibility = await EvaluateVisibilityAsync(registered, user, tenantId, traceId, ct).ConfigureAwait(false);
+        if (!visibility.Visible)
         {
-            throw new SecurityException("An authenticated user identity is required.");
+            await AuditAsync("PROCEDURE_DENIED", "DENY", definition, tenantId, userSid, new { reason = visibility.Reason }, traceId, ct).ConfigureAwait(false);
+            throw new KeyNotFoundException(NotFoundMessage);
         }
 
-        var userSid = userSidNullable ?? new Sid("anonymous");
-
-        if (definition.RequiredRoles.Count > 0 && !HasAnyRole(user, definition.RequiredRoles))
-        {
-            await AuditAsync("PROCEDURE_DENIED", "DENY", definition, tenantId, userSid, new { reason = "role" }, ct).ConfigureAwait(false);
-            throw new KeyNotFoundException($"Procedure endpoint '{name}' is not registered.");
-        }
-
+        // 3. Availability (503), only for callers that may see the procedure.
         if (registered.State != ProcedureState.Active || registered.Validation == null)
         {
-            throw new ProcedureUnavailableException($"Procedure endpoint '{name}' is currently unavailable.");
+            throw new ProcedureUnavailableException(UnavailableMessage);
         }
 
-        // 2. Input validation (unknown and context-bound parameters are rejected, never ignored)
-        var values = ValidateInputs(definition, rawInputs);
+        var decisions = visibility.Decisions;
 
-        // 3. Consent (+ ABAC restriction) on every table the procedure reads
-        var decisions = new Dictionary<string, (TableAccessDecision Decision, TableMetadata Meta)>(StringComparer.OrdinalIgnoreCase);
-        var tableKeys = registered.Validation.ReferencedTables.ToList();
-        if (definition.ResultTable != null && !tableKeys.Contains(definition.ResultTable, StringComparer.OrdinalIgnoreCase))
-        {
-            tableKeys.Add(definition.ResultTable);
-        }
-
-        if (definition.ValidationMode == ProcedureValidationMode.Declared && tableKeys.Count == 0)
-        {
-            // Review P-1: without a result table no consent could be evaluated (fail-closed).
-            await AuditAsync("PROCEDURE_DENIED", "DENY", definition, tenantId, userSid, new { reason = "no-result-table" }, ct).ConfigureAwait(false);
-            throw new SecurityException(DeniedMessage);
-        }
-
-        foreach (var key in tableKeys)
-        {
-            // A consent row filter on the result table is enforced after the call by a key match (RowScopeKey);
-            // on every other table it cannot be enforced and denies the call.
-            bool allowRowFilter = definition.RowScopeKey.Count > 0 && _rowScope != null && IsResultTable(definition, key);
-            var evaluated = await EvaluateTableAsync(definition.CatalogDomain, key, user, userSid, tenantId, consentBypassed, allowRowFilter, ct).ConfigureAwait(false);
-            if (evaluated == null)
-            {
-                await AuditAsync("PROCEDURE_DENIED", "DENY", definition, tenantId, userSid, new { reason = "consent" }, ct).ConfigureAwait(false);
-                throw new SecurityException(DeniedMessage);
-            }
-
-            decisions[key] = evaluated.Value;
-        }
-
-        // 4. Call (security context goes into the read-only SESSION_CONTEXT)
-        var context = new ProcedureSecurityContext(
-            tenantId.Value,
-            userSid.Value,
-            user.FindFirst("purpose")?.Value ?? user.FindFirst("purpose_id")?.Value);
-
-        RawProcedureResult raw;
+        // 4. Concurrency lease (429), after visibility and availability; released in the single finally below.
+        List<IDisposable>? leases;
         try
         {
-            raw = await _invoker.ExecuteReadAsync(definition, values, context, ct).ConfigureAwait(false);
+            leases = AcquireLeases(decisions, user, tenantId);
         }
-        catch (ProcedureBusinessException)
+        catch (GatewayThrottledException)
         {
-            await AuditAsync("PROCEDURE_REJECTED", "DENY", definition, tenantId, userSid, new { reason = "business-error" }, ct).ConfigureAwait(false);
+            await AuditAsync("PROCEDURE_THROTTLED", "DENY", definition, tenantId, userSid, new { reason = "concurrency" }, traceId, ct).ConfigureAwait(false);
             throw;
+        }
+
+        try
+        {
+            // 5. Input validation (unknown and context-bound parameters are rejected, never ignored)
+            var values = ValidateInputs(definition, rawInputs);
+
+            // 6. Call (security context goes into the read-only SESSION_CONTEXT)
+            var context = new ProcedureSecurityContext(
+                tenantId.Value,
+                userSid.Value,
+                user.FindFirst("purpose")?.Value ?? user.FindFirst("purpose_id")?.Value);
+
+            RawProcedureResult raw;
+            try
+            {
+                raw = await _invoker.ExecuteReadAsync(definition, values, context, ct).ConfigureAwait(false);
+            }
+            catch (ProcedureBusinessException bex)
+            {
+                // SEC-PROC152-08: number/SQLSTATE and ids only, never the database message text.
+                _logger?.LogWarning(
+                    "Procedure '{Procedure}' rejected the request: number {Number}, sqlState {SqlState}, trace {TraceId}.",
+                    definition.ProcedureName, bex.ErrorNumber, bex.SqlState, traceId);
+                await AuditAsync(
+                    "PROCEDURE_REJECTED", "DENY", definition, tenantId, userSid,
+                    new { reason = "business-error", number = bex.ErrorNumber, sqlState = bex.SqlState }, traceId, ct).ConfigureAwait(false);
+                throw new ProcedureBusinessException(bex.ErrorNumber, bex.SqlState, traceId);
+            }
+            catch (DbException dbx)
+            {
+                // SEC-PROC152-08: driver text (messages, inner exceptions) may contain values; log the type and number only.
+                _logger?.LogError(
+                    "Stored procedure endpoint '{Procedure}' failed with {ExceptionType} (number {Number}, trace {TraceId}).",
+                    definition.ProcedureName, dbx.GetType().Name, DbErrorNumber(dbx), traceId);
+                await AuditAsync("PROCEDURE_FAILED", "DENY", definition, tenantId, userSid, new { reason = dbx.GetType().Name }, traceId, ct).ConfigureAwait(false);
+                throw;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // SEC-PROC152-08: exception type only; never the message, inner exceptions or ToString (may carry values).
+                _logger?.LogError(
+                    "Stored procedure endpoint '{Procedure}' failed with {ExceptionType} (trace {TraceId}).",
+                    definition.ProcedureName, ex.GetType().Name, traceId);
+                await AuditAsync("PROCEDURE_FAILED", "DENY", definition, tenantId, userSid, new { reason = ex.GetType().Name }, traceId, ct).ConfigureAwait(false);
+                throw;
+            }
+
+            // 6b. Row scope: keep only the rows the consent row filter of the result table allows
+            int rowsRemovedByScope = 0;
+            if (definition.ResultTable != null &&
+                decisions.TryGetValue(definition.ResultTable, out var resultDecision) &&
+                !string.IsNullOrWhiteSpace(resultDecision.Decision.CombinedRowFilterSql))
+            {
+                var scoped = await ApplyRowScopeAsync(definition, raw, resultDecision.Decision, resultDecision.Meta, registered.Validation.ResultColumnSources, context, tenantId, userSid, traceId, ct).ConfigureAwait(false);
+                rowsRemovedByScope = raw.Rows.Count - scoped.Rows.Count;
+                raw = scoped;
+            }
+
+            // 7. Result-set governance (deny / mask / drop unknown columns)
+            var governed = GovernResult(definition, raw, decisions, registered.Validation.ResultColumnSources, tenantId);
+
+            // 8. Synchronous audit BEFORE data leaves the gateway (fail-closed: an audit failure aborts the response)
+            await AuditAsync(
+                "PROCEDURE_EXECUTE",
+                "ALLOW",
+                definition,
+                tenantId,
+                userSid,
+                new
+                {
+                    mode = definition.Mode.ToString(),
+                    rowCount = governed.Rows.Count,
+                    truncated = raw.Truncated,
+                    rowsRemovedByScope,
+                    virtual_filters = decisions
+                        .Where(d => d.Value.Decision.AppliedVirtualFilters is { Count: > 0 })
+                        .ToDictionary(d => d.Key.ToString(), d => d.Value.Decision.AppliedVirtualFilters),
+                    returnedColumns = governed.Columns.Count,
+                    droppedColumns = raw.Columns.Count - governed.Columns.Count,
+                    parameterHashes = HashParameters(values)
+                },
+                traceId,
+                ct).ConfigureAwait(false);
+
+            return new GovernedProcedureResult(governed.Columns, governed.Rows, governed.Rows.Count, raw.Truncated, sw.ElapsedMilliseconds);
+        }
+        finally
+        {
+            ReleaseLeases(leases);
+        }
+    }
+
+    public async Task<bool> IsVisibleAsync(RegisteredProcedure procedure, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(procedure);
+        ArgumentNullException.ThrowIfNull(user);
+        if (procedure.State != ProcedureState.Active)
+        {
+            return false;
+        }
+
+        var visibility = await EvaluateVisibilityAsync(procedure, user, tenantId, traceId: null, ct).ConfigureAwait(false);
+        return visibility.Visible;
+    }
+
+    /// <summary>
+    /// SEC-PROC152-01/02/10: the visibility stage. Every failure except cancellation (including an unexpected exception) is
+    /// "not visible"; nothing from the caller or the exception reaches the response.
+    /// </summary>
+    internal async Task<ProcedureVisibility> EvaluateVisibilityAsync(
+        RegisteredProcedure registered,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        string? traceId,
+        CancellationToken ct)
+    {
+        var definition = registered.Definition;
+        try
+        {
+            bool consentBypassed = _options.Value.IsConsentBypassed;
+            var sidNullable = user.GetUserSid();
+            if (sidNullable == null && !consentBypassed)
+            {
+                return ProcedureVisibility.Hidden("identity");
+            }
+
+            var userSid = sidNullable ?? new Sid("anonymous");
+            if (definition.RequiredRoles.Count > 0 && !HasAnyRole(user, definition.RequiredRoles))
+            {
+                return ProcedureVisibility.Hidden("role");
+            }
+
+            // Table set: an Active procedure is governed by every table it references plus its result table; otherwise only
+            // the result table can be evaluated. Zero tables is never visible (nothing could be consent-checked).
+            var tableKeys = new List<string>();
+            if (registered.State == ProcedureState.Active && registered.Validation != null)
+            {
+                tableKeys.AddRange(registered.Validation.ReferencedTables);
+            }
+
+            if (definition.ResultTable != null && !tableKeys.Contains(definition.ResultTable, StringComparer.OrdinalIgnoreCase))
+            {
+                tableKeys.Add(definition.ResultTable);
+            }
+
+            if (tableKeys.Count == 0)
+            {
+                return ProcedureVisibility.Hidden("no-result-table");
+            }
+
+            var decisions = new Dictionary<string, TableDecision>(StringComparer.OrdinalIgnoreCase);
+            foreach (var key in tableKeys)
+            {
+                // A consent row filter on the result table is enforced after the call by a key match (RowScopeKey);
+                // on every other table it cannot be enforced and denies the call.
+                bool allowRowFilter = definition.RowScopeKey.Count > 0 && _rowScope != null && IsResultTable(definition, key);
+                var evaluated = await EvaluateTableAsync(definition.CatalogDomain, key, user, userSid, tenantId, consentBypassed, allowRowFilter, ct).ConfigureAwait(false);
+                if (evaluated == null)
+                {
+                    return ProcedureVisibility.Hidden("consent");
+                }
+
+                decisions[key] = evaluated.Value;
+            }
+
+            return new ProcedureVisibility(true, string.Empty, decisions);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger?.LogError(ex, "Stored procedure endpoint '{Endpoint}' failed.", name);
-            await AuditAsync("PROCEDURE_FAILED", "DENY", definition, tenantId, userSid, new { reason = ex.GetType().Name }, ct).ConfigureAwait(false);
+            // Type only: the exception text can name tables, filters or values.
+            _logger?.LogError(
+                "Procedure '{Procedure}': the visibility stage failed with {ExceptionType} (trace {TraceId}); treated as not visible.",
+                definition.Name, ex.GetType().Name, traceId);
+            return ProcedureVisibility.Hidden("visibility-error");
+        }
+    }
+
+    private async Task AuditUnknownAsync(string? name, ClaimsPrincipal user, TenantId tenantId, string traceId, CancellationToken ct)
+    {
+        // SEC-PROC152-05: only authenticated callers, rate limited per tenant and SID; anonymous (bypass) callers are not audited.
+        var sid = user.GetUserSid();
+        if (sid == null)
+        {
+            return;
+        }
+
+        if (!_denialAuditLimiter.TryAcquire(tenantId.Value, sid.Value.Value))
+        {
+            long dropped = _denialAuditLimiter.Dropped;
+            if (dropped == 1 || dropped % 100 == 0)
+            {
+                _logger?.LogInformation("Unknown-procedure denial audit rate limit reached; {Dropped} audit rows dropped so far.", dropped);
+            }
+
+            return;
+        }
+
+        string target = name != null && TargetNameRegex.IsMatch(name) ? name : InvalidTargetMarker;
+        await AuditAsync("PROCEDURE_DENIED", "DENY", target, tenantId, sid.Value, new { reason = "unknown" }, traceId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// SEC-PROC152-06/07: one lease per consent-checked table in ordinal order of the qualified name, key and limit exactly as in
+    /// the SQL path (so both share one budget). A partial acquisition is rolled back. Limit greater than zero without a gate
+    /// fails closed.
+    /// </summary>
+    private List<IDisposable>? AcquireLeases(Dictionary<string, TableDecision> decisions, ClaimsPrincipal user, TenantId tenantId)
+    {
+        int max = _options.Value.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
+        if (max <= 0)
+        {
+            return null;
+        }
+
+        if (_concurrencyGate == null)
+        {
+            throw new InvalidOperationException("The table read concurrency gate is not configured although a limit is set (fail-closed).");
+        }
+
+        string sid = user.FindFirst(ClaimTypes.PrimarySid)?.Value
+                     ?? user.FindFirst("sub")?.Value
+                     ?? "anonymous";
+        var tableSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var d in decisions.Values)
+        {
+            tableSet.Add(d.Meta.Identifier.ToQualifiedName());
+        }
+
+        var tables = new List<string>(tableSet);
+        tables.Sort(StringComparer.Ordinal);
+        var leases = new List<IDisposable>(tables.Count);
+        try
+        {
+            foreach (var table in tables)
+            {
+                var key = $"{tenantId.Value}|{sid}|{table}".ToLowerInvariant();
+                leases.Add(_concurrencyGate.TryEnter(key, max) ?? throw new GatewayThrottledException(2));
+            }
+        }
+        catch
+        {
+            ReleaseLeases(leases);
             throw;
         }
 
-        // 4b. Row scope: keep only the rows the consent row filter of the result table allows
-        int rowsRemovedByScope = 0;
-        if (definition.ResultTable != null &&
-            decisions.TryGetValue(definition.ResultTable, out var resultDecision) &&
-            !string.IsNullOrWhiteSpace(resultDecision.Decision.CombinedRowFilterSql))
+        return leases;
+    }
+
+    private static void ReleaseLeases(List<IDisposable>? leases)
+    {
+        if (leases == null)
         {
-            var scoped = await ApplyRowScopeAsync(definition, raw, resultDecision.Decision, resultDecision.Meta, registered.Validation.ResultColumnSources, context, tenantId, userSid, ct).ConfigureAwait(false);
-            rowsRemovedByScope = raw.Rows.Count - scoped.Rows.Count;
-            raw = scoped;
+            return;
         }
 
-        // 5. Result-set governance (deny / mask / drop unknown columns)
-        var governed = GovernResult(definition, raw, decisions, registered.Validation.ResultColumnSources, tenantId);
-
-        // 6. Synchronous audit BEFORE data leaves the gateway (fail-closed: an audit failure aborts the response)
-        await AuditAsync(
-            "PROCEDURE_EXECUTE",
-            "ALLOW",
-            definition,
-            tenantId,
-            userSid,
-            new
-            {
-                mode = definition.Mode.ToString(),
-                rowCount = governed.Rows.Count,
-                truncated = raw.Truncated,
-                rowsRemovedByScope,
-                virtual_filters = decisions
-                    .Where(d => d.Value.Decision.AppliedVirtualFilters is { Count: > 0 })
-                    .ToDictionary(d => d.Key.ToString(), d => d.Value.Decision.AppliedVirtualFilters),
-                returnedColumns = governed.Columns.Count,
-                droppedColumns = raw.Columns.Count - governed.Columns.Count,
-                parameterHashes = HashParameters(values)
-            },
-            ct).ConfigureAwait(false);
-
-        return new GovernedProcedureResult(governed.Columns, governed.Rows, governed.Rows.Count, raw.Truncated, sw.ElapsedMilliseconds);
+        foreach (var lease in leases)
+        {
+            lease.Dispose();
+        }
     }
+
+    private static int? DbErrorNumber(DbException ex) => ex.GetType().GetProperty("Number")?.GetValue(ex) as int?;
 
     private static bool HasAnyRole(ClaimsPrincipal user, IReadOnlyList<string> roles)
     {
@@ -315,7 +509,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     /// unless <paramref name="allowRowFilter"/> is set: the result table's filter is then enforced by a database key
     /// match after the call (<see cref="ApplyRowScopeAsync"/>).
     /// </summary>
-    internal Task<(TableAccessDecision Decision, TableMetadata Meta)?> EvaluateTableAsync(
+    internal Task<TableDecision?> EvaluateTableAsync(
         string catalogDomain,
         string tableKey,
         ClaimsPrincipal user,
@@ -328,13 +522,13 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         if (!TableIdentifier.TryParse(catalogDomain + "." + tableKey, out var tableId) &&
             !TableIdentifier.TryParse(tableKey, out tableId))
         {
-            return Task.FromResult<(TableAccessDecision Decision, TableMetadata Meta)?>(null);
+            return Task.FromResult<TableDecision?>(null);
         }
 
         return EvaluateTableAsync(tableId, user, userSid, tenantId, consentBypassed, allowRowFilter, ct);
     }
 
-    internal async Task<(TableAccessDecision Decision, TableMetadata Meta)?> EvaluateTableAsync(
+    internal async Task<TableDecision?> EvaluateTableAsync(
         TableIdentifier tableId,
         ClaimsPrincipal user,
         Sid userSid,
@@ -399,6 +593,10 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             return null;
         }
 
+        // SEC-PROC152-09: computed BEFORE the ABAC rewrite below, which makes a sensitivity mask indistinguishable from an
+        // explicit one. null (not computable) lifts nothing.
+        var sensitivityOnlyMasked = ComputeSensitivityOnlyMask(decision, meta);
+
         if (!consentBypassed && _policyEnforcement != null && _policyEnforcement.HasPolicies(tenantId))
         {
             // With ABAC active every catalog column carries an explicit level; columns outside the catalog are denied.
@@ -406,7 +604,38 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             decision = decision with { ColumnAccess = explicitLevels, HasUnconstrainedColumnAllow = false };
         }
 
-        return (decision, meta);
+        return (decision, meta, sensitivityOnlyMasked);
+    }
+
+    /// <summary>
+    /// Columns whose <see cref="ColumnAccessLevel.Mask"/> comes from catalog sensitivity only: no explicit base or scope-specific
+    /// column rule exists and the consent allows the columns unconstrained. Only these may be lifted by <c>cleared_columns</c>.
+    /// </summary>
+    private static HashSet<string>? ComputeSensitivityOnlyMask(TableAccessDecision decision, TableMetadata meta)
+    {
+        try
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var column in meta.Columns)
+            {
+                if (decision.ColumnAccess.ContainsKey(column.ColumnName))
+                {
+                    continue;
+                }
+
+                if (decision.HasUnconstrainedColumnAllow &&
+                    decision.GetEffectiveColumnAccess(column.ColumnName, meta) == ColumnAccessLevel.Mask)
+                {
+                    set.Add(column.ColumnName);
+                }
+            }
+
+            return set;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NullReferenceException or InvalidOperationException or KeyNotFoundException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -450,6 +679,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         ProcedureSecurityContext security,
         TenantId tenantId,
         Sid userSid,
+        string traceId,
         CancellationToken ct)
     {
         var keyColumns = definition.RowScopeKey;
@@ -468,8 +698,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
 
         if (!usable)
         {
-            await AuditAsync("PROCEDURE_DENIED", "DENY", definition, tenantId, userSid, new { reason = "row-scope-key" }, ct).ConfigureAwait(false);
-            throw new SecurityException(DeniedMessage);
+            await AuditAsync("PROCEDURE_DENIED", "DENY", definition, tenantId, userSid, new { reason = "row-scope-key" }, traceId, ct).ConfigureAwait(false);
+            throw new ProcedureUnavailableException(UnavailableMessage);
         }
 
         var tableKeyColumns = tableColumnNames.Select(k => meta.GetColumn(k)!.ColumnName).ToList();
@@ -482,9 +712,11 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger?.LogError(ex, "Row scope lookup for procedure endpoint '{Endpoint}' failed.", definition.Name);
-            await AuditAsync("PROCEDURE_FAILED", "DENY", definition, tenantId, userSid, new { reason = "row-scope-" + ex.GetType().Name }, ct).ConfigureAwait(false);
-            throw new SecurityException(DeniedMessage);
+            _logger?.LogError(
+                "Row scope lookup for procedure endpoint '{Endpoint}' failed with {ExceptionType} (trace {TraceId}).",
+                definition.Name, ex.GetType().Name, traceId);
+            await AuditAsync("PROCEDURE_FAILED", "DENY", definition, tenantId, userSid, new { reason = "row-scope-" + ex.GetType().Name }, traceId, ct).ConfigureAwait(false);
+            throw new ProcedureUnavailableException(UnavailableMessage);
         }
 
         var kept = new List<object?[]>(raw.Rows.Count);
@@ -503,11 +735,11 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     private (IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows) GovernResult(
         ProcedureDefinition definition,
         RawProcedureResult raw,
-        Dictionary<string, (TableAccessDecision Decision, TableMetadata Meta)> decisions,
+        Dictionary<string, TableDecision> decisions,
         IReadOnlyDictionary<string, ResultColumnSource>? sources,
         TenantId tenantId)
     {
-        (TableAccessDecision Decision, TableMetadata Meta)? mapped = null;
+        TableDecision? mapped = null;
         if (definition.ResultTable != null)
         {
             if (decisions.TryGetValue(definition.ResultTable, out var m))
@@ -558,6 +790,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             // Computed / ambiguous columns (no source) are removed unless declared clear; columns of tables other than the
             // result table survive only with an explicit column-level Clear.
             var (decision, meta, sourceColumn, foreign) = (default(TableAccessDecision)!, default(TableMetadata)!, col, false);
+            IReadOnlySet<string>? sensitivityOnly = null;
             if (sources != null)
             {
                 if (!sources.TryGetValue(col, out var src) || string.IsNullOrWhiteSpace(src.Table) || string.IsNullOrWhiteSpace(src.Column))
@@ -577,7 +810,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                     continue; // source table not governed: fail closed
                 }
 
-                (decision, meta) = srcMapped;
+                (decision, meta, sensitivityOnly) = srcMapped;
                 sourceColumn = src.Column;
                 var key = $"{schema}.{src.Table}";
                 foreign = definition.ResultTable == null ||
@@ -591,7 +824,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                     continue; // unknown column: removed (fail-closed)
                 }
 
-                (decision, meta) = mapped.Value;
+                (decision, meta, sensitivityOnly) = mapped.Value;
             }
 
             // If source table access is denied, fail closed
@@ -601,8 +834,9 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             }
 
             var level = decision.GetEffectiveColumnAccess(sourceColumn, meta);
-            // Zero-Trust: procedure metadata cannot override an explicit Deny on catalog columns; ClearedResultColumns overrides Mask to Clear per contract
-            if (cleared.Contains(col) && level != ColumnAccessLevel.Deny)
+            // Zero-Trust (SEC-PROC152-09): ClearedResultColumns lifts only a Mask that stems from catalog sensitivity alone; an explicit
+            // base or scope-specific Mask and any Deny stay; an unknown sensitivity set lifts nothing.
+            if (cleared.Contains(col) && level == ColumnAccessLevel.Mask && sensitivityOnly != null && sensitivityOnly.Contains(sourceColumn))
             {
                 level = ColumnAccessLevel.Clear;
             }
@@ -676,13 +910,25 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         return result;
     }
 
-    private async Task AuditAsync(
+    private Task AuditAsync(
         string eventType,
         string decision,
         ProcedureDefinition definition,
         TenantId tenantId,
         Sid actor,
         object details,
+        string traceId,
+        CancellationToken ct) =>
+        AuditAsync(eventType, decision, definition.ProcedureName, tenantId, actor, details, traceId, ct);
+
+    private async Task AuditAsync(
+        string eventType,
+        string decision,
+        string target,
+        TenantId tenantId,
+        Sid actor,
+        object details,
+        string traceId,
         CancellationToken ct)
     {
         await Autheris.Application.Policy.GovernedQueryStages.WriteAsync(
@@ -691,10 +937,10 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 eventType,
                 tenantId,
                 actor,
-                definition.ProcedureName,
+                target,
                 allowed: string.Equals(decision, "ALLOW", StringComparison.Ordinal),
                 details,
-                traceId: Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N")),
+                traceId: traceId),
             Autheris.Application.Policy.AuditTier.Required,
             ct).ConfigureAwait(false);
     }
@@ -724,10 +970,10 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     }
 
     private static bool TryFindDecision(
-        Dictionary<string, (TableAccessDecision Decision, TableMetadata Meta)> decisions,
+        Dictionary<string, TableDecision> decisions,
         string schema,
         string table,
-        out (TableAccessDecision Decision, TableMetadata Meta) result)
+        out TableDecision result)
     {
         var keyWithSchema = $"{(string.IsNullOrWhiteSpace(schema) ? "dbo" : schema)}.{table}";
         if (decisions.TryGetValue(keyWithSchema, out result))
@@ -756,4 +1002,10 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         result = default;
         return false;
     }
+}
+
+/// <summary>Result of the visibility stage; <see cref="Reason"/> is for the server-side audit only.</summary>
+internal sealed record ProcedureVisibility(bool Visible, string Reason, Dictionary<string, TableDecision> Decisions)
+{
+    public static ProcedureVisibility Hidden(string reason) => new(false, reason, new Dictionary<string, TableDecision>(StringComparer.OrdinalIgnoreCase));
 }

@@ -43,10 +43,12 @@ public interface ICrossSourcePlanner
 public sealed class CrossSourcePlanner : ICrossSourcePlanner
 {
     private readonly ISqlEngine _sqlEngine;
+    private readonly Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? _timeZoneState;
 
-    public CrossSourcePlanner(ISqlEngine sqlEngine)
+    public CrossSourcePlanner(ISqlEngine sqlEngine, Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? timeZoneState = null)
     {
         _sqlEngine = sqlEngine ?? throw new ArgumentNullException(nameof(sqlEngine));
+        _timeZoneState = timeZoneState;   // null = conversion unavailable (fail closed)
     }
 
     /// <summary>
@@ -274,14 +276,47 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             statement = new SqlAstBuilder().BuildStatement(tree);
         }
 
+        // REQ-SQL-130 (BC-130-4): the governed compiler does not run for the DuckDB statement, so the time zone calls are validated here, for a supplied and
+        // a built statement alike (CTEs, subqueries and set operations are traversed), before the AST is rewritten. A masked or denied column is never a timestamp.
+        var timeZoneProof = TimeZoneConversion.ValidateFederated(
+            statement,
+            _timeZoneState?.IsAvailable(TargetSqlDialect.DuckDb) ?? false,
+            (qualifier, column) => IsMaskedOrDenied(qualifier, column, tables, tableDecisions));
+
         var rewriter = new FederationAstRewriter(targetToStaging, targetToAlias, tables);
         var rewrittenAst = (SqlStatement)rewriter.Visit(statement);
 
-        var generator = SqlDialectGeneratorFactory.GetGenerator(TargetSqlDialect.DuckDb);
         // WP-X3: every query value is bound ($n); the staged rows are the only data DuckDB sees.
-        var compiled = generator.Generate(rewrittenAst, ParameterSource.Empty);
+        var compiled = TimeZoneConversion.GenerateFederated(rewrittenAst, timeZoneProof);
 
         return new CrossSourcePlan(compiled, stagingRequests, stagingNames);
+    }
+
+    /// <summary>
+    /// Whether a column reference may name a column that the decision masks or denies. A qualifier that belongs to no staged table (a CTE or derived
+    /// table alias) is judged by the column name alone, the same fallback the mask guards use for columns they cannot attribute.
+    /// </summary>
+    private static bool IsMaskedOrDenied(
+        string? qualifier,
+        string column,
+        IReadOnlyList<ResolvedSourceTable> tables,
+        TableAccessDecision[] decisions)
+    {
+        bool qualifierBelongsToATable = qualifier is not null && tables.Any(t => GovernedSqlExecutionService.ReferencesColumn(qualifier, column, column, t.Target));
+        for (int i = 0; i < tables.Count; i++)
+        {
+            foreach (var col in tables[i].Metadata.Columns)
+            {
+                if (!string.Equals(col.ColumnName, column, StringComparison.OrdinalIgnoreCase)) continue;
+                if (decisions[i].GetEffectiveColumnAccess(col.ColumnName, tables[i].Metadata) == ColumnAccessLevel.Clear) continue;
+                if (qualifier is null || !qualifierBelongsToATable || GovernedSqlExecutionService.ReferencesColumn(qualifier, column, col.ColumnName, tables[i].Target))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static bool MatchesProjectedColumn(string p, string colName, TableAccessTarget target)

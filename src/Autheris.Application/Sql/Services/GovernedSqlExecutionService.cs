@@ -76,7 +76,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             rewrite.ContractManager,
             rewrite.AccessProfileRepository,
             rewrite.MemoryCache,
-            typedPolicies: rewrite.TypedPolicies);
+            typedPolicies: rewrite.TypedPolicies,
+            timeZoneState: rewrite.TimeZoneState);
 
         _executor = new GovernedSqlExecutor(
             _rewriter,
@@ -130,6 +131,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         }
         catch (CrossSourceRoutingException)
         {
+            // Second line (SEC-128-12): the federated entries refuse a list as well; this keeps the refusal ahead of the service lookup.
+            ListParameters.ClientListParameters.RejectForFederation(request.Parameters);
             var federatedService = ResolveFederatedService();
             await federatedService.ExecuteGovernedQueryAsync(request, user, tenantId, rowWriter, ct).ConfigureAwait(false);
         }
@@ -147,6 +150,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         }
         catch (CrossSourceRoutingException)
         {
+            ListParameters.ClientListParameters.RejectForFederation(request.Parameters);
             var federatedService = ResolveFederatedService();
             return await federatedService.ExecuteQueryBufferedAsync(request, user, tenantId, ct).ConfigureAwait(false);
         }

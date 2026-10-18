@@ -1,4 +1,3 @@
-using System.Security;
 using System.Security.Claims;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Procedures.Interfaces;
@@ -108,7 +107,7 @@ public class ProcedureRowScopeTests
         }
         else
         {
-            await Should.ThrowAsync<SecurityException>(() => f.Create().ExecuteAsync("get_cranes", null, User(), Tenant));
+            await Should.ThrowAsync<ProcedureUnavailableException>(() => f.Create().ExecuteAsync("get_cranes", null, User(), Tenant));
             await f.RowScope.DidNotReceiveWithAnyArgs().GetAllowedKeysAsync(default!, default!, default!, default!, default!, default!, default);
         }
     }
@@ -149,7 +148,7 @@ public class ProcedureRowScopeTests
             Audit.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(AuditEntries.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
             return new GovernedProcedureExecutionService(
                 Registry, Invoker, Options.Create(new GatewayOptions()), Audit, Tables, Consents, Resolution, masking: null,
-                policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, rowScope: withResolver ? RowScope : null);
+                policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance, rowScope: withResolver ? RowScope : null);
         }
     }
 
@@ -256,7 +255,7 @@ public class ProcedureRowScopeTests
     {
         var f = Active(Header.Replace("-- @row-scope-key serial_number", string.Empty));
 
-        await Should.ThrowAsync<SecurityException>(() => f.Create().ExecuteAsync("get_cranes", null, User(), Tenant));
+        await Should.ThrowAsync<KeyNotFoundException>(() => f.Create().ExecuteAsync("get_cranes", null, User(), Tenant));
         await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default);
     }
 
@@ -265,7 +264,7 @@ public class ProcedureRowScopeTests
     {
         var f = Active();
 
-        await Should.ThrowAsync<SecurityException>(() => f.Create(withResolver: false).ExecuteAsync("get_cranes", null, User(), Tenant));
+        await Should.ThrowAsync<KeyNotFoundException>(() => f.Create(withResolver: false).ExecuteAsync("get_cranes", null, User(), Tenant));
         await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default);
     }
 
@@ -276,7 +275,7 @@ public class ProcedureRowScopeTests
     {
         var f = Active(keyAccess: access);
 
-        await Should.ThrowAsync<SecurityException>(() => f.Create().ExecuteAsync("get_cranes", null, User(), Tenant));
+        await Should.ThrowAsync<ProcedureUnavailableException>(() => f.Create().ExecuteAsync("get_cranes", null, User(), Tenant));
         await f.RowScope.DidNotReceiveWithAnyArgs().GetAllowedKeysAsync(default!, default!, default!, default!, default!, default!, default);
     }
 
@@ -287,7 +286,7 @@ public class ProcedureRowScopeTests
         f.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<CancellationToken>())
             .Returns(new RawProcedureResult(["name"], [new object?[] { "x" }], false));
 
-        await Should.ThrowAsync<SecurityException>(() => f.Create().ExecuteAsync("get_cranes", null, User(), Tenant));
+        await Should.ThrowAsync<ProcedureUnavailableException>(() => f.Create().ExecuteAsync("get_cranes", null, User(), Tenant));
     }
 
     [Fact]
@@ -299,7 +298,7 @@ public class ProcedureRowScopeTests
                 Arg.Any<IReadOnlyList<object?[]>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<CancellationToken>())
             .Returns<Task<IReadOnlySet<string>>>(_ => throw new InvalidOperationException("db down"));
 
-        await Should.ThrowAsync<SecurityException>(() => f.Create().ExecuteAsync("get_cranes", null, User(), Tenant));
+        await Should.ThrowAsync<ProcedureUnavailableException>(() => f.Create().ExecuteAsync("get_cranes", null, User(), Tenant));
         f.AuditEntries.ShouldContain(a => a.EventType == "PROCEDURE_FAILED");
     }
 

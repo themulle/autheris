@@ -221,7 +221,7 @@ public class PureYamlProcedureGovernanceTests
             tables,
             consents,
             resolution,
-            masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance);
 
         var result = await executionService.ExecuteAsync("get_orders", null, User("Reader"), Tenant);
 
@@ -324,7 +324,7 @@ public class PureYamlProcedureGovernanceTests
             tables,
             consents,
             resolution,
-            masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance);
 
         var result = await executionService.ExecuteAsync("get_orders_clear", null, User("Reader"), Tenant);
 
@@ -335,7 +335,7 @@ public class PureYamlProcedureGovernanceTests
     }
 
     [Fact]
-    public async Task Execute_DeclaredProcedure_WhenColumnInClearedResultColumns_ReturnsClearTextEvenIfSourceMasked()
+    public async Task Execute_DeclaredProcedure_WhenColumnInClearedResultColumns_DoesNotLiftAnExplicitConsentMask()
     {
         const string yaml = """
             name: get_orders_override
@@ -427,14 +427,14 @@ public class PureYamlProcedureGovernanceTests
             tables,
             consents,
             resolution,
-            masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance);
 
         var result = await executionService.ExecuteAsync("get_orders_override", null, User("Reader"), Tenant);
 
         // ClearedResultColumn in procedure contract overrides masking to Clear
         result.Rows.Count.ShouldBe(1);
         result.Rows[0]["order_id"].ShouldBe(100);
-        result.Rows[0]["sensitive_note"].ShouldBe("secret financial data");
+        result.Rows[0]["sensitive_note"].ShouldBe("***MASKED***"); // SEC-PROC152-09: an explicit Mask is never lifted
     }
 
     [Fact]
