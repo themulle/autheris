@@ -1340,6 +1340,11 @@
           "name": "renewal_count",
           "type": "INT",
           "family": "integer"
+        },
+        {
+          "name": "description",
+          "type": "NVARCHAR",
+          "family": "string"
         }
       ],
       "primaryKey": [

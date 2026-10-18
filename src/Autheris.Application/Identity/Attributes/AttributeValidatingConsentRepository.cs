@@ -17,7 +17,7 @@ using Microsoft.Extensions.Options;
 /// <see cref="CreateConsentAsync"/> or <see cref="ReplaceConsentsAsync"/> on <see cref="IConsentRepository"/>; this decorator checks the
 /// registry rules before the inner repository stores anything. Everything else is forwarded unchanged.
 /// </summary>
-public sealed class AttributeValidatingConsentRepository : IConsentRepository
+public sealed class AttributeValidatingConsentRepository : IConsentRepository, IConsentDescriptionRepository
 {
     private readonly IConsentRepository _inner;
     private readonly ICallerAttributeRegistry _registry;
@@ -40,8 +40,12 @@ public sealed class AttributeValidatingConsentRepository : IConsentRepository
     }
 
     public async Task ReplaceConsentsAsync(
-        IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason,
-        IReadOnlyList<AuditLogEntry>? auditEntries = null, CancellationToken ct = default)
+        IReadOnlyList<Guid> revokeConsentIds,
+        IReadOnlyList<Consent> create,
+        Sid actor,
+        string reason,
+        IReadOnlyList<AuditLogEntry>? auditEntries = null,
+        CancellationToken ct = default)
     {
         foreach (var consent in create)
         {
@@ -50,6 +54,28 @@ public sealed class AttributeValidatingConsentRepository : IConsentRepository
 
         await _inner.ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, auditEntries, ct).ConfigureAwait(false);
     }
+
+    // PLAN-GOV-158-INC1: the description seam is additive and shares the same validation of the create list.
+    private IConsentDescriptionRepository InnerDescriptions =>
+        _inner as IConsentDescriptionRepository ?? throw new NotSupportedException("The inner consent repository does not support consent descriptions.");
+
+    public async Task ReplaceConsentsAsync(
+        IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason,
+        IReadOnlyList<AuditLogEntry>? auditEntries, IReadOnlyList<ConsentDescriptionUpdate>? descriptionUpdates, CancellationToken ct)
+    {
+        foreach (var consent in create)
+        {
+            await ValidateAsync(consent, ct).ConfigureAwait(false);
+        }
+
+        await InnerDescriptions.ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, auditEntries, descriptionUpdates, ct).ConfigureAwait(false);
+    }
+
+    public Task<bool> UpdateConsentDescriptionWithAuditAsync(Guid consentId, TenantId tenant, string? description, AuditLogEntry audit, CancellationToken ct = default) =>
+        InnerDescriptions.UpdateConsentDescriptionWithAuditAsync(consentId, tenant, description, audit, ct);
+
+    public Task LoadDescriptionsAsync(IReadOnlyCollection<Consent> consents, CancellationToken ct = default) =>
+        InnerDescriptions.LoadDescriptionsAsync(consents, ct);
 
     private async Task ValidateAsync(Consent consent, CancellationToken ct)
     {

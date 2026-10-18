@@ -115,6 +115,11 @@ public static partial class GovernanceEndpoints
         {
             return Results.Json(new { error = ex.ErrorCode }, statusCode: ex.StatusCode);
         }
+        catch (Autheris.Application.Governance.Services.DeclarativeManifestValidationException ex)
+        {
+            // SEC-GOV158I1-03: fixed message naming only the policy index, never the rejected text.
+            return Results.Json(new { error = "VALIDATION_ERROR", message = $"Manifest policy at index {ex.PolicyIndex} has an invalid description." }, statusCode: StatusCodes.Status400BadRequest);
+        }
         catch (Autheris.Application.Governance.Grants.GrantPolicyViolationException ex)
         {
             return Results.Json(

@@ -1321,6 +1321,11 @@
           "name": "renewal_count",
           "type": "INTEGER",
           "family": "integer"
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "family": "string"
         }
       ],
       "primaryKey": [

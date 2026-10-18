@@ -77,6 +77,7 @@ public static class AuditEventTypes
     public const string ConsentDenied = "CONSENT_DENIED";
     public const string ConsentRevoked = "CONSENT_REVOKED";
     public const string ConsentApplied = "CONSENT_APPLIED";
+    public const string ConsentDescriptionChanged = "CONSENT_DESCRIPTION_CHANGED";
     public const string ProfileInvalidationFailed = "PROFILE_INVALIDATION_FAILED";
     public const string BreakGlassActivated = "BREAK_GLASS_ACTIVATED";
 

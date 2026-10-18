@@ -116,7 +116,8 @@ internal sealed class SqliteBaselineSchema
                 revoked_at TEXT,
                 revoke_reason TEXT,
                 tenant_id TEXT NOT NULL DEFAULT 'legacy-single-tenant',
-                renewal_count INTEGER NOT NULL DEFAULT 0
+                renewal_count INTEGER NOT NULL DEFAULT 0,
+                description TEXT CHECK (description IS NULL OR length(description) <= 2000)
             );
 
             CREATE TABLE IF NOT EXISTS CONSENT_COLUMN_RULES (
