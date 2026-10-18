@@ -341,7 +341,10 @@ public sealed partial class GovernedAggregationService
         IReadOnlyList<AggregateSelection> resolvedAggregates,
         CancellationToken ct)
     {
-        var executor = _dataSourceExecutors?.FirstOrDefault(e => e.SupportedType == metadata.Table.DataSourceType);
+        // WP-2 (F-1): a SQL table is aggregated in the database by the governed planner, so no row cap applies. The in-memory branches
+        // below serve the other source types and deployments without a SQL execution service.
+        bool usePlanner = _sqlExecutionService != null && metadata.Table.DataSourceType == DataSourceType.Sql;
+        var executor = usePlanner ? null : _dataSourceExecutors?.FirstOrDefault(e => e.SupportedType == metadata.Table.DataSourceType);
         if (executor != null)
         {
             var authorizedColumns = metadata.Columns
