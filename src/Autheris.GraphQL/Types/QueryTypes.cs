@@ -243,8 +243,9 @@ public sealed class Query
         }
 
         var descriptionMax = (textOptions?.Value ?? new GovernanceTextOptions()).ConsentDescriptionMaxLength;
-        var dtos = consents
-            .Where(c => c.IsActive(now) && c.TenantId == tenantId)
+        var activeConsents = consents.Where(c => c.IsActive(now) && c.TenantId == tenantId).ToList();
+        await Autheris.Application.Governance.ConsentDescriptionLoader.LoadAsync(consentRepository, activeConsents, ct).ConfigureAwait(false);
+        var dtos = activeConsents
             .Select(c => new ConsentDto
             {
                 Id = c.Id,

@@ -193,8 +193,8 @@ public static partial class GovernanceEndpoints
             now,
             context.RequestAborted).ConfigureAwait(false);
 
-        var descriptionMax = (context.RequestServices.GetService(typeof(Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GovernanceTextOptions>))
-            as Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GovernanceTextOptions>)?.Value.ConsentDescriptionMaxLength
+        await Autheris.Application.Governance.ConsentDescriptionLoader.LoadAsync(consentRepository, page.Items, context.RequestAborted).ConfigureAwait(false);
+        var descriptionMax = context.RequestServices.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GovernanceTextOptions>>()?.Value.ConsentDescriptionMaxLength
             ?? new Autheris.Domain.Options.GovernanceTextOptions().ConsentDescriptionMaxLength;
         return Results.Ok(new
         {

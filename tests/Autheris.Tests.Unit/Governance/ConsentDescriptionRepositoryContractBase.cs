@@ -19,6 +19,15 @@ public abstract class ConsentDescriptionRepositoryContractBase : IAsyncLifetime
     private static readonly Sid Admin = new("S-1-5-21-ADMIN-DESC");
 
     protected IGovernanceRepository Repo { get; private set; } = null!;
+
+    private IConsentDescriptionRepository Desc => (IConsentDescriptionRepository)Repo;
+
+    private async Task<string?> DescriptionOfAsync(Guid id)
+    {
+        var consent = (await Repo.GetConsentByIdAsync(id))!;
+        await Desc.LoadDescriptionsAsync([consent]);
+        return consent.Description;
+    }
     protected bool Available { get; private set; }
 
     protected abstract Task<IGovernanceRepository?> CreateRepositoryAsync();
@@ -78,25 +87,36 @@ public abstract class ConsentDescriptionRepositoryContractBase : IAsyncLifetime
         var none = await Repo.CreateConsentAsync(NewConsent(tableId, table, GranteeType.User, null));
         user.Description.ShouldBe("Sales analysts read orders");
 
-        (await Repo.GetConsentByIdAsync(user.Id))!.Description.ShouldBe("Sales analysts read orders");
-        (await Repo.GetConsentByIdAsync(none.Id))!.Description.ShouldBeNull();
+        // The access-decision hot path never loads the description: every read method leaves it unset until the explicit opt-in load.
+        (await Repo.GetConsentByIdAsync(user.Id))!.Description.ShouldBeNull();
+        (await DescriptionOfAsync(user.Id)).ShouldBe("Sales analysts read orders");
+        (await DescriptionOfAsync(none.Id)).ShouldBeNull();
 
         var now = DateTimeOffset.UtcNow;
         var forSubjects = await Repo.GetActiveConsentsForSubjectsAsync([Alice], table, now, Tenant);
+        forSubjects.ShouldAllBe(c => c.Description == null);
+        await Desc.LoadDescriptionsAsync(forSubjects);
         forSubjects.Single(c => c.Id == user.Id).Description.ShouldBe("Sales analysts read orders");
         forSubjects.Single(c => c.Id == none.Id).Description.ShouldBeNull();
 
         var all = await Repo.GetAllActiveConsentsForSubjectsAsync([Alice], ["Analyst"], now, Tenant);
+        all.ShouldAllBe(c => c.Description == null);
+        await Desc.LoadDescriptionsAsync(all);
         all.Single(c => c.Id == user.Id).Description.ShouldBe("Sales analysts read orders");
 
         var roles = await Repo.GetActiveRoleConsentsAsync(table, "Analyst", Tenant, now);
+        await Desc.LoadDescriptionsAsync(roles);
         roles.Single(c => c.Id == role.Id).Description.ShouldBe("Role text");
 
         var page = await Repo.GetConsentPageAsync(new ConsentPageQuery(Tenant, table));
+        page.Items.ShouldAllBe(c => c.Description == null);
+        await Desc.LoadDescriptionsAsync(page.Items);
         page.Items.Single(c => c.Id == user.Id).Description.ShouldBe("Sales analysts read orders");
         page.Items.Single(c => c.Id == role.Id).Description.ShouldBe("Role text");
 
         var expiring = await Repo.GetExpiringConsentsAsync(now.AddHours(3));
+        expiring.ShouldAllBe(c => c.Description == null);
+        await Desc.LoadDescriptionsAsync(expiring);
         expiring.Single(c => c.Id == user.Id).Description.ShouldBe("Sales analysts read orders");
     }
 
@@ -125,16 +145,16 @@ public abstract class ConsentDescriptionRepositoryContractBase : IAsyncLifetime
         var (table, tableId) = await SeedTableAsync();
         var consent = await Repo.CreateConsentAsync(NewConsent(tableId, table, GranteeType.User, "before"));
 
-        await Repo.ReplaceConsentsAsync([], [], Admin, "desc", null, [new ConsentDescriptionUpdate(consent.Id, Tenant, "after")], CancellationToken.None);
+        await Desc.ReplaceConsentsAsync([], [], Admin, "desc", null, [new ConsentDescriptionUpdate(consent.Id, Tenant, "after")], CancellationToken.None);
 
         var loaded = (await Repo.GetConsentByIdAsync(consent.Id))!;
-        loaded.Description.ShouldBe("after");
+        (await DescriptionOfAsync(consent.Id)).ShouldBe("after");
         loaded.IsRevoked.ShouldBeFalse();
         loaded.ValidTo.ShouldBe(consent.ValidTo);
         loaded.Effect.ShouldBe(consent.Effect);
 
-        await Repo.ReplaceConsentsAsync([], [], Admin, "desc", null, [new ConsentDescriptionUpdate(consent.Id, Tenant, null)], CancellationToken.None);
-        (await Repo.GetConsentByIdAsync(consent.Id))!.Description.ShouldBeNull();
+        await Desc.ReplaceConsentsAsync([], [], Admin, "desc", null, [new ConsentDescriptionUpdate(consent.Id, Tenant, null)], CancellationToken.None);
+        (await DescriptionOfAsync(consent.Id)).ShouldBeNull();
     }
 
     [Trait("Category", "Security")]
@@ -147,11 +167,11 @@ public abstract class ConsentDescriptionRepositoryContractBase : IAsyncLifetime
         var consent = await Repo.CreateConsentAsync(NewConsent(tableId, table, GranteeType.User, "before"));
         await Repo.RevokeConsentAsync(consent.Id, Alice, "revoked in between");
 
-        await Repo.ReplaceConsentsAsync([], [], Admin, "desc", null, [new ConsentDescriptionUpdate(consent.Id, Tenant, "after")], CancellationToken.None);
+        await Desc.ReplaceConsentsAsync([], [], Admin, "desc", null, [new ConsentDescriptionUpdate(consent.Id, Tenant, "after")], CancellationToken.None);
 
         var loaded = (await Repo.GetConsentByIdAsync(consent.Id))!;
         loaded.IsRevoked.ShouldBeTrue();
-        loaded.Description.ShouldBe("before");
+        (await DescriptionOfAsync(consent.Id)).ShouldBe("before");
     }
 
     [Trait("Category", "Security")]
@@ -162,9 +182,9 @@ public abstract class ConsentDescriptionRepositoryContractBase : IAsyncLifetime
         var (table, tableId) = await SeedTableAsync();
         var consent = await Repo.CreateConsentAsync(NewConsent(tableId, table, GranteeType.User, "before"));
 
-        await Repo.ReplaceConsentsAsync([], [], Admin, "desc", null, [new ConsentDescriptionUpdate(consent.Id, new TenantId("tenant-other"), "after")], CancellationToken.None);
+        await Desc.ReplaceConsentsAsync([], [], Admin, "desc", null, [new ConsentDescriptionUpdate(consent.Id, new TenantId("tenant-other"), "after")], CancellationToken.None);
 
-        (await Repo.GetConsentByIdAsync(consent.Id))!.Description.ShouldBe("before");
+        (await DescriptionOfAsync(consent.Id)).ShouldBe("before");
     }
 
     private static void AddParameter(DbCommand cmd, string name, object value)

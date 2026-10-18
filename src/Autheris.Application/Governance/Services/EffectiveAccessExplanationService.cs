@@ -156,7 +156,8 @@ public sealed class EffectiveAccessExplanationService(
             activeRowFilters.Add(canSeeDefinition ? decision.CombinedRowFilterSql : RowFilterDescription);
         }
 
-        var applicableConsents = MatchingAllowConsents(activeConsents, table, now, userSid.Value, groupSids, roles, allUserSids);
+        var applicableConsents = MatchingAllowConsents(activeConsents, table, now, userSid.Value, groupSids, roles, allUserSids).ToList();
+        await ConsentDescriptionLoader.LoadAsync(consentRepository, applicableConsents, ct).ConfigureAwait(false);
 
         // Earliest moment at which the caller's current effective access changes (clamped expiry of matching grants only).
         DateTimeOffset? validTo = null;
@@ -176,8 +177,8 @@ public sealed class EffectiveAccessExplanationService(
             .ThenBy(c => c.Id)
             .Select(c => ConsentDescriptionText.ForOutput(c.Description, DescriptionMaxLength))
             .ToList();
-        var description = describing.FirstOrDefault();
         var descriptions = describing.OfType<string>().Distinct(StringComparer.Ordinal).Take(MaxDescriptions).ToList();
+        var description = descriptions.FirstOrDefault();
 
         return new EffectiveTableAccessDto(
             table.ToString(),

@@ -264,8 +264,16 @@ public partial class PostgreSqlGovernanceRepository
         return consents;
     }
 
-    /// <summary>PLAN-GOV-158-INC1: loads <c>CONSENTS.description</c> for the given consents (single choke point for every read path).</summary>
-    private static async Task LoadConsentDescriptionsAsync(NpgsqlConnection conn, List<Consent> consents, CancellationToken ct)
+    /// <summary>PLAN-GOV-158-INC1: opt-in load of <c>CONSENTS.description</c> (<see cref="IConsentDescriptionRepository.LoadDescriptionsAsync"/>); never part of hydration.</summary>
+    public async Task LoadDescriptionsAsync(IReadOnlyCollection<Consent> consents, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(consents);
+        if (consents.Count == 0) return;
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await LoadConsentDescriptionsAsync(conn, consents, ct).ConfigureAwait(false);
+    }
+
+    private static async Task LoadConsentDescriptionsAsync(NpgsqlConnection conn, IReadOnlyCollection<Consent> consents, CancellationToken ct)
     {
         if (consents.Count == 0) return;
         var byId = new Dictionary<string, List<Consent>>(StringComparer.OrdinalIgnoreCase);
@@ -290,8 +298,6 @@ public partial class PostgreSqlGovernanceRepository
     private async Task HydrateConsentsBatchAsync(NpgsqlConnection conn, List<Consent> consents, CancellationToken ct)
     {
         if (consents.Count == 0) return;
-
-        await LoadConsentDescriptionsAsync(conn, consents, ct).ConfigureAwait(false);
 
         var consentIds = consents.Select(c => c.Id.ToString()).ToList();
         var rulesMap = consents.ToDictionary(c => c.Id.ToString(), _ => new List<ConsentColumnRule>(), StringComparer.OrdinalIgnoreCase);

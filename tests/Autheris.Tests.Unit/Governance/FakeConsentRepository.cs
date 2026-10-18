@@ -5,7 +5,7 @@ using Autheris.Domain.Model;
 namespace Autheris.Tests.Unit.Governance;
 
 /// <summary>In-memory consent store with a transactional <see cref="ReplaceConsentsAsync"/> (all-or-nothing) and fault injection.</summary>
-internal sealed class FakeConsentRepository : IConsentRepository
+internal sealed class FakeConsentRepository : IConsentRepository, IConsentDescriptionRepository
 {
     private readonly List<Consent> _consents = [];
 
@@ -14,6 +14,7 @@ internal sealed class FakeConsentRepository : IConsentRepository
     public int DirectCreateCalls { get; private set; }
     public int DirectRevokeCalls { get; private set; }
     public int DescriptionUpdateCount { get; private set; }
+    public int DescriptionLoadCalls { get; private set; }
     public int LastCreateCount { get; private set; }
     public int LastRevokeCount { get; private set; }
 
@@ -26,6 +27,16 @@ internal sealed class FakeConsentRepository : IConsentRepository
 
     public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, IReadOnlyList<AuditLogEntry>? auditEntries = null, CancellationToken ct = default) =>
         ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, auditEntries, null, ct);
+
+    // The fake keeps descriptions on the stored instances, so the opt-in load only counts the call.
+    public Task LoadDescriptionsAsync(IReadOnlyCollection<Consent> consents, CancellationToken ct = default)
+    {
+        DescriptionLoadCalls++;
+        return Task.CompletedTask;
+    }
+
+    public Task<bool> UpdateConsentDescriptionWithAuditAsync(Guid consentId, TenantId tenant, string? description, AuditLogEntry audit, CancellationToken ct = default) =>
+        throw new NotImplementedException();
 
     public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, IReadOnlyList<AuditLogEntry>? auditEntries, IReadOnlyList<ConsentDescriptionUpdate>? descriptionUpdates, CancellationToken ct)
     {

@@ -187,6 +187,7 @@ public sealed class DeclarativeConsentApplyService(
             {
                 // Decision 6: a description-only difference is an in-place update (same id, no revoke, no epoch bump); every semantic
                 // difference already failed IsIdentical and takes the revoke/create path (SEC-GOV158I1-07).
+                await ConsentDescriptionLoader.LoadAsync(consentRepository, [matchingConsent], ct).ConfigureAwait(false);
                 var storedDescription = UntrustedText.Normalize(matchingConsent.Description, GovernanceTextOptions.ConsentDescriptionCeiling, allowLineFeed: false);
                 var storedNormalized = storedDescription.IsValid ? storedDescription.Value : matchingConsent.Description;
                 if (!string.Equals(storedNormalized, description, StringComparison.Ordinal))
@@ -289,6 +290,7 @@ public sealed class DeclarativeConsentApplyService(
                 }
 
                 createList.Add(newConsent);
+                var (fingerprintLength, fingerprintPrefix) = ConsentDescriptionText.Fingerprint(description);
                 auditEntries.Add(new AuditLogEntry
                 {
                     Id = Guid.NewGuid(),
@@ -301,8 +303,8 @@ public sealed class DeclarativeConsentApplyService(
                     {
                         Reason = $"Applied declarative policy version {manifest.Version}",
                         Version = manifest.Version,
-                        DescriptionLength = ConsentDescriptionText.Fingerprint(description).Length,
-                        DescriptionSha256Prefix = ConsentDescriptionText.Fingerprint(description).HashPrefix
+                        DescriptionLength = fingerprintLength,
+                        DescriptionSha256Prefix = fingerprintPrefix
                     }),
                     TenantId = tenantId
                 });
@@ -324,7 +326,9 @@ public sealed class DeclarativeConsentApplyService(
             }
             else
             {
-                await consentRepository.ReplaceConsentsAsync(revokeIds, createList, actorSid, supersededReason, auditEntries, descriptionUpdates, ct).ConfigureAwait(false);
+                var descriptionWriter = consentRepository as IConsentDescriptionRepository
+                    ?? throw new InvalidOperationException("The consent repository does not support in-place description updates.");
+                await descriptionWriter.ReplaceConsentsAsync(revokeIds, createList, actorSid, supersededReason, auditEntries, descriptionUpdates, ct).ConfigureAwait(false);
             }
         }
 

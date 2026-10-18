@@ -68,6 +68,18 @@ public sealed class DeclarativeConsentDescriptionTests
     }
 
     [Fact]
+    public async Task Apply_LoadsStoredDescriptionOnlyForTheMatchingConsent_OptIn()
+    {
+        var (svc, repo) = Create();
+        await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("1", [Policy("old")]));
+        repo.DescriptionLoadCalls.ShouldBe(0); // the create path compares nothing
+
+        await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("2", [Policy("old")]));
+
+        repo.DescriptionLoadCalls.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task Apply_SameDescription_IsUnchangedAndNoReplaceCall()
     {
         var (svc, repo) = Create();
@@ -159,7 +171,7 @@ public sealed class DeclarativeConsentDescriptionTests
     [Fact]
     public async Task Apply_SemanticChange_WithDescriptionChange_UsesRevokeCreatePath()
     {
-        // T-GOV158I1-09: a rule change plus a new description never takes the in-place path.
+        // T-GOV158I1-09 (SEC-GOV158I1-07): a rule change plus a new description never takes the in-place path.
         var (svc, repo) = Create();
         await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("1", [Policy("old")]));
         var oldId = repo.Active(DateTimeOffset.UtcNow).Single().Id;

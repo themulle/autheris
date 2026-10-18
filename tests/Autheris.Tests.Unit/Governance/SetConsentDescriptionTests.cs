@@ -27,6 +27,13 @@ public sealed class SetConsentDescriptionTests : IDisposable
     private readonly IDataOwnershipRepository _ownership = Substitute.For<IDataOwnershipRepository>();
     private readonly ServiceProvider _services = DecisionServices.Build();
 
+    private async Task<string?> StoredDescriptionAsync(Guid id)
+    {
+        var consent = (await _repository.GetConsentByIdAsync(id))!;
+        await _repository.LoadDescriptionsAsync([consent]);
+        return consent.Description;
+    }
+
     public void Dispose()
     {
         _services.Dispose();
@@ -86,7 +93,7 @@ public sealed class SetConsentDescriptionTests : IDisposable
         (await SetAsync(consent.Id, " by admin ", Admin())).Description.ShouldBe("by admin");
         (await SetAsync(consent.Id, "by owner or delegate", Person())).Description.ShouldBe("by owner or delegate");
 
-        (await _repository.GetConsentByIdAsync(consent.Id))!.Description.ShouldBe("by owner or delegate");
+        (await StoredDescriptionAsync(consent.Id)).ShouldBe("by owner or delegate");
         (await AuditRowsAsync()).Count.ShouldBe(2);
     }
 
@@ -98,7 +105,7 @@ public sealed class SetConsentDescriptionTests : IDisposable
         var dto = await SetAsync(consent.Id, "   ", Admin());
 
         dto.Description.ShouldBeNull();
-        (await _repository.GetConsentByIdAsync(consent.Id))!.Description.ShouldBeNull();
+        (await StoredDescriptionAsync(consent.Id)).ShouldBeNull();
     }
 
     [Trait("Category", "Security")]
@@ -135,7 +142,7 @@ public sealed class SetConsentDescriptionTests : IDisposable
     [Fact]
     public async Task SetDescription_Unauthorised_InvalidText_SameNotFoundAsUnknownId()
     {
-        // T-GOV158I1-04: no validation oracle before authorisation.
+        // T-GOV158I1-04 (SEC-GOV158I1-04): no validation oracle before authorisation.
         var consent = await NewConsentAsync();
         _ownership.IsAuthorizedApproverForTableAsync(default, default, default).ReturnsForAnyArgs(false);
 
@@ -154,7 +161,7 @@ public sealed class SetConsentDescriptionTests : IDisposable
         ex.Errors[0].Code.ShouldBe("VALIDATION_ERROR");
         ex.Errors[0].Message.ShouldNotContain("evil");
         ex.Errors[0].Message.ShouldNotContain("text");
-        (await _repository.GetConsentByIdAsync(consent.Id))!.Description.ShouldBe("before");
+        (await StoredDescriptionAsync(consent.Id)).ShouldBe("before");
     }
 
     [Trait("Category", "Security")]
@@ -174,7 +181,7 @@ public sealed class SetConsentDescriptionTests : IDisposable
     [Fact]
     public async Task SetDescription_AppOnlyMtlsReadOnlyToken_Refused_BeforeLookup()
     {
-        // T-GOV158I1-06 (D-7): the guard runs first; the consent is never loaded.
+        // T-GOV158I1-06 (D-7, SEC-GOV158I1-04): the guard runs first; the consent is never loaded.
         var consent = await NewConsentAsync();
         var repo = Substitute.For<IConsentRepository>();
         var descRepo = Substitute.For<IConsentDescriptionRepository>();
@@ -216,7 +223,7 @@ public sealed class SetConsentDescriptionTests : IDisposable
 
         await ShouldBeNotFoundAsync(() => SetAsync(consent.Id, "x", Person()));
 
-        (await _repository.GetConsentByIdAsync(consent.Id))!.Description.ShouldBe("before");
+        (await StoredDescriptionAsync(consent.Id)).ShouldBe("before");
     }
 
     [Trait("Category", "Security")]
@@ -252,7 +259,7 @@ public sealed class SetConsentDescriptionTests : IDisposable
 
         await Should.ThrowAsync<Exception>(() => SetAsync(consent.Id, "after", Admin()));
 
-        (await _repository.GetConsentByIdAsync(consent.Id))!.Description.ShouldBe("before");
+        (await StoredDescriptionAsync(consent.Id)).ShouldBe("before");
     }
 
     [Trait("Category", "Security")]
@@ -268,6 +275,7 @@ public sealed class SetConsentDescriptionTests : IDisposable
 
         (await _repository.GetTableEpochAsync(consent.TableIdentifier)).ShouldBe(epochBefore);
         var after = (await _repository.GetConsentByIdAsync(consent.Id))!;
+        await _repository.LoadDescriptionsAsync([after]);
         after.Description.ShouldBe("after");
         after.ValidFrom.ShouldBe(before.ValidFrom);
         after.ValidTo.ShouldBe(before.ValidTo);

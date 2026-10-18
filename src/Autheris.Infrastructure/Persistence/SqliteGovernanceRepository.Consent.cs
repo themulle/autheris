@@ -474,8 +474,16 @@ public partial class SqliteGovernanceRepository
         return filters;
     }
 
-    /// <summary>PLAN-GOV-158-INC1: loads <c>CONSENTS.description</c> for the given consents (single choke point for every read path).</summary>
-    private static async Task LoadConsentDescriptionsAsync(SqliteConnection conn, List<Consent> consents, CancellationToken ct)
+    /// <summary>PLAN-GOV-158-INC1: opt-in load of <c>CONSENTS.description</c> (<see cref="IConsentDescriptionRepository.LoadDescriptionsAsync"/>); never part of hydration.</summary>
+    public async Task LoadDescriptionsAsync(IReadOnlyCollection<Consent> consents, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(consents);
+        if (consents.Count == 0) return;
+        await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
+        await LoadConsentDescriptionsAsync(scope.Connection, consents, ct);
+    }
+
+    private static async Task LoadConsentDescriptionsAsync(SqliteConnection conn, IReadOnlyCollection<Consent> consents, CancellationToken ct)
     {
         if (consents.Count == 0) return;
         var byId = new Dictionary<string, List<Consent>>(StringComparer.OrdinalIgnoreCase);
@@ -503,8 +511,6 @@ public partial class SqliteGovernanceRepository
     private async Task HydrateConsentsBatchAsync(SqliteConnection conn, List<Consent> consents, CancellationToken ct)
     {
         if (consents.Count == 0) return;
-
-        await LoadConsentDescriptionsAsync(conn, consents, ct);
 
         if (consents.Count == 1)
         {
@@ -1553,7 +1559,6 @@ public partial class SqliteGovernanceRepository
 
             if (consent != null)
             {
-                await LoadConsentDescriptionsAsync(conn, new List<Consent> { consent }, ct);
                 consent.ColumnRules = await LoadColumnRulesAsync(conn, consent.Id, ct);
                 consent.RowFilters = await LoadRowFiltersAsync(conn, consent.Id, ct);
             }
@@ -1703,7 +1708,6 @@ public partial class SqliteGovernanceRepository
                     RenewalCount = reader.GetInt32(18)
                 });
             }
-            await LoadConsentDescriptionsAsync(conn, consents, ct);
             return consents;
         }
     }

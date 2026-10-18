@@ -117,7 +117,7 @@ public sealed class UntrustedTextTests
     [Fact]
     public void UntrustedText_HugeRaw_RejectedBeforeNormalization_NoEcho()
     {
-        // T-GOV158I1-02: raw input beyond 4 x cap is refused without normalising and without echoing the text.
+        // T-GOV158I1-02 (SEC-GOV158I1-02): raw input beyond 4 x cap is refused without normalising and without echoing the text.
         var raw = new string('x', 4 * 500 + 1);
 
         var check = UntrustedText.Normalize(raw, 500, allowLineFeed: false);
