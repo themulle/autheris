@@ -67,7 +67,7 @@ public sealed class DeclarativeConsentApplyService(
         var details = new List<string>();
 
         var hasDatasets = manifest.Datasets is { Count: > 0 };
-        if ((manifest.Policies == null || policies.Count == 0) && !hasDatasets)
+        if ((manifest.Policies == null || manifest.Policies.Count == 0) && !hasDatasets)
         {
             return new DeclarativeApplyResult(0, 0, 0, 0, dryRun, ["Empty manifest; 0 policies processed."]);
         }
