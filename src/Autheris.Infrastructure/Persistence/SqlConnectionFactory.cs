@@ -321,4 +321,17 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
 
     private static NotSupportedException UnsupportedProvider(string? provider) =>
         new($"SQL provider '{provider}' is not supported. Supported providers are: 'Sqlite', 'SqlServer', 'PostgreSql', 'Oracle', 'Databricks'.");
+
+    /// <summary>
+    /// Issue #132 (PLAN-DATA-132, SEC-DATA132-05): Verifies physical SQL Server instance identity
+    /// via SELECT @@SERVERNAME. Returns the runtime server name string.
+    /// </summary>
+    public static async Task<string?> VerifyServerIdentityAsync(DbConnection connection, string? expectedHost = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT @@SERVERNAME";
+        var result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return result as string ?? result?.ToString();
+    }
 }

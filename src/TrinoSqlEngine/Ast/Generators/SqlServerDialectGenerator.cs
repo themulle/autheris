@@ -597,4 +597,24 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
             builder.Append(pagination.WithTies ? " ROWS WITH TIES" : " ROWS ONLY");
         }
     }
+
+    /// <summary>
+    /// Issue #132 (PLAN-DATA-132, WP-132-3): Emits physical three-part table names [database].[schema].[table]
+    /// when <see cref="SqlEmitterContext.EmitThreePartNames"/> is true and the table has 3 parts.
+    /// Otherwise retains standard two-part qualification [schema].[table].
+    /// </summary>
+    public override void FormatTableName(ref ValueStringBuilder builder, SqlQualifiedName name, SqlEmitterContext context)
+    {
+        if (context.EmitThreePartNames && name.Parts.Count == 3)
+        {
+            for (int i = 0; i < name.Parts.Count; i++)
+            {
+                if (i > 0) builder.Append('.');
+                FormatIdentifier(ref builder, name.Parts[i], context);
+            }
+            return;
+        }
+
+        base.FormatTableName(ref builder, name, context);
+    }
 }

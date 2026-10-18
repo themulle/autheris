@@ -62,6 +62,8 @@ public sealed record Table
     public bool IsActive { get; init; } = true;
 
     public DataSourceType DataSourceType { get; init; } = DataSourceType.Sql;
+    /// <summary>Issue #132: Explicit physical database name if different from connection string catalog or source name.</summary>
+    public string? PhysicalDatabaseName { get; init; }
     public string? Location { get; init; }
     public HttpEndpointDescriptor? HttpEndpoint { get; init; }
     public string? PluginName { get; init; }
@@ -217,6 +219,7 @@ public sealed record TableMetadata
     }
 
     public DataSourceType DataSourceType => Table.DataSourceType;
+    public string? PhysicalDatabaseName => Table.PhysicalDatabaseName;
     public HttpEndpointDescriptor? HttpEndpoint => Table.HttpEndpoint;
     public string? PluginName => Table.PluginName;
     /// <summary>Issue #163: Table-level required filter columns enforced across every read path.</summary>

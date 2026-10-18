@@ -44,6 +44,13 @@ public sealed class SqlEmitterContext
     /// false: a generator refuses to emit <c>convert_timezone</c> for an unvalidated statement, so a future emit site that skips the validator fails closed.
     /// </summary>
     internal bool TimeZoneCallsValidated { get; init; }
+
+    /// <summary>
+    /// Issue #132 (PLAN-DATA-132, WP-132-3): When true, the SQL Server dialect generator emits physical
+    /// three-part table names [database].[schema].[table] for multi-database co-located execution.
+    /// </summary>
+    public bool EmitThreePartNames { get; init; }
+
     public bool InProjectionContext { get; set; }
     public int IndentLevel { get; set; }
 

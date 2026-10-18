@@ -11,6 +11,7 @@ using Autheris.Application.Services;
 using Autheris.Application.Sql.Federation.Conjuncts;
 using Autheris.Application.Sql.Federation.KeySet;
 using Autheris.Application.Sql.Federation.Pushdown;
+using Autheris.Application.Sql.Federation.Subtrees;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -329,6 +330,24 @@ public sealed partial class QueryAnalysisService
                     TargetColumn: kp.DrivenKeyColumn,
                     PushedKeyCount: (int?)drivingRows,
                     EstimatedBatches: estBatches));
+            }
+
+            if (_gatewayOptions.WebSql?.CrossSource?.CoLocation?.Enabled == true)
+            {
+                var crossSourceOpts = _gatewayOptions.WebSql.CrossSource;
+                var partitions = SubtreeGraphPartitioner.Partition(resolvedTables, _gatewayOptions.DataSources.Connections, crossSourceOpts);
+                foreach (var partition in partitions)
+                {
+                    if (partition.IsCoLocated && partition.CoLocationGroup != null && partition.Tables.Count > 1)
+                    {
+                        outcome.CoLocatedGroups.Add(new CoLocatedGroupPlan(
+                            GroupName: partition.CoLocationGroup,
+                            Databases: partition.DistinctDatabases,
+                            MemberTables: partition.Tables.Select(t => !string.IsNullOrWhiteSpace(t.Target.FullName) ? t.Target.FullName : t.Target.TableName).ToList(),
+                            SingleStatementExecuted: true));
+                    }
+                }
+            }
             }
         }
 

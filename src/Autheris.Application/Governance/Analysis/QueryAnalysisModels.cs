@@ -174,11 +174,12 @@ public sealed record QueryAccessRequirementsReport(
 }
 
 /// <summary>
-/// Issue #122 / #124: Query federation, predicate pushdown, and dynamic key-set analysis.
+/// Issue #122 / #124 / #132: Query federation, predicate pushdown, dynamic key-sets, and co-located group analysis.
 /// </summary>
 public sealed record QueryFederationAnalysis(
     IReadOnlyList<AnalyzedFederatedTable> Tables,
-    IReadOnlyList<AnalyzedKeySetPushdown>? KeySetPushdowns = null);
+    IReadOnlyList<AnalyzedKeySetPushdown>? KeySetPushdowns = null,
+    IReadOnlyList<CoLocatedGroupPlan>? CoLocatedGroups = null);
 
 public sealed record AnalyzedKeySetPushdown(
     string DrivingTable,
@@ -186,6 +187,15 @@ public sealed record AnalyzedKeySetPushdown(
     string TargetColumn,
     int? PushedKeyCount = null,
     int? EstimatedBatches = null);
+
+/// <summary>
+/// Issue #132 (PLAN-DATA-132, WP-132-4): Co-located SQL Server group plan in query analysis.
+/// </summary>
+public sealed record CoLocatedGroupPlan(
+    string GroupName,
+    IReadOnlyList<string> Databases,
+    IReadOnlyList<string> MemberTables,
+    bool SingleStatementExecuted);
 
 public sealed record AnalyzedFederatedTable(
     string Table,

@@ -381,7 +381,8 @@ public sealed partial class QueryAnalysisService
         ref int hiddenMissingDatasetsCount,
         ref int totalEstimatedCost,
         List<AnalyzedFederatedTable>? federatedTables = null,
-        List<AnalyzedKeySetPushdown>? keySetPushdowns = null)
+        List<AnalyzedKeySetPushdown>? keySetPushdowns = null,
+        List<CoLocatedGroupPlan>? coLocatedGroups = null)
     {
         diagnostics.AddRange(source.Diagnostics);
 
@@ -393,6 +394,11 @@ public sealed partial class QueryAnalysisService
         if (keySetPushdowns != null && source.KeySetPushdowns.Count > 0)
         {
             keySetPushdowns.AddRange(source.KeySetPushdowns);
+        }
+
+        if (coLocatedGroups != null && source.CoLocatedGroups.Count > 0)
+        {
+            coLocatedGroups.AddRange(source.CoLocatedGroups);
         }
 
         foreach (var (field, cost) in source.RootFieldCosts)
@@ -446,6 +452,7 @@ public sealed partial class QueryAnalysisService
         public Dictionary<string, int> RootFieldCosts { get; } = new(StringComparer.Ordinal);
         public List<AnalyzedFederatedTable> FederatedTables { get; } = new();
         public List<AnalyzedKeySetPushdown> KeySetPushdowns { get; } = new();
+        public List<CoLocatedGroupPlan> CoLocatedGroups { get; } = new();
         public bool HasRowFilters { get; set; }
         public bool HasMandatoryVirtualFilters { get; set; }
         public bool IsBlockedByMandatoryFilter { get; set; }

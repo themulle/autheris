@@ -165,6 +165,23 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         }
     }
 
+    public virtual string GenerateSql(SqlStatement statement, SqlEmitterContext context)
+    {
+        ArgumentNullException.ThrowIfNull(statement);
+        ArgumentNullException.ThrowIfNull(context);
+        Span<char> initialBuffer = stackalloc char[512];
+        var builder = new ValueStringBuilder(initialBuffer);
+        try
+        {
+            GenerateSql(statement, ref builder, context);
+            return builder.ToString();
+        }
+        finally
+        {
+            builder.Dispose();
+        }
+    }
+
     public virtual void GenerateSql(SqlStatement statement, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
         ArgumentNullException.ThrowIfNull(statement);
