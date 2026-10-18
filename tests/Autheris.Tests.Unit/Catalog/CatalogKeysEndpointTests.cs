@@ -24,7 +24,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-/// <summary>Issue #94 (SD-5, SEC-94-05, -06, -15): PUT /api/v1/catalog/datasets/{id}/keys.</summary>
+/// <summary>Issue #94 (SD-5, SEC-94-05, -06, -15), Issue #160 (SEC-160-01, -02): PUT /api/v1/catalog/datasets/{id}/keys.</summary>
 public sealed class CatalogKeysEndpointTests : IDisposable
 {
     private static readonly TableIdentifier Orders = new("sales", "dbo", "orders");
@@ -52,27 +52,29 @@ public sealed class CatalogKeysEndpointTests : IDisposable
         ReplaceKeyDefinition = true
     };
 
-    private static HttpContext Context()
+    private static HttpContext Context(string? sid = "S-1-5-21-ADMIN")
     {
         var services = new ServiceCollection().AddLogging().AddOptions().BuildServiceProvider();
         var ctx = new DefaultHttpContext { RequestServices = services };
         ctx.Response.Body = new MemoryStream();
         ctx.TraceIdentifier = "trace-1";
-        ctx.User = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.NameIdentifier, "S-1-5-21-ADMIN"), new Claim("tenant_id", "tenant-a"), new Claim(ClaimTypes.Role, "GovernanceAdmin")], "TestAuth"));
+        Claim[] claims = sid != null
+            ? [new Claim("tenant_id", "tenant-a"), new Claim(ClaimTypes.Role, "GovernanceAdmin"), new Claim(ClaimTypes.NameIdentifier, sid)]
+            : [new Claim("tenant_id", "tenant-a"), new Claim(ClaimTypes.Role, "GovernanceAdmin")];
+        ctx.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
         return ctx;
     }
 
-    private static async Task<(int Status, string Body)> Run(IResult result)
+    private static async Task<(int Status, string Body)> Run(IResult result, HttpContext? ctx = null)
     {
-        var ctx = Context();
-        await result.ExecuteAsync(ctx);
-        ctx.Response.Body.Position = 0;
-        return (ctx.Response.StatusCode, Encoding.UTF8.GetString(((MemoryStream)ctx.Response.Body).ToArray()));
+        var targetCtx = ctx ?? Context();
+        await result.ExecuteAsync(targetCtx);
+        targetCtx.Response.Body.Position = 0;
+        return (targetCtx.Response.StatusCode, Encoding.UTF8.GetString(((MemoryStream)targetCtx.Response.Body).ToArray()));
     }
 
-    private Task<IResult> Put(string id, SetDatasetKeysDto? dto, ITableMetadataRepository? repo = null) =>
-        CatalogApiEndpoints.SetDatasetKeysHandler(id, dto, repo ?? _repo, _audit, Context(), CancellationToken.None);
+    private Task<IResult> Put(string id, SetDatasetKeysDto? dto, ITableMetadataRepository? repo = null, HttpContext? ctx = null) =>
+        CatalogApiEndpoints.SetDatasetKeysHandler(id, dto, repo ?? _repo, _audit, ctx ?? Context(), CancellationToken.None);
 
     private object? Scalar(string sql)
     {
@@ -165,6 +167,54 @@ public sealed class CatalogKeysEndpointTests : IDisposable
         reader.GetString(6).ShouldNotBeNullOrEmpty();
         reader.GetInt64(7).ShouldBeGreaterThan(0);
         reader.Read().ShouldBeFalse("exactly one entry per change");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task CallerWithoutSid_FailsClosedWith403_AndDoesNotModifyOrAudit()
+    {
+        // Issue #160 (SEC-160-01): Fail closed when caller has no SID claim; nothing is modified, nothing is audited.
+        var repoSpy = Substitute.For<ITableMetadataRepository>();
+        var auditSpy = Substitute.For<IAuditWriter>();
+        var ctx = Context(sid: null);
+
+        var result = await CatalogApiEndpoints.SetDatasetKeysHandler(
+            "sales.dbo.orders",
+            new SetDatasetKeysDto(PrimaryKey: ["a"]),
+            repoSpy,
+            auditSpy,
+            ctx,
+            CancellationToken.None);
+
+        var (status, _) = await Run(result, ctx);
+        status.ShouldBe(StatusCodes.Status403Forbidden);
+
+        await repoSpy.DidNotReceiveWithAnyArgs().GetActiveTableIdentifierAsync(default!, default);
+        await repoSpy.DidNotReceiveWithAnyArgs().GetActiveTableIdentifierByIdAsync(default, default);
+        await repoSpy.DidNotReceiveWithAnyArgs().ReplaceTableKeyDefinitionAsync(default!, default!, default!, default);
+        await auditSpy.DidNotReceiveWithAnyArgs().RecordRequiredAsync(default!, default);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task CallerWithValidSid_WritesExactSidToHmacChainedAuditLog()
+    {
+        // Issue #160 (SEC-160-02): The caller's exact SID is written to the HMAC-chained audit log instead of a placeholder.
+        const string expectedSid = "S-1-5-21-CUSTOM-CALLER-999";
+        await _repo.UpsertTableMetadataAsync(Meta(Orders) with { PrimaryKeyColumns = ["a"] });
+        var ctx = Context(sid: expectedSid);
+
+        var (status, _) = await Run(await Put("sales.dbo.orders", new SetDatasetKeysDto(PrimaryKey: ["b"]), ctx: ctx), ctx);
+        status.ShouldBe(200);
+
+        using var cmd = _repo.RawConnection().CreateCommand();
+        cmd.CommandText = "SELECT actor_sid, prev_hash, entry_hash FROM AUDIT_LOG_ENTRIES WHERE event_type = @t ORDER BY seq DESC LIMIT 1";
+        cmd.Parameters.AddWithValue("@t", AuditEventTypes.CatalogKeyDefinitionChanged);
+        using var reader = cmd.ExecuteReader();
+        reader.Read().ShouldBeTrue();
+        reader.GetString(0).ShouldBe(expectedSid);
+        reader.GetString(1).ShouldNotBeNullOrEmpty();
+        reader.GetString(2).ShouldNotBeNullOrEmpty();
     }
 
     [Fact]
