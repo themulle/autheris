@@ -72,6 +72,8 @@ public sealed record Table
     public SmallGroupStrategy? SmallGroupStrategy { get; init; }
     /// <summary>Issue #163: Table-level required filter columns enforced across every read path.</summary>
     public ImmutableArray<string> RequiredFilterColumns { get; init; } = ImmutableArray<string>.Empty;
+    /// <summary>Issue #124: Optional cardinality hint (expected row count) used for cross-source join ordering.</summary>
+    public long? ExpectedRows { get; init; }
 
     /// <summary>Rank of a sensitivity class; unknown classes rank like HIGH (fail-closed). Empty means NORMAL.</summary>
     public static int SensitivityRank(string? sensitivity)
@@ -187,6 +189,11 @@ public sealed record TableMetadata
 
     /// <summary>Issue #80: Optional estimated row count of the table used for small-table privacy coarsening.</summary>
     public long? EstimatedRowCount { get; init; }
+
+    /// <summary>Issue #124: Optional cardinality hint (expected row count) used for cross-source join ordering.</summary>
+    public long? ExpectedRows { get; init; }
+
+    public long? EffectiveExpectedRows => ExpectedRows ?? Table.ExpectedRows ?? EstimatedRowCount;
 
     /// <summary>Per-table minimum group size override for governed aggregations (#37). Falls back to <see cref="Table.MinGroupSize"/>.</summary>
     public int? MinGroupSize { get; init; }

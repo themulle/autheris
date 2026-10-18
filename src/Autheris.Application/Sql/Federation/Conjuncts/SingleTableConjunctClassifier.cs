@@ -154,7 +154,7 @@ public static class SingleTableConjunctClassifier
         }
     }
 
-    private static (ResolvedSourceTable? Table, string ColumnName) ResolveColumn(
+    internal static (ResolvedSourceTable? Table, string ColumnName) ResolveColumn(
         ColumnReference colRef,
         IReadOnlyList<ResolvedSourceTable> tables)
     {

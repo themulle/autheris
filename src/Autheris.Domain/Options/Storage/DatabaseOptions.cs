@@ -62,6 +62,12 @@ public sealed class DataSourceConnectionOptions
     public bool KeySetCacheAllowed { get; init; }
 
     /// <summary>
+    /// Issue #124 (SEC-DATA124-02): operator/data-owner consent allowing dynamic key-set pushdown filters
+    /// to be imported and executed against this target data source during cross-source WebSQL joins. Default false (fail closed).
+    /// </summary>
+    public bool AllowKeySetImport { get; init; } = false;
+
+    /// <summary>
     /// Issue #129 (BC-129-03): the connection may serve the privileged caller attribute lookup (a fixed read of the registered attribute
     /// table under the gateway service identity). It must use a dedicated read-only login. Default false: attribute-table providers fail
     /// closed (<c>SOURCE_NOT_ALLOWED</c>).

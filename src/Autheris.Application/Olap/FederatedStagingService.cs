@@ -20,6 +20,7 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Application.Sql.Federation.KeySet;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TrinoSqlEngine.Ast.Emit;
@@ -154,12 +155,33 @@ public sealed class FederatedStagingService : IFederatedStagingService
         }
 
         // Phase B: Read and stage each source under governed conditions.
+        var orderedTables = tables;
+        if (tables.Any(t => t.KeySetPlan != null))
+        {
+            var drivingStagingNames = new HashSet<string>(
+                tables.Where(t => t.KeySetPlan != null).Select(t => t.KeySetPlan!.DrivingStagingName),
+                StringComparer.OrdinalIgnoreCase);
+
+            var sorted = tables.ToList();
+            sorted.Sort((a, b) =>
+            {
+                bool aIsDriving = drivingStagingNames.Contains(a.StagingName);
+                bool bIsDriving = drivingStagingNames.Contains(b.StagingName);
+                if (aIsDriving && !bIsDriving) return -1;
+                if (!aIsDriving && bIsDriving) return 1;
+                return 0;
+            });
+            orderedTables = sorted;
+        }
+
         var stagedSources = new List<OlapTableSource>(tables.Count);
+        var stagedByStagingName = new Dictionary<string, OlapTableSource>(StringComparer.OrdinalIgnoreCase);
+        var requestByStagingName = tables.ToDictionary(r => r.StagingName, StringComparer.OrdinalIgnoreCase);
         int totalStagedRows = 0;
         long totalStagedBytes = 0;
         var actorSid = user.GetUserSid()?.Value ?? "anonymous";
 
-        foreach (var req in tables)
+        foreach (var req in orderedTables)
         {
             var connector = ResolveConnector(req.Metadata);
             if (connector == null)
@@ -221,23 +243,160 @@ public sealed class FederatedStagingService : IFederatedStagingService
                 readConnector = lookupConnector;
             }
 
-            GovernedReadResult readResult;
-            try
+            bool isKeySetCandidate = req.KeySetPlan != null &&
+                                     req.Metadata.Table.DataSourceType == DataSourceType.Sql &&
+                                     (_gatewayOptions.Value.WebSql?.CrossSource?.DynamicKeySet?.Enabled ?? true);
+
+            OlapTableSource? drivingSource = null;
+            TableAccessDecision? drivingDecision = null;
+            bool keySetAllowed = false;
+
+            if (isKeySetCandidate)
             {
-                readResult = await GovernedConnectorReader.ReadAsync(
-                    readConnector,
-                    session,
-                    req.Metadata,
-                    rowPolicy,
-                    ct).ConfigureAwait(false);
-            }
-            catch (Autheris.Application.Connectors.ConnectorRowLimitExceededException ex)
-            {
-                _logger.LogWarning("Table {Table} exceeded staging limit of {Limit} rows.", ex.Table, ex.MaxRows);
-                throw new GatewaySecurityException($"Table '{ex.Table}' exceeds maximum allowed staging rows ({ex.MaxRows}).", "ROW_LIMIT_EXCEEDED");
+                stagedByStagingName.TryGetValue(req.KeySetPlan!.DrivingStagingName, out drivingSource);
+                if (requestByStagingName.TryGetValue(req.KeySetPlan.DrivingStagingName, out var drivingReq))
+                {
+                    drivingDecision = drivingReq.Decision;
+                }
+
+                var targetSourceName = req.Metadata.Table.SourceName ?? req.Metadata.Identifier.Domain;
+                var connections = _gatewayOptions.Value.DataSources?.Connections;
+                DataSourceConnectionOptions? targetConn = null;
+                if (connections != null)
+                {
+                    string effectiveSourceName = targetSourceName;
+                    if (_gatewayOptions.Value.WebSql?.DataSourceMappings != null &&
+                        _gatewayOptions.Value.WebSql.DataSourceMappings.TryGetValue(targetSourceName, out var mapped) &&
+                        !string.IsNullOrWhiteSpace(mapped))
+                    {
+                        effectiveSourceName = mapped;
+                    }
+                    connections.TryGetValue(effectiveSourceName, out targetConn);
+                }
+
+                keySetAllowed = drivingSource != null &&
+                                drivingDecision != null &&
+                                KeySetGovernanceGuard.CanApplyKeySetPushdown(
+                                    drivingSource.Metadata,
+                                    drivingDecision,
+                                    req.KeySetPlan.DrivingKeyColumn,
+                                    req.Metadata,
+                                    req.Decision,
+                                    req.KeySetPlan.DrivenKeyColumn,
+                                    targetConn);
             }
 
-            var rows = readResult.Rows;
+            IReadOnlyList<object> distinctKeys = Array.Empty<object>();
+            bool keySetApplied = false;
+            int batchesExecuted = 0;
+            IReadOnlyList<IReadOnlyDictionary<string, object?>> rows;
+            bool rlsPushedDown = false;
+            bool inDbMaskingExecuted = false;
+            int? rowsBeforeVf = null;
+
+            if (keySetAllowed && drivingSource != null)
+            {
+                distinctKeys = KeyBatcher.ExtractDistinctKeys(drivingSource.GovernedRows, req.KeySetPlan!.DrivingKeyColumn);
+                var keySetOpts = _gatewayOptions.Value.WebSql?.CrossSource?.DynamicKeySet ?? new DynamicKeySetOptions();
+                int batchSize = KeyBatcher.ResolveBatchSize(req.Metadata.Dialect, keySetOpts.MaxKeySetBatchSize);
+                int batchCount = distinctKeys.Count == 0 ? 1 : (distinctKeys.Count + batchSize - 1) / batchSize;
+
+                if (KeyBatcher.IsWithinBounds(distinctKeys.Count, batchCount, keySetOpts.MaxKeySetKeys, keySetOpts.MaxKeySetBatches))
+                {
+                    keySetApplied = true;
+                    var batches = distinctKeys.Count == 0 ? [Array.Empty<object>()] : KeyBatcher.CreateBatches(distinctKeys, batchSize);
+                    var combinedRows = new List<IReadOnlyDictionary<string, object?>>();
+                    var seenRowKeys = new HashSet<string>(StringComparer.Ordinal);
+
+                    foreach (var batch in batches)
+                    {
+                        var batchFilter = KeySetClauseBuilder.Build(req.KeySetPlan.DrivenKeyColumn, batch, req.PushdownFilter);
+                        var batchSessionArgs = new Dictionary<string, object?>(sessionArgs);
+                        var batchSession = new ConnectorSessionContext(
+                            Principal: user,
+                            Tenant: tenantId,
+                            AccessDecision: req.Decision,
+                            ProjectedColumns: req.Projection.Count > 0 ? req.Projection : req.Metadata.Columns.Select(c => c.ColumnName).ToList(),
+                            Arguments: batchSessionArgs,
+                            PushdownFilterSql: req.Decision.CombinedRowFilterSql,
+                            Limit: budget.MaxStagedRowsPerTable + 1,
+                            Offset: 0);
+                        batchSession.Items[TableQueryItems.Filter] = batchFilter;
+
+                        GovernedReadResult batchResult;
+                        try
+                        {
+                            batchResult = await GovernedConnectorReader.ReadAsync(
+                                readConnector,
+                                batchSession,
+                                req.Metadata,
+                                rowPolicy,
+                                ct).ConfigureAwait(false);
+                        }
+                        catch (Autheris.Application.Connectors.ConnectorRowLimitExceededException ex)
+                        {
+                            _logger.LogWarning("Table {Table} exceeded staging limit of {Limit} rows.", ex.Table, ex.MaxRows);
+                            throw new GatewaySecurityException($"Table '{ex.Table}' exceeds maximum allowed staging rows ({ex.MaxRows}).", "ROW_LIMIT_EXCEEDED");
+                        }
+
+                        batchesExecuted++;
+                        if (batchResult.RlsPushdownExecuted) rlsPushedDown = true;
+                        if (batchResult.InDbMaskingExecuted) inDbMaskingExecuted = true;
+
+                        // SEC-DATA124-04: Gateway Ordinal Deduplication
+                        foreach (var row in batchResult.Rows)
+                        {
+                            var fingerprint = ComputeRowFingerprint(row, req.Metadata.PrimaryKeyColumns);
+                            if (seenRowKeys.Add(fingerprint))
+                            {
+                                combinedRows.Add(row);
+                                if (combinedRows.Count > budget.MaxStagedRowsPerTable)
+                                {
+                                    throw new GatewaySecurityException($"Table '{req.Metadata.Identifier}' exceeds maximum allowed staging rows ({budget.MaxStagedRowsPerTable}).", "ROW_LIMIT_EXCEEDED");
+                                }
+                            }
+                        }
+                    }
+
+                    rows = combinedRows;
+                }
+                else
+                {
+                    _logger.LogInformation("Dynamic key-set pushdown bounds exceeded for {Table} (keys: {KeyCount}, batches: {BatchCount}). Falling back to plain staging.",
+                        req.Metadata.Identifier, distinctKeys.Count, batchCount);
+                    keySetApplied = false;
+                    rows = null!;
+                }
+            }
+            else
+            {
+                rows = null!;
+            }
+
+            if (!keySetApplied)
+            {
+                GovernedReadResult readResult;
+                try
+                {
+                    readResult = await GovernedConnectorReader.ReadAsync(
+                        readConnector,
+                        session,
+                        req.Metadata,
+                        rowPolicy,
+                        ct).ConfigureAwait(false);
+                }
+                catch (Autheris.Application.Connectors.ConnectorRowLimitExceededException ex)
+                {
+                    _logger.LogWarning("Table {Table} exceeded staging limit of {Limit} rows.", ex.Table, ex.MaxRows);
+                    throw new GatewaySecurityException($"Table '{ex.Table}' exceeds maximum allowed staging rows ({ex.MaxRows}).", "ROW_LIMIT_EXCEEDED");
+                }
+
+                rows = readResult.Rows;
+                rlsPushedDown = readResult.RlsPushdownExecuted;
+                inDbMaskingExecuted = readResult.InDbMaskingExecuted;
+                rowsBeforeVf = readResult.RowsBeforeVirtualFilter;
+            }
+
             totalStagedRows += rows.Count;
             if (totalStagedRows > budget.MaxTotalStagedRows)
             {
@@ -253,7 +412,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                 throw new GatewaySecurityException($"Federated query exceeds maximum allowed total staged bytes of {budget.MaxTotalStagedBytes}.", "TOTAL_BYTES_LIMIT_EXCEEDED");
             }
 
-            // Audit record for this source read (fail-closed, INV-17)
+            // Audit record for this source read (fail-closed, INV-17, SEC-DATA124-05)
             try
             {
                 var auditDetails = new Dictionary<string, object?>
@@ -263,15 +422,19 @@ public sealed class FederatedStagingService : IFederatedStagingService
                     ["dataSourceType"] = req.Metadata.Table.DataSourceType.ToString(),
                     ["sourceName"] = req.Metadata.Table.SourceName ?? req.Metadata.Identifier.Domain,
                     ["rowCount"] = rows.Count,
-                    ["rlsPushedDown"] = readResult.RlsPushdownExecuted,
-                    ["inDbMaskingExecuted"] = readResult.InDbMaskingExecuted,
-                    ["filterPushedDown"] = req.PushdownFilter != null,
-                    ["pushedPredicateCount"] = req.PushdownFilter?.PushdownPredicates?.Count ?? (req.PushdownFilter != null ? 1 : 0),
+                    ["rlsPushedDown"] = rlsPushedDown,
+                    ["inDbMaskingExecuted"] = inDbMaskingExecuted,
+                    ["filterPushedDown"] = req.PushdownFilter != null || keySetApplied,
+                    ["pushedPredicateCount"] = req.PushdownFilter?.PushdownPredicates?.Count ?? (req.PushdownFilter != null || keySetApplied ? 1 : 0),
                     ["pushedPredicates"] = req.PushdownFilter?.PushdownPredicates != null
                         ? req.PushdownFilter.PushdownPredicates.Select(p => new Dictionary<string, string> { ["column"] = p.Column, ["operator"] = p.Operator }).ToList()
                         : (object)Array.Empty<Dictionary<string, string>>(),
                     ["parameterNames"] = req.ParameterAudit?.ParameterNames ?? (object)Array.Empty<string>(),
-                    ["listParameterCounts"] = req.ParameterAudit?.ListParameterCounts ?? (object)new Dictionary<string, int>()
+                    ["listParameterCounts"] = req.ParameterAudit?.ListParameterCounts ?? (object)new Dictionary<string, int>(),
+                    ["keySetFilter"] = keySetApplied,
+                    ["keyCount"] = keySetApplied ? distinctKeys.Count : 0,
+                    ["batchCount"] = keySetApplied ? batchesExecuted : 0,
+                    ["targetColumn"] = keySetApplied ? req.KeySetPlan!.DrivenKeyColumn : null
                 };
                 if (vfPlan != null)
                 {
@@ -279,7 +442,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                     auditDetails["vfTier"] = vfPlan.Tier.ToString();
                     auditDetails["upstreamCalled"] = !vfPlan.SkipUpstream;
                     auditDetails["pushdownKeyCount"] = vfPlan.PushdownArguments?.Values.OfType<System.Collections.ICollection>().Sum(c => c.Count) ?? 0;
-                    auditDetails["rowsReceived"] = readResult.RowsBeforeVirtualFilter ?? 0;
+                    auditDetails["rowsReceived"] = rowsBeforeVf ?? 0;
                     auditDetails["rowsKept"] = rows.Count;
                     if (lookupConnector != null)
                     {
@@ -318,15 +481,30 @@ public sealed class FederatedStagingService : IFederatedStagingService
             // Determine masked columns for DuckDB VARCHAR schema mapping
             var maskedColumns = MaskedColumnSet.For(req.Metadata, req.Decision);
 
-            stagedSources.Add(new OlapTableSource(
+            var stagedSource = new OlapTableSource(
                 Table: req.Metadata.Identifier,
                 GovernedRows: rows,
                 Metadata: req.Metadata,
                 StagingTableName: req.StagingName,
-                MaskedColumns: maskedColumns));
+                MaskedColumns: maskedColumns);
+
+            stagedSources.Add(stagedSource);
+            stagedByStagingName[req.StagingName] = stagedSource;
         }
 
         return stagedSources;
+    }
+
+    private static string ComputeRowFingerprint(
+        IReadOnlyDictionary<string, object?> row,
+        IReadOnlyList<string> primaryKeyColumns)
+    {
+        if (primaryKeyColumns.Count > 0 && primaryKeyColumns.All(row.ContainsKey))
+        {
+            return string.Join("\0", primaryKeyColumns.Select(c => $"{c}:{row[c]}"));
+        }
+
+        return string.Join("\0", row.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => $"{kv.Key}:{kv.Value}"));
     }
 
     private void EnsureNoArgumentConflict(Dictionary<string, object?> sessionArgs, string name, TableMetadata metadata)
