@@ -71,7 +71,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         ArgumentNullException.ThrowIfNull(context);
         ct.ThrowIfCancellationRequested();
 
-        var (permitted, _) = await ResolvePermittedAsync(context, ct).ConfigureAwait(false);
+        var (permitted, _) = await VisibleForAsync(context, ct).ConfigureAwait(false);
         return permitted.Select(ToSummary).ToList();
     }
 
@@ -151,7 +151,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         ArgumentNullException.ThrowIfNull(context);
         ct.ThrowIfCancellationRequested();
 
-        var (permitted, all) = await ResolvePermittedAsync(context, ct).ConfigureAwait(false);
+        var (permitted, all) = await VisibleForAsync(context, ct).ConfigureAwait(false);
         var q = query?.Trim();
 
         if (string.IsNullOrWhiteSpace(q))
@@ -197,7 +197,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         ArgumentNullException.ThrowIfNull(context);
         ct.ThrowIfCancellationRequested();
 
-        var (permitted, all) = await ResolvePermittedAsync(context, ct).ConfigureAwait(false);
+        var (permitted, all) = await VisibleForAsync(context, ct).ConfigureAwait(false);
         var permittedById = permitted.ToDictionary(t => t.Identifier);
 
         if (_searchEngine?.IsIndexReady == true)
@@ -302,7 +302,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     /// The tables the caller may discover (one visibility service: consent, tier shaping and ReBAC) together with the unfiltered
     /// catalog (only used to tell which columns a caller cannot see). Any failure answers the empty set, never the unfiltered catalog.
     /// </summary>
-    private async Task<(IReadOnlyList<TableMetadata> Permitted, IReadOnlyList<TableMetadata> All)> ResolvePermittedAsync(RequestContext context, CancellationToken ct)
+    private async Task<(IReadOnlyList<TableMetadata> Permitted, IReadOnlyList<TableMetadata> All)> VisibleForAsync(RequestContext context, CancellationToken ct)
     {
         if (_visibility == null)
         {
