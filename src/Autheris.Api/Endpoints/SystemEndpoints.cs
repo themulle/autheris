@@ -12,8 +12,10 @@ using Autheris.Application.ResourceGroups;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
+using Autheris.GraphQL.Catalog;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 
@@ -47,6 +49,7 @@ public static class SystemEndpoints
             HttpContext context,
             IGatewaySystemMetricsService metricsService,
             IOptions<GatewayOptions> options,
+            [FromServices] ICatalogSchemaDiagnostics? catalogDiagnostics,
             CancellationToken ct) =>
         {
             var sysOpts = options.Value.SystemMetrics;
@@ -68,7 +71,8 @@ public static class SystemEndpoints
                 status = isAllHealthy ? "Healthy" : "Degraded",
                 version = metrics.Version,
                 uptime = metrics.Uptime,
-                components = metrics.Components
+                components = metrics.Components,
+                graphQlCatalog = BuildCatalogDiagnostics(catalogDiagnostics, context.User)
             }, statusCode: isAllHealthy ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable);
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
@@ -93,6 +97,39 @@ public static class SystemEndpoints
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         return app;
+    }
+
+    /// <summary>Cap on the table names listed in the health payload (BUG #157, SEC-BUG157-03).</summary>
+    internal const int MaxListedOmittedTables = 100;
+
+    /// <summary>
+    /// BUG #157: GraphQL catalog omissions for the health payload. Table names are catalog metadata and are listed only for
+    /// GovernanceAdmin; every other authorised caller gets the count (SEC-BUG157-02). Null when no diagnostics are registered, which
+    /// omits the property. Entries carry only the qualified table name and the reason (SEC-BUG157-03). Never influences the status.
+    /// </summary>
+    private static object? BuildCatalogDiagnostics(ICatalogSchemaDiagnostics? diagnostics, ClaimsPrincipal user)
+    {
+        if (diagnostics == null)
+        {
+            return null;
+        }
+
+        var omitted = diagnostics.OmittedTables;
+        if (!GatewayPolicies.HasRole(user, GatewayRole.GovernanceAdmin))
+        {
+            return new { omittedTableCount = omitted.Count };
+        }
+
+        var listed = omitted
+            .Take(MaxListedOmittedTables)
+            .Select(o => new { table = $"{o.Table.Domain}.{o.Table.Schema}.{o.Table.TableName}", reason = o.Reason.ToString() })
+            .ToArray();
+        return new
+        {
+            omittedTableCount = omitted.Count,
+            omittedTables = listed,
+            omittedTablesTruncated = omitted.Count > listed.Length
+        };
     }
 
     private static bool IsAuthorized(ClaimsPrincipal user, IReadOnlyList<string>? allowedRoles)

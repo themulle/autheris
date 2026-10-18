@@ -14,10 +14,23 @@ public interface IRowFilterKeySetStage
         IReadOnlyDictionary<TableIdentity, PolicyPredicate?> predicates,
         RowFilterKeySetReport report,
         CancellationToken ct);
+
+    /// <summary>
+    /// D-WPC-2 / SEC-RF107-17: the statement is not a read statement, so <see cref="ApplyAsync"/> is not invoked. Reports <paramref name="reason"/> for every
+    /// site whose resolved strategy is <c>KeySetCache</c>; never reads epochs, the cache or the loader.
+    /// </summary>
+    void ReportSkipped(
+        RowFilterKeySetContext context,
+        IReadOnlyDictionary<TableIdentity, PolicyPredicate?> predicates,
+        RowFilterKeySetReport report,
+        KeySetFallbackReason reason);
 }
 
 /// <param name="GovernanceIdentifiers">Target and dependent governance identifiers per table (the epoch keys).</param>
 /// <param name="Disabled">True on the single bind-limit retry (SEC-RF107-15): every site stays <c>EXISTS</c>.</param>
+/// <param name="IsRead">D-WPC-1 / SEC-RF107-17: <c>metadata.StatementType == Select</c>.</param>
+/// <param name="UserSqlLength">D-WPC-1: length of the user statement (text budget, D-WPC-3).</param>
+/// <param name="MaxExpansionFactor">D-WPC-1: the normalized expansion factor of the compile request.</param>
 public sealed record RowFilterKeySetContext(
     string DataSourceName,
     TenantId Tenant,
@@ -26,11 +39,14 @@ public sealed record RowFilterKeySetContext(
     TenantBinding TenantBinding,
     IReadOnlyDictionary<TableIdentity, TableMetadata?> Metadata,
     IReadOnlyDictionary<TableIdentity, IReadOnlyList<TableIdentifier>> GovernanceIdentifiers,
-    bool Disabled);
+    bool Disabled,
+    bool IsRead = true,
+    int UserSqlLength = 0,
+    int MaxExpansionFactor = CompileRequestFactory.DefaultMaxExpansionFactor);
 
 public enum KeySetOutcomeKind { Exists, Hit, Miss, Fallback }
 
-/// <summary><c>Deny_Negated</c> is the reason of a site in a negated context or a shared node instance (SEC-RF107-06).</summary>
+/// <summary><c>Deny_Negated</c> is the reason of a site in a negated context, <c>Deny_Shared</c> the one of a node instance that occurs more than once in the predicate (SEC-RF107-06).</summary>
 public enum KeySetFallbackReason
 {
     Deny_Negated,
@@ -45,7 +61,19 @@ public enum KeySetFallbackReason
     TypeNotBindable,
     ValueNotBindable,
     InvalidStoredSetting,
-    LoadThrottled
+    LoadThrottled,
+
+    /// <summary>D-WPC-3: the IN lists would not fit the expansion budget of the statement text (pre-load gate or post-load fit).</summary>
+    ExpansionBudget,
+
+    /// <summary>D-WPC-4: the compile hit the expansion limit and the one-time retry re-assembled the statement with every site as <c>EXISTS</c>.</summary>
+    ExpansionLimitRetry,
+
+    /// <summary>D-WPC-2: key sets apply to read statements only; INSERT, UPDATE, DELETE and unknown statement types keep <c>EXISTS</c>.</summary>
+    WriteStatement,
+
+    /// <summary>SEC-RF107-06: the node instance of the site occurs more than once in the predicate tree and is never substituted.</summary>
+    Deny_Shared
 }
 
 /// <summary>Diagnostics of one site. Never contains key values or a hash of key values (SEC-RF107-09).</summary>
@@ -60,41 +88,6 @@ public sealed record RowFilterKeySetOutcome(
     int? PaddedCount,
     int? AgeSeconds);
 
-/// <summary>Per-statement collector of <see cref="RowFilterKeySetOutcome"/> (single statement, single assembly; not thread-safe).</summary>
-public sealed class RowFilterKeySetReport
-{
-    private readonly List<RowFilterKeySetOutcome> _outcomes = [];
-
-    public IReadOnlyList<RowFilterKeySetOutcome> Outcomes => _outcomes;
-
-    public void Add(RowFilterKeySetOutcome outcome)
-    {
-        ArgumentNullException.ThrowIfNull(outcome);
-        _outcomes.Add(outcome);
-    }
-}
 
 /// <summary>Result of <c>GovernancePolicyFactory.CreateAssemblyAsync</c>: the policy plus the key-set diagnostics.</summary>
 public sealed record GovernedPolicyAssembly(GovernancePolicy Policy, RowFilterKeySetReport KeySets);
-
-/// <summary>
-/// Cached key set of one correlated filter. <see cref="Tenant"/> and <see cref="DataSource"/> are verified on every hit (SEC-RF107-02).
-/// <see cref="ToString"/> prints counts only (SEC-RF107-09).
-/// </summary>
-public sealed record RowFilterKeySetEntry(
-    IReadOnlyList<object> Keys,
-    bool Overflow,
-    DateTimeOffset LoadedAt,
-    string Tenant,
-    string DataSource)
-{
-    public long EstimateBytes() => throw new NotImplementedException("WP-C: RowFilterKeySetEntry.EstimateBytes");
-
-    public override string ToString() => $"RowFilterKeySetEntry {{ Keys = {Keys.Count}, Overflow = {Overflow}, LoadedAt = {LoadedAt:O} }}";
-}
-
-public static class RowFilterKeySetErrorCodes
-{
-    /// <summary>The key query failed (connection, command, read, timeout, conversion); the statement is denied, fail closed (SEC-RF107-08).</summary>
-    public const string KeySetUnavailable = "ROW_FILTER_KEY_SET_UNAVAILABLE";
-}

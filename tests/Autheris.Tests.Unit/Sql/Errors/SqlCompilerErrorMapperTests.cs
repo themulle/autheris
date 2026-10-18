@@ -52,6 +52,13 @@ public sealed class SqlCompilerErrorMapperTests
         { "affected-rows", () => new GovernedSqlException(GovernedSqlErrorCodes.AffectedRowsLimit, TargetSqlDialect.PostgreSql), 422, "DML_AFFECTED_ROWS_LIMIT", null },
         { "data-error", () => new GovernedSqlException(GovernedSqlErrorCodes.DataError, TargetSqlDialect.PostgreSql), 422, "SQL_DATA_ERROR", null },
         { "provider-error", () => new GovernedSqlException(GovernedSqlErrorCodes.ProviderError, TargetSqlDialect.PostgreSql), 502, "SQL_PROVIDER_ERROR", null },
+        // REQ-SQL-130 (T-27): one stable code per cause; the exception is not a SecurityException, so it is never the generic 403.
+        { "timezone-invalid", () => new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneInvalid), 400, "SQL_TIMEZONE_INVALID", null },
+        { "timezone-argument", () => new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneArgument), 422, "SQL_TIMEZONE_ARGUMENT", null },
+        { "timezone-unsupported-dialect", () => new SqlTimeZoneException(GovernedSqlErrorCodes.FunctionUnsupportedDialect), 501, "SQL_FUNCTION_UNSUPPORTED_DIALECT", null },
+        { "timezone-unavailable", () => new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneUnavailable), 503, "SQL_TIMEZONE_UNAVAILABLE", null },
+        { "timezone-wrapped", () => new InvalidOperationException(HostileMarker, new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneInvalid)), 400, "SQL_TIMEZONE_INVALID", null },
+        { "timezone-unknown-code", () => new SqlTimeZoneException("SQL_SOMETHING_ELSE"), 500, "SQL_COMPILER_INVARIANT", null },
         { "coverage", () => new SecurityCoverageException(HostileMarker), 500, "SQL_COMPILER_INVARIANT", null },
         { "config", () => new SqlCompileConfigurationException(), 500, "SQL_COMPILER_INVARIANT", null },
         { "checked-required", () => new CheckedExecutionRequiredException(TargetSqlDialect.PostgreSql), 500, "DML_CHECKED_EXECUTION_REQUIRED", null },
@@ -86,6 +93,19 @@ public sealed class SqlCompilerErrorMapperTests
 
         mapping.Code.ShouldBe("SQL_LIMIT_EXCEEDED");
         mapping.Limit.ShouldBe("QueryLength");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Map_ATimeZoneErrorIsNeverTheGenericPolicyViolation_EvenInsideASecurityException()
+    {
+        var wrapped = new SecurityException("outer", new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneArgument));
+
+        SqlCompilerErrorMapper.TryMap(wrapped, out var mapping).ShouldBeTrue();
+
+        mapping.Status.ShouldBe(422);
+        mapping.Code.ShouldBe("SQL_TIMEZONE_ARGUMENT");
+        mapping.Title.ShouldBe("The time zone conversion arguments are not valid.");
     }
 
     [Fact]

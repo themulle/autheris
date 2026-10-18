@@ -16,7 +16,8 @@ public sealed record SqlEndpointParameter(
     string? Description = null,
     string? TargetColumn = null,
     string? TargetTable = null,
-    string? ComparisonOperator = null);
+    string? ComparisonOperator = null,
+    bool IsList = false);
 
 /// <summary>
 /// Represents a projected output column of a declarative SQL endpoint.

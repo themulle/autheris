@@ -210,6 +210,18 @@ public sealed class TypedPolicySourcesWiringTests
     }
 
     [Fact]
+    public async Task ProcedureExecutionService_ResolvesConcurrencyGateAndDenialAuditLimiter()
+    {
+        await using var provider = BuildProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var service = scope.ServiceProvider.GetRequiredService<IProcedureExecutionService>();
+
+        FieldsOf(service, typeof(Autheris.Application.Interfaces.ITableReadConcurrencyGate)).ShouldHaveSingleItem().ShouldNotBeNull();
+        var limiter = FieldsOf(service, typeof(Autheris.Application.Procedures.Services.ProcedureDenialAuditLimiter)).ShouldHaveSingleItem();
+        limiter.ShouldBeSameAs(provider.GetRequiredService<Autheris.Application.Procedures.Services.ProcedureDenialAuditLimiter>());
+    }
+
+    [Fact]
     public async Task WebSqlService_RewriterGetsTheTypedPolicySources()
     {
         await using var provider = BuildProvider();

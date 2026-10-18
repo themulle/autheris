@@ -567,6 +567,277 @@ public sealed class CatalogSchemaModelTests
         Assert.Empty(offenders);
     }
 
+    // BUG #157: tables without queryable columns are omitted instead of producing field-less GraphQL types.
+
+    private static readonly TableColumn[] NoColumns = [];
+    private static readonly TableColumn[] OnlyDashedColumns =
+        [new TableColumn { ColumnName = "secret-col", DataType = "int" }, new TableColumn { ColumnName = "other-col", DataType = "int" }];
+
+    private static async Task<CatalogSchemaModel> BuildTablesAsync(
+        IReadOnlyList<TableMetadata> tables,
+        IReadOnlyList<TableRelation>? relations = null,
+        Microsoft.Extensions.Logging.ILogger? logger = null)
+        => await BuildWithRelationsAsync(tables, relations ?? [], logger);
+
+    [Fact]
+    public async Task BuildAsync_TableWithoutColumns_IsOmittedWithNoQueryableColumns()
+    {
+        var empty = CreateTable(new TableIdentifier("sales", "dbo", "empty"), columns: NoColumns);
+        var valid = CreateTable(new TableIdentifier("sales", "dbo", "valid"));
+
+        var model = await BuildTablesAsync([empty, valid]);
+
+        Assert.Equal(valid.Identifier, Assert.Single(model.Tables).Identifier);
+        var omitted = Assert.Single(model.OmittedTables);
+        Assert.Equal(empty.Identifier, omitted.Table);
+        Assert.Equal(CatalogTableOmissionReason.NoQueryableColumns, omitted.Reason);
+    }
+
+    [Fact]
+    public async Task BuildAsync_TableWhoseColumnsAllFailPlainIdentifierRule_IsOmittedWithNoQueryableColumns()
+    {
+        var dashed = CreateTable(new TableIdentifier("sales", "dbo", "dashed"), columns: OnlyDashedColumns);
+
+        var model = await BuildTablesAsync([dashed]);
+
+        Assert.Empty(model.Tables);
+        Assert.Equal(CatalogTableOmissionReason.NoQueryableColumns, Assert.Single(model.OmittedTables).Reason);
+    }
+
+    [Fact]
+    public async Task BuildAsync_OmittedColumnlessTable_DoesNotReserveTypeNames()
+    {
+        // "sales.dbo.orders" sorts before "sales_dbo.orders.x"? Both sanitise to sales_dbo_orders*; use identical base names.
+        var emptyFirst = CreateTable(new TableIdentifier("sales", "dbo", "orders_item"), columns: NoColumns);
+        var validLater = CreateTable(new TableIdentifier("sales_dbo", "orders", "item"));
+
+        var model = await BuildTablesAsync([emptyFirst, validLater]);
+
+        var kept = Assert.Single(model.Tables);
+        Assert.Equal(validLater.Identifier, kept.Identifier);
+        Assert.Equal("sales_dbo_orders_item", kept.TypeName);
+        Assert.Equal(CatalogTableOmissionReason.NoQueryableColumns, Assert.Single(model.OmittedTables).Reason);
+    }
+
+    [Fact]
+    public async Task BuildAsync_RelationToOrFromOmittedTable_IsNotExposed()
+    {
+        var parent = RelTable(PartnerId, "pg1");
+        var emptyChild = CreateTable(ContactId, sourceName: "pg1", columns: NoColumns);
+
+        var model = await BuildTablesAsync([parent, emptyChild], [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.Empty(Assert.Single(model.Tables).Relations);
+
+        var emptyParent = CreateTable(PartnerId, sourceName: "pg1", columns: NoColumns);
+        var child = RelTable(ContactId, "pg1");
+        var model2 = await BuildTablesAsync([emptyParent, child], [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.Empty(Assert.Single(model2.Tables).Relations);
+    }
+
+    [Fact]
+    public async Task BuildAsync_CollidingTable_IsRecordedAsNameCollision()
+    {
+        var first = CreateTable(new TableIdentifier("sales", "dbo", "orders_item"));
+        var second = CreateTable(new TableIdentifier("sales_dbo", "orders", "item"));
+
+        var model = await BuildTablesAsync([first, second]);
+
+        var omitted = Assert.Single(model.OmittedTables);
+        Assert.Equal(second.Identifier, omitted.Table);
+        Assert.Equal(CatalogTableOmissionReason.NameCollision, omitted.Reason);
+    }
+
+    [Fact]
+    public async Task BuildAsync_TreeUnsupportedDialectTable_IsRecordedAsUnsupportedDialect()
+    {
+        var pg = CreateTable(new TableIdentifier("sales", "public", "orders"));
+        var oracle = CreateTable(new TableIdentifier("erp", "app", "invoices"), dialect: "Oracle");
+        var unknown = CreateTable(new TableIdentifier("erp", "app", "mystery"), dialect: "NoSuchDialect");
+
+        var model = await BuildTablesAsync([pg, oracle, unknown]);
+
+        Assert.Equal(pg.Identifier, Assert.Single(model.Tables).Identifier);
+        Assert.Equal(2, model.OmittedTables.Count);
+        Assert.All(model.OmittedTables, o => Assert.Equal(CatalogTableOmissionReason.UnsupportedDialect, o.Reason));
+    }
+
+    [Fact]
+    public async Task BuildAsync_ColumnlessTable_LogsOneWarningWithQualifiedNameOnly()
+    {
+        var logger = new CapturingLogger();
+        var empty = CreateTable(new TableIdentifier("sales", "dbo", "empty"), columns: NoColumns);
+
+        await BuildTablesAsync([empty], logger: logger);
+
+        var warning = Assert.Single(logger.Entries, e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning);
+        Assert.Contains(empty.Identifier.ToQualifiedName(), warning.Message);
+    }
+
+    [Fact]
+    public async Task BuildAsync_NullLogger_ColumnlessTable_DoesNotThrow()
+    {
+        var empty = CreateTable(new TableIdentifier("sales", "dbo", "empty"), columns: NoColumns);
+
+        var model = await BuildTablesAsync([empty], logger: null);
+
+        Assert.Empty(model.Tables);
+    }
+
+    [Fact]
+    public async Task Model_NeverContainsTableWithZeroColumns()
+    {
+        var tables = new[]
+        {
+            CreateTable(new TableIdentifier("a", "dbo", "valid")),
+            CreateTable(new TableIdentifier("a", "dbo", "empty"), columns: NoColumns),
+            CreateTable(new TableIdentifier("a", "dbo", "filtered"), columns: OnlyDashedColumns),
+            CreateTable(new TableIdentifier("a", "dbo", "valid_filter")),
+            CreateTable(new TableIdentifier("a_dbo", "valid", "filter")),
+        };
+
+        var model = await BuildTablesAsync(tables);
+
+        Assert.NotEmpty(model.Tables);
+        Assert.All(model.Tables, t => Assert.NotEmpty(t.Columns));
+        Assert.Equal(tables.Length, model.Tables.Count + model.OmittedTables.Count);
+    }
+
+    [Fact]
+    public async Task Fingerprint_ChangesWhenColumnlessTableAppears()
+    {
+        var valid = CreateTable(new TableIdentifier("sales", "dbo", "valid"));
+        var before = await BuildTablesAsync([valid]);
+        var after = await BuildTablesAsync([valid, CreateTable(new TableIdentifier("sales", "dbo", "empty"), columns: NoColumns)]);
+
+        Assert.NotEqual(before.Fingerprint(), after.Fingerprint());
+    }
+
+    [Fact]
+    public async Task Fingerprint_ChangesWhenOmittedTableGainsColumns()
+    {
+        var emptyId = new TableIdentifier("sales", "dbo", "later");
+        var before = await BuildTablesAsync([CreateTable(emptyId, columns: NoColumns)]);
+        var after = await BuildTablesAsync([CreateTable(emptyId)]);
+
+        Assert.NotEqual(before.Fingerprint(), after.Fingerprint());
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Model_OmittedTable_HasNoTypesFieldsRelationsOrReservedNames()
+    {
+        // SEC-BUG157-01 / T-BUG157-S01
+        var empty = CreateTable(PartnerId, sourceName: "pg1", columns: NoColumns);
+        var child = RelTable(ContactId, "pg1");
+        var reuser = CreateTable(new TableIdentifier("crm_dbo", "partners", "x"), sourceName: "pg1");
+        var reuserSameName = CreateTable(new TableIdentifier("crm", "dbo", "partners_x"), sourceName: "pg1", columns: NoColumns);
+
+        var model = await BuildTablesAsync(
+            [empty, child, reuser, reuserSameName],
+            [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.DoesNotContain(model.Tables, t => t.Identifier == empty.Identifier);
+        Assert.DoesNotContain(model.Tables, t => t.Identifier == reuserSameName.Identifier);
+        Assert.False(model.TablesByIdentifier.ContainsKey(empty.Identifier));
+        Assert.DoesNotContain("crm_dbo_partners", model.TablesByTypeName.Keys);
+        Assert.DoesNotContain("crm_dbo_partners", model.TablesByQueryFieldName.Keys);
+        Assert.All(model.Tables, t => Assert.DoesNotContain(t.Relations, r => r.TargetTableIdentifier == empty.Identifier));
+        // The later table keeps the name that the omitted table would otherwise have reserved
+        Assert.Equal("crm_dbo_partners_x", model.TablesByIdentifier[reuser.Identifier].TypeName);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Model_AllColumnsFilteredByRGql13_ReasonIsNoQueryableColumnsAndLeaksNoColumnName()
+    {
+        // SEC-BUG157-05 / T-BUG157-S02: the pre-existing R-GQL-13 information line is out of scope; the new records are checked.
+        var logger = new CapturingLogger();
+        var dashed = CreateTable(new TableIdentifier("sales", "dbo", "dashed"), columns: OnlyDashedColumns);
+
+        var model = await BuildTablesAsync([dashed], logger: logger);
+
+        var omitted = Assert.Single(model.OmittedTables);
+        Assert.Equal(CatalogTableOmissionReason.NoQueryableColumns, omitted.Reason);
+        var warning = Assert.Single(logger.Entries, e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning);
+        Assert.DoesNotContain("secret-col", warning.Message);
+        Assert.DoesNotContain("other-col", warning.Message);
+        Assert.DoesNotContain("secret", omitted.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Model_InactiveAndNonSqlTables_NeverAppearInOmittedTables()
+    {
+        // SEC-BUG157-06 / T-BUG157-S08
+        var inactive = CreateTable(new TableIdentifier("a", "dbo", "inactive"), isActive: false, columns: NoColumns);
+        var inactiveOracle = CreateTable(new TableIdentifier("a", "dbo", "inactive_oracle"), isActive: false, dialect: "Oracle");
+        var nonSql = CreateTable(new TableIdentifier("a", "dbo", "http"), dsType: DataSourceType.HttpDeclarative, columns: NoColumns);
+        var nonSqlUnknown = CreateTable(new TableIdentifier("a", "dbo", "http2"), dsType: DataSourceType.HttpDeclarative, dialect: "Nope");
+        var valid = CreateTable(new TableIdentifier("a", "dbo", "valid"));
+
+        var model = await BuildTablesAsync([inactive, inactiveOracle, nonSql, nonSqlUnknown, valid]);
+
+        Assert.Empty(model.OmittedTables);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Warning_ColumnlessTable_ContainsOnlyQualifiedName()
+    {
+        // SEC-BUG157-05 / T-BUG157-S09: asserts on the new warning record only.
+        var logger = new CapturingLogger();
+        var empty = CreateTable(new TableIdentifier("sales", "dbo", "empty"), columns: OnlyDashedColumns);
+
+        await BuildTablesAsync([empty], logger: logger);
+
+        var warning = Assert.Single(logger.Entries, e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning);
+        Assert.Equal(
+            $"GraphQL catalog schema: table '{empty.Identifier.ToQualifiedName()}' has no queryable columns and is omitted from the GraphQL schema.",
+            warning.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Fingerprint_StableAcrossRepeatedBuilds_NoRebuildLoop()
+    {
+        // SEC-BUG157-09 / T-BUG157-S10: check build (logger null) and real build agree with omissions present.
+        var tables = new[]
+        {
+            CreateTable(new TableIdentifier("a", "dbo", "valid")),
+            CreateTable(new TableIdentifier("a", "dbo", "empty"), columns: NoColumns),
+            CreateTable(new TableIdentifier("a", "dbo", "oracle"), dialect: "Oracle"),
+        };
+
+        var check = await BuildTablesAsync(tables, logger: null);
+        var real = await BuildTablesAsync(tables, logger: new CapturingLogger());
+
+        Assert.Equal(check.Fingerprint(), real.Fingerprint());
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Fingerprint_OmissionEntries_AreUnambiguouslyEncoded()
+    {
+        // SEC-BUG157-09: two different omission sets never produce the same fingerprint.
+        var a = await BuildTablesAsync([CreateTable(new TableIdentifier("a", "b", "c"), columns: NoColumns)]);
+        var b = await BuildTablesAsync([CreateTable(new TableIdentifier("a", "b", "c"), dialect: "Oracle")]);
+
+        Assert.NotEqual(a.Fingerprint(), b.Fingerprint());
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Fingerprint_OmittedTablesDifferingOnlyInDomain_DoNotCollide()
+    {
+        // SEC-BUG157-09: schema.table alone is ambiguous across domains.
+        var a = await BuildTablesAsync([CreateTable(new TableIdentifier("d1", "s", "t"), columns: NoColumns)]);
+        var b = await BuildTablesAsync([CreateTable(new TableIdentifier("d2", "s", "t"), columns: NoColumns)]);
+
+        Assert.NotEqual(a.Fingerprint(), b.Fingerprint());
+    }
+
     private static TableMetadata CreateTable(
         TableIdentifier id,
         bool isActive = true,

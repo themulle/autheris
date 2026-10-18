@@ -11,3 +11,7 @@ NuGet.config                       @themulle
 tests/Autheris.Tests.SqlCompilerGate/Corpus/accepted-differences*.json  @themulle
 # WP-X1.3 (SEC-X1-14): a tier flip in the capability table admits a dialect to WebSQL
 src/TrinoSqlEngine/Ast/Capabilities/DialectCapabilityTable.cs  @themulle
+# REQ-SQL-130 (BC-130-6c): the closed time zone set and its hash constant cannot change without security review
+src/TrinoSqlEngine/TimeZones/**  @themulle
+tests/TrinoSqlEngine.Tests/TimeZones/Cldr/**  @themulle
+tests/TrinoSqlEngine.Tests/TimeZones/IanaWindowsZonesGenerator.cs  @themulle

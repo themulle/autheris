@@ -342,6 +342,37 @@ internal static class SecurityProbes
             Assert.Equal(SqlLimitKind.InListItems, ex.Kind);
         });
 
+        // ---- client lists (REQ-SQL-128, SEC-128-01, -02, -10) ----------------------------------------------------------------
+        Add("ClientList_EmptyNotInDelete_IsRejectedAsUnfiltered", "client-list-order", () =>
+        {
+            var h = new Compiler.ClientListHarness();
+            Assert.Throws<UnfilteredDmlException>(() => h.Compile(TargetSqlDialect.PostgreSql, "DELETE FROM orders WHERE id NOT IN (__param_e)",
+                Compiler.ClientListHarness.Shapes(("e", 0)), StatementPermissions.Delete));
+        });
+
+        Add("ClientList_ListInScalarPosition_IsRejected", "client-list-position", () =>
+        {
+            var h = new Compiler.ClientListHarness();
+            Assert.Throws<ClientListException>(() => h.Compile(TargetSqlDialect.PostgreSql, "SELECT id FROM orders WHERE id = __param_l",
+                Compiler.ClientListHarness.Shapes(("l", 3))));
+        });
+
+        Add("ClientList_RepeatedUse_IsCappedPerStatement", "client-list-cap", () =>
+        {
+            var h = new Compiler.ClientListHarness();
+            string sql = "SELECT id FROM orders WHERE " + string.Join(" OR ", Enumerable.Repeat("id IN (__param_l)", 11));
+            Assert.Throws<ClientListException>(() => h.Compile(TargetSqlDialect.PostgreSql, sql, Compiler.ClientListHarness.Shapes(("l", 1000))));
+        });
+
+        Add("ClientList_LongerListThanCompiled_IsRefusedNotTruncated", "client-list-count", () =>
+        {
+            var h = new Compiler.ClientListHarness();
+            var compiled = h.Compile(TargetSqlDialect.PostgreSql, "SELECT id FROM orders WHERE id IN (__param_ids)", Compiler.ClientListHarness.Shapes(("ids", 2)));
+            var longer = ClientListValue.Create(new object[] { 1L, 2L, 3L }, SqlParameterType.Int64);
+            Assert.Throws<ClientListException>(() => CompiledSqlBinders.For(TargetSqlDialect.PostgreSql)
+                .Bind(new Compiler.BinderMutationTests.RecCommand(), compiled, new Dictionary<string, object?> { ["ids"] = longer }));
+        });
+
         PerDialect("ExecutionStack_Exhaustion_FailsClosed", "execution-stack", d =>
         {
             foreach (int at in new[] { 1, 4, 12 })

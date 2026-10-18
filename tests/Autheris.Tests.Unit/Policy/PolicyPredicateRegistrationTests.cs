@@ -41,6 +41,8 @@ public sealed class PolicyPredicateRegistrationTests
         services.AddSingleton<ISqlEngine, FastSqlEngine>();
         services.AddSingleton(NSubstitute.Substitute.For<Autheris.Application.Sql.Catalog.IGovernedCatalogProvider>());
         services.AddSingleton(NSubstitute.Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>());   // M-A1: the factory reads governance records of policy tables
+        services.AddSingleton(NSubstitute.Substitute.For<Autheris.Application.Interfaces.IEpochValidationService>());   // #107: the key-set stage reads authoritative epochs
+        services.AddSingleton(NSubstitute.Substitute.For<Autheris.Application.Interfaces.ISqlConnectionFactory>());     // #107: the key-set loader opens the governed read connection
         services.AddOptions();
         services.AddSingleton(Microsoft.Extensions.Options.Options.Create(new GatewayOptions()));
 

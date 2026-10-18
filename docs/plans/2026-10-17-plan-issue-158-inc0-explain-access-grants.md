@@ -176,3 +176,12 @@ narrows what is shown. No control is weakened.
 - **T-GOV158-S10** `RoleGrantMatchedByRoleId_ShowsOnlyCallersHeldRoleGrant` : id-matched grant shown, other-id grant not.
 - **T-GOV158-S11** `DescriptionAndValidTo_IndependentOfRepositoryOrder` : both orders yield equal DTOs.
 - **T-GOV158-S12** `McpAndGraphQlMyAccess_ShareServiceOutput_NoForeignRole` : MCP result for the regression fixture carries no foreign role name.
+
+## Changelog
+
+- 2026-10-17 (Phase 4): G-PLAN-REBASE check against the branch: F1-F8 confirmed; F3 path corrected to
+  `src/Autheris.Application/Services/ConsentResolutionService.cs` (SEC-GOV158-07). Implemented as planned:
+  `ConsentResolutionService.IsApplicable` (internal static) is used by `ResolveAccess` and by the explanation helper
+  `EffectiveAccessExplanationService.MatchingAllowConsents` (internal static, so the parity theory T-GOV158-S05 can call it).
+  Deviation: the helper is `internal` (not private) for testability; `validTo` and the description use
+  `EffectiveValidTo`/ordinal minimum as in sections 3.3 and 3.4. Tests S01, S02, S10 are the security-tagged functional rows.
