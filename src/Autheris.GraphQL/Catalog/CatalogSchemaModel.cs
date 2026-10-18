@@ -1,4 +1,5 @@
 using System.Text;
+using Autheris.Application.Analytics;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Sql.Tree.Federation;
 using Autheris.Domain.Common;
@@ -506,51 +507,14 @@ public sealed partial class CatalogSchemaModel
     [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
     private static partial System.Text.RegularExpressions.Regex QueryableColumnNameRegex();
 
-    public static CatalogFieldType MapDataType(string? dataType)
+    public static CatalogFieldType MapDataType(string? dataType) => ColumnValueKinds.FromDataType(dataType) switch
     {
-        if (string.IsNullOrWhiteSpace(dataType)) return CatalogFieldType.String;
-        var dt = dataType.Trim().ToLowerInvariant();
-
-        // 1. Spatial / complex types that might contain words like 'point' or 'interval'
-        if (dt.Contains("interval") || dt.Contains("point") || dt.Contains("polygon") ||
-            dt.Contains("geometry") || dt.Contains("geography") || dt.Contains("line") ||
-            dt.Contains("json") || dt.Contains("xml") || dt.Contains("uuid") || dt.Contains("guid"))
-        {
-            return CatalogFieldType.String;
-        }
-
-        var baseType = dt.Split('(', '[', ' ')[0].Trim();
-
-        if (baseType.StartsWith("bit") || baseType.StartsWith("bool"))
-        {
-            return CatalogFieldType.Boolean;
-        }
-
-        if (baseType is "bigint" or "int8" or "long")
-        {
-            return CatalogFieldType.Long;
-        }
-
-        if (baseType is "int" or "integer" or "int4" or "smallint" or "int2" or "tinyint")
-        {
-            return CatalogFieldType.Int;
-        }
-
-        if (baseType is "decimal" or "numeric" or "money" or "smallmoney")
-        {
-            return CatalogFieldType.Decimal;
-        }
-
-        if (baseType is "float" or "double" or "real" or "float4" or "float8")
-        {
-            return CatalogFieldType.Float;
-        }
-
-        if (dt.Contains("date") || dt.Contains("time") || dt.Contains("timestamp"))
-        {
-            return CatalogFieldType.DateTime;
-        }
-
-        return CatalogFieldType.String;
-    }
+        ColumnValueKind.Int => CatalogFieldType.Int,
+        ColumnValueKind.Long => CatalogFieldType.Long,
+        ColumnValueKind.Float => CatalogFieldType.Float,
+        ColumnValueKind.Decimal => CatalogFieldType.Decimal,
+        ColumnValueKind.Boolean => CatalogFieldType.Boolean,
+        ColumnValueKind.DateTime => CatalogFieldType.DateTime,
+        _ => CatalogFieldType.String
+    };
 }

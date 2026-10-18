@@ -24,6 +24,11 @@ public static class GatewayAnalyticsServiceExtensions
             .ValidateOnStart();
 
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<AnalyticsOptions>, AnalyticsOptionsValidator>());
+
+        services.AddOptions<SemanticOptions>()
+            .Configure<IConfiguration>((o, cfg) => cfg.GetSection(SemanticOptions.SectionName).Bind(o))
+            .ValidateOnStart();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<SemanticOptions>, SemanticOptionsValidator>());
         services.TryAddSingleton<IGovernedTableReadPlanner, GovernedTableReadPlanner>();
         services.TryAddSingleton<ISemanticCatalogService, InMemorySemanticCatalog>();
         services.TryAddScoped<IDbtSemanticManifestIngestionService, DbtSemanticManifestIngestionService>();

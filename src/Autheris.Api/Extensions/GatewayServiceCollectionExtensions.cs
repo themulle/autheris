@@ -142,6 +142,7 @@ public static class GatewayServiceCollectionExtensions
             .ValidateOnStart();
 
         services.AddSingleton<IValidateOptions<GatewayOptions>, GatewayCoreOptionsValidator>();
+        services.AddSingleton<IValidateOptions<GatewayOptions>, GraphQLAggregationOptionsValidator>();
         services.AddSingleton<IValidateOptions<GatewayOptions>, GatewaySecurityOptionsValidator>();
         services.AddSingleton<IValidateOptions<GatewayOptions>, GatewayStorageOptionsValidator>();
         services.AddSingleton<IValidateOptions<GatewayOptions>, GatewayResilienceOptionsValidator>();
