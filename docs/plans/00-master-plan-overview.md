@@ -84,13 +84,13 @@ Guiding rule (owner): rights are checked by the backend, not by the calling agen
 | Rank | Item | Size | Phase 1 (PM) | Next phase |
 |---:|---|:---:|:---:|---|
 | 3.1a | **#122** predicate pushdown in cross-source WebSQL (`REQ-DATA-122`, delivered in Wave 2 rank 2.16) | M-L | ✅ | **COMPLETED & VERIFIED ✅** (PR #194, [`PLAN-DATA-122`](2026-10-18-plan-issue-122-websql-filter-pushdown.md), closed) |
-| 3.1b | **#123** run same-source parts of a cross-source WebSQL query in the source (`REQ-DATA-123`, `WP-FED-13`) | L | ✅ | Phase 4 in progress ([`PLAN-DATA-123`](2026-10-18-plan-issue-123-websql-same-source-subtrees.md), `feat/issue-123-websql-same-source-subtrees`) |
-| 3.1c | **#124** dynamic key-set filters in cross-source WebSQL joins (`REQ-DATA-124`, `WP-FED-14`) | M-L | ✅ | Phase 4 in progress ([`PLAN-DATA-124`](2026-10-18-plan-issue-124-websql-dynamic-keyset-filters.md), `feat/issue-124-websql-dynamic-keyset-filters`) |
+| 3.1b | **#123** run same-source parts of a cross-source WebSQL query in the source (`REQ-DATA-123`, `WP-FED-13`) | L | ✅ | **COMPLETED & VERIFIED ✅** (PR #199, [`PLAN-DATA-123`](2026-10-18-plan-issue-123-websql-same-source-subtrees.md), closed) |
+| 3.1c | **#124** dynamic key-set filters in cross-source WebSQL joins (`REQ-DATA-124`, `WP-FED-14`) | M-L | ✅ | **COMPLETED & VERIFIED ✅** (PR #197, [`PLAN-DATA-124`](2026-10-18-plan-issue-124-websql-dynamic-keyset-filters.md), closed) |
 | 3.2 | `REQ-FED-01` INC-1..INC-5: federation contract, GraphQL cross-source relations, HTTP sources | L | ✅ | Phase 4 (steps B-0 security fix, I-9..I-13, I-18..I-21) |
 | 3.3 | **#113** access requests with read-only tokens and dynamic row filters on approval (`REQ-GOV-113`, Inc A `ReadOnlySelfServiceScopes`, Inc B dynamic row filter & masking) ([`INTAKE-2026-10-18-CONS-REQ`](2026-10-18-issue-intake-consumers-and-access-requests.md)) | M+L | ✅ | **COMPLETED & VERIFIED ✅** (PR #193, [`PLAN-GOV-113`](2026-10-18-plan-issue-113-access-requests-readonly-tokens.md), closed) |
 | 3.4 | **#114** consumers per calling application (`REQ-AUD-114`, calls/rows/rejections, per-application aggregation, dual-tier privacy gate) ([`INTAKE-2026-10-18-CONS-REQ`](2026-10-18-issue-intake-consumers-and-access-requests.md)) | M | ✅ | **COMPLETED & VERIFIED ✅** (PR #192, [`PLAN-AUD-114`](2026-10-18-plan-issue-114-consumers-calling-application.md), closed) |
 | 3.5 | **#129** row filters on caller attributes (replaces `WP-SC-04`, after #128) | L | ✅ | Phase 4 (step I-25) |
-| 3.6 | **#131** bound parameters in federated (cross-source) WebSQL queries (`REQ-DATA-131`, `WP-FED-15`) ([`INTAKE-2026-10-18-FED-BOUND-PARAMS`](2026-10-18-issue-intake-bound-parameters-federation.md)) | S-M | ✅ | Phase 4 in progress ([`PLAN-DATA-131`](2026-10-18-plan-issue-131-bound-parameters-federation.md), `feat/issue-131-bound-parameters-federation`) |
+| 3.6 | **#131** bound parameters in federated (cross-source) WebSQL queries (`REQ-DATA-131`, `WP-FED-15`) ([`INTAKE-2026-10-18-FED-BOUND-PARAMS`](2026-10-18-issue-intake-bound-parameters-federation.md)) | S-M | ✅ | **COMPLETED & VERIFIED ✅** (PR #196, [`PLAN-DATA-131`](2026-10-18-plan-issue-131-bound-parameters-federation.md), closed) |
 | 3.7 | **BL-06** OpenTelemetry tracing, metrics and logging | L | ✅ | Phase 4 (steps I-27..I-30) |
 
 ### Priority Wave 4: larger add-ons
@@ -99,7 +99,7 @@ Guiding rule (owner): rights are checked by the backend, not by the calling agen
 |---:|---|:---:|:---:|---|
 | 4.1 | **#99** governed CDC fan-out (I1 rest, I2, I3; I1-0 contracts merged) | XL | ✅ | Phase 4 |
 | 4.2 | **BL-03 Wave 2** scale to 5,000 users (identity realms, SCIM, delegation, Access Policies, …) | XL | ✅ | Owner re-evaluation, re-reviews |
-| 4.3 | **#132** co-located data sources: run joins across databases of one server as one statement (`REQ-DATA-132`, `WP-FED-16`, spike first) | L | ✅ | Phase 4 in progress ([`PLAN-DATA-132`](2026-10-18-plan-issue-132-colocated-data-sources.md), `feat/issue-132-colocated-data-sources`) |
+| 4.3 | **#132** co-located data sources: run joins across databases of one server as one statement (`REQ-DATA-132`, `WP-FED-16`, spike first) | L | ✅ | **COMPLETED & VERIFIED ✅** (PR #198, [`PLAN-DATA-132`](2026-10-18-plan-issue-132-colocated-data-sources.md), closed) |
 | 4.4 | **BL-05** per-data-source configuration | ? | ❌ intake only | Phase 1 |
 | 4.5 | **BL-08** C# DLL extension points for authentication and authorization | ? | ❌ intake only | Phase 1 |
 | 4.6 | **BL-04** table cache (after BL-01, BL-05) | XL | ❌ intake only | Phase 1 |
