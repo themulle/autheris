@@ -62,6 +62,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.ConsentDenied] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ConsentRevoked] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ConsentApplied] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ConsentDescriptionChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ProfileInvalidationFailed] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.BreakGlassActivated] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DatasourceTested] = AuditFailurePolicy.FailClosed,
@@ -92,6 +93,12 @@ public static class AuditPolicyTable
         [AuditEventTypes.QueryAnalysisEvaluated] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.RowFilterEvaluationChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.TableRowFilterStrategyChanged] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.CallerAttributeDefinitionPending] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.CallerAttributeDefinitionApplied] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.CallerAttributeDefinitionRejected] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.CallerAttributeDefinitionDeleted] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.CallerAttributeServiceSetChanged] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.CallerAttributeSimulationRead] = AuditFailurePolicy.FailClosed,
     };
 
     public static IReadOnlyDictionary<string, AuditFailurePolicy> All => Table;

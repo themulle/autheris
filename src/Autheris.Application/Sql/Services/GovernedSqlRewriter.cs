@@ -339,6 +339,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         var tablesWithoutRls = new HashSet<TableIdentity>();
         var accessedTables = new List<TableIdentifier>();
         var virtualFilters = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        var callerAttributes = new Dictionary<string, IReadOnlyList<CallerAttributeAuditEntry>>(StringComparer.OrdinalIgnoreCase);
         var accessedTableSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         DatabaseDialect? targetDatabaseDialect = _dataSourceResolver.ResolveConnectionDialect(effectiveDataSourceName);
@@ -495,7 +496,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             var decision = consentBypassed && (_consentRepository == null || _consentResolution == null)
                 ? WithTypedMasks(TableAccessDecision.Allowed(resolvedId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true), tableMeta, tenantId)
                 : await AccessPolicy().DecideAsync(
-                    new TableAccessQuery(userSid, tenantId, groupSids, roles, tableMeta, user.Claims, colList, RebacEnforcement.QueryPaths, clientIp, actionAttribute),
+                    new TableAccessQuery(userSid, tenantId, groupSids, roles, tableMeta, user.Claims, colList, RebacEnforcement.QueryPaths, clientIp, actionAttribute, Principal: user),
                     ct).ConfigureAwait(false);
 
             if (!decision.IsAllowed)
@@ -531,6 +532,11 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             {
                 // One audit key per table: the resolved qualified name (the other spellings of the same table would only multiply the record).
                 virtualFilters[resolvedId.ToQualifiedName()] = applied;
+            }
+
+            if (decision.CallerAttributes is { Count: > 0 } resolvedAttributes)
+            {
+                callerAttributes[resolvedId.ToQualifiedName()] = resolvedAttributes;
             }
 
             var identity = new TableIdentity(tableMeta.Table.SchemaName, tableMeta.Table.TableName);
@@ -667,7 +673,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             LogKeySets(assembly.KeySets);
         }
 
-        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, assembly.KeySets.Outcomes);
+        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, assembly.KeySets.Outcomes, callerAttributes);
     }
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<TargetSqlDialect, byte> ClampWarned = new();
@@ -791,7 +797,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             _accessProfileRepository,
             _memoryCache,
             rowPolicyFactory: _typedPolicies?.RowPolicies,
-            maskPolicyFactory: _typedPolicies?.MaskPolicies);
+            maskPolicyFactory: _typedPolicies?.MaskPolicies,
+            callerAttributes: _typedPolicies?.CallerAttributes);
 
     private System.Net.IPAddress ResolveClientIp()
     {

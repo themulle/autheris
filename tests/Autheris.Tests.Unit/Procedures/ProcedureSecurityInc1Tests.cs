@@ -176,7 +176,7 @@ public class ProcedureSecurityInc1Tests
         e.Resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
             .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(DefaultColumns, StringComparer.OrdinalIgnoreCase)));
         e.Masking.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>()).Returns("***");
-        e.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<CancellationToken>())
+        e.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new RawProcedureResult(
                 ["order_id", "secret", "salary", "extra"],
                 [new object?[] { 1, "s", 1000m, "x" }, new object?[] { 2, "t", 2000m, "y" }],
@@ -242,7 +242,7 @@ public class ProcedureSecurityInc1Tests
     {
         var e = Active(d => d with { ResultTable = null }, tables: []);
         await Should.ThrowAsync<KeyNotFoundException>(() => Run(e));
-        await e.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default);
+        await e.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default, default);
     }
 
     [Fact]
@@ -290,7 +290,7 @@ public class ProcedureSecurityInc1Tests
             e.AuditEntries.ShouldContain(a => a.DetailsJson.Contains("visibility-error"));
         }
 
-        await e.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default);
+        await e.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default, default);
     }
 
     [Theory]
@@ -351,7 +351,7 @@ public class ProcedureSecurityInc1Tests
             policyEnforcement: e.PolicyEnforcement, rowScope: rowScope, concurrencyGate: e.Gate);
 
         // the key column "order_id" is not in the result columns -> unusable key after visibility -> 503
-        e.Invoker.ExecuteReadAsync(default!, default!, default!, default).ReturnsForAnyArgs(new RawProcedureResult(["salary"], [new object?[] { 1m }], false));
+        e.Invoker.ExecuteReadAsync(default!, default!, default!, default, default).ReturnsForAnyArgs(new RawProcedureResult(["salary"], [new object?[] { 1m }], false));
         await Should.ThrowAsync<ProcedureUnavailableException>(() => svc.ExecuteAsync("get_orders", Valid(), User(), Tenant));
         e.Gate.Outstanding.ShouldBe(0);
     }
@@ -515,11 +515,11 @@ public class ProcedureSecurityInc1Tests
                 (await Run(e)).RowCount.ShouldBe(2);
                 break;
             case "exception":
-                e.Invoker.ExecuteReadAsync(default!, default!, default!, default).ThrowsAsyncForAnyArgs(new InvalidOperationException("x"));
+                e.Invoker.ExecuteReadAsync(default!, default!, default!, default, default).ThrowsAsyncForAnyArgs(new InvalidOperationException("x"));
                 await Should.ThrowAsync<InvalidOperationException>(() => Run(e));
                 break;
             case "cancellation":
-                e.Invoker.ExecuteReadAsync(default!, default!, default!, default).ThrowsAsyncForAnyArgs(new OperationCanceledException());
+                e.Invoker.ExecuteReadAsync(default!, default!, default!, default, default).ThrowsAsyncForAnyArgs(new OperationCanceledException());
                 await Should.ThrowAsync<OperationCanceledException>(() => Run(e));
                 break;
             case "audit-throws":
@@ -547,7 +547,7 @@ public class ProcedureSecurityInc1Tests
         var ex = await Should.ThrowAsync<GatewayThrottledException>(() => Run(e));
         ex.RetryAfterSeconds.ShouldBe(2);
         e.AuditEntries.ShouldContain(a => a.EventType == "PROCEDURE_THROTTLED");
-        await e.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default);
+        await e.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default, default);
     }
 
     [Fact]
@@ -600,7 +600,7 @@ public class ProcedureSecurityInc1Tests
         var visible = Active();
         visible.UseGate = false;
         await Should.ThrowAsync<InvalidOperationException>(() => Run(visible));
-        await visible.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default);
+        await visible.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default, default);
 
         var invisible = Active(d => d with { RequiredRoles = ["r"] });
         invisible.UseGate = false;
@@ -630,7 +630,7 @@ public class ProcedureSecurityInc1Tests
         MssqlProcedureInvoker.TryGetBusinessError(new FakeSqlException(1205, secret), out _, out _).ShouldBeFalse();
 
         var business = Active();
-        business.Invoker.ExecuteReadAsync(default!, default!, default!, default).ThrowsAsyncForAnyArgs(new ProcedureBusinessException(50001, null));
+        business.Invoker.ExecuteReadAsync(default!, default!, default!, default, default).ThrowsAsyncForAnyArgs(new ProcedureBusinessException(50001, null));
         var bex = await Should.ThrowAsync<ProcedureBusinessException>(() => Run(business));
         bex.Message.ShouldBe("The procedure rejected the request.");
         bex.ErrorNumber.ShouldBe(50001);
@@ -641,7 +641,7 @@ public class ProcedureSecurityInc1Tests
 
         // non-business DbException: logged without the exception object and its text
         var db = Active();
-        db.Invoker.ExecuteReadAsync(default!, default!, default!, default).ThrowsAsyncForAnyArgs(new FakeSqlException(1205, secret));
+        db.Invoker.ExecuteReadAsync(default!, default!, default!, default, default).ThrowsAsyncForAnyArgs(new FakeSqlException(1205, secret));
         await Should.ThrowAsync<FakeSqlException>(() => Run(db, inputs: new Dictionary<string, object?> { ["customer_id"] = 7, ["note"] = "value-4711" }));
         db.Logger.Entries.ShouldAllBe(l => l.Exception == null);
         db.Logger.AllText.ShouldNotContain("Mueller");
@@ -772,7 +772,7 @@ public class ProcedureSecurityInc1Tests
         }
 
         await Should.ThrowAsync<KeyNotFoundException>(() => Run(e));
-        await e.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default);
+        await e.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default, default);
         (await e.Create().IsVisibleAsync(e.Registry.GetAll().Single(), User(), Tenant)).ShouldBeFalse();
     }
 
@@ -884,6 +884,7 @@ public class ProcedureSecurityInc1Tests
             ["no-table"] = () => (Active(d => d with { ResultTable = null }, tables: []), "get_orders", User()),
             ["unavailable"] = () => (Active(d => d with { RequiredRoles = ["r"] }, markActive: false), "get_orders", User("other")),
             ["no-sid"] = () => (Active(), "get_orders", Anonymous()),
+            ["write-mode"] = () => (Active(d => d with { Mode = ProcedureMode.Write }), "get_orders", User()),
             ["visibility-error"] = () =>
             {
                 var e = Active();
@@ -895,7 +896,8 @@ public class ProcedureSecurityInc1Tests
         var variants = new (bool Post, string? Query, string? Body)[]
         {
             (false, "customer_id=7", null), (false, "bogus=1", null), (false, null, null),
-            (true, null, "{\"customer_id\":7}"), (true, null, "{\"bogus\":1}"), (true, null, "{}")
+            (true, null, "{\"customer_id\":7}"), (true, null, "{\"bogus\":1}"), (true, null, "{}"),
+            (false, "limit=abc", null), (false, "limit=1", null), (true, null, "{\"limit\":0}"), (true, null, "{\"limit\":2}")
         };
 
         for (int v = 0; v < variants.Length; v++)
@@ -966,7 +968,7 @@ public class ProcedureSecurityInc1Tests
     public async Task T_PROC152_08_Service_GenericException_NotInLogsAuditOrResponse()
     {
         var e = Active();
-        e.Invoker.ExecuteReadAsync(default!, default!, default!, default).ThrowsAsyncForAnyArgs(new InvalidOperationException(SecretText, new InvalidOperationException(SecretText)));
+        e.Invoker.ExecuteReadAsync(default!, default!, default!, default, default).ThrowsAsyncForAnyArgs(new InvalidOperationException(SecretText, new InvalidOperationException(SecretText)));
 
         var ex = await Should.ThrowAsync<InvalidOperationException>(() => Run(e));
 

@@ -29,6 +29,9 @@ public record TableAccessDecision(
     /// </summary>
     public Autheris.Domain.Model.ConsentRowFilterRecipe? ConsentFilterRecipe { get; init; }
 
+    /// <summary>REQ-GOV-129 (BC-129-15): the caller attributes resolved for this decision (audit only; ids, outcomes and reason codes, no values).</summary>
+    public IReadOnlyList<Autheris.Domain.Model.CallerAttributeAuditEntry>? CallerAttributes { get; init; }
+
     /// <summary>The typed Virtual Filter policy behind <see cref="MandatoryRowPredicateSql"/> (null when it was added as text).</summary>
     public IRowPolicy? MandatoryRowPolicy { get; init; }
 

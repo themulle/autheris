@@ -111,7 +111,8 @@ internal static class PostgreSqlBaselineSchema
                 revoked_at TEXT,
                 revoke_reason TEXT,
                 tenant_id TEXT NOT NULL DEFAULT 'legacy-single-tenant',
-                renewal_count INTEGER NOT NULL DEFAULT 0
+                renewal_count INTEGER NOT NULL DEFAULT 0,
+                description TEXT CHECK (description IS NULL OR char_length(description) <= 2000)
             );
 
             CREATE TABLE IF NOT EXISTS CONSENT_COLUMN_RULES (
@@ -252,10 +253,21 @@ internal static class PostgreSqlBaselineSchema
                 parent_table_id TEXT NOT NULL,
                 child_table_id TEXT NOT NULL,
                 relation_name TEXT NOT NULL,
-                join_key_parent TEXT NOT NULL,
-                join_key_child TEXT NOT NULL,
                 cardinality TEXT NOT NULL
             );
+
+            -- Issue #151: composite-key relations. One row per ordered key pair; column names are validated on write.
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_table_relations_natural
+                ON TABLE_RELATIONS (parent_table_id, child_table_id, relation_name);
+            CREATE TABLE IF NOT EXISTS TABLE_RELATION_KEYS (
+                relation_id TEXT NOT NULL,
+                key_ordinal INTEGER NOT NULL CHECK (key_ordinal >= 1),
+                parent_column TEXT NOT NULL,
+                child_column TEXT NOT NULL,
+                PRIMARY KEY (relation_id, key_ordinal)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_table_relation_keys_parent ON TABLE_RELATION_KEYS (relation_id, parent_column);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_table_relation_keys_child ON TABLE_RELATION_KEYS (relation_id, child_column);
 
             CREATE TABLE IF NOT EXISTS ITSM_OUTBOX (
                 id TEXT PRIMARY KEY,
@@ -357,6 +369,51 @@ internal static class PostgreSqlBaselineSchema
             );
 
             INSERT INTO VIRTUAL_FILTER_GENERATION (id, generation) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
+
+            -- Issue #129: caller attribute registry (four-eyes, draft beside the active row), service sets and one generation counter
+            CREATE TABLE IF NOT EXISTS CALLER_ATTRIBUTES (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                definition_json TEXT NOT NULL,
+                definition_hash TEXT NOT NULL,
+                status INTEGER NOT NULL,
+                created_by TEXT NOT NULL,
+                approved_by TEXT,
+                approved_at TEXT,
+                draft_definition_json TEXT,
+                draft_definition_hash TEXT,
+                draft_created_by TEXT,
+                pending_deletion INTEGER NOT NULL DEFAULT 0,
+                deletion_requested_by TEXT,
+                updated_by TEXT,
+                updated_at TEXT NOT NULL,
+                UNIQUE (tenant_id, name)
+            );
+
+            CREATE TABLE IF NOT EXISTS CALLER_ATTRIBUTE_SERVICE_SETS (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                application_id TEXT NOT NULL,
+                attribute_name TEXT NOT NULL,
+                values_json TEXT NOT NULL,
+                values_hash TEXT NOT NULL,
+                status INTEGER NOT NULL,
+                created_by TEXT NOT NULL,
+                approved_by TEXT,
+                approved_at TEXT,
+                draft_values_json TEXT,
+                draft_created_by TEXT,
+                updated_at TEXT NOT NULL,
+                UNIQUE (tenant_id, application_id, attribute_name)
+            );
+
+            CREATE TABLE IF NOT EXISTS CALLER_ATTRIBUTE_GENERATION (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                generation BIGINT NOT NULL
+            );
+
+            INSERT INTO CALLER_ATTRIBUTE_GENERATION (id, generation) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
 
             -- CR-ADG-31: tenant registry (grouped by NFKC + upper-case key; collided = 1 denies every spelling of the group)
             CREATE TABLE IF NOT EXISTS TENANT_REGISTRY (

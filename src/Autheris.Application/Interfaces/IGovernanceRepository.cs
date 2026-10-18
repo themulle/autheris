@@ -250,8 +250,17 @@ public interface IDataOwnershipRepository
 public interface ITableRelationRepository
 {
     Task<IReadOnlyList<TableRelation>> GetRelationsForTableAsync(TableIdentifier parentTable, CancellationToken ct = default);
-    Task CreateRelationAsync(TableRelation relation, CancellationToken ct = default);
+
+    /// <summary>
+    /// Creates or updates a relation by its natural key (parent table, child table, relation name) together with its ordered key pairs in one
+    /// transaction (issue #151). Throws <see cref="Autheris.Domain.Exceptions.InvalidRelationException"/> for invalid keys, unknown, inactive or ambiguous
+    /// tables and unknown key columns; nothing is written then.
+    /// </summary>
+    Task<RelationWriteResult> CreateRelationAsync(TableRelation relation, CancellationToken ct = default);
 }
+
+/// <summary>Outcome of <see cref="ITableRelationRepository.CreateRelationAsync"/>: the stored relation id, whether the row was inserted, and whether the ordered key pairs of an existing relation changed (SEC-REL151-04).</summary>
+public sealed record RelationWriteResult(Guid StoredId, bool Created, bool KeysChanged);
 
 public interface IGovernanceRepository :
     ITableMetadataRepository,
@@ -263,4 +272,40 @@ public interface IGovernanceRepository :
     ITableRelationRepository,
     IItsmOutboxRepository
 {
+}
+
+/// <summary>
+/// PLAN-GOV-158-INC1 (SEC-GOV158I1-05/06): the single write seam of <c>setConsentDescription</c>. Implemented by every governance provider; deliberately not part
+/// of <see cref="IConsentRepository"/> so the attribute-validating decorator and consent fakes are untouched.
+/// </summary>
+public interface IConsentDescriptionRepository
+{
+    /// <summary>
+    /// Sets the description of one non-revoked, unexpired consent of <paramref name="tenant"/> and writes <paramref name="audit"/> in the SAME transaction
+    /// (an audit failure rolls the update back). Touches only <c>description</c>: no epoch bump, no validity or rule change. Returns false, changes nothing and
+    /// writes no audit row when no such consent exists.
+    /// </summary>
+    Task<bool> UpdateConsentDescriptionWithAuditAsync(Guid consentId, TenantId tenant, string? description, AuditLogEntry audit, CancellationToken ct = default);
+
+    /// <summary>
+    /// Opt-in load of <c>CONSENTS.description</c> into <paramref name="consents"/> (matched by id). The read methods of <see cref="IConsentRepository"/>
+    /// never load it, so the access-decision hot path carries no description cost; only explain, consent listings, myActiveConsents and the
+    /// manifest compare call this. One extra round trip per call; a consent without a stored description is left untouched.
+    /// </summary>
+    Task LoadDescriptionsAsync(IReadOnlyCollection<Consent> consents, CancellationToken ct = default);
+
+    /// <summary>
+    /// Same contract as <see cref="IConsentRepository.ReplaceConsentsAsync(IReadOnlyList{Guid}, IReadOnlyList{Consent}, Sid, string, IReadOnlyList{AuditLogEntry}?, CancellationToken)"/>
+    /// plus in-place description updates of non-revoked consents in the SAME transaction. A description update changes no other column and bumps no epoch;
+    /// a revoked, expired, unknown or foreign-tenant target changes nothing (no error, no resurrection). The attribute-validating decorator implements this
+    /// interface too, so the create list is validated on this path as well.
+    /// </summary>
+    Task ReplaceConsentsAsync(
+        IReadOnlyList<Guid> revokeConsentIds,
+        IReadOnlyList<Consent> create,
+        Sid actor,
+        string reason,
+        IReadOnlyList<AuditLogEntry>? auditEntries,
+        IReadOnlyList<ConsentDescriptionUpdate>? descriptionUpdates,
+        CancellationToken ct);
 }

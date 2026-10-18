@@ -93,6 +93,39 @@ public sealed class ReadOnlyTokenMiddleware
             return false;
         }
 
+        if (IsProcedureExecutionPath(request.Path.Value))
+        {
+            return true;
+        }
+
         return _queryPaths.Any(p => request.Path.StartsWithSegments(p, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private const string ProceduresPrefix = "/api/v1/procedures";
+
+    /// <summary>
+    /// D-6 / SEC-PROC152I2-09: POST to exactly <c>/api/v1/procedures/{one non-empty segment}</c>. Works on the raw path value
+    /// (no decoding, no trimming); only the prefix and <c>openapi.json</c> compare case-insensitively. Governed procedures
+    /// are read-only by contract (the service refuses write-mode definitions), so executing one is a read.
+    /// </summary>
+    private static bool IsProcedureExecutionPath(string? path)
+    {
+        if (path is null || path.Length <= ProceduresPrefix.Length + 1 ||
+            !path.StartsWith(ProceduresPrefix, StringComparison.OrdinalIgnoreCase) ||
+            path[ProceduresPrefix.Length] != '/')
+        {
+            return false;
+        }
+
+        var segment = path.AsSpan(ProceduresPrefix.Length + 1);
+        if (segment.IndexOfAny('/', ';') >= 0 ||
+            segment.Contains("%2F", StringComparison.OrdinalIgnoreCase) ||
+            segment.SequenceEqual(".") || segment.SequenceEqual("..") ||
+            segment.Equals("openapi.json", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
     }
 }

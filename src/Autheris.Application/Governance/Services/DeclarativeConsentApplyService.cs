@@ -12,19 +12,24 @@ using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Autheris.Domain.Security;
+using Microsoft.Extensions.Options;
 
 public sealed class DeclarativeConsentApplyService(
     ITableMetadataRepository metadataRepository,
     IConsentRepository consentRepository,
     IAuditLogRepository auditLogRepository,
-    IGrantPolicy? grantPolicy = null) : IDeclarativeConsentApplyService
+    IGrantPolicy? grantPolicy = null,
+    IOptions<GovernanceTextOptions>? textOptions = null) : IDeclarativeConsentApplyService
 {
     // WP-SC-16: the policy is stateless; without an injected instance the built-in maxima apply (never "no policy").
     // Kept for constructor/DI compatibility: the APPLIED audit entries are written by ReplaceConsentsAsync inside its transaction, never separately.
     private readonly IAuditLogRepository _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
 
     private readonly IGrantPolicy _grantPolicy = grantPolicy ?? new GrantPolicy();
+
+    private readonly int _descriptionMaxLength = (textOptions?.Value ?? new GovernanceTextOptions()).ConsentDescriptionMaxLength;
 
     public async Task<DeclarativeApplyResult> ApplyManifestAsync(
         ClaimsPrincipal caller,
@@ -57,6 +62,7 @@ public sealed class DeclarativeConsentApplyService(
         int applied = 0;
         int unchanged = 0;
         int revoked = 0;
+        int updated = 0;
         var details = new List<string>();
 
         if (manifest.Policies == null || manifest.Policies.Count == 0)
@@ -75,12 +81,29 @@ public sealed class DeclarativeConsentApplyService(
             }
         }
 
+        // PLAN-GOV-158-INC1 decision 6: normalise every description before anything is read or written (also in dry-run); a violation
+        // rejects the whole manifest with a neutral message that names only the policy index (SEC-GOV158I1-03).
+        var descriptions = new string?[manifest.Policies.Count];
+        for (var i = 0; i < manifest.Policies.Count; i++)
+        {
+            var check = UntrustedText.Normalize(manifest.Policies[i].Description, _descriptionMaxLength, allowLineFeed: false);
+            if (!check.IsValid)
+            {
+                throw new DeclarativeManifestValidationException(i);
+            }
+
+            descriptions[i] = check.Value;
+        }
+
         var revokeIds = new List<Guid>();
+        var descriptionUpdates = new List<ConsentDescriptionUpdate>();
         var createList = new List<Consent>();
         var auditEntries = new List<AuditLogEntry>();
 
-        foreach (var policy in manifest.Policies)
+        for (var policyIndex = 0; policyIndex < manifest.Policies.Count; policyIndex++)
         {
+            var policy = manifest.Policies[policyIndex];
+            var description = descriptions[policyIndex];
             totalEvaluated++;
             var tableId = new TableIdentifier(policy.Domain, policy.Schema, policy.TableName);
             var metadata = await metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
@@ -125,7 +148,7 @@ public sealed class DeclarativeConsentApplyService(
                     policy.ValidUntil,
                     now,
                     GrantClassifier.Classify([metadata]),
-                    Justification: policy.Description ?? "GitOps manifest",
+                    Justification: description ?? "GitOps manifest",
                     Effect: effect));
                 GrantPolicyViolationException.ThrowIfDenied(decision);
 
@@ -162,6 +185,35 @@ public sealed class DeclarativeConsentApplyService(
             var matchingConsent = activeExisting.FirstOrDefault(c => IsIdentical(c, effect, policy, individual ? policy.ValidUntil : null));
             if (matchingConsent != null)
             {
+                // Decision 6: a description-only difference is an in-place update (same id, no revoke, no epoch bump); every semantic
+                // difference already failed IsIdentical and takes the revoke/create path (SEC-GOV158I1-07).
+                await ConsentDescriptionLoader.LoadAsync(consentRepository, [matchingConsent], ct).ConfigureAwait(false);
+                var storedDescription = UntrustedText.Normalize(matchingConsent.Description, GovernanceTextOptions.ConsentDescriptionCeiling, allowLineFeed: false);
+                var storedNormalized = storedDescription.IsValid ? storedDescription.Value : matchingConsent.Description;
+                if (!string.Equals(storedNormalized, description, StringComparison.Ordinal))
+                {
+                    updated++;
+                    if (!dryRun)
+                    {
+                        descriptionUpdates.Add(new ConsentDescriptionUpdate(matchingConsent.Id, tenantId, description));
+                        var (length, prefix) = ConsentDescriptionText.Fingerprint(description);
+                        auditEntries.Add(new AuditLogEntry
+                        {
+                            Id = Guid.NewGuid(),
+                            OccurredAt = now,
+                            EventType = "GITOPS_CONSENT_APPLY",
+                            ActorSid = actorSid,
+                            TargetTable = tableId.ToString(),
+                            Decision = "APPLIED",
+                            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { Version = manifest.Version, Update = "description", DescriptionLength = length, DescriptionSha256Prefix = prefix }),
+                            TenantId = tenantId
+                        });
+                    }
+
+                    details.Add($"{(dryRun ? "[DryRun] Would update" : "Updated")} description for '{tableId}' -> '{policy.GranteeRef}'.");
+                    continue;
+                }
+
                 unchanged++;
                 details.Add($"Policy for '{tableId}' -> '{policy.GranteeRef}' is unchanged.");
                 continue;
@@ -186,6 +238,7 @@ public sealed class DeclarativeConsentApplyService(
                     GranteeSid = granteeSid,
                     RoleName = roleName,
                     RoleId = roleId,
+                    Description = description,
                     ValidFrom = now,
                     ValidTo = validTo,
                     IsRevoked = false
@@ -237,6 +290,7 @@ public sealed class DeclarativeConsentApplyService(
                 }
 
                 createList.Add(newConsent);
+                var (fingerprintLength, fingerprintPrefix) = ConsentDescriptionText.Fingerprint(description);
                 auditEntries.Add(new AuditLogEntry
                 {
                     Id = Guid.NewGuid(),
@@ -245,7 +299,13 @@ public sealed class DeclarativeConsentApplyService(
                     ActorSid = actorSid,
                     TargetTable = tableId.ToString(),
                     Decision = "APPLIED",
-                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { Reason = $"Applied declarative policy version {manifest.Version}: {policy.Description ?? "No description"}" }),
+                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        Reason = $"Applied declarative policy version {manifest.Version}",
+                        Version = manifest.Version,
+                        DescriptionLength = fingerprintLength,
+                        DescriptionSha256Prefix = fingerprintPrefix
+                    }),
                     TenantId = tenantId
                 });
             }
@@ -257,18 +317,22 @@ public sealed class DeclarativeConsentApplyService(
         // WP-SC-02: one transaction and one epoch bump for the whole manifest; a fault leaves nothing changed and writes no audit.
         // M2: the APPLIED audit entries travel into the same transaction, so a committed change always has its (Tier-A, anchored) record and a failing
         // epoch invalidation after the commit cannot lose it.
-        if (!dryRun && (createList.Count > 0 || revokeIds.Count > 0))
+        if (!dryRun && (createList.Count > 0 || revokeIds.Count > 0 || descriptionUpdates.Count > 0))
         {
-            await consentRepository.ReplaceConsentsAsync(
-                revokeIds,
-                createList,
-                actorSid,
-                $"Superseded by GitOps declarative apply (version: {manifest.Version})",
-                auditEntries,
-                ct).ConfigureAwait(false);
+            var supersededReason = $"Superseded by GitOps declarative apply (version: {manifest.Version})";
+            if (descriptionUpdates.Count == 0)
+            {
+                await consentRepository.ReplaceConsentsAsync(revokeIds, createList, actorSid, supersededReason, auditEntries, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                var descriptionWriter = consentRepository as IConsentDescriptionRepository
+                    ?? throw new InvalidOperationException("The consent repository does not support in-place description updates.");
+                await descriptionWriter.ReplaceConsentsAsync(revokeIds, createList, actorSid, supersededReason, auditEntries, descriptionUpdates, ct).ConfigureAwait(false);
+            }
         }
 
-        return new DeclarativeApplyResult(totalEvaluated, applied, unchanged, revoked, dryRun, details);
+        return new DeclarativeApplyResult(totalEvaluated, applied, unchanged, revoked, dryRun, details, updated);
     }
 
     private static bool MatchesGrantee(Consent consent, GranteeType type, Sid? sid, string? roleName)

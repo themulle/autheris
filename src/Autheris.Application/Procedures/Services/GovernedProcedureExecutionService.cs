@@ -132,6 +132,16 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         }
 
         var definition = registered.Definition;
+
+        // 1a. Write-mode guard (SEC-PROC152I2-10): only read procedures are executable. A write-mode definition is not visible,
+        // answered exactly like an unknown name, before anything caller-controlled is looked at.
+        if (definition.Mode != ProcedureMode.Read)
+        {
+            var denyUser = user.GetUserSid() ?? new Sid("anonymous");
+            await AuditAsync("PROCEDURE_DENIED", "DENY", definition, tenantId, denyUser, new { reason = "write-mode" }, traceId, ct).ConfigureAwait(false);
+            throw new KeyNotFoundException(NotFoundMessage);
+        }
+
         var sw = Stopwatch.StartNew();
         var userSid = user.GetUserSid() ?? new Sid("anonymous");
 
@@ -167,7 +177,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         try
         {
             // 5. Input validation (unknown and context-bound parameters are rejected, never ignored)
-            var values = ValidateInputs(definition, rawInputs);
+            var values = ValidateInputs(definition, rawInputs, out int? requestedLimit);
 
             // 6. Call (security context goes into the read-only SESSION_CONTEXT)
             var context = new ProcedureSecurityContext(
@@ -175,10 +185,17 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 userSid.Value,
                 user.FindFirst("purpose")?.Value ?? user.FindFirst("purpose_id")?.Value);
 
+            // 6a. Row budget, decided before the invoke from the visibility decisions (SEC-PROC152I2-01): a scoped call scans up
+            // to MaxScanRows raw rows (the limit is applied after the row scope), an unscoped call reads the limit itself.
+            var procedureOptions = _options.Value.SqlEndpoints.Procedures;
+            int effectiveLimit = requestedLimit ?? procedureOptions.MaxRows;
+            bool scoped = IsRowScoped(definition, decisions, out var resultDecision);
+            int rowBudget = scoped ? procedureOptions.EffectiveMaxScanRows : effectiveLimit;
+
             RawProcedureResult raw;
             try
             {
-                raw = await _invoker.ExecuteReadAsync(definition, values, context, ct).ConfigureAwait(false);
+                raw = await _invoker.ExecuteReadAsync(definition, values, context, rowBudget, ct).ConfigureAwait(false);
             }
             catch (ProcedureBusinessException bex)
             {
@@ -186,10 +203,13 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 _logger?.LogWarning(
                     "Procedure '{Procedure}' rejected the request: number {Number}, sqlState {SqlState}, trace {TraceId}.",
                     definition.ProcedureName, bex.ErrorNumber, bex.SqlState, traceId);
+                // D-7: resolve the operator-declared entry; the audit carries the mapped code only (never the message).
+                var mapped = definition.ErrorCodes.FirstOrDefault(e =>
+                    (e.Number is not null && e.Number == bex.ErrorNumber) || (e.SqlState is not null && e.SqlState == bex.SqlState));
                 await AuditAsync(
                     "PROCEDURE_REJECTED", "DENY", definition, tenantId, userSid,
-                    new { reason = "business-error", number = bex.ErrorNumber, sqlState = bex.SqlState }, traceId, ct).ConfigureAwait(false);
-                throw new ProcedureBusinessException(bex.ErrorNumber, bex.SqlState, traceId);
+                    new { reason = "business-error", number = bex.ErrorNumber, sqlState = bex.SqlState, mappedCode = mapped?.Code }, traceId, ct).ConfigureAwait(false);
+                throw new ProcedureBusinessException(bex.ErrorNumber, bex.SqlState, traceId, mapped?.Code, mapped?.Message);
             }
             catch (DbException dbx)
             {
@@ -210,15 +230,21 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 throw;
             }
 
-            // 6b. Row scope: keep only the rows the consent row filter of the result table allows
+            // 6b. Row scope: keep only the rows the consent row filter of the result table allows, THEN cut to the limit
+            // (SEC-PROC152I2-02: the cut never precedes the scope; a scope failure stays fail-closed).
             int rowsRemovedByScope = 0;
-            if (definition.ResultTable != null &&
-                decisions.TryGetValue(definition.ResultTable, out var resultDecision) &&
-                !string.IsNullOrWhiteSpace(resultDecision.Decision.CombinedRowFilterSql))
+            bool truncated = raw.MoreRowsAvailable;
+            bool scanCapReached = scoped && raw.MoreRowsAvailable;
+            if (scoped)
             {
-                var scoped = await ApplyRowScopeAsync(definition, raw, resultDecision.Decision, resultDecision.Meta, registered.Validation.ResultColumnSources, context, tenantId, userSid, traceId, ct).ConfigureAwait(false);
-                rowsRemovedByScope = raw.Rows.Count - scoped.Rows.Count;
-                raw = scoped;
+                var scopedRaw = await ApplyRowScopeAsync(definition, raw, resultDecision.Decision, resultDecision.Meta, registered.Validation.ResultColumnSources, context, tenantId, userSid, traceId, ct).ConfigureAwait(false);
+                rowsRemovedByScope = raw.Rows.Count - scopedRaw.Rows.Count;
+                // 'truncated' may be true when the scan cap was hit with few (or no) in-scope rows. Accepted by SEC-PROC152I2-03:
+                // a coarse signal only, it reveals nothing about which rows exist.
+                truncated = scopedRaw.Rows.Count > effectiveLimit || raw.MoreRowsAvailable;
+                raw = scopedRaw.Rows.Count > effectiveLimit
+                    ? new RawProcedureResult(scopedRaw.Columns, scopedRaw.Rows.Take(effectiveLimit).ToList(), raw.MoreRowsAvailable)
+                    : scopedRaw;
             }
 
             // 7. Result-set governance (deny / mask / drop unknown columns)
@@ -235,7 +261,9 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 {
                     mode = definition.Mode.ToString(),
                     rowCount = governed.Rows.Count,
-                    truncated = raw.Truncated,
+                    truncated,
+                    scanCapReached,
+                    effectiveLimit,
                     rowsRemovedByScope,
                     virtual_filters = decisions
                         .Where(d => d.Value.Decision.AppliedVirtualFilters is { Count: > 0 })
@@ -247,7 +275,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 traceId,
                 ct).ConfigureAwait(false);
 
-            return new GovernedProcedureResult(governed.Columns, governed.Rows, governed.Rows.Count, raw.Truncated, sw.ElapsedMilliseconds);
+            return new GovernedProcedureResult(governed.Columns, governed.Rows, governed.Rows.Count, truncated, sw.ElapsedMilliseconds);
         }
         finally
         {
@@ -432,9 +460,38 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         return roles.Any(r => !string.IsNullOrWhiteSpace(r) && (user.IsInRole(r) || claimRoles.Contains(r)));
     }
 
-    private Dictionary<string, object?> ValidateInputs(ProcedureDefinition definition, IReadOnlyDictionary<string, object?>? rawInputs)
+    private const string InvalidLimitMessage = "Invalid 'limit'.";
+
+    private Dictionary<string, object?> ValidateInputs(ProcedureDefinition definition, IReadOnlyDictionary<string, object?>? rawInputs, out int? requestedLimit)
     {
-        var inputs = rawInputs ?? new Dictionary<string, object?>();
+        // The reserved key 'limit' (any case) is taken out before the unknown-parameter check: it never reaches the parameter
+        // values, the parameter hashes, the SQL call or SESSION_CONTEXT (SEC-PROC152I2-07).
+        var inputs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        object? limitRaw = null;
+        int limitKeys = 0;
+        if (rawInputs != null)
+        {
+            foreach (var (key, value) in rawInputs)
+            {
+                if (string.Equals(key, "limit", StringComparison.OrdinalIgnoreCase))
+                {
+                    limitKeys++;
+                    limitRaw = value;
+                }
+                else
+                {
+                    // Keys that differ only by case (possible in a case-sensitive input map) are ambiguous: fail closed instead of
+                    // silently keeping the last one. Fixed text, no key or value echo.
+                    if (!inputs.TryAdd(key, value))
+                    {
+                        throw new ArgumentException("Duplicate input parameter.");
+                    }
+                }
+            }
+        }
+
+        // Several spellings of the key in a case-sensitive input map are ambiguous: fail closed.
+        requestedLimit = limitKeys > 1 ? throw new ArgumentException(InvalidLimitMessage) : ParseLimit(limitRaw, _options.Value.SqlEndpoints.Procedures.MaxRows);
         var declared = definition.Parameters.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
 
         foreach (var key in inputs.Keys)
@@ -470,6 +527,53 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         }
 
         return values;
+    }
+
+    /// <summary>
+    /// Parses the reserved <c>limit</c> input: a JSON integer or a digit string. Null / JSON null is absent, everything else that is
+    /// not a plain positive integer is a 400 with a constant text (the value is never echoed); above <paramref name="maxRows"/> or
+    /// beyond <see cref="int"/> range it clamps to <paramref name="maxRows"/>.
+    /// </summary>
+    private static int? ParseLimit(object? raw, int maxRows)
+    {
+        string? digits;
+        switch (raw)
+        {
+            case null:
+                return null;
+            case JsonElement { ValueKind: JsonValueKind.Null }:
+                return null;
+            case JsonElement { ValueKind: JsonValueKind.Number } number:
+                digits = number.GetRawText();
+                break;
+            case JsonElement { ValueKind: JsonValueKind.String } text:
+                digits = text.GetString();
+                break;
+            case JsonElement:
+                throw new ArgumentException(InvalidLimitMessage);
+            case string str:
+                digits = str;
+                break;
+            case int or long or short or byte or uint or ushort:
+                long numeric = Convert.ToInt64(raw, CultureInfo.InvariantCulture);
+                return numeric < 1 ? throw new ArgumentException(InvalidLimitMessage) : (int)Math.Min(numeric, maxRows);
+            default:
+                throw new ArgumentException(InvalidLimitMessage);
+        }
+
+        if (string.IsNullOrEmpty(digits) || !digits.All(static c => c is >= '0' and <= '9'))
+        {
+            throw new ArgumentException(InvalidLimitMessage);
+        }
+
+        string trimmed = digits.TrimStart('0');
+        if (trimmed.Length == 0)
+        {
+            throw new ArgumentException(InvalidLimitMessage); // zero
+        }
+
+        // More than 9 digits cannot be a valid in-range value below MaxRows (hard cap 100000): clamp without parsing.
+        return trimmed.Length > 9 ? maxRows : Math.Min(int.Parse(trimmed, CultureInfo.InvariantCulture), maxRows);
     }
 
     private static object Coerce(object value, ProcedureParameter p)
@@ -574,7 +678,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 memoryCache: _memoryCache,
                 accessProfileCache: _accessProfileCache,
                 rowPolicyFactory: _typedPolicies?.RowPolicies,
-                maskPolicyFactory: _typedPolicies?.MaskPolicies)
+                maskPolicyFactory: _typedPolicies?.MaskPolicies,
+            callerAttributes: _typedPolicies?.CallerAttributes)
                 .DecideAsync(
                     new Autheris.Application.Policy.TableAccessQuery(
                         userSid,
@@ -585,7 +690,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                         user.Claims,
                         ClientIp: ResolveClientIp(user),
                         ExtraAttributes: new Dictionary<string, object?> { ["gql.action"] = "read" },
-                        ObjectKind: FilterObjectKinds.ProcedureResult),
+                        ObjectKind: FilterObjectKinds.ProcedureResult,
+                        Principal: user),
                     ct).ConfigureAwait(false);
 
         if (!decision.IsAllowed || (!allowRowFilter && !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql)))
@@ -666,6 +772,18 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         definition.ResultTable != null && string.Equals(key, definition.ResultTable, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// SEC-PROC152I2-01: the single predicate for "a row filter is active on the result table". The invoker budget and the
+    /// row scope branch both use it.
+    /// </summary>
+    private static bool IsRowScoped(ProcedureDefinition definition, Dictionary<string, TableDecision> decisions, out TableDecision resultDecision)
+    {
+        resultDecision = default;
+        return definition.ResultTable != null &&
+               decisions.TryGetValue(definition.ResultTable, out resultDecision) &&
+               !string.IsNullOrWhiteSpace(resultDecision.Decision.CombinedRowFilterSql);
+    }
+
+    /// <summary>
     /// Removes the rows of the procedure result whose key (<see cref="ProcedureDefinition.RowScopeKey"/>) the consent row
     /// filter of the result table does not allow. Fail-closed: a missing key column, a key column the caller may not use
     /// in a filter, or a failing lookup denies the call; rows with a NULL key part are removed.
@@ -729,7 +847,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             }
         }
 
-        return new RawProcedureResult(raw.Columns, kept, raw.Truncated);
+        return new RawProcedureResult(raw.Columns, kept, raw.MoreRowsAvailable);
     }
 
     private (IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows) GovernResult(
@@ -959,6 +1077,12 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         if (mandatory.IsDenied)
         {
             return TableAccessDecision.Denied(decision.Table, mandatory.DenyReason ?? "Denied by virtual filters.");
+        }
+
+        if (mandatory.CallerAttributesTextConstant)
+        {
+            // REQ-GOV-129 (BC-129-05, F-4): this consent bypass path is text only; the text of a caller attribute filter is a constant, so the table is denied.
+            return TableAccessDecision.Denied(decision.Table, "Denied by virtual filters.");
         }
 
         return mandatory.PredicateSql != null ? decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters, mandatory.AppliedBindings) : decision;

@@ -28,6 +28,7 @@ public enum RebacEnforcement
 /// <summary>
 /// One caller and one catalog table. <paramref name="Claims"/> feed the Casbin attributes and the purpose;
 /// <paramref name="ClientIp"/> overrides the request IP resolver (unknown IPs are <see cref="IPAddress.None"/>).
+/// <paramref name="Principal"/> (REQ-GOV-129, F-1) is used only to resolve caller attributes: it is never logged, hashed or put into a cache key.
 /// </summary>
 public sealed record TableAccessQuery(
     Sid UserSid,
@@ -42,7 +43,8 @@ public sealed record TableAccessQuery(
     IReadOnlyDictionary<string, object?>? ExtraAttributes = null,
     FilterObjectKinds ObjectKind = FilterObjectKinds.Relation,
     IReadOnlySet<Sid>? AllUserSids = null,
-    SchemaContractDefinition? Contract = null)
+    SchemaContractDefinition? Contract = null,
+    ClaimsPrincipal? Principal = null)
 {
     public static TableAccessQuery ForPrincipal(
         ClaimsPrincipal principal,
@@ -67,7 +69,8 @@ public sealed record TableAccessQuery(
             ClientIp: null,
             extraAttributes,
             AllUserSids: principal.GetAllUserSids(),
-            Contract: contract);
+            Contract: contract,
+            Principal: principal);
     }
 }
 
@@ -97,6 +100,7 @@ public sealed partial class TableAccessPolicy
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
     private readonly RowPolicyFactory? _rowPolicyFactory;
     private readonly ColumnMaskPolicyFactory? _maskPolicyFactory;
+    private readonly Autheris.Application.Identity.Attributes.ICallerAttributeResolver? _callerAttributes;
     private readonly ISchemaContractManager? _contractManager;
     private readonly IAccessProfileRepository? _accessProfileRepository;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
@@ -120,8 +124,10 @@ public sealed partial class TableAccessPolicy
         Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
         Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null,
         RowPolicyFactory? rowPolicyFactory = null,
-        ColumnMaskPolicyFactory? maskPolicyFactory = null)
+        ColumnMaskPolicyFactory? maskPolicyFactory = null,
+        Autheris.Application.Identity.Attributes.ICallerAttributeResolver? callerAttributes = null)
     {
+        _callerAttributes = callerAttributes;
         _rowPolicyFactory = rowPolicyFactory;
         _maskPolicyFactory = maskPolicyFactory;
         _mandatoryFilters = mandatoryFilters ?? throw new ArgumentNullException(nameof(mandatoryFilters));
@@ -311,9 +317,32 @@ public sealed partial class TableAccessPolicy
             {
                 // WP-X0g: with a RowPolicyFactory the typed predicate is attached (values bound, passes RequireTypedRowPolicy);
                 // without one, or when a builder has no typed form, the legacy text path stays until X1.
-                decision = _rowPolicyFactory != null && mandatory.TypedPredicate != null
-                    ? decision.WithMandatoryPredicate(_rowPolicyFactory.FromPredicate(mandatory.TypedPredicate, query.Metadata.Dialect), mandatory.AppliedFilters, mandatory.AppliedBindings)
-                    : decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters, mandatory.AppliedBindings);
+                if (mandatory.CallerAttributesTextConstant && (_rowPolicyFactory == null || mandatory.TypedPredicate == null))
+                {
+                    // REQ-GOV-129 (BC-129-05): the text of a caller attribute filter is only a constant; without the typed predicate the table is denied,
+                    // whether or not a sibling filter has a typed form.
+                    return TableAccessDecision.Denied(table, "Denied by virtual filters.");
+                }
+
+                if (_rowPolicyFactory != null && mandatory.TypedPredicate != null)
+                {
+                    var typed = mandatory.TypedPredicate;
+                    IReadOnlyList<CallerAttributeAuditEntry>? audit = null;
+                    if (mandatory.CallerAttributes.Count > 0)
+                    {
+                        (typed, audit) = await BindVirtualFilterAttributesAsync(typed, mandatory.CallerAttributes, query, ct).ConfigureAwait(false);
+                    }
+
+                    decision = decision.WithMandatoryPredicate(_rowPolicyFactory.FromPredicate(typed, query.Metadata.Dialect), mandatory.AppliedFilters, mandatory.AppliedBindings);
+                    if (audit is { Count: > 0 })
+                    {
+                        decision = decision with { CallerAttributes = Merge(decision.CallerAttributes, audit) };
+                    }
+                }
+                else
+                {
+                    decision = decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters, mandatory.AppliedBindings);
+                }
             }
         }
 

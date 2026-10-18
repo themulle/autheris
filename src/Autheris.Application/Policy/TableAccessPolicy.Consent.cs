@@ -41,7 +41,7 @@ public sealed partial class TableAccessPolicy
             var cached = await _cacheService.GetCachedDecisionAsync(query.Tenant, query.UserSid, table, contextHash, ct).ConfigureAwait(false);
             if (cached != null && !IsUntypedConsentFilter(cached, query.Metadata))
             {
-                return WithTypedConsentPolicy(cached, query.Metadata);
+                return await WithTypedConsentPolicyAsync(cached, query, ct).ConfigureAwait(false);
             }
         }
 
@@ -82,7 +82,7 @@ public sealed partial class TableAccessPolicy
             await _cacheService.SetCachedDecisionAsync(query.Tenant, query.UserSid, table, decision, ttl, contextHash!, epochAtLoad, ct).ConfigureAwait(false);
         }
 
-        return WithTypedConsentPolicy(decision, query.Metadata);
+        return await WithTypedConsentPolicyAsync(decision, query, ct).ConfigureAwait(false);
     }
 
     /// <summary>The compiler path needs the typed form only for SQL sources; the other sources keep the legacy text (no marker consumers there).</summary>
@@ -102,8 +102,9 @@ public sealed partial class TableAccessPolicy
     /// <see cref="ConsentRowFilterRecipe"/>). The text becomes the projection of the policy and the values become bound parameters. A
     /// filter that cannot be typed leaves the decision string-only, which the compiler path denies.
     /// </summary>
-    private TableAccessDecision WithTypedConsentPolicy(TableAccessDecision decision, TableMetadata metadata)
+    private async Task<TableAccessDecision> WithTypedConsentPolicyAsync(TableAccessDecision decision, TableAccessQuery query, CancellationToken ct)
     {
+        var metadata = query.Metadata;
         if (!WantsTypedConsentPolicy(metadata) || !decision.IsAllowed || decision.RowPolicy != null || decision.ConsentFilterRecipe == null)
         {
             return decision;
@@ -111,16 +112,69 @@ public sealed partial class TableAccessPolicy
 
         try
         {
-            var policy = _rowPolicyFactory!.FromConsentFilters(decision.ConsentFilterRecipe, metadata.Dialect);
-            return policy == null
+            // REQ-GOV-129 (A-1, B-consent): values are bound here, per request, into the typed policy; the cached decision stays value-free.
+            var (attributes, padding) = await ResolveRecipeAttributesAsync(decision.ConsentFilterRecipe, query, ct).ConfigureAwait(false);
+            var policy = _rowPolicyFactory!.FromConsentFilters(decision.ConsentFilterRecipe, metadata.Dialect, attributes, padding);
+            var typed = policy == null
                 ? decision
                 : (decision with { CombinedRowFilterSql = null, RowFilterParameters = null }).WithAdditionalRowPolicy(policy);
+            return attributes is { IsEmpty: false } ? typed with { CallerAttributes = Merge(typed.CallerAttributes, attributes.AuditEntries()) } : typed;
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.Security.SecurityException or ArgumentException or NotSupportedException)
         {
             return decision;
         }
     }
+
+    /// <summary>
+    /// The caller attributes the recipe names, resolved once for this request (null when the recipe names none, the feature is off or no
+    /// resolver is registered: the builder then keeps the constants). A statement-wide bind budget guards the expansion (BC-129-09): over the
+    /// budget every attribute of the recipe is <c>OverCardinality</c>, which is the same constant as <c>Missing</c>.
+    /// </summary>
+    private async Task<(Autheris.Application.Identity.Attributes.CallerAttributeSet? Set, Autheris.Application.Identity.Attributes.CallerAttributePadding? Padding)> ResolveRecipeAttributesAsync(
+        ConsentRowFilterRecipe recipe, TableAccessQuery query, CancellationToken ct)
+    {
+        if (_callerAttributes is not { IsEnabled: true } resolver)
+        {
+            return (null, null);
+        }
+
+        var names = Autheris.Application.Identity.Attributes.CallerAttributeRecipes.Names(recipe);
+        if (names.Count == 0)
+        {
+            return (null, null);
+        }
+
+        return await ResolveAttributeSetAsync(resolver, names, query, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Resolves <paramref name="names"/> for the caller of <paramref name="query"/> once, under the request's bind reserve (BC-129-09).</summary>
+    private static async Task<(Autheris.Application.Identity.Attributes.CallerAttributeSet? Set, Autheris.Application.Identity.Attributes.CallerAttributePadding? Padding)> ResolveAttributeSetAsync(
+        Autheris.Application.Identity.Attributes.ICallerAttributeResolver resolver, IReadOnlyCollection<string> names, TableAccessQuery query, CancellationToken ct)
+    {
+        var subject = resolver.CreateSubject(query.Principal, query.Tenant);
+        var (set, padding) = await Autheris.Application.Identity.Attributes.CallerAttributeRecipes.ResolveAsync(resolver, subject, names, ct).ConfigureAwait(false);
+        return (set, padding);
+    }
+
+    /// <summary>
+    /// REQ-GOV-129 (A-1, B-vf): binds the slots of a Virtual Filter predicate for this request. Feature off or anything unresolved: deny all rows
+    /// (a Virtual Filter is a restriction ANDed with the consent decision, never a grant).
+    /// </summary>
+    private async Task<(TrinoSqlEngine.Governance.PolicyPredicate Predicate, IReadOnlyList<CallerAttributeAuditEntry>? Audit)> BindVirtualFilterAttributesAsync(
+        TrinoSqlEngine.Governance.PolicyPredicate typed, IReadOnlyList<string> names, TableAccessQuery query, CancellationToken ct)
+    {
+        if (_callerAttributes is not { IsEnabled: true } resolver)
+        {
+            return (TrinoSqlEngine.Governance.PolicyPredicate.DenyAll, null);
+        }
+
+        var (set, padding) = await ResolveAttributeSetAsync(resolver, names, query, ct).ConfigureAwait(false);
+        return (Autheris.Application.Identity.Attributes.CallerAttributeBinder.Bind(typed, set!, padding!), set!.AuditEntries());
+    }
+
+    private static IReadOnlyList<CallerAttributeAuditEntry> Merge(IReadOnlyList<CallerAttributeAuditEntry>? existing, IReadOnlyList<CallerAttributeAuditEntry> added) =>
+        existing is null or { Count: 0 } ? added : [.. existing, .. added.Where(a => !existing.Contains(a))];
 
     /// <summary>
     /// SR-M-07: applies an access profile to an already allowed consent decision. <see cref="MaskingPolicyMode.Unmasked"/> relaxes

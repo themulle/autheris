@@ -62,7 +62,7 @@ public class ProcedureRowScopeTests
     public async Task Execute_MappedKey_ReadsResultColumnAndMatchesTableColumn()
     {
         var f = Active(Header.Replace("-- @row-scope-key serial_number", "-- @row-scope-key serial=serial_number"));
-        f.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<CancellationToken>())
+        f.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new RawProcedureResult(
                 ["serial", "name"],
                 [new object?[] { "100", "delivered" }, new object?[] { "200", "active" }],
@@ -183,7 +183,7 @@ public class ProcedureRowScopeTests
         f.Resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
             .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), columns, rowFilter));
 
-        f.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<CancellationToken>())
+        f.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new RawProcedureResult(
                 ["serial_number", "name"],
                 [
@@ -256,7 +256,7 @@ public class ProcedureRowScopeTests
         var f = Active(Header.Replace("-- @row-scope-key serial_number", string.Empty));
 
         await Should.ThrowAsync<KeyNotFoundException>(() => f.Create().ExecuteAsync("get_cranes", null, User(), Tenant));
-        await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default);
+        await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default, default);
     }
 
     [Fact]
@@ -265,7 +265,7 @@ public class ProcedureRowScopeTests
         var f = Active();
 
         await Should.ThrowAsync<KeyNotFoundException>(() => f.Create(withResolver: false).ExecuteAsync("get_cranes", null, User(), Tenant));
-        await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default);
+        await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default, default);
     }
 
     [Theory]
@@ -283,7 +283,7 @@ public class ProcedureRowScopeTests
     public async Task Execute_KeyColumnMissingInResult_Denies()
     {
         var f = Active();
-        f.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<CancellationToken>())
+        f.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new RawProcedureResult(["name"], [new object?[] { "x" }], false));
 
         await Should.ThrowAsync<ProcedureUnavailableException>(() => f.Create().ExecuteAsync("get_cranes", null, User(), Tenant));

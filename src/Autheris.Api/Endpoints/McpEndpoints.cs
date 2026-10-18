@@ -7,6 +7,7 @@ using System.Security.Claims;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
+using Autheris.Application.Identity.Attributes;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -193,7 +194,7 @@ public static class McpEndpoints
             .ToList();
     }
 
-    internal static McpCaller ResolveCaller(HttpContext context, bool allowOpenMcp)
+    internal static McpCaller ResolveCaller(HttpContext context, bool allowOpenMcp, CallerAttributeOptions? attributeOptions = null)
     {
         var principal = context.User;
         var isAuthenticated = principal.Identity?.IsAuthenticated == true;
@@ -238,10 +239,16 @@ public static class McpEndpoints
                             c.Type != ClaimTypes.PrimarySid &&
                             c.Type != ClaimTypes.Role &&
                             c.Type != ClaimTypes.GroupSid &&
-                            c.Type != Autheris.Domain.Security.TokenAccessScope.ClaimType)
+                            c.Type != Autheris.Domain.Security.TokenAccessScope.ClaimType &&
+                            c.Type != CallerAttributeSchemeGate.MarkerClaimType)
                 .GroupBy(c => c.Type, StringComparer.Ordinal)
                 .ToDictionary(g => g.Key, g => g.First().Value, StringComparer.Ordinal)
             : null;
+        if (additionalClaims is not null && CallerAttributeSchemeGate.HasAllowedOriginalScheme(principal, attributeOptions ?? new CallerAttributeOptions()))
+        {
+            // BC-129-01: only the gateway sets this marker, and only for an original identity of an allowed scheme.
+            additionalClaims[CallerAttributeSchemeGate.MarkerClaimType] = "1";
+        }
 
         return new McpCaller(principalId, userSid, tenantId, roles, groupSids, clientIp, isReadOnly, additionalClaims);
     }
