@@ -283,4 +283,12 @@ public sealed class RedisRateLimiterService : IRateLimiterService
             }
         }
     }
+
+    public Task<CostQuotaResult> ReserveCostQuotaAsync(string key, int reservedCost, ClientQuotaPolicy policy, CancellationToken ct = default)
+        => CheckCostQuotaAsync(key, reservedCost, policy, ct);
+
+    public async Task<CostQuotaResult> SettleCostQuotaAsync(string key, int reservedCost, int actualCost, ClientQuotaPolicy policy, CancellationToken ct = default)
+    {
+        return await _inMemoryFallback.SettleCostQuotaAsync(key, reservedCost, actualCost, policy, ct).ConfigureAwait(false);
+    }
 }

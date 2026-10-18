@@ -247,6 +247,7 @@ public static class GatewayApplicationBuilderExtensions
         if (switches.RestDataEndpointEnabled)
         {
             app.MapDatasetDataEndpoints();
+            app.MapTableStreamEndpoints();
         }
 
         app.MapAnalyticsEndpoints();

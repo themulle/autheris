@@ -33,7 +33,7 @@ public sealed class UnorderedPagingException : ArgumentException
 /// compiler binds).
 /// </para>
 /// </summary>
-public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
+public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
 {
     /// <summary>Alias of the single column of <see cref="PlanCount"/>.</summary>
     public const string CountColumnAlias = "total_count";
