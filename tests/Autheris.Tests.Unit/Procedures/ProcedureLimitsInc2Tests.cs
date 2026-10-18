@@ -1,6 +1,7 @@
 using System.Data;
 using System.Data.Common;
 using System.Security.Claims;
+using System.Text.Json;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.Procedures.Services;
@@ -456,5 +457,281 @@ public class ProcedureLimitsInc2Tests
     public void Options_MaxScanRowsNull_DefaultsTo10xMaxRowsCapped100000(int maxRows, int expected)
     {
         new ProcedureEndpointsOptions { MaxRows = maxRows }.EffectiveMaxScanRows.ShouldBe(expected);
+    }
+
+    // ---------- WP-B: reserved `limit` input (SEC-PROC152I2-07, -08, -15) ----------
+
+    private static Dictionary<string, object?> Inputs(object? limit)
+        => new(StringComparer.OrdinalIgnoreCase) { ["limit"] = limit };
+
+    private static JsonElement Json(string raw) => JsonDocument.Parse(raw).RootElement.Clone();
+
+    private static Task<GovernedProcedureResult> RunWith(Fixture f, IReadOnlyDictionary<string, object?>? inputs)
+        => f.Create().ExecuteAsync("get_cranes", inputs, User(), Tenant);
+
+    public static TheoryData<object?, int> ValidLimits() => new()
+    {
+        { "3", 3 },
+        { "10", 10 },
+        { "999", 10 },
+        { "99999999999999999999", 10 },
+        { "007", 7 },
+        { 3, 3 },
+        { 3L, 3 },
+        { 99999999999L, 10 },
+        { Json("4"), 4 },
+        { Json("99999999999"), 10 },
+        { Json("\"5\""), 5 },
+        { Json("12345678901234567890123"), 10 },
+    };
+
+    [Theory]
+    [MemberData(nameof(ValidLimits))]
+    public async Task Limit_Valid_FeedsTheRowBudget_AndClampsToMaxRows(object? limit, int expectedBudget)
+    {
+        var f = Active(scoped: false, total: 100);
+
+        await RunWith(f, Inputs(limit));
+
+        f.Budgets.ShouldBe([expectedBudget]);
+    }
+
+    [Fact]
+    public async Task Limit_Valid_ReturnsAtMostLimitRows_AndFlagsTruncated()
+    {
+        var f = Active(scoped: false, total: 100);
+
+        var result = await RunWith(f, Inputs("3"));
+
+        result.RowCount.ShouldBe(3);
+        result.Truncated.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Limit_Scoped_IsAppliedAfterTheRowScope_ScanCapUnchanged()
+    {
+        var f = Active(scoped: true, total: 100);
+        f.Allow([5, 50, 95]);
+
+        var result = await RunWith(f, Inputs("2"));
+
+        result.RowCount.ShouldBe(2);
+        result.Truncated.ShouldBeTrue();
+        f.Budgets.ShouldBe([100]);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("JSON-NULL")]
+    public async Task Limit_NullIsAbsent_UsesMaxRows(string? marker)
+    {
+        var f = Active(scoped: false, total: 100);
+
+        await RunWith(f, Inputs(marker == null ? null : Json("null")));
+
+        f.Budgets.ShouldBe([10]);
+    }
+
+    public static TheoryData<object?> InvalidLimits() => new()
+    {
+        "0", "-1", "+1", "1.5", "1e2", "", " ", "abc", "1,2", "0x10", "１２", "1 ", " 1",
+        0, -5, int.MinValue, 1.5, true, false,
+        Json("0"), Json("-1"), Json("1.0"), Json("1.5"), Json("1e2"), Json("true"), Json("false"),
+        Json("\"abc\""), Json("\"\""), Json("\"-3\""), Json("{}"), Json("[1]"), Json("[]"), Json("-99999999999"),
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidLimits))]
+    [Trait("Category", "Security")]
+    public async Task T_PROC152I2_08_Limit_Invalid_Is400_ConstantText_NeverEchoed(object? limit)
+    {
+        var f = Active(scoped: false, total: 100);
+
+        var ex = await Should.ThrowAsync<ArgumentException>(() => RunWith(f, Inputs(limit)));
+
+        ex.Message.ShouldBe("Invalid 'limit'.");
+        f.Budgets.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task T_PROC152I2_08_Limit_Invalid_ValueNotEchoed()
+    {
+        var f = Active(scoped: false, total: 100);
+
+        var ex = await Should.ThrowAsync<ArgumentException>(() => RunWith(f, Inputs("SECRET-VALUE-77")));
+
+        ex.Message.ShouldNotContain("SECRET");
+        ex.ToString().ShouldNotContain("SECRET-VALUE-77");
+    }
+
+    [Theory]
+    [InlineData("abc")]
+    [InlineData("3")]
+    [InlineData("0")]
+    [Trait("Category", "Security")]
+    public async Task T_PROC152I2_08_Limit_InvisibleCaller_Is404_Identical_ForValidAndInvalid(string limit)
+    {
+        var f = Active(scoped: false, total: 100);
+        f.Resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
+            .Returns(ci => TableAccessDecision.Denied(ci.ArgAt<TableIdentifier>(3), "no consent"));
+
+        var ex = await Should.ThrowAsync<KeyNotFoundException>(() => RunWith(f, Inputs(limit)));
+
+        var baseline = await Should.ThrowAsync<KeyNotFoundException>(() => RunWith(f, null));
+        ex.Message.ShouldBe(baseline.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task T_PROC152I2_08_Limit_Invalid_UnavailableProcedure_Is503_NotValidation()
+    {
+        var f = Active(scoped: false, total: 100);
+        f.Registry.MarkDisabled("get_cranes", "broken");
+
+        await Should.ThrowAsync<ProcedureUnavailableException>(() => RunWith(f, Inputs("abc")));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task T_PROC152I2_08_Limit_MixedCaseDuplicateKeys_CaseInsensitiveDictionaryKeepsLast_AndMaxRowsBounds()
+    {
+        var f = Active(scoped: false, total: 100);
+        var inputs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["limit"] = "1" };
+        inputs["LIMIT"] = "2";
+
+        await RunWith(f, inputs);
+
+        f.Budgets.ShouldBe([2]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task T_PROC152I2_08_Limit_MixedCaseDuplicateKeys_OrdinalDictionary_Is400()
+    {
+        var f = Active(scoped: false, total: 100);
+        var inputs = new Dictionary<string, object?> { ["limit"] = "1", ["LIMIT"] = "2" };
+
+        var ex = await Should.ThrowAsync<ArgumentException>(() => RunWith(f, inputs));
+
+        ex.Message.ShouldBe("Invalid 'limit'.");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task T_PROC152I2_09_Limit_NeverInParameterHashes_OrSessionContext_OrInvokerValues()
+    {
+        var f = Active(scoped: false, total: 100);
+
+        await RunWith(f, Inputs("3"));
+
+        await f.Invoker.Received(1).ExecuteReadAsync(
+            Arg.Any<ProcedureDefinition>(),
+            Arg.Is<IReadOnlyDictionary<string, object?>>(d => !d.ContainsKey("limit") && !d.ContainsKey("Limit") && d.Count == 0),
+            Arg.Any<ProcedureSecurityContext>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+        f.AuditEntries.ShouldNotBeEmpty();
+        f.AuditEntries.Single(a => a.EventType == "PROCEDURE_EXECUTE").DetailsJson.ShouldContain("\"parameterHashes\":{}");
+    }
+
+    [Fact]
+    public async Task Limit_DoesNotMaskUnknownParameterCheck()
+    {
+        var f = Active(scoped: false, total: 100);
+        var inputs = Inputs("3");
+        inputs["bogus"] = "x";
+
+        var ex = await Should.ThrowAsync<ArgumentException>(() => RunWith(f, inputs));
+
+        ex.Message.ShouldStartWith("Unknown parameter 'bogus'");
+    }
+
+    // ---------- WP-B: reserved name in the parsers and the catalog ----------
+
+    [Theory]
+    [InlineData("-- @param limit int optional")]
+    [InlineData("-- @param Limit int required")]
+    [InlineData("-- @param LIMIT nvarchar(10) optional")]
+    [InlineData("-- @context tenant_id -> @limit")]
+    [InlineData("-- @context user_sid -> @Limit")]
+    [InlineData("-- @context purpose -> LIMIT")]
+    [Trait("Category", "Security")]
+    public void T_PROC152I2_10_Parser_Header_ParameterNamedLimit_Rejected(string line)
+    {
+        string header = UnscopedHeader + "\n" + line;
+
+        var ex = Should.Throw<FormatException>(() => ProcedureDefinitionParser.Parse(header, "x", false, 60));
+
+        ex.Message.ShouldBe("Parameter name 'limit' is reserved.");
+    }
+
+    [Theory]
+    [InlineData("parameters:\n  - name: limit\n    type: int")]
+    [InlineData("parameters:\n  - name: '@Limit'\n    type: int")]
+    [InlineData("parameters:\n  - name: LIMIT\n    context: tenant_id")]
+    [InlineData("context:\n  tenant_id: '@limit'")]
+    [InlineData("context_bindings:\n  - key: user_sid\n    parameter: Limit")]
+    [Trait("Category", "Security")]
+    public void T_PROC152I2_10_Parser_Yaml_ParameterNamedLimit_Rejected(string fragment)
+    {
+        string yaml = "name: x\nprocedure: tem.p\nvalidation: declared\nresult_table: md.crane\n" + fragment + "\n";
+
+        var ex = Should.Throw<FormatException>(() => ProcedureDefinitionParser.ParseYaml(yaml, "x", false, 30));
+
+        ex.Message.ShouldBe("Parameter name 'limit' is reserved.");
+    }
+
+    [Theory]
+    [InlineData("limit")]
+    [InlineData("@Limit")]
+    [InlineData("LIMIT")]
+    [Trait("Category", "Security")]
+    public void T_PROC152I2_10_Catalog_ParameterNamedLimit_Rejected(string dbParameterName)
+    {
+        var errors = StoredProcedureCatalogValidator.ReservedParameterErrors([dbParameterName]);
+
+        errors.ShouldBe(["Procedure parameter '@limit' uses the reserved name 'limit'."]);
+    }
+
+    [Fact]
+    public void Catalog_OtherParameterNames_NotRejected()
+    {
+        StoredProcedureCatalogValidator.ReservedParameterErrors(["limits", "p_limit", "CustomerId"]).ShouldBeEmpty();
+    }
+
+    // ---------- WP-B: OpenAPI ----------
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task T_PROC152I2_17_OpenApi_LimitParameter_OnlyForVisibleProcedures_NoScanCap()
+    {
+        var registry = new InMemoryProcedureRegistry();
+        var visible = ProcedureDefinitionParser.Parse(UnscopedHeader, "x", false, 60);
+        var hidden = ProcedureDefinitionParser.Parse(UnscopedHeader.Replace("get_cranes", "hidden_cranes"), "y", false, 60);
+        foreach (var d in new[] { visible, hidden })
+        {
+            registry.Register(d);
+            registry.MarkActive(d.Name, new ProcedureValidationResult(true, [], ["serial_number"], ["md.crane"], new Dictionary<string, string>()));
+        }
+
+        var service = Substitute.For<IProcedureExecutionService>();
+        service.IsVisibleAsync(Arg.Any<RegisteredProcedure>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(ci => Task.FromResult(ci.ArgAt<RegisteredProcedure>(0).Definition.Name == "get_cranes"));
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = User() };
+        var options = Options.Create(new GatewayOptions
+        {
+            SqlEndpoints = new SqlEndpointsOptions { Procedures = new ProcedureEndpointsOptions { MaxRows = 321, MaxScanRows = 4321 } }
+        });
+
+        var result = await Autheris.Api.Endpoints.ProcedureEndpointRoutes.HandleOpenApi(http, registry, service, options);
+
+        var ok = result.ShouldBeOfType<Microsoft.AspNetCore.Http.HttpResults.Ok<Dictionary<string, object>>>();
+        var paths = (Dictionary<string, object>)ok.Value!["paths"];
+        paths.Keys.Count.ShouldBe(1);
+        string json = JsonSerializer.Serialize(ok.Value);
+        json.ShouldContain("\"name\":\"limit\"");
+        json.ShouldContain("\"maximum\":321");
+        json.ShouldContain("\"minimum\":1");
+        json.ShouldNotContain("4321");
+        json.ShouldNotContain("hidden_cranes");
     }
 }

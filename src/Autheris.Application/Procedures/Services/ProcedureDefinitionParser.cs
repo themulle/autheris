@@ -227,6 +227,8 @@ public static class ProcedureDefinitionParser
             throw new FormatException("@procedure is required and must have the form schema.name (no database, linked server or quoting).");
         }
 
+        RejectReservedNames(parameters, contexts);
+
         var duplicate = parameters.GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1);
         if (duplicate != null)
         {
@@ -268,6 +270,21 @@ public static class ProcedureDefinitionParser
             RowScopeKeyTable = scopeTableColumns
         };
     }
+
+    /// <summary>
+    /// SEC-PROC152I2-08: <c>limit</c> is the reserved row-limit input of the endpoint; no parameter or context binding may use
+    /// the name (any case, optional leading '@'), so the input can never be shadowed or confused with a procedure parameter.
+    /// </summary>
+    private static void RejectReservedNames(List<ProcedureParameter> parameters, List<ProcedureContextBinding> contexts)
+    {
+        if (parameters.Any(p => IsReservedName(p.Name)) || contexts.Any(c => IsReservedName(c.ParameterName)))
+        {
+            throw new FormatException("Parameter name 'limit' is reserved.");
+        }
+    }
+
+    internal static bool IsReservedName(string name)
+        => string.Equals(name?.Trim().TrimStart('@'), "limit", StringComparison.OrdinalIgnoreCase);
 
     private static ProcedureParameter ParseParameter(string text)
     {
@@ -524,6 +541,8 @@ public static class ProcedureDefinitionParser
                 throw new FormatException($"referenced_tables entry '{rt}' must have the form schema.table.");
             }
         }
+
+        RejectReservedNames(parameters, contexts);
 
         var duplicate = parameters.GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1);
         if (duplicate != null)

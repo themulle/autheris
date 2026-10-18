@@ -167,7 +167,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         try
         {
             // 5. Input validation (unknown and context-bound parameters are rejected, never ignored)
-            var values = ValidateInputs(definition, rawInputs);
+            var values = ValidateInputs(definition, rawInputs, out int? requestedLimit);
 
             // 6. Call (security context goes into the read-only SESSION_CONTEXT)
             var context = new ProcedureSecurityContext(
@@ -178,7 +178,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             // 6a. Row budget, decided before the invoke from the visibility decisions (SEC-PROC152I2-01): a scoped call scans up
             // to MaxScanRows raw rows (the limit is applied after the row scope), an unscoped call reads the limit itself.
             var procedureOptions = _options.Value.SqlEndpoints.Procedures;
-            int effectiveLimit = procedureOptions.MaxRows;
+            int effectiveLimit = requestedLimit ?? procedureOptions.MaxRows;
             bool scoped = IsRowScoped(definition, decisions, out var resultDecision);
             int rowBudget = scoped ? procedureOptions.EffectiveMaxScanRows : effectiveLimit;
 
@@ -445,9 +445,33 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         return roles.Any(r => !string.IsNullOrWhiteSpace(r) && (user.IsInRole(r) || claimRoles.Contains(r)));
     }
 
-    private Dictionary<string, object?> ValidateInputs(ProcedureDefinition definition, IReadOnlyDictionary<string, object?>? rawInputs)
+    private const string InvalidLimitMessage = "Invalid 'limit'.";
+
+    private Dictionary<string, object?> ValidateInputs(ProcedureDefinition definition, IReadOnlyDictionary<string, object?>? rawInputs, out int? requestedLimit)
     {
-        var inputs = rawInputs ?? new Dictionary<string, object?>();
+        // The reserved key 'limit' (any case) is taken out before the unknown-parameter check: it never reaches the parameter
+        // values, the parameter hashes, the SQL call or SESSION_CONTEXT (SEC-PROC152I2-07).
+        var inputs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        object? limitRaw = null;
+        int limitKeys = 0;
+        if (rawInputs != null)
+        {
+            foreach (var (key, value) in rawInputs)
+            {
+                if (string.Equals(key, "limit", StringComparison.OrdinalIgnoreCase))
+                {
+                    limitKeys++;
+                    limitRaw = value;
+                }
+                else
+                {
+                    inputs[key] = value;
+                }
+            }
+        }
+
+        // Several spellings of the key in a case-sensitive input map are ambiguous: fail closed.
+        requestedLimit = limitKeys > 1 ? throw new ArgumentException(InvalidLimitMessage) : ParseLimit(limitRaw, _options.Value.SqlEndpoints.Procedures.MaxRows);
         var declared = definition.Parameters.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
 
         foreach (var key in inputs.Keys)
@@ -483,6 +507,53 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         }
 
         return values;
+    }
+
+    /// <summary>
+    /// Parses the reserved <c>limit</c> input: a JSON integer or a digit string. Null / JSON null is absent, everything else that is
+    /// not a plain positive integer is a 400 with a constant text (the value is never echoed); above <paramref name="maxRows"/> or
+    /// beyond <see cref="int"/> range it clamps to <paramref name="maxRows"/>.
+    /// </summary>
+    private static int? ParseLimit(object? raw, int maxRows)
+    {
+        string? digits;
+        switch (raw)
+        {
+            case null:
+                return null;
+            case JsonElement { ValueKind: JsonValueKind.Null }:
+                return null;
+            case JsonElement { ValueKind: JsonValueKind.Number } number:
+                digits = number.GetRawText();
+                break;
+            case JsonElement { ValueKind: JsonValueKind.String } text:
+                digits = text.GetString();
+                break;
+            case JsonElement:
+                throw new ArgumentException(InvalidLimitMessage);
+            case string str:
+                digits = str;
+                break;
+            case int or long or short or byte or uint or ushort:
+                long numeric = Convert.ToInt64(raw, CultureInfo.InvariantCulture);
+                return numeric < 1 ? throw new ArgumentException(InvalidLimitMessage) : (int)Math.Min(numeric, maxRows);
+            default:
+                throw new ArgumentException(InvalidLimitMessage);
+        }
+
+        if (string.IsNullOrEmpty(digits) || !digits.All(static c => c is >= '0' and <= '9'))
+        {
+            throw new ArgumentException(InvalidLimitMessage);
+        }
+
+        string trimmed = digits.TrimStart('0');
+        if (trimmed.Length == 0)
+        {
+            throw new ArgumentException(InvalidLimitMessage); // zero
+        }
+
+        // More than 9 digits cannot be a valid in-range value below MaxRows (hard cap 100000): clamp without parsing.
+        return trimmed.Length > 9 ? maxRows : Math.Min(int.Parse(trimmed, CultureInfo.InvariantCulture), maxRows);
     }
 
     private static object Coerce(object value, ProcedureParameter p)
