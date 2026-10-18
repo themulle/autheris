@@ -32,7 +32,14 @@ public sealed record TreeOrFilter(IReadOnlyList<TreeFilter> Items) : TreeFilter;
 public sealed record TreeNotFilter(TreeFilter Item) : TreeFilter;
 
 /// <summary>For <see cref="TreeFilterOperator.In"/>/<see cref="TreeFilterOperator.NotIn"/> the value is a list.</summary>
-public sealed record TreeComparison(string Column, TreeFilterOperator Operator, object? Value) : TreeFilter;
+public sealed record TreeComparison(string Column, TreeFilterOperator Operator, object? Value) : TreeFilter
+{
+    /// <summary>
+    /// The value kind the typed filter declared (GraphQL <c>string</c>, <c>int</c>, ... leaf), when there is one. The typed metric query
+    /// checks it against the resolved column kind (#112 A-8, METRIC_FILTER_INVALID); it never changes the rendered predicate.
+    /// </summary>
+    public Autheris.Application.Analytics.ColumnValueKind? DeclaredKind { get; init; }
+}
 
 public sealed record TreeOrder(string Column, bool Descending = false);
 

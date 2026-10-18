@@ -30,7 +30,7 @@ public static class GatewayAnalyticsServiceExtensions
             .ValidateOnStart();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<SemanticOptions>, SemanticOptionsValidator>());
         services.TryAddSingleton<IGovernedTableReadPlanner, GovernedTableReadPlanner>();
-        services.TryAddSingleton<ISemanticCatalogService, InMemorySemanticCatalog>();
+        services.AddSemanticCatalog();
         services.TryAddScoped<IDbtSemanticManifestIngestionService, DbtSemanticManifestIngestionService>();
         services.TryAddScoped<IGovernedAggregationService, GovernedAggregationService>();
         services.TryAddScoped<ISemanticMetricQueryService, SemanticMetricQueryService>();

@@ -308,6 +308,8 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         {
             return await McpSemanticTools.ExecuteListMetricsAsync(
                 _semanticCatalog ?? new Autheris.Application.Dbt.Services.InMemorySemanticCatalog(),
+                userPrincipal,
+                new Autheris.Application.Dbt.Services.SemanticTenancy(_tenancyMode),
                 argumentsJson,
                 ct).ConfigureAwait(false);
         }
@@ -316,6 +318,8 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         {
             return await McpSemanticTools.ExecuteDescribeMetricAsync(
                 _semanticCatalog ?? new Autheris.Application.Dbt.Services.InMemorySemanticCatalog(),
+                userPrincipal,
+                new Autheris.Application.Dbt.Services.SemanticTenancy(_tenancyMode),
                 argumentsJson,
                 ct).ConfigureAwait(false);
         }

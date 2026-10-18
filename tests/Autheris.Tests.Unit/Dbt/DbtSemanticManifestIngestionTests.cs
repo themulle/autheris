@@ -1,6 +1,12 @@
 namespace Autheris.Tests.Unit.Dbt;
 
+using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Interfaces;
+using Autheris.Domain.Common;
+using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using NSubstitute;
 using Autheris.Application.Dbt.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
@@ -67,16 +73,21 @@ public sealed class DbtSemanticManifestIngestionTests
     [Fact]
     public async Task ParseAndIngestAsync_ValidManifest_PopulatesCatalog()
     {
-        var catalog = new InMemorySemanticCatalog();
-        var service = new DbtSemanticManifestIngestionService(catalog, NullLogger<DbtSemanticManifestIngestionService>.Instance);
+        var single = SemanticCatalogTestKit.Mode(TenancyMode.Single);
+        var catalog = new InMemorySemanticCatalog(single);
+        var repository = Substitute.For<ITableMetadataRepository>();
+        repository.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(SemanticManifestValidatorTests.Orders());
+        repository.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>()).Returns(ci => Task.FromResult(ci.Arg<TableMetadata>()));
+        var service = new DbtSemanticManifestIngestionService(catalog, NullLogger<DbtSemanticManifestIngestionService>.Instance, repository, gatewayOptions: single);
+        var legacy = TenantId.LegacySingleTenant;
 
-        var manifest = await service.ParseAndIngestAsync(SampleSemanticManifestJson);
+        var manifest = await service.ParseAndIngestAsync(SampleSemanticManifestJson, legacy);
 
         manifest.SemanticModels.Count.ShouldBe(1);
         manifest.Metrics.Count.ShouldBe(2);
 
         // Verify model
-        var model = await catalog.GetSemanticModelAsync("orders_source");
+        var model = await catalog.GetSemanticModelAsync("orders_source", legacy);
         model.ShouldNotBeNull();
         model.Name.ShouldBe("orders_source");
         model.Entities.Count.ShouldBe(2);
@@ -85,17 +96,17 @@ public sealed class DbtSemanticManifestIngestionTests
         model.Dimensions.ShouldContain(d => d.Name == "ordered_at" && d.IsPartition);
 
         // Verify metrics
-        var allMetrics = await catalog.ListMetricsAsync();
+        var allMetrics = await catalog.ListMetricsAsync(null, legacy);
         allMetrics.Count.ShouldBe(2);
 
-        var revMetric = await catalog.GetMetricAsync("gross_revenue");
+        var revMetric = await catalog.GetMetricAsync("gross_revenue", legacy);
         revMetric.ShouldNotBeNull();
         revMetric.Label.ShouldBe("Gross Revenue");
         revMetric.Measures.ShouldContain("order_total");
         revMetric.Meta["unit"].ShouldBe("EUR");
 
         // Filter by model
-        var modelMetrics = await catalog.ListMetricsAsync("orders_source");
+        var modelMetrics = await catalog.ListMetricsAsync("orders_source", legacy);
         modelMetrics.Count.ShouldBe(2);
     }
 }

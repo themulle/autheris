@@ -105,12 +105,13 @@ public sealed class DbtDatasetTagTests
         tableRepo.UpsertTableMetadataAsync(Arg.Do<TableMetadata>(m => captured = m), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult(ci.Arg<TableMetadata>()));
         var service = new DbtSemanticManifestIngestionService(
-            Substitute.For<ISemanticCatalogService>(), NullLogger<DbtSemanticManifestIngestionService>.Instance, tableRepo, _tags);
+            Substitute.For<ISemanticCatalogService>(), NullLogger<DbtSemanticManifestIngestionService>.Instance, tableRepo, _tags,
+            gatewayOptions: Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { Mode = "Single" } }));
 
         await service.ParseAndIngestAsync("""
         { "semantic_models": [ { "name": "orders", "description": "d", "node_relation": { "relation_name": "a.b.orders" },
             "entities": [ { "name": "order_id", "type": "primary" } ], "dimensions": [], "measures": [] } ], "metrics": [] }
-        """);
+        """, TenantId.LegacySingleTenant);
 
         captured!.Table.Tags.ShouldBeEmpty();
         await _tags.Received(1).ImportDbtTagsAsync(new TableIdentifier("semantic", "semantic", "orders"),

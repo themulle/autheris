@@ -17,7 +17,14 @@ public sealed record MetricQueryRequest(
     string? TimeGranularity = null,
     IReadOnlyList<TableOrderBy>? OrderBy = null,
     int? Limit = null,
-    SmallGroupStrategy? SmallGroupStrategyOverride = null);
+    SmallGroupStrategy? SmallGroupStrategyOverride = null)
+{
+    /// <summary>
+    /// Typed filter of the GraphQL surface (#112 A-8). Built into a clause after the base table is resolved; mutually exclusive with
+    /// <see cref="Where"/> (REST and MCP keep the text filter).
+    /// </summary>
+    public Autheris.Application.Sql.Tree.TreeFilter? TypedWhere { get; init; }
+}
 
 /// <summary>
 /// Governed execution result for a semantic metric query, including manifest version provenance and k-anonymity metadata (#38).
@@ -28,8 +35,16 @@ public sealed record MetricQueryResult(
     IReadOnlyList<AggregationGroupRow> Groups,
     AggregationGroupRow? Totals,
     AggregationMetadata Metadata,
-    IReadOnlyDictionary<string, DbtMetric> MetricDefinitions)
+    IReadOnlyDictionary<string, Autheris.Application.Dbt.Services.MetricDefinitionSummary> MetricDefinitions)
 {
+    /// <summary>Static value kind per requested metric (count INT, ratio and derived DECIMAL, otherwise from the function and column type). For the typed surface only: REST and MCP output is unchanged.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlyDictionary<string, AggregateValueKind> MetricValueKinds { get; init; } = new Dictionary<string, AggregateValueKind>();
+
+    /// <summary>Static value kind per group-by column.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlyDictionary<string, AggregateValueKind> DimensionValueKinds { get; init; } = new Dictionary<string, AggregateValueKind>();
+
     public bool Suppressed => Metadata.Suppressed;
     public int SuppressedGroupsCount => Metadata.SuppressedGroupsCount;
     public long SuppressedRowsCount => Metadata.SuppressedRowsCount;

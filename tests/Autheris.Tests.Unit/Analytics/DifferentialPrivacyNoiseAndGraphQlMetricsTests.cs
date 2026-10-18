@@ -331,7 +331,7 @@ public sealed class DifferentialPrivacyNoiseAndGraphQlMetricsTests
             Groups: [new AggregationGroupRow(new Dictionary<string, object?> { ["region"] = "EU" }, 5, new Dictionary<string, object?> { ["total_revenue"] = 1000m })],
             Totals: new AggregationGroupRow(new Dictionary<string, object?>(), 5, new Dictionary<string, object?> { ["total_revenue"] = 1000m }),
             Metadata: new AggregationMetadata(2, SmallGroupStrategy.Suppress, false, 0, 0, false, false, NoiseApplied: true, EpsilonConsumed: 1.0, RemainingEpsilon: 9.0),
-            MetricDefinitions: new Dictionary<string, DbtMetric>());
+            MetricDefinitions: new Dictionary<string, Autheris.Application.Dbt.Services.MetricDefinitionSummary>());
 
         var metricService = Substitute.For<ISemanticMetricQueryService>();
         metricService.QueryMetricsAsync(principal, Arg.Any<MetricQueryRequest>(), Arg.Any<CancellationToken>())
