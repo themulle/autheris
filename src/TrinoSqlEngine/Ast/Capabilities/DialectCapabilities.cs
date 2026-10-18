@@ -134,7 +134,8 @@ public sealed record DialectCapabilities(
     bool ReportsInsertRowCount = true,
     int? MaxCompoundSelectTerms = null,
     int? MaxExpressionDepth = null,
-    bool LikeIsCaseInsensitive = false)
+    bool LikeIsCaseInsensitive = false,
+    bool SupportsTimeZoneConversion = false)
 {
     /// <summary>Version of the capability data. Part of the compile cache key (SEC-ADG-01).</summary>
     public const string TableVersion = "cap-6";

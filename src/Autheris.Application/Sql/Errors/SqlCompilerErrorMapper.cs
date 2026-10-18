@@ -107,6 +107,12 @@ public static class SqlCompilerErrorMapper
         e => e is ParseCanceledException { InnerException: TimeoutException } ? Of(422, GovernedSqlErrorCodes.LimitExceeded, nameof(SqlLimitKind.CompileTime)) : null,
         e => e is ParseCanceledException or RecognitionException ? Of(400, GovernedSqlErrorCodes.SyntaxError) : null,
         e => e is MissingClientParameterException ? Of(400, GovernedSqlErrorCodes.ParameterMissing) : null,
+        // REQ-SQL-128: a caller mistake with a list parameter. The code is stable, the message fixed, no count or name. The row precedes
+        // the generic SecurityException row (403), which a wrapped list error must never reach.
+        e => e is ClientListException list ? Of(400, list.Code) : null,
+        // REQ-SQL-130 (A-10): a refused time zone conversion has its own stable code per cause. SqlTimeZoneException is not a SecurityException,
+        // and this row precedes the generic 403 row, so a wrapped one never becomes a policy violation. The message is the fixed one of the code.
+        e => e is SqlTimeZoneException zone ? MapTimeZone(zone.Code) : null,
         // Phase 5 L3: a user error (a reserved identifier), not a gateway defect: no invariant metric.
         e => e is ReservedIdentifierException ? Of(400, GovernedSqlErrorCodes.ReservedIdentifier) : null,
         e => e switch
@@ -136,6 +142,16 @@ public static class SqlCompilerErrorMapper
         // not verify). The exception derives from InvalidOperationException, so the classifier would not know it.
         e => e is SqlSourceUnavailableException ? Of(503, GovernedSqlErrorCodes.SourceUnavailable) : null
     ];
+
+    private static SqlErrorMapping MapTimeZone(string code) => code switch
+    {
+        GovernedSqlErrorCodes.TimeZoneInvalid => Of(400, code),
+        GovernedSqlErrorCodes.TimeZoneArgument => Of(422, code),
+        GovernedSqlErrorCodes.FunctionUnsupportedDialect => Of(501, code),
+        GovernedSqlErrorCodes.TimeZoneUnavailable => Of(503, code),
+        // An unknown code is a gateway defect: fail closed.
+        _ => Of(500, GovernedSqlErrorCodes.CompilerInvariant)
+    };
 
     private static SqlErrorMapping? MapGoverned(string code) => code switch
     {

@@ -104,6 +104,7 @@ public static class GatewaySqlEngineServiceExtensions
         services.AddScoped<StoredProcedureCatalogValidator>();
         services.AddSingleton<IProcedureInvoker, MssqlProcedureInvoker>();
         services.AddSingleton<IProcedureRowScopeResolver, SqlProcedureRowScopeResolver>();
+        services.AddSingleton<ProcedureDenialAuditLimiter>();
         services.AddScoped<IProcedureExecutionService, GovernedProcedureExecutionService>();
         services.AddSingleton<IProcedureYamlGenerator, ProcedureYamlGenerator>();
         if (gatewayOptions.SqlEndpoints.Procedures.Enabled)

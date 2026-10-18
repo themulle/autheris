@@ -64,7 +64,9 @@ public sealed record MaskExpression(
 public sealed record ParameterReference(
     string Name,
     int? PositionalIndex = null,
-    bool IsSynthetic = false) : Expression;
+    bool IsSynthetic = false,
+    int? ListIndex = null,
+    int? ListCount = null) : Expression;
 
 /// <summary>
 /// A literal of the user's query. <paramref name="ColumnType"/> is the catalog data type of the column the literal is compared with

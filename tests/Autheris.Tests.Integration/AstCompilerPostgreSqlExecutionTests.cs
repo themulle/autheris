@@ -566,4 +566,62 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
         // The literal is compared with the citext column as text (case-sensitive), exactly as before the change.
         Ids(await RunAsync("SELECT id FROM orders WHERE tenantid = 'ACME'", "acme")).ShouldBeEmpty();
     }
+
+    // ---- REQ-SQL-128: client lists on a real PostgreSQL (AC-128-1, AC-128-2, AC-128-8) ---------------------------------------------
+
+    private async Task<List<object?[]>> RunListAsync(string sql, string tenant, Dictionary<string, ClientListValue> lists)
+    {
+        var shapes = ClientListShapes.Create(lists.ToDictionary(l => l.Key, l => l.Value.Count));
+        var compiled = _engine.Compile(sql.AsMemory(), Request(tenant) with { ClientLists = shapes }, CancellationToken.None);
+        await using var conn = new NpgsqlConnection(_fx.ConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        _binder.Bind(cmd, compiled, lists.ToDictionary(l => l.Key, l => (object?)l.Value));
+        var rows = new List<object?[]>();
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var row = new object[reader.FieldCount];
+            reader.GetValues(row);
+            rows.Add(row);
+        }
+
+        return rows;
+    }
+
+    private static ClientListValue Ints(params int[] values) => ClientListValue.Create(values.Select(v => (object)v).ToList(), SqlParameterType.Int32);
+
+    private static ClientListValue Texts(params string[] values) => ClientListValue.Create(values.Cast<object>().ToList(), SqlParameterType.String);
+
+    [Fact]
+    public async Task ClientList_IntegerList_ReturnsOnlyTheTenantsRows_AndNotInIsItsComplement()
+    {
+        var ids = new Dictionary<string, ClientListValue> { ["ids"] = Ints(1, 2, 3, 5, 6) };
+        Ids(await RunListAsync("SELECT id FROM orders WHERE id IN (__param_ids)", "acme", ids)).ShouldBe(new List<int> { 1, 2, 6 });
+        Ids(await RunListAsync("SELECT id FROM orders WHERE id NOT IN (__param_ids)", "acme", ids)).ShouldBeEmpty();
+        Ids(await RunListAsync("SELECT id FROM orders WHERE id NOT IN (__param_ids)", "acme", new() { ["ids"] = Ints(1) })).ShouldBe(new List<int> { 2, 6 });
+    }
+
+    [Fact]
+    public async Task ClientList_EmptyList_IsFalse_AndNotInIsTrue()
+    {
+        var none = new Dictionary<string, ClientListValue> { ["ids"] = Ints() };
+        Ids(await RunListAsync("SELECT id FROM orders WHERE id IN (__param_ids)", "acme", none)).ShouldBeEmpty();
+        Ids(await RunListAsync("SELECT id FROM orders WHERE id NOT IN (__param_ids)", "acme", none)).ShouldBe(new List<int> { 1, 2, 6 });
+    }
+
+    [Fact]
+    public async Task ClientList_HostileTextValues_AreBoundNeverExecuted()
+    {
+        var hostile = new Dictionary<string, ClientListValue> { ["s"] = Texts("open'; DROP TABLE orders; --", "x' OR '1'='1", "/* c */", "open") };
+        Ids(await RunListAsync("SELECT id FROM orders WHERE status IN (__param_s)", "acme", hostile)).ShouldBe(new List<int> { 1, 2 });
+        Ids(await RunAsync("SELECT id FROM orders", "acme")).ShouldBe(new List<int> { 1, 2, 6 });
+    }
+
+    [Fact]
+    public async Task ClientList_OneThousandValues_AreBound()
+    {
+        var many = new Dictionary<string, ClientListValue> { ["ids"] = Ints(Enumerable.Range(1, 1000).ToArray()) };
+        Ids(await RunListAsync("SELECT id FROM orders WHERE id IN (__param_ids)", "acme", many)).ShouldBe(new List<int> { 1, 2, 6 });
+    }
 }

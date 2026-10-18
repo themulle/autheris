@@ -441,7 +441,7 @@ public class SecurityCoverageTests
         {
             if (type == typeof(AstSecurityVisitor)) continue; // creates the nodes; never re-enters them (tested below)
             // Producers that run before an expression is wrapped in a SecurityPredicateExpression need constructor arguments.
-            if (type.Name is "PolicySubqueryTenantRewriter" or "PolicyShaper" or "PolicyColumnTypeAnnotator" or "LiteralColumnTypeAnnotator") continue;
+            if (type.Name is "PolicySubqueryTenantRewriter" or "PolicyShaper" or "PolicyColumnTypeAnnotator" or "LiteralColumnTypeAnnotator" or "ClientListExpander" or "TimeZoneCallValidator") continue;
             var rewriter = (SqlAstRewriter)Activator.CreateInstance(type, BindingFlags.Default | BindingFlags.OptionalParamBinding, null, Array.Empty<object>(), null)!;
             var result = rewriter.Visit(stmt);
             Assert.True(ContainsStatementPredicate(result, injected), $"{type.Name} rewrote an injected security predicate");
@@ -457,6 +457,21 @@ public class SecurityCoverageTests
 
         var result = new TrinoSqlEngine.Ast.Security.LiteralColumnTypeAnnotator(new TrinoSqlEngine.Governance.InMemoryTableCatalog(Array.Empty<TrinoSqlEngine.Governance.TableCatalogEntry>(), "dbo")).Visit(stmt);
         Assert.True(ContainsStatementPredicate(result, injected), "the annotator rewrote an injected security predicate");
+    }
+
+    [Fact]
+    public void TimeZoneCallValidator_DoesNotDescendIntoSecurityPredicate()
+    {
+        // An injected predicate is opaque to every rewriter: a call hidden inside it would never be validated (and never exists, BC-130-2).
+        var inner = new FunctionCallExpression(new SqlQualifiedName("convert_timezone"), new Expression[] { new LiteralExpression("Mars/Base", LiteralType.String), new LiteralExpression("UTC", LiteralType.String), Col("a") });
+        var injected = Pred(RootId, SecurityScope.Root, inner);
+        var stmt = WithInjected(injected, new BinaryExpression(Col("a"), Equal, Int(1)));
+
+        var catalog = new TrinoSqlEngine.Governance.InMemoryTableCatalog(Array.Empty<TrinoSqlEngine.Governance.TableCatalogEntry>(), "dbo");
+        var options = new TrinoSqlEngine.Ast.Visitors.TimeZoneValidationOptions(TargetSqlDialect.PostgreSql, true, true, new DictMaskProvider(),
+            System.Collections.Frozen.FrozenSet<string>.Empty, TrinoSqlEngine.Ast.Emit.ClientListShapes.Empty, false);
+        var result = new TrinoSqlEngine.Ast.Visitors.TimeZoneCallValidator(catalog, options).Visit(stmt);
+        Assert.True(ContainsStatementPredicate(result, injected), "the validator rewrote an injected security predicate");
     }
 
     [Fact]
