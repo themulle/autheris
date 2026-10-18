@@ -690,7 +690,7 @@ public sealed class CutoverArchitectureTests
         graph.Targets.Where(kv => kv.Value.Contains(CompileTarget)).Select(kv => kv.Key.Type)
             .Distinct().ShouldBe(new[] { "Autheris.Application.Sql.Services.GovernedSqlRewriter" }, ignoreOrder: true);
         graph.Targets.Where(kv => kv.Value.Contains(BinderTarget)).Select(kv => kv.Key.Type)
-            .Distinct().ShouldBe(new[] { "Autheris.Application.Sql.Services.GovernedSqlExecutor" }, ignoreOrder: true);
+            .Distinct().ShouldBe(new[] { "Autheris.Application.Sql.Services.GovernedSqlExecutor", "Autheris.Application.Olap.DuckDbOlapEngine" }, ignoreOrder: true);
     }
 
     // The fixtures of the controls below are top-level types of this (test) assembly, which the production scans never read

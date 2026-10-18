@@ -32,6 +32,15 @@ public static class ListParameterNormalizer
     public static ClientListValue Normalize(object raw, ListParameterLimits limits, SqlParameterType? declaredElementType, bool guidStrings = false)
     {
         ArgumentNullException.ThrowIfNull(raw);
+        if (raw is ClientListValue already)
+        {
+            if (already.Count > limits.ConfiguredMaxValues)
+            {
+                throw new ClientListException(GovernedSqlErrorCodes.ListParamTooLarge);
+            }
+            return already;
+        }
+
         try
         {
             var items = Read(raw, limits.RawCeiling);

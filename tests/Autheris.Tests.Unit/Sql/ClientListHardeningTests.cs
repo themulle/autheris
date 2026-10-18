@@ -104,30 +104,30 @@ public sealed class ClientListHardeningTests
     [InlineData("[1,2]")]
     [InlineData("[]")]
     [Trait("Category", "Security")]
-    public async Task Federation_ListParameter_IsRefused_OnEveryEntry_RawArrayDetected(string json)
+    public async Task Federation_ListParameter_IsRefused_WhenCrossSourceDisabled(string json)
     {
         var service = Federated(out _);
         var request = Request("SELECT 1", new Dictionary<string, object?> { ["x"] = Json(json) });
         var user = User();
         var tenant = new TenantId(TenantA);
 
-        (await Should.ThrowAsync<ClientListException>(() => service.ExecuteQueryBufferedAsync(request, user, tenant))).Code.ShouldBe("SQL_LIST_PARAM_UNSUPPORTED");
-        (await Should.ThrowAsync<ClientListException>(() => service.ExecuteGovernedQueryAsync(request, user, tenant, (_, _) => Task.CompletedTask))).Code.ShouldBe("SQL_LIST_PARAM_UNSUPPORTED");
+        // Issue #131: list parameters are supported in federation; when cross-source is disabled, policy exception is thrown
+        await Should.ThrowAsync<WebSqlPolicyException>(() => service.ExecuteQueryBufferedAsync(request, user, tenant));
+        await Should.ThrowAsync<WebSqlPolicyException>(() => service.ExecuteGovernedQueryAsync(request, user, tenant, (_, _) => Task.CompletedTask));
     }
 
-    // SEC-128-12 (second line): the CrossSourceRoutingException catch blocks refuse a list before the federated service is even resolved.
+    // Issue #131: list parameters in cross-source queries are routed to federation (#128 forward compatibility).
     [Fact]
     [Trait("Category", "Security")]
-    public async Task Federation_CrossSourceRoutedStatement_WithAList_IsRefused_BeforeTheFederatedServiceIsReached_BothEntries()
+    public async Task Federation_CrossSourceRoutedStatement_WithAList_IsRoutedToFederatedService()
     {
         var federated = Substitute.For<IFederatedQueryExecutionService>();
         await using var f = await CreateAsync(federated: federated, crossSourceCatalog: true);
         var parameters = new Dictionary<string, object?> { ["ids"] = Json("[1,2]") };
         const string sql = "SELECT id FROM orders WHERE id IN (@ids)";
 
-        (await Should.ThrowAsync<ClientListException>(() => f.QueryAsync(sql, parameters))).Code.ShouldBe("SQL_LIST_PARAM_UNSUPPORTED");
-        (await Should.ThrowAsync<ClientListException>(() => f.ExecuteAsync(sql, parameters))).Code.ShouldBe("SQL_LIST_PARAM_UNSUPPORTED");
-        federated.ReceivedCalls().ShouldBeEmpty();
+        await f.QueryAsync(sql, parameters);
+        await federated.Received(1).ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<System.Security.Claims.ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Domain.Common;
+using Autheris.Application.Sql.Federation.Parameters;
 using Autheris.Domain.Model;
 using TrinoSqlEngine.Analysis;
 
@@ -17,7 +18,8 @@ public sealed record StagingTableRequest(
     string StagingName,
     IReadOnlyList<string> Projection,
     TableFilterClause? PushdownFilter = null,
-    VirtualFilterTablePlan? VirtualFilterPlan = null);
+    VirtualFilterTablePlan? VirtualFilterPlan = null,
+    PushedParameterAudit? ParameterAudit = null);
 
 public sealed record FederationBudget(
     int MaxTableCount,

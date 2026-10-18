@@ -172,6 +172,11 @@ public sealed class SqlParameterExtractor : SqlBaseBaseListener
         }
 
         string cleanSql = StripComments(rawSql);
+        if (cleanSql.Contains("__param_", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new System.Security.SecurityException("The SQL statement uses a reserved identifier prefix.");
+        }
+
         string trimmed = cleanSql.Trim().TrimEnd(';');
         var ranges = GetExcludedRanges(trimmed);
 
@@ -301,6 +306,21 @@ public sealed class SqlParameterExtractor : SqlBaseBaseListener
                     ComparisonOperator = opText
                 };
             }
+        }
+    }
+
+    public static void EnsureValidParameterName(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        var trimmed = name.TrimStart('@');
+        if (trimmed.StartsWith("__gql_", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("p_rls_", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("rls_", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("__param_", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("p_pd_", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("__rls_ks", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new System.Security.SecurityException("A request parameter uses a reserved gateway parameter name.");
         }
     }
 }

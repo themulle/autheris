@@ -34,6 +34,8 @@ using TrinoSqlEngine;
 using TrinoSqlEngine.Analysis;
 using TrinoSqlEngine.Ast.Builder;
 using TrinoSqlEngine.Ast.Nodes;
+using Autheris.Application.Sql.Federation.Parameters;
+using Autheris.Application.Sql.ListParameters;
 
 public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionService
 {
@@ -144,13 +146,6 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         return new Sid(sidString);
     }
 
-    /// <summary>
-    /// SEC-128-12: the federated path never binds client parameters, so a list would be dropped silently. Every dispatch path ends in one of the
-    /// entries below; each refuses a request with a list-valued RAW parameter (a JSON array, a collection or a <c>ClientListValue</c>) until #131.
-    /// </summary>
-    private static void RejectListParameters(GovernedSqlQueryRequest request) =>
-        Autheris.Application.Sql.ListParameters.ClientListParameters.RejectForFederation(request.Parameters);
-
     public async Task ExecuteGovernedQueryAsync(
         GovernedSqlQueryRequest request,
         ClaimsPrincipal user,
@@ -160,7 +155,6 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(rowWriter);
-        RejectListParameters(request);
 
         var (duckDbResult, _) = await ExecuteFederatedInternalAsync(request, user, tenantId, ct).ConfigureAwait(false);
 
@@ -176,7 +170,6 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        RejectListParameters(request);
 
         var (duckDbResult, plan) = await ExecuteFederatedInternalAsync(request, user, tenantId, ct).ConfigureAwait(false);
 
@@ -223,7 +216,13 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             throw new WebSqlPolicyException("Cross-catalog queries across multiple data sources are not supported in WebSQL.");
         }
 
-        var metadata = _sqlEngine.Analyze(rawSql.AsMemory(), AnalysisTokenOptions, ct);
+        if (rawSql.Contains(GovernedSqlExecutionService.ClientParameterPlaceholderPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new WebSqlPolicyException("The SQL statement uses a reserved identifier prefix.");
+        }
+
+        var sqlForAnalysis = GovernedSqlExecutionService.NormalizeClientParameters(rawSql, null, out _);
+        var metadata = _sqlEngine.Analyze(sqlForAnalysis.AsMemory(), AnalysisTokenOptions, ct);
 
         if (metadata.StatementType is SqlStatementType.Insert or SqlStatementType.Update or SqlStatementType.Delete)
         {
@@ -238,7 +237,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
 
         var (decisions, userSid) = await AuthorizeAllTablesAsync(metadata, routing.Tables, user, tenantId, isDml: false, ct).ConfigureAwait(false);
 
-        _planner.Plan(rawSql, metadata, routing.Tables, decisions, crossSourceOptions);
+        _planner.Plan(sqlForAnalysis, metadata, routing.Tables, decisions, crossSourceOptions);
     }
 
     private async Task<(OlapQueryResult Result, CrossSourcePlan Plan)> ExecuteFederatedInternalAsync(
@@ -262,7 +261,14 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             throw new WebSqlPolicyException("Cross-catalog queries across multiple data sources are not supported in WebSQL.");
         }
 
-        var metadata = _sqlEngine.Analyze(request.Sql.AsMemory(), AnalysisTokenOptions, ct);
+        GovernedSqlExecutionService.EnsureClientParameterNames(request.Parameters);
+        if (request.Sql.Contains(GovernedSqlExecutionService.ClientParameterPlaceholderPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new WebSqlPolicyException("The SQL statement uses a reserved identifier prefix.");
+        }
+
+        var sqlForAnalysis = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, request.Parameters, out _);
+        var metadata = _sqlEngine.Analyze(sqlForAnalysis.AsMemory(), AnalysisTokenOptions, ct);
 
         if (metadata.StatementType is SqlStatementType.Insert or SqlStatementType.Update or SqlStatementType.Delete)
         {
@@ -305,6 +311,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         // CR-04 (AC-9.1): key set reads are on record even when the plan is denied after the keys were loaded.
         var keySourceReads = new List<VirtualFilterKeySourceRead>();
         bool keySourceReadsAudited = false;
+        FederatedParameterContract? parameterContract = null;
         try
         {
             // Budget and Timeout (INV-12, INV-13). SEC-12: the timeout also covers authorization, planning and key loading.
@@ -318,14 +325,18 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             // Phase A: Authorize ALL tables before any read (INV-1, INV-2)
             var (decisions, userSid) = await AuthorizeAllTablesAsync(metadata, routing.Tables, user, tenantId, isDml: false, timeoutCts.Token).ConfigureAwait(false);
 
+            // SEC-DATA131-01: parameter validation strictly follows table authorization (anti-oracle defense).
+            var parameterLimits = ListParameterLimits.From(_options.Value.WebSql ?? new WebSqlOptions());
+            parameterContract = FederatedParameterContract.Create(request.Parameters, parameterLimits);
+
             // F-GOV-14 (WI-6): the planner decides per protected HTTP table how the authorized keys are loaded and enforced
             // (single policy decision point: the decisions). Without a planner a table with applied Virtual Filters is denied.
-            var statement = ParseStatement(request.Sql);
+            var statement = ParseStatement(sqlForAnalysis);
             var vfPlans = await PlanVirtualFiltersAsync(statement, routing.Tables, decisions, tenantId, keySourceReads, timeoutCts.Token).ConfigureAwait(false);
-            var plan = _planner.Plan(request.Sql, metadata, routing.Tables, decisions, crossSourceOptions, vfPlans, statement);
+            var plan = _planner.Plan(sqlForAnalysis, metadata, routing.Tables, decisions, crossSourceOptions, vfPlans, statement, parameterContract);
 
             // Start Audit (fail-closed, INV-17)
-            await RecordStartAuditAsync(request, routing.Tables, userSid, tenantId, vfPlans, keySourceReads, correlationId, ct).ConfigureAwait(false);
+            await RecordStartAuditAsync(request, routing.Tables, userSid, tenantId, vfPlans, keySourceReads, correlationId, parameterContract, plan.Compiled.Parameters.Length, ct).ConfigureAwait(false);
             keySourceReadsAudited = true;
 
             var budget = new FederationBudget(
@@ -348,7 +359,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
                 : maxResultRows;
 
             var duckDbResult = await _duckDbEngine.ExecuteGeneratedAsync(
-                new GeneratedOlapQuery(plan.GeneratedDuckDbSql, plan.Compiled.Parameters),
+                new GeneratedOlapQuery(plan.GeneratedDuckDbSql, plan.Compiled.Parameters, Compiled: plan.Compiled, ClientValues: parameterContract.ClientValues),
                 stagedSources,
                 effectiveMaxRows,
                 timeoutCts.Token).ConfigureAwait(false);
@@ -357,7 +368,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         }
         catch (Exception ex)
         {
-            await RecordFailureAuditAsync(request, tenantId, user, ex, correlationId, keySourceReadsAudited ? [] : keySourceReads).ConfigureAwait(false);
+            await RecordFailureAuditAsync(request, tenantId, user, ex, correlationId, keySourceReadsAudited ? [] : keySourceReads, parameterContract).ConfigureAwait(false);
             throw;
         }
     }
@@ -527,6 +538,8 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>? vfPlans,
         IReadOnlyList<VirtualFilterKeySourceRead> keySourceReads,
         string correlationId,
+        FederatedParameterContract? parameters,
+        int bindCount,
         CancellationToken ct)
     {
         if (_auditLogRepository == null)
@@ -542,13 +555,17 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             dataSource = t.EffectiveDataSource
         }).ToList();
 
+        var paramsAudit = parameters?.ToAudit()?.Parameters ?? (IReadOnlyList<FederatedParameterAuditEntry>)Array.Empty<FederatedParameterAuditEntry>();
+
         var startDetails = JsonSerializer.Serialize(new
         {
             originalSql = redactedOriginalSql,
             originalSqlHash,
             tables = tablesAudit,
             transport = request.Transport ?? "WebSql",
-            virtualFilters = VirtualFilterAudit(vfPlans)
+            virtualFilters = VirtualFilterAudit(vfPlans),
+            parameters = paramsAudit,
+            bindCount
         });
 
         try
@@ -621,7 +638,8 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         ClaimsPrincipal user,
         Exception ex,
         string correlationId,
-        IReadOnlyList<VirtualFilterKeySourceRead> unauditedKeySourceReads)
+        IReadOnlyList<VirtualFilterKeySourceRead> unauditedKeySourceReads,
+        FederatedParameterContract? parameters = null)
     {
         if (_auditLogRepository == null) return;
 
@@ -639,15 +657,43 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             var eventType = isDenied ? AuditEventTypes.WebSqlQueryDenied : AuditEventTypes.QueryExecutionError;
 
             var reasonCode = ex is GatewaySecurityException gse ? gse.ErrorCode : isDenied ? "POLICY_VIOLATION" : ex.GetType().Name;
-            var detailsJson = JsonSerializer.Serialize(new
+
+            bool hasParams = (request.Parameters != null && request.Parameters.Count > 0) || (parameters != null && parameters.ClientValues.Count > 0);
+            string errorText = ex is GatewaySecurityException
+                ? $"Access denied ({reasonCode})"
+                : hasParams
+                    ? $"Query failed ({ex.GetType().Name})"
+                    : $"Query failed ({reasonCode})";
+
+            object? paramsAudit = parameters?.ToAudit()?.Parameters;
+            if (paramsAudit == null && request.Parameters != null && request.Parameters.Count > 0)
             {
-                originalSql = redactedOriginalSql,
-                originalSqlHash,
-                reasonCode,
-                // SEC-11 / SEC-FED-DELTA-01: the audit stores a stable code or the exception type name for every failure, never
-                // Exception.Message (it may quote data values of the failing source or of the DuckDB stage; audit entries cannot be redacted).
-                error = ex is GatewaySecurityException ? $"Access denied ({reasonCode})" : $"Query failed ({reasonCode})"
-            });
+                var list = new List<object>();
+                foreach (var (k, v) in request.Parameters)
+                {
+                    var cleanKey = k.TrimStart('@');
+                    bool isList = v is System.Collections.IEnumerable and not string and not byte[];
+                    int count = 1;
+                    if (isList && v is System.Collections.ICollection c) count = c.Count;
+                    else if (isList && v is System.Collections.IEnumerable e) count = e.Cast<object?>().Count();
+                    list.Add(new { name = cleanKey, kind = isList ? "list" : "scalar", count });
+                }
+                paramsAudit = list;
+            }
+
+            var detailsObj = new Dictionary<string, object?>
+            {
+                ["originalSql"] = redactedOriginalSql,
+                ["originalSqlHash"] = originalSqlHash,
+                ["reasonCode"] = reasonCode,
+                ["error"] = errorText
+            };
+            if (paramsAudit != null)
+            {
+                detailsObj["parameters"] = paramsAudit;
+            }
+
+            var detailsJson = JsonSerializer.Serialize(detailsObj);
 
             await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
             {

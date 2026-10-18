@@ -20,6 +20,8 @@ using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Generators;
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Visitors;
+using Autheris.Application.Sql.Federation.Optimization;
+using Autheris.Application.Sql.Federation.Parameters;
 
 public sealed record CrossSourcePlan(
     CompiledSql Compiled,
@@ -39,7 +41,8 @@ public interface ICrossSourcePlanner
         IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
         CrossSourceOptions options,
         IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>? virtualFilterPlans = null,
-        SqlStatement? statement = null);
+        SqlStatement? statement = null,
+        FederatedParameterContract? parameters = null);
 }
 
 public sealed class CrossSourcePlanner : ICrossSourcePlanner
@@ -86,7 +89,17 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         IReadOnlyList<ResolvedSourceTable> tables,
         IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
         CrossSourceOptions options) =>
-        Plan(rawSql, metadata, tables, decisions, options, null, null);
+        Plan(rawSql, metadata, tables, decisions, options, null, null, null);
+
+    public CrossSourcePlan Plan(
+        string rawSql,
+        SqlQueryMetadata metadata,
+        IReadOnlyList<ResolvedSourceTable> tables,
+        IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
+        CrossSourceOptions options,
+        IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>? virtualFilterPlans,
+        SqlStatement? statement) =>
+        Plan(rawSql, metadata, tables, decisions, options, virtualFilterPlans, statement, null);
 
     /// <summary>
     /// Plans the staging requests and the DuckDB query. <paramref name="virtualFilterPlans"/> (WI-6) are attached to the
@@ -100,7 +113,8 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
         CrossSourceOptions options,
         IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>? virtualFilterPlans = null,
-        SqlStatement? statement = null)
+        SqlStatement? statement = null,
+        FederatedParameterContract? parameters = null)
     {
         ArgumentNullException.ThrowIfNull(rawSql);
         ArgumentNullException.ThrowIfNull(metadata);
@@ -239,6 +253,12 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             }
         }
 
+        if (statement == null)
+        {
+            var (tree, _) = _sqlEngine.Parse(rawSql.AsMemory());
+            statement = new SqlAstBuilder().BuildStatement(tree);
+        }
+
         var stagingRequests = new List<StagingTableRequest>(tables.Count);
         var stagingNames = new List<string>(tables.Count);
 
@@ -309,6 +329,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             virtualFilterPlans?.TryGetValue(identifier, out vfPlan);
 
             TableFilterClause? pushdownFilter = null;
+            PushedParameterAudit? paramAudit = null;
             if (options.PredicatePushdown.Enabled &&
                 conjunctsByTable != null &&
                 conjunctsByTable.TryGetValue(identifier, out var tableConjuncts))
@@ -332,8 +353,12 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
 
                 if (pushableConjuncts.Count > 0)
                 {
-                    pushdownFilter = PushedClauseBuilder.Build(pushableConjuncts, t.Metadata);
+                    pushdownFilter = Autheris.Application.Sql.Federation.Pushdown.PushedClauseBuilder.Build(pushableConjuncts, t.Metadata);
                 }
+            }
+            else if (options.PredicatePushdown.Enabled && parameters != null && t.Metadata.Table.DataSourceType == DataSourceType.Sql)
+            {
+                pushdownFilter = Autheris.Application.Sql.Federation.Optimization.PushedClauseBuilder.BuildPushdown(statement, t.Target, t.Metadata, dec, parameters, out paramAudit);
             }
 
             stagingRequests.Add(new StagingTableRequest(
@@ -343,7 +368,8 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                 stagingName,
                 projected.ToList(),
                 PushdownFilter: pushdownFilter,
-                VirtualFilterPlan: vfPlan));
+                VirtualFilterPlan: vfPlan,
+                ParameterAudit: paramAudit));
         }
 
         // 5. AST rewrite to target s0, s1, etc. (the user query is not touched for Virtual Filters)
@@ -356,6 +382,11 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
 
         var rewriter = new FederationAstRewriter(targetToStaging, targetToAlias, tables);
         var rewrittenAst = (SqlStatement)rewriter.Visit(statement);
+
+        if (parameters?.ListShapes is { IsEmpty: false } listShapes)
+        {
+            rewrittenAst = TrinoSqlEngine.Ast.Visitors.ClientListExpansion.Apply(rewrittenAst, listShapes);
+        }
 
         // WP-X3: every query value is bound ($n); the staged rows are the only data DuckDB sees.
         var compiled = TimeZoneConversion.GenerateFederated(rewrittenAst, timeZoneProof);
