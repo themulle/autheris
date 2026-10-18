@@ -121,9 +121,8 @@ internal static class Wp0
         => new(
             tables,
             Substitute.For<IAuditLogRepository>(),
-            consents,
             Microsoft.Extensions.Options.Options.Create(options ?? Options(TenancyMode.Multi)),
-            rebac,
+            Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tables, consents, options ?? Options(TenancyMode.Multi), rebac),
             Substitute.For<IKeyVaultSecretProvider>(),
             Substitute.For<IOpenApiIngestionService>(),
             searchEngine,

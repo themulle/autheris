@@ -38,6 +38,13 @@ public sealed class ApiDispatcherService : IApiDispatcherService
     private readonly IDynamicOpenApiGenerator? _openApiGenerator;
     private readonly ILogger<ApiDispatcherService>? _logger;
     private readonly TenancyMode _tenancyMode;
+    private readonly IReadPathSwitches? _switches;
+
+    // PLAN-SEC-115 A-5: what each branch reaches. Without switches (direct construction) everything is allowed, as before.
+    private bool DataBranchAllowed => _switches is null || (_switches.RestDataEndpointEnabled && _switches.IsGroupEnabled(McpToolGroup.Query));
+    private bool CatalogBranchAllowed => _switches?.IsGroupEnabled(McpToolGroup.Catalog) ?? true;
+    private bool StatementBranchAllowed => _switches?.IsGroupEnabled(McpToolGroup.Query) ?? true;
+    private bool AccessBranchAllowed => _switches?.IsGroupEnabled(McpToolGroup.Access) ?? true;
 
     public ApiDispatcherService(
         IGovernedDataQueryService? dataQueryService = null,
@@ -45,8 +52,10 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         IGovernedSqlExecutionService? sqlExecutionService = null,
         IDynamicOpenApiGenerator? openApiGenerator = null,
         ILogger<ApiDispatcherService>? logger = null,
-        IOptions<GatewayOptions>? gatewayOptions = null)
+        IOptions<GatewayOptions>? gatewayOptions = null,
+        IReadPathSwitches? switches = null)
     {
+        _switches = switches;
         _tenancyMode = gatewayOptions?.Value.Tenancy.EffectiveMode ?? TenancyMode.Multi;
         _dataQueryService = dataQueryService;
         _catalogDiscoveryService = catalogDiscoveryService;
@@ -61,7 +70,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         var normMethod = (method ?? "GET").Trim().ToUpperInvariant();
         var normEndpoint = endpoint.Trim();
 
-        var desc = BuildEndpointDescription(normEndpoint, normMethod);
+        var desc = BuildEndpointDescription(normEndpoint, normMethod, DataBranchAllowed);
         return Task.FromResult(JsonSerializer.Serialize(desc, JsonOpts));
     }
 
@@ -84,6 +93,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         // 1. Governed REST Data API: /api/v1/data/{domain}/{table} or /api/v1/data/{datasetId}
         if (normEndpoint.StartsWith("/api/v1/data", StringComparison.OrdinalIgnoreCase))
         {
+            if (!DataBranchAllowed) return UnknownEndpoint(endpoint, method);
             if (_dataQueryService == null)
             {
                 return SerializeError("ServiceUnavailable", 503, "GovernedDataQueryService is not registered.");
@@ -109,6 +119,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         // 2. Catalog datasets list: /api/v1/catalog/datasets
         if (normEndpoint.Equals("/api/v1/catalog/datasets", StringComparison.OrdinalIgnoreCase))
         {
+            if (!CatalogBranchAllowed) return UnknownEndpoint(endpoint, method);
             if (_catalogDiscoveryService == null)
             {
                 return SerializeError("ServiceUnavailable", 503, "CatalogDiscoveryService is not registered.");
@@ -121,6 +132,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         // 3. Catalog dataset detail: /api/v1/catalog/datasets/{datasetId}
         if (normEndpoint.StartsWith("/api/v1/catalog/datasets/", StringComparison.OrdinalIgnoreCase))
         {
+            if (!CatalogBranchAllowed) return UnknownEndpoint(endpoint, method);
             if (_catalogDiscoveryService == null)
             {
                 return SerializeError("ServiceUnavailable", 503, "CatalogDiscoveryService is not registered.");
@@ -141,6 +153,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         // 4. Catalog search: /api/v1/catalog/search
         if (normEndpoint.StartsWith("/api/v1/catalog/search", StringComparison.OrdinalIgnoreCase))
         {
+            if (!CatalogBranchAllowed) return UnknownEndpoint(endpoint, method);
             if (_catalogDiscoveryService == null)
             {
                 return SerializeError("ServiceUnavailable", 503, "CatalogDiscoveryService is not registered.");
@@ -155,6 +168,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         // 5. Catalog datasources: /api/v1/catalog/datasources
         if (normEndpoint.StartsWith("/api/v1/catalog/datasources", StringComparison.OrdinalIgnoreCase))
         {
+            if (!CatalogBranchAllowed) return UnknownEndpoint(endpoint, method);
             if (_catalogDiscoveryService == null)
             {
                 return SerializeError("ServiceUnavailable", 503, "CatalogDiscoveryService is not registered.");
@@ -177,6 +191,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         // 6. WebSQL: /api/v1/statement
         if (normEndpoint.Equals("/api/v1/statement", StringComparison.OrdinalIgnoreCase) && normMethod == "POST")
         {
+            if (!StatementBranchAllowed) return UnknownEndpoint(endpoint, method);
             if (_sqlExecutionService == null)
             {
                 return SerializeError("ServiceUnavailable", 503, "GovernedSqlExecutionService is not registered.");
@@ -201,6 +216,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         // 7. Governance access: /api/v1/governance/me/access
         if (normEndpoint.Equals("/api/v1/governance/me/access", StringComparison.OrdinalIgnoreCase))
         {
+            if (!AccessBranchAllowed) return UnknownEndpoint(endpoint, method);
             var accessInfo = new
             {
                 subjectId = effectiveContext.SubjectId.Value,
@@ -212,8 +228,12 @@ public sealed class ApiDispatcherService : IApiDispatcherService
             return JsonSerializer.Serialize(accessInfo, JsonOpts);
         }
 
-        return SerializeError("EndpointNotFound", 404, $"Endpoint '{endpoint}' [{method}] is not recognized by Autheris dynamic dispatcher.");
+        return UnknownEndpoint(endpoint, method);
     }
+
+    /// <summary>The one producer of the unknown-endpoint answer, so a refused (switched-off) branch and an unknown endpoint cannot diverge.</summary>
+    private static string UnknownEndpoint(string endpoint, string method) =>
+        SerializeError("EndpointNotFound", 404, $"Endpoint '{endpoint}' [{method}] is not recognized by Autheris dynamic dispatcher.");
 
     public async Task<string> GetOpenApiJsonAsync(CancellationToken ct = default)
     {
@@ -234,43 +254,75 @@ public sealed class ApiDispatcherService : IApiDispatcherService
 
     public Task<string> GetEndpointsDocumentationAsync(CancellationToken ct = default)
     {
-        const string doc = """
-            # Autheris Enterprise Gateway - REST API Documentation
+        // PLAN-SEC-115 A-5: the sections of switched-off branches are omitted; the remaining ones are renumbered (default: 1..4 as shipped).
+        var sections = new List<string>();
+        if (DataBranchAllowed)
+        {
+            sections.Add("""
+                Governed REST Data API
+                - **GET /api/v1/data/{domain}/{schema}/{table}**
+                  - Description: Queries dataset records under tenant isolation, row filters and column masking.
+                  - Query parameters:
+                    - `select` (string): Comma-separated columns (e.g. `id,amount,status`).
+                    - `filter` (string): Safe AST predicate (e.g. `status eq 'active' and amount gt 100`).
+                    - `orderBy` (string): Sorting expression (e.g. `createdDate desc`).
+                    - `limit` (int): Page size (default 50, max 1000).
+                    - `offset` (int): Offset paging.
+                  - Returns: `DatasetQueryEnvelope` with metadata and rows.
+                """);
+        }
 
-            ## 1. Governed REST Data API
-            - **GET /api/v1/data/{domain}/{schema}/{table}**
-              - Description: Queries dataset records under tenant isolation, row filters and column masking.
-              - Query parameters:
-                - `select` (string): Comma-separated columns (e.g. `id,amount,status`).
-                - `filter` (string): Safe AST predicate (e.g. `status eq 'active' and amount gt 100`).
-                - `orderBy` (string): Sorting expression (e.g. `createdDate desc`).
-                - `limit` (int): Page size (default 50, max 1000).
-                - `offset` (int): Offset paging.
-              - Returns: `DatasetQueryEnvelope` with metadata and rows.
+        if (CatalogBranchAllowed)
+        {
+            sections.Add("""
+                Catalog & Discovery API
+                - **GET /api/v1/catalog/datasets**: Lists all datasets visible to the caller (ReBAC filtered).
+                - **GET /api/v1/catalog/datasets/{datasetId}**: Returns detailed column schema and masking states.
+                - **GET /api/v1/catalog/datasources**: Lists registered datasources without leaking secrets.
+                - **GET /api/v1/catalog/search?q={query}&domain={domain}**: Fulltext search over datasets and columns.
+                """);
+        }
 
-            ## 2. Catalog & Discovery API
-            - **GET /api/v1/catalog/datasets**: Lists all datasets visible to the caller (ReBAC filtered).
-            - **GET /api/v1/catalog/datasets/{datasetId}**: Returns detailed column schema and masking states.
-            - **GET /api/v1/catalog/datasources**: Lists registered datasources without leaking secrets.
-            - **GET /api/v1/catalog/search?q={query}&domain={domain}**: Fulltext search over datasets and columns.
+        if (StatementBranchAllowed)
+        {
+            sections.Add("""
+                WebSQL & Statement Execution
+                - **POST /api/v1/statement**
+                  - Description: Executes governed SQL statements with automatic AST rewriting.
+                  - Request body: `{ "sql": "SELECT id, email FROM sales.public.customers" }`.
+                """);
+        }
 
-            ## 3. WebSQL & Statement Execution
-            - **POST /api/v1/statement**
-              - Description: Executes governed SQL statements with automatic AST rewriting.
-              - Request body: `{ "sql": "SELECT id, email FROM sales.public.customers" }`.
+        if (AccessBranchAllowed)
+        {
+            sections.Add("""
+                Governance & Access Self-Service
+                - **GET /api/v1/governance/me/access**: Transparent view of current identity, roles, and access boundaries.
+                """);
+        }
 
-            ## 4. Governance & Access Self-Service
-            - **GET /api/v1/governance/me/access**: Transparent view of current identity, roles, and access boundaries.
-            """;
-        return Task.FromResult(doc);
+        var sb = new System.Text.StringBuilder("# Autheris Enterprise Gateway - REST API Documentation");
+        for (var i = 0; i < sections.Count; i++)
+        {
+            var nl = sections[i].IndexOf('\n', StringComparison.Ordinal);
+            sb.Append("\n\n## ").Append(i + 1).Append(". ").Append(sections[i][..nl]).Append(sections[i][nl..]);
+        }
+
+        return Task.FromResult(sb.ToString());
     }
 
     public Task<string> GetMcpToolsDocumentationAsync(CancellationToken ct = default)
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("# Autheris Model Context Protocol (MCP) Tools Reference\n");
-        foreach (var tool in McpDatasetTools.Definitions())
+        foreach (var tool in McpDatasetTools.Definitions(_switches))
         {
+            // Lists only what the switches leave on (it used to list every dataset tool regardless of the registry).
+            if (_switches is not null && !_switches.IsToolEnabled(tool.Name))
+            {
+                continue;
+            }
+
             sb.AppendLine($"### `{tool.Name}`");
             sb.AppendLine($"{tool.Description}\n");
             sb.AppendLine("**Input Schema:**");
@@ -281,9 +333,10 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         return Task.FromResult(sb.ToString());
     }
 
-    private static object BuildEndpointDescription(string endpoint, string method)
+    private static object BuildEndpointDescription(string endpoint, string method, bool dataBranchAllowed)
     {
-        if (endpoint.StartsWith("/api/v1/data", StringComparison.OrdinalIgnoreCase))
+        // A closed data endpoint falls through to the generic description of an unknown endpoint: no documentation, no confirmation.
+        if (dataBranchAllowed && endpoint.StartsWith("/api/v1/data", StringComparison.OrdinalIgnoreCase))
         {
             return new
             {
@@ -417,40 +470,60 @@ public sealed class ApiDispatcherService : IApiDispatcherService
     private static string SerializeError(string error, int status, string message) =>
         JsonSerializer.Serialize(new { error, status, message }, JsonOpts);
 
-    private static string BuildStaticOpenApiJson() => """
+    private string BuildStaticOpenApiJson()
+    {
+        var paths = new List<string>();
+        if (DataBranchAllowed)
         {
-          "openapi": "3.1.0",
-          "info": {
-            "title": "Autheris Enterprise Governance Gateway API",
-            "version": "2.0.0",
-            "description": "Governed REST Data API, Catalog Discovery, and WebSQL execution."
-          },
-          "paths": {
-            "/api/v1/data/{domain}/{table}": {
-              "get": {
-                "summary": "Governed REST Data API",
-                "responses": { "200": { "description": "Dataset query envelope" } }
-              }
-            },
-            "/api/v1/catalog/datasets": {
-              "get": {
-                "summary": "List catalog datasets",
-                "responses": { "200": { "description": "Datasets list" } }
-              }
-            },
-            "/api/v1/catalog/datasources": {
-              "get": {
-                "summary": "List datasources",
-                "responses": { "200": { "description": "Datasources list" } }
-              }
-            },
-            "/api/v1/statement": {
-              "post": {
-                "summary": "Execute WebSQL statement",
-                "responses": { "200": { "description": "Governed SQL query result" } }
-              }
-            }
-          }
+            paths.Add("""
+                "/api/v1/data/{domain}/{table}": {
+                  "get": {
+                    "summary": "Governed REST Data API",
+                    "responses": { "200": { "description": "Dataset query envelope" } }
+                  }
+                }
+                """);
         }
-        """;
+
+        if (CatalogBranchAllowed)
+        {
+            paths.Add("""
+                "/api/v1/catalog/datasets": {
+                  "get": {
+                    "summary": "List catalog datasets",
+                    "responses": { "200": { "description": "Datasets list" } }
+                  }
+                },
+                "/api/v1/catalog/datasources": {
+                  "get": {
+                    "summary": "List datasources",
+                    "responses": { "200": { "description": "Datasources list" } }
+                  }
+                }
+                """);
+        }
+
+        if (StatementBranchAllowed)
+        {
+            paths.Add("""
+                "/api/v1/statement": {
+                  "post": {
+                    "summary": "Execute WebSQL statement",
+                    "responses": { "200": { "description": "Governed SQL query result" } }
+                  }
+                }
+                """);
+        }
+
+        var body = string.Join(",\n", paths.Select(p => string.Join("\n", p.Split('\n').Select(l => "    " + l))));
+        return "{\n" +
+               "  \"openapi\": \"3.1.0\",\n" +
+               "  \"info\": {\n" +
+               "    \"title\": \"Autheris Enterprise Governance Gateway API\",\n" +
+               "    \"version\": \"2.0.0\",\n" +
+               "    \"description\": \"Governed REST Data API, Catalog Discovery, and WebSQL execution.\"\n" +
+               "  },\n" +
+               "  \"paths\": {" + (body.Length > 0 ? "\n" + body + "\n  " : string.Empty) + "}\n" +
+               "}";
+    }
 }

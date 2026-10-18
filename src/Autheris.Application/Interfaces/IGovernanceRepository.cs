@@ -15,6 +15,35 @@ public interface ITableMetadataRepository
         => throw new NotSupportedException($"{GetType().Name} does not implement row filter evaluation settings.");
 
     /// <summary>
+    /// Issue #111: the persisted catalog tags and visibility of an active table (missing settings row = Hidden), or null when the table is
+    /// unknown or inactive. <paramref name="strict"/> (admin read mode) throws on any store error instead of degrading to Hidden.
+    /// </summary>
+    Task<DatasetCatalogSettings?> GetDatasetCatalogSettingsAsync(TableIdentifier table, bool strict = true, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement dataset catalog settings.");
+
+    /// <summary>Issue #111 (A-9): table counts per tier for <c>autheris_catalog_visibility_total</c>; Hidden is all tables minus the Summary and Full rows.</summary>
+    Task<DatasetVisibilityCounts> GetDatasetVisibilityCountsAsync(CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement dataset catalog settings.");
+
+    /// <summary>
+    /// Issue #111: replaces the tags of one <paramref name="source"/> (admin replaces only admin rows, dbt only dbt rows; a tag present as admin
+    /// stays admin) in one transaction with the before read. No epoch bump (tags are not policy inputs). Null when the table is unknown or inactive.
+    /// </summary>
+    Task<DatasetCatalogChange?> ReplaceDatasetTagsAsync(
+        TableIdentifier table, IReadOnlyList<string> tags, DatasetTagSource source, Sid actor, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement dataset catalog settings.");
+
+    /// <summary>Issue #111: adds and removes admin-source tags (a dbt row of a removed tag is kept) in one transaction. Null when the table is unknown or inactive.</summary>
+    Task<DatasetCatalogChange?> ChangeDatasetTagsAsync(
+        TableIdentifier table, IReadOnlyList<string> add, IReadOnlyList<string> remove, Sid actor, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement dataset catalog settings.");
+
+    /// <summary>Issue #111: sets the visibility tier in one transaction with the before read. No epoch bump. Null when the table is unknown or inactive.</summary>
+    Task<DatasetCatalogChange?> SetDatasetVisibilityAsync(
+        TableIdentifier table, DatasetVisibility visibility, Sid actor, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement dataset catalog settings.");
+
+    /// <summary>
     /// Issue #94 (SD-5): replaces ONLY the declared primary key and indexes of a table. In one transaction the stored columns are read,
     /// the definition is validated against them and replaced, and the epoch is bumped once; masking rules and column metadata other than
     /// the key markers are untouched. Returns null when the table does not exist; throws <c>TableDefinitionException</c> when invalid.

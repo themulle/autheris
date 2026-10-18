@@ -54,6 +54,8 @@ INSERT INTO mcp_cranes VALUES (1,'LTM-1100','Mobilkran',100,'a@x.test'),(2,'LTM-
             b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-McpDatasetE2E-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
             b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dbPath}");
+            // Discovery is consent-based here; ReBAC (default on) would hide every table without can_query tuples (#138 INC-1: one rule for all channels).
+            b.UseSetting("Gateway:Rebac:Enabled", "false");
             b.UseSetting("Gateway:Mcp:Enabled", "true");
             b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
         });

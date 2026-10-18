@@ -278,6 +278,7 @@ public sealed class BackstageCatalogExportService : IBackstageCatalogExportServi
                         tags.Add(SanitizeEntityName($"sensitivity-{table.Sensitivity}"));
                     }
 
+                    // Issue #111 (F-C9): intentionally stays on Table.Tags (source tags); persisted dataset (catalog) tags are not exported here.
                     if (table.Tags != null && table.Tags.Count > 0)
                     {
                         tags.AddRange(table.Tags.Select(SanitizeEntityName));

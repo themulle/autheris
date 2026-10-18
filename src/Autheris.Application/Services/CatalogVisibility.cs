@@ -58,14 +58,40 @@ public static class CatalogVisibility
         return "NONE";
     }
 
+    /// <summary>
+    /// Tables a non-admin subject may discover. A table with an active Allow consent (and no unconditional Deny) takes the consent path
+    /// (<see cref="CatalogView.Granted"/>, columns per consent). Issue #111: persisted tiers apply only on <see cref="CatalogSurface.Discovery"/>
+    /// (the default <see cref="CatalogSurface.DataAccess"/> never executes the tier switch: a table without Allow consent is dropped), and only
+    /// for the tables <paramref name="sharedTables"/> names in <see cref="TenancyMode.Multi"/> (null or empty: tiers off; a claim-less tenant never
+    /// gets tiers; consents never extend the set) or for every table in <see cref="TenancyMode.Single"/>. Every returned row carries an explicit
+    /// <see cref="CatalogView"/>; <c>Summary</c> never carries columns, <c>Full</c> carries the columns minus every DENY-masked column.
+    /// </summary>
     public static IReadOnlyList<TableMetadata> FilterForSubject(
         IEnumerable<TableMetadata> allTables,
         IEnumerable<Consent> activeConsents,
         TenantId tenantId,
-        IReadOnlySet<string>? callerScopes = null)
+        IReadOnlySet<string>? callerScopes = null,
+        CatalogSurface surface = CatalogSurface.DataAccess,
+        IEnumerable<string>? sharedTables = null,
+        TenancyMode tenancyMode = TenancyMode.Multi)
     {
         ArgumentNullException.ThrowIfNull(allTables);
         ArgumentNullException.ThrowIfNull(activeConsents);
+
+        var tiersApply = surface == CatalogSurface.Discovery;
+        HashSet<TableIdentifier>? tierTables = null;
+        var allTablesTiered = false;
+        if (tiersApply)
+        {
+            if (tenancyMode == TenancyMode.Single)
+            {
+                allTablesTiered = true;
+            }
+            else if (tenantId != TenantId.LegacySingleTenant)
+            {
+                tierTables = ParseSharedTables(sharedTables);
+            }
+        }
 
         var tenantConsents = activeConsents.Where(c => c.TenantId == tenantId).ToList();
 
@@ -89,24 +115,21 @@ public static class CatalogVisibility
             var isAllowed = allowedTableIds.Contains(table.Identifier) && !unconditionallyDeniedTableIds.Contains(table.Identifier);
             if (!isAllowed)
             {
-                if (table.Table.Visibility == DatasetVisibility.Hidden)
+                // DataAccess: no tier switch at all. Discovery: only Summary and Full on tier-eligible tables; Hidden and every unknown value drops.
+                if (tiersApply && (allTablesTiered || (tierTables?.Contains(table.Identifier) ?? false)))
                 {
-                    continue;
+                    switch (table.Table.Visibility)
+                    {
+                        case DatasetVisibility.Summary:
+                            visible.Add(table with { Columns = Array.Empty<TableColumn>(), CatalogView = CatalogView.Summary });
+                            break;
+                        case DatasetVisibility.Full:
+                            visible.Add(table with { Columns = ColumnsWithoutDeny(table), CatalogView = CatalogView.Full });
+                            break;
+                    }
                 }
 
-                if (table.Table.Visibility == DatasetVisibility.Summary)
-                {
-                    visible.Add(table.ReleaseProfileToCatalogViewers
-                        ? table
-                        : table with { Columns = Array.Empty<TableColumn>() });
-                    continue;
-                }
-
-                if (table.Table.Visibility == DatasetVisibility.Full)
-                {
-                    visible.Add(table);
-                    continue;
-                }
+                continue;
             }
 
             var tableConsents = consentsByTable.TryGetValue(table.Identifier, out var tc) ? tc : [];
@@ -137,10 +160,50 @@ public static class CatalogVisibility
                             tableAllows.Any(a => ConsentResolutionService.ResolveConsentColumnLevel(a, c.ColumnName, callerScopes) != ColumnAccessLevel.Deny))
                 .ToList();
 
-            visible.Add(table with { Columns = visibleColumns });
+            visible.Add(table with { Columns = visibleColumns, CatalogView = CatalogView.Granted });
         }
 
         return visible;
+    }
+
+    /// <summary>Columns of <paramref name="table"/> minus every column with a table-level DENY masking rule (issue #111 G-2).</summary>
+    private static List<TableColumn> ColumnsWithoutDeny(TableMetadata table)
+    {
+        if (table.ColumnMaskingRules is not { Count: > 0 } rules)
+        {
+            return table.Columns.ToList();
+        }
+
+        var denied = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (colName, rule) in rules)
+        {
+            if (string.Equals(rule.RuleType, "DENY", StringComparison.OrdinalIgnoreCase))
+            {
+                denied.Add(colName);
+            }
+        }
+
+        return table.Columns.Where(c => !denied.Contains(c.ColumnName)).ToList();
+    }
+
+    /// <summary>Parses <c>domain.schema.table</c> entries like <see cref="FilterToTenant"/>; malformed entries are skipped (never widen).</summary>
+    private static HashSet<TableIdentifier>? ParseSharedTables(IEnumerable<string>? sharedTables)
+    {
+        if (sharedTables is null)
+        {
+            return null;
+        }
+
+        HashSet<TableIdentifier>? parsed = null;
+        foreach (var shared in sharedTables)
+        {
+            if (!string.IsNullOrWhiteSpace(shared) && TableIdentifier.TryParse(shared, out var id))
+            {
+                (parsed ??= []).Add(id);
+            }
+        }
+
+        return parsed;
     }
 
     /// <summary>
@@ -239,6 +302,22 @@ public static class CatalogVisibility
         CancellationToken ct = default)
         => VisibleTablesAsync(allTables, principal, tenantId, consentRepository, contract, TenancyMode.Multi, sharedTables: null, ct);
 
+    /// <summary>
+    /// Fail-closed default: this overload (and every overload without a surface) is <see cref="CatalogSurface.DataAccess"/>, never
+    /// <see cref="CatalogSurface.Discovery"/> (issue #111, pinned by test).
+    /// </summary>
+    public static Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
+        IReadOnlyList<TableMetadata> allTables,
+        ClaimsPrincipal principal,
+        TenantId tenantId,
+        IConsentRepository? consentRepository,
+        Autheris.Application.Governance.Contracts.SchemaContractDefinition? contract,
+        TenancyMode tenancyMode,
+        IEnumerable<string>? sharedTables,
+        CancellationToken ct = default)
+        => VisibleTablesAsync(allTables, principal, tenantId, consentRepository, contract, tenancyMode, sharedTables, CatalogSurface.DataAccess, ct);
+
+    /// <summary>Issue #111: as above for an explicit <paramref name="surface"/>; only the discovery call sites pass <see cref="CatalogSurface.Discovery"/>.</summary>
     public static async Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
         IReadOnlyList<TableMetadata> allTables,
         ClaimsPrincipal principal,
@@ -247,6 +326,7 @@ public static class CatalogVisibility
         Autheris.Application.Governance.Contracts.SchemaContractDefinition? contract,
         TenancyMode tenancyMode,
         IEnumerable<string>? sharedTables,
+        CatalogSurface surface,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(allTables);
@@ -287,7 +367,11 @@ public static class CatalogVisibility
             subjects, roles, DateTimeOffset.UtcNow, tenantId, ct).ConfigureAwait(false);
 
         // Scopes from the claims overload, as the data path (TableAccessPolicy) reads them.
-        var visible = FilterForSubject(allTables, activeConsents, tenantId, Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims));
+        // A claim-less principal (Multi) never gets tiers: no shared set is passed for it.
+        var tierSharedTables = scope == CallerScope.Claimless ? null : sharedTables;
+        var visible = FilterForSubject(
+            allTables, activeConsents, tenantId, Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims),
+            surface, tierSharedTables, tenancyMode);
         return FilterByContract(visible, contract);
     }
 }

@@ -24,6 +24,7 @@ public static class McpAdminTools
     public const string ResolvePrincipal = "admin_resolve_principal";
     public const string PlanRowFilterEvaluation = "admin_plan_row_filter_evaluation";
     public const string ApplyRowFilterEvaluation = "admin_apply_row_filter_evaluation";
+    public const string SetDatasetCatalog = "admin_set_dataset_catalog";
 
     private static readonly TableIdentifier AdminControlPlaneTable = new("governance", "admin", "control_plane");
 
@@ -46,6 +47,7 @@ public static class McpAdminTools
         string.Equals(toolName, ApplyAccess, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, RegisterDatasource, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, SetDatasetState, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, SetDatasetCatalog, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, ResolvePrincipal, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
@@ -188,6 +190,24 @@ public static class McpAdminTools
             TargetTable: AdminControlPlaneTable);
 
         yield return new McpToolDefinition(
+            Name: SetDatasetCatalog,
+            Description: "Sets the tags and/or the catalog visibility tier (Hidden, Summary, Full) of a dataset (issue #111). Single call; Full is an administrator act and every change is audited.",
+            InputJsonSchema: """
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["dataset"],
+              "properties": {
+                "dataset": { "type": "string", "description": "Dataset identifier (domain.schema.table or table id)." },
+                "tags": { "type": "array", "items": { "type": "string" }, "description": "Replaces the admin tags (empty list removes them). Omit to leave unchanged." },
+                "visibility": { "type": "string", "enum": ["Hidden", "Summary", "Full"], "description": "Catalog tier. Omit to leave unchanged." }
+              }
+            }
+            """,
+            TargetGraphQLOperation: string.Empty,
+            TargetTable: AdminControlPlaneTable);
+
+        yield return new McpToolDefinition(
             Name: ResolvePrincipal,
             Description: "Fuzzy / unsharp resolution of principal names into SIDs and groups (R-61).",
             InputJsonSchema: """
@@ -208,6 +228,7 @@ public static class McpAdminTools
         string argumentsJson,
         McpSessionContext sessionContext,
         IAccessPlanningService planningService,
+        Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService? datasetCatalog = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(toolName);
@@ -266,6 +287,11 @@ public static class McpAdminTools
                 return new McpToolCallResult(true, JsonSerializer.Serialize(result, JsonOptions));
             }
 
+            if (string.Equals(toolName, SetDatasetCatalog, StringComparison.OrdinalIgnoreCase))
+            {
+                return await SetDatasetCatalogAsync(argumentsJson, sessionContext, datasetCatalog, ct).ConfigureAwait(false);
+            }
+
             if (string.Equals(toolName, ResolvePrincipal, StringComparison.OrdinalIgnoreCase))
             {
                 var req = JsonSerializer.Deserialize<AdminResolvePrincipalRequest>(argumentsJson, JsonOptions)
@@ -284,5 +310,58 @@ public static class McpAdminTools
         {
             return new McpToolCallResult(false, "{}", ex.Message);
         }
+    }
+
+    private sealed record SetDatasetCatalogArguments(string? Dataset, IReadOnlyList<string>? Tags, string? Visibility);
+
+    /// <summary>
+    /// Issue #111 (A-8): the same service as REST and the manifest, called with the principal rebuilt from the session, so the tool cannot widen
+    /// anything beyond what the session principal may do (Full needs an administrator class, decided by the service, not by this tool).
+    /// </summary>
+    private static async Task<McpToolCallResult> SetDatasetCatalogAsync(
+        string argumentsJson,
+        McpSessionContext sessionContext,
+        Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService? datasetCatalog,
+        CancellationToken ct)
+    {
+        if (datasetCatalog is null)
+        {
+            return new McpToolCallResult(false, "{}", "UNAVAILABLE");
+        }
+
+        var req = JsonSerializer.Deserialize<SetDatasetCatalogArguments>(argumentsJson, StrictJsonOptions)
+            ?? throw new ArgumentException("Invalid arguments for admin_set_dataset_catalog.");
+        if (string.IsNullOrWhiteSpace(req.Dataset) || (req.Tags is null && req.Visibility is null))
+        {
+            throw new ArgumentException("admin_set_dataset_catalog requires 'dataset' and at least one of 'tags' or 'visibility'.");
+        }
+
+        var principal = Autheris.Application.Mcp.Services.McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
+        var edit = new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(req.Tags, null, null, req.Visibility);
+        var result = await datasetCatalog.ApplyAsync(principal, req.Dataset, edit, "mcp", ct).ConfigureAwait(false);
+        if (!result.IsSuccess)
+        {
+            var code = result.Outcome switch
+            {
+                Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.Forbidden => "FORBIDDEN",
+                Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidTag => "INVALID_TAG",
+                Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.TagLimitExceeded => "TAG_LIMIT_EXCEEDED",
+                Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidVisibility => "INVALID_VISIBILITY",
+                Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidRequest => "INVALID_REQUEST",
+                Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.Unavailable => "UNAVAILABLE",
+                _ => "NOT_FOUND"
+            };
+            return new McpToolCallResult(false, "{}", code);
+        }
+
+        var settings = result.Settings!;
+        return new McpToolCallResult(true, JsonSerializer.Serialize(new
+        {
+            datasetId = result.Table!.Value.ToString(),
+            changed = result.Outcome == Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.Applied,
+            tags = settings.Tags.OrderBy(t => t.Tag, StringComparer.Ordinal).Select(t => new { tag = t.Tag, source = t.Source == DatasetTagSource.Dbt ? "dbt" : "admin" }),
+            visibility = settings.Visibility.ToString(),
+            tierEffective = result.TierEffective
+        }, JsonOptions));
     }
 }

@@ -61,11 +61,12 @@ internal static class McpCatalogVisibility
             contract: null,
             options?.Tenancy.EffectiveMode ?? TenancyMode.Multi,
             options?.Catalog.SharedTables,
+            CatalogSurface.DataAccess,
             ct).ConfigureAwait(false);
     }
 
     // An invalid tenant claim resolves to "no caller" in the resolver; the consent lookup never sees it.
-    private static TenantId SafeTenantId(ClaimsPrincipal principal)
+    internal static TenantId SafeTenantId(ClaimsPrincipal principal)
     {
         try
         {

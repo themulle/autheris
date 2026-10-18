@@ -64,7 +64,7 @@ public sealed class ArrowFlightSqlSecurityTests
             NullLogger<ArrowFlightSqlServer>.Instance);
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.Name, "bi-analyst"), new Claim(ClaimTypes.Role, "DataAnalyst")], "Bearer"));
+            [new Claim(ClaimTypes.Name, "bi-analyst"), new Claim(ClaimTypes.PrimarySid, "bi-analyst"), new Claim(ClaimTypes.Role, "DataAnalyst")], "Bearer"));
 
         // Act
         var flightInfo = await server.GetFlightInfoAsync("SELECT * FROM orders", principal, new TenantId("tenant-1"));
@@ -87,7 +87,7 @@ public sealed class ArrowFlightSqlSecurityTests
             NullLogger<ArrowFlightSqlServer>.Instance);
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.Name, "bi-analyst"), new Claim(ClaimTypes.Role, "DataAnalyst")], "Bearer"));
+            [new Claim(ClaimTypes.Name, "bi-analyst"), new Claim(ClaimTypes.PrimarySid, "bi-analyst"), new Claim(ClaimTypes.Role, "DataAnalyst")], "Bearer"));
 
         var tamperedTicket = new FlightSqlTicket(
             TicketId: "t-1",
@@ -117,7 +117,7 @@ public sealed class ArrowFlightSqlSecurityTests
             NullLogger<ArrowFlightSqlServer>.Instance);
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.Name, "bi-analyst"), new Claim(ClaimTypes.Role, "DataAnalyst")], "Bearer"));
+            [new Claim(ClaimTypes.Name, "bi-analyst"), new Claim(ClaimTypes.PrimarySid, "bi-analyst"), new Claim(ClaimTypes.Role, "DataAnalyst")], "Bearer"));
 
         // Ticket created 2 hours ago (expired beyond 30-min window)
         var expiredTime = DateTimeOffset.UtcNow.AddHours(-2);
@@ -177,7 +177,7 @@ public sealed class ArrowFlightSqlSecurityTests
 
         // Wunsch 9: a GovernanceAdmin sees the whole catalog of the tenant, but still never another tenant's tables
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.Name, "user"), new Claim(ClaimTypes.Role, "GovernanceAdmin")], "Bearer"));
+            [new Claim(ClaimTypes.Name, "user"), new Claim(ClaimTypes.PrimarySid, "user"), new Claim(ClaimTypes.Role, "GovernanceAdmin")], "Bearer"));
 
         // Act
         var tables = await server.GetTablesAsync(principal, new TenantId("tenant-1"));

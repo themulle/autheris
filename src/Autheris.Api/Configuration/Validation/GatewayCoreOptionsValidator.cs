@@ -45,6 +45,16 @@ public sealed class GatewayCoreOptionsValidator : IValidateOptions<GatewayOption
             failures.Add("Gateway:Tenancy:Mode must be Single or Multi (empty means Multi).");
         }
 
+        if (opts.Catalog.MaxTagsPerDataset is < 1 or > Autheris.Domain.Model.DatasetTagRules.HardMaxTagsPerDataset)
+        {
+            failures.Add("Gateway:Catalog:MaxTagsPerDataset must be between 1 and 256.");
+        }
+
+        if (opts.Catalog.DefaultVisibility is not (Autheris.Domain.Model.DatasetVisibility.Hidden or Autheris.Domain.Model.DatasetVisibility.Summary))
+        {
+            failures.Add("Gateway:Catalog:DefaultVisibility must be Hidden or Summary (Full is not allowed as a default).");
+        }
+
         if (opts.Casbin.Enabled &&
             !string.IsNullOrWhiteSpace(opts.Casbin.ModelPath) &&
             !_fileSystem.FileExists(opts.Casbin.ModelPath))

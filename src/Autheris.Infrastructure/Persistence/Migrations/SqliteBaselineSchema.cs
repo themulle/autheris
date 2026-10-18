@@ -571,6 +571,23 @@ internal sealed class SqliteBaselineSchema
                 updated_by TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            -- Issue #111: dataset catalog tags (admin / dbt source) and visibility tier; separate from TABLES because ingestion upserts rewrite TABLES.
+            -- No foreign keys and no CHECK constraints (as TABLE_ROW_FILTER_STRATEGIES): validity is enforced on write and re-validated on read.
+            CREATE TABLE IF NOT EXISTS TABLE_TAGS (
+                table_id TEXT NOT NULL,
+                tag TEXT NOT NULL,
+                source TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (table_id, tag)
+            );
+            CREATE TABLE IF NOT EXISTS TABLE_CATALOG_SETTINGS (
+                table_id TEXT PRIMARY KEY,
+                visibility INTEGER NOT NULL,
+                updated_by TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
         ";
         cmd.ExecuteNonQuery();
 

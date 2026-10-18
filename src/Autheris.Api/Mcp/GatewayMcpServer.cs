@@ -89,15 +89,8 @@ public static class GatewayMcpServer
 
     internal static async ValueTask<ListResourcesResult> ListResourcesAsync(RequestContext<ListResourcesRequestParams> context, CancellationToken ct)
     {
-        var resources = new List<Resource>
-        {
-            new() { Uri = "autheris://catalog/summary", Name = "Catalog Summary", Description = "Summary of visible enterprise catalog datasets", MimeType = "text/markdown" },
-            new() { Uri = "autheris://catalog/datasources", Name = "Datasources", Description = "Status of connected enterprise data sources", MimeType = "text/markdown" },
-            new() { Uri = "autheris://governance/my-access", Name = "My Access", Description = "Effective access profile, roles and policies of current caller", MimeType = "text/markdown" },
-            new() { Uri = "autheris://api/openapi.json", Name = "OpenAPI Specification", Description = "OpenAPI 3.1 specification for Autheris REST endpoints", MimeType = "application/json" },
-            new() { Uri = "autheris://api/docs/endpoints", Name = "API Endpoints Documentation", Description = "Markdown documentation of available REST endpoints", MimeType = "text/markdown" },
-            new() { Uri = "autheris://api/docs/mcp-tools", Name = "MCP Tools Reference", Description = "Markdown reference for available MCP tools", MimeType = "text/markdown" }
-        };
+        var switches = context.Services!.GetService<IReadPathSwitches>();
+        var resources = FilterResources(NativeResourceList(), switches);
 
         var compiler = context.Services!.GetService<ISemanticMcpCompiler>();
         if (compiler != null)
@@ -110,29 +103,48 @@ public static class GatewayMcpServer
         return new ListResourcesResult { Resources = resources };
     }
 
+    internal static List<Resource> NativeResourceList() =>
+    [
+        new() { Uri = "autheris://catalog/summary", Name = "Catalog Summary", Description = "Summary of visible enterprise catalog datasets", MimeType = "text/markdown" },
+        new() { Uri = "autheris://catalog/datasources", Name = "Datasources", Description = "Status of connected enterprise data sources", MimeType = "text/markdown" },
+        new() { Uri = "autheris://governance/my-access", Name = "My Access", Description = "Effective access profile, roles and policies of current caller", MimeType = "text/markdown" },
+        new() { Uri = "autheris://api/openapi.json", Name = "OpenAPI Specification", Description = "OpenAPI 3.1 specification for Autheris REST endpoints", MimeType = "application/json" },
+        new() { Uri = "autheris://api/docs/endpoints", Name = "API Endpoints Documentation", Description = "Markdown documentation of available REST endpoints", MimeType = "text/markdown" },
+        new() { Uri = "autheris://api/docs/mcp-tools", Name = "MCP Tools Reference", Description = "Markdown reference for available MCP tools", MimeType = "text/markdown" }
+    ];
+
+    /// <summary>PLAN-SEC-115 A-6: omits the native resources whose group is switched off (the same gate <c>ReadAsync</c> applies).</summary>
+    internal static List<Resource> FilterResources(IEnumerable<Resource> resources, IReadPathSwitches? switches) =>
+        switches is null ? resources.ToList() : resources.Where(r => switches.IsResourceEnabled(r.Uri!)).ToList();
+
     internal static ValueTask<ListResourceTemplatesResult> ListResourceTemplatesAsync(RequestContext<ListResourceTemplatesRequestParams> context, CancellationToken ct) =>
         ValueTask.FromResult(new ListResourceTemplatesResult
         {
-            ResourceTemplates =
-            [
-                new ResourceTemplate
-                {
-                    Name = "dataset",
-                    Title = "Dataset description",
-                    UriTemplate = DatasetResourceTemplate,
-                    Description = "The description of a dataset as returned by describe_dataset: columns, types, GraphQL field and example query. {dataset} is a dataset id from list_datasets (domain.schema.table).",
-                    MimeType = "application/json"
-                },
-                new ResourceTemplate
-                {
-                    Name = "dataset_schema",
-                    Title = "Catalog Dataset Schema",
-                    UriTemplate = CatalogSchemaResourceTemplate,
-                    Description = "Detailed schema and masking configuration for dataset {datasetId} (domain.schema.table).",
-                    MimeType = "text/markdown"
-                }
-            ]
+            ResourceTemplates = FilterResourceTemplates(NativeResourceTemplateList(), context.Services!.GetService<IReadPathSwitches>())
         });
+
+    internal static List<ResourceTemplate> NativeResourceTemplateList() =>
+    [
+        new ResourceTemplate
+        {
+            Name = "dataset",
+            Title = "Dataset description",
+            UriTemplate = DatasetResourceTemplate,
+            Description = "The description of a dataset as returned by describe_dataset: columns, types, GraphQL field and example query. {dataset} is a dataset id from list_datasets (domain.schema.table).",
+            MimeType = "application/json"
+        },
+        new ResourceTemplate
+        {
+            Name = "dataset_schema",
+            Title = "Catalog Dataset Schema",
+            UriTemplate = CatalogSchemaResourceTemplate,
+            Description = "Detailed schema and masking configuration for dataset {datasetId} (domain.schema.table).",
+            MimeType = "text/markdown"
+        }
+    ];
+
+    internal static List<ResourceTemplate> FilterResourceTemplates(IEnumerable<ResourceTemplate> templates, IReadPathSwitches? switches) =>
+        switches is null ? templates.ToList() : templates.Where(t => switches.IsResourceEnabled(t.UriTemplate)).ToList();
 
     internal static async ValueTask<ReadResourceResult> ReadResourceAsync(RequestContext<ReadResourceRequestParams> context, CancellationToken ct)
     {
@@ -172,7 +184,7 @@ public static class GatewayMcpServer
     }
 
     internal static ValueTask<ListPromptsResult> ListPromptsAsync(RequestContext<ListPromptsRequestParams> context, CancellationToken ct) =>
-        ValueTask.FromResult(new ListPromptsResult { Prompts = GetAvailablePrompts().ToList() });
+        ValueTask.FromResult(new ListPromptsResult { Prompts = GetAvailablePrompts(context.Services!.GetService<IReadPathSwitches>()).ToList() });
 
     internal static ValueTask<GetPromptResult> GetPromptAsync(RequestContext<GetPromptRequestParams> context, CancellationToken ct)
     {
@@ -181,7 +193,7 @@ public static class GatewayMcpServer
             k => k.Key,
             v => v.Value.ValueKind == JsonValueKind.String ? v.Value.GetString() : v.Value.ToString(),
             StringComparer.OrdinalIgnoreCase);
-        var result = BuildPrompt(request.Name, stringArgs);
+        var result = BuildPrompt(request.Name, stringArgs, context.Services!.GetService<IReadPathSwitches>());
         return ValueTask.FromResult(result);
     }
 
@@ -198,7 +210,13 @@ public static class GatewayMcpServer
         }
     }
 
-    public static IReadOnlyList<Prompt> GetAvailablePrompts() =>
+    /// <summary>The prompts the caller may see; a prompt whose tool groups are switched off is unlisted (hygiene, not a security control).</summary>
+    public static IReadOnlyList<Prompt> GetAvailablePrompts(IReadPathSwitches? switches = null) =>
+        switches is null
+            ? AllPrompts()
+            : AllPrompts().Where(p => switches.IsPromptEnabled(p.Name)).ToList();
+
+    private static List<Prompt> AllPrompts() =>
     [
         new Prompt
         {
@@ -236,8 +254,14 @@ public static class GatewayMcpServer
         }
     ];
 
-    public static GetPromptResult BuildPrompt(string promptName, IReadOnlyDictionary<string, string?>? arguments)
+    public static GetPromptResult BuildPrompt(string promptName, IReadOnlyDictionary<string, string?>? arguments, IReadPathSwitches? switches = null)
     {
+        // A gated prompt answers exactly like an unknown one (PLAN-SEC-115 ST-115-14).
+        if (switches is not null && !switches.IsPromptEnabled(promptName))
+        {
+            throw new McpProtocolException($"Prompt '{promptName}' not found.", McpErrorCode.InvalidParams);
+        }
+
         var args = arguments ?? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         if (string.Equals(promptName, "explore_dataset", StringComparison.OrdinalIgnoreCase))
         {

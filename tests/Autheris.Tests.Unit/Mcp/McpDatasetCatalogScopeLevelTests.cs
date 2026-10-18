@@ -137,12 +137,12 @@ public sealed class McpDatasetCatalogScopeLevelTests
     [Fact]
     public async Task Describe_NotGranted_ReleaseProfile_StillShowsBaselineProfile_SensitiveStaysMasked()
     {
-        var open = CreateCatalog(CreateTable(DatasetVisibility.Summary, releaseProfileToCatalogViewers: true), []);
+        var open = CreateCatalog(CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true), []);
         var openDescription = await DescribeAsync(open, WithScopes(ScopeA));
         openDescription.AccessStatus.ShouldBe("NONE");
         ShouldShowFullProfile(openDescription);
 
-        var sensitive = CreateCatalog(CreateTable(DatasetVisibility.Summary, releaseProfileToCatalogViewers: true, gradeSensitive: true), []);
+        var sensitive = CreateCatalog(CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true, gradeSensitive: true), []);
         ShouldShowNoValues(await DescribeAsync(sensitive, WithScopes()));
     }
 
@@ -150,7 +150,7 @@ public sealed class McpDatasetCatalogScopeLevelTests
     [Fact]
     public async Task Describe_NotGranted_DenyEffectColumnDeny_StaysDeny_EvenWithReleaseProfile()
     {
-        var table = CreateTable(DatasetVisibility.Summary, releaseProfileToCatalogViewers: true);
+        var table = CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true);
         var catalog = CreateCatalog(table, [DenyEffect(Rule("grade", ColumnAccessLevel.Deny))]);
 
         var description = await DescribeAsync(catalog, WithScopes());
@@ -163,7 +163,7 @@ public sealed class McpDatasetCatalogScopeLevelTests
     [Fact]
     public async Task Describe_NotGranted_ScopeBoundDenyEffectDeny_AppliesToScopeHolderOnly()
     {
-        var table = CreateTable(DatasetVisibility.Summary, releaseProfileToCatalogViewers: true);
+        var table = CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true);
         var catalog = CreateCatalog(table, [DenyEffect(Rule("grade", ColumnAccessLevel.Deny, ScopeA))]);
 
         Grade(await DescribeAsync(catalog, WithScopes(ScopeA)))!.ValueProfile.ShouldBeNull();
@@ -175,7 +175,7 @@ public sealed class McpDatasetCatalogScopeLevelTests
     [Fact]
     public async Task Describe_NotGranted_UnconditionalTableDeny_NoProfileForAnyColumn()
     {
-        var table = CreateTable(DatasetVisibility.Summary, releaseProfileToCatalogViewers: true);
+        var table = CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true);
         var catalog = CreateCatalog(table, [DenyEffect()]);
 
         var description = await DescribeAsync(catalog, WithScopes());
@@ -241,10 +241,10 @@ public sealed class McpDatasetCatalogScopeLevelTests
     {
         var masking = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase) { ["grade"] = new MaskingRule { RuleType = "DENY" } };
 
-        var baseline = CreateCatalog(CreateTable(DatasetVisibility.Summary, releaseProfileToCatalogViewers: true, maskingRules: masking), []);
+        var baseline = CreateCatalog(CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true, maskingRules: masking), []);
         Grade(await DescribeAsync(baseline, WithScopes()))?.ValueProfile.ShouldBeNull();
 
-        var granted = CreateCatalog(CreateTable(DatasetVisibility.Summary, releaseProfileToCatalogViewers: true, maskingRules: masking), [Allow()]);
+        var granted = CreateCatalog(CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true, maskingRules: masking), [Allow()]);
         var description = await DescribeAsync(granted, WithScopes());
         Grade(description)?.ValueProfile.ShouldBeNull();
         Json(description).ShouldNotContain("SENTINEL_");
@@ -267,7 +267,7 @@ public sealed class McpDatasetCatalogScopeLevelTests
     [Fact]
     public async Task Describe_ForeignTenantAllowConsent_DoesNotGrant()
     {
-        var table = CreateTable(DatasetVisibility.Summary, releaseProfileToCatalogViewers: true);
+        var table = CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true);
         var catalog = CreateCatalog(table, [Allow("tenant-other")]);
 
         var description = await DescribeAsync(catalog, WithScopes());
@@ -281,7 +281,7 @@ public sealed class McpDatasetCatalogScopeLevelTests
     [Fact]
     public async Task Describe_Admin_ForwardAuthClusterAdminRole_IsNotAdmin_CanonicalAdminsStayClear()
     {
-        var table = CreateTable(DatasetVisibility.Summary, releaseProfileToCatalogViewers: true);
+        var table = CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true);
         var catalog = CreateCatalog(table, [DenyEffect(Rule("grade", ColumnAccessLevel.Deny))],
             gatewayOptions: Autheris.Tests.Unit.Catalog.Wp0.Options(Autheris.Domain.Options.TenancyMode.Multi, "sales.public.orders"));
 
@@ -311,7 +311,7 @@ public sealed class McpDatasetCatalogScopeLevelTests
     [Fact]
     public async Task Describe_RawMeta_NotGrantedWithoutRelease_OmitsValueKeys()
     {
-        var table = CreateTable(DatasetVisibility.Summary, releaseProfileToCatalogViewers: false);
+        var table = CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: false);
         var catalog = CreateCatalog(table, []);
 
         var description = await DescribeAsync(catalog, WithScopes());
@@ -444,6 +444,9 @@ public sealed class McpDatasetCatalogScopeLevelTests
         services.AddSingleton(Substitute.For<IGatewayExecutionService>());
         services.AddSingleton(Substitute.For<IAuditLogRepository>());
         services.AddSingleton<IConsentResolutionService>(spy);
+        services.AddSingleton(Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.DisabledRebac());
+        services.AddSingleton(Microsoft.Extensions.Options.Options.Create(new GatewayOptions { Catalog = new Autheris.Domain.Options.DataCatalogOptions { SharedTables = [table.Identifier.ToString()] } }));
+        services.AddScoped<Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService, Autheris.Application.Catalog.Services.CatalogVisibilityService>();
         services.AddScoped<IMcpDatasetCatalog, McpDatasetCatalog>();
         services.AddScoped<IQueryAnalysisService, QueryAnalysisService>();
 

@@ -30,7 +30,7 @@ public sealed class IcebergRestCatalogSecurityTests
     private static readonly TableIdentifier OrdersId = new("tenant-1", "raw", "orders");
 
     private static ClaimsPrincipal Analyst() => new(new ClaimsIdentity(
-        new[] { new Claim(ClaimTypes.Name, "analyst@corp.com"), new Claim(ClaimTypes.Role, "DataScientist") },
+        new[] { new Claim(ClaimTypes.Name, "analyst@corp.com"), new Claim(ClaimTypes.PrimarySid, "analyst@corp.com"), new Claim(ClaimTypes.Role, "DataScientist") },
         "Bearer"));
 
     private static TableMetadata Orders(params string[] columns) => new()
@@ -166,7 +166,7 @@ public sealed class IcebergRestCatalogSecurityTests
         // Act
         // Wunsch 9: a GovernanceAdmin sees the whole catalog of the tenant, but still never another tenant's tables
         var admin = new ClaimsPrincipal(new ClaimsIdentity(
-            new[] { new Claim(ClaimTypes.Name, "admin@corp.com"), new Claim(ClaimTypes.Role, "GovernanceAdmin") }, "Bearer"));
+            new[] { new Claim(ClaimTypes.Name, "admin@corp.com"), new Claim(ClaimTypes.PrimarySid, "admin@corp.com"), new Claim(ClaimTypes.Role, "GovernanceAdmin") }, "Bearer"));
         var tables = await catalogService.ListTablesAsync("tenant-1", "raw", admin);
 
         // Assert (SEC H-3: Only tenant-1 tables are returned, never tenant-2)

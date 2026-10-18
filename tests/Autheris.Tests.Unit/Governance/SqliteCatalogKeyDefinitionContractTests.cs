@@ -179,6 +179,30 @@ public sealed class SqliteCatalogKeyDefinitionContractTests : IDisposable
     }
 
     [Fact]
+    public async Task ReplaceTableKeyDefinition_ReReadWithoutFurtherWrite_ReturnsFreshDefinition_AndLeavesNoPendingInvalidation()
+    {
+        await _repo.UpsertTableMetadataAsync(Meta(Orders, replace: true, pk: ["a"]));
+        (await _repo.GetTableMetadataAsync(Orders))!.PrimaryKeyColumns.ShouldBe(["a"]);
+
+        await _repo.ReplaceTableKeyDefinitionAsync(Orders, ["b"], []);
+
+        (await _repo.GetTableMetadataAsync(Orders))!.PrimaryKeyColumns.ShouldBe(["b"]);
+        _repo.PendingMetadataInvalidationCountForTesting.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task SetRowFilterEvaluation_ReReadWithoutFurtherWrite_ReturnsFreshSettings_AndLeavesNoPendingInvalidation()
+    {
+        await _repo.UpsertTableMetadataAsync(Meta(Orders, replace: true, pk: ["a"]));
+        (await _repo.GetTableMetadataAsync(Orders))!.RowFilterEvaluation.ShouldBeNull();
+
+        await _repo.SetRowFilterEvaluationAsync(Orders, new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.KeySetCache, 60, 5), new Sid("S-1-5-21-admin"));
+
+        (await _repo.GetTableMetadataAsync(Orders))!.RowFilterEvaluation.ShouldNotBeNull();
+        _repo.PendingMetadataInvalidationCountForTesting.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task ReplaceTableKeyDefinition_BumpsEpochOnce()
     {
         await _repo.UpsertTableMetadataAsync(Meta(Orders));

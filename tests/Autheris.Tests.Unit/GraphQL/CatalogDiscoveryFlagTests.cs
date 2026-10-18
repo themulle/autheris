@@ -11,6 +11,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Types;
 using Autheris.Tests.Unit.Catalog;
+using Autheris.Tests.Unit.TestSupport;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -33,10 +34,12 @@ public sealed class CatalogDiscoveryFlagTests
             Tenancy = Wp0.Options(mode).Tenancy,
             Catalog = new DataCatalogOptions { AllowAuthenticatedCatalogDiscovery = flag }
         };
+        var tables = Wp0.Tables(Orders, Invoices);
+        var consentRepo = Wp0.Consents(consents);
         return new Query().GetCatalogAsync(
             domain: null, first: null, after: null, search: null, tag: null,
-            Wp0.Tables(Orders, Invoices), Wp0.Consents(consents), approvalRepository: null, dataOwnershipRepository: null,
-            accessor, Options.Create(gateway));
+            tables, consentRepo, approvalRepository: null, dataOwnershipRepository: null,
+            accessor, Options.Create(gateway), CatalogVisibilityTestFactory.Create(tables, consentRepo, gateway));
     }
 
     [Fact]

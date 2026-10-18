@@ -1661,6 +1661,35 @@
       "indexes": []
     },
     {
+      "name": "TABLE_CATALOG_SETTINGS",
+      "columns": [
+        {
+          "name": "table_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "visibility",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "updated_by",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "table_id"
+      ],
+      "indexes": []
+    },
+    {
       "name": "TABLE_COLUMNS",
       "columns": [
         {
@@ -2002,6 +2031,41 @@
       ],
       "primaryKey": [
         "table_id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "TABLE_TAGS",
+      "columns": [
+        {
+          "name": "table_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "tag",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "source",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_by",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "table_id",
+        "tag"
       ],
       "indexes": []
     },
