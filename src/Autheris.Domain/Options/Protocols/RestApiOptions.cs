@@ -133,6 +133,17 @@ public sealed class CrossSourceOptions
 
     /// <summary>Issue #122: Governed WebSQL filter pushdown to remote relational SQL data sources.</summary>
     public PredicatePushdownOptions PredicatePushdown { get; init; } = new();
+
+    /// <summary>Issue #124: Governed dynamic key-set filters in cross-source WebSQL joins.</summary>
+    public DynamicKeySetOptions DynamicKeySet { get; init; } = new();
+}
+
+public sealed class DynamicKeySetOptions
+{
+    public bool Enabled { get; init; } = true;
+    public int MaxKeySetKeys { get; init; } = 2000;
+    public int MaxKeySetBatches { get; init; } = 10;
+    public int MaxKeySetBatchSize { get; init; } = 500;
 }
 
 public sealed class PredicatePushdownOptions

@@ -174,10 +174,18 @@ public sealed record QueryAccessRequirementsReport(
 }
 
 /// <summary>
-/// Issue #122: Query federation and predicate pushdown analysis.
+/// Issue #122 / #124: Query federation, predicate pushdown, and dynamic key-set analysis.
 /// </summary>
 public sealed record QueryFederationAnalysis(
-    IReadOnlyList<AnalyzedFederatedTable> Tables);
+    IReadOnlyList<AnalyzedFederatedTable> Tables,
+    IReadOnlyList<AnalyzedKeySetPushdown>? KeySetPushdowns = null);
+
+public sealed record AnalyzedKeySetPushdown(
+    string DrivingTable,
+    string DrivenTable,
+    string TargetColumn,
+    int? PushedKeyCount = null,
+    int? EstimatedBatches = null);
 
 public sealed record AnalyzedFederatedTable(
     string Table,

@@ -6,6 +6,7 @@ using System.Linq;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Olap;
 using Autheris.Application.Sql.Federation.Conjuncts;
+using Autheris.Application.Sql.Federation.KeySet;
 using Autheris.Application.Sql.Federation.Pushdown;
 using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Domain.Common;
@@ -215,7 +216,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
 
         // Issue #122: AST Conjunct Splitting and Single-Table Classification
         Dictionary<TableIdentifier, List<SingleTableConjunct>>? conjunctsByTable = null;
-        if (options.PredicatePushdown.Enabled)
+        if (options.PredicatePushdown.Enabled || options.DynamicKeySet.Enabled)
         {
             var conjuncts = SqlConjunctSplitter.Split(statement);
             var classification = SingleTableConjunctClassifier.Classify(conjuncts, tables);
@@ -224,14 +225,47 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                 .ToDictionary(g => g.Key, g => g.ToList());
         }
 
-        foreach (var t in tables)
+        // Issue #124: Dynamic Key-Set Planning & Dependency Ordering
+        IReadOnlyList<KeySetJoinPlan>? keySetPlans = null;
+        if (options.DynamicKeySet.Enabled && tables.Count > 1)
+        {
+            var decisionDict = new Dictionary<TableIdentifier, TableAccessDecision>();
+            for (int idx = 0; idx < tables.Count; idx++)
+            {
+                decisionDict[DecisionKey(tables[idx])] = tableDecisions[idx];
+            }
+
+            keySetPlans = DynamicKeySetPlanner.Plan(
+                statement,
+                tables,
+                decisionDict,
+                options,
+                conjunctsByTable);
+        }
+
+        var plannedTables = tables.ToList();
+        if (keySetPlans is { Count: > 0 })
+        {
+            var drivingIds = new HashSet<TableIdentifier>(keySetPlans.Select(p => p.DrivingTable.ResolvedIdentifier));
+            var drivenIds = new HashSet<TableIdentifier>(keySetPlans.Select(p => p.DrivenTable.ResolvedIdentifier));
+            plannedTables.Sort((a, b) =>
+            {
+                var idA = DecisionKey(a);
+                var idB = DecisionKey(b);
+                if (drivingIds.Contains(idA) && drivenIds.Contains(idB)) return -1;
+                if (drivenIds.Contains(idA) && drivingIds.Contains(idB)) return 1;
+                return 0;
+            });
+        }
+
+        foreach (var t in plannedTables)
         {
             tableNameCounts[t.Target.TableName] = tableNameCounts.GetValueOrDefault(t.Target.TableName) + 1;
         }
 
         // Short names (schema.table, table) are only usable when exactly one distinct table carries them (SEC-1).
         var shortNameOwners = new Dictionary<string, HashSet<TableIdentifier>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var t in tables)
+        foreach (var t in plannedTables)
         {
             var id = DecisionKey(t);
             foreach (var name in new[] { id.ToQualifiedName(), id.TableName, t.Target.TableName })
@@ -259,12 +293,12 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             statement = new SqlAstBuilder().BuildStatement(tree);
         }
 
-        var stagingRequests = new List<StagingTableRequest>(tables.Count);
-        var stagingNames = new List<string>(tables.Count);
+        var stagingRequests = new List<StagingTableRequest>(plannedTables.Count);
+        var stagingNames = new List<string>(plannedTables.Count);
 
-        for (int i = 0; i < tables.Count; i++)
+        for (int i = 0; i < plannedTables.Count; i++)
         {
-            var t = tables[i];
+            var t = plannedTables[i];
             string stagingName = $"s{i}";
             stagingNames.Add(stagingName);
 
@@ -295,7 +329,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             }
 
             // Minimal projection
-            var dec = tableDecisions[i];
+            var dec = RequireDecision(decisions, t);
 
             var projected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             bool selectAll = metadata.ProjectedColumns.Any(p => p == "*");
@@ -361,6 +395,20 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                 pushdownFilter = Autheris.Application.Sql.Federation.Optimization.PushedClauseBuilder.BuildPushdown(statement, t.Target, t.Metadata, dec, parameters, out paramAudit);
             }
 
+            KeySetPlanInfo? keySetPlanInfo = null;
+            if (keySetPlans is { Count: > 0 })
+            {
+                var plan = keySetPlans.FirstOrDefault(p => p.DrivenTable.ResolvedIdentifier == DecisionKey(t));
+                if (plan != null && identifierToStaging.TryGetValue(plan.DrivingTable.ResolvedIdentifier, out var drivingStagingName))
+                {
+                    keySetPlanInfo = new KeySetPlanInfo(
+                        drivingStagingName,
+                        plan.DrivingTable.ResolvedIdentifier,
+                        plan.DrivingKeyColumn,
+                        plan.DrivenKeyColumn);
+                }
+            }
+
             stagingRequests.Add(new StagingTableRequest(
                 t.Target,
                 t.Metadata,
@@ -369,7 +417,8 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                 projected.ToList(),
                 PushdownFilter: pushdownFilter,
                 VirtualFilterPlan: vfPlan,
-                ParameterAudit: paramAudit));
+                ParameterAudit: paramAudit,
+                KeySetPlan: keySetPlanInfo));
         }
 
         // 5. AST rewrite to target s0, s1, etc. (the user query is not touched for Virtual Filters)
@@ -380,7 +429,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             _timeZoneState?.IsAvailable(TargetSqlDialect.DuckDb) ?? false,
             (qualifier, column) => IsMaskedOrDenied(qualifier, column, tables, tableDecisions));
 
-        var rewriter = new FederationAstRewriter(targetToStaging, targetToAlias, tables);
+        var rewriter = new FederationAstRewriter(targetToStaging, targetToAlias, plannedTables);
         var rewrittenAst = (SqlStatement)rewriter.Visit(statement);
 
         if (parameters?.ListShapes is { IsEmpty: false } listShapes)

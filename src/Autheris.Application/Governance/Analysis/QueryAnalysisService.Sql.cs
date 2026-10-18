@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Federation.Conjuncts;
+using Autheris.Application.Sql.Federation.KeySet;
 using Autheris.Application.Sql.Federation.Pushdown;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
@@ -287,6 +288,47 @@ public sealed partial class QueryAnalysisService
                     PushdownApplied: pushedPredicates.Count > 0,
                     PushedPredicates: pushedPredicates,
                     ResidualPredicates: residualPredicates));
+            }
+
+            // Issue #124: Dynamic Key-Set Pushdown Analysis
+            var keySetDecisions = new Dictionary<TableIdentifier, TableAccessDecision>();
+            foreach (var table in resolvedTables)
+            {
+                var columnLevels = new Dictionary<string, ColumnAccessLevel>();
+                foreach (var col in table.Metadata.Columns)
+                {
+                    bool isMasked = outcome.OutputColumns.Any(o =>
+                        string.Equals(o.Dataset, FormatDatasetId(table.ResolvedIdentifier), StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(o.Column, col.ColumnName, StringComparison.OrdinalIgnoreCase) &&
+                        o.IsMasked);
+
+                    columnLevels[col.ColumnName] = isMasked ? ColumnAccessLevel.Mask : ColumnAccessLevel.Clear;
+                }
+                keySetDecisions[table.ResolvedIdentifier] = TableAccessDecision.Allowed(table.ResolvedIdentifier, columnLevels, hasUnconstrainedColumnAllow: true);
+            }
+
+            var keySetPlans = DynamicKeySetPlanner.Plan(
+                parsedStatement,
+                resolvedTables,
+                keySetDecisions,
+                new CrossSourceOptions { DynamicKeySet = new DynamicKeySetOptions() },
+                singleConjunctsByTable);
+
+            foreach (var kp in keySetPlans)
+            {
+                var drivingName = !string.IsNullOrWhiteSpace(kp.DrivingTable.Target.FullName) ? kp.DrivingTable.Target.FullName : kp.DrivingTable.Target.TableName;
+                var drivenName = !string.IsNullOrWhiteSpace(kp.DrivenTable.Target.FullName) ? kp.DrivenTable.Target.FullName : kp.DrivenTable.Target.TableName;
+                var drivingRows = kp.DrivingTable.Metadata.EffectiveExpectedRows;
+                int? estBatches = drivingRows.HasValue
+                    ? Math.Max(1, (int)((drivingRows.Value + 499) / 500))
+                    : null;
+
+                outcome.KeySetPushdowns.Add(new AnalyzedKeySetPushdown(
+                    DrivingTable: drivingName,
+                    DrivenTable: drivenName,
+                    TargetColumn: kp.DrivenKeyColumn,
+                    PushedKeyCount: (int?)drivingRows,
+                    EstimatedBatches: estBatches));
             }
         }
 
