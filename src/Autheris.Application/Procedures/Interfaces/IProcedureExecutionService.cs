@@ -40,8 +40,10 @@ public sealed class ProcedureBusinessException : System.Exception
 {
     public const string FixedMessage = "The procedure rejected the request.";
 
-    public ProcedureBusinessException(int? errorNumber, string? sqlState, string? traceId = null) : base(FixedMessage)
+    public ProcedureBusinessException(int? errorNumber, string? sqlState, string? traceId = null, string? mappedCode = null, string? mappedMessage = null) : base(FixedMessage)
     {
+        MappedCode = mappedCode;
+        MappedMessage = mappedMessage;
         ErrorNumber = errorNumber;
         SqlState = sqlState;
         TraceId = traceId;
@@ -50,6 +52,12 @@ public sealed class ProcedureBusinessException : System.Exception
     public int? ErrorNumber { get; }
 
     public string? SqlState { get; }
+
+    /// <summary>Operator-declared code of the matching <c>error_codes</c> entry, if any.</summary>
+    public string? MappedCode { get; }
+
+    /// <summary>Operator-declared fixed message of the matching entry, if any.</summary>
+    public string? MappedMessage { get; }
 
     /// <summary>Trace id shared with the audit rows of the call (random per request).</summary>
     public string? TraceId { get; }

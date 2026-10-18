@@ -396,9 +396,9 @@ public static class ProcedureEndpointRoutes
         }
         catch (ProcedureBusinessException ex)
         {
-            // Fixed message; number, SQLSTATE and the database text never reach the response (SEC-PROC152-08).
+            // Fixed or operator-declared text only; number, SQLSTATE and the database text never reach the response (SEC-PROC152-08).
             http.Response.StatusCode = StatusCodes.Status422UnprocessableEntity;
-            await http.Response.WriteAsJsonAsync(new { error = ProcedureBusinessException.FixedMessage, code = "PROCEDURE_REJECTED", traceId = ex.TraceId }, ct).ConfigureAwait(false);
+            await http.Response.WriteAsJsonAsync(new { error = ex.MappedMessage ?? ProcedureBusinessException.FixedMessage, code = ex.MappedCode ?? "PROCEDURE_REJECTED", traceId = ex.TraceId }, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

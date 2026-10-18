@@ -14,7 +14,7 @@ using YamlDotNet.Serialization.NamingConventions;
 /// F-SQL-02: Parses the header comments of a <c>*.proc.sql</c> declaration. Only the header is evaluated; the gateway
 /// never executes any SQL text from the file, it calls the procedure via <c>CommandType.StoredProcedure</c>.
 /// </summary>
-public static class ProcedureDefinitionParser
+public static partial class ProcedureDefinitionParser
 {
     private static readonly Regex HeaderRegex = new(
         @"^[ \t]*--[ \t]*@([a-zA-Z0-9_-]+)(?:[:\s][ \t]*(.*))?$",
@@ -586,9 +586,92 @@ public static class ProcedureDefinitionParser
             ReferencedTables = referencedTables,
             DdlHash = model.Integrity?.DdlHash?.Trim(),
             RowScopeKey = ValidateRowScopeKey(SplitRowScopeKey(ParseYamlRowScopeKey(model.RowScopeKey), out var scopeTableColumns), resultTable, validationMode, outputs),
-            RowScopeKeyTable = scopeTableColumns
+            RowScopeKeyTable = scopeTableColumns,
+            ErrorCodes = ParseErrorCodes(model.ErrorCodes)
         };
     }
+
+    // SEC-PROC152I2-12: SQLSTATE classes that signal infrastructure, authentication or resource failures (or success/warning
+    // states) must never be reported as a business rejection.
+    private static readonly HashSet<string> RejectedSqlStateClasses = new(StringComparer.Ordinal)
+    {
+        "00", "01", "02", "08", "28", "40", "53", "54", "55", "57", "58", "F0", "XX", "HV"
+    };
+
+    private const int MaxErrorCodes = 64;
+
+    /// <summary>Validates the YAML <c>error_codes</c> map (D-7); every violation is a fixed-text <see cref="FormatException"/>.</summary>
+    private static List<ProcedureErrorCode> ParseErrorCodes(List<ProcedureErrorCodeYamlModel>? entries)
+    {
+        var result = new List<ProcedureErrorCode>();
+        if (entries is null)
+        {
+            return result;
+        }
+
+        if (entries.Count > MaxErrorCodes)
+        {
+            throw new FormatException($"error_codes must not contain more than {MaxErrorCodes} entries.");
+        }
+
+        var numbers = new HashSet<int>();
+        var states = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in entries)
+        {
+            if (entry is null || (entry.Number is null) == (entry.Sqlstate is null))
+            {
+                throw new FormatException("Each error_codes entry needs exactly one of 'number' or 'sqlstate'.");
+            }
+
+            if (entry.Number is { } number)
+            {
+                if (number is < 50000 or > 59999)
+                {
+                    throw new FormatException("error_codes number must be between 50000 and 59999.");
+                }
+
+                if (!numbers.Add(number))
+                {
+                    throw new FormatException("error_codes must not declare a number more than once.");
+                }
+            }
+            else
+            {
+                var state = entry.Sqlstate!;
+                if (!ErrorCodeSqlStateRegex().IsMatch(state) || RejectedSqlStateClasses.Contains(state[..2]))
+                {
+                    throw new FormatException("error_codes sqlstate must be five characters [0-9A-Z] and not an infrastructure or success class.");
+                }
+
+                if (!states.Add(state))
+                {
+                    throw new FormatException("error_codes must not declare a sqlstate more than once.");
+                }
+            }
+
+            if (entry.Code is null || !ErrorCodeCodeRegex().IsMatch(entry.Code))
+            {
+                throw new FormatException("error_codes code must match ^[A-Z][A-Z0-9_]{2,63}$.");
+            }
+
+            var message = entry.Message;
+            if (string.IsNullOrWhiteSpace(message) || message.Length > 200
+                || message.Any(c => char.IsControl(c) || c is '{' or '}' or '%'))
+            {
+                throw new FormatException("error_codes message must be 1..200 characters without control characters, '{', '}' or '%'.");
+            }
+
+            result.Add(new ProcedureErrorCode(entry.Number, entry.Sqlstate, entry.Code, message));
+        }
+
+        return result;
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex("^[0-9A-Z]{5}$")]
+    private static partial System.Text.RegularExpressions.Regex ErrorCodeSqlStateRegex();
+
+    [System.Text.RegularExpressions.GeneratedRegex("^[A-Z][A-Z0-9_]{2,63}$")]
+    private static partial System.Text.RegularExpressions.Regex ErrorCodeCodeRegex();
 
     /// <summary>
     /// Entries are <c>column</c> or <c>result_column=table_column</c> (the procedure names the key differently than the
@@ -834,11 +917,22 @@ public sealed class ProcedureYamlModel
     /// <summary>A column name or a list of column names.</summary>
     public object? RowScopeKey { get; set; }
 
+    /// <summary>Declared business error map (YAML only; the SQL header format has no error codes).</summary>
+    public List<ProcedureErrorCodeYamlModel>? ErrorCodes { get; set; }
+
     /// <summary>Explicit list of physical tables referenced by the procedure.</summary>
     public List<string>? ReferencedTables { get; set; }
 
     /// <summary>Optional integrity metadata (e.g. ddl_hash) for drift prevention.</summary>
     public ProcedureIntegrityYamlModel? Integrity { get; set; }
+}
+
+public sealed class ProcedureErrorCodeYamlModel
+{
+    public int? Number { get; set; }
+    public string? Sqlstate { get; set; }
+    public string? Code { get; set; }
+    public string? Message { get; set; }
 }
 
 public sealed class ProcedureIntegrityYamlModel

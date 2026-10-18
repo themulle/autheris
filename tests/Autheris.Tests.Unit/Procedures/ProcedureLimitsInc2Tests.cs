@@ -10,9 +10,11 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 using Shouldly;
 using Xunit;
 
@@ -90,10 +92,10 @@ public class ProcedureLimitsInc2Tests
 
     private static ClaimsPrincipal User() => new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-LWE-DAVID")], "test"));
 
-    private static Fixture Active(bool scoped, int total, int maxRows = 10, int? maxScanRows = null, ProcedureMode mode = ProcedureMode.Read)
+    private static Fixture Active(bool scoped, int total, int maxRows = 10, int? maxScanRows = null, ProcedureMode mode = ProcedureMode.Read, IReadOnlyList<ProcedureErrorCode>? errorCodes = null)
     {
         var f = new Fixture { Procedures = new ProcedureEndpointsOptions { MaxRows = maxRows, MaxScanRows = maxScanRows } };
-        var def = ProcedureDefinitionParser.Parse(scoped ? ScopedHeader : UnscopedHeader, "x", false, 60) with { Mode = mode };
+        var def = ProcedureDefinitionParser.Parse(scoped ? ScopedHeader : UnscopedHeader, "x", false, 60) with { Mode = mode, ErrorCodes = errorCodes ?? [] };
         f.Registry.Register(def);
         f.Registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], ["serial_number", "name"], ["md.crane"], new Dictionary<string, string>()));
         f.Tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(new TableMetadata
@@ -755,5 +757,231 @@ public class ProcedureLimitsInc2Tests
         f.Budgets.ShouldBeEmpty();
         await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default, default);
         f.AuditEntries.Count(e => JsonSerializer.Serialize(e).Contains("write-mode")).ShouldBe(1);
+    }
+
+    // ---------- WP-D: declared error map (D-7, SEC-PROC152I2-11, -12) ----------
+
+    private const string MapYaml = """
+        name: get_cranes
+        procedure: tem.usp_Cranes
+        result_table: md.crane
+        error_codes:
+          - number: 50001
+            code: CRANE_LOCKED
+            message: The crane is locked.
+          - sqlstate: ZZ001
+            code: CRANE_GONE
+            message: The crane no longer exists.
+        """;
+
+    private static string YamlWithErrorCodes(string entries) =>
+        "name: get_cranes\nprocedure: tem.usp_Cranes\nresult_table: md.crane\nerror_codes:\n" + entries;
+
+    [Fact]
+    public void Parser_ErrorCodes_Valid_Parsed()
+    {
+        var def = ProcedureDefinitionParser.ParseYaml(MapYaml, "x", false, 60);
+
+        def.ErrorCodes.Count.ShouldBe(2);
+        def.ErrorCodes[0].ShouldBe(new ProcedureErrorCode(50001, null, "CRANE_LOCKED", "The crane is locked."));
+        def.ErrorCodes[1].ShouldBe(new ProcedureErrorCode(null, "ZZ001", "CRANE_GONE", "The crane no longer exists."));
+    }
+
+    [Fact]
+    public void Parser_NoErrorCodes_EmptyMap()
+    {
+        ProcedureDefinitionParser.ParseYaml("name: a\nprocedure: tem.usp_A\n", "x", false, 60).ErrorCodes.ShouldBeEmpty();
+    }
+
+    public static TheoryData<string> MalformedErrorCodes()
+    {
+        var data = new TheoryData<string>
+        {
+            "  - number: 50001\n    sqlstate: ZZ001\n    code: ABC\n    message: m\n",
+            "  - code: ABC\n    message: m\n",
+            "  - number: 49999\n    code: ABC\n    message: m\n",
+            "  - number: 60000\n    code: ABC\n    message: m\n",
+            "  - number: 50001\n    code: abc\n    message: m\n",
+            "  - number: 50001\n    code: AB\n    message: m\n",
+            "  - number: 50001\n    code: 1ABC\n    message: m\n",
+            "  - number: 50001\n    code: ABC\n    message: ''\n",
+            "  - number: 50001\n    code: ABC\n    message: " + new string('x', 201) + "\n",
+            "  - number: 50001\n    code: ABC\n    message: \"hello {0}\"\n",
+            "  - number: 50001\n    code: ABC\n    message: \"100%\"\n",
+            "  - number: 50001\n    code: ABC\n    message: \"a}b\"\n",
+            "  - number: 50001\n    code: ABC\n    message: \"line\\nbreak\"\n",
+            "  - number: 50001\n    code: ABC\n    message: m\n  - number: 50001\n    code: DEF\n    message: m\n",
+            "  - sqlstate: ZZ001\n    code: ABC\n    message: m\n  - sqlstate: ZZ001\n    code: DEF\n    message: m\n",
+            "  - sqlstate: zz001\n    code: ABC\n    message: m\n",
+            "  - sqlstate: ZZ00\n    code: ABC\n    message: m\n",
+            string.Concat(Enumerable.Range(0, 65).Select(i => $"  - number: {50000 + i}\n    code: CODE_{i}\n    message: m\n"))
+        };
+        foreach (var cls in new[] { "00", "01", "02", "08", "28", "40", "53", "54", "55", "57", "58", "F0", "XX", "HV" })
+        {
+            data.Add($"  - sqlstate: {cls}123\n    code: ABC\n    message: m\n");
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(MalformedErrorCodes))]
+    [Trait("Category", "Security")]
+    public void T_PROC152I2_15_Parser_ErrorCodes_Malformed_Rejected(string entries)
+    {
+        Should.Throw<FormatException>(() => ProcedureDefinitionParser.ParseYaml(YamlWithErrorCodes(entries), "x", false, 60));
+    }
+
+    [Fact]
+    public void Parser_ErrorCodes_Exactly64_Accepted()
+    {
+        var entries = string.Concat(Enumerable.Range(0, 64).Select(i => $"  - number: {50000 + i}\n    code: CODE_{i}\n    message: m\n"));
+
+        ProcedureDefinitionParser.ParseYaml(YamlWithErrorCodes(entries), "x", false, 60).ErrorCodes.Count.ShouldBe(64);
+    }
+
+    private sealed class FakeNumberException(int number, string message) : DbException(message)
+    {
+        public int Number { get; } = number;
+    }
+
+    private sealed class FakeSqlStateException(string sqlState, string message) : DbException(message)
+    {
+        public override string SqlState { get; } = sqlState;
+    }
+
+    private static ProcedureDefinition MapDefinition() => ProcedureDefinitionParser.ParseYaml(MapYaml, "x", false, 60);
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void T_PROC152I2_15_DeclaredSqlState_TreatedAsBusiness_UndeclaredIsNot()
+    {
+        var def = MapDefinition();
+
+        MssqlProcedureInvoker.TryGetBusinessError(new FakeSqlStateException("ZZ001", "secret"), def, out var number, out var state).ShouldBeTrue();
+        number.ShouldBeNull();
+        state.ShouldBe("ZZ001");
+        MssqlProcedureInvoker.TryGetBusinessError(new FakeSqlStateException("ZZ002", "secret"), def, out _, out _).ShouldBeFalse();
+        MssqlProcedureInvoker.TryGetBusinessError(new FakeSqlStateException("ZZ001", "secret"), null, out _, out _).ShouldBeFalse();
+        MssqlProcedureInvoker.TryGetBusinessError(new FakeSqlStateException("P0001", "secret"), def, out _, out _).ShouldBeTrue();
+        MssqlProcedureInvoker.TryGetBusinessError(new FakeSqlStateException("40001", "secret"), def, out _, out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void T_PROC152I2_15_NumberAndSqlStateEntries_DoNotCrossMatch()
+    {
+        var def = MapDefinition() with { ErrorCodes = [new ProcedureErrorCode(null, "ZZ001", "A_B", "m")] };
+
+        // A number exception never matches a sqlstate entry, and a sqlstate exception never matches a number entry.
+        MssqlProcedureInvoker.TryGetBusinessError(new FakeNumberException(1205, "x"), def, out _, out _).ShouldBeFalse();
+        var numberDef = def with { ErrorCodes = [new ProcedureErrorCode(1205, null, "A_B", "m")] };
+        MssqlProcedureInvoker.TryGetBusinessError(new FakeNumberException(1205, "x"), numberDef, out _, out _).ShouldBeFalse();
+        MssqlProcedureInvoker.TryGetBusinessError(new FakeSqlStateException("1205X", "x"), numberDef, out _, out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task BusinessError_Mapped_Returns422WithDeclaredCodeAndMessage()
+    {
+        var f = Active(scoped: false, total: 1, errorCodes: MapDefinition().ErrorCodes);
+        f.Invoker.ExecuteReadAsync(default!, default!, default!, default, default)
+            .ThrowsAsyncForAnyArgs(new ProcedureBusinessException(50001, null));
+
+        var ex = await Should.ThrowAsync<ProcedureBusinessException>(() => Run(f));
+
+        ex.MappedCode.ShouldBe("CRANE_LOCKED");
+        ex.MappedMessage.ShouldBe("The crane is locked.");
+        ex.TraceId.ShouldNotBeNull();
+        var details = f.AuditEntries.Single(a => a.EventType == "PROCEDURE_REJECTED").DetailsJson;
+        details.ShouldContain("CRANE_LOCKED");
+        details.ShouldNotContain("The crane is locked.");
+    }
+
+    [Fact]
+    public async Task BusinessError_MappedBySqlState_ResolvesEntry()
+    {
+        var f = Active(scoped: false, total: 1, errorCodes: MapDefinition().ErrorCodes);
+        f.Invoker.ExecuteReadAsync(default!, default!, default!, default, default)
+            .ThrowsAsyncForAnyArgs(new ProcedureBusinessException(null, "ZZ001"));
+
+        var ex = await Should.ThrowAsync<ProcedureBusinessException>(() => Run(f));
+
+        ex.MappedCode.ShouldBe("CRANE_GONE");
+        ex.MappedMessage.ShouldBe("The crane no longer exists.");
+    }
+
+    [Fact]
+    public async Task BusinessError_NotInMap_ReturnsGenericProcedureRejected()
+    {
+        var f = Active(scoped: false, total: 1, errorCodes: MapDefinition().ErrorCodes);
+        f.Invoker.ExecuteReadAsync(default!, default!, default!, default, default)
+            .ThrowsAsyncForAnyArgs(new ProcedureBusinessException(50099, null));
+
+        var ex = await Should.ThrowAsync<ProcedureBusinessException>(() => Run(f));
+
+        ex.MappedCode.ShouldBeNull();
+        ex.MappedMessage.ShouldBeNull();
+        f.AuditEntries.Single(a => a.EventType == "PROCEDURE_REJECTED").DetailsJson.ShouldContain("\"mappedCode\":null");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task T_PROC152I2_14_UndeclaredSqlState_DbException_StaysOn500Path_NoMapCode()
+    {
+        var f = Active(scoped: false, total: 1, errorCodes: MapDefinition().ErrorCodes);
+        f.Invoker.ExecuteReadAsync(default!, default!, default!, default, default)
+            .ThrowsAsyncForAnyArgs(new FakeSqlStateException("ZZ002", "Value 4711 in dbo.Secret"));
+
+        var ex = await Should.ThrowAsync<FakeSqlStateException>(() => Run(f));
+
+        ex.ShouldNotBeAssignableTo<ProcedureBusinessException>();
+        f.AuditEntries.ShouldNotContain(a => a.EventType == "PROCEDURE_REJECTED");
+        f.AuditEntries.Single(a => a.EventType == "PROCEDURE_FAILED").DetailsJson.ShouldNotContain("4711");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait("Category", "Security")]
+    public async Task T_PROC152I2_14_BusinessError_DbTextWithValueAndTable_NeverInResponseOrAudit(bool mapped)
+    {
+        const string secret = "Value 4711 in dbo.Secret";
+        var def = MapDefinition();
+        var f = Active(scoped: false, total: 1, errorCodes: def.ErrorCodes);
+        // The real invoker converts the DbException into number/SQLSTATE only; verify that seam first.
+        MssqlProcedureInvoker.TryGetBusinessError(new FakeNumberException(mapped ? 50001 : 50099, secret), def, out var number, out var state).ShouldBeTrue();
+        f.Invoker.ExecuteReadAsync(default!, default!, default!, default, default)
+            .ThrowsAsyncForAnyArgs(new ProcedureBusinessException(number, state));
+
+        var ex = await Should.ThrowAsync<ProcedureBusinessException>(() => Run(f));
+
+        ex.Message.ShouldNotContain("4711");
+        (ex.MappedMessage ?? string.Empty).ShouldNotContain("4711");
+        foreach (var entry in f.AuditEntries)
+        {
+            (entry.DetailsJson ?? string.Empty).ShouldNotContain("4711");
+            (entry.DetailsJson ?? string.Empty).ShouldNotContain("dbo.Secret");
+        }
+
+        ex.MappedCode.ShouldBe(mapped ? "CRANE_LOCKED" : null);
+    }
+
+    [Fact]
+    public async Task Route_MappedBusinessError_Writes422WithDeclaredCodeAndMessage()
+    {
+        var service = Substitute.For<IProcedureExecutionService>();
+        service.ExecuteAsync(default!, default, default!, default, default)
+            .ThrowsAsyncForAnyArgs(new ProcedureBusinessException(50001, null, "abc123", "CRANE_LOCKED", "The crane is locked."));
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = User() };
+        http.RequestServices = new Microsoft.Extensions.DependencyInjection.ServiceCollection().AddLogging().BuildServiceProvider();
+        http.Response.Body = new MemoryStream();
+
+        await Autheris.Api.Endpoints.ProcedureEndpointRoutes.HandleGet(
+            "x", http, service, Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
+
+        http.Response.StatusCode.ShouldBe(422);
+        http.Response.Body.Position = 0;
+        new StreamReader(http.Response.Body).ReadToEnd()
+            .ShouldBe("{\"error\":\"The crane is locked.\",\"code\":\"CRANE_LOCKED\",\"traceId\":\"abc123\"}");
     }
 }

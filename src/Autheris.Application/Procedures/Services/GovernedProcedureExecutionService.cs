@@ -203,10 +203,13 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 _logger?.LogWarning(
                     "Procedure '{Procedure}' rejected the request: number {Number}, sqlState {SqlState}, trace {TraceId}.",
                     definition.ProcedureName, bex.ErrorNumber, bex.SqlState, traceId);
+                // D-7: resolve the operator-declared entry; the audit carries the mapped code only (never the message).
+                var mapped = definition.ErrorCodes.FirstOrDefault(e =>
+                    (e.Number is not null && e.Number == bex.ErrorNumber) || (e.SqlState is not null && e.SqlState == bex.SqlState));
                 await AuditAsync(
                     "PROCEDURE_REJECTED", "DENY", definition, tenantId, userSid,
-                    new { reason = "business-error", number = bex.ErrorNumber, sqlState = bex.SqlState }, traceId, ct).ConfigureAwait(false);
-                throw new ProcedureBusinessException(bex.ErrorNumber, bex.SqlState, traceId);
+                    new { reason = "business-error", number = bex.ErrorNumber, sqlState = bex.SqlState, mappedCode = mapped?.Code }, traceId, ct).ConfigureAwait(false);
+                throw new ProcedureBusinessException(bex.ErrorNumber, bex.SqlState, traceId, mapped?.Code, mapped?.Message);
             }
             catch (DbException dbx)
             {
