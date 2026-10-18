@@ -52,7 +52,6 @@ public sealed class CatalogKeyDefinitionReportTests
         var service = new CatalogDiscoveryService(
             repo,
             Substitute.For<IAuditLogRepository>(),
-            consents,
             Microsoft.Extensions.Options.Options.Create(options),
             Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(repo, consents, options, Substitute.For<IRebacEvaluator>()),
             Substitute.For<IKeyVaultSecretProvider>(),

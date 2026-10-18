@@ -69,7 +69,6 @@ public sealed class CatalogDiscoveryWiringTests
         var tables = Wp0.Tables();
         var audit = Substitute.For<IAuditLogRepository>();
 
-        Should.Throw<ArgumentNullException>(() => new CatalogDiscoveryService(tables, audit, null!, Options.Create(new GatewayOptions())));
-        Should.Throw<ArgumentNullException>(() => new CatalogDiscoveryService(tables, audit, Wp0.Consents(), null!));
+        Should.Throw<ArgumentNullException>(() => new CatalogDiscoveryService(tables, audit, null!));
     }
 }

@@ -29,7 +29,7 @@ public sealed class CatalogDiscoveryPipelineGuardTests
         var visibility = CatalogVisibilityTestFactory.Create(
             tables, consents, options, engineOutput: (_, _, _) => Task.FromResult<IReadOnlyList<TableMetadata>>(engineOutput));
         return new CatalogDiscoveryService(
-            tables, Substitute.For<IAuditLogRepository>(), consents, Microsoft.Extensions.Options.Options.Create(options), visibility);
+            tables, Substitute.For<IAuditLogRepository>(), Microsoft.Extensions.Options.Options.Create(options), visibility);
     }
 
     private static RequestContext Subject() => Wp0.Context(Wp0.User("S-USER", "tenant-a"));

@@ -36,7 +36,6 @@ public sealed class CatalogDiscoveryServiceTests
         return new CatalogDiscoveryService(
             _metadataRepository,
             _auditLogRepository,
-            consents,
             Microsoft.Extensions.Options.Options.Create(options),
             Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(_metadataRepository, consents, options, Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.WithBatchFromCheck(_rebacEvaluator)),
             _secretProvider,

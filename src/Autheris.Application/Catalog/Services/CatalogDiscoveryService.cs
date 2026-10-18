@@ -36,13 +36,12 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     private readonly IHttpClientFactory? _httpClientFactory;
 
     /// <summary>
-    /// The consent repository and the gateway options are required: the caller class and the visible set depend on them, so a
+    /// The gateway options are required: the caller class and the visible set depend on them, so a
     /// missing dependency fails closed at construction instead of silently returning the unfiltered catalog.
     /// </summary>
     public CatalogDiscoveryService(
         ITableMetadataRepository metadataRepository,
         IAuditLogRepository auditLogRepository,
-        IConsentRepository consentRepository,
         IOptions<GatewayOptions> gatewayOptions,
         ICatalogVisibilityService? visibilityService = null,
         IKeyVaultSecretProvider? secretProvider = null,
@@ -55,7 +54,6 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         _maxSpecDownloadBytes = options?.Value.MaxSpecDownloadBytes ?? new CatalogDiscoveryOptions().MaxSpecDownloadBytes;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
-        ArgumentNullException.ThrowIfNull(consentRepository);
         _gatewayOptions = (gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions))).Value
             ?? throw new ArgumentNullException(nameof(gatewayOptions));
         _visibility = visibilityService;

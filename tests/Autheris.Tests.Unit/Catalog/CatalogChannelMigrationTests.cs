@@ -72,7 +72,7 @@ public sealed class CatalogChannelMigrationTests
             tables, consents, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
             options: Options.Create(options), graphQlMap: graphQl, visibilityService: service);
         var rest = new CatalogDiscoveryService(
-            tables, Substitute.For<IAuditLogRepository>(), consents, Options.Create(options), service);
+            tables, Substitute.For<IAuditLogRepository>(), Options.Create(options), service);
         return (mcp, rest, service);
     }
 
@@ -236,7 +236,7 @@ public sealed class CatalogChannelMigrationTests
         var mcp = new McpDatasetCatalog(
             Wp0.Tables(full), Wp0.Consents(), Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
             options: Options.Create(options), visibilityService: service);
-        var rest = new CatalogDiscoveryService(Wp0.Tables(full), Substitute.For<IAuditLogRepository>(), Wp0.Consents(), Options.Create(options), service);
+        var rest = new CatalogDiscoveryService(Wp0.Tables(full), Substitute.For<IAuditLogRepository>(), Options.Create(options), service);
         var user = Wp0.User("S-USER", "tenant-a");
 
         (await mcp.DescribeDatasetAsync(user, "sales.dbo.full_t")).Columns.ShouldBeEmpty();
@@ -328,7 +328,7 @@ public sealed class CatalogChannelMigrationTests
         var consents = ConsentsFor("S-USER", Ok);
         var mcp = new McpDatasetCatalog(
             tables, consents, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(), options: Options.Create(Opts(false)));
-        var rest = new CatalogDiscoveryService(tables, Substitute.For<IAuditLogRepository>(), consents, Options.Create(Opts(false)));
+        var rest = new CatalogDiscoveryService(tables, Substitute.For<IAuditLogRepository>(), Options.Create(Opts(false)));
         var user = Wp0.User("S-USER", "tenant-a");
 
         (await mcp.ListDatasetsAsync(user)).Total.ShouldBe(0);

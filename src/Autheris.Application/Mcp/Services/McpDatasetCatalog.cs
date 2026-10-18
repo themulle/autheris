@@ -882,7 +882,6 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
 
     private async Task<HashSet<string>> VisibleRelationTargetsAsync(ClaimsPrincipal principal, GraphQlTableMapping graphQl, CancellationToken ct)
     {
-        var targets = graphQl.Relations.Select(r => r.Target).Distinct().ToList();
         if (IsBypassed)
         {
             var all = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
@@ -894,6 +893,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             return new HashSet<string>(StringComparer.Ordinal);
         }
 
+        var targets = graphQl.Relations.Select(r => r.Target).Distinct().ToList();
         var visible = await visibility.FilterVisibleAsync(CallerOf(principal), targets, ct).ConfigureAwait(false);
         return visible.Select(DatasetId).ToHashSet(StringComparer.Ordinal);
     }
