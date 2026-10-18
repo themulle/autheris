@@ -45,7 +45,8 @@ public sealed class CatalogSurfaceCallSiteGuardTests
         string[] allowed =
         [
             "CatalogSurface.cs", "CatalogVisibility.cs", "McpCatalogVisibility.cs",
-            "McpDatasetCatalog.cs", "QueryTypes.cs", "CatalogDiscoveryService.cs"
+            "McpDatasetCatalog.cs", "QueryTypes.cs", "CatalogDiscoveryService.cs",
+            "CatalogVisibilityService.cs" // #138 INC-1 (SEC-CAT138-18): the only service entry; channel files leave the list when migrated.
         ];
 
         var offenders = SourceFiles()
