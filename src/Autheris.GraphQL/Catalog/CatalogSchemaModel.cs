@@ -183,7 +183,7 @@ public sealed partial class CatalogSchemaModel
             "Query", "Mutation", "Subscription", "AutherisSortDirection",
             "AutherisStringFilter", "AutherisIntFilter", "AutherisLongFilter",
             "AutherisFloatFilter", "AutherisDecimalFilter", "AutherisBooleanFilter",
-            "AutherisDateTimeFilter"
+            "AutherisDateTimeFilter", "AutherisAggregationResult"
         };
 
         var reservedFilterKeywords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -199,11 +199,12 @@ public sealed partial class CatalogSchemaModel
             var typeName = baseName;
             var filterTypeName = $"{typeName}_filter";
             var orderTypeName = $"{typeName}_order_by";
+            var aggregateFieldName = $"{typeName}_aggregate";
 
             var columns = new List<CatalogColumnField>();
             var usedColNames = new HashSet<string>(StringComparer.Ordinal);
 
-            foreach (var col in meta.Columns)
+            foreach (var col in meta.Columns ?? [])
             {
                 // R-GQL-13: the tree compiler only accepts plain column names; others (e.g. "a-b") were offered in the
                 // schema under a sanitized name but could never be queried.
@@ -250,6 +251,7 @@ public sealed partial class CatalogSchemaModel
             if (usedSchemaTypeNames.Contains(typeName)) collidingName = typeName;
             else if (usedSchemaTypeNames.Contains(filterTypeName)) collidingName = filterTypeName;
             else if (usedSchemaTypeNames.Contains(orderTypeName)) collidingName = orderTypeName;
+            else if (usedSchemaTypeNames.Contains(aggregateFieldName)) collidingName = aggregateFieldName;
 
             if (collidingName != null)
             {
@@ -264,6 +266,7 @@ public sealed partial class CatalogSchemaModel
             usedSchemaTypeNames.Add(typeName);
             usedSchemaTypeNames.Add(filterTypeName);
             usedSchemaTypeNames.Add(orderTypeName);
+            usedSchemaTypeNames.Add(aggregateFieldName);
 
             var queryFieldName = typeName; // Same name for root query field and object type
             tableBuilders.Add((meta, typeName, queryFieldName, filterTypeName, orderTypeName, columns));

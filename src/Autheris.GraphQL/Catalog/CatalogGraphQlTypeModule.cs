@@ -260,30 +260,33 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
             }));
         }
 
-        types.Add(new ObjectTypeExtension(d =>
+        if (schemaModel.Tables.Count > 0)
         {
-            d.Name("Query");
-
-            foreach (var table in schemaModel.Tables)
+            types.Add(new ObjectTypeExtension(d =>
             {
-                d.Field(table.QueryFieldName)
-                    .Description($"Query {table.TypeName}. Keyset paging can be performed via where: {{ id: {{ gt: $lastId }} }}, orderBy: [{{ id: ASC }}].")
-                    .Type(new NonNullTypeNode(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode(table.TypeName)))))
-                    .Argument("where", a => a.Type(new NamedTypeNode(table.FilterTypeName)))
-                    .Argument("orderBy", a => a.Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode(table.OrderByTypeName)))))
-                    .Argument("first", a => a.Type(new NamedTypeNode("Int")).DefaultValue(100))
-                    .Argument("offset", a => a.Type(new NamedTypeNode("Int")).DefaultValue(0))
-                    .Resolve(async ctx => await ResolveRootQueryAsync(ctx, table, schemaModel).ConfigureAwait(false));
+                d.Name("Query");
 
-                d.Field($"{table.QueryFieldName}_aggregate")
-                    .Description($"Governed aggregation for {table.TypeName} with k-anonymity and differential privacy.")
-                    .Type(new NonNullTypeNode(new NamedTypeNode("AutherisAggregationResult")))
-                    .Argument("groupBy", a => a.Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode("String")))))
-                    .Argument("where", a => a.Type(new NamedTypeNode("String")))
-                    .Argument("limit", a => a.Type(new NamedTypeNode("Int")).DefaultValue(100))
-                    .Resolve(async ctx => await ResolveTableAggregateAsync(ctx, table).ConfigureAwait(false));
-            }
-        }));
+                foreach (var table in schemaModel.Tables)
+                {
+                    d.Field(table.QueryFieldName)
+                        .Description($"Query {table.TypeName}. Keyset paging can be performed via where: {{ id: {{ gt: $lastId }} }}, orderBy: [{{ id: ASC }}].")
+                        .Type(new NonNullTypeNode(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode(table.TypeName)))))
+                        .Argument("where", a => a.Type(new NamedTypeNode(table.FilterTypeName)))
+                        .Argument("orderBy", a => a.Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode(table.OrderByTypeName)))))
+                        .Argument("first", a => a.Type(new NamedTypeNode("Int")).DefaultValue(100))
+                        .Argument("offset", a => a.Type(new NamedTypeNode("Int")).DefaultValue(0))
+                        .Resolve(async ctx => await ResolveRootQueryAsync(ctx, table, schemaModel).ConfigureAwait(false));
+
+                    d.Field($"{table.QueryFieldName}_aggregate")
+                        .Description($"Governed aggregation for {table.TypeName} with k-anonymity and differential privacy.")
+                        .Type(new NonNullTypeNode(new NamedTypeNode("AutherisAggregationResult")))
+                        .Argument("groupBy", a => a.Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode("String")))))
+                        .Argument("where", a => a.Type(new NamedTypeNode("String")))
+                        .Argument("limit", a => a.Type(new NamedTypeNode("Int")).DefaultValue(100))
+                        .Resolve(async ctx => await ResolveTableAggregateAsync(ctx, table).ConfigureAwait(false));
+                }
+            }));
+        }
 
         return types;
     }
@@ -507,7 +510,9 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
     {
         var aggregationService = ctx.Service<IGovernedAggregationService>();
         var httpContext = ctx.Service<IHttpContextAccessor>()?.HttpContext;
-        var principal = httpContext?.User ?? new ClaimsPrincipal();
+        var principal = (ctx.ContextData.TryGetValue(nameof(ClaimsPrincipal), out var cp) && cp is ClaimsPrincipal p)
+            ? p
+            : httpContext?.User ?? new ClaimsPrincipal();
 
         var groupBy = ctx.ArgumentValue<IReadOnlyList<string>?>("groupBy");
         var whereStr = ctx.ArgumentValue<string?>("where");
@@ -531,9 +536,9 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         {
             throw new GraphQLException(ErrorBuilder.New().SetMessage("Privacy budget exhausted.").SetCode("PRIVACY_BUDGET_EXHAUSTED").Build());
         }
-        catch (MaskedAggregationException ex)
+        catch (MaskedAggregationException)
         {
-            throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode(MaskedAggregationException.ErrorCodeConst).Build());
+            throw new GraphQLException(ErrorBuilder.New().SetMessage(MaskedAggregationException.FixedMessage).SetCode(MaskedAggregationException.ErrorCodeConst).Build());
         }
         catch (AggregationColumnUnavailableException)
         {
@@ -542,13 +547,21 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                 .SetCode(AggregationColumnUnavailableException.ErrorCodeConst)
                 .Build());
         }
-        catch (AggregationRowCapExceededException ex)
+        catch (AggregationRowCapExceededException)
         {
-            throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode(AggregationRowCapExceededException.ErrorCodeConst).Build());
+            throw new GraphQLException(ErrorBuilder.New().SetMessage(AggregationRowCapExceededException.FixedMessage).SetCode(AggregationRowCapExceededException.ErrorCodeConst).Build());
         }
-        catch (GatewayInvalidQueryException ex)
+        catch (GatewayInvalidQueryException)
         {
-            throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode("INVALID_QUERY").Build());
+            throw new GraphQLException(ErrorBuilder.New().SetMessage("The requested aggregation query is invalid.").SetCode("INVALID_QUERY").Build());
+        }
+        catch (ArgumentException)
+        {
+            throw new GraphQLException(ErrorBuilder.New().SetMessage("The requested aggregation arguments are invalid.").SetCode("AGGREGATION_ARGUMENT_INVALID").Build());
+        }
+        catch (TableNotFoundException)
+        {
+            throw new GraphQLException(ErrorBuilder.New().SetMessage("Access denied.").SetCode("ACCESS_DENIED").Build());
         }
         catch (GatewayForbiddenException)
         {
@@ -563,7 +576,9 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
     {
         var treeService = ctx.Service<IGovernedTreeQueryService>();
         var httpContext = ctx.Service<IHttpContextAccessor>()?.HttpContext;
-        var principal = httpContext?.User ?? new ClaimsPrincipal();
+        var principal = (ctx.ContextData.TryGetValue(nameof(ClaimsPrincipal), out var cp) && cp is ClaimsPrincipal p)
+            ? p
+            : httpContext?.User ?? new ClaimsPrincipal();
 
         IReadOnlyDictionary<string, string[]>? headers = null;
         if (httpContext?.Request?.Headers is { Count: > 0 } reqHeaders)
