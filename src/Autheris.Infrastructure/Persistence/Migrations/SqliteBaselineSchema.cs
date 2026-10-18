@@ -255,10 +255,21 @@ internal sealed class SqliteBaselineSchema
                 parent_table_id TEXT NOT NULL,
                 child_table_id TEXT NOT NULL,
                 relation_name TEXT NOT NULL,
-                join_key_parent TEXT NOT NULL,
-                join_key_child TEXT NOT NULL,
                 cardinality TEXT NOT NULL
             );
+
+            -- Issue #151: composite-key relations. One row per ordered key pair; column names are validated on write.
+            CREATE UNIQUE INDEX IF NOT EXISTS UX_TABLE_RELATIONS_NATURAL
+                ON TABLE_RELATIONS (parent_table_id, child_table_id, relation_name);
+            CREATE TABLE IF NOT EXISTS TABLE_RELATION_KEYS (
+                relation_id TEXT NOT NULL,
+                key_ordinal INTEGER NOT NULL CHECK (key_ordinal >= 1),
+                parent_column TEXT NOT NULL,
+                child_column TEXT NOT NULL,
+                PRIMARY KEY (relation_id, key_ordinal)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS UX_TABLE_RELATION_KEYS_PARENT ON TABLE_RELATION_KEYS (relation_id, parent_column);
+            CREATE UNIQUE INDEX IF NOT EXISTS UX_TABLE_RELATION_KEYS_CHILD ON TABLE_RELATION_KEYS (relation_id, child_column);
 
             CREATE TABLE IF NOT EXISTS ITSM_OUTBOX (
                 id TEXT PRIMARY KEY,
