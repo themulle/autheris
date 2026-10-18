@@ -6,8 +6,10 @@ using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Api.Extensions;
+using Autheris.Api.Hosting.Warmup;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Hosting;
 
@@ -52,6 +54,8 @@ public static class HealthEndpoints
         app.MapGet("/health/ready", async (
             ITrafficDrainController controller,
             IGatewayHealthCheckService? healthCheckService,
+            [FromServices] IGraphQlExecutorGate? executorGate,
+            [FromServices] IStartupWarmupState? warmupState,
             CancellationToken ct) =>
         {
             if (controller.IsDraining)
@@ -85,6 +89,20 @@ public static class HealthEndpoints
                 }
             }
 
+            // PLAN-OPS-150 D-150-2: executor gate (required, positive proof, missing or unknown means 503), then the best-effort
+            // warm-up state. Both are read live (no cache). Production bodies carry status and timestamp only (SEC-OPS150-09).
+            var gateState = executorGate?.State ?? ExecutorGateState.Pending;
+            if (gateState != ExecutorGateState.Ready)
+            {
+                return NotReady(gateState == ExecutorGateState.Pending ? "Warming" : "Unhealthy", gateState, warmupState?.Phase);
+            }
+
+            var phase = warmupState?.Phase ?? WarmupPhase.Pending;
+            if (phase != WarmupPhase.Ready)
+            {
+                return NotReady("Warming", gateState, phase);
+            }
+
             if (environment.IsDevelopment())
             {
                 return Results.Ok(new
@@ -105,5 +123,22 @@ public static class HealthEndpoints
         }).AllowAnonymous().WithAuditExemption("Operational health probe");
 
         return app;
+
+        IResult NotReady(string status, ExecutorGateState gate, WarmupPhase? phase)
+        {
+            if (environment.IsDevelopment())
+            {
+                return Results.Json(new
+                {
+                    status,
+                    timestamp = DateTimeOffset.UtcNow,
+                    securityMode = GetSecurityMode(gatewayOptions),
+                    executorGate = gate.ToString(),
+                    warmupPhase = phase?.ToString() ?? "Unknown"
+                }, statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            return Results.Json(new { status, timestamp = DateTimeOffset.UtcNow }, statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
     }
 }
