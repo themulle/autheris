@@ -141,6 +141,42 @@ public sealed record RuntimeConsumerSummary(
     string ClientType // "ServicePrincipal", "InteractiveUser", "DownstreamSystem"
 );
 
+public sealed record RejectionBreakdown(
+    long Access = 0,
+    long RateLimit = 0,
+    long Cost = 0,
+    long Other = 0
+)
+{
+    public long Total => Access + RateLimit + Cost + Other;
+}
+
+public sealed record CallingApplicationUsage(
+    string Application,
+    string Day,
+    long Calls,
+    long RowsReturned,
+    long RowsMeasuredCalls,
+    RejectionBreakdown Rejections,
+    IReadOnlyList<string> Versions,
+    IReadOnlyList<string> QueryNames,
+    int DistinctActors = 0,
+    IReadOnlyList<string>? ActorSids = null
+);
+
+public sealed record ConsumerAppDailySummary(
+    string Application,
+    string Day,
+    long Calls,
+    long RowsReturned,
+    long RowsMeasuredCalls,
+    RejectionBreakdown Rejections,
+    IReadOnlyList<string> Versions,
+    IReadOnlyList<string> QueryNames,
+    int DistinctActors = 0,
+    IReadOnlyList<string>? ActorSids = null
+);
+
 public sealed record TableConsumersReport(
     string Table,
     string BreakingChangeRisk, // "CRITICAL", "HIGH", "MEDIUM", "LOW"
@@ -149,7 +185,9 @@ public sealed record TableConsumersReport(
     DateTimeOffset? LastAccessedAt,
     IReadOnlyList<DownstreamConsumerEntity> DownstreamConsumers,
     IReadOnlyList<RuntimeConsumerSummary> RuntimeConsumers,
-    IReadOnlyList<string> RecommendedMitigations
+    IReadOnlyList<string> RecommendedMitigations,
+    IReadOnlyList<CallingApplicationUsage>? ApplicationUsages = null,
+    bool SuppressedSmallGroups = false
 );
 
 public sealed record GdprRecipientAccessRecord(
