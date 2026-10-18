@@ -250,8 +250,17 @@ public interface IDataOwnershipRepository
 public interface ITableRelationRepository
 {
     Task<IReadOnlyList<TableRelation>> GetRelationsForTableAsync(TableIdentifier parentTable, CancellationToken ct = default);
-    Task CreateRelationAsync(TableRelation relation, CancellationToken ct = default);
+
+    /// <summary>
+    /// Creates or updates a relation by its natural key (parent table, child table, relation name) together with its ordered key pairs in one
+    /// transaction (issue #151). Throws <see cref="Autheris.Domain.Exceptions.InvalidRelationException"/> for invalid keys, unknown, inactive or ambiguous
+    /// tables and unknown key columns; nothing is written then.
+    /// </summary>
+    Task<RelationWriteResult> CreateRelationAsync(TableRelation relation, CancellationToken ct = default);
 }
+
+/// <summary>Outcome of <see cref="ITableRelationRepository.CreateRelationAsync"/>: the stored relation id, whether the row was inserted, and whether the ordered key pairs of an existing relation changed (SEC-REL151-04).</summary>
+public sealed record RelationWriteResult(Guid StoredId, bool Created, bool KeysChanged);
 
 public interface IGovernanceRepository :
     ITableMetadataRepository,

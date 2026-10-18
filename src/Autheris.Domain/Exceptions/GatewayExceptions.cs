@@ -1,4 +1,5 @@
 using Autheris.Domain.Common;
+using Autheris.Domain.Model;
 
 namespace Autheris.Domain.Exceptions;
 
@@ -187,3 +188,12 @@ public sealed class GatewayRateLimitException : GatewaySecurityException
 /// this type first (it must never be treated as "new table"). The message is the not-found text and names only the table id.
 /// </summary>
 public sealed class TableMetadataUnavailableException(TableIdentifier table) : TableNotFoundException(table);
+
+/// <summary>
+/// Issue #151: a relation write was rejected (invalid key columns, unknown or ambiguous table). The message carries the
+/// relation name and column identifiers only.
+/// </summary>
+public sealed class InvalidRelationException(RelationKeyViolation? violation, string message) : Exception(message)
+{
+    public RelationKeyViolation? Violation { get; } = violation;
+}

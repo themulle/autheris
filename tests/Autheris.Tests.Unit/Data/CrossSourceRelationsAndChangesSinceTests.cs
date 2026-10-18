@@ -588,6 +588,133 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
     }
 
     // =========================================================================
+    // ISSUE #151: composite-key cross-source relations
+    // =========================================================================
+
+    private static TableMetadata CreateOrdersWithRegionTable()
+    {
+        var orders = CreateOrdersTable();
+        return new TableMetadata
+        {
+            Identifier = orders.Identifier,
+            PrimaryKeyColumns = orders.PrimaryKeyColumns,
+            Table = orders.Table,
+            Columns = [.. orders.Columns, new TableColumn { ColumnName = "customer_region", DataType = "varchar" }]
+        };
+    }
+
+    private static TableRelation CreateCompositeRelation(TableMetadata orders, TableMetadata customers) => new()
+    {
+        ParentTableIdentifier = orders.Identifier,
+        ChildTableIdentifier = customers.Identifier,
+        RelationName = "customer",
+        JoinKeysParent = ["customer_id", "customer_region"],
+        JoinKeysChild = ["id", "region"],
+        Cardinality = RelationCardinality.ManyToOne,
+        AllowCrossDataSource = true
+    };
+
+    private static (CrossSourceRelationResolver Resolver, TableRelation Relation) CreateCompositeResolver(
+        ColumnAccessLevel parentRegionAccess = ColumnAccessLevel.Clear,
+        ColumnAccessLevel childRegionAccess = ColumnAccessLevel.Clear)
+    {
+        var orders = CreateOrdersWithRegionTable();
+        var customers = CreateCustomersTable();
+        var pdp = new FakePolicyDecisionPoint();
+        pdp.SetDecision(orders.Identifier, TableAccessDecision.Allowed(
+            orders.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["customer_id"] = ColumnAccessLevel.Clear,
+                ["customer_region"] = parentRegionAccess
+            },
+            hasUnconstrainedColumnAllow: true));
+        pdp.SetDecision(customers.Identifier, TableAccessDecision.Allowed(
+            customers.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["id"] = ColumnAccessLevel.Clear,
+                ["name"] = ColumnAccessLevel.Clear,
+                ["region"] = childRegionAccess
+            },
+            hasUnconstrainedColumnAllow: true));
+
+        var rowReader = new InMemoryCrossSourceRowReader();
+        rowReader.SeedTable(customers.Identifier,
+        [
+            new Dictionary<string, object?> { ["id"] = 10, ["name"] = "Alice EU", ["region"] = "EU", ["tenant_id"] = "tenant-a" },
+            new Dictionary<string, object?> { ["id"] = 10, ["name"] = "Alice US", ["region"] = "US", ["tenant_id"] = "tenant-a" },
+            new Dictionary<string, object?> { ["id"] = 10, ["name"] = "Alice NullRegion", ["region"] = null, ["tenant_id"] = "tenant-a" }
+        ]);
+
+        var resolver = new CrossSourceRelationResolver(
+            new FakeMetadataRepository(orders, customers), pdp, rowReader, new SimpleMaskingProvider(), new FakeAuditLogRepository(),
+            options: Options.Create(new CrossSourceRelationOptions()));
+        return (resolver, CreateCompositeRelation(orders, customers));
+    }
+
+    private static Dictionary<string, object?> OrderRow(int orderId, object? customerId, object? region) =>
+        new() { ["order_id"] = orderId, ["customer_id"] = customerId, ["customer_region"] = region };
+
+    [Fact]
+    public async Task CrossSource_CompositeRelation_JoinsOnAllColumns()
+    {
+        var (resolver, relation) = CreateCompositeResolver();
+        var parentRows = new List<IReadOnlyDictionary<string, object?>>
+        {
+            OrderRow(1, 10, "EU"),
+            OrderRow(2, 10, "US"),
+            OrderRow(3, 10, "APAC") // matches the first key only
+        };
+
+        var result = await resolver.ResolveRelationAsync(new CrossSourceRelationRequest(relation, parentRows, CreatePrincipal(), DefaultTenant));
+
+        result.ManyToOneByParentIndex[0]!["name"].Should().Be("Alice EU");
+        result.ManyToOneByParentIndex[1]!["name"].Should().Be("Alice US");
+        result.ManyToOneByParentIndex[2].Should().BeNull();
+        result.OneToManyByParentIndex[2].Should().BeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task CrossSource_CompositeRelation_NullKeyPart_NeverJoins()
+    {
+        // SEC-REL151-11 / T-REL151-03: a NULL in any key part never joins (SQL NULL semantics), on parent and child side.
+        var (resolver, relation) = CreateCompositeResolver();
+        var parentRows = new List<IReadOnlyDictionary<string, object?>>
+        {
+            OrderRow(1, 10, null), // the child row (10, NULL) must not match it
+            OrderRow(2, null, "EU"),
+            OrderRow(3, 10, DBNull.Value)
+        };
+
+        var result = await resolver.ResolveRelationAsync(new CrossSourceRelationRequest(relation, parentRows, CreatePrincipal(), DefaultTenant));
+
+        result.ManyToOneByParentIndex.Should().OnlyContain(r => r == null);
+        result.OneToManyByParentIndex.Should().OnlyContain(r => r.Count == 0);
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData(true, ColumnAccessLevel.Mask)]
+    [InlineData(true, ColumnAccessLevel.Deny)]
+    [InlineData(false, ColumnAccessLevel.Mask)]
+    [InlineData(false, ColumnAccessLevel.Deny)]
+    public async Task CrossSource_CompositeRelation_KeyPositionNotClear_Throws(bool parentSide, ColumnAccessLevel level)
+    {
+        // SEC-REL151-11 / T-REL151-03: the second key position is restricted on either side.
+        var (resolver, relation) = CreateCompositeResolver(
+            parentRegionAccess: parentSide ? level : ColumnAccessLevel.Clear,
+            childRegionAccess: parentSide ? ColumnAccessLevel.Clear : level);
+        var parentRows = new List<IReadOnlyDictionary<string, object?>> { OrderRow(1, 10, "EU") };
+
+        var act = () => resolver.ResolveRelationAsync(new CrossSourceRelationRequest(relation, parentRows, CreatePrincipal(), DefaultTenant));
+
+        var ex = await act.Should().ThrowAsync<CrossSourceRelationException>();
+        ex.Which.ErrorCode.Should().Be(CrossSourceRelationErrorCodes.CrossSourceRelationKeyNotClear);
+    }
+
+    // =========================================================================
     // Test Doubles
     // =========================================================================
 

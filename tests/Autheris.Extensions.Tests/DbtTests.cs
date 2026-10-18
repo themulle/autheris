@@ -474,14 +474,14 @@ public sealed class DbtTests
         """;
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(manifestWithRelationshipsJson));
-        var (models, relationships) = await DbtArtifactStreamingParser.ParseManifestWithRelationshipsAsync(stream);
+        var (models, relationships, _) = await DbtArtifactStreamingParser.ParseManifestWithRelationshipsAsync(stream);
 
         models.Count.ShouldBe(2);
         relationships.Count.ShouldBeGreaterThanOrEqualTo(1);
 
         var rel = relationships.First(r => r.ChildModelOrTable == "fct_orders" && r.ParentModelOrTable == "stg_customers");
-        rel.ParentColumn.ShouldBe("customer_id");
-        rel.ChildColumn.ShouldBe("customer_id");
+        rel.ParentColumns.ShouldBe(["customer_id"]);
+        rel.ChildColumns.ShouldBe(["customer_id"]);
     }
 
     [Fact]
