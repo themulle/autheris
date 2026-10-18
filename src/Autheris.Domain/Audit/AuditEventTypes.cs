@@ -122,5 +122,13 @@ public static class AuditEventTypes
     // Row filter key-set cache strategy administration (#107)
     public const string RowFilterEvaluationChanged = "ROW_FILTER_EVALUATION_CHANGED";
     public const string TableRowFilterStrategyChanged = "TABLE_ROW_FILTER_STRATEGY_CHANGED";
+
+    // Caller attribute registry administration (#129; four-eyes steps carry hashes only, never values)
+    public const string CallerAttributeDefinitionPending = "CALLER_ATTRIBUTE_DEFINITION_PENDING";
+    public const string CallerAttributeDefinitionApplied = "CALLER_ATTRIBUTE_DEFINITION_APPLIED";
+    public const string CallerAttributeDefinitionRejected = "CALLER_ATTRIBUTE_DEFINITION_REJECTED";
+    public const string CallerAttributeDefinitionDeleted = "CALLER_ATTRIBUTE_DEFINITION_DELETED";
+    public const string CallerAttributeServiceSetChanged = "CALLER_ATTRIBUTE_SERVICE_SET_CHANGED";
+    public const string CallerAttributeSimulationRead = "CALLER_ATTRIBUTE_SIMULATION_READ";
 }
 

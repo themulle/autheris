@@ -54,6 +54,7 @@ public sealed class GatewayOptions
     [Required] public ArrowExportOptions Arrow { get; init; } = new();
     [Required] public DuckDbOlapOptions DuckDbOlap { get; init; } = new();
     [Required] public RowFilterOptions RowFilters { get; init; } = new();
+    [Required] public CallerAttributeOptions CallerAttributes { get; init; } = new();
     [Required] public VirtualFilterOptions VirtualFilters { get; init; } = new();
     [Required] public LoggingOptions Logging { get; init; } = new();
     [Required] public ClassificationOptions Classification { get; init; } = new();

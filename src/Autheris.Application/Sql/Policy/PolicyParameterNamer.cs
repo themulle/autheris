@@ -46,6 +46,16 @@ internal sealed partial class PolicyParameterNamer
         return new PolicyParameterExpression(name, value.Type, ParameterOrigin.Policy, isLikePattern);
     }
 
+    /// <summary>
+    /// Registers a caller attribute value under its reserved name (<see cref="Autheris.Application.Identity.Attributes.CallerAttributeParameterName"/>).
+    /// Only <c>CallerAttributeBinder</c> calls this (architecture test); the same name and value registered twice is the same parameter.
+    /// </summary>
+    internal PolicyParameterExpression AddCallerAttribute(string reservedName, PolicyValue value)
+    {
+        _values[reservedName] = value;
+        return new PolicyParameterExpression(reservedName, value.Type, ParameterOrigin.Policy);
+    }
+
     /// <summary>Converts a consent JSON value to a typed policy value (the legacy extraction rules: raw text for structured values).</summary>
     public static PolicyValue ToPolicyValue(JsonElement element) => element.ValueKind switch
     {

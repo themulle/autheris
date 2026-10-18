@@ -131,5 +131,7 @@ public sealed class Consent
                 throw new InvalidOperationException($"Consent {Id}: GranteeSid must be specified when GranteeType is User, Group or ServicePrincipal.");
             }
         }
+
+        ConsentRowFilterShape.Validate(RowFilters);
     }
 }

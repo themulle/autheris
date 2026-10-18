@@ -348,6 +348,7 @@ public sealed partial class GovernedSqlExecutor
                 ["dataSource"] = dsName,
                 ["virtual_filters"] = rewrite.VirtualFilters
             };
+            AddCallerAttributeAuditFields(fields, rewrite, compiled);
             AddCompiledAuditFields(fields, compiled, clientValues);
             AddKeySetAuditFields(fields, rewrite);
             await _auditWriter.RecordAsync(new AuditLogEntry
@@ -540,7 +541,7 @@ public sealed partial class GovernedSqlExecutor
         catch (Exception ex)
         {
             // A driver error is reduced to a stable code first; the original is logged server-side only (see SanitizeProviderError).
-            var sanitized = SanitizeProviderError(ex, binderDialect, dsName, clientValues.Values.Any(v => v is ClientListValue));
+            var sanitized = SanitizeProviderError(ex, binderDialect, dsName, BindsValueFromTheCaller(compiled, clientValues));
             var reported = sanitized ?? ex;
 
             if (!dmlContext.IsDml)
@@ -606,6 +607,14 @@ public sealed partial class GovernedSqlExecutor
     }
 
     /// <summary>
+    /// True when the statement binds a client list (SEC-128-07) or a caller attribute value (BC-129-16): a driver message can quote such a value, so
+    /// the exception text is not logged for it.
+    /// </summary>
+    internal static bool BindsValueFromTheCaller(CompiledSql compiled, IReadOnlyDictionary<string, object?> clientValues) =>
+        clientValues.Values.Any(v => v is ClientListValue) ||
+        compiled.Parameters.Any(p => p.Origin == ParameterOrigin.Policy && p.SourceName != null && Autheris.Application.Identity.Attributes.CallerAttributeParameterName.IsReserved(p.SourceName));
+
+    /// <summary>
     /// A driver error becomes a typed error with a stable code and a fixed message; the original is logged server-side only. A timeout
     /// or an unavailable source is classified first and keeps its own status (504, 503). Everything that is not a driver error
     /// (policy and binder refusals, cancellation, the gateway's own exceptions) passes through unchanged.
@@ -624,7 +633,7 @@ public sealed partial class GovernedSqlExecutor
 
         if (clientListsBound)
         {
-            // SEC-128-07: a driver message can carry a bound list element ("Conversion failed when converting the nvarchar value '...'"), so
+            // SEC-128-07 / BC-129-16: a driver message can carry a bound list element or caller attribute value ("Conversion failed when converting the nvarchar value '...'"), so
             // the exception object (message, inner exceptions) is not logged when a client list is bound; its type and number are.
             var driver = error as DbException;
             _logger?.LogWarning("WebSQL provider error on data source {DataSource} ({Dialect}); the caller receives a sanitized error. ErrorType={ErrorType} ErrorCode={ErrorCode} TraceId={TraceId}",
@@ -691,6 +700,12 @@ public sealed partial class GovernedSqlExecutor
         {
             // The first spelling wins when two names differ only by case (as before).
             string trimmed = name.TrimStart('@');
+            if (Autheris.Application.Identity.Attributes.CallerAttributeParameterName.IsReserved(trimmed))
+            {
+                // REQ-GOV-129 (BC-129-16, ST-129-14): a client parameter never uses the reserved name of a caller attribute slot (any case).
+                throw new ArgumentException("A client parameter must not use a reserved gateway parameter name.");
+            }
+
             if (!seen.Add(trimmed))
             {
                 continue;
@@ -786,6 +801,24 @@ public sealed partial class GovernedSqlExecutor
                 fields["list_params_empty"] = empty.ToArray();
             }
         }
+    }
+
+    /// <summary>
+    /// REQ-GOV-129 (A-11, BC-129-15): the caller attributes of the statement per table as registry id, outcome and reason code, and the number of caller
+    /// attribute binds. Absent when no attribute took part; never a name of unregistered input, a subject key or a value.
+    /// </summary>
+    private static void AddCallerAttributeAuditFields(Dictionary<string, object?> fields, GovernedRewrite rewrite, CompiledSql compiled)
+    {
+        if (rewrite.CallerAttributes is not { Count: > 0 } attributes)
+        {
+            return;
+        }
+
+        fields["caller_attributes"] = attributes.ToDictionary(
+            p => p.Key,
+            p => p.Value.Select(a => new Dictionary<string, object?> { ["id"] = a.Id, ["outcome"] = a.Outcome, ["reason"] = a.Reason }).ToList(),
+            StringComparer.OrdinalIgnoreCase);
+        fields["caller_attribute_binds"] = compiled.Parameters.Count(p => p.Origin == ParameterOrigin.Policy && p.SourceName != null && Autheris.Application.Identity.Attributes.CallerAttributeParameterName.IsReserved(p.SourceName));
     }
 
     /// <summary>X1.2 / SEC-ADG-23: compiler version, dialect, bind count and the digest; the compiled text only with Audit:StoreCompiledSql.</summary>

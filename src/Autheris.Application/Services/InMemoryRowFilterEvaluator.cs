@@ -3,6 +3,7 @@ namespace Autheris.Application.Services;
 using System;
 using System.Collections.Generic;
 using Autheris.Application.Policy;
+using Autheris.Application.Streaming.Services;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -71,6 +72,27 @@ public static class InMemoryRowFilterEvaluator
         return policy is PolicyPredicateRowPolicy typed
             ? PolicyPredicateRowEvaluator.Filter(rows, typed.Predicate, metadata)
             : [];
+    }
+
+    /// <summary>
+    /// One row against the row filters of <paramref name="decision"/> (change detection, relation resolution): typed first (REQ-GOV-129 A-8: a
+    /// typed policy carries bound caller attributes, its text projection only markers a text evaluator cannot read), text only for a decision
+    /// without a typed policy. A typed policy that this evaluator cannot evaluate, or whose text drifted, denies the row.
+    /// </summary>
+    public static bool RowPassesDecision(IReadOnlyDictionary<string, object?> row, TableAccessDecision decision, TableMetadata metadata)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        ArgumentNullException.ThrowIfNull(decision);
+        ArgumentNullException.ThrowIfNull(metadata);
+
+        if (decision.RowPolicy is { } policy)
+        {
+            return string.Equals(decision.CombinedRowFilterSql, policy.Project().Sql, StringComparison.Ordinal) &&
+                   FilterRows([row], policy, metadata).Count == 1;
+        }
+
+        return (string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql) || StreamingRowFilterAstEvaluator.Matches(row, decision.CombinedRowFilterSql)) &&
+               (string.IsNullOrWhiteSpace(decision.MandatoryRowPredicateSql) || StreamingRowFilterAstEvaluator.Matches(row, decision.MandatoryRowPredicateSql));
     }
 
     /// <summary>Text entry point for the listed text consumers and legacy string-only decisions; see <see cref="LegacyTextRowFilterEvaluator"/>.</summary>

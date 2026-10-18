@@ -85,6 +85,22 @@ public static class GatewayDiagnostics
     public static readonly Histogram<double> RowFilterKeyQueryDuration =
         Meter.CreateHistogram<double>("autheris.rowfilter.keyset.key_query.duration", "ms", description: "Duration of a row-filter key query");
 
+    // Caller attributes (REQ-GOV-129 A-11): tags are limited to the provider kind and the outcome, never an attribute name, subject or value.
+    public static readonly Counter<long> CallerAttributeResolutions =
+        Meter.CreateCounter<long>("autheris.callerattr.resolutions", description: "Caller attribute resolutions, by provider kind and outcome");
+
+    public static readonly Counter<long> CallerAttributeCacheHits =
+        Meter.CreateCounter<long>("autheris.callerattr.cache.hits", description: "Caller attribute value cache hits");
+
+    public static readonly Counter<long> CallerAttributeCacheMisses =
+        Meter.CreateCounter<long>("autheris.callerattr.cache.misses", description: "Caller attribute value cache misses");
+
+    public static readonly Histogram<double> CallerAttributeProviderDuration =
+        Meter.CreateHistogram<double>("autheris.callerattr.provider.duration", "ms", description: "Duration of a caller attribute provider call");
+
+    public static readonly Counter<long> CallerAttributeCircuitOpen =
+        Meter.CreateCounter<long>("autheris.callerattr.circuit.open", description: "Caller attribute provider calls refused by an open circuit");
+
     // Versioned PII allow-list per span type (Frozen for zero-allocation thread-safe lookups)
     private static readonly FrozenDictionary<string, FrozenSet<string>> SpanTagAllowList = new Dictionary<string, FrozenSet<string>>
     {

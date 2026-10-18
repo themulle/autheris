@@ -17,6 +17,8 @@ public class IndividualGrantPolicyArchitectureTests
     /// <summary>Files that write grants without calling the policy, each with the reason it is safe.</summary>
     private static readonly Dictionary<string, string> Allowlist = new(StringComparer.OrdinalIgnoreCase)
     {
+        ["Autheris.Application/Identity/Attributes/AttributeValidatingConsentRepository.cs"] =
+            "Decorator of IConsentRepository (REQ-GOV-129): validates caller attribute row filters and forwards unchanged; it neither creates nor extends a validity window.",
         ["Autheris.Extensions/OpenMetadata/OpenMetadataSyncService.cs"] =
             "System reconcile of consents derived from OpenMetadata rules; short validity refreshed on each run and covered by the read-time clamp.",
         ["Autheris.Extensions/Itsm/ItsmWebhookHandler.cs"] =

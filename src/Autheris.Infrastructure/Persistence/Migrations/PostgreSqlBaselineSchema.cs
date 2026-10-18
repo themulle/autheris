@@ -369,6 +369,51 @@ internal static class PostgreSqlBaselineSchema
 
             INSERT INTO VIRTUAL_FILTER_GENERATION (id, generation) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
 
+            -- Issue #129: caller attribute registry (four-eyes, draft beside the active row), service sets and one generation counter
+            CREATE TABLE IF NOT EXISTS CALLER_ATTRIBUTES (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                definition_json TEXT NOT NULL,
+                definition_hash TEXT NOT NULL,
+                status INTEGER NOT NULL,
+                created_by TEXT NOT NULL,
+                approved_by TEXT,
+                approved_at TEXT,
+                draft_definition_json TEXT,
+                draft_definition_hash TEXT,
+                draft_created_by TEXT,
+                pending_deletion INTEGER NOT NULL DEFAULT 0,
+                deletion_requested_by TEXT,
+                updated_by TEXT,
+                updated_at TEXT NOT NULL,
+                UNIQUE (tenant_id, name)
+            );
+
+            CREATE TABLE IF NOT EXISTS CALLER_ATTRIBUTE_SERVICE_SETS (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                application_id TEXT NOT NULL,
+                attribute_name TEXT NOT NULL,
+                values_json TEXT NOT NULL,
+                values_hash TEXT NOT NULL,
+                status INTEGER NOT NULL,
+                created_by TEXT NOT NULL,
+                approved_by TEXT,
+                approved_at TEXT,
+                draft_values_json TEXT,
+                draft_created_by TEXT,
+                updated_at TEXT NOT NULL,
+                UNIQUE (tenant_id, application_id, attribute_name)
+            );
+
+            CREATE TABLE IF NOT EXISTS CALLER_ATTRIBUTE_GENERATION (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                generation BIGINT NOT NULL
+            );
+
+            INSERT INTO CALLER_ATTRIBUTE_GENERATION (id, generation) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
+
             -- CR-ADG-31: tenant registry (grouped by NFKC + upper-case key; collided = 1 denies every spelling of the group)
             CREATE TABLE IF NOT EXISTS TENANT_REGISTRY (
                 normalized_key TEXT PRIMARY KEY,

@@ -1,0 +1,108 @@
+namespace Autheris.Application.Identity.Attributes;
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Autheris.Application.Governance.Paging;
+using Autheris.Application.Interfaces;
+using Autheris.Domain.Common;
+using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using Microsoft.Extensions.Options;
+
+/// <summary>
+/// The one write seam for consents (PLAN-GOV-129 A-9): GraphQL, REST admin, OpenMetadata sync and declarative apply all call
+/// <see cref="CreateConsentAsync"/> or <see cref="ReplaceConsentsAsync"/> on <see cref="IConsentRepository"/>; this decorator checks the
+/// registry rules before the inner repository stores anything. Everything else is forwarded unchanged.
+/// </summary>
+public sealed class AttributeValidatingConsentRepository : IConsentRepository
+{
+    private readonly IConsentRepository _inner;
+    private readonly ICallerAttributeRegistry _registry;
+    private readonly ITableMetadataRepository _tables;
+    private readonly CallerAttributeOptions _options;
+
+    public AttributeValidatingConsentRepository(
+        IConsentRepository inner, ICallerAttributeRegistry registry, ITableMetadataRepository tables, IOptions<GatewayOptions> options)
+    {
+        _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
+        _tables = tables ?? throw new ArgumentNullException(nameof(tables));
+        _options = options?.Value?.CallerAttributes ?? new CallerAttributeOptions();
+    }
+
+    public async Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default)
+    {
+        await ValidateAsync(consent, ct).ConfigureAwait(false);
+        return await _inner.CreateConsentAsync(consent, ct).ConfigureAwait(false);
+    }
+
+    public async Task ReplaceConsentsAsync(
+        IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason,
+        IReadOnlyList<AuditLogEntry>? auditEntries = null, CancellationToken ct = default)
+    {
+        foreach (var consent in create)
+        {
+            await ValidateAsync(consent, ct).ConfigureAwait(false);
+        }
+
+        await _inner.ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, auditEntries, ct).ConfigureAwait(false);
+    }
+
+    private async Task ValidateAsync(Consent consent, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(consent);
+        ConsentRowFilterAttributeValidator.ValidateShape(consent.RowFilters);
+        bool hasAttribute = consent.RowFilters.Any(f => string.Equals(f.ValueSource, ConsentRowFilterAttributeValidator.UserAttributeSource, StringComparison.OrdinalIgnoreCase));
+        var snapshot = _options.Enabled || hasAttribute ? await _registry.GetAsync(ct).ConfigureAwait(false) : CallerAttributeSnapshot.Empty;
+        if (_options.Enabled && ConsentRowFilterAttributeValidator.IsAttributeSource(consent, snapshot, _options))
+        {
+            throw new InvalidOperationException("A consent on a caller attribute source table is refused: the table is read with the gateway service identity.");
+        }
+
+        if (hasAttribute)
+        {
+            var metadata = await _tables.GetTableMetadataAsync(consent.TableIdentifier, ct).ConfigureAwait(false);
+            ConsentRowFilterAttributeValidator.ValidateAgainstRegistry(consent, snapshot, _options, metadata);
+        }
+    }
+
+    public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default) =>
+        _inner.GetActiveConsentsForSubjectsAsync(subjects, table, atTime, tenantId: null, ct);
+
+    public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default) =>
+        _inner.GetActiveConsentsForSubjectsAsync(subjects, table, atTime, tenantId, ct);
+
+    public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles = null, DateTimeOffset? atTime = null, CancellationToken ct = default) =>
+        _inner.GetAllActiveConsentsForSubjectsAsync(subjects, roles, atTime, tenantId: null, ct);
+
+    public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default) =>
+        _inner.GetAllActiveConsentsForSubjectsAsync(subjects, roles, atTime, tenantId, ct);
+
+    public Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default) => _inner.GetConsentByIdAsync(consentId, ct);
+
+    public Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, CancellationToken ct = default) =>
+        _inner.RevokeConsentAsync(consentId, revokedBySid, reason, ct);
+
+    public Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, CancellationToken ct = default) =>
+        _inner.GetExpiringConsentsAsync(threshold, ct);
+
+    public Task ExtendConsentExpiryAsync(Guid consentId, DateTimeOffset newValidTo, CancellationToken ct = default) =>
+        _inner.ExtendConsentExpiryAsync(consentId, newValidTo, ct);
+
+    public Task<IReadOnlyList<Consent>> GetActiveConsentsByConsentRequestIdAsync(Guid consentRequestId, DateTimeOffset atTime, CancellationToken ct = default) =>
+        _inner.GetActiveConsentsByConsentRequestIdAsync(consentRequestId, atTime, ct);
+
+    public Task<bool> RevokeSystemConsentAsync(Guid consentId, Guid consentRequestId, Sid revokedBySid, string reason, CancellationToken ct = default) =>
+        _inner.RevokeSystemConsentAsync(consentId, consentRequestId, revokedBySid, reason, ct);
+
+    public Task<IReadOnlyList<TableIdentifier>> GetTablesWithConsentsForTenantAsync(TenantId tenantId, CancellationToken ct = default) =>
+        _inner.GetTablesWithConsentsForTenantAsync(tenantId, ct);
+
+    public Task<IReadOnlyList<Consent>> GetActiveRoleConsentsAsync(TableIdentifier table, string roleName, TenantId? tenantId, DateTimeOffset atTime, CancellationToken ct = default) =>
+        _inner.GetActiveRoleConsentsAsync(table, roleName, tenantId, atTime, ct);
+
+    public Task<ConsentPage> GetConsentPageAsync(ConsentPageQuery query, CancellationToken ct = default) => _inner.GetConsentPageAsync(query, ct);
+}

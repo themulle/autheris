@@ -346,7 +346,7 @@ public static class GatewayMcpServer
         var httpContext = services.GetRequiredService<IHttpContextAccessor>().HttpContext
             ?? throw new McpProtocolException("No HTTP request context.", McpErrorCode.InternalError);
         var options = services.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value;
-        var caller = McpEndpoints.ResolveCaller(httpContext, options.IsMcpAuthBypassed);
+        var caller = McpEndpoints.ResolveCaller(httpContext, options.IsMcpAuthBypassed, options.CallerAttributes);
         var now = DateTimeOffset.UtcNow;
         return new McpSessionContext(
             "http-" + httpContext.TraceIdentifier,
