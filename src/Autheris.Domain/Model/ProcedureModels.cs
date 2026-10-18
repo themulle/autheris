@@ -91,6 +91,7 @@ public sealed record ProcedureDefinition(
     ProcedureKind Kind = ProcedureKind.Procedure)
 {
     public IReadOnlyList<string> DeclaredOutputs { get; init; } = DeclaredOutputs ?? [];
+    public string? Description { get; init; }
 
     /// <summary>
     /// Optional (composite) key that identifies a row of <see cref="ResultTable"/> in the result set. When set, a consent

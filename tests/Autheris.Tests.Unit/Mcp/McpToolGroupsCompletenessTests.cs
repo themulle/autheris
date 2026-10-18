@@ -92,6 +92,7 @@ public sealed partial class McpToolGroupsCompletenessTests
     [InlineData("query_sql", McpToolGroup.Query)]
     [InlineData("query_graphql", McpToolGroup.Query)]
     [InlineData("sample_rows", McpToolGroup.Query)]
+    [InlineData("call_procedure", McpToolGroup.Query)]
     [InlineData("query_metrics", McpToolGroup.Query)]
     [InlineData("simulate_query", McpToolGroup.Query)]
     [InlineData("query_customers", McpToolGroup.Query)]

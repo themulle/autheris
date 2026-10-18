@@ -67,4 +67,6 @@ public sealed record CatalogSearchHit(
     IReadOnlyList<string> MatchedTerms,
     IReadOnlyList<string> RelevantColumns,
     IReadOnlyList<TableRelationship> RelatedJoinPaths,
-    string? SuggestedGraphQlField);
+    string? SuggestedGraphQlField,
+    string Kind = "table",
+    string? DatasetId = null);

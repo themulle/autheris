@@ -53,6 +53,8 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
     private readonly Autheris.Domain.Interfaces.IConsentResolutionService consentResolution;
     private readonly ILogger<McpDatasetCatalog>? logger;
     private readonly ICatalogVisibilityService? visibility;
+    private readonly Autheris.Application.Procedures.Interfaces.IProcedureRegistry? _procedureRegistry;
+    private readonly Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? _procedureExecutionService;
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     public McpDatasetCatalog(
@@ -71,7 +73,9 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         Autheris.Application.Governance.Interfaces.ISchemaSunsettingService? sunsettingService = null,
         Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null,
         ILogger<McpDatasetCatalog>? logger = null,
-        ICatalogVisibilityService? visibilityService = null)
+        ICatalogVisibilityService? visibilityService = null,
+        Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
+        Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -90,6 +94,8 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         this.consentResolution = consentResolution ?? new ConsentResolutionService();
         this.logger = logger;
         this.visibility = visibilityService;
+        this._procedureRegistry = procedureRegistry;
+        this._procedureExecutionService = procedureExecutionService;
     }
 
     public McpDatasetCatalog(
@@ -107,7 +113,9 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         Autheris.Application.Governance.Interfaces.ISchemaSunsettingService? sunsettingService = null,
         Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null,
         ILogger<McpDatasetCatalog>? logger = null,
-        ICatalogVisibilityService? visibilityService = null)
+        ICatalogVisibilityService? visibilityService = null,
+        Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
+        Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -125,6 +133,8 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         this.consentResolution = consentResolution ?? new ConsentResolutionService();
         this.logger = logger;
         this.visibility = visibilityService;
+        this._procedureRegistry = procedureRegistry;
+        this._procedureExecutionService = procedureExecutionService;
     }
 
     public Task<McpDatasetList> ListDatasetsAsync(
@@ -159,23 +169,18 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             .Where(t => Shape(isAdminView, t) != CatalogOutputShape.NotFound)
             .ToList();
 
-        var matches = visible
-            .Where(t => string.IsNullOrWhiteSpace(domain) || string.Equals(t.Identifier.Domain, domain.Trim(), StringComparison.OrdinalIgnoreCase))
-            .Where(t => string.IsNullOrWhiteSpace(search) || Matches(t, search.Trim()))
-            .Where(t => string.IsNullOrWhiteSpace(tag) || t.CatalogTags.Any(tg => string.Equals(tg, tag.Trim(), StringComparison.OrdinalIgnoreCase)))
-            .OrderBy(t => DatasetId(t.Identifier), StringComparer.Ordinal)
-            .ToList();
-
-        var effectiveOffset = Math.Max(0, offset ?? 0);
-        var effectiveLimit = Math.Clamp(limit ?? 50, 1, MaxListedDatasets);
-
-        var pagedMatches = matches.Skip(effectiveOffset).Take(effectiveLimit).ToList();
-        var datasets = new List<McpDatasetSummary>(pagedMatches.Count);
-
         var (activeConsents, pendingRequests, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
 
-        foreach (var t in pagedMatches)
+        var tableSummaries = new List<McpDatasetSummary>();
+        foreach (var t in visible)
         {
+            if (!string.IsNullOrWhiteSpace(domain) && !string.Equals(t.Identifier.Domain, domain.Trim(), StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (!string.IsNullOrWhiteSpace(search) && !Matches(t, search.Trim()))
+                continue;
+            if (!string.IsNullOrWhiteSpace(tag) && !t.CatalogTags.Any(tg => string.Equals(tg, tag.Trim(), StringComparison.OrdinalIgnoreCase)))
+                continue;
+
             var summaryOnly = Shape(isAdminView, t) == CatalogOutputShape.Summary;
             var graphQl = graphQlMap == null || summaryOnly ? null : await graphQlMap.GetTableAsync(t.Identifier, ct).ConfigureAwait(false);
             var status = options?.Value.IsMcpAuthBypassed == true
@@ -183,7 +188,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
                 : CatalogVisibility.ComputeAccessStatus(t.Identifier, activeConsents, pendingRequests, isAdmin);
 
             // 4b.1: Only short description in summary; long description only in describe_dataset
-            datasets.Add(new McpDatasetSummary(
+            tableSummaries.Add(new McpDatasetSummary(
                 DatasetId(t.Identifier),
                 McpCatalogText.DisplayName(t.Table.DisplayName, t.Identifier.TableName),
                 t.Table.Description,
@@ -191,15 +196,83 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
                 summaryOnly ? 0 : t.Columns.Count,
                 graphQl?.QueryField,
                 Tags: t.CatalogTags,
-                AccessStatus: status));
+                AccessStatus: status,
+                Kind: "table"));
         }
 
-        var total = matches.Count;
-        var hasMore = effectiveOffset + datasets.Count < total;
-        int? nextOffset = hasMore ? effectiveOffset + datasets.Count : null;
+        var procedureSummaries = new List<McpDatasetSummary>();
+        if (_procedureRegistry != null && _procedureExecutionService != null)
+        {
+            var tenantId = principal.GetTenantId();
+            foreach (var proc in _procedureRegistry.GetAll())
+            {
+                if (proc.State == ProcedureState.Active &&
+                    proc.Definition.Mode == ProcedureMode.Read &&
+                    !string.IsNullOrWhiteSpace(proc.Definition.ResultTable))
+                {
+                    if (await _procedureExecutionService.IsVisibleAsync(proc, principal, tenantId, ct).ConfigureAwait(false))
+                    {
+                        var def = proc.Definition;
+                        var procId = $"procedure:{def.Name}";
+
+                        if (!string.IsNullOrWhiteSpace(domain) && !string.Equals(def.CatalogDomain, domain.Trim(), StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        if (!string.IsNullOrWhiteSpace(tag))
+                            continue;
+                        if (!string.IsNullOrWhiteSpace(search))
+                        {
+                            var s = search.Trim();
+                            bool matches = procId.Contains(s, StringComparison.OrdinalIgnoreCase) ||
+                                           def.Name.Contains(s, StringComparison.OrdinalIgnoreCase) ||
+                                           def.Summary.Contains(s, StringComparison.OrdinalIgnoreCase) ||
+                                           (def.Description?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                                           def.Parameters.Any(p => p.Name.Contains(s, StringComparison.OrdinalIgnoreCase));
+                            if (!matches)
+                                continue;
+                        }
+
+                        int columnCount = 0;
+                        string sensitivity = "NORMAL";
+                        if (def.ResultTableIdentifier is { } resId)
+                        {
+                            var resMeta = await _metadataRepository.GetTableMetadataAsync(resId, ct).ConfigureAwait(false);
+                            if (resMeta != null)
+                            {
+                                sensitivity = resMeta.Table.Sensitivity ?? "NORMAL";
+                                var levels = ResolveColumnLevels(principal, resMeta, activeConsents, isAdmin, isGranted: true, bypass: options?.Value.IsMcpAuthBypassed == true);
+                                columnCount = resMeta.Columns.Count(c => !levels.TryGetValue(c.ColumnName, out var lvl) || lvl != ColumnAccessLevel.Deny);
+                            }
+                        }
+
+                        procedureSummaries.Add(new McpDatasetSummary(
+                            Id: procId,
+                            DisplayName: McpCatalogText.DisplayName(def.Summary, def.Name),
+                            Description: def.Description ?? def.Summary,
+                            Sensitivity: sensitivity,
+                            ColumnCount: columnCount,
+                            GraphQlField: null,
+                            Tags: null,
+                            AccessStatus: "GRANTED",
+                            Kind: "procedure"));
+                    }
+                }
+            }
+        }
+
+        var allMatches = tableSummaries.Concat(procedureSummaries)
+            .OrderBy(s => s.Id, StringComparer.Ordinal)
+            .ToList();
+
+        var effectiveOffset = Math.Max(0, offset ?? 0);
+        var effectiveLimit = Math.Clamp(limit ?? 50, 1, MaxListedDatasets);
+
+        var pagedSummaries = allMatches.Skip(effectiveOffset).Take(effectiveLimit).ToList();
+        var total = allMatches.Count;
+        var hasMore = effectiveOffset + pagedSummaries.Count < total;
+        int? nextOffset = hasMore ? effectiveOffset + pagedSummaries.Count : null;
 
         return new McpDatasetList(
-            datasets,
+            pagedSummaries,
             total,
             hasMore,
             Guidance,
@@ -211,6 +284,12 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
 
     public async Task<McpDatasetDescription> DescribeDatasetAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(dataset);
+        if (dataset.TrimStart().StartsWith("procedure:", StringComparison.OrdinalIgnoreCase))
+        {
+            return await DescribeProcedureDatasetAsync(principal, dataset.Trim(), ct).ConfigureAwait(false);
+        }
+
         var (table, shape) = await FindVisibleAsync(principal, dataset, ct).ConfigureAwait(false);
         var id = table.Identifier;
 
@@ -374,6 +453,108 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             AccessStatus: accessStatus,
             Indexes: null,
             View: SummaryView);
+    }
+
+    private async Task<McpDatasetDescription> DescribeProcedureDatasetAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct)
+    {
+        var procName = dataset["procedure:".Length..].Trim();
+        if (string.IsNullOrWhiteSpace(procName) || _procedureRegistry == null || _procedureExecutionService == null)
+        {
+            throw new TableNotFoundException(new TableIdentifier("procedure", "dbo", procName ?? string.Empty));
+        }
+
+        if (!_procedureRegistry.TryGet(procName, out var registered) || registered == null)
+        {
+            throw new TableNotFoundException(new TableIdentifier("procedure", "dbo", procName));
+        }
+
+        // Fail-closed checks (OQ-35 / Decision D-153-1)
+        if (registered.State != ProcedureState.Active ||
+            registered.Definition.Mode != ProcedureMode.Read ||
+            string.IsNullOrWhiteSpace(registered.Definition.ResultTable))
+        {
+            throw new TableNotFoundException(new TableIdentifier("procedure", "dbo", procName));
+        }
+
+        var tenantId = principal.GetTenantId();
+        var isVisible = await _procedureExecutionService.IsVisibleAsync(registered, principal, tenantId, ct).ConfigureAwait(false);
+        if (!isVisible)
+        {
+            throw new TableNotFoundException(new TableIdentifier("procedure", "dbo", procName));
+        }
+
+        var def = registered.Definition;
+        var resId = def.ResultTableIdentifier;
+        if (resId == null)
+        {
+            throw new TableNotFoundException(new TableIdentifier("procedure", "dbo", procName));
+        }
+
+        var resMeta = await _metadataRepository.GetTableMetadataAsync(resId.Value, ct).ConfigureAwait(false);
+        if (resMeta == null)
+        {
+            throw new TableNotFoundException(new TableIdentifier("procedure", "dbo", procName));
+        }
+
+        var (activeConsents, pendingRequests, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
+        var accessStatus = options?.Value.IsMcpAuthBypassed == true
+            ? "GRANTED"
+            : CatalogVisibility.ComputeAccessStatus(resId.Value, activeConsents, pendingRequests, isAdmin);
+
+        var levels = ResolveColumnLevels(principal, resMeta, activeConsents, isAdmin, isGranted: options?.Value.IsMcpAuthBypassed != true && string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase), bypass: options?.Value.IsMcpAuthBypassed == true);
+
+        // Project columns: Denied columns completely omitted; Masked -> "mask"; Clear -> "clear"
+        var projectedColumns = new List<McpDatasetColumn>();
+        foreach (var col in resMeta.Columns)
+        {
+            var level = levels.TryGetValue(col.ColumnName, out var lvl) ? lvl : ColumnAccessLevel.Deny;
+            if (level == ColumnAccessLevel.Deny)
+            {
+                continue; // completely omitted!
+            }
+
+            var access = level == ColumnAccessLevel.Mask ? "mask" : "clear";
+            projectedColumns.Add(new McpDatasetColumn(
+                Name: col.ColumnName,
+                Type: col.DataType,
+                Description: col.Description,
+                Sensitive: col.IsSensitive,
+                PrimaryKey: false,
+                Access: access));
+        }
+
+        // Project parameters
+        var parameters = def.Parameters
+            .Select(p => new McpProcedureParameterInfo(
+                Name: p.Name,
+                SqlType: p.SqlType,
+                ClrType: p.ClrType.Name,
+                IsRequired: p.IsRequired,
+                Description: p.Description))
+            .ToList();
+
+        return new McpDatasetDescription(
+            Id: $"procedure:{def.Name}",
+            DisplayName: McpCatalogText.DisplayName(def.Summary, def.Name),
+            Domain: def.CatalogDomain,
+            Schema: "procedure",
+            Table: def.Name,
+            Description: def.Summary,
+            LongDescription: def.Description,
+            Sensitivity: resMeta.Table.Sensitivity ?? "NORMAL",
+            RequiresApproval: resMeta.Table.RequiresFourEyes,
+            Columns: projectedColumns,
+            Examples: [],
+            GraphQl: null,
+            OtherAccess: null,
+            Tags: null,
+            DataOwner: null,
+            DataOwnerDelegates: null,
+            AccessStatus: "GRANTED",
+            Indexes: null,
+            View: null,
+            Kind: "procedure",
+            Parameters: parameters);
     }
 
     /// <summary>Value of <see cref="McpDatasetDescription.View"/> for the allow-listed summary.</summary>

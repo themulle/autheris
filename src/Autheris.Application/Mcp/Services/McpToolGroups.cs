@@ -48,6 +48,7 @@ public static class McpToolGroups
 
         Add(McpToolGroup.Query,
             McpDatasetTools.QueryDataset, McpDatasetTools.QuerySql, McpDatasetTools.QueryGraphQl, McpDatasetTools.SampleRows,
+            McpDatasetTools.CallProcedure,
             McpSemanticTools.QueryMetrics, "simulate_query", "query_customers", "query_invoices");
 
         Add(McpToolGroup.Api, McpDatasetTools.InvokeApi, McpDatasetTools.DescribeApi);
