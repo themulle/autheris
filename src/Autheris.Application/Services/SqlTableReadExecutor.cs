@@ -296,7 +296,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
     /// Equality arguments (GraphQL, MCP) and the pushed-down filter of <see cref="TableQueryItems.Filter"/> as one neutral
     /// clause. Values are client parameters; the planner authorizes every referenced column.
     /// </summary>
-    private static TableFilterClause? BuildFilter(DataSourceExecutionContext context)
+    internal static TableFilterClause? BuildFilter(DataSourceExecutionContext context)
     {
         var clauses = new List<TableFilterClause>();
         var index = 0;
@@ -357,7 +357,8 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
             parameters,
             clauses.SelectMany(c => c.ReferencedColumns).Distinct(StringComparer.OrdinalIgnoreCase).ToList())
         {
-            TrinoSqlFactory = resolve => string.Join(" AND ", clauses.Select(c => "(" + c.GetTrinoPredicate(resolve) + ")"))
+            TrinoSqlFactory = resolve => string.Join(" AND ", clauses.Select(c => "(" + c.GetTrinoPredicate(resolve) + ")")),
+            PushdownPredicates = clauses.SelectMany(c => c.PushdownPredicates ?? Array.Empty<PushdownPredicateInfo>()).ToList()
         };
     }
 

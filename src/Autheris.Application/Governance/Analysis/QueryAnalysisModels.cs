@@ -174,12 +174,29 @@ public sealed record QueryAccessRequirementsReport(
 }
 
 /// <summary>
+/// Issue #122: Query federation and predicate pushdown analysis.
+/// </summary>
+public sealed record QueryFederationAnalysis(
+    IReadOnlyList<AnalyzedFederatedTable> Tables);
+
+public sealed record AnalyzedFederatedTable(
+    string Table,
+    string DataSource,
+    bool PushdownApplied,
+    IReadOnlyList<AnalyzedPushedPredicate> PushedPredicates,
+    IReadOnlyList<AnalyzedResidualPredicate> ResidualPredicates);
+
+public sealed record AnalyzedPushedPredicate(string Column, string Operator);
+public sealed record AnalyzedResidualPredicate(string Column, string Reason);
+
+/// <summary>
 /// Issue #79: Combined result of zero-read static query analysis.
 /// </summary>
 public sealed record QueryAnalysisResult(
     QueryValidationReport ValidationReport,
     QueryAccessRequirementsReport AccessRequirements,
-    int SourceDatabaseReadsExecuted = 0);
+    int SourceDatabaseReadsExecuted = 0,
+    QueryFederationAnalysis? Federation = null);
 
 /// <summary>
 /// Issue #79: Request to submit a bundled multi-table consent request derived from an access requirements report.

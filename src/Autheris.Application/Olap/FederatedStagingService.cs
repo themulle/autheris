@@ -265,7 +265,11 @@ public sealed class FederatedStagingService : IFederatedStagingService
                     ["rowCount"] = rows.Count,
                     ["rlsPushedDown"] = readResult.RlsPushdownExecuted,
                     ["inDbMaskingExecuted"] = readResult.InDbMaskingExecuted,
-                    ["filterPushedDown"] = req.PushdownFilter != null
+                    ["filterPushedDown"] = req.PushdownFilter != null,
+                    ["pushedPredicateCount"] = req.PushdownFilter?.PushdownPredicates?.Count ?? (req.PushdownFilter != null ? 1 : 0),
+                    ["pushedPredicates"] = req.PushdownFilter?.PushdownPredicates != null
+                        ? req.PushdownFilter.PushdownPredicates.Select(p => new Dictionary<string, string> { ["column"] = p.Column, ["operator"] = p.Operator }).ToList()
+                        : (object)Array.Empty<Dictionary<string, string>>()
                 };
                 if (vfPlan != null)
                 {

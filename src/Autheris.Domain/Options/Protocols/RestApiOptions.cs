@@ -130,6 +130,15 @@ public sealed class CrossSourceOptions
 
     /// <summary>Configured <see cref="AllowedHttpAuthModes"/> or the default list.</summary>
     public IReadOnlyList<string> GetEffectiveAllowedHttpAuthModes() => AllowedHttpAuthModes ?? (IReadOnlyList<string>)DefaultAllowedHttpAuthModes;
+
+    /// <summary>Issue #122: Governed WebSQL filter pushdown to remote relational SQL data sources.</summary>
+    public PredicatePushdownOptions PredicatePushdown { get; init; } = new();
+}
+
+public sealed class PredicatePushdownOptions
+{
+    public bool Enabled { get; init; } = true;
+    public int MaxInListCount { get; init; } = 1000;
 }
 
 public sealed class SqlEndpointsOptions

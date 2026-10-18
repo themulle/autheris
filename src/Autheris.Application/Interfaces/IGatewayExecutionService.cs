@@ -60,6 +60,9 @@ public interface IGatewayExecutionService
 /// <summary>A column to order by (4a.3).</summary>
 public sealed record TableOrderBy(string Column, bool Descending = false);
 
+/// <summary>Issue #122: Structural pushdown predicate metadata for audit and query analysis (zero parameter values or literals).</summary>
+public sealed record PushdownPredicateInfo(string Column, string Operator);
+
 /// <summary>
 /// Befund 2.1: Parameterized SQL filter clause pushed down into the database query with Zero-Trust guardrails.
 /// </summary>
@@ -68,6 +71,9 @@ public sealed record TableFilterClause(
     IReadOnlyDictionary<string, object?> Parameters,
     IReadOnlyList<string> ReferencedColumns)
 {
+    /// <summary>Issue #122: Optional structural pushed predicate metadata (zero parameter values or literals).</summary>
+    public IReadOnlyList<PushdownPredicateInfo>? PushdownPredicates { get; init; }
+
     /// <summary>Optional dialect-specific predicate builder when AST is available.</summary>
     public Func<DatabaseDialect, string>? DialectSqlFactory { get; init; }
 

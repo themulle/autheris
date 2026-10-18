@@ -379,9 +379,15 @@ public sealed partial class QueryAnalysisService
         ref bool hasMandatoryVirtualFilters,
         ref bool isBlockedByMandatoryFilter,
         ref int hiddenMissingDatasetsCount,
-        ref int totalEstimatedCost)
+        ref int totalEstimatedCost,
+        List<AnalyzedFederatedTable>? federatedTables = null)
     {
         diagnostics.AddRange(source.Diagnostics);
+
+        if (federatedTables != null && source.FederatedTables.Count > 0)
+        {
+            federatedTables.AddRange(source.FederatedTables);
+        }
 
         foreach (var (field, cost) in source.RootFieldCosts)
         {
@@ -432,6 +438,7 @@ public sealed partial class QueryAnalysisService
         public List<DeprecatedFieldReference> DeprecatedFields { get; } = new();
         public List<RequestableConsentItem> MissingConsents { get; } = new();
         public Dictionary<string, int> RootFieldCosts { get; } = new(StringComparer.Ordinal);
+        public List<AnalyzedFederatedTable> FederatedTables { get; } = new();
         public bool HasRowFilters { get; set; }
         public bool HasMandatoryVirtualFilters { get; set; }
         public bool IsBlockedByMandatoryFilter { get; set; }

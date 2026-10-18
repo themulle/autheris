@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.Linq;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Olap;
+using Autheris.Application.Sql.Federation.Conjuncts;
+using Autheris.Application.Sql.Federation.Pushdown;
 using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -184,12 +186,29 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             }
         }
 
+        if (statement == null)
+        {
+            var (tree, _) = _sqlEngine.Parse(rawSql.AsMemory());
+            statement = new SqlAstBuilder().BuildStatement(tree);
+        }
+
         // 4. Staging names and minimal projections
         var targetToStaging = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var targetToAlias = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var identifierToStaging = new Dictionary<TableIdentifier, string>();
         var identifierToAlias = new Dictionary<TableIdentifier, string>();
         var tableNameCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        // Issue #122: AST Conjunct Splitting and Single-Table Classification
+        Dictionary<TableIdentifier, List<SingleTableConjunct>>? conjunctsByTable = null;
+        if (options.PredicatePushdown.Enabled)
+        {
+            var conjuncts = SqlConjunctSplitter.Split(statement);
+            var classification = SingleTableConjunctClassifier.Classify(conjuncts, tables);
+            conjunctsByTable = classification.SingleTableConjuncts
+                .GroupBy(c => c.Table)
+                .ToDictionary(g => g.Key, g => g.ToList());
+        }
 
         foreach (var t in tables)
         {
@@ -289,23 +308,45 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             VirtualFilterTablePlan? vfPlan = null;
             virtualFilterPlans?.TryGetValue(identifier, out vfPlan);
 
+            TableFilterClause? pushdownFilter = null;
+            if (options.PredicatePushdown.Enabled &&
+                conjunctsByTable != null &&
+                conjunctsByTable.TryGetValue(identifier, out var tableConjuncts))
+            {
+                var pushableConjuncts = new List<SingleTableConjunct>();
+                foreach (var conj in tableConjuncts)
+                {
+                    var evalResult = PushabilityEvaluator.Evaluate(
+                        conj,
+                        t.Metadata,
+                        dec,
+                        t.Metadata.Dialect,
+                        vfPlan,
+                        options.PredicatePushdown);
+
+                    if (evalResult.IsPushable)
+                    {
+                        pushableConjuncts.Add(conj);
+                    }
+                }
+
+                if (pushableConjuncts.Count > 0)
+                {
+                    pushdownFilter = PushedClauseBuilder.Build(pushableConjuncts, t.Metadata);
+                }
+            }
+
             stagingRequests.Add(new StagingTableRequest(
                 t.Target,
                 t.Metadata,
                 dec,
                 stagingName,
                 projected.ToList(),
-                PushdownFilter: null,
+                PushdownFilter: pushdownFilter,
                 VirtualFilterPlan: vfPlan));
         }
 
         // 5. AST rewrite to target s0, s1, etc. (the user query is not touched for Virtual Filters)
-        if (statement == null)
-        {
-            var (tree, _) = _sqlEngine.Parse(rawSql.AsMemory());
-            statement = new SqlAstBuilder().BuildStatement(tree);
-        }
-
         // REQ-SQL-130 (BC-130-4): the governed compiler does not run for the DuckDB statement, so the time zone calls are validated here, for a supplied and
         // a built statement alike (CTEs, subqueries and set operations are traversed), before the AST is rewritten. A masked or denied column is never a timestamp.
         var timeZoneProof = TimeZoneConversion.ValidateFederated(
