@@ -178,6 +178,14 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Sql.Policy.GovernancePolicyFactory>();
         services.AddSingleton<IRlsFilterGenerator, RlsFilterGenerator>();
         services.AddSingleton<IRowFilterSqlBuilder, RowFilterSqlBuilder>();
+        // REQ-GOV-143 (D-1/D-15): restricted scopes. Bound once (IOptions, not reloadable) and validated at startup.
+        services.AddOptions<Autheris.Domain.Options.RestrictedScopeOptions>()
+            .BindConfiguration(Autheris.Domain.Options.RestrictedScopeOptions.SectionName)
+            .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Autheris.Domain.Options.RestrictedScopeOptions>, Autheris.Application.Policy.RestrictedScopeOptionsValidator>();
+        services.AddSingleton<Autheris.Domain.Security.IRestrictedScopePolicy>(sp =>
+            Autheris.Domain.Security.RestrictedScopePolicy.FromOptions(
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.RestrictedScopeOptions>>().Value));
         services.AddSingleton<IConsentResolutionService, ConsentResolutionService>();
         services.AddSingleton<IIdentitySubjectResolver, IdentitySubjectResolver>();
         // WP-0 (PLAN-GOV-113): only a person decides consent requests. The resolvers resolve the guard with GetRequiredService (no fallback).
