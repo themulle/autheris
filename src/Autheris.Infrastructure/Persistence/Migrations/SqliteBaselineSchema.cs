@@ -601,6 +601,20 @@ internal sealed class SqliteBaselineSchema
                 updated_by TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            -- Issue #112: one validated semantic (dbt) manifest per tenant (latest version only); a save replaces the row atomically.
+            -- No foreign key (tenant registry rows are optional in single-tenant installs). content_hash is the SHA-256 hex of manifest_json.
+            CREATE TABLE IF NOT EXISTS SEMANTIC_MANIFESTS (
+                tenant_id TEXT NOT NULL PRIMARY KEY,
+                manifest_version TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                format_version INTEGER NOT NULL,
+                models_count INTEGER NOT NULL,
+                metrics_count INTEGER NOT NULL,
+                manifest_json TEXT NOT NULL,
+                imported_by TEXT NOT NULL,
+                imported_at TEXT NOT NULL
+            );
         ";
         cmd.ExecuteNonQuery();
 

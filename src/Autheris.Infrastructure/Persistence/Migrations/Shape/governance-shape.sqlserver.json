@@ -1715,6 +1715,60 @@
       "indexes": []
     },
     {
+      "name": "SEMANTIC_MANIFESTS",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "manifest_version",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "content_hash",
+          "type": "CHAR",
+          "family": "string"
+        },
+        {
+          "name": "format_version",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "models_count",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "metrics_count",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "manifest_json",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "imported_by",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "imported_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id"
+      ],
+      "indexes": []
+    },
+    {
       "name": "TABLE_CATALOG_SETTINGS",
       "columns": [
         {

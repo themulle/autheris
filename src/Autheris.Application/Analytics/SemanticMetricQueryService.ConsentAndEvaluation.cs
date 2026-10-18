@@ -320,7 +320,7 @@ public sealed partial class SemanticMetricQueryService
         };
     }
 
-    private static string CleanDbtFilterTemplate(string rawFilter)
+    internal static string CleanDbtFilterTemplate(string rawFilter)
     {
         var text = rawFilter.Trim();
         if (text.StartsWith("{{", StringComparison.Ordinal) && text.EndsWith("}}", StringComparison.Ordinal))
@@ -332,6 +332,9 @@ public sealed partial class SemanticMetricQueryService
             text,
             @"(?:Dimension|TimeDimension|Entity)\(\s*['""](?:[A-Za-z0-9_]+__)?([A-Za-z0-9_]+)['""]\s*\)",
             "$1");
+
+        // dbt wraps each reference ("{{ Dimension('x') }} = 'y'"): once the reference is a plain column the template braces are noise.
+        text = text.Replace("{{", string.Empty, StringComparison.Ordinal).Replace("}}", string.Empty, StringComparison.Ordinal).Trim();
 
         return text;
     }

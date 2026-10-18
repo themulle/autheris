@@ -9,6 +9,7 @@ using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Extensions;
 using Autheris.Application.Analytics;
 using Autheris.Application.Dbt.Interfaces;
+using Autheris.Application.Dbt.Services;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Audit;
@@ -250,16 +251,21 @@ public static class AnalyticsEndpoints
     internal static async Task<IResult> HandleListMetricsAsync(
         HttpContext httpContext,
         ISemanticCatalogService semanticCatalog,
+        SemanticTenancy semanticTenancy,
         string? dataset = null,
         CancellationToken ct = default)
     {
-        var metrics = await semanticCatalog.ListMetricsAsync(
-            string.IsNullOrWhiteSpace(dataset) ? null : dataset,
-            EndpointSecurity.GetRequestTenant(httpContext),
-            ct).ConfigureAwait(false);
+        // A1-3 / A1-6 (d): the caller's own partition and its own version only; no SID or no tenant standing sees an empty catalog.
+        var tenant = semanticTenancy.ResolveCallerTenant(httpContext.User) is null ? (TenantId?)null : EndpointSecurity.GetRequestTenant(httpContext);
+        IReadOnlyList<DbtMetric> metrics = tenant is { } t
+            ? await semanticCatalog.ListMetricsAsync(string.IsNullOrWhiteSpace(dataset) ? null : dataset, t, ct).ConfigureAwait(false)
+            : [];
+        var version = tenant is { } vt
+            ? await semanticCatalog.GetManifestVersionAsync(vt, ct).ConfigureAwait(false)
+            : "1.0";
         return Results.Ok(new
         {
-            manifestVersion = semanticCatalog.ManifestVersion,
+            manifestVersion = version,
             total = metrics.Count,
             metrics = SemanticMetricCatalogProjection.Project(metrics, httpContext.User)
         });

@@ -787,93 +787,20 @@ public static partial class TreeSqlCompiler
 
     // ---------------------------------------------------------------- filters
 
-    private static string BuildFilter(TreeFilter filter, TableMetadata metadata, CompileContext context, string target)
+    private static string BuildFilter(TreeFilter filter, TableMetadata metadata, CompileContext context, string target) =>
+        TreeFilterRenderer.Render(filter, new CompilerFilterTarget(metadata, context, target));
+
+    /// <summary>Dialect rendering of the shared filter shape: qualified quoted columns, <c>@gqN</c> parameters, backslash LIKE escape.</summary>
+    private sealed class CompilerFilterTarget(TableMetadata metadata, CompileContext context, string target) : ITreeFilterTarget
     {
-        switch (filter)
-        {
-            case TreeAndFilter and:
-                return and.Items.Count == 0
-                    ? "1 = 1"
-                    : "(" + string.Join(" AND ", and.Items.Select(i => BuildFilter(i, metadata, context, target))) + ")";
-            case TreeOrFilter or:
-                return or.Items.Count == 0
-                    ? "1 = 0"
-                    : "(" + string.Join(" OR ", or.Items.Select(i => BuildFilter(i, metadata, context, target))) + ")";
-            case TreeNotFilter not:
-                return "NOT (" + BuildFilter(not.Item, metadata, context, target) + ")";
-            case TreeComparison comparison:
-                return BuildComparison(comparison, metadata, context, target);
-            default:
-                throw new GatewayInvalidQueryException("Unsupported filter.");
-        }
+        public string Column(string column) => $"{target}.{Q(context, metadata.GetColumn(column)!.ColumnName)}";
+
+        public string AddParameter(object? value) => context.AddParameter(value);
+
+        public char LikeEscape => '\\';
+
+        public string LikeSpecials => "%_[";
+
+        public bool AlwaysEmitLikeEscape => true;
     }
-
-    private static string BuildComparison(TreeComparison comparison, TableMetadata metadata, CompileContext context, string target)
-    {
-        var column = $"{target}.{Q(context, metadata.GetColumn(comparison.Column)!.ColumnName)}";
-        var value = comparison.Value;
-
-        switch (comparison.Operator)
-        {
-            case TreeFilterOperator.IsNull:
-                return value is true ? $"{column} IS NULL" : $"{column} IS NOT NULL";
-            case TreeFilterOperator.Eq:
-                return value == null ? $"{column} IS NULL" : $"{column} = {context.AddParameter(value)}";
-            case TreeFilterOperator.Neq:
-                return value == null ? $"{column} IS NOT NULL" : $"{column} <> {context.AddParameter(value)}";
-            case TreeFilterOperator.Gt:
-                return $"{column} > {context.AddParameter(RequireValue(comparison))}";
-            case TreeFilterOperator.Gte:
-                return $"{column} >= {context.AddParameter(RequireValue(comparison))}";
-            case TreeFilterOperator.Lt:
-                return $"{column} < {context.AddParameter(RequireValue(comparison))}";
-            case TreeFilterOperator.Lte:
-                return $"{column} <= {context.AddParameter(RequireValue(comparison))}";
-            case TreeFilterOperator.In:
-            case TreeFilterOperator.NotIn:
-            {
-                var items = ToList(comparison);
-                if (items.Count == 0)
-                {
-                    return comparison.Operator == TreeFilterOperator.In ? "1 = 0" : "1 = 1";
-                }
-                var names = string.Join(", ", items.Select(context.AddParameter));
-                return comparison.Operator == TreeFilterOperator.In ? $"{column} IN ({names})" : $"{column} NOT IN ({names})";
-            }
-            case TreeFilterOperator.Contains:
-                return $"{column} LIKE {context.AddParameter("%" + EscapeLike(RequireText(comparison)) + "%")} ESCAPE '\\'";
-            case TreeFilterOperator.StartsWith:
-                return $"{column} LIKE {context.AddParameter(EscapeLike(RequireText(comparison)) + "%")} ESCAPE '\\'";
-            case TreeFilterOperator.EndsWith:
-                return $"{column} LIKE {context.AddParameter("%" + EscapeLike(RequireText(comparison)))} ESCAPE '\\'";
-            default:
-                throw new GatewayInvalidQueryException("Unsupported filter operator.");
-        }
-    }
-
-    private static object RequireValue(TreeComparison comparison) =>
-        comparison.Value ?? throw new GatewayInvalidQueryException($"The operator '{comparison.Operator}' on '{comparison.Column}' needs a value.");
-
-    private static string RequireText(TreeComparison comparison) =>
-        comparison.Value as string ?? throw new GatewayInvalidQueryException($"The operator '{comparison.Operator}' on '{comparison.Column}' needs a text value.");
-
-    private static List<object?> ToList(TreeComparison comparison)
-    {
-        if (comparison.Value is string || comparison.Value is not IEnumerable enumerable)
-        {
-            throw new GatewayInvalidQueryException($"The operator '{comparison.Operator}' on '{comparison.Column}' needs a list.");
-        }
-        var items = enumerable.Cast<object?>().Where(v => v != null).Distinct().ToList();
-        if (items.Count > MaxInListSize)
-        {
-            throw new GatewayInvalidQueryException($"A list filter may contain at most {MaxInListSize} values.");
-        }
-        return items;
-    }
-
-    private static string EscapeLike(string value) =>
-        value.Replace("\\", "\\\\", StringComparison.Ordinal)
-             .Replace("%", "\\%", StringComparison.Ordinal)
-             .Replace("_", "\\_", StringComparison.Ordinal)
-             .Replace("[", "\\[", StringComparison.Ordinal);
 }

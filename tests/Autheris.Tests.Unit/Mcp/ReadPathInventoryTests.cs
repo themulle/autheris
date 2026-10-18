@@ -12,7 +12,16 @@ public sealed class ReadPathInventoryTests
     public void Default_profile_golden_line()
     {
         ReadPathInventory.Describe(new GatewayOptions()).ShouldBe(
-            "Read paths: graphql=on rest_data=on odata=on arrow=on flight_sql=on duckdb_olap=on websql=off sql_endpoints=on lakehouse=off mcp=off(catalog=on,query=on,api=on,access=on,disabled_tools=0)");
+            "Read paths: graphql=on graphql_aggregate=on rest_data=on odata=on arrow=on flight_sql=on duckdb_olap=on websql=off sql_endpoints=on lakehouse=off mcp=off(catalog=on,query=on,api=on,access=on,disabled_tools=0)");
+    }
+
+    [Fact]
+    public void GraphqlAggregate_flag_follows_the_option_SEC_112_10()
+    {
+        var off = new GatewayOptions { GraphQL = new GraphQLOptions { Aggregation = new GraphQLAggregationOptions { Enabled = false } } };
+
+        ReadPathInventory.Describe(off).ShouldContain("graphql=on graphql_aggregate=off rest_data=");
+        ReadPathInventory.Describe(new GatewayOptions()).ShouldContain("graphql_aggregate=on");
     }
 
     [Fact]

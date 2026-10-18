@@ -18,7 +18,7 @@ public static class ReadPathInventory
         var disabledCount = mcp.DisabledTools?.Count ?? 0;
 
         return string.Create(CultureInfo.InvariantCulture,
-            $"Read paths: graphql=on rest_data={OnOff(options.RestApi?.DataEndpoint?.Enabled ?? true)} odata={OnOff(options.OData.Enabled)} " +
+            $"Read paths: graphql=on graphql_aggregate={OnOff(options.GraphQL?.Aggregation?.Enabled ?? true)} rest_data={OnOff(options.RestApi?.DataEndpoint?.Enabled ?? true)} odata={OnOff(options.OData.Enabled)} " +
             $"arrow={OnOff(options.Arrow.Enabled)} flight_sql={OnOff(options.Arrow.Enabled && options.Arrow.EnableFlightSql)} " +
             $"duckdb_olap={OnOff(options.DuckDbOlap.Enabled)} websql={OnOff(options.WebSql.Enabled)} " +
             $"sql_endpoints={OnOff(options.SqlEndpoints.Enabled)} lakehouse={OnOff(options.Lakehouse.Enabled)} " +

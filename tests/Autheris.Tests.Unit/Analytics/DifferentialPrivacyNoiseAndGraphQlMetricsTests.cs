@@ -18,6 +18,8 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Autheris.GraphQL.Types;
+using HotChocolate;
+using HotChocolate.Execution;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -318,12 +320,10 @@ public sealed class DifferentialPrivacyNoiseAndGraphQlMetricsTests
     }
 
     [Fact]
-    public async Task AnalyticsQueryExtensions_QueryMetricsAsync_ExecutesGovernedMetricQueryForAuthenticatedUser()
+    public async Task QueryMetrics_ExecutesGovernedMetricQueryForAuthenticatedUser_ThroughTheTypedField()
     {
         var principal = CreatePrincipal("S-1-5-21-GQL-ANALYST");
-        var httpContext = new DefaultHttpContext { User = principal };
-        var accessor = Substitute.For<IHttpContextAccessor>();
-        accessor.HttpContext.Returns(httpContext);
+        var host = new Autheris.Tests.Unit.GraphQL.TypedAggregateTestHost { User = principal };
 
         var expectedResult = new MetricQueryResult(
             Metrics: ["total_revenue"],
@@ -331,25 +331,31 @@ public sealed class DifferentialPrivacyNoiseAndGraphQlMetricsTests
             Groups: [new AggregationGroupRow(new Dictionary<string, object?> { ["region"] = "EU" }, 5, new Dictionary<string, object?> { ["total_revenue"] = 1000m })],
             Totals: new AggregationGroupRow(new Dictionary<string, object?>(), 5, new Dictionary<string, object?> { ["total_revenue"] = 1000m }),
             Metadata: new AggregationMetadata(2, SmallGroupStrategy.Suppress, false, 0, 0, false, false, NoiseApplied: true, EpsilonConsumed: 1.0, RemainingEpsilon: 9.0),
-            MetricDefinitions: new Dictionary<string, DbtMetric>());
+            MetricDefinitions: new Dictionary<string, Autheris.Application.Dbt.Services.MetricDefinitionSummary>())
+        {
+            MetricValueKinds = new Dictionary<string, AggregateValueKind> { ["total_revenue"] = AggregateValueKind.Decimal },
+            DimensionValueKinds = new Dictionary<string, AggregateValueKind> { ["region"] = AggregateValueKind.String }
+        };
 
-        var metricService = Substitute.For<ISemanticMetricQueryService>();
-        metricService.QueryMetricsAsync(principal, Arg.Any<MetricQueryRequest>(), Arg.Any<CancellationToken>())
+        MetricQueryRequest? captured = null;
+        host.Metrics.QueryMetricsAsync(principal, Arg.Do<MetricQueryRequest>(r => captured = r), Arg.Any<CancellationToken>())
             .Returns(expectedResult);
+        var executor = await host.BuildAsync();
 
-        var ext = new AnalyticsQueryExtensions();
-        var actual = await ext.QueryMetricsAsync(
-            metrics: ["total_revenue"],
-            groupBy: ["region"],
-            where: "region = 'EU'",
-            timeGranularity: "month",
-            orderBy: ["total_revenue DESC"],
-            limit: 25,
-            metricQueryService: metricService,
-            httpContextAccessor: accessor);
+        var response = await executor.ExecuteAsync(
+            "{ queryMetrics(metrics: [\"total_revenue\"], groupBy: [\"region\"], timeGranularity: \"month\", orderBy: [{ metric: \"total_revenue\", direction: DESC }], limit: 25) " +
+            "{ noiseApplied groups { values { alias decimalValue } } } }");
 
-        actual.ShouldBeSameAs(expectedResult);
-        actual.Metadata.NoiseApplied.ShouldBeTrue();
+        Autheris.Tests.Unit.GraphQL.TypedAggregateTestHost.Errors(response).ShouldBeEmpty();
+        captured!.Metrics.ShouldBe(["total_revenue"]);
+        captured.GroupBy.ShouldBe(["region"]);
+        captured.TimeGranularity.ShouldBe("month");
+        captured.Limit.ShouldBe(25);
+        captured.OrderBy.ShouldBe([new TableOrderBy("total_revenue", true)]);
+        using var doc = Autheris.Tests.Unit.GraphQL.TypedAggregateTestHost.Json(response);
+        var data = doc.RootElement.GetProperty("data").GetProperty("queryMetrics");
+        data.GetProperty("noiseApplied").GetBoolean().ShouldBeTrue();
+        data.GetProperty("groups")[0].GetProperty("values")[0].GetProperty("decimalValue").GetDecimal().ShouldBe(1000m);
     }
 
     [Fact]

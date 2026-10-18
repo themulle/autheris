@@ -595,7 +595,7 @@ public sealed class AggregationPrivacyHardeningTests
     [Fact]
     public void SemanticMetricCatalogProjection_NonAdmin_GetsOnlyDescriptiveFields()
     {
-        var projected = Autheris.Api.Endpoints.SemanticMetricCatalogProjection.Project([MetricWithFilter("mrr")], PrincipalWithRole("Analyst"));
+        var projected = Autheris.Application.Dbt.Services.SemanticMetricCatalogProjection.Project([MetricWithFilter("mrr")], PrincipalWithRole("Analyst"));
 
         var json = System.Text.Json.JsonSerializer.Serialize(projected);
         json.ShouldContain("mrr");
@@ -610,31 +610,33 @@ public sealed class AggregationPrivacyHardeningTests
     [InlineData("GovernanceAdmin")]
     public void SemanticMetricCatalogProjection_Administrators_GetTheFullDefinition(string role)
     {
-        var projected = Autheris.Api.Endpoints.SemanticMetricCatalogProjection.Project([MetricWithFilter("mrr")], PrincipalWithRole(role));
+        var projected = Autheris.Application.Dbt.Services.SemanticMetricCatalogProjection.Project([MetricWithFilter("mrr")], PrincipalWithRole(role));
 
         System.Text.Json.JsonSerializer.Serialize(projected).ShouldContain("secret_filter");
     }
 
     [Fact]
-    public async Task InMemorySemanticCatalog_MultiTenancy_TenantWithoutPartitionDoesNotSeeTheLegacyPartition()
+    public async Task InMemorySemanticCatalog_MultiTenancy_TenantSeesOnlyItsOwnPartition()
     {
         var catalog = new Autheris.Application.Dbt.Services.InMemorySemanticCatalog();
-        await catalog.RegisterManifestAsync(new DbtSemanticManifest([], [MetricWithFilter("legacy_metric")], "1.0"));
+        var tenantA = new TenantId("tenant-a");
         var tenantB = new TenantId("tenant-b");
+        await catalog.RegisterManifestAsync(new DbtSemanticManifest([], [MetricWithFilter("a_metric")], "1.0"), tenantA);
 
         (await catalog.ListMetricsAsync(null, tenantB)).ShouldBeEmpty();
-        (await catalog.GetMetricAsync("legacy_metric", tenantB)).ShouldBeNull();
+        (await catalog.GetMetricAsync("a_metric", tenantB)).ShouldBeNull();
         (await catalog.ListSemanticModelsAsync(tenantB)).ShouldBeEmpty();
-        // The claim-less principal is the legacy tenant itself and keeps its partition.
-        (await catalog.ListMetricsAsync(null, TenantId.LegacySingleTenant)).Count.ShouldBe(1);
+        // SEC-112-13: the legacy tenant id is not reachable in Multi (unset mode is Multi).
+        (await catalog.ListMetricsAsync(null, TenantId.LegacySingleTenant)).ShouldBeEmpty();
+        (await catalog.ListMetricsAsync(null, tenantA)).Count.ShouldBe(1);
     }
 
     [Fact]
-    public async Task InMemorySemanticCatalog_SingleTenancy_KeepsTheLegacyFallback()
+    public async Task InMemorySemanticCatalog_SingleTenancy_AllTenantsShareTheLegacyPartition()
     {
         var options = Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Single" } });
         var catalog = new Autheris.Application.Dbt.Services.InMemorySemanticCatalog(options);
-        await catalog.RegisterManifestAsync(new DbtSemanticManifest([], [MetricWithFilter("legacy_metric")], "1.0"));
+        await catalog.RegisterManifestAsync(new DbtSemanticManifest([], [MetricWithFilter("legacy_metric")], "1.0"), TenantId.LegacySingleTenant);
 
         (await catalog.GetMetricAsync("legacy_metric", new TenantId("tenant-b"))).ShouldNotBeNull();
     }
