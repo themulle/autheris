@@ -183,6 +183,33 @@ public partial class PostgreSqlGovernanceRepository
         return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
     }
 
+    public async Task<bool> UpdateConsentDescriptionWithAuditAsync(Guid consentId, TenantId tenant, string? description, AuditLogEntry audit, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(audit);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (!await UpdateConsentDescriptionInTransactionAsync(conn, tx, new ConsentDescriptionUpdate(consentId, tenant, description), ct).ConfigureAwait(false))
+            {
+                await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
+                OnTransactionRolledBack(tx);
+                return false;
+            }
+
+            await RecordAuditEventAsync(audit, tx, ct).ConfigureAwait(false);
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+            OnTransactionCommitted(tx);
+            return true;
+        }
+        catch
+        {
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
+            OnTransactionRolledBack(tx);
+            throw;
+        }
+    }
+
     /// <summary>Revokes one consent inside <paramref name="tx"/> with the authorisation and audit of <c>RevokeConsentAsync</c>. Returns null when it was already revoked.</summary>
     private async Task<TableIdentifier?> RevokeConsentInTransactionAsync(
         NpgsqlConnection conn, NpgsqlTransaction tx, Guid consentId, Sid actor, string reason, CancellationToken ct)

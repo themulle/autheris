@@ -184,6 +184,34 @@ public partial class SqliteGovernanceRepository
         return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
     }
 
+    public async Task<bool> UpdateConsentDescriptionWithAuditAsync(Guid consentId, TenantId tenant, string? description, AuditLogEntry audit, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(audit);
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            if (!await UpdateConsentDescriptionInTransactionAsync(conn, tx, new ConsentDescriptionUpdate(consentId, tenant, description), ct).ConfigureAwait(false))
+            {
+                await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
+                OnTransactionRolledBack(tx);
+                return false;
+            }
+
+            await RecordAuditEventInternalAsync(conn, audit, ct, tx).ConfigureAwait(false);
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+            OnTransactionCommitted(tx);
+            return true;
+        }
+        catch
+        {
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
+            OnTransactionRolledBack(tx);
+            throw;
+        }
+    }
+
     /// <summary>Revokes one consent inside <paramref name="tx"/> with the authorisation and audit of <c>RevokeConsentAsync</c>. Returns null when it was already revoked.</summary>
     private async Task<TableIdentifier?> RevokeConsentInTransactionAsync(
         SqliteConnection conn, SqliteTransaction tx, Guid consentId, Sid actor, string reason, CancellationToken ct)

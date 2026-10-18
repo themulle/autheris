@@ -277,6 +277,7 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IAuditLogRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IPolicyEpochRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsentApprovalRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<IConsentDescriptionRepository>(sp => (IConsentDescriptionRepository)sp.GetRequiredService<TRepository>()); // PLAN-GOV-158-INC1
         services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<TRepository>());

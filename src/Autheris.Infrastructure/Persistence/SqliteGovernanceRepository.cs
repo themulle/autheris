@@ -15,7 +15,7 @@ using Microsoft.Extensions.Options;
 
 namespace Autheris.Infrastructure.Persistence;
 
-public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrations.IGovernanceStoreInitializer, IDisposable
+public partial class SqliteGovernanceRepository : IGovernanceRepository, IConsentDescriptionRepository, Migrations.IGovernanceStoreInitializer, IDisposable
 {
     private readonly SqliteGovernanceConnectionProvider _connections;
     internal SqliteGovernanceConnectionProvider Connections => _connections;

@@ -287,3 +287,17 @@ public interface IGovernanceRepository :
     IItsmOutboxRepository
 {
 }
+
+/// <summary>
+/// PLAN-GOV-158-INC1 (SEC-GOV158I1-05/06): the single write seam of <c>setConsentDescription</c>. Implemented by every governance provider; deliberately not part
+/// of <see cref="IConsentRepository"/> so the attribute-validating decorator and consent fakes are untouched.
+/// </summary>
+public interface IConsentDescriptionRepository
+{
+    /// <summary>
+    /// Sets the description of one non-revoked, unexpired consent of <paramref name="tenant"/> and writes <paramref name="audit"/> in the SAME transaction
+    /// (an audit failure rolls the update back). Touches only <c>description</c>: no epoch bump, no validity or rule change. Returns false, changes nothing and
+    /// writes no audit row when no such consent exists.
+    /// </summary>
+    Task<bool> UpdateConsentDescriptionWithAuditAsync(Guid consentId, TenantId tenant, string? description, AuditLogEntry audit, CancellationToken ct = default);
+}
