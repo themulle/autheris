@@ -328,6 +328,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             VirtualFilterTablePlan? vfPlan = null;
             virtualFilterPlans?.TryGetValue(identifier, out vfPlan);
 
+            TableFilterClause? pushdownFilter = null;
             PushedParameterAudit? paramAudit = null;
             if (options.PredicatePushdown.Enabled &&
                 conjunctsByTable != null &&
@@ -352,7 +353,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
 
                 if (pushableConjuncts.Count > 0)
                 {
-                    pushdownFilter = PushedClauseBuilder.Build(pushableConjuncts, t.Metadata);
+                    pushdownFilter = Autheris.Application.Sql.Federation.Pushdown.PushedClauseBuilder.Build(pushableConjuncts, t.Metadata);
                 }
             }
             else if (options.PredicatePushdown.Enabled && parameters != null && t.Metadata.Table.DataSourceType == DataSourceType.Sql)
