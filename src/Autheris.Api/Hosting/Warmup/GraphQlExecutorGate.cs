@@ -1,6 +1,7 @@
 namespace Autheris.Api.Hosting.Warmup;
 
 using System.Text.Json;
+using Autheris.Api.Middleware;
 using Autheris.Domain.Options;
 using HotChocolate.Execution;
 using Microsoft.Extensions.Hosting;
@@ -43,10 +44,13 @@ public sealed partial class GraphQlExecutorGate(
                 probe = Task.Run(() => ProbeAsync(stoppingToken), CancellationToken.None);
             }
 
+            // A probe that never returns is abandoned on host stop only; observe its fault so it is never unobserved.
+            _ = probe.ContinueWith(static t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+
             ExecutorGateState result;
             try
             {
-                result = await probe.ConfigureAwait(false);
+                result = await probe.WaitAsync(stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -78,15 +82,12 @@ public sealed partial class GraphQlExecutorGate(
         {
             var executor = await executorProvider.GetExecutorAsync(cancellationToken: ct).ConfigureAwait(false);
 
-            // PersistedQueriesOnly rejects every non-allow-listed document, including the constant: a successful build is the proof.
-            if (gatewayOptions.Value.GraphQL.PersistedQueriesOnly)
-            {
-                return ExecutorGateState.Ready;
-            }
-
             var request = OperationRequestBuilder.New().SetDocument(WarmupDocument).MarkAsWarmupRequest().Build();
-            var executed = await executor.ExecuteAsync(request, ct).ConfigureAwait(false);
-            if (IsTypenameQuery(executed))
+            await using var executed = await executor.ExecuteAsync(request, ct).ConfigureAwait(false);
+
+            // Under PersistedQueriesOnly the constant is rejected by TrustedDocumentsOnlyMiddleware; exactly that one rejection proves
+            // the pipeline ran and is accepted only in that mode. The document is never added to the trusted store (SEC-OPS150-07).
+            if (IsTypenameQuery(executed) || (gatewayOptions.Value.GraphQL.PersistedQueriesOnly && IsTrustedDocumentRejection(executed)))
             {
                 return ExecutorGateState.Ready;
             }
@@ -104,6 +105,10 @@ public sealed partial class GraphQlExecutorGate(
             return ExecutorGateState.Failed;
         }
     }
+
+    private static bool IsTrustedDocumentRejection(IExecutionResult result) =>
+        result is OperationResult { Errors: { Count: 1 } errors }
+        && string.Equals(errors[0].Code, TrustedDocumentsOnlyMiddleware.RejectionCode, StringComparison.Ordinal);
 
     private static bool IsTypenameQuery(IExecutionResult result)
     {

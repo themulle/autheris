@@ -29,25 +29,39 @@ public sealed partial class StartupWarmupService(
             state.Set(WarmupPhase.Ready);
         }
 
+        // Names are resolved once, guarded: a misbehaving step must never stop the host (SEC-OPS150-08).
+        var named = new List<(IStartupWarmup Step, string Name)>();
         foreach (var step in steps)
+        {
+            try
+            {
+                named.Add((step, step.Name));
+            }
+            catch (Exception ex)
+            {
+                LogStepFailed(logger, "unknown", ex.GetType().Name);
+            }
+        }
+
+        foreach (var (step, name) in named)
         {
             stoppingToken.ThrowIfCancellationRequested();
 
-            if (opts.Steps.TryGetValue(step.Name, out var stepOptions) && !stepOptions.Enabled)
+            if (opts.Steps.TryGetValue(name, out var stepOptions) && !stepOptions.Enabled)
             {
-                StartupWarmupDiagnostics.RecordStep(step.Name, StartupWarmupDiagnostics.Skipped, 0);
+                StartupWarmupDiagnostics.RecordStep(name, StartupWarmupDiagnostics.Skipped, 0);
                 continue;
             }
 
             var remaining = budget - timeProvider.GetElapsedTime(start);
             if (remaining <= TimeSpan.Zero)
             {
-                StartupWarmupDiagnostics.RecordStep(step.Name, StartupWarmupDiagnostics.Skipped, 0);
-                LogStepSkipped(logger, step.Name);
+                StartupWarmupDiagnostics.RecordStep(name, StartupWarmupDiagnostics.Skipped, 0);
+                LogStepSkipped(logger, name);
                 continue;
             }
 
-            await RunStepAsync(step, remaining, stoppingToken).ConfigureAwait(false);
+            await RunStepAsync(step, name, remaining, stoppingToken).ConfigureAwait(false);
         }
 
         var total = timeProvider.GetElapsedTime(start);
@@ -56,7 +70,7 @@ public sealed partial class StartupWarmupService(
         LogFinished(logger, total.TotalMilliseconds);
     }
 
-    private async Task RunStepAsync(IStartupWarmup step, TimeSpan remaining, CancellationToken stoppingToken)
+    private async Task RunStepAsync(IStartupWarmup step, string name, TimeSpan remaining, CancellationToken stoppingToken)
     {
         var stepStart = timeProvider.GetTimestamp();
         string outcome;
@@ -76,21 +90,21 @@ public sealed partial class StartupWarmupService(
         {
             throw;
         }
-        catch (Exception ex) when (task is not null && ((ex is TimeoutException && !task.IsCompleted) || task.IsCanceled))
+        catch (Exception ex) when (budgetCts.IsCancellationRequested || (ex is TimeoutException && task is { IsCompleted: false }))
         {
-            // The bound elapsed (the step is still running) or the step observed the budget token. A step that itself threw a
-            // TimeoutException has a completed, faulted task and is a failure below.
+            // The budget token fired or the hard bound elapsed while the step was still running. A step that itself throws
+            // (including its own TimeoutException or OperationCanceledException) is a failure below.
             outcome = StartupWarmupDiagnostics.TimedOut;
-            LogStepTimedOut(logger, step.Name);
+            LogStepTimedOut(logger, name);
         }
         catch (Exception ex)
         {
             outcome = StartupWarmupDiagnostics.Failed;
-            LogStepFailed(logger, step.Name, ex.GetType().Name);
+            LogStepFailed(logger, name, ex.GetType().Name);
         }
 
         await linked.CancelAsync().ConfigureAwait(false);
-        StartupWarmupDiagnostics.RecordStep(step.Name, outcome, timeProvider.GetElapsedTime(stepStart).TotalSeconds);
+        StartupWarmupDiagnostics.RecordStep(name, outcome, timeProvider.GetElapsedTime(stepStart).TotalSeconds);
     }
 
     [LoggerMessage(EventId = 15101, Level = LogLevel.Warning, Message = "Startup warm-up step {Step} failed with {ExceptionType}")]

@@ -1,16 +1,20 @@
 namespace Autheris.Tests.Unit.Hosting;
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Api.Hosting.Warmup;
+using Autheris.Api.Middleware;
 using Autheris.Domain.Options;
 using HotChocolate;
 using HotChocolate.Execution;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -21,28 +25,51 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-/// <summary>PLAN-OPS-150 WP-B: warm-up framework, options and the executor gate probe.</summary>
+/// <summary>PLAN-OPS-150 WP-B: warm-up framework, options and the executor gate probe. No real-time polling: signals and a fake clock only.</summary>
 public sealed class StartupWarmupTests
 {
+    private static readonly TimeSpan Bound = TimeSpan.FromSeconds(10);
+
     private sealed class CapturingLogger<T> : ILogger<T>
     {
-        public List<string> Messages { get; } = [];
+        public ConcurrentQueue<string> Messages { get; } = new();
 
         public IDisposable? BeginScope<TState>(TState state)
             where TState : notnull => null;
 
         public bool IsEnabled(LogLevel logLevel) => true;
 
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            // Includes the exception text if one were attached: the code under test must never attach it.
+            Messages.Enqueue(formatter(state, exception) + (exception is null ? string.Empty : "|EXCEPTION:" + exception));
+    }
+
+    /// <summary>Fake clock that signals every timer registration, so tests advance time only once the code waits on it.</summary>
+    private sealed class SignalingTimeProvider : FakeTimeProvider
+    {
+        private readonly Channel<TimeSpan> _created = Channel.CreateUnbounded<TimeSpan>();
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
         {
-            // Includes the exception text if one were attached: the service must never attach it.
-            Messages.Add(formatter(state, exception) + (exception is null ? string.Empty : "|EXCEPTION:" + exception));
+            var timer = base.CreateTimer(callback, state, dueTime, period);
+            _created.Writer.TryWrite(dueTime);
+            return timer;
+        }
+
+        public async Task<TimeSpan> NextTimerAsync()
+        {
+            using var cts = new CancellationTokenSource(Bound);
+            return await _created.Reader.ReadAsync(cts.Token);
         }
     }
 
     private sealed class FakeStep(string name, Func<CancellationToken, Task> run) : IStartupWarmup
     {
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public int Runs;
+
+        public Task Started => _started.Task.WaitAsync(Bound);
 
         public string Name => name;
 
@@ -51,8 +78,18 @@ public sealed class StartupWarmupTests
         public Task RunAsync(CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref Runs);
+            _started.TrySetResult();
             return run(cancellationToken);
         }
+    }
+
+    private sealed class ThrowingNameStep : IStartupWarmup
+    {
+        public string Name => throw new InvalidOperationException("name lookup blew up");
+
+        public WarmupKind Kind => WarmupKind.BestEffort;
+
+        public Task RunAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private static StartupWarmupService CreateService(
@@ -63,41 +100,22 @@ public sealed class StartupWarmupTests
         StartupWarmupOptions? options = null) =>
         new(steps, state, Options.Create(options ?? new StartupWarmupOptions { TimeoutSeconds = 30 }), time, logger ?? new CapturingLogger<StartupWarmupService>());
 
-    private static async Task WaitUntilAsync(Func<bool> condition)
-    {
-        var deadline = DateTime.UtcNow.AddSeconds(10);
-        while (!condition())
-        {
-            DateTime.UtcNow.ShouldBeLessThan(deadline, "condition not reached in time");
-            await Task.Delay(5);
-        }
-    }
-
-    // The probe registers its back-off timer after publishing the state, so advance in small steps until the effect shows.
-    private static async Task AdvanceUntilAsync(FakeTimeProvider time, Func<bool> condition)
-    {
-        var deadline = DateTime.UtcNow.AddSeconds(10);
-        while (!condition())
-        {
-            DateTime.UtcNow.ShouldBeLessThan(deadline, "condition not reached in time");
-            time.Advance(TimeSpan.FromSeconds(1));
-            await Task.Delay(5);
-        }
-    }
+    private static Task Finished(BackgroundService service) => service.ExecuteTask!.WaitAsync(Bound);
 
     [Fact]
     public async Task Warmup_RunsStepsSequentially_ThenReady()
     {
         var state = new StartupWarmupState();
-        var order = new List<string>();
-        var a = new FakeStep("A", _ => { order.Add("A"); return Task.CompletedTask; });
-        var b = new FakeStep("B", _ => { order.Add("B"); return Task.CompletedTask; });
+        var order = new ConcurrentQueue<string>();
+        var a = new FakeStep("A", _ => { order.Enqueue("A"); return Task.CompletedTask; });
+        var b = new FakeStep("B", _ => { order.Enqueue("B"); return Task.CompletedTask; });
         using var service = CreateService([a, b], state, new FakeTimeProvider());
 
         await service.StartAsync(CancellationToken.None);
-        await WaitUntilAsync(() => state.Phase == WarmupPhase.Ready);
+        await Finished(service);
 
-        order.ShouldBe(["A", "B"]);
+        state.Phase.ShouldBe(WarmupPhase.Ready);
+        order.ToArray().ShouldBe(["A", "B"]);
         await service.StopAsync(CancellationToken.None);
     }
 
@@ -108,14 +126,16 @@ public sealed class StartupWarmupTests
         // T-OPS150-11 / SEC-OPS150-08: StartAsync returns before any step ran, even for a step that blocks the calling thread.
         var state = new StartupWarmupState();
         using var release = new ManualResetEventSlim();
-        var step = new FakeStep("Blocking", _ => { release.Wait(TimeSpan.FromSeconds(10), CancellationToken.None); return Task.CompletedTask; });
+        var step = new FakeStep("Blocking", _ => { release.Wait(Bound, CancellationToken.None); return Task.CompletedTask; });
         using var service = CreateService([step], state, new FakeTimeProvider());
 
-        await service.StartAsync(CancellationToken.None);
+        // The blocking step would hold StartAsync forever if ExecuteAsync ran steps inline: it must return while the step is still blocked.
+        await service.StartAsync(CancellationToken.None).WaitAsync(Bound);
+        release.IsSet.ShouldBeFalse();
 
-        state.Phase.ShouldBe(WarmupPhase.Pending);
-        step.Runs.ShouldBe(0);
+        await step.Started;
         release.Set();
+        await Finished(service);
         await service.StopAsync(CancellationToken.None);
     }
 
@@ -126,16 +146,19 @@ public sealed class StartupWarmupTests
         var logger = new CapturingLogger<StartupWarmupService>();
         var tcs = new TaskCompletionSource();
         var step = new FakeStep("Hung", ct => tcs.Task.WaitAsync(ct));
-        var time = new FakeTimeProvider();
+        var time = new SignalingTimeProvider();
         using var service = CreateService([step], state, time, logger, new StartupWarmupOptions { TimeoutSeconds = 30 });
 
         await service.StartAsync(CancellationToken.None);
-        await WaitUntilAsync(() => state.Phase == WarmupPhase.Warming && step.Runs == 1);
+        await step.Started;
+        await time.NextTimerAsync();
+        await time.NextTimerAsync();
         state.Phase.ShouldBe(WarmupPhase.Warming);
 
         time.Advance(TimeSpan.FromSeconds(31));
-        await WaitUntilAsync(() => state.Phase == WarmupPhase.Ready);
+        await Finished(service);
 
+        state.Phase.ShouldBe(WarmupPhase.Ready);
         logger.Messages.ShouldContain(m => m.Contains("Hung") && m.Contains("budget"));
         await service.StopAsync(CancellationToken.None);
     }
@@ -149,9 +172,42 @@ public sealed class StartupWarmupTests
         using var service = CreateService([throwing, next], state, new FakeTimeProvider());
 
         await service.StartAsync(CancellationToken.None);
-        await WaitUntilAsync(() => state.Phase == WarmupPhase.Ready);
+        await Finished(service);
 
+        state.Phase.ShouldBe(WarmupPhase.Ready);
         next.Runs.ShouldBe(1);
+        await service.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Warmup_StepNameThrows_HostSurvives_OtherStepsRun()
+    {
+        var state = new StartupWarmupState();
+        var next = new FakeStep("Next", _ => Task.CompletedTask);
+        using var service = CreateService([new ThrowingNameStep(), next], state, new FakeTimeProvider());
+
+        await service.StartAsync(CancellationToken.None);
+        await Finished(service);
+
+        service.ExecuteTask!.IsCompletedSuccessfully.ShouldBeTrue();
+        state.Phase.ShouldBe(WarmupPhase.Ready);
+        next.Runs.ShouldBe(1);
+        await service.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Warmup_StepOwnCancellation_IsFailedNotTimedOut()
+    {
+        var state = new StartupWarmupState();
+        var logger = new CapturingLogger<StartupWarmupService>();
+        var step = new FakeStep("SelfCancel", _ => throw new OperationCanceledException());
+        using var service = CreateService([step], state, new FakeTimeProvider(), logger);
+
+        await service.StartAsync(CancellationToken.None);
+        await Finished(service);
+
+        logger.Messages.ShouldContain(m => m.Contains("SelfCancel") && m.Contains("failed") && m.Contains(nameof(OperationCanceledException)));
+        logger.Messages.ShouldNotContain(m => m.Contains("budget"));
         await service.StopAsync(CancellationToken.None);
     }
 
@@ -163,15 +219,18 @@ public sealed class StartupWarmupTests
         var state = new StartupWarmupState();
         using var neverSet = new ManualResetEventSlim();
         var step = new FakeStep("Stubborn", _ => { neverSet.Wait(TimeSpan.FromSeconds(60), CancellationToken.None); return Task.CompletedTask; });
-        var time = new FakeTimeProvider();
+        var time = new SignalingTimeProvider();
         using var service = CreateService([step], state, time, options: new StartupWarmupOptions { TimeoutSeconds = 5 });
 
         await service.StartAsync(CancellationToken.None);
-        await WaitUntilAsync(() => step.Runs == 1);
+        await step.Started;
+        await time.NextTimerAsync();
+        await time.NextTimerAsync();
         time.Advance(TimeSpan.FromSeconds(6));
-        await WaitUntilAsync(() => state.Phase == WarmupPhase.Ready);
+        await Finished(service);
 
-        await service.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+        state.Phase.ShouldBe(WarmupPhase.Ready);
+        await service.StopAsync(CancellationToken.None).WaitAsync(Bound);
         neverSet.Set();
     }
 
@@ -184,7 +243,7 @@ public sealed class StartupWarmupTests
         using var service = CreateService([step], state, new FakeTimeProvider(), options: options);
 
         await service.StartAsync(CancellationToken.None);
-        await WaitUntilAsync(() => state.Phase == WarmupPhase.Ready);
+        await Finished(service);
 
         step.Runs.ShouldBe(0);
         await service.StopAsync(CancellationToken.None);
@@ -199,10 +258,11 @@ public sealed class StartupWarmupTests
         using var service = CreateService([step], state, new FakeTimeProvider(), options: new StartupWarmupOptions { RequireForReadiness = false });
 
         await service.StartAsync(CancellationToken.None);
-        await WaitUntilAsync(() => state.Phase == WarmupPhase.Ready);
+        await step.Started;
 
-        step.Runs.ShouldBeLessThanOrEqualTo(1);
+        state.Phase.ShouldBe(WarmupPhase.Ready);
         tcs.SetResult();
+        await Finished(service);
         await service.StopAsync(CancellationToken.None);
     }
 
@@ -217,7 +277,7 @@ public sealed class StartupWarmupTests
         using var service = CreateService([step], state, new FakeTimeProvider(), logger);
 
         await service.StartAsync(CancellationToken.None);
-        await WaitUntilAsync(() => state.Phase == WarmupPhase.Ready);
+        await Finished(service);
         await service.StopAsync(CancellationToken.None);
 
         var text = string.Join('\n', logger.Messages);
@@ -238,7 +298,7 @@ public sealed class StartupWarmupTests
         using var service = CreateService([step], state, new FakeTimeProvider(), logger);
 
         await service.StartAsync(CancellationToken.None);
-        await WaitUntilAsync(() => state.Phase == WarmupPhase.Ready);
+        await Finished(service);
         await service.StopAsync(CancellationToken.None);
 
         logger.Messages.ShouldContain(m => m.Contains("Named") && m.Contains(nameof(TimeoutException)) && !m.Contains("detail-text"));
@@ -272,7 +332,7 @@ public sealed class StartupWarmupTests
         using var service = CreateService([ok, bad], state, new FakeTimeProvider());
 
         await service.StartAsync(CancellationToken.None);
-        await WaitUntilAsync(() => state.Phase == WarmupPhase.Ready);
+        await Finished(service);
         await service.StopAsync(CancellationToken.None);
 
         lock (lockObj)
@@ -393,25 +453,51 @@ public sealed class StartupWarmupTests
         return new GraphQlExecutorGate(provider, Options.Create(options), time, new CapturingLogger<GraphQlExecutorGate>());
     }
 
-    private static async Task<IRequestExecutorProvider> RealProviderAsync(ServiceProvider[] keep)
+    /// <summary>A real executor with the gateway pipeline shape (no UseSkipWarmupExecution, A-150-8), optionally with the trusted-document middleware.</summary>
+    private static async Task<(ServiceProvider Services, IRequestExecutorProvider Provider)> RealProviderAsync(TrustedDocumentStore? store = null, string queryName = "Query")
     {
         var services = new ServiceCollection();
-        // Same shape as the gateway pipeline: no UseSkipWarmupExecution (A-150-8), so the constant document really executes.
-        services.AddGraphQLServer()
-            .AddQueryType(d => d.Name("Query").Field("hello").Type<HotChocolate.Types.StringType>().Resolve(_ => new ValueTask<object?>("world")))
+        var builder = services.AddGraphQLServer()
+            .AddQueryType(d => d.Name(queryName).Field("hello").Type<HotChocolate.Types.StringType>().Resolve(_ => new ValueTask<object?>("world")))
             .UseExceptions()
             .UseTimeout()
-            .UseDocumentCache()
-            .UseDocumentParser()
+            .UseDocumentCache();
+        if (store is not null)
+        {
+            services.AddSingleton(store);
+            builder.UseRequest<TrustedDocumentsOnlyMiddleware>();
+        }
+
+        builder.UseDocumentParser()
             .UseDocumentValidation()
             .UseOperationCache()
             .UseOperationResolver()
             .UseOperationVariableCoercion()
             .UseOperationExecution();
         var sp = services.BuildServiceProvider();
-        keep[0] = sp;
         var provider = sp.GetRequiredService<IRequestExecutorProvider>();
         await provider.GetExecutorAsync();
+        return (sp, provider);
+    }
+
+    private static IRequestExecutorProvider ProviderThatThrows(SemaphoreSlim calls)
+    {
+        var provider = Substitute.For<IRequestExecutorProvider>();
+        provider.GetExecutorAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns<ValueTask<IRequestExecutor>>(_ =>
+            {
+                calls.Release();
+                throw new SchemaException(SchemaErrorBuilder.New().SetMessage("boom").Build());
+            });
+        return provider;
+    }
+
+    private static IRequestExecutorProvider ProviderWithExecutorResult(IExecutionResult result)
+    {
+        var executor = Substitute.For<IRequestExecutor>();
+        executor.ExecuteAsync(Arg.Any<IOperationRequest>(), Arg.Any<CancellationToken>()).Returns(_ => Task.FromResult(result));
+        var provider = Substitute.For<IRequestExecutorProvider>();
+        provider.GetExecutorAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<IRequestExecutor>(executor));
         return provider;
     }
 
@@ -423,47 +509,211 @@ public sealed class StartupWarmupTests
     [Fact]
     public async Task ExecutorGate_RealExecutor_TypenameProven_Ready()
     {
-        var keep = new ServiceProvider[1];
-        var provider = await RealProviderAsync(keep);
-        await using var sp = keep[0];
+        var (sp, provider) = await RealProviderAsync();
+        await using var _ = sp;
         using var gate = CreateGate(provider, new FakeTimeProvider());
 
         await gate.StartAsync(CancellationToken.None);
-        await WaitUntilAsync(() => gate.State == ExecutorGateState.Ready);
+        await Finished(gate);
+
+        gate.State.ShouldBe(ExecutorGateState.Ready);
         await gate.StopAsync(CancellationToken.None);
     }
 
+    [Trait("Category", "Security")]
     [Fact]
-    public async Task ExecutorGate_PersistedQueriesOnly_BuildIsTheProof()
+    public async Task ExecutorGate_PersistedQueriesOnly_TrustedDocumentRejection_IsProof_StoreUnchanged()
     {
-        var keep = new ServiceProvider[1];
-        var provider = await RealProviderAsync(keep);
-        await using var sp = keep[0];
+        // T-OPS150-10 / SEC-OPS150-07: the rejection of the constant by the trusted-document middleware proves the executor ran its
+        // pipeline; the warm-up document is never added to the store.
+        var store = new TrustedDocumentStore(["{ hello }"]);
+        var (sp, provider) = await RealProviderAsync(store);
+        await using var _ = sp;
         using var gate = CreateGate(provider, new FakeTimeProvider(), persistedOnly: true);
 
         await gate.StartAsync(CancellationToken.None);
-        await WaitUntilAsync(() => gate.State == ExecutorGateState.Ready);
+        await Finished(gate);
+
+        gate.State.ShouldBe(ExecutorGateState.Ready);
+        store.Count.ShouldBe(1);
+        store.IsTrusted(GraphQlExecutorGate.WarmupDocument).ShouldBeFalse();
         await gate.StopAsync(CancellationToken.None);
     }
 
+    [Trait("Category", "Security")]
     [Fact]
-    public async Task ExecutorGate_ProbeThrows_StateFailed_RetriesWithBackoff()
+    public async Task ExecutorGate_PersistedQueriesOnly_OtherError_StaysPending()
     {
+        // SEC-OPS150-01: only exactly one TRUSTED_DOCUMENT_REQUIRED error counts; any other outcome is not proof.
+        var other = OperationResult.FromError(ErrorBuilder.New().SetMessage("x").SetCode("SOMETHING_ELSE").Build());
+        var time = new SignalingTimeProvider();
+        using var gate = CreateGate(ProviderWithExecutorResult(other), time, persistedOnly: true);
+
+        await gate.StartAsync(CancellationToken.None);
+        await time.NextTimerAsync(); // the back-off after the unproven probe
+
+        gate.State.ShouldBe(ExecutorGateState.Pending);
+        await gate.StopAsync(CancellationToken.None);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task ExecutorGate_PersistedQueriesOnly_RejectionWithExtraError_StaysPending()
+    {
+        var two = OperationResult.FromError(
+            ErrorBuilder.New().SetMessage("a").SetCode(TrustedDocumentsOnlyMiddleware.RejectionCode).Build(),
+            ErrorBuilder.New().SetMessage("b").SetCode("SOMETHING_ELSE").Build());
+        var time = new SignalingTimeProvider();
+        using var gate = CreateGate(ProviderWithExecutorResult(two), time, persistedOnly: true);
+
+        await gate.StartAsync(CancellationToken.None);
+        await time.NextTimerAsync();
+
+        gate.State.ShouldBe(ExecutorGateState.Pending);
+        await gate.StopAsync(CancellationToken.None);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task ExecutorGate_NotPersistedOnly_TrustedDocumentRejection_StaysPending()
+    {
+        // The rejection code is proof only when PersistedQueriesOnly is configured.
+        var rejection = OperationResult.FromError(ErrorBuilder.New().SetMessage("x").SetCode(TrustedDocumentsOnlyMiddleware.RejectionCode).Build());
+        var time = new SignalingTimeProvider();
+        using var gate = CreateGate(ProviderWithExecutorResult(rejection), time, persistedOnly: false);
+
+        await gate.StartAsync(CancellationToken.None);
+        await time.NextTimerAsync();
+
+        gate.State.ShouldBe(ExecutorGateState.Pending);
+        await gate.StopAsync(CancellationToken.None);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task ExecutorGate_ExecutorBuiltButTypenameNotProven_StaysPending()
+    {
+        // SEC-OPS150-01 (A-150-7): an executor was returned but the constant did not yield data.__typename == "Query".
+        var (sp, provider) = await RealProviderAsync(queryName: "NotQuery");
+        await using var _ = sp;
+        var time = new SignalingTimeProvider();
+        using var gate = CreateGate(provider, time);
+
+        await gate.StartAsync(CancellationToken.None);
+        await time.NextTimerAsync();
+
+        gate.State.ShouldBe(ExecutorGateState.Pending);
+        await gate.StopAsync(CancellationToken.None);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task ExecutorGate_GetExecutorNeverReturns_Stays503_PastTimeout()
+    {
+        // T-OPS150-19 / SEC-OPS150-16 / D-14: a hung probe leaves the gate Pending however much time passes.
+        var called = new TaskCompletionSource();
         var provider = Substitute.For<IRequestExecutorProvider>();
-        var calls = 0;
         provider.GetExecutorAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns<ValueTask<IRequestExecutor>>(_ => { Interlocked.Increment(ref calls); throw new SchemaException(SchemaErrorBuilder.New().SetMessage("boom").Build()); });
+            .Returns(_ =>
+            {
+                called.TrySetResult();
+                return new ValueTask<IRequestExecutor>(new TaskCompletionSource<IRequestExecutor>().Task);
+            });
         var time = new FakeTimeProvider();
         using var gate = CreateGate(provider, time);
 
         await gate.StartAsync(CancellationToken.None);
-        await WaitUntilAsync(() => gate.State == ExecutorGateState.Failed && Volatile.Read(ref calls) == 1);
+        await called.Task.WaitAsync(Bound);
+        time.Advance(TimeSpan.FromMinutes(10));
 
-        // Far past the global warm-up budget: still Failed (the timeout never opens the gate) and retried with back-off.
-        await AdvanceUntilAsync(time, () => Volatile.Read(ref calls) == 2);
-        await AdvanceUntilAsync(time, () => Volatile.Read(ref calls) == 3);
-        time.Advance(TimeSpan.FromSeconds(500));
+        gate.State.ShouldBe(ExecutorGateState.Pending);
+        gate.ExecuteTask!.IsCompleted.ShouldBeFalse();
+        await gate.StopAsync(CancellationToken.None).WaitAsync(Bound);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task ExecutorGate_ProbeThrows_StateFailed_RetriesWithExactBackoff()
+    {
+        // A-150-1 / SEC-OPS150-15: 5 s doubling, flat 60 s cap, retried indefinitely; the warm-up timeout never opens it.
+        var calls = new SemaphoreSlim(0);
+        var time = new SignalingTimeProvider();
+        using var gate = CreateGate(ProviderThatThrows(calls), time);
+
+        await gate.StartAsync(CancellationToken.None);
+        (await calls.WaitAsync(Bound)).ShouldBeTrue();
+        (await time.NextTimerAsync()).ShouldBe(TimeSpan.FromSeconds(5));
         gate.State.ShouldBe(ExecutorGateState.Failed);
+
+        time.Advance(TimeSpan.FromSeconds(4.9));
+        calls.CurrentCount.ShouldBe(0);
+        time.Advance(TimeSpan.FromSeconds(0.1));
+        (await calls.WaitAsync(Bound)).ShouldBeTrue();
+
+        foreach (var expected in new[] { 10, 20, 40, 60, 60, 60 })
+        {
+            (await time.NextTimerAsync()).ShouldBe(TimeSpan.FromSeconds(expected));
+            time.Advance(TimeSpan.FromSeconds(expected));
+            (await calls.WaitAsync(Bound)).ShouldBeTrue();
+            gate.State.ShouldBe(ExecutorGateState.Failed);
+        }
+
         await gate.StopAsync(CancellationToken.None);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task ExecutorGate_ReadyLatched_LaterFailingProviderLeavesItReady()
+    {
+        // SEC-OPS150-03: once Ready it latches; it neither re-probes nor flips back.
+        var (sp, real) = await RealProviderAsync();
+        await using var _ = sp;
+        var executor = await real.GetExecutorAsync();
+        var calls = 0;
+        var provider = Substitute.For<IRequestExecutorProvider>();
+        provider.GetExecutorAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(_ =>
+        {
+            return Interlocked.Increment(ref calls) == 1
+                ? new ValueTask<IRequestExecutor>(executor)
+                : throw new SchemaException(SchemaErrorBuilder.New().SetMessage("later").Build());
+        });
+        var time = new FakeTimeProvider();
+        using var gate = CreateGate(provider, time);
+
+        await gate.StartAsync(CancellationToken.None);
+        await Finished(gate);
+        time.Advance(TimeSpan.FromHours(1));
+
+        gate.State.ShouldBe(ExecutorGateState.Ready);
+        calls.ShouldBe(1);
+        await gate.StopAsync(CancellationToken.None);
+    }
+
+    private static readonly AsyncLocal<string?> Ambient = new();
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task ExecutorGate_ProbeRunsWithoutAmbientIdentity_NoAsyncLocalNoHttpContext()
+    {
+        // T-OPS150-07 / SEC-OPS150-05: neither an AsyncLocal nor IHttpContextAccessor.HttpContext set by the starting request flows into the probe.
+        var accessor = new HttpContextAccessor { HttpContext = new DefaultHttpContext() };
+        Ambient.Value = "caller-principal";
+        var seen = new TaskCompletionSource<(string? Local, HttpContext? Http)>();
+        var provider = Substitute.For<IRequestExecutorProvider>();
+        provider.GetExecutorAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns<ValueTask<IRequestExecutor>>(_ =>
+        {
+            seen.TrySetResult((Ambient.Value, accessor.HttpContext));
+            throw new InvalidOperationException("stop here");
+        });
+        var time = new FakeTimeProvider();
+        using var gate = CreateGate(provider, time);
+
+        await gate.StartAsync(CancellationToken.None);
+        var (local, http) = await seen.Task.WaitAsync(Bound);
+
+        local.ShouldBeNull();
+        http.ShouldBeNull();
+        await gate.StopAsync(CancellationToken.None);
+        Ambient.Value = null;
     }
 }

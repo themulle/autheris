@@ -97,6 +97,9 @@ public sealed class TrustedDocumentStore
 /// </summary>
 public sealed class TrustedDocumentsOnlyMiddleware
 {
+    /// <summary>Error code of the rejection result; shared with the readiness executor gate (PLAN-OPS-150).</summary>
+    public const string RejectionCode = "TRUSTED_DOCUMENT_REQUIRED";
+
     private readonly RequestDelegate _next;
 
     public TrustedDocumentsOnlyMiddleware(RequestDelegate next)
@@ -132,7 +135,7 @@ public sealed class TrustedDocumentsOnlyMiddleware
         {
             var error = ErrorBuilder.New()
                 .SetMessage("Only trusted (persisted) GraphQL documents are allowed on this gateway.")
-                .SetCode("TRUSTED_DOCUMENT_REQUIRED")
+                .SetCode(RejectionCode)
                 .Build();
             context.Result = OperationResult.FromError(error);
             return;

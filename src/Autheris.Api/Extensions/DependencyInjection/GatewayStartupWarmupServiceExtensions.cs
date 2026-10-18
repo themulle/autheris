@@ -19,6 +19,9 @@ public static class GatewayStartupWarmupServiceExtensions
     internal static void CaptureColdPathTiming(IServiceCollection services, IConfiguration configuration)
     {
         services.AddSingleton(new ColdPathTimingFlag(configuration.GetValue<bool>($"{ColdPathTimingOptions.SectionName}:Enabled")));
+        // The Enabled switch is read here, at registration, because whether the hosted service exists is a registration-time decision.
+        // StartupWarmupOptions.Enabled is bound for validation and documentation but is not read at runtime, so there are two sources
+        // of truth by design. A missing key means enabled (fail-closed default).
         services.AddSingleton(new StartupWarmupFlag(configuration.GetValue($"{StartupWarmupOptions.SectionName}:Enabled", true)));
     }
 

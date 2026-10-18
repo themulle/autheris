@@ -94,13 +94,13 @@ public static class HealthEndpoints
             var gateState = executorGate?.State ?? ExecutorGateState.Pending;
             if (gateState != ExecutorGateState.Ready)
             {
-                return NotReady(gateState == ExecutorGateState.Pending ? "Warming" : "Unhealthy", gateState.ToString(), warmupState?.Phase);
+                return NotReady(gateState == ExecutorGateState.Pending ? "Warming" : "Unhealthy", gateState, warmupState?.Phase);
             }
 
             var phase = warmupState?.Phase ?? WarmupPhase.Pending;
             if (phase != WarmupPhase.Ready)
             {
-                return NotReady("Warming", gateState.ToString(), phase);
+                return NotReady("Warming", gateState, phase);
             }
 
             if (environment.IsDevelopment())
@@ -124,7 +124,7 @@ public static class HealthEndpoints
 
         return app;
 
-        IResult NotReady(string status, string gate, WarmupPhase? phase)
+        IResult NotReady(string status, ExecutorGateState gate, WarmupPhase? phase)
         {
             if (environment.IsDevelopment())
             {
@@ -133,7 +133,7 @@ public static class HealthEndpoints
                     status,
                     timestamp = DateTimeOffset.UtcNow,
                     securityMode = GetSecurityMode(gatewayOptions),
-                    executorGate = gate,
+                    executorGate = gate.ToString(),
                     warmupPhase = phase?.ToString() ?? "Unknown"
                 }, statusCode: StatusCodes.Status503ServiceUnavailable);
             }

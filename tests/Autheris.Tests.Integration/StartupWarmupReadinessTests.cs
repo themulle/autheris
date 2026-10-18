@@ -270,23 +270,26 @@ public sealed class StartupWarmupReadinessTests
         return factory;
     }
 
+    /// <summary>Awaits the gate (and the best-effort service when registered) instead of polling the endpoint.</summary>
+    private static async Task WaitForStartupAsync(WebApplicationFactory<Program> factory)
+    {
+        var hosted = factory.Services.GetServices<IHostedService>().OfType<BackgroundService>()
+            .Where(h => h is GraphQlExecutorGate or StartupWarmupService);
+        foreach (var service in hosted)
+        {
+            await service.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(60));
+        }
+    }
+
     [Fact]
     public async Task FullHost_ReadyReached_WithRealExecutorGate()
     {
         await using var factory = Factory(null);
         using var client = factory.CreateClient();
 
-        HttpStatusCode last = default;
-        for (var i = 0; i < 100 && last != HttpStatusCode.OK; i++)
-        {
-            last = (await client.GetAsync("/health/ready")).StatusCode;
-            if (last != HttpStatusCode.OK)
-            {
-                await Task.Delay(100);
-            }
-        }
+        await WaitForStartupAsync(factory);
 
-        last.ShouldBe(HttpStatusCode.OK);
+        (await client.GetAsync("/health/ready")).StatusCode.ShouldBe(HttpStatusCode.OK);
         factory.Services.GetRequiredService<IGraphQlExecutorGate>().State.ShouldBe(ExecutorGateState.Ready);
     }
 
@@ -303,17 +306,9 @@ public sealed class StartupWarmupReadinessTests
         hosted.ShouldContain(h => h is GraphQlExecutorGate);
         factory.Services.GetRequiredService<IStartupWarmupState>().Phase.ShouldBe(WarmupPhase.Ready);
 
-        HttpStatusCode last = default;
-        for (var i = 0; i < 100 && last != HttpStatusCode.OK; i++)
-        {
-            last = (await client.GetAsync("/health/ready")).StatusCode;
-            if (last != HttpStatusCode.OK)
-            {
-                await Task.Delay(100);
-            }
-        }
+        await WaitForStartupAsync(factory);
 
-        last.ShouldBe(HttpStatusCode.OK);
+        (await client.GetAsync("/health/ready")).StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 
     [Fact]
