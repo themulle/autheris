@@ -227,7 +227,7 @@ public class ReadOnlyTokenTests
     [Theory]
     [InlineData("POST", "/api/governance/sunsetting/rules", false)]
     [InlineData("DELETE", "/api/rebac/tuples", false)]
-    [InlineData("POST", "/api/v1/procedures/close_period", false)]
+    [InlineData("POST", "/api/v1/procedures/close_period", true)] // INC-2 D-6: governed procedures are read-only
     [InlineData("POST", "/graphqlx", false)]
     [InlineData("POST", "/graphql", true)]
     [InlineData("POST", "/graphql/finance", true)]

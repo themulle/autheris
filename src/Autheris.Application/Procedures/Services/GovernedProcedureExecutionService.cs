@@ -132,6 +132,16 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         }
 
         var definition = registered.Definition;
+
+        // 1a. Write-mode guard (SEC-PROC152I2-10): only read procedures are executable. A write-mode definition is not visible,
+        // answered exactly like an unknown name, before anything caller-controlled is looked at.
+        if (definition.Mode != ProcedureMode.Read)
+        {
+            var denyUser = user.GetUserSid() ?? new Sid("anonymous");
+            await AuditAsync("PROCEDURE_DENIED", "DENY", definition, tenantId, denyUser, new { reason = "write-mode" }, traceId, ct).ConfigureAwait(false);
+            throw new KeyNotFoundException(NotFoundMessage);
+        }
+
         var sw = Stopwatch.StartNew();
         var userSid = user.GetUserSid() ?? new Sid("anonymous");
 

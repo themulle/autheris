@@ -884,6 +884,7 @@ public class ProcedureSecurityInc1Tests
             ["no-table"] = () => (Active(d => d with { ResultTable = null }, tables: []), "get_orders", User()),
             ["unavailable"] = () => (Active(d => d with { RequiredRoles = ["r"] }, markActive: false), "get_orders", User("other")),
             ["no-sid"] = () => (Active(), "get_orders", Anonymous()),
+            ["write-mode"] = () => (Active(d => d with { Mode = ProcedureMode.Write }), "get_orders", User()),
             ["visibility-error"] = () =>
             {
                 var e = Active();
@@ -895,7 +896,8 @@ public class ProcedureSecurityInc1Tests
         var variants = new (bool Post, string? Query, string? Body)[]
         {
             (false, "customer_id=7", null), (false, "bogus=1", null), (false, null, null),
-            (true, null, "{\"customer_id\":7}"), (true, null, "{\"bogus\":1}"), (true, null, "{}")
+            (true, null, "{\"customer_id\":7}"), (true, null, "{\"bogus\":1}"), (true, null, "{}"),
+            (false, "limit=abc", null), (false, "limit=1", null), (true, null, "{\"limit\":0}"), (true, null, "{\"limit\":2}")
         };
 
         for (int v = 0; v < variants.Length; v++)

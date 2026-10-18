@@ -90,10 +90,10 @@ public class ProcedureLimitsInc2Tests
 
     private static ClaimsPrincipal User() => new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-LWE-DAVID")], "test"));
 
-    private static Fixture Active(bool scoped, int total, int maxRows = 10, int? maxScanRows = null)
+    private static Fixture Active(bool scoped, int total, int maxRows = 10, int? maxScanRows = null, ProcedureMode mode = ProcedureMode.Read)
     {
         var f = new Fixture { Procedures = new ProcedureEndpointsOptions { MaxRows = maxRows, MaxScanRows = maxScanRows } };
-        var def = ProcedureDefinitionParser.Parse(scoped ? ScopedHeader : UnscopedHeader, "x", false, 60);
+        var def = ProcedureDefinitionParser.Parse(scoped ? ScopedHeader : UnscopedHeader, "x", false, 60) with { Mode = mode };
         f.Registry.Register(def);
         f.Registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], ["serial_number", "name"], ["md.crane"], new Dictionary<string, string>()));
         f.Tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(new TableMetadata
@@ -733,5 +733,27 @@ public class ProcedureLimitsInc2Tests
         json.ShouldContain("\"minimum\":1");
         json.ShouldNotContain("4321");
         json.ShouldNotContain("hidden_cranes");
+    }
+
+    // ---------- WP-C: write-mode guard (SEC-PROC152I2-10) ----------
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("abc")]
+    [InlineData("3")]
+    [Trait("Category", "Security")]
+    public async Task T_PROC152I2_13_WriteModeDefinition_InRegistry_Returns404_SameBodyAsUnknown(string? limit)
+    {
+        var f = Active(scoped: false, total: 100, mode: ProcedureMode.Write);
+        var service = f.Create();
+        var inputs = limit == null ? null : Inputs(limit);
+
+        var ex = await Should.ThrowAsync<KeyNotFoundException>(() => service.ExecuteAsync("get_cranes", inputs, User(), Tenant));
+        var unknown = await Should.ThrowAsync<KeyNotFoundException>(() => service.ExecuteAsync("nope", null, User(), Tenant));
+
+        ex.Message.ShouldBe(unknown.Message);
+        f.Budgets.ShouldBeEmpty();
+        await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default, default);
+        f.AuditEntries.Count(e => JsonSerializer.Serialize(e).Contains("write-mode")).ShouldBe(1);
     }
 }
