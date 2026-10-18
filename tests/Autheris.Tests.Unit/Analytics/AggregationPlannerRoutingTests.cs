@@ -161,4 +161,30 @@ public sealed class AggregationPlannerRoutingTests
         result.Groups.Single().Aggregates["cnt"].ShouldBe(3L);
         await sql.DidNotReceiveWithAnyArgs().ExecuteQueryBufferedAsync(default!, default!, default, default);
     }
+
+    [Fact]
+    public async Task Aggregation_PlannerCutsGroups_SetsTruncated()
+    {
+        var executor = new CountingExecutor(0, DataSourceType.Sql);
+        var (service, _, requests) = Create([SqlRow("A", 5), SqlRow("B", 4), SqlRow("C", 3)], executor, maxGroups: 2);
+
+        var result = await service.ExecuteAggregationAsync(Principal(), Query());
+
+        result.Metadata.Truncated.ShouldBeTrue();
+        result.Groups.Count.ShouldBe(2);
+        requests.Single().Sql.ShouldEndWith("LIMIT 3");
+    }
+
+    [Fact]
+    public async Task Aggregation_PlannerReturnsExactlyTheLimit_IsNotTruncated()
+    {
+        var executor = new CountingExecutor(0, DataSourceType.Sql);
+        var (service, _, requests) = Create([SqlRow("A", 5), SqlRow("B", 4)], executor, maxGroups: 2);
+
+        var result = await service.ExecuteAggregationAsync(Principal(), Query());
+
+        result.Metadata.Truncated.ShouldBeFalse();
+        result.Groups.Count.ShouldBe(2);
+        requests.Single().Sql.ShouldEndWith("LIMIT 3");
+    }
 }

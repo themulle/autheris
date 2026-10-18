@@ -206,7 +206,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             }
         }
 
-        var rawBuckets = await ExecuteAndBuildBucketsAsync(
+        var bucketRead = await ExecuteAndBuildBucketsAsync(
             principal,
             tenantId,
             metadata,
@@ -215,6 +215,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             groupByColumns,
             resolvedAggregates,
             ct).ConfigureAwait(false);
+        var rawBuckets = bucketRead.Buckets;
 
         var survivingBuckets = new List<ComputedBucket>(rawBuckets.Count);
         var smallBuckets = new List<ComputedBucket>();
@@ -314,8 +315,8 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             orderedBuckets.Add(mergedOtherBucket);
         }
 
-        bool truncated = orderedBuckets.Count > requestedLimit;
-        if (truncated)
+        bool truncated = bucketRead.SourceTruncated || orderedBuckets.Count > requestedLimit;
+        if (orderedBuckets.Count > requestedLimit)
         {
             orderedBuckets = orderedBuckets.Take(requestedLimit).ToList();
         }

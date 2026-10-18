@@ -331,7 +331,10 @@ public sealed partial class GovernedAggregationService
     /// <summary>Maximum number of rows the in-memory aggregation branches read; reaching it fails closed (<c>AGGREGATION_ROW_CAP_EXCEEDED</c>).</summary>
     private const int InMemoryAggregationRowCap = 100_000;
 
-    private async Task<List<ComputedBucket>> ExecuteAndBuildBucketsAsync(
+    /// <summary>The buckets read from the source and whether the source itself cut groups off (the planner returned more than the group limit).</summary>
+    private readonly record struct BucketRead(List<ComputedBucket> Buckets, bool SourceTruncated = false);
+
+    private async Task<BucketRead> ExecuteAndBuildBucketsAsync(
         ClaimsPrincipal principal,
         TenantId tenantId,
         TableMetadata metadata,
@@ -381,7 +384,7 @@ public sealed partial class GovernedAggregationService
                 ? rawRows.ToList()
                 : InMemoryRowFilterEvaluator.FilterRows(rawRows.ToList(), decision, metadata);
             var filteredRows = FilterRowsByWhere(rlsRows, query.Where, metadata);
-            return BuildBucketsFromRows(filteredRows, groupByColumns, resolvedAggregates, metadata);
+            return new BucketRead(BuildBucketsFromRows(filteredRows, groupByColumns, resolvedAggregates, metadata));
         }
 
         if (_gatewayExecutionService != null && _sqlExecutionService == null)
@@ -398,7 +401,7 @@ public sealed partial class GovernedAggregationService
             }
 
             var filteredRows = FilterRowsByWhere(rows.ToList(), query.Where, metadata);
-            return BuildBucketsFromRows(filteredRows, groupByColumns, resolvedAggregates, metadata);
+            return new BucketRead(BuildBucketsFromRows(filteredRows, groupByColumns, resolvedAggregates, metadata));
         }
 
         if (_sqlExecutionService != null)
@@ -415,7 +418,7 @@ public sealed partial class GovernedAggregationService
                     resolvedAggregates,
                     trinoFilter,
                     query.OrderBy,
-                    Limit: sqlLimit,
+                    Limit: sqlLimit + 1,
                     Transport: query.Transport ?? SqlTransports.Rest),
                 metadata,
                 decision);
@@ -429,12 +432,17 @@ public sealed partial class GovernedAggregationService
             var sqlResult = await _sqlExecutionService.ExecuteQueryBufferedAsync(sqlRequest, principal, tenantId, ct).ConfigureAwait(false);
             if (sqlResult.Rows.Count > 0 && sqlResult.Rows[0].ContainsKey(planned.CountColumnAlias))
             {
-                return BuildBucketsFromPlannedSqlResult(sqlResult.Rows, groupByColumns, resolvedAggregates, planned.CountColumnAlias);
+                // WP-2 (F-2): the planner was asked for one group more than the limit; a surplus group means the SQL cut groups off.
+                bool sourceTruncated = sqlResult.Rows.Count > sqlLimit;
+                var plannedRows = sourceTruncated ? sqlResult.Rows.Take(sqlLimit).ToList() : sqlResult.Rows;
+                return new BucketRead(
+                    BuildBucketsFromPlannedSqlResult(plannedRows, groupByColumns, resolvedAggregates, planned.CountColumnAlias),
+                    sourceTruncated);
             }
 
             var rlsRows = InMemoryRowFilterEvaluator.FilterRows(sqlResult.Rows.ToList(), decision, metadata);
             var filteredRows = FilterRowsByWhere(rlsRows, query.Where, metadata);
-            return BuildBucketsFromRows(filteredRows, groupByColumns, resolvedAggregates, metadata);
+            return new BucketRead(BuildBucketsFromRows(filteredRows, groupByColumns, resolvedAggregates, metadata));
         }
 
         throw new GatewayNotImplementedException("No SQL execution service or data source executor is configured to execute aggregation queries.");
