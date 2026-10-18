@@ -239,6 +239,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             {
                 var scopedRaw = await ApplyRowScopeAsync(definition, raw, resultDecision.Decision, resultDecision.Meta, registered.Validation.ResultColumnSources, context, tenantId, userSid, traceId, ct).ConfigureAwait(false);
                 rowsRemovedByScope = raw.Rows.Count - scopedRaw.Rows.Count;
+                // 'truncated' may be true when the scan cap was hit with few (or no) in-scope rows. Accepted by SEC-PROC152I2-03:
+                // a coarse signal only, it reveals nothing about which rows exist.
                 truncated = scopedRaw.Rows.Count > effectiveLimit || raw.MoreRowsAvailable;
                 raw = scopedRaw.Rows.Count > effectiveLimit
                     ? new RawProcedureResult(scopedRaw.Columns, scopedRaw.Rows.Take(effectiveLimit).ToList(), raw.MoreRowsAvailable)
@@ -478,7 +480,12 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 }
                 else
                 {
-                    inputs[key] = value;
+                    // Keys that differ only by case (possible in a case-sensitive input map) are ambiguous: fail closed instead of
+                    // silently keeping the last one. Fixed text, no key or value echo.
+                    if (!inputs.TryAdd(key, value))
+                    {
+                        throw new ArgumentException("Duplicate input parameter.");
+                    }
                 }
             }
         }
@@ -765,11 +772,6 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         definition.ResultTable != null && string.Equals(key, definition.ResultTable, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Removes the rows of the procedure result whose key (<see cref="ProcedureDefinition.RowScopeKey"/>) the consent row
-    /// filter of the result table does not allow. Fail-closed: a missing key column, a key column the caller may not use
-    /// in a filter, or a failing lookup denies the call; rows with a NULL key part are removed.
-    /// </summary>
-    /// <summary>
     /// SEC-PROC152I2-01: the single predicate for "a row filter is active on the result table". The invoker budget and the
     /// row scope branch both use it.
     /// </summary>
@@ -781,6 +783,11 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                !string.IsNullOrWhiteSpace(resultDecision.Decision.CombinedRowFilterSql);
     }
 
+    /// <summary>
+    /// Removes the rows of the procedure result whose key (<see cref="ProcedureDefinition.RowScopeKey"/>) the consent row
+    /// filter of the result table does not allow. Fail-closed: a missing key column, a key column the caller may not use
+    /// in a filter, or a failing lookup denies the call; rows with a NULL key part are removed.
+    /// </summary>
     private async Task<RawProcedureResult> ApplyRowScopeAsync(
         ProcedureDefinition definition,
         RawProcedureResult raw,

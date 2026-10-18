@@ -5,6 +5,7 @@ using System.Text.Json;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.Procedures.Services;
+using Autheris.Application.Procedures.Tools;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
@@ -53,6 +54,8 @@ public class ProcedureLimitsInc2Tests
         public List<AuditLogEntry> AuditEntries { get; } = [];
         public List<int> Budgets { get; } = [];
         public ProcedureEndpointsOptions Procedures { get; set; } = new() { MaxRows = 10 };
+        public global::Autheris.Application.Interfaces.ITableReadConcurrencyGate? Gate { get; set; }
+        public CapturingLogger<GovernedProcedureExecutionService> Logger { get; } = new();
 
         public GovernedProcedureExecutionService Create()
         {
@@ -60,8 +63,9 @@ public class ProcedureLimitsInc2Tests
             var options = new GatewayOptions { SqlEndpoints = new SqlEndpointsOptions { Procedures = Procedures } };
             return new GovernedProcedureExecutionService(
                 Registry, Invoker, Options.Create(options), Audit, Tables, Consents, Resolution, masking: null,
+                logger: Logger,
                 policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-                concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance,
+                concurrencyGate: Gate ?? global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance,
                 rowScope: RowScope);
         }
 
@@ -594,6 +598,35 @@ public class ProcedureLimitsInc2Tests
         await Should.ThrowAsync<ProcedureUnavailableException>(() => RunWith(f, Inputs("abc")));
     }
 
+    [Theory]
+    [InlineData("abc")]
+    [InlineData("0")]
+    [Trait("Category", "Security")]
+    public async Task T_PROC152I2_08_Limit_Invalid_LeaseDenied_Is429_NotValidation(string limit)
+    {
+        var f = Active(scoped: false, total: 100);
+        f.Gate = Substitute.For<global::Autheris.Application.Interfaces.ITableReadConcurrencyGate>();
+        f.Gate.TryEnter(Arg.Any<string>(), Arg.Any<int>()).Returns((IDisposable?)null);
+
+        await Should.ThrowAsync<GatewayThrottledException>(() => RunWith(f, Inputs(limit)));
+
+        f.Budgets.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task T_PROC152I2_08_Input_NonLimitKeysDifferingOnlyByCase_OrdinalDictionary_Is400_NoEcho()
+    {
+        var f = Active(scoped: false, total: 100);
+        var inputs = new Dictionary<string, object?> { ["Foo"] = "SECRET-A", ["foo"] = "SECRET-B" };
+
+        var ex = await Should.ThrowAsync<ArgumentException>(() => RunWith(f, inputs));
+
+        ex.Message.ShouldBe("Duplicate input parameter.");
+        ex.Message.ShouldNotContain("SECRET");
+        f.Budgets.ShouldBeEmpty();
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public async Task T_PROC152I2_08_Limit_MixedCaseDuplicateKeys_CaseInsensitiveDictionaryKeepsLast_AndMaxRowsBounds()
@@ -698,6 +731,76 @@ public class ProcedureLimitsInc2Tests
     public void Catalog_OtherParameterNames_NotRejected()
     {
         StoredProcedureCatalogValidator.ReservedParameterErrors(["limits", "p_limit", "CustomerId"]).ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task T_PROC152I2_10_Catalog_ValidateAsync_ParameterNamedLimit_RejectedAndNotRegisteredActive()
+    {
+        var options = Options.Create(new GatewayOptions
+        {
+            SqlEndpoints = new SqlEndpointsOptions
+            {
+                Procedures = new ProcedureEndpointsOptions { Enabled = true, AllowedSchemas = ["tem"], ConnectionName = "proc" }
+            },
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = new Dictionary<string, DataSourceConnectionOptions>
+                {
+                    ["proc"] = new() { Provider = "SqlServer", ConnectionString = "Server=x" }
+                }
+            }
+        });
+        var factory = Substitute.For<ISqlConnectionFactory>();
+        factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromResult<DbConnection>(new ScriptedCatalogConnection("@limit")));
+        var validator = new StoredProcedureCatalogValidator(new ProcedureConnectionProvider(factory, options), options);
+        var def = ProcedureDefinitionParser.Parse(UnscopedHeader, "x", false, 60);
+
+        var result = await validator.ValidateAsync(def, CancellationToken.None);
+
+        result.IsValid.ShouldBeFalse();
+        result.Errors.ShouldContain("Procedure parameter '@limit' uses the reserved name 'limit'.");
+
+        // The registration service never promotes the failed validation to Active.
+        var registry = new InMemoryProcedureRegistry();
+        registry.Register(def);
+        var scopeFactory = Substitute.For<IServiceScopeFactory>();
+        var scope = Substitute.For<IServiceScope>();
+        var sp = Substitute.For<IServiceProvider>();
+        scopeFactory.CreateScope().Returns(scope);
+        scope.ServiceProvider.Returns(sp);
+        sp.GetService(typeof(StoredProcedureCatalogValidator)).Returns(validator);
+        var svc = new ProcedureRegistrationService(new ProcedureDefinitionLoader(registry, options), registry, scopeFactory, options, null);
+
+        await svc.ValidateDueAsync(CancellationToken.None);
+
+        registry.TryGet("get_cranes", out var registered).ShouldBeTrue();
+        registered!.State.ShouldNotBe(ProcedureState.Active);
+    }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("sha256:abc12345", false)]
+    public void T_PROC152I2_WPE_Generator_DeclaredWithoutDdlHash_EmitsDiscoverableWarningComment(string? hash, bool warns)
+    {
+        var request = new ProcedureGenerationRequest(
+            "x", "api.usp_X", null, [], [], [new ProcedureOutputColumnInfo("a", "int", null, null, null)], [],
+            ResultTable: "md.crane", DdlHash: hash);
+
+        string yaml = new global::Autheris.Application.Procedures.Tools.ProcedureYamlGenerator().GenerateYaml(request);
+
+        const string warning = "# WARNING: integrity.ddl_hash is required for 'validation: declared' outside Development.";
+        if (warns)
+        {
+            yaml.ShouldContain(warning);
+        }
+        else
+        {
+            yaml.ShouldNotContain("WARNING");
+        }
+
+        ProcedureDefinitionParser.ParseYaml(yaml, "x", false, 30).Name.ShouldBe("x");
     }
 
     // ---------- WP-B: OpenAPI ----------
@@ -937,6 +1040,23 @@ public class ProcedureLimitsInc2Tests
         ex.ShouldNotBeAssignableTo<ProcedureBusinessException>();
         f.AuditEntries.ShouldNotContain(a => a.EventType == "PROCEDURE_REJECTED");
         f.AuditEntries.Single(a => a.EventType == "PROCEDURE_FAILED").DetailsJson.ShouldNotContain("4711");
+        f.AuditEntries.Single(a => a.EventType == "PROCEDURE_FAILED").DetailsJson.ShouldNotContain("dbo.Secret");
+        AssertNoDbText(f.Logger);
+    }
+
+    private static void AssertNoDbText(CapturingLogger<GovernedProcedureExecutionService> logger)
+    {
+        foreach (var (_, message) in logger.Entries)
+        {
+            message.ShouldNotContain("4711");
+            message.ShouldNotContain("dbo.Secret");
+        }
+
+        foreach (var state in logger.States)
+        {
+            state.ShouldNotContain("4711");
+            state.ShouldNotContain("dbo.Secret");
+        }
     }
 
     [Theory]
@@ -964,6 +1084,7 @@ public class ProcedureLimitsInc2Tests
         }
 
         ex.MappedCode.ShouldBe(mapped ? "CRANE_LOCKED" : null);
+        AssertNoDbText(f.Logger);
     }
 
     [Fact]
@@ -991,12 +1112,21 @@ public class ProcedureLimitsInc2Tests
     {
         public List<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> Entries { get; } = [];
 
+        /// <summary>Raw structured state (name=value pairs) and exception text of every entry.</summary>
+        public List<string> States { get; } = [];
+
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
         public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
 
         public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-            => Entries.Add((logLevel, formatter(state, exception)));
+        {
+            Entries.Add((logLevel, formatter(state, exception)));
+            string structured = state is IEnumerable<KeyValuePair<string, object?>> pairs
+                ? string.Join(";", pairs.Select(p => p.Key + "=" + p.Value))
+                : state?.ToString() ?? string.Empty;
+            States.Add(structured + "|" + exception);
+        }
     }
 
     private const string DeclaredYamlNoHash = "name: x\nprocedure: api.usp_X\nvalidation: declared\nresult_table: md.crane\noutputs:\n  - {name: a, type: int}\n";
