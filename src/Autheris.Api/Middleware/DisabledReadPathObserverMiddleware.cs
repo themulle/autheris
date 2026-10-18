@@ -145,9 +145,20 @@ public sealed class DisabledReadPathObserverMiddleware
 
         _logger.LogWarning(
             "Request to a read path that is switched off by configuration (rest_data): method={Method} principal={PrincipalHash}.",
-            context.Request.Method,
+            KnownMethod(context.Request.Method),
             hash);
     }
+
+    // The request method is client-controlled; only fixed, known verbs reach the log (no log forging).
+    private static string KnownMethod(string method) =>
+        HttpMethods.IsGet(method) ? "GET"
+        : HttpMethods.IsHead(method) ? "HEAD"
+        : HttpMethods.IsPost(method) ? "POST"
+        : HttpMethods.IsPut(method) ? "PUT"
+        : HttpMethods.IsPatch(method) ? "PATCH"
+        : HttpMethods.IsDelete(method) ? "DELETE"
+        : HttpMethods.IsOptions(method) ? "OPTIONS"
+        : "OTHER";
 
     private void EvictOldest(long now)
     {
