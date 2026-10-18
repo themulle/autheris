@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Autheris.Application.Identity.Attributes;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Policy.RowFilterKeySets;
 using Autheris.Domain.Model;
@@ -29,7 +30,9 @@ public sealed partial class TypedRowFilterBuilder
 
     /// <summary>One consent's filters as a predicate. <paramref name="dialect"/> only bounds the IN-list size (Oracle: 1000 items per list).</summary>
     /// <exception cref="ArgumentException">No filters: the caller decides what "no restriction" means, this builder never guesses.</exception>
-    public PolicyPredicate Build(IReadOnlyList<ConsentRowFilter> filters, TableIdentity table, TargetSqlDialect? dialect = null)
+    public PolicyPredicate Build(
+        IReadOnlyList<ConsentRowFilter> filters, TableIdentity table, TargetSqlDialect? dialect = null,
+        CallerAttributeSet? attributes = null, CallerAttributePadding? padding = null)
     {
         ArgumentNullException.ThrowIfNull(filters);
         if (filters.Count == 0)
@@ -38,7 +41,7 @@ public sealed partial class TypedRowFilterBuilder
         }
 
         var namer = new PolicyParameterNamer();
-        var expression = ConsentExpression(filters, dialect, namer, isDeny: false)
+        var expression = ConsentExpression(filters, dialect, namer, isDeny: false, attributes, padding)
             ?? throw new InvalidOperationException($"The row filters of table '{table}' produced no condition.");
         return PolicyPredicate.Create(expression, namer.Values);
     }
@@ -47,12 +50,14 @@ public sealed partial class TypedRowFilterBuilder
     /// Allow consents OR-combined (an allow consent without filters means all rows), deny consents as <c>NOT (...)</c>.
     /// Returns null when no consent restricts rows.
     /// </summary>
-    public PolicyPredicate? BuildCombined(IReadOnlyList<Consent> aConsents, IReadOnlyList<Consent> dConsents, TableIdentity table, TargetSqlDialect? dialect = null)
+    public PolicyPredicate? BuildCombined(
+        IReadOnlyList<Consent> aConsents, IReadOnlyList<Consent> dConsents, TableIdentity table, TargetSqlDialect? dialect = null,
+        CallerAttributeSet? attributes = null, CallerAttributePadding? padding = null)
     {
         ArgumentNullException.ThrowIfNull(aConsents);
         ArgumentNullException.ThrowIfNull(dConsents);
         return BuildCombined(
-            aConsents.Select(static c => c.RowFilters).ToList(), dConsents.Select(static c => c.RowFilters).ToList(), table, dialect);
+            aConsents.Select(static c => c.RowFilters).ToList(), dConsents.Select(static c => c.RowFilters).ToList(), table, dialect, attributes, padding);
     }
 
     /// <summary>
@@ -63,7 +68,9 @@ public sealed partial class TypedRowFilterBuilder
         IReadOnlyList<IReadOnlyList<ConsentRowFilter>> allowFilters,
         IReadOnlyList<IReadOnlyList<ConsentRowFilter>> denyFilters,
         TableIdentity table,
-        TargetSqlDialect? dialect = null)
+        TargetSqlDialect? dialect = null,
+        CallerAttributeSet? attributes = null,
+        CallerAttributePadding? padding = null)
     {
         ArgumentNullException.ThrowIfNull(allowFilters);
         ArgumentNullException.ThrowIfNull(denyFilters);
@@ -72,10 +79,10 @@ public sealed partial class TypedRowFilterBuilder
         Expression? allow = null;
         if (!allowFilters.Any(f => f.Count == 0))
         {
-            allow = OrChain(allowFilters.Select(f => ConsentExpression(f, dialect, namer, isDeny: false)));
+            allow = OrChain(allowFilters.Select(f => ConsentExpression(f, dialect, namer, isDeny: false, attributes, padding)));
         }
 
-        Expression? deny = OrChain(denyFilters.Where(f => f.Count > 0).Select(f => ConsentExpression(f, dialect, namer, isDeny: true)));
+        Expression? deny = OrChain(denyFilters.Where(f => f.Count > 0).Select(f => ConsentExpression(f, dialect, namer, isDeny: true, attributes, padding)));
         if (deny != null)
         {
             // The generator parenthesizes the operand of NOT itself.
@@ -104,7 +111,8 @@ public sealed partial class TypedRowFilterBuilder
         };
     }
 
-    private static Expression? ConsentExpression(IReadOnlyList<ConsentRowFilter> filters, TargetSqlDialect? dialect, PolicyParameterNamer namer, bool isDeny)
+    private static Expression? ConsentExpression(
+        IReadOnlyList<ConsentRowFilter> filters, TargetSqlDialect? dialect, PolicyParameterNamer namer, bool isDeny, CallerAttributeSet? attributes, CallerAttributePadding? padding)
     {
         if (filters.Count == 0)
         {
@@ -114,7 +122,7 @@ public sealed partial class TypedRowFilterBuilder
         var groups = new List<Expression>();
         foreach (var group in filters.GroupBy(f => f.FilterGroup))
         {
-            var conditions = group.Select(f => Condition(f, dialect, namer, isDeny)).ToList();
+            var conditions = group.Select(f => Condition(f, dialect, namer, isDeny, attributes, padding)).ToList();
             groups.Add(conditions.Count == 1
                 ? conditions[0]
                 : new ParenthesizedExpression(conditions.Aggregate((l, r) => new BinaryExpression(l, BinaryOperator.And, r))));
@@ -123,7 +131,8 @@ public sealed partial class TypedRowFilterBuilder
         return OrChain(groups);
     }
 
-    private static Expression Condition(ConsentRowFilter filter, TargetSqlDialect? dialect, PolicyParameterNamer namer, bool isDeny)
+    private static Expression Condition(
+        ConsentRowFilter filter, TargetSqlDialect? dialect, PolicyParameterNamer namer, bool isDeny, CallerAttributeSet? attributes, CallerAttributePadding? padding)
     {
         if (filter.FilterType == RowFilterType.SubqueryCorrelated)
         {
@@ -137,8 +146,7 @@ public sealed partial class TypedRowFilterBuilder
 
         if (string.Equals(filter.ValueSource, "USER_ATTRIBUTE", StringComparison.OrdinalIgnoreCase))
         {
-            // RR-L4-01 polarity: ALLOW matches no rows (1 = 0); DENY matches all rows (1 = 1) so NOT (1 = 1) blocks access.
-            return Constant(isDeny);
+            return AttributeCondition(filter, dialect, namer, isDeny, attributes, padding);
         }
 
         var column = filter.ColumnName;
@@ -202,6 +210,57 @@ public sealed partial class TypedRowFilterBuilder
                 _ => new BinaryExpression(columnRef, BinaryOperator.Equal, parameter)
             };
         }
+    }
+
+    /// <summary>
+    /// REQ-GOV-129 (A-3): a <c>USER_ATTRIBUTE</c> leaf. A resolved attribute binds as policy parameters (EQ/NEQ scalar, IN scalar or list,
+    /// padded); every other state (no set, unknown or invalid name, not resolved, wrong operator or cardinality) is the fail-closed constant
+    /// of RR-L4-01: ALLOW matches no rows (<c>1 = 0</c>), DENY matches all rows (<c>1 = 1</c>) so <c>NOT (1 = 1)</c> blocks access. The stored
+    /// <c>ValueJson</c> is never read: a literal is not a fallback.
+    /// </summary>
+    private static Expression AttributeCondition(
+        ConsentRowFilter filter, TargetSqlDialect? dialect, PolicyParameterNamer namer, bool isDeny, CallerAttributeSet? attributes, CallerAttributePadding? padding)
+    {
+        if (attributes is null || !CallerAttributeDefinition.IsValidName(filter.UserAttribute) ||
+            !attributes.TryGet(filter.UserAttribute!, out var result) || result.Outcome != CallerAttributeOutcome.Resolved || result.Value is null || result.Value.Count == 0)
+        {
+            return Constant(isDeny);
+        }
+
+        var op = filter.Operator.ToUpperInvariant();
+        if (op is not ("EQ" or "NEQ" or "IN") || (op != "IN" && result.Value.Count != 1))
+        {
+            return Constant(isDeny);
+        }
+
+        var column = filter.ColumnName;
+        if (!SafeIdentifierRegex().IsMatch(column))
+        {
+            throw new InvalidOperationException($"Invalid column name in row filter: '{column}'. Potential injection attack.");
+        }
+
+        var columnRef = PolicyParameterNamer.Column(column);
+        var parameters = CallerAttributeBinder.Expand(namer, filter.UserAttribute!, result.Value, padding ?? CallerAttributePadding.Default);
+        if (op == "EQ")
+        {
+            return new BinaryExpression(columnRef, BinaryOperator.Equal, parameters[0]);
+        }
+
+        if (op == "NEQ")
+        {
+            return new BinaryExpression(columnRef, BinaryOperator.NotEqual, parameters[0]);
+        }
+
+        int size = dialect is { } d && PolicyParameterNamer.InListLimit(d) is > 0 and var limit ? limit : Math.Max(parameters.Count, 1);
+        var lists = new List<Expression>();
+        foreach (var chunk in parameters.Chunk(size))
+        {
+            lists.Add(new InListExpression(columnRef, chunk.Select(p => (Expression)p).ToList(), false));
+        }
+
+        return lists.Count == 1
+            ? lists[0]
+            : new ParenthesizedExpression(lists.Aggregate((left, right) => new BinaryExpression(left, BinaryOperator.Or, right)));
     }
 
     /// <summary><c>1 = 1</c> (true) or <c>1 = 0</c> (false).</summary>

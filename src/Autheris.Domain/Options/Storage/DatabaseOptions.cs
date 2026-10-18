@@ -62,6 +62,22 @@ public sealed class DataSourceConnectionOptions
     public bool KeySetCacheAllowed { get; init; }
 
     /// <summary>
+    /// Issue #129 (BC-129-03): the connection may serve the privileged caller attribute lookup (a fixed read of the registered attribute
+    /// table under the gateway service identity). It must use a dedicated read-only login. Default false: attribute-table providers fail
+    /// closed (<c>SOURCE_NOT_ALLOWED</c>).
+    /// </summary>
+    public bool CallerAttributeLookupAllowed { get; init; }
+
+    /// <summary>
+    /// Issue #129 (BC-129-03, F-8): the owner records that the lookup login is NOT dedicated (shares the governed login). Honoured only
+    /// in Development; elsewhere it is ignored and the provider fails closed unless <see cref="CallerAttributeDedicatedLogin"/> is set.
+    /// </summary>
+    public bool CallerAttributeSharedLoginAcknowledged { get; init; }
+
+    /// <summary>Issue #129 (BC-129-03): operator attestation that the connection's login is dedicated, read-only, SELECT on the attribute tables only.</summary>
+    public bool CallerAttributeDedicatedLogin { get; init; }
+
+    /// <summary>
     /// Oracle only (WP-F1, CR-ADG-08): Key Vault reference of the database password. Outside Development the connection string
     /// must not contain a plaintext <c>Password</c>; the factory injects the resolved secret when it opens the connection.
     /// </summary>

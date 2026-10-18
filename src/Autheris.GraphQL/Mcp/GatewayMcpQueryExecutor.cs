@@ -687,7 +687,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             }
         }
 
-        var identity = new ClaimsIdentity(claims, "McpAuth");
+        var identity = new ClaimsIdentity(claims, Autheris.Application.Identity.Attributes.CallerAttributeSchemeGate.McpAuthScheme);
         if (sessionContext.IsReadOnly)
         {
             Autheris.Domain.Security.TokenAccessScope.MarkReadOnly(identity);

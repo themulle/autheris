@@ -31,6 +31,9 @@ public sealed class EffectiveAccessExplanationService(
     /// <summary>Row filter description for callers who are not allowed to see the filter definition.</summary>
     internal const string RowFilterDescription = "Row filter applies (defined by data owner).";
 
+    /// <summary>REQ-GOV-129 (V-129-10): all a caller (and an owner) learns of a filter that depends on a caller attribute: that one applies. No attribute name, no value.</summary>
+    internal const string AttributeRowFilterDescription = "Row filter applies (depends on an attribute of the caller).";
+
     public async Task<EffectiveTableAccessDto> ExplainMyAccessAsync(
         ClaimsPrincipal principal,
         TableIdentifier table,
@@ -136,7 +139,11 @@ public sealed class EffectiveAccessExplanationService(
         }
 
         var activeRowFilters = new List<string>();
-        if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
+        if (decision.ConsentFilterRecipe is { } recipe && Autheris.Application.Identity.Attributes.CallerAttributeRecipes.Names(recipe).Count > 0)
+        {
+            activeRowFilters.Add(AttributeRowFilterDescription);
+        }
+        else if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
         {
             // The SQL (literal values, internal rules) is shown only to owners, delegates and governance admins.
             var canSeeDefinition = isAdmin || await IsOwnerOrDelegateAsync(userSid.Value, table, ct).ConfigureAwait(false);

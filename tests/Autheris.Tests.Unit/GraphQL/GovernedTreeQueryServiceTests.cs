@@ -637,5 +637,132 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         // SQL2-13: Auditing must record both tenants separately, never suppressing the second tenant
         await fixture.Audit.Received(2).RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
     }
-}
 
+    // ---- Issue #151 WP-151-5: composite-key relations ----
+
+    private static readonly TableIdentifier Orders = new("blog", "main", "orders");
+    private static readonly TableIdentifier Lines = new("blog", "main", "lines");
+    private static readonly (string, string)[] OrderColumns = [("id", "integer"), ("k1", "integer"), ("k2", "integer"), ("k3", "integer"), ("name", "text")];
+    private static readonly (string, string)[] LineColumns = [("id", "integer"), ("p1", "integer"), ("p2", "integer"), ("p3", "integer"), ("label", "text")];
+
+    private void SeedComposite()
+    {
+        using var cmd = _keepAlive.CreateCommand();
+        cmd.CommandText = """
+            CREATE TABLE orders (id INTEGER PRIMARY KEY, k1 INTEGER, k2 INTEGER, k3 INTEGER, name TEXT);
+            CREATE TABLE lines (id INTEGER PRIMARY KEY, p1 INTEGER, p2 INTEGER, p3 INTEGER, label TEXT);
+            INSERT INTO orders VALUES (1, 1, 1, 1, 'o1'), (2, 1, 1, 2, 'o2'), (3, 1, 2, 1, 'o3');
+            INSERT INTO lines VALUES (10, 1, 1, 1, 'L10'), (11, 1, 1, 2, 'L11'), (12, 1, 2, 1, 'L12'), (13, 1, 2, 2, 'L13'), (14, 9, 9, 9, 'L14');
+            """;
+        cmd.ExecuteNonQuery();
+    }
+
+    private Fixture CreateComposite(
+        Dictionary<string, ColumnAccessLevel>? orderAccess = null,
+        Dictionary<string, ColumnAccessLevel>? lineAccess = null,
+        string? orderFilter = null,
+        string? lineFilter = null)
+    {
+        SeedComposite();
+        return Create(a =>
+        {
+            var orders = Meta(Orders, "blog", OrderColumns);
+            var lines = Meta(Lines, "blog", LineColumns);
+            a[Orders] = new ResolvedTableAccess(orders,
+                TableAccessDecision.Allowed(Orders, orderAccess ?? new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: orderFilter, hasUnconstrainedColumnAllow: true),
+                new TenantId("t1"), new Sid("S-1-5-21-DAVID"), new ClaimsPrincipal());
+            a[Lines] = new ResolvedTableAccess(lines,
+                TableAccessDecision.Allowed(Lines, lineAccess ?? new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: lineFilter, hasUnconstrainedColumnAllow: true),
+                new TenantId("t1"), new Sid("S-1-5-21-DAVID"), new ClaimsPrincipal());
+        });
+    }
+
+    private static TreeQueryNode OrdersWithLines(int keys) => new(Orders, ["id", "name"])
+    {
+        Relations = [new TreeRelationNode("lines", new[] { "k1", "k2", "k3" }[..keys], new[] { "p1", "p2", "p3" }[..keys], true,
+            new TreeQueryNode(Lines, ["label"]) { OrderBy = [new TreeOrder("id")] })],
+        OrderBy = [new TreeOrder("id")]
+    };
+
+    private static TreeQueryNode LinesWithOrder() => new(Lines, ["id"])
+    {
+        Relations = [new TreeRelationNode("order", ["p1", "p2", "p3"], ["k1", "k2", "k3"], false, new TreeQueryNode(Orders, ["name"]))],
+        OrderBy = [new TreeOrder("id")]
+    };
+
+    private static List<string?> Labels(JsonElement row) =>
+        row.GetProperty("lines").EnumerateArray().Select(x => x.GetProperty("label").GetString()).ToList();
+
+    [Fact]
+    public async Task CompositeRelation_JoinsOnAllColumns_BothDirections()
+    {
+        var fixture = CreateComposite();
+
+        using var down = await fixture.ExecuteAsync(new ClaimsPrincipal(), OrdersWithLines(3), null);
+        Labels(down.RootElement[0]).ShouldBe(["L10"]);
+        Labels(down.RootElement[1]).ShouldBe(["L11"]);
+        Labels(down.RootElement[2]).ShouldBe(["L12"]);
+
+        using var up = await fixture.ExecuteAsync(new ClaimsPrincipal(), LinesWithOrder(), null);
+        up.RootElement[0].GetProperty("order").GetProperty("name").GetString().ShouldBe("o1");
+        up.RootElement[1].GetProperty("order").GetProperty("name").GetString().ShouldBe("o2");
+        up.RootElement[2].GetProperty("order").GetProperty("name").GetString().ShouldBe("o3");
+        up.RootElement[3].GetProperty("order").ValueKind.ShouldBe(JsonValueKind.Null); // (1,2,2) has no parent
+        up.RootElement[4].GetProperty("order").ValueKind.ShouldBe(JsonValueKind.Null);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task CompositeRelation_FirstKeyMatchOnly_ReturnsNoChildRows()
+    {
+        // SEC-REL151-01 / T-REL151-01: lines matching the parent on key 1 only must never be returned.
+        var fixture = CreateComposite();
+        using (var cmd = _keepAlive.CreateCommand())
+        {
+            cmd.CommandText = "INSERT INTO orders VALUES (4, 5, 5, 5, 'o4'); INSERT INTO lines VALUES (15, 5, 6, 6, 'L15'), (16, 5, 5, 6, 'L16');";
+            cmd.ExecuteNonQuery();
+        }
+
+        using var result = await fixture.ExecuteAsync(new ClaimsPrincipal(), OrdersWithLines(3), null);
+
+        Labels(result.RootElement[3]).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task CompositeRelation_RowFilterAppliedPerLevel()
+    {
+        var fixture = CreateComposite(orderFilter: "\"name\" <> 'o3'", lineFilter: "\"label\" <> 'L10'");
+
+        using var result = await fixture.ExecuteAsync(new ClaimsPrincipal(), OrdersWithLines(3), null);
+
+        result.RootElement.GetArrayLength().ShouldBe(2); // parent filter removed o3
+        Labels(result.RootElement[0]).ShouldBeEmpty(); // child filter removed L10
+        Labels(result.RootElement[1]).ShouldBe(["L11"]);
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData(1, true, ColumnAccessLevel.Deny)]
+    [InlineData(2, true, ColumnAccessLevel.Deny)]
+    [InlineData(3, true, ColumnAccessLevel.Deny)]
+    [InlineData(1, true, ColumnAccessLevel.Mask)]
+    [InlineData(2, true, ColumnAccessLevel.Mask)]
+    [InlineData(3, true, ColumnAccessLevel.Mask)]
+    [InlineData(1, false, ColumnAccessLevel.Deny)]
+    [InlineData(2, false, ColumnAccessLevel.Deny)]
+    [InlineData(3, false, ColumnAccessLevel.Deny)]
+    [InlineData(1, false, ColumnAccessLevel.Mask)]
+    [InlineData(2, false, ColumnAccessLevel.Mask)]
+    [InlineData(3, false, ColumnAccessLevel.Mask)]
+    public async Task CompositeRelation_AnyKeyPositionMasked_FailsClosed(int position, bool parentSide, ColumnAccessLevel level)
+    {
+        // SEC-REL151-11 / T-REL151-02: a masked or denied key column at any position, on either side, fails the whole relation.
+        var restricted = new Dictionary<string, ColumnAccessLevel> { [(parentSide ? "k" : "p") + position] = level };
+        var fixture = CreateComposite(
+            orderAccess: parentSide ? restricted : null,
+            lineAccess: parentSide ? null : restricted);
+
+        await Should.ThrowAsync<GatewayInvalidQueryException>(() => fixture.ExecuteAsync(new ClaimsPrincipal(), OrdersWithLines(3), null));
+        fixture.Factory.Opened.ShouldBe(0);
+    }
+}

@@ -587,95 +587,151 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task<IReadOnlyList<TableRelation>> GetRelationsForTableAsync(TableIdentifier parentTable, CancellationToken ct = default)
     {
-        var list = new List<TableRelation>();
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"SELECT r.id, r.parent_table_id, r.child_table_id, r.relation_name, r.join_key_parent, r.join_key_child, r.cardinality,
+
+        // One statement: a reader never sees a mixed key set (SEC-REL151-06). Key rows are only reached through the join (SEC-REL151-08).
+        cmd.CommandText = @"SELECT r.id, r.parent_table_id, r.child_table_id, r.relation_name, r.cardinality,
                                    tp.source_name, tp.schema_name, tp.table_name,
-                                   tc.source_name, tc.schema_name, tc.table_name
+                                   tc.source_name, tc.schema_name, tc.table_name,
+                                   k.key_ordinal, k.parent_column, k.child_column
                             FROM TABLE_RELATIONS r
                             JOIN TABLES tp ON r.parent_table_id = tp.id
                             JOIN TABLES tc ON r.child_table_id = tc.id
-                            WHERE LOWER(tp.source_name) = LOWER(@pDomain) AND LOWER(tp.schema_name) = LOWER(@pSchema) AND LOWER(tp.table_name) = LOWER(@pTable)";
+                            LEFT JOIN TABLE_RELATION_KEYS k ON k.relation_id = r.id
+                            WHERE LOWER(tp.source_name) = LOWER(@pDomain) AND LOWER(tp.schema_name) = LOWER(@pSchema) AND LOWER(tp.table_name) = LOWER(@pTable)
+                            ORDER BY r.id, k.key_ordinal";
         cmd.Parameters.AddWithValue("@pDomain", parentTable.Domain);
         cmd.Parameters.AddWithValue("@pSchema", parentTable.Schema);
         cmd.Parameters.AddWithValue("@pTable", parentTable.TableName);
 
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        var rows = new List<RelationRowData>();
+        await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
-            var pId = new TableIdentifier(reader.GetString(7), reader.GetString(8), reader.GetString(9));
-            var cId = new TableIdentifier(reader.GetString(10), reader.GetString(11), reader.GetString(12));
-            var cardStr = reader.GetString(6);
-            var card = Enum.TryParse<RelationCardinality>(cardStr, true, out var parsedCard) ? parsedCard : RelationCardinality.OneToMany;
-
-            list.Add(new TableRelation
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                Id = Guid.Parse(reader.GetString(0)),
-                ParentTableId = Guid.Parse(reader.GetString(1)),
-                ParentTableIdentifier = pId,
-                ChildTableId = Guid.Parse(reader.GetString(2)),
-                ChildTableIdentifier = cId,
-                RelationName = reader.GetString(3),
-                JoinKeyParent = reader.GetString(4),
-                JoinKeyChild = reader.GetString(5),
-                Cardinality = card
-            });
+                rows.Add(new RelationRowData(
+                    reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4),
+                    new TableIdentifier(reader.GetString(5), reader.GetString(6), reader.GetString(7)),
+                    new TableIdentifier(reader.GetString(8), reader.GetString(9), reader.GetString(10)),
+                    reader.IsDBNull(11) ? null : reader.GetInt32(11),
+                    reader.IsDBNull(12) ? null : reader.GetString(12),
+                    reader.IsDBNull(13) ? null : reader.GetString(13)));
+            }
         }
 
-        return list;
+        return RelationRowAssembler.Assemble(rows, _logger);
     }
 
-    public async Task CreateRelationAsync(TableRelation relation, CancellationToken ct = default)
+    public async Task<RelationWriteResult> CreateRelationAsync(TableRelation relation, CancellationToken ct = default)
     {
+        // Rule check before any connection is opened (SEC-REL151-03).
+        RelationWriteSupport.ValidateKeysOrThrow(relation);
+
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        // One connection, one explicit transaction; disposing it uncommitted (failure or cancellation) rolls back all rows (SEC-REL151-06).
+        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
 
-        string? parentTableId = null;
-        string? childTableId = null;
+        var parentTableId = await ResolveActiveTableIdAsync(conn, tx, relation.RelationName, relation.ParentTableIdentifier, ct).ConfigureAwait(false);
+        var childTableId = await ResolveActiveTableIdAsync(conn, tx, relation.RelationName, relation.ChildTableIdentifier, ct).ConfigureAwait(false);
+        var parentKeys = RelationWriteSupport.Canonicalize(relation.RelationName, "parent", relation.JoinKeysParent, await LoadColumnNamesAsync(conn, tx, parentTableId, ct).ConfigureAwait(false));
+        var childKeys = RelationWriteSupport.Canonicalize(relation.RelationName, "child", relation.JoinKeysChild, await LoadColumnNamesAsync(conn, tx, childTableId, ct).ConfigureAwait(false));
 
+        string storedId;
+        bool created;
+        // Natural-key upsert: only discovery-owned columns are in the update list (I-18 keeps allow_cross_data_source out of it).
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT id FROM TABLES WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table) LIMIT 1";
-            cmd.Parameters.AddWithValue("@domain", relation.ParentTableIdentifier.Domain);
-            cmd.Parameters.AddWithValue("@schema", relation.ParentTableIdentifier.Schema);
-            cmd.Parameters.AddWithValue("@table", relation.ParentTableIdentifier.TableName);
-            parentTableId = (await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false))?.ToString();
-        }
-
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = "SELECT id FROM TABLES WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table) LIMIT 1";
-            cmd.Parameters.AddWithValue("@domain", relation.ChildTableIdentifier.Domain);
-            cmd.Parameters.AddWithValue("@schema", relation.ChildTableIdentifier.Schema);
-            cmd.Parameters.AddWithValue("@table", relation.ChildTableIdentifier.TableName);
-            childTableId = (await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false))?.ToString();
-        }
-
-        if (parentTableId == null || childTableId == null)
-        {
-            throw new InvalidOperationException($"Cannot create relation '{relation.RelationName}': One or both tables do not exist in the catalog.");
-        }
-
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = @"INSERT INTO TABLE_RELATIONS (id, parent_table_id, child_table_id, relation_name, join_key_parent, join_key_child, cardinality)
-                                VALUES (@id, @pId, @cId, @relName, @jkp, @jkc, @card)
-                                ON CONFLICT (id) DO UPDATE SET
-                                    parent_table_id = EXCLUDED.parent_table_id,
-                                    child_table_id = EXCLUDED.child_table_id,
-                                    relation_name = EXCLUDED.relation_name,
-                                    join_key_parent = EXCLUDED.join_key_parent,
-                                    join_key_child = EXCLUDED.join_key_child,
-                                    cardinality = EXCLUDED.cardinality";
+            cmd.Transaction = tx;
+            cmd.CommandText = @"INSERT INTO TABLE_RELATIONS (id, parent_table_id, child_table_id, relation_name, cardinality)
+                                VALUES (@id, @pId, @cId, @relName, @card)
+                                ON CONFLICT (parent_table_id, child_table_id, relation_name) DO UPDATE SET cardinality = EXCLUDED.cardinality
+                                RETURNING id, (xmax = 0) AS inserted";
             cmd.Parameters.AddWithValue("@id", relation.Id.ToString());
             cmd.Parameters.AddWithValue("@pId", parentTableId);
             cmd.Parameters.AddWithValue("@cId", childTableId);
             cmd.Parameters.AddWithValue("@relName", relation.RelationName);
-            cmd.Parameters.AddWithValue("@jkp", relation.JoinKeyParent);
-            cmd.Parameters.AddWithValue("@jkc", relation.JoinKeyChild);
             cmd.Parameters.AddWithValue("@card", relation.Cardinality.ToString());
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            await reader.ReadAsync(ct).ConfigureAwait(false);
+            storedId = reader.GetString(0);
+            created = reader.GetBoolean(1);
+        }
+
+        // The upsert holds the relation row (row lock / HOLDLOCK range), so the stored pairs read here are consistent with the replace below.
+        var stored = new List<(string Parent, string Child)>();
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = "SELECT parent_column, child_column FROM TABLE_RELATION_KEYS WHERE relation_id = @id ORDER BY key_ordinal";
+            cmd.Parameters.AddWithValue("@id", storedId);
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                stored.Add((reader.GetString(0), reader.GetString(1)));
+            }
+        }
+
+        var keysChanged = !created && !RelationWriteSupport.SamePairs(stored, parentKeys, childKeys);
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = "DELETE FROM TABLE_RELATION_KEYS WHERE relation_id = @id";
+            cmd.Parameters.AddWithValue("@id", storedId);
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
+
+        for (var i = 0; i < parentKeys.Count; i++)
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = "INSERT INTO TABLE_RELATION_KEYS (relation_id, key_ordinal, parent_column, child_column) VALUES (@id, @ord, @pc, @cc)";
+            cmd.Parameters.AddWithValue("@id", storedId);
+            cmd.Parameters.AddWithValue("@ord", i + 1);
+            cmd.Parameters.AddWithValue("@pc", parentKeys[i]);
+            cmd.Parameters.AddWithValue("@cc", childKeys[i]);
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        ct.ThrowIfCancellationRequested();
+        await tx.CommitAsync(ct).ConfigureAwait(false);
+        return new RelationWriteResult(Guid.Parse(storedId), created, keysChanged);
+    }
+
+    /// <summary>Resolves an active table id from its identifier: zero or several matches throw (SEC-REL151-07, no LIMIT 1).</summary>
+    private static async Task<string> ResolveActiveTableIdAsync(NpgsqlConnection conn, NpgsqlTransaction tx, string relationName, TableIdentifier table, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SELECT id FROM TABLES WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table) AND is_active = 1";
+        cmd.Parameters.AddWithValue("@domain", table.Domain);
+        cmd.Parameters.AddWithValue("@schema", table.Schema);
+        cmd.Parameters.AddWithValue("@table", table.TableName);
+        var ids = new List<string>(2);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            ids.Add(reader.GetString(0));
+        }
+
+        return ids.Count == 1 ? ids[0] : throw RelationWriteSupport.TableNotResolved(relationName, table, ids.Count);
+    }
+
+    private static async Task<List<string>> LoadColumnNamesAsync(NpgsqlConnection conn, NpgsqlTransaction tx, string tableId, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SELECT column_name FROM TABLE_COLUMNS WHERE table_id = @t";
+        cmd.Parameters.AddWithValue("@t", tableId);
+        var names = new List<string>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            names.Add(reader.GetString(0));
+        }
+
+        return names;
     }
 
     public async Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default)

@@ -27,6 +27,9 @@ public sealed record PolicyLintInput(
     IReadOnlyList<CasbinLintRule> CasbinRules)
 {
     public IReadOnlyList<string> AdditionalAllowedFunctions { get; init; } = [];
+
+    /// <summary>The active caller attribute registry (REQ-GOV-129); null when the feature is off: a placeholder is then a finding.</summary>
+    public Autheris.Application.Identity.Attributes.CallerAttributeSnapshot? CallerAttributes { get; init; }
 }
 
 /// <summary>One unparsable predicate. Carries ids and a stable code only: never predicate text or parameter values.</summary>

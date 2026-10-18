@@ -107,6 +107,7 @@ public sealed partial class VirtualFilterAdministrationService
     private readonly VirtualFilterFederationOptions _federation;
     private readonly IVirtualFilterSnapshotProvider? _snapshots;
     private readonly ITableMetadataRepository? _catalog;
+    private readonly Autheris.Application.Identity.Attributes.ICallerAttributeRegistry? _callerAttributes;
     private readonly SqlDataSourceOptions? _dataSources;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<TenantId, List<(DateTimeOffset Timestamp, int Count)>> _removalHistory = new();
 
@@ -115,8 +116,10 @@ public sealed partial class VirtualFilterAdministrationService
         IAuditLogRepository audit,
         IOptions<GatewayOptions>? options = null,
         IVirtualFilterSnapshotProvider? snapshots = null,
-        ITableMetadataRepository? catalog = null)
+        ITableMetadataRepository? catalog = null,
+        Autheris.Application.Identity.Attributes.ICallerAttributeRegistry? callerAttributes = null)
     {
+        _callerAttributes = options?.Value?.CallerAttributes?.Enabled == true ? callerAttributes : null;
         _catalog = catalog;
         _dataSources = options?.Value?.DataSources;
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));

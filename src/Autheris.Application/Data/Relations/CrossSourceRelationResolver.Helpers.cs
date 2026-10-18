@@ -245,14 +245,8 @@ public sealed partial class CrossSourceRelationResolver
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(childDecision.CombinedRowFilterSql) &&
-            !StreamingRowFilterAstEvaluator.Matches(row, childDecision.CombinedRowFilterSql))
-        {
-            return false;
-        }
-
-        if (!string.IsNullOrWhiteSpace(childDecision.MandatoryRowPredicateSql) &&
-            !StreamingRowFilterAstEvaluator.Matches(row, childDecision.MandatoryRowPredicateSql))
+        // REQ-GOV-129 (A-8): typed policy first (bound caller attributes), text only for a decision without one.
+        if (!InMemoryRowFilterEvaluator.RowPassesDecision(row, childDecision, childMetadata))
         {
             return false;
         }

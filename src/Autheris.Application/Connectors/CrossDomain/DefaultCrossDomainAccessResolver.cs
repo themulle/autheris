@@ -50,7 +50,8 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
             _options,
             mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
             rowPolicyFactory: typedPolicies?.RowPolicies,
-            maskPolicyFactory: typedPolicies?.MaskPolicies);
+            maskPolicyFactory: typedPolicies?.MaskPolicies,
+            callerAttributes: typedPolicies?.CallerAttributes);
     }
 
     public Task<TableAccessDecision> ResolveAccessAsync(

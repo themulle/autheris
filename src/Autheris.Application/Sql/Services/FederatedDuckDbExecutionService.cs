@@ -127,7 +127,8 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             _accessProfileRepository,
             _memoryCache,
             rowPolicyFactory: _typedPolicies?.RowPolicies,
-            maskPolicyFactory: _typedPolicies?.MaskPolicies);
+            maskPolicyFactory: _typedPolicies?.MaskPolicies,
+            callerAttributes: _typedPolicies?.CallerAttributes);
 
     private IPAddress? ResolveClientIp(ClaimsPrincipal user)
     {
@@ -456,7 +457,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
                     new Autheris.Application.VirtualFilters.MandatoryFilterQuery(userSid, groupSids, roles, tenantId, resolved.Metadata),
                     ct).ConfigureAwait(false)
                 : await AccessPolicy().DecideAsync(
-                    new TableAccessQuery(userSid, tenantId, groupSids, roles, resolved.Metadata, user.Claims, colList, RebacEnforcement.QueryPaths, clientIp, actionAttribute),
+                    new TableAccessQuery(userSid, tenantId, groupSids, roles, resolved.Metadata, user.Claims, colList, RebacEnforcement.QueryPaths, clientIp, actionAttribute, Principal: user),
                     ct).ConfigureAwait(false);
 
             if (!decision.IsAllowed)
@@ -505,6 +506,12 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         if (mandatory.IsDenied)
         {
             return TableAccessDecision.Denied(decision.Table, mandatory.DenyReason ?? "Denied by virtual filters.");
+        }
+
+        if (mandatory.CallerAttributesTextConstant)
+        {
+            // REQ-GOV-129 (BC-129-05, F-4): this consent bypass path is text only; the text of a caller attribute filter is a constant, so the table is denied.
+            return TableAccessDecision.Denied(decision.Table, "Denied by virtual filters.");
         }
 
         return mandatory.PredicateSql != null

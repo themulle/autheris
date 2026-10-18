@@ -352,10 +352,10 @@ p, auditor, *, {table}, read, true, allow
         public Task<IReadOnlyList<TableRelation>> GetRelationsForTableAsync(TableIdentifier parentTable, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<TableRelation>>(_relations.Where(r => r.ParentTableIdentifier.Equals(parentTable)).ToList());
 
-        public Task CreateRelationAsync(TableRelation relation, CancellationToken ct = default)
+        public Task<RelationWriteResult> CreateRelationAsync(TableRelation relation, CancellationToken ct = default)
         {
             _relations.Add(relation);
-            return Task.CompletedTask;
+            return Task.FromResult(new RelationWriteResult(relation.Id, true, false));
         }
     }
 }

@@ -186,9 +186,10 @@ public sealed class TypedPolicySourcesWiringTests
         service?.GetType().GetFields(BindingFlags.Instance | BindingFlags.NonPublic).Where(f => f.FieldType == type).Select(f => f.GetValue(service)) ?? [];
 
     [Fact]
-    public void Registration_ProvidesTheTypedPolicySourcesOnce()
+    public async Task Registration_ProvidesTheTypedPolicySourcesOnce()
     {
-        using var provider = BuildProvider();
+        // The sources hold the caller attribute resolver (#129), whose registry reaches the governance repository: dispose asynchronously.
+        await using var provider = BuildProvider();
 
         provider.GetRequiredService<TypedPolicySources>().ShouldBeSameAs(provider.GetRequiredService<TypedPolicySources>());
         provider.GetRequiredService<ColumnMaskPolicyFactory>().ShouldNotBeNull();

@@ -335,16 +335,28 @@ public partial class SqliteGovernanceRepository
                 }
             }
 
-            // Relate finance_table_1 -> finance_items
+            // Relate finance_table_1 -> finance_items (issue #151: ordered key pairs live in TABLE_RELATION_KEYS)
+            var relId = Guid.NewGuid().ToString();
             using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = trans;
-                cmd.CommandText = @"INSERT OR IGNORE INTO TABLE_RELATIONS (id, parent_table_id, child_table_id, relation_name, join_key_parent, join_key_child, cardinality)
-                                    SELECT @relId, id, @childId, 'items', 'id', 'parent_id', 'OneToMany'
+                cmd.CommandText = @"INSERT OR IGNORE INTO TABLE_RELATIONS (id, parent_table_id, child_table_id, relation_name, cardinality)
+                                    SELECT @relId, id, @childId, 'items', 'OneToMany'
                                     FROM TABLES
                                     WHERE schema_name = 'dbo' AND table_name = 'finance_table_1';";
-                cmd.Parameters.AddWithValue("@relId", Guid.NewGuid().ToString());
+                cmd.Parameters.AddWithValue("@relId", relId);
                 cmd.Parameters.AddWithValue("@childId", childTableId);
+                cmd.ExecuteNonQuery();
+            }
+
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = trans;
+                cmd.CommandText = @"INSERT OR IGNORE INTO TABLE_RELATION_KEYS (relation_id, key_ordinal, parent_column, child_column)
+                                    SELECT r.id, 1, 'id', 'parent_id'
+                                    FROM TABLE_RELATIONS r
+                                    JOIN TABLES tp ON tp.id = r.parent_table_id
+                                    WHERE r.relation_name = 'items' AND tp.schema_name = 'dbo' AND tp.table_name = 'finance_table_1';";
                 cmd.ExecuteNonQuery();
             }
 
