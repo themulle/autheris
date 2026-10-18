@@ -984,4 +984,258 @@ public class ProcedureLimitsInc2Tests
         new StreamReader(http.Response.Body).ReadToEnd()
             .ShouldBe("{\"error\":\"The crane is locked.\",\"code\":\"CRANE_LOCKED\",\"traceId\":\"abc123\"}");
     }
+
+    // ---------- WP-E: ddl_hash requirement for declared mode ----------
+
+    private sealed class CapturingLogger<T> : Microsoft.Extensions.Logging.ILogger<T>
+    {
+        public List<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Entries.Add((logLevel, formatter(state, exception)));
+    }
+
+    private const string DeclaredYamlNoHash = "name: x\nprocedure: api.usp_X\nvalidation: declared\nresult_table: md.crane\noutputs:\n  - {name: a, type: int}\n";
+    private const string DeclaredYamlWithHash = DeclaredYamlNoHash + "integrity:\n  ddl_hash: \"sha256:abc12345\"\n";
+    private const string CatalogYamlNoHash = "name: x\nprocedure: api.usp_X\nresult_table: md.crane\n";
+
+    private static (ProcedureDefinitionLoader Loader, InMemoryProcedureRegistry Registry, CapturingLogger<ProcedureDefinitionLoader> Log, string Dir) CreateDdlLoader(
+        string? environmentName, bool? requireDdlHash = null)
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "autheris-proc-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var options = Options.Create(new GatewayOptions
+        {
+            SqlEndpoints = new SqlEndpointsOptions
+            {
+                Procedures = new ProcedureEndpointsOptions
+                {
+                    Enabled = true,
+                    Directory = dir,
+                    AllowedSchemas = ["api"],
+                    EnableHotReload = false,
+                    AllowDeclaredValidation = true,
+                    RequireDdlHashForDeclared = requireDdlHash
+                }
+            }
+        });
+        IHostEnvironment? env = null;
+        if (environmentName != null)
+        {
+            env = Substitute.For<IHostEnvironment>();
+            env.EnvironmentName.Returns(environmentName);
+        }
+
+        var registry = new InMemoryProcedureRegistry();
+        var log = new CapturingLogger<ProcedureDefinitionLoader>();
+        return (new ProcedureDefinitionLoader(registry, options, env, log), registry, log, dir);
+    }
+
+    [Fact]
+    public void Declared_NoDdlHash_LogsWarningNamingProcedure()
+    {
+        var (loader, registry, log, dir) = CreateDdlLoader("Development");
+        try
+        {
+            string file = Path.Combine(dir, "x.proc.yaml");
+            File.WriteAllText(file, DeclaredYamlNoHash);
+
+            loader.TryLoadFile(file, dir).ShouldBeTrue();
+
+            registry.GetAll().Count.ShouldBe(1);
+            log.Entries.Count(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains("Procedure 'x' uses validation: declared without integrity.ddl_hash")).ShouldBe(1);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void Declared_NoDdlHash_RequireTrue_NotRegistered()
+    {
+        var (loader, registry, _, dir) = CreateDdlLoader("Development", requireDdlHash: true);
+        try
+        {
+            string file = Path.Combine(dir, "x.proc.yaml");
+            File.WriteAllText(file, DeclaredYamlNoHash);
+
+            loader.TryLoadFile(file, dir).ShouldBeFalse();
+
+            registry.GetAll().ShouldBeEmpty();
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void Declared_NoDdlHash_HotReload_WarnsAgain()
+    {
+        var (loader, _, log, dir) = CreateDdlLoader("Development");
+        try
+        {
+            string file = Path.Combine(dir, "x.proc.yaml");
+            File.WriteAllText(file, DeclaredYamlNoHash);
+
+            loader.TryLoadFile(file, dir);
+            loader.TryLoadFile(file, dir);
+
+            log.Entries.Count(e => e.Message.Contains("without integrity.ddl_hash")).ShouldBe(2);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void Catalog_NoDdlHash_NoWarning()
+    {
+        var (loader, registry, log, dir) = CreateDdlLoader("Production", requireDdlHash: true);
+        try
+        {
+            string file = Path.Combine(dir, "x.proc.yaml");
+            File.WriteAllText(file, CatalogYamlNoHash);
+
+            loader.TryLoadFile(file, dir).ShouldBeTrue();
+
+            registry.GetAll().Count.ShouldBe(1);
+            log.Entries.ShouldNotContain(e => e.Message.Contains("ddl_hash"));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void Declared_WithDdlHash_RequireTrue_Registers()
+    {
+        var (loader, registry, _, dir) = CreateDdlLoader("Production");
+        try
+        {
+            string file = Path.Combine(dir, "x.proc.yaml");
+            File.WriteAllText(file, DeclaredYamlWithHash);
+
+            loader.TryLoadFile(file, dir).ShouldBeTrue();
+
+            registry.GetAll().Count.ShouldBe(1);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void RequireDdlHash_Null_TrueOutsideDevelopment_FalseInDevelopment()
+    {
+        var dev = CreateDdlLoader("Development");
+        var prod = CreateDdlLoader("Production");
+        try
+        {
+            File.WriteAllText(Path.Combine(dev.Dir, "x.proc.yaml"), DeclaredYamlNoHash);
+            File.WriteAllText(Path.Combine(prod.Dir, "x.proc.yaml"), DeclaredYamlNoHash);
+
+            dev.Loader.TryLoadFile(Path.Combine(dev.Dir, "x.proc.yaml"), dev.Dir).ShouldBeTrue();
+            prod.Loader.TryLoadFile(Path.Combine(prod.Dir, "x.proc.yaml"), prod.Dir).ShouldBeFalse();
+        }
+        finally
+        {
+            Directory.Delete(dev.Dir, true);
+            Directory.Delete(prod.Dir, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("Staging")]
+    [InlineData("Production")]
+    [InlineData("QA-Custom")]
+    [InlineData("")]
+    [InlineData(null)]
+    [Trait("Category", "Security")]
+    public void T_PROC152I2_16_DdlHash_Required_ForStagingProductionAndUnknownEnvironment_NotDevelopment(string? environmentName)
+    {
+        var (loader, registry, _, dir) = CreateDdlLoader(environmentName);
+        try
+        {
+            string file = Path.Combine(dir, "x.proc.yaml");
+            File.WriteAllText(file, DeclaredYamlNoHash);
+
+            loader.TryLoadFile(file, dir).ShouldBeFalse();
+
+            registry.GetAll().ShouldBeEmpty();
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void T_PROC152I2_16_Declared_NoHash_HotReload_Unregisters_PreviousVersion()
+    {
+        var (loader, registry, _, dir) = CreateDdlLoader("Production");
+        try
+        {
+            string file = Path.Combine(dir, "x.proc.yaml");
+            File.WriteAllText(file, DeclaredYamlWithHash);
+            loader.TryLoadFile(file, dir).ShouldBeTrue();
+            registry.GetAll().Count.ShouldBe(1);
+
+            File.WriteAllText(file, DeclaredYamlNoHash);
+            loader.TryLoadFile(file, dir).ShouldBeFalse();
+
+            registry.GetAll().ShouldBeEmpty();
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void T_PROC152I2_16_Explicit_RequireFalse_Production_LogsStartupWarning()
+    {
+        var (loader, _, log, dir) = CreateDdlLoader("Production", requireDdlHash: false);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "x.proc.yaml"), DeclaredYamlNoHash);
+
+            loader.LoadFromDirectory();
+
+            var startup = log.Entries.Where(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains("RequireDdlHashForDeclared")).ToList();
+            startup.Count.ShouldBe(1);
+            startup[0].Message.ShouldNotContain("x.proc");
+            startup[0].Message.ShouldNotContain("api.usp_X");
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void RequireDdlHash_ExplicitFalse_Development_NoStartupWarning()
+    {
+        var (loader, _, log, dir) = CreateDdlLoader("Development", requireDdlHash: false);
+        try
+        {
+            loader.LoadFromDirectory();
+
+            log.Entries.ShouldNotContain(e => e.Message.Contains("RequireDdlHashForDeclared"));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
 }

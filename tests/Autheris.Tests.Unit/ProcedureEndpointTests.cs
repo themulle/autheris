@@ -637,7 +637,8 @@ public class ProcedureEndpointTests
                     AllowedSchemas = ["api"],
                     AllowedDataSources = ["telemetry_db"],
                     EnableHotReload = false,
-                    AllowDeclaredValidation = true
+                    AllowDeclaredValidation = true,
+                    RequireDdlHashForDeclared = false // fixture declares no ddl_hash (INC-2 D-8)
                 }
             }
         });
