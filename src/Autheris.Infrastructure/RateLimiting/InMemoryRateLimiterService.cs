@@ -345,4 +345,37 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
             }
         }
     }
+
+    public Task<CostQuotaResult> ReserveCostQuotaAsync(string key, int reservedCost, ClientQuotaPolicy policy, CancellationToken ct = default)
+        => CheckCostQuotaAsync(key, reservedCost, policy, ct);
+
+    public Task<CostQuotaResult> SettleCostQuotaAsync(string key, int reservedCost, int actualCost, ClientQuotaPolicy policy, CancellationToken ct = default)
+    {
+        var currentTimestamp = Stopwatch.GetTimestamp();
+        if (!_costBuckets.TryGetValue(key, out var bucket))
+        {
+            return Task.FromResult(new CostQuotaResult(true, policy.MaxTokensCapacity, 0));
+        }
+
+        lock (bucket.Lock)
+        {
+            var elapsedSeconds = Stopwatch.GetElapsedTime(bucket.LastRefillTimestamp, currentTimestamp).TotalSeconds;
+            bucket.Tokens = Math.Min(policy.MaxTokensCapacity, bucket.Tokens + (elapsedSeconds * policy.TokenRefillRatePerSecond));
+            bucket.LastRefillTimestamp = currentTimestamp;
+
+            var delta = reservedCost - actualCost;
+            if (delta > 0)
+            {
+                // Refund unused tokens up to capacity
+                bucket.Tokens = Math.Min(policy.MaxTokensCapacity, bucket.Tokens + delta);
+            }
+            else if (delta < 0)
+            {
+                // Additional debit clamped at 0
+                bucket.Tokens = Math.Max(0, bucket.Tokens + delta);
+            }
+
+            return Task.FromResult(new CostQuotaResult(true, (int)Math.Floor(bucket.Tokens), 0));
+        }
+    }
 }

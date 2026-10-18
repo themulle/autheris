@@ -67,6 +67,7 @@ public sealed record Table
     public string? RlsExpression { get; init; }
     public int? MinGroupSize { get; init; }
     public SmallGroupStrategy? SmallGroupStrategy { get; init; }
+    public IReadOnlyList<string> RequiredFilterColumns { get; init; } = Array.Empty<string>();
 
     /// <summary>Rank of a sensitivity class; unknown classes rank like HIGH (fail-closed). Empty means NORMAL.</summary>
     public static int SensitivityRank(string? sensitivity)
@@ -193,6 +194,7 @@ public sealed record TableMetadata
     public SmallGroupStrategy? EffectiveSmallGroupStrategy => SmallGroupStrategy ?? Table.SmallGroupStrategy;
 
     public bool IsCompositePrimaryKey => PrimaryKeyColumns.Count > 1;
+    public IReadOnlyList<string> RequiredFilterColumns => Table.RequiredFilterColumns;
 
     /// <summary>
     /// D-5: the record's generated ToString() printed every property, including masking rules with their HMAC key ids.
