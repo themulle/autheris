@@ -152,6 +152,10 @@ public static class GatewayServiceCollectionExtensions
                 sp.GetService<Microsoft.Extensions.Logging.ILogger<CrossSourceOptionsValidator>>()));
         services.AddSingleton<IValidateOptions<GatewayOptions>>(_ => new ReadPathSwitchOptionsValidator(configuration));
         services.AddSingleton<IValidateOptions<GatewayOptions>>(sp =>
+            new CoLocationOptionsValidator(
+                configuration,
+                sp.GetService<Microsoft.Extensions.Logging.ILogger<CoLocationOptionsValidator>>()));
+        services.AddSingleton<IValidateOptions<GatewayOptions>>(sp =>
             new Autheris.Api.Extensions.DependencyInjection.GatewayEmptyListConfigurationValidator(
                 configuration,
                 sp.GetService<Microsoft.Extensions.Logging.ILogger<Autheris.Api.Extensions.DependencyInjection.GatewayEmptyListConfigurationValidator>>()));

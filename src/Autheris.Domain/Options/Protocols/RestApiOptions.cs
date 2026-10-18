@@ -136,6 +136,9 @@ public sealed class CrossSourceOptions
 
     /// <summary>Issue #124: Governed dynamic key-set filters in cross-source WebSQL joins.</summary>
     public DynamicKeySetOptions DynamicKeySet { get; init; } = new();
+
+    /// <summary>Issue #132 (PLAN-DATA-132): Co-located SQL Server data source execution options.</summary>
+    public CoLocationOptions CoLocation { get; init; } = new();
 }
 
 public sealed class DynamicKeySetOptions
@@ -144,6 +147,11 @@ public sealed class DynamicKeySetOptions
     public int MaxKeySetKeys { get; init; } = 2000;
     public int MaxKeySetBatches { get; init; } = 10;
     public int MaxKeySetBatchSize { get; init; } = 500;
+}
+
+public sealed class CoLocationOptions
+{
+    public bool Enabled { get; init; } = false;
 }
 
 public sealed class PredicatePushdownOptions

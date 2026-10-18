@@ -28,6 +28,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.WebSqlQueryDenied] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.WebSqlCrossSourceQuery] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.WebSqlCrossSourceSourceRead] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.WebSqlCrossSourceSubtreeRead] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.WebSqlDmlExecuted] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.WebSqlDmlRejected] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.WebSqlDmlFailed] = AuditFailurePolicy.FailClosed,

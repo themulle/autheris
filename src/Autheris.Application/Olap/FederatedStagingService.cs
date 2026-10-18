@@ -492,6 +492,62 @@ public sealed class FederatedStagingService : IFederatedStagingService
             stagedByStagingName[req.StagingName] = stagedSource;
         }
 
+        // Issue #132 (PLAN-DATA-132, WP-132-4, SEC-DATA132-07): Dual-tier co-located statement audit records
+        var connectionMap = _gatewayOptions.Value.DataSources?.Connections;
+        if (connectionMap != null)
+        {
+            var coLocatedByGroup = tables
+                .Where(t =>
+                {
+                    var src = t.Metadata.Table.SourceName ?? t.Metadata.Identifier.Domain;
+                    return connectionMap.TryGetValue(src, out var conn) &&
+                           !string.IsNullOrWhiteSpace(conn?.CoLocationGroup) &&
+                           string.Equals(conn.Provider, "SqlServer", StringComparison.OrdinalIgnoreCase);
+                })
+                .GroupBy(t =>
+                {
+                    var src = t.Metadata.Table.SourceName ?? t.Metadata.Identifier.Domain;
+                    return connectionMap[src].CoLocationGroup!.Trim();
+                }, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var grp in coLocatedByGroup)
+            {
+                var memberList = grp.ToList();
+                if (memberList.Count >= 2)
+                {
+                    try
+                    {
+                        var dbs = memberList.Select(m => m.Metadata.Table.PhysicalDatabaseName ?? m.Metadata.Identifier.Domain).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                        var tableNames = memberList.Select(m => m.Metadata.Identifier.ToString()).ToList();
+                        var subtreeAuditDetails = new Dictionary<string, object?>
+                        {
+                            ["colocated"] = true,
+                            ["coLocationGroup"] = grp.Key,
+                            ["databases"] = dbs,
+                            ["tables"] = tableNames,
+                            ["rowCount"] = totalStagedRows
+                        };
+
+                        await _auditRepo.RecordAuditEventAsync(new AuditLogEntry
+                        {
+                            TenantId = tenantId.Value,
+                            EventType = AuditEventTypes.WebSqlCrossSourceSubtreeRead,
+                            ActorSid = actorSid,
+                            TargetTable = string.Join(",", tableNames),
+                            Decision = "ALLOW",
+                            TraceId = budget.AuditCorrelationId ?? Guid.NewGuid().ToString("N"),
+                            DetailsJson = JsonSerializer.Serialize(subtreeAuditDetails)
+                        }, ct).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        _logger.Error(ex, "Federated staging subtree audit write failed for group {Group}; failing closed.", grp.Key);
+                        throw new InvalidOperationException($"Subtree audit logging failed for group '{grp.Key}'; federated staging aborted.", ex);
+                    }
+                }
+            }
+        }
+
         return stagedSources;
     }
 

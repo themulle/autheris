@@ -51,6 +51,9 @@ public static class GovernedSqlErrorCodes
     public const string FunctionUnsupportedDialect = "SQL_FUNCTION_UNSUPPORTED_DIALECT";
     public const string TimeZoneUnavailable = "SQL_TIMEZONE_UNAVAILABLE";
 
+    // Issue #132 (PLAN-DATA-132, SEC-DATA132-01): AST rejection of client three-part/four-part physical database names.
+    public const string InvalidIdentifierQualification = "INVALID_IDENTIFIER_QUALIFICATION";
+
     /// <summary>The fixed, value-free message of a code. It never carries driver text, values or object names.</summary>
     public static string FixedMessage(string code) => code switch
     {
@@ -85,6 +88,7 @@ public static class GovernedSqlErrorCodes
         FunctionUnsupportedDialect => "The function is not supported for this data source dialect.",
         TimeZoneUnavailable => "Time zone conversion is temporarily unavailable.",
         RequiredFilterColumnMissing => "A required filter column was not constrained by the query or an active row policy.",
+        InvalidIdentifierQualification => "Database-qualified or server-qualified object names are not permitted.",
         _ => "The statement could not be executed."
     };
 }

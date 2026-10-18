@@ -39,6 +39,17 @@ public sealed class DataSourceConnectionOptions
     [Range(1, 300)] public int CommandTimeoutSeconds { get; init; } = 30;
 
     /// <summary>
+    /// Issue #132 (PLAN-DATA-132, SEC-DATA132-06): Administrative co-location group identifier for SQL Server data sources
+    /// hosted on the same physical database instance with symmetric credentials.
+    /// </summary>
+    public string? CoLocationGroup { get; init; }
+
+    /// <summary>
+    /// Issue #132: Optional explicit physical server name or host for identity verification (e.g. @@SERVERNAME).
+    /// </summary>
+    public string? ServerName { get; init; }
+
+    /// <summary>
     /// SQL Server only: every session of this data source runs <c>SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED</c>
     /// ("dirty read"). Reads then neither wait for nor block writers (no shared locks), at the price of seeing uncommitted,
     /// possibly rolled back rows and occasionally missing or duplicating rows during page splits. Meant for analytical reads

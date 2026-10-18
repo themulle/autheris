@@ -10,6 +10,8 @@ using System.Security;
 /// </summary>
 public class WebSqlPolicyException : SecurityException
 {
+    public string? Code { get; init; }
+
     public WebSqlPolicyException()
         : base("The SQL statement was rejected by the WebSQL security policy.")
     {
@@ -20,9 +22,21 @@ public class WebSqlPolicyException : SecurityException
     {
     }
 
+    public WebSqlPolicyException(string message, string code)
+        : base(message)
+    {
+        Code = code;
+    }
+
     public WebSqlPolicyException(string message, Exception innerException)
         : base(message, innerException)
     {
+    }
+
+    public WebSqlPolicyException(string message, string code, Exception innerException)
+        : base(message, innerException)
+    {
+        Code = code;
     }
 }
 

@@ -162,6 +162,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         var populatedReferencedTables = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var federatedTables = new List<AnalyzedFederatedTable>();
         var keySetPushdowns = new List<AnalyzedKeySetPushdown>();
+        var coLocatedGroups = new List<CoLocatedGroupPlan>();
 
         var hasRowFilters = false;
         var hasMandatoryVirtualFilters = false;
@@ -214,7 +215,8 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     ref hiddenMissingDatasetsCount,
                     ref totalEstimatedCost,
                     federatedTables,
-                    keySetPushdowns);
+                    keySetPushdowns,
+                    coLocatedGroups);
             }
             else if (item.SqlEndpoint != null)
             {
@@ -255,7 +257,8 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     ref hiddenMissingDatasetsCount,
                     ref totalEstimatedCost,
                     federatedTables,
-                    keySetPushdowns);
+                    keySetPushdowns,
+                    coLocatedGroups);
             }
             else if (item.StoredProcedure != null)
             {
@@ -298,7 +301,8 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                         ref hiddenMissingDatasetsCount,
                         ref totalEstimatedCost,
                         federatedTables,
-                        keySetPushdowns);
+                    keySetPushdowns,
+                    coLocatedGroups);
                 }
                 else
                 {
@@ -331,7 +335,8 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                         ref hiddenMissingDatasetsCount,
                         ref totalEstimatedCost,
                         federatedTables,
-                        keySetPushdowns);
+                    keySetPushdowns,
+                    coLocatedGroups);
                 }
             }
             else if (!string.IsNullOrWhiteSpace(item.SqlQuery))
@@ -364,7 +369,8 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     ref hiddenMissingDatasetsCount,
                     ref totalEstimatedCost,
                     federatedTables,
-                    keySetPushdowns);
+                    keySetPushdowns,
+                    coLocatedGroups);
             }
             else
             {
@@ -442,8 +448,11 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
             }, ct).ConfigureAwait(false);
         }
 
-        var federation = (federatedTables.Count > 0 || keySetPushdowns.Count > 0)
-            ? new QueryFederationAnalysis(federatedTables, keySetPushdowns.Count > 0 ? keySetPushdowns : null)
+        var federation = (federatedTables.Count > 0 || keySetPushdowns.Count > 0 || coLocatedGroups.Count > 0)
+            ? new QueryFederationAnalysis(
+                federatedTables,
+                keySetPushdowns.Count > 0 ? keySetPushdowns : null,
+                coLocatedGroups.Count > 0 ? coLocatedGroups : null)
             : null;
 
         return new QueryAnalysisResult(
