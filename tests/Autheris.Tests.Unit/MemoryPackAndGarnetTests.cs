@@ -51,7 +51,7 @@ public class MemoryPackAndGarnetTests
         deserialized.RowFilterSql.ShouldBe("tenant_id = 42");
 
         // Convert back to TableAccessDecision
-        var restoredDecision = deserialized.ToDecision();
+        var restoredDecision = deserialized.ToDecision(Autheris.Domain.Security.RestrictedScopePolicy.Default.Fingerprint)!;
         restoredDecision.Table.Domain.ShouldBe("sales");
         restoredDecision.Table.Schema.ShouldBe("crm");
         restoredDecision.Table.TableName.ShouldBe("customers");

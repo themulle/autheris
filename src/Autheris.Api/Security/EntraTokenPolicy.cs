@@ -92,12 +92,7 @@ public static class EntraTokenPolicy
     // scp carries the bare scope name; the configuration may use the full form api://app/Agent.Read.
     private static bool IsSameScope(string configured, string tokenScope)
     {
-        var bare = configured.Trim();
-        var slash = bare.LastIndexOf('/');
-        if (slash >= 0 && slash < bare.Length - 1)
-        {
-            bare = bare[(slash + 1)..];
-        }
+        var bare = ScopeNames.ToBareName(configured.Trim());
 
         return string.Equals(bare, tokenScope, StringComparison.OrdinalIgnoreCase);
     }

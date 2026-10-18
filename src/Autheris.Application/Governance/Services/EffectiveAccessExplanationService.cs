@@ -126,6 +126,10 @@ public sealed class EffectiveAccessExplanationService(
         var maskedCols = new List<string>();
         var deniedCols = new List<string>();
 
+        // REQ-GOV-143 (SEC-GOV143-09): only the subject's own decision, only non-Deny columns, no scope name and no rule or consent id.
+        var restrictedScope = decision.ScopeClearance is not null;
+        var scopeClearRequired = restrictedScope ? new List<string>() : null;
+
         foreach (var col in metadata.Columns)
         {
             var level = decision.GetEffectiveColumnAccess(col.ColumnName, metadata);
@@ -136,6 +140,11 @@ public sealed class EffectiveAccessExplanationService(
                     break;
                 case ColumnAccessLevel.Mask:
                     maskedCols.Add(col.ColumnName);
+                    if (scopeClearRequired != null && decision.IsMaskedByScopeRestriction(col.ColumnName, metadata))
+                    {
+                        scopeClearRequired.Add(col.ColumnName);
+                    }
+
                     break;
                 case ColumnAccessLevel.Deny:
                 default:
@@ -188,7 +197,9 @@ public sealed class EffectiveAccessExplanationService(
             deniedCols,
             activeRowFilters,
             description,
-            validTo
+            validTo,
+            restrictedScope,
+            scopeClearRequired
         )
         {
             ConsentDescriptions = descriptions

@@ -167,3 +167,7 @@ Mandatory tests (`[Trait("Category","Security")]`), range T-GOV143-18..21:
 - T-GOV143-20 `UnknownClearance_SurvivesCacheHitAndDecisionCopies`
 - T-GOV143-21 `ArchitectureTest_EveryResolveAccessCaller_PassesClaimsScopesOrUnknown`
 (The addendum's own tests `IcebergTable_RestrictedToken_SensitiveMasked`, `StreamEvent_RestrictedSubscriber_SensitiveMasked`, `StreamDecisionCache_...NeverShare`, `ResolveWithoutClaims_PolicyEnabled_TreatedAsRestricted`, `PrefixedTokenScope_BareRule_DoesNotClear`, `ScopeClear_OnBaseMaskColumn_NotInClearedColumns`, `ClearedColumns_SubsetOfClearLevels` are accepted as covering T-GOV143-02/03/05/04.) Total security test range: T-GOV143-01..21.
+
+## Changelog
+
+- 2026-10-18 Phase 4: WP-143-2 verified after the origin/main merge (#158 INC-1, procedure INC-2); consumers, Iceberg and stream paths (A-1), architecture test and parity test green; no plan drift.

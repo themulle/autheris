@@ -131,7 +131,10 @@ public sealed partial class GovernedAggregationService
             RowPolicy = existing?.RowPolicy,
             MandatoryRowPredicateSql = existing?.MandatoryRowPredicateSql,
             MandatoryRowPolicy = existing?.MandatoryRowPolicy,
-            AppliedVirtualFilters = existing?.AppliedVirtualFilters
+            AppliedVirtualFilters = existing?.AppliedVirtualFilters,
+            // REQ-GOV-143 (SEC-GOV143-07): the rebuilt decision keeps the restriction of the original; without an original every
+            // catalog-sensitive column is Mask above, so there is nothing to carry.
+            ScopeClearance = existing?.ScopeClearance
         };
     }
 

@@ -4,16 +4,28 @@ using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
+using Microsoft.Extensions.Logging;
 
 namespace Autheris.Application.Services;
 
 public sealed class ConsentResolutionService : IConsentResolutionService
 {
     private readonly IRowFilterSqlBuilder _sqlBuilder;
+    private readonly IRestrictedScopePolicy _restrictedScopes;
+    private readonly ILogger<ConsentResolutionService>? _logger;
 
-    public ConsentResolutionService(IRowFilterSqlBuilder? sqlBuilder = null)
+    /// <param name="sqlBuilder">Row filter SQL builder; defaults to <see cref="RowFilterSqlBuilder"/>.</param>
+    /// <param name="restrictedScopes">The restricted scopes (REQ-GOV-143); <c>null</c> = the secure default (<c>Agent.Read</c>), also for parameterless construction.</param>
+    /// <param name="logger">Receives the exception type only when the restriction step fails.</param>
+    public ConsentResolutionService(
+        IRowFilterSqlBuilder? sqlBuilder = null,
+        IRestrictedScopePolicy? restrictedScopes = null,
+        ILogger<ConsentResolutionService>? logger = null)
     {
         _sqlBuilder = sqlBuilder ?? new RowFilterSqlBuilder();
+        _restrictedScopes = restrictedScopes ?? RestrictedScopePolicy.Default;
+        _logger = logger;
     }
 
     public TableAccessDecision ResolveAccess(
@@ -133,8 +145,101 @@ public sealed class ConsentResolutionService : IConsentResolutionService
                 aConsents.Select(static c => c.RowFilters).ToList(),
                 dConsents.Where(static c => c.RowFilters.Count > 0).Select(static c => c.RowFilters).ToList());
 
-        return TableAccessDecision.Allowed(table, columnAccess, rowFilterSql, hasUnconstrainedColumnAllow) with { ConsentFilterRecipe = recipe };
+        var scopeClearance = ComputeScopeClearance(columnAccess, callerScopes, unconstrainedConsents, rowConstrainedGroups);
+
+        return TableAccessDecision.Allowed(table, columnAccess, rowFilterSql, hasUnconstrainedColumnAllow)
+            with { ConsentFilterRecipe = recipe, ScopeClearance = scopeClearance };
     }
+
+    /// <summary>
+    /// REQ-GOV-143 (PLAN-GOV-143 D-5/A-2): <c>null</c> for an unrestricted caller; otherwise the restricted scopes held and the columns for which
+    /// a rule supplies a scope-specific <c>Clear</c> for every held scope (same grouping as rule 3), intersected with the columns whose level in
+    /// the same decision is <c>Clear</c>. Fails closed: any exception yields a clearance with a held marker and no cleared column (SEC-GOV143-01).
+    /// </summary>
+    private RestrictedScopeClearance? ComputeScopeClearance(
+        IReadOnlyDictionary<string, ColumnAccessLevel> columnAccess,
+        IReadOnlySet<string>? callerScopes,
+        IReadOnlyList<Consent> unconstrainedConsents,
+        IReadOnlyList<List<Consent>> rowConstrainedGroups)
+    {
+        try
+        {
+            var held = _restrictedScopes.HeldBy(callerScopes);
+            if (held.Count == 0)
+            {
+                return null;
+            }
+
+            var cleared = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (column, level) in columnAccess)
+            {
+                if (level != ColumnAccessLevel.Clear)
+                {
+                    continue;
+                }
+
+                if (held.All(scope => SuppliesScopeClear(column, scope, callerScopes!, unconstrainedConsents, rowConstrainedGroups)))
+                {
+                    cleared.Add(column);
+                }
+            }
+
+            return new RestrictedScopeClearance(new HashSet<string>(held, StringComparer.OrdinalIgnoreCase), cleared);
+        }
+        catch (Exception ex)
+        {
+            // Log the type only: the message may carry scope names or rule content.
+            _logger?.LogError("Restricted-scope clearance failed ({ExceptionType}); sensitive columns are masked for this decision.", ex.GetType().Name);
+            return new RestrictedScopeClearance(FailClosedMarker(), new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        }
+    }
+
+    private HashSet<string> FailClosedMarker()
+    {
+        try
+        {
+            var scopes = _restrictedScopes.Scopes;
+            if (scopes.Count > 0)
+            {
+                return new HashSet<string>(scopes, StringComparer.OrdinalIgnoreCase);
+            }
+        }
+        catch (Exception)
+        {
+            // Fall through to the default list: the marker only has to be non-empty.
+        }
+
+        return new HashSet<string>(RestrictedScopePolicy.Default.Scopes, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool SuppliesScopeClear(
+        string column,
+        string restrictedScope,
+        IReadOnlySet<string> callerScopes,
+        IReadOnlyList<Consent> unconstrainedConsents,
+        IReadOnlyList<List<Consent>> rowConstrainedGroups)
+    {
+        if (unconstrainedConsents.Count > 0)
+        {
+            return unconstrainedConsents.Any(c => ConsentSuppliesScopeClear(c, column, restrictedScope, callerScopes));
+        }
+
+        return rowConstrainedGroups.Count > 0
+            && rowConstrainedGroups.All(group => group.Any(c => ConsentSuppliesScopeClear(c, column, restrictedScope, callerScopes)));
+    }
+
+    /// <summary>
+    /// A rule supplies the scope <c>Clear</c> only when it is a <c>Clear</c> rule of this column that applies to the raw caller scopes and lists a
+    /// scope the caller holds (ordinal-ignore-case) whose bare name is the restricted scope (A-2 i-iii). A consent without column rules supplies nothing.
+    /// </summary>
+    private static bool ConsentSuppliesScopeClear(Consent consent, string column, string restrictedScope, IReadOnlySet<string> callerScopes) =>
+        consent.ColumnRules.Any(r =>
+            r.AccessLevel == ColumnAccessLevel.Clear
+            && string.Equals(r.ColumnName, column, StringComparison.OrdinalIgnoreCase)
+            && IsScopeSpecific(r)
+            && RuleAppliesToScopes(r, callerScopes)
+            && r.ApplicableScopes.Any(a => callerScopes.Contains(a)
+                && string.Equals(ScopeNames.ToBareName(a), restrictedScope, StringComparison.OrdinalIgnoreCase)));
 
     /// <summary>
     /// SEC (Low): Cache lifetime of a consent decision. Bounded by the earliest <c>EffectiveValidTo</c> (after the read-time clamp of individual grants, WP-SC-16) of the consents the decision
