@@ -114,7 +114,8 @@ public sealed class DatabricksDbCommand : DbCommand
             connection.Options.Catalog,
             connection.Options.Schema,
             TimeSpan.FromSeconds(connection.Options.WaitTimeoutSeconds),
-            connection.DataSourceName);
+            connection.DataSourceName,
+            Delegation: connection.DelegationContext);
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         Volatile.Write(ref _running, cts);

@@ -39,6 +39,11 @@ public sealed class DataSourceConnectionOptions
     [Range(1, 300)] public int CommandTimeoutSeconds { get; init; } = 30;
 
     /// <summary>
+    /// Issue #238 (PLAN-DATA-238, WP-SC-15): Policy enforcement mode (AutherisEnforced, Delegated, DelegatedDefenceInDepth).
+    /// </summary>
+    public EnforcementMode EnforcementMode { get; init; } = EnforcementMode.AutherisEnforced;
+
+    /// <summary>
     /// Issue #132 (PLAN-DATA-132, SEC-DATA132-06): Administrative co-location group identifier for SQL Server data sources
     /// hosted on the same physical database instance with symmetric credentials.
     /// </summary>
@@ -196,6 +201,21 @@ public sealed class SqlServerWindowsAuthOptions
     public bool? UseManagedNtlm { get; init; }
 }
 
+/// <summary>
+/// Issue #238 (PLAN-DATA-238, REQ-DATA-238): Governed enforcement mode for a data source connection.
+/// </summary>
+public enum EnforcementMode
+{
+    /// <summary>Autheris evaluates row filters, column masks, and table access controls directly (default).</summary>
+    AutherisEnforced = 0,
+
+    /// <summary>Autheris performs coarse admission; row-level security and column masking are delegated to the native source (e.g. Unity Catalog).</summary>
+    Delegated = 1,
+
+    /// <summary>Both Autheris policies and native data source policies are applied concurrently.</summary>
+    DelegatedDefenceInDepth = 2
+}
+
 /// <summary>Authentication modes of the Databricks Statement Execution client.</summary>
 public enum DatabricksAuthMode
 {
@@ -203,7 +223,37 @@ public enum DatabricksAuthMode
     OAuthM2M = 0,
 
     /// <summary>Personal access token. Development only (SEC-ADG-09 item 4).</summary>
-    Pat = 1
+    Pat = 1,
+
+    /// <summary>OAuth 2.0 On-Behalf-Of (OBO) token exchange for Azure Databricks (WP-SC-15 / Issue #238).</summary>
+    OAuthObo = 2
+}
+
+/// <summary>
+/// Issue #238 (PLAN-DATA-238, WP-SC-15): Configuration for Azure Databricks OAuth 2.0 On-Behalf-Of (OBO) token exchange.
+/// </summary>
+public sealed class DatabricksOboOptions
+{
+    /// <summary>Entra ID tenant ID (for authority URL resolution). When omitted, "common" or configured authority is used.</summary>
+    public string? TenantId { get; init; }
+
+    /// <summary>Application (client) ID of the Azure Databricks application registration.</summary>
+    public string? ClientId { get; init; }
+
+    /// <summary>Key Vault reference or secret value for the confidential client application.</summary>
+    public string? ClientSecretRef { get; init; }
+
+    /// <summary>Key Vault reference to a client certificate used for client assertion.</summary>
+    public string? ClientCertificateRef { get; init; }
+
+    /// <summary>Azure Databricks resource scope (default: 2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default).</summary>
+    public string Scopes { get; init; } = "2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default";
+
+    /// <summary>Optional custom Entra ID authority URL (e.g. for national clouds).</summary>
+    public string? Authority { get; init; }
+
+    /// <summary>Controls refresh token retention for long-running statements (default false).</summary>
+    public bool AllowLongRunning { get; init; } = false;
 }
 
 public sealed class DatabricksAuthOptions
@@ -218,6 +268,9 @@ public sealed class DatabricksAuthOptions
 
     /// <summary>PAT mode (Development only): Key Vault reference or plaintext token.</summary>
     public string? PatRef { get; init; }
+
+    /// <summary>OAuth OBO settings (Issue #238 / WP-SC-15).</summary>
+    public DatabricksOboOptions? Obo { get; init; }
 }
 
 /// <summary>

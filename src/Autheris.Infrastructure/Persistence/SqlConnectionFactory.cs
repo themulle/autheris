@@ -268,7 +268,8 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             }
         }
 
-        var connection = new DatabricksDbConnection(client, settings, dataSourceName);
+        var delegationContext = _services?.GetService<IDelegationContextProvider>()?.ResolveDelegationContext();
+        var connection = new DatabricksDbConnection(client, settings, dataSourceName, delegationContext);
         await connection.OpenAsync(ct).ConfigureAwait(false);
         return connection;
     }
