@@ -392,7 +392,7 @@ public sealed class CutoverArchitectureTests
         // -- statements of the gateway itself (no client text) --
         ("Autheris.Application.Services.DbSessionContextInitializer", "fixed session-initialisation statements (tenant and user session context)"),
         ("Autheris.Infrastructure.Persistence.SqlConnectionFactory", "fixed session pinning and hardening statements of a new connection"),
-        ("Autheris.Extensions.Cdc.MssqlChangeTrackingPoller", "CDC polling: fixed change-tracking queries over catalog table and column names"),
+        ("Autheris.Extensions.Cdc.CdcSourceQueries", "CDC producer: fixed change-tracking statements over validated declared table and column names, bound values, no client text"),
         ("Autheris.Application.Procedures.Services.MssqlProcedureInvoker", "stored-procedure call by a validated catalog name with bound parameters (not a WebSQL statement)"),
         ("Autheris.Application.Procedures.Services.SqlProcedureRowScopeResolver", "procedure row-scope key query over validated catalog identifiers, bound values, read-only; splices validated policy row-filter text (§7.3 consumer)"),
         ("Autheris.Application.Procedures.Services.StoredProcedureCatalogValidator", "catalog validation queries over the procedure definitions (metadata only)"),

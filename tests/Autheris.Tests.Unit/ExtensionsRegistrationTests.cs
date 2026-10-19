@@ -251,7 +251,7 @@ public sealed class ExtensionsRegistrationTests
         var disabled = CreateServices(new GatewayOptions());
         HostedServiceCount<DataCatalogSyncBackgroundService>(disabled).ShouldBe(0);
         HostedServiceCount<OpenMetadataSyncBackgroundService>(disabled).ShouldBe(0);
-        HostedServiceCount<MssqlChangeTrackingHostedService>(disabled).ShouldBe(0);
+        HostedServiceCount<CdcProducerService>(disabled).ShouldBe(0);
 
         var enabled = CreateServices(new GatewayOptions
         {
@@ -261,7 +261,7 @@ public sealed class ExtensionsRegistrationTests
         });
         HostedServiceCount<DataCatalogSyncBackgroundService>(enabled).ShouldBe(1);
         HostedServiceCount<OpenMetadataSyncBackgroundService>(enabled).ShouldBe(1);
-        HostedServiceCount<MssqlChangeTrackingHostedService>(enabled).ShouldBe(1);
+        HostedServiceCount<CdcProducerService>(enabled).ShouldBe(1);
     }
 
     [Fact]
