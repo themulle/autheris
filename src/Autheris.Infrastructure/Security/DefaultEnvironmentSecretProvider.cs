@@ -14,16 +14,16 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
 {
     private const string ItsmWebhookSecretInstancePrefix = "itsm:webhook-secret:";
 
-    private readonly IConfiguration _configuration;
-    private readonly IHostEnvironment _environment;
+    private readonly IConfiguration? _configuration;
+    private readonly IHostEnvironment? _environment;
     private readonly Microsoft.Extensions.Logging.ILogger<DefaultEnvironmentSecretProvider>? _logger;
 
     private readonly string _secretsDirectory;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte[]> _inMemorySecrets = new(StringComparer.OrdinalIgnoreCase);
 
     public DefaultEnvironmentSecretProvider(
-        IConfiguration configuration,
-        IHostEnvironment environment,
+        IConfiguration? configuration = null,
+        IHostEnvironment? environment = null,
         Microsoft.Extensions.Logging.ILogger<DefaultEnvironmentSecretProvider>? logger = null,
         string? secretsDirectory = null)
     {
@@ -179,7 +179,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
 
         foreach (var key in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            var secretVal = _configuration[key];
+            var secretVal = _configuration?[key];
             if (!string.IsNullOrWhiteSpace(secretVal))
             {
                 _logger?.LogWarning("Secret reference '{SecretRef}' resolved from configuration key '{CandidateKey}'. In production, ensure sensitive secrets are stored securely in Azure Key Vault or environment variables rather than configuration files.", SanitizeForLog(DescribeReference(secretRef)), SanitizeForLog(key));
@@ -215,7 +215,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
         }
 
         // In Development, allow using the secret reference itself as dev key
-        if (_environment.IsDevelopment())
+        if (_environment?.IsDevelopment() ?? false)
         {
             return Encoding.UTF8.GetBytes(secretRef);
         }
@@ -244,7 +244,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
     private void ValidateSecretLength(byte[] bytes, string secretRef)
     {
         // DEP-6 / POL-14: Enforce minimum key length of 32 bytes outside Development for cryptographic keys
-        if (!_environment.IsDevelopment() && IsCryptographicKeyRequiringMinLength(secretRef) && bytes.Length < 32)
+        if (!(_environment?.IsDevelopment() ?? false) && IsCryptographicKeyRequiringMinLength(secretRef) && bytes.Length < 32)
         {
             throw new InvalidOperationException(
                 $"Security error: The cryptographic secret ({DescribeReference(secretRef)}) must be at least 32 bytes long outside the development environment (current length: {bytes.Length}).");

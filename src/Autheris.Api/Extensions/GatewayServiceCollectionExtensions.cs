@@ -212,6 +212,7 @@ public static class GatewayServiceCollectionExtensions
         GatewayOptions gatewayOptions,
         IHostEnvironment? environment = null)
     {
+        services.TryAddSingleton<IConfiguration>(static _ => new ConfigurationBuilder().Build());
         var hostEnv = environment ?? (services.FirstOrDefault(d => d.ServiceType == typeof(IHostEnvironment))?.ImplementationInstance as IHostEnvironment);
 
         // WP-ARC-B-12: must stay the first hosted service so the governance schema is migrated before anything else starts.

@@ -10,6 +10,7 @@ using System.Diagnostics.Metrics;
 public static class AutherisTelemetrySources
 {
     public const string Core = "Autheris.Core";
+    public const string Metrics = "Autheris.Metrics";
     public const string SqlCompiler = "Autheris.SqlCompiler";
     public const string Mcp = "Autheris.Mcp";
     public const string AsyncJobs = "Autheris.AsyncJobs";
@@ -26,6 +27,7 @@ public static class AutherisTelemetrySources
     public static readonly string[] AllMeters =
     [
         Core,
+        Metrics,
         SqlCompiler,
         Mcp,
         AsyncJobs,
