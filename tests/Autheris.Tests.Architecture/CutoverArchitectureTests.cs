@@ -417,6 +417,7 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.AccessProfileStore", "access profile tables of the governance store (WP-SC-03): fixed statements with bound values, only integer-indexed parameter names and enum literals are spliced, no client text"),
         ("Autheris.Application.Sql.Federation.CoLocation.CoLocationVerificationService", "co-location verification (Issue #132, SEC-DATA132-05): fixed 'SELECT @@SERVERNAME' verification statement on SQL Server connection, no client text"),
         ("Autheris.Infrastructure.Persistence.ConsumerAggregationStore", "consumer aggregation store (Issue #114, SEC-AUD114-05): fixed rollup statements with bound parameters, no client text"),
+        ("Autheris.Infrastructure.Persistence.CdcStreamSqlCore", "CDC durable stream store (Issue #99, SEC-CDC-05): fixed event and row-image statements over engine-specific schemas, bound values, no client text"),
     ];
 
     private static bool IsAllowedCommandTextSite(string top) =>
