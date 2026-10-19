@@ -33,7 +33,11 @@ public sealed record SubtreeExecutionPlan(
     IReadOnlyList<string> ProjectedColumns,
     IReadOnlySet<string> MaskedColumns,
     TableMetadata SyntheticMetadata,
-    IReadOnlyDictionary<string, object?>? Parameters = null);
+    IReadOnlyDictionary<string, object?>? Parameters = null,
+    string? SqlOverride = null)
+{
+    public string Sql => SqlOverride ?? Compiled.Sql;
+}
 
 /// <summary>
 /// Issue #123 (WP-123-1): Result of partitioning query AST into same-source subtrees and remaining single tables.

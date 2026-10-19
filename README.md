@@ -7,7 +7,8 @@
 [![OData](https://img.shields.io/badge/Protocol-OData%20v4-0078D4)](#)
 [![AuthZ](https://img.shields.io/badge/AuthZ-Casbin%20ABAC-009688)](#)
 [![CI Build & Test](https://img.shields.io/badge/CI-Passing-brightgreen?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/Tests-5%2C600%2B%20Passing-brightgreen)](tests/Autheris.Tests.Unit)
+[![Tests](https://img.shields.io/badge/Tests-11%2C700%2B%20Passing-brightgreen)](tests/Autheris.Tests.Unit)
+[![Codebase](https://img.shields.io/badge/Codebase-415k%2B%20SLOC%20%7C%20~95%20Person--Years%20(COCOMO%20II)-blue)](#-what-autheris-does--core-business-value)
 [![Security Review](https://img.shields.io/badge/Security%20Review-2026--10--02%20Remediated-brightgreen)](security-review-2026-10-02.md)
 [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/themulle/autheris/pkgs/container/autheris)
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2F%20Onion-blue)](docs/architecture/arc42.md)
@@ -17,7 +18,7 @@
 
 Autheris is a high-performance, secure, centralized enterprise GraphQL gateway built with **.NET 10** and **Hot Chocolate 16.6.7**. It provides unified GraphQL access to heterogeneous enterprise databases (**Microsoft SQL Server / MSSQL, SQLite, PostgreSQL, Databricks, Oracle**), modern **Apache Iceberg Lakehouses**, REST APIs, and federated **Hot Chocolate Fusion Subgraphs** while enforcing a strict **Zero-Trust Data-Owner-Consent** governance model.
 
-Instead of traditional coarse-grained role-based access control (RBAC), access to tables, rows, and columns requires explicitly granted, time-bounded, and auditable consents governed directly by data owners.
+Instead of traditional coarse-grained role-based access control (RBAC), access to tables, rows, and columns requires explicitly granted, time-bounded, and auditable consents governed directly by data owners. Autheris encompasses over **415,000 Source Lines of Code (SLOC)** and 11,700+ automated tests — representing an estimated **~95 person-years (~€13–15M)** of engineering effort under standard COCOMO II estimation models.
 
 > 📚 **Product & Architecture Documentation**:
 > - [📋 Complete Enterprise Feature Catalog (docs/features/README.md)](docs/features/README.md) — Comprehensive inventory and deep-dive documentation for all 57+ enterprise features.

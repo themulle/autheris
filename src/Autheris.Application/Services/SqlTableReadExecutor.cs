@@ -87,7 +87,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
             var subtreeService = _executionService();
             var subtreeResult = await subtreeService.ExecuteQueryBufferedAsync(
                 new GovernedSqlQueryRequest(
-                    subtreePlan.Compiled.Sql,
+                    subtreePlan.Sql,
                     subtreePlan.Parameters,
                     Transport: SqlTransports.WebSql,
                     PlannedTableRead: true),

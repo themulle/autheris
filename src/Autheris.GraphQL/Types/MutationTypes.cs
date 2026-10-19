@@ -461,8 +461,8 @@ public sealed class Mutation
         var approverSid = GetAuthenticatedUserSid(httpContextAccessor);
 
         var approvePrincipal = httpContextAccessor.HttpContext?.User;
-        var scopes = TokenAccessScope.GetScopes(approvePrincipal);
-        if (scopes.Count > 0 && !TokenAccessScope.HasScope(approvePrincipal, "data.access.review"))
+        var scopes = TokenAccessScope.GetScopeSet(approvePrincipal?.Claims);
+        if (scopes.Count > 0 && !scopes.Contains("data.access.review"))
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
@@ -762,8 +762,8 @@ public sealed class Mutation
         _ = RequireDecisionService<IGrantPolicy>(httpContextAccessor); // composition fail-fast: both decision resolvers need the same services
 
         var rejectPrincipal = httpContextAccessor.HttpContext?.User;
-        var scopes = TokenAccessScope.GetScopes(rejectPrincipal);
-        if (scopes.Count > 0 && !TokenAccessScope.HasScope(rejectPrincipal, "data.access.review"))
+        var scopes = TokenAccessScope.GetScopeSet(rejectPrincipal?.Claims);
+        if (scopes.Count > 0 && !scopes.Contains("data.access.review"))
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")

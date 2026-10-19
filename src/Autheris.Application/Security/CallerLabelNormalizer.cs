@@ -49,7 +49,7 @@ public static class CallerLabelNormalizer
         char rawFirst = raw[0];
         if (rawFirst is '=' or '+' or '-' or '@' or '\t' or '\r') return InvalidSentinel;
 
-        var trimmed = raw.Trim(' ');
+        var trimmed = raw.Trim();
         if (trimmed.Length == 0) return UnknownSentinel;
         if (trimmed.Length > MaxClientIdLength) trimmed = trimmed[..MaxClientIdLength];
 
@@ -72,7 +72,7 @@ public static class CallerLabelNormalizer
             return InvalidSentinel;
         }
 
-        var trimmed = raw.Trim(' ');
+        var trimmed = raw.Trim();
         if (trimmed.Length == 0) return UnknownSentinel;
 
         if (trimmed.Length > maxLength)

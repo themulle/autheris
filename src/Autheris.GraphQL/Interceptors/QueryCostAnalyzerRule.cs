@@ -490,7 +490,11 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                         else
                         {
                             // SEC-GOV177-05: Single object selection (1:1 / N:1 vs uncataloged/ambiguous)
-                            bool isVerifiedSingle = IsVerifiedSingleObjectRelation(currentType, field.Name.Value, fieldDef);
+                            bool isRootField = currentDepth <= 1 ||
+                                               (currentType != null && (currentType == schema.QueryType ||
+                                                                        currentType == schema.MutationType ||
+                                                                        currentType == schema.SubscriptionType));
+                            bool isVerifiedSingle = isRootField || IsVerifiedSingleObjectRelation(currentType, field.Name.Value, fieldDef);
                             int rowMultiplier = isVerifiedSingle
                                 ? (_costOptions?.CostPerSingleRowLookup ?? 1)
                                 : _defaultListMultiplier;

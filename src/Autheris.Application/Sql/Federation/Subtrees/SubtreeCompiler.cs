@@ -8,6 +8,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
 using System.Threading;
+using Autheris.Application.Sql.Policy;
 using Autheris.Application.Sql.Security;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
@@ -214,34 +215,21 @@ public static class SubtreeCompiler
             0)).ToList();
 
         var inMemoryCatalog = new InMemoryTableCatalog(entries, "public");
-        var compileRequest = new CompileRequest
+        var policy = new GovernancePolicy
         {
-            TargetDialect = dialect,
-            Policy = new GovernancePolicy
-            {
-                RowFilters = new SubtreeNoOpRowPolicyProvider(entries),
-                Masks = new SubtreeNoOpMaskProvider(),
-                Catalog = inMemoryCatalog,
-                Tenant = new TenantBinding("__autheris_tenant", tenantId?.Value ?? "default", SqlParameterType.String),
-                Dml = DmlGuardOptions.Strict
-            },
-            TokenGuards = new SqlTokenSecurityOptions
-            {
-                RejectComments = true,
-                RejectBackslashInStrings = true,
-                RejectEscapedStringLiterals = true,
-                RejectDollarQuoting = true,
-                RejectBracketLexerDifferentials = dialect is TargetSqlDialect.SqlServer or TargetSqlDialect.Sqlite,
-                RejectNonAsciiIdentifiers = true,
-                RejectDotsInQuotedIdentifiers = true,
-                RejectTimeTravelQueries = true,
-                RejectReservedIdentifiers = true
-            },
-            Statements = StatementPermissions.ReadOnly,
-            EnforcedMaxRows = 0,
-            AllowedFunctions = allowlist,
-            TimeZoneConversionAvailable = false
+            RowFilters = new SubtreeNoOpRowPolicyProvider(entries),
+            Masks = new SubtreeNoOpMaskProvider(),
+            Catalog = inMemoryCatalog,
+            Tenant = new TenantBinding("__autheris_tenant", tenantId?.Value ?? "default", SqlParameterType.String)
         };
+
+        var compileRequest = CompileRequestFactory.Create(
+            policy,
+            dialect,
+            new WebSqlOptions(),
+            isDml: false,
+            enforcedMaxRows: 0,
+            allowedFunctions: allowlist);
 
         var compiled = sqlEngine.Compile(canonicalSql.AsMemory(), compileRequest, ct);
 
@@ -274,8 +262,6 @@ public static class SubtreeCompiler
                 isolatedSql = Regex.Replace(isolatedSql, Regex.Escape(orig) + @"\b", isolated);
             }
         }
-
-        var finalCompiled = compiled with { Sql = isolatedSql };
 
         // 8. Transitive Masking Heritage (SEC-DATA123-03)
         var maskedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -363,11 +349,12 @@ public static class SubtreeCompiler
             SourceName: subtree.SourceName,
             Dialect: dialect,
             MemberTables: subtree.MemberTables,
-            Compiled: finalCompiled,
+            Compiled: compiled,
             ProjectedColumns: projectedColNames,
             MaskedColumns: maskedColumns.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             SyntheticMetadata: syntheticMetadata,
-            Parameters: isolatedParams);
+            Parameters: isolatedParams,
+            SqlOverride: isolatedSql);
     }
 
     private static HashSet<string> CollectFunctionCalls(SourceSubtree subtree)
