@@ -43,9 +43,7 @@ public sealed class ArchitectureNoSourceKeyCatalogQueriesTests
     private static readonly Dictionary<string, string> Allowlist = new(StringComparer.Ordinal)
     {
         ["Autheris.Application/Procedures/Services/SqlProcedureRowScopeResolver.cs"] =
-            "Proves PHYSICAL uniqueness for row-scope authorization (fails closed); a declared, unverified index must not replace it (SEC-94-10).",
-        ["Autheris.Extensions/Cdc/MssqlChangeTrackingPoller.cs"] =
-            "CDC change tracking needs the physical key of the tracked table; not an authorization path (follow-up: declared key)."
+            "Proves PHYSICAL uniqueness for row-scope authorization (fails closed); a declared, unverified index must not replace it (SEC-94-10)."
     };
 
     private const string MigrationsDirectory = "Autheris.Infrastructure/Persistence/Migrations/";
@@ -96,8 +94,7 @@ public sealed class ArchitectureNoSourceKeyCatalogQueriesTests
     {
         Allowlist.Keys.Order(StringComparer.Ordinal).ShouldBe(
         [
-            "Autheris.Application/Procedures/Services/SqlProcedureRowScopeResolver.cs",
-            "Autheris.Extensions/Cdc/MssqlChangeTrackingPoller.cs"
+            "Autheris.Application/Procedures/Services/SqlProcedureRowScopeResolver.cs"
         ]);
         foreach (var (path, reason) in Allowlist)
         {
@@ -121,6 +118,11 @@ public sealed class ArchitectureNoSourceKeyCatalogQueriesTests
         scanned.ShouldContain(f => f.StartsWith("Autheris.Infrastructure/Persistence/Catalog/", StringComparison.Ordinal));
         scanned.ShouldContain(f => f.StartsWith("Autheris.Application/Data/", StringComparison.Ordinal));
         scanned.ShouldContain(f => f.StartsWith("Autheris.Extensions/OData/", StringComparison.Ordinal));
+        // the change tracking producer reads keys from the declared definition only (REQ-CDC-99 D-A3): it must be in the scanned set
+        scanned.ShouldContain(f => f.StartsWith("Autheris.Extensions/Cdc/", StringComparison.Ordinal));
+        scanned.ShouldContain("Autheris.Extensions/Cdc/MssqlChangeTrackingPoller.cs");
+        scanned.ShouldContain("Autheris.Extensions/Cdc/CdcTableActivator.cs");
+        scanned.ShouldContain("Autheris.Extensions/Cdc/CdcSourceQueries.cs");
     }
 
     private static readonly (string Pattern, string Sample)[] Samples =

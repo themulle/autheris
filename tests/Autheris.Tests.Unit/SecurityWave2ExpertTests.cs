@@ -29,35 +29,6 @@ using Xunit;
 
 public class SecurityWave2ExpertTests
 {
-    [Theory]
-    [InlineData("dbo; DROP TABLE Users;--", "invoices")]
-    [InlineData("dbo", "invoices]; DROP TABLE Users;--")]
-    [InlineData("dbo", "inv oices")]
-    [InlineData("dbo", "invoices' OR '1'='1")]
-    public async Task MssqlChangeTracking_SqlInjection_Prevented_WhenTableHasMaliciousName(string schema, string tableName)
-    {
-        var factory = Substitute.For<ISqlConnectionFactory>();
-        var watermarkStore = new InMemoryMssqlWatermarkStore();
-        var eventChannel = Substitute.For<ICdcEventChannel>();
-        var options = Options.Create(new GatewayOptions
-        {
-            MssqlChangeTracking = new MssqlChangeTrackingOptions
-            {
-                Enabled = true,
-                ConnectionString = "Server=localhost;Database=Test;"
-            }
-        });
-        var logger = Substitute.For<ILogger<MssqlChangeTrackingPoller>>();
-
-        var poller = new MssqlChangeTrackingPoller(factory, watermarkStore, eventChannel, options, logger);
-        var table = new TableIdentifier("finance", schema, tableName);
-
-        await Should.ThrowAsync<ArgumentException>(async () =>
-        {
-            await poller.PollTableChangesAsync(table, 1);
-        });
-    }
-
     [Fact]
     public void QuickstartProfile_InProduction_ThrowsValidationException_FailClosed()
     {
@@ -140,55 +111,5 @@ public class SecurityWave2ExpertTests
         {
             sanitized.Extensions.ContainsKey("dev_fix_hints").ShouldBeFalse();
         }
-    }
-
-    [Fact]
-    public void MssqlChangeTracking_ParseTrackedTables_HandlesVariousFormats()
-    {
-        var list = MssqlChangeTrackingHostedService.ParseTrackedTables(
-        [
-            "finance.dbo.invoices",
-            "hr.employees",
-            "orders",
-            "",
-            "   "
-        ]);
-
-        list.Count.ShouldBe(3);
-        list[0].ShouldBe(new TableIdentifier("finance", "dbo", "invoices"));
-        list[1].ShouldBe(new TableIdentifier("hr", "dbo", "employees"));
-        list[2].ShouldBe(new TableIdentifier("default", "dbo", "orders"));
-    }
-
-    [Fact]
-    public async Task WatermarkStore_SetsAndAdvancesWatermark_Safely()
-    {
-        var store = new InMemoryMssqlWatermarkStore();
-        var table = new TableIdentifier("finance", "dbo", "invoices");
-
-        (await store.GetWatermarkAsync(table)).ShouldBeNull();
-
-        (await store.TryAdvanceWatermarkAsync(table, 100, 1)).ShouldBeTrue();
-        (await store.GetWatermarkAsync(table)).ShouldBe(100);
-
-        // Watermark should not go backwards
-        (await store.TryAdvanceWatermarkAsync(table, 50, 1)).ShouldBeTrue();
-        (await store.GetWatermarkAsync(table)).ShouldBe(100);
-
-        (await store.TryAdvanceWatermarkAsync(table, 150, 1)).ShouldBeTrue();
-        (await store.GetWatermarkAsync(table)).ShouldBe(150);
-    }
-
-    [Fact]
-    public async Task WatermarkStore_StaleFencingToken_IsRejected()
-    {
-        var store = new InMemoryMssqlWatermarkStore();
-        var table = new TableIdentifier("finance", "dbo", "invoices");
-        await store.TryAdvanceWatermarkAsync(table, 10, 5);
-
-        (await store.TryAdvanceWatermarkAsync(table, 99, 4)).ShouldBeFalse();
-
-        (await store.GetWatermarkAsync(table)).ShouldBe(10);
-        store.IsDurable.ShouldBeFalse();
     }
 }

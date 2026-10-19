@@ -202,6 +202,7 @@ public static class GatewayApplicationBuilderExtensions
         app.MapAuthEndpoints();
         app.MapWebhookEndpoints(gatewayOptions);
         app.MapStreamingCdcEndpoints();
+        app.MapCdcStreamAdminEndpoints();
         app.MapDbtEndpoints();
         app.MapGovernanceEndpoints();
         app.MapDataContractEndpoints();

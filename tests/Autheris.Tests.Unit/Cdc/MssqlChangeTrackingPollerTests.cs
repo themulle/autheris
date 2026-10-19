@@ -1,476 +1,411 @@
 namespace Autheris.Tests.Unit.Cdc;
 
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Data;
-using System.Data.Common;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
 using Autheris.Application.State;
 using Autheris.Application.Streaming;
-using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions.Cdc;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
+using static CdcProducerHarness;
 
+/// <summary>The producer appends complete change versions to the durable stream in one fenced transaction (PLAN-CDC-99 D-A4, D-A5).</summary>
 public sealed class MssqlChangeTrackingPollerTests
 {
-    private static readonly TableIdentifier Table = new("finance", "dbo", "invoices");
-
-    private sealed record Change(long Version, string Operation, int Id);
-
-    /// <summary>A scripted change tracking source answering the poller's T-SQL by recognising its statements.</summary>
-    private sealed class FakeChangeSource
+    private static async Task<CdcProducerHarness> Seeded(CdcProducerHarness h, long watermark = 5)
     {
-        public List<Change> Changes { get; } = [];
+        await h.SeedWatermarkAsync(watermark);
+        return h;
+    }
 
-        public IReadOnlyList<string> PrimaryKey { get; set; } = ["Id"];
+    [Fact]
+    public async Task FirstRun_StartsAtCurrentVersion_WithoutReplayingHistory()
+    {
+        var h = new CdcProducerHarness();
+        h.Source.CurrentVersion = 100;
+        h.Source.Changes.Add(Change(3, "I", 1));
+        h.Source.Changes.Add(Change(50, "U", 2));
 
-        public bool PkQueryFails { get; set; }
+        var appended = await h.Poller.PollTableChangesAsync(TableId, 1);
 
-        public long? MinValidVersion { get; set; } = 0;
+        appended.ShouldBe(0);
+        h.InnerStore.Only.Watermark.ShouldBe(100);
+        h.InnerStore.Only.Head.ShouldBe(0);
+        h.InnerStore.Only.Events.ShouldBeEmpty();
+    }
 
-        public long? CurrentVersion { get; set; } = 0;
+    [Fact]
+    public async Task Batch_IsAppendedWithDenseOffsets_ChangeVersionsAndWatermark()
+    {
+        var h = await Seeded(new CdcProducerHarness());
+        h.Source.Changes.Add(Change(10, "I", 1));
+        h.Source.Changes.Add(Change(11, "U", 2));
+        h.Source.Changes.Add(Change(11, "D", 3));
 
-        public object Respond(string sql, IReadOnlyDictionary<string, object?> parameters)
+        var appended = await h.Poller.PollTableChangesAsync(TableId, 1);
+
+        appended.ShouldBe(3);
+        var state = h.InnerStore.Only;
+        state.Events.Select(e => e.Offset).ShouldBe([1L, 2, 3]);
+        state.Events.Select(e => e.ChangeVersion).ShouldBe([10L, 11, 11]);
+        state.Events.Select(e => e.Operation).ShouldBe([CdcOperation.Insert, CdcOperation.Update, CdcOperation.Delete]);
+        state.Watermark.ShouldBe(11);
+        state.Head.ShouldBe(3);
+        h.Signal.Notified.ShouldBe([(state.Id, 3L)]);
+    }
+
+    [Fact]
+    public async Task PayloadsAreEncrypted_AndCarryKeyAndAfterImage()
+    {
+        var h = await Seeded(new CdcProducerHarness());
+        h.Source.Changes.Add(Change(10, "I", 7, "seven"));
+
+        await h.Poller.PollTableChangesAsync(TableId, 1);
+
+        var (record, payload) = (await h.ReadChangesAsync()).Single();
+        System.Text.Encoding.UTF8.GetString(record.Payload.Data).ShouldNotContain("seven");
+        payload.Key["Id"].ShouldBe(7);
+        payload.After!["Name"].ShouldBe("seven");
+        payload.Before.ShouldBeNull();
+        payload.BeforeUnknown.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task SourceIsReadInOneSnapshotTransaction_WithExplicitColumns_AndTheConfiguredTimeout()
+    {
+        var h = await Seeded(new CdcProducerHarness(o => new MssqlChangeTrackingOptions
         {
-            if (sql.Contains("sys.indexes", StringComparison.Ordinal))
-            {
-                if (PkQueryFails)
-                {
-                    throw new InvalidOperationException("transient pk query failure");
-                }
+            Enabled = true,
+            QueryTimeoutSeconds = 30,
+            Tables = [new CdcTrackedTableOptions { Table = "finance.dbo.invoices", QueryTimeoutSeconds = 7 }]
+        }));
+        await h.Poller.PollTableChangesAsync(TableId, 1); // activates (probes) once
+        h.Source.Changes.Add(Change(10, "I", 1));
+        h.Source.Isolations.Clear();
+        h.Source.Statements.Clear();
+        h.Source.CommandTimeouts.Clear();
+        h.Source.Commits = 0;
 
-                var pk = new DataTable();
-                pk.Columns.Add("name", typeof(string));
-                foreach (var column in PrimaryKey)
-                {
-                    pk.Rows.Add(column);
-                }
+        await h.Poller.PollTableChangesAsync(TableId, 1);
 
-                return pk;
-            }
-
-            if (sql.Contains("CHANGE_TRACKING_MIN_VALID_VERSION", StringComparison.Ordinal))
-            {
-                return MinValidVersion.HasValue ? MinValidVersion.Value : DBNull.Value;
-            }
-
-            if (sql.Contains("CHANGE_TRACKING_CURRENT_VERSION", StringComparison.Ordinal))
-            {
-                return CurrentVersion.HasValue ? CurrentVersion.Value : DBNull.Value;
-            }
-
-            var table = new DataTable();
-            table.Columns.Add("SYS_CHANGE_VERSION", typeof(long));
-            table.Columns.Add("SYS_CHANGE_OPERATION", typeof(string));
-            foreach (var column in PrimaryKey)
-            {
-                table.Columns.Add("PK_" + column, column == "Id" ? typeof(int) : typeof(string));
-            }
-
-            table.Columns.Add("Id", typeof(int));
-            table.Columns.Add("Name", typeof(string));
-
-            IEnumerable<Change> selected;
-            if (parameters.TryGetValue("@version", out var exact))
-            {
-                selected = Changes.Where(c => c.Version == Convert.ToInt64(exact));
-            }
-            else
-            {
-                var last = Convert.ToInt64(parameters["@lastVersion"]);
-                var batch = Convert.ToInt32(parameters["@batchSize"]);
-                selected = Changes.Where(c => c.Version > last).OrderBy(c => c.Version).ThenBy(c => c.Id).Take(batch);
-            }
-
-            foreach (var change in selected)
-            {
-                var isDelete = string.Equals(change.Operation, "D", StringComparison.OrdinalIgnoreCase);
-                var values = new List<object> { change.Version, change.Operation };
-                values.AddRange(PrimaryKey.Select(c => c == "Id" ? (object)change.Id : "k" + change.Id));
-                values.Add(isDelete ? DBNull.Value : change.Id);
-                values.Add(isDelete ? DBNull.Value : "row" + change.Id);
-                table.Rows.Add(values.ToArray());
-            }
-
-            return table;
-        }
-    }
-
-    private sealed class RecordingChannel : ICdcEventChannel
-    {
-        public List<CdcEvent> Published { get; } = [];
-
-        public ValueTask PublishAsync(CdcEvent cdcEvent, CancellationToken ct = default)
-        {
-            Published.Add(cdcEvent);
-            return ValueTask.CompletedTask;
-        }
-
-        public IAsyncEnumerable<CdcEvent> SubscribeAsync(string topic, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-    }
-
-    private static MssqlChangeTrackingPoller CreateWith(FakeChangeSource source, IMssqlWatermarkStore store)
-    {
-        var factory = Substitute.For<ISqlConnectionFactory>();
-        factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-            .Returns(_ => Task.FromResult<DbConnection>(new FakeConnection(source.Respond)));
-        var options = Options.Create(new GatewayOptions
-        {
-            MssqlChangeTracking = new MssqlChangeTrackingOptions { Enabled = true, ConnectionString = "Server=localhost;Database=Test;" }
-        });
-        return new MssqlChangeTrackingPoller(factory, store, new RecordingChannel(), options, NullLogger<MssqlChangeTrackingPoller>.Instance);
-    }
-
-    private static (MssqlChangeTrackingPoller Poller, InMemoryMssqlWatermarkStore Store, RecordingChannel Channel) Create(
-        FakeChangeSource source, int batchSize = 500)
-    {
-        var factory = Substitute.For<ISqlConnectionFactory>();
-        factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-            .Returns(_ => Task.FromResult<DbConnection>(new FakeConnection(source.Respond)));
-        var store = new InMemoryMssqlWatermarkStore();
-        var channel = new RecordingChannel();
-        var options = Options.Create(new GatewayOptions
-        {
-            MssqlChangeTracking = new MssqlChangeTrackingOptions
-            {
-                Enabled = true,
-                ConnectionString = "Server=localhost;Database=Test;",
-                BatchSize = batchSize
-            }
-        });
-        var poller = new MssqlChangeTrackingPoller(factory, store, channel, options, NullLogger<MssqlChangeTrackingPoller>.Instance);
-        return (poller, store, channel);
+        h.Source.Isolations.ShouldBe([IsolationLevel.Snapshot]);
+        h.Source.Commits.ShouldBe(1);
+        var read = h.Source.Statements.Single(s => s.Contains("CHANGETABLE(CHANGES [dbo].[invoices], @lastVersion)", StringComparison.Ordinal));
+        read.ShouldNotContain("T.*");
+        read.ShouldContain("T.[Id]");
+        read.ShouldContain("T.[Name]");
+        read.ShouldContain("TOP (@batchSize)");
+        read.ShouldContain("ORDER BY CT.SYS_CHANGE_VERSION ASC");
+        h.Source.CommandTimeouts.ShouldNotBeEmpty();
+        h.Source.CommandTimeouts.ShouldAllBe(t => t == 7);
+        h.Source.Statements.ShouldAllBe(s => !s.Contains("sys.", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
-    public async Task WatermarkBelowMinValid_Throws_NoReplay()
+    public async Task NonSnapshotReadOptIn_UsesReadCommitted()
     {
-        var source = new FakeChangeSource { MinValidVersion = 10 };
-        source.Changes.Add(new Change(12, "I", 1));
-        var (poller, store, channel) = Create(source);
-        await store.TryAdvanceWatermarkAsync(Table, 5, 1);
+        var h = await Seeded(new CdcProducerHarness(o => new MssqlChangeTrackingOptions { Enabled = true, TrackedTables = ["finance.dbo.invoices"], AllowNonSnapshotRead = true }));
+        h.Source.Changes.Add(Change(10, "I", 1));
 
-        var ex = await Should.ThrowAsync<CdcWatermarkExpiredException>(() => poller.PollTableChangesAsync(Table, 1));
+        await h.Poller.PollTableChangesAsync(TableId, 1);
 
-        ex.StoredVersion.ShouldBe(5);
-        ex.MinValidVersion.ShouldBe(10);
-        channel.Published.ShouldBeEmpty();
-        (await store.GetWatermarkAsync(Table)).ShouldBe(5);
+        h.Source.Isolations.ShouldBe([IsolationLevel.ReadCommitted]);
     }
 
     [Fact]
-    public async Task NoPrimaryKey_Throws()
+    public async Task FullBatch_DoesNotSkipRowsOfASplitVersion()
     {
-        var source = new FakeChangeSource { PrimaryKey = [] };
-        source.Changes.Add(new Change(12, "I", 1));
-        var (poller, store, channel) = Create(source);
-        await store.TryAdvanceWatermarkAsync(Table, 5, 1);
-
-        await Should.ThrowAsync<CdcSourceConfigurationException>(() => poller.PollTableChangesAsync(Table, 1));
-
-        channel.Published.ShouldBeEmpty();
-    }
-
-    [Fact]
-    public async Task FirstRun_StartsAtCurrentVersion()
-    {
-        var source = new FakeChangeSource { CurrentVersion = 100 };
-        source.Changes.Add(new Change(3, "I", 1));
-        source.Changes.Add(new Change(50, "U", 2));
-        var (poller, store, channel) = Create(source);
-
-        var processed = await poller.PollTableChangesAsync(Table, 1);
-
-        processed.ShouldBe(0);
-        channel.Published.ShouldBeEmpty();
-        (await store.GetWatermarkAsync(Table)).ShouldBe(100);
-    }
-
-    [Fact]
-    public async Task FencedCommit_ThrowsFencingTokenRejected()
-    {
-        var source = new FakeChangeSource();
-        source.Changes.Add(new Change(12, "I", 1));
-        var (poller, store, channel) = Create(source);
-        await store.TryAdvanceWatermarkAsync(Table, 5, 9); // a newer lease owner already wrote the watermark
-
-        await Should.ThrowAsync<FencingTokenRejectedException>(() => poller.PollTableChangesAsync(Table, 4));
-
-        channel.Published.ShouldBeEmpty(); // a fenced poll publishes nothing
-
-        (await store.GetWatermarkAsync(Table)).ShouldBe(5);
-    }
-
-    [Fact]
-    public async Task FullBatch_DoesNotSkipRowsOfSplitVersion()
-    {
-        var source = new FakeChangeSource();
-        source.Changes.Add(new Change(10, "I", 1));
-        source.Changes.Add(new Change(10, "I", 2));
+        var h = await Seeded(new CdcProducerHarness(o => new MssqlChangeTrackingOptions { Enabled = true, TrackedTables = ["finance.dbo.invoices"], BatchSize = 3 }));
+        h.Source.Changes.Add(Change(10, "I", 1));
+        h.Source.Changes.Add(Change(10, "I", 2));
         foreach (var id in new[] { 3, 4, 5, 6 })
         {
-            source.Changes.Add(new Change(11, "U", id)); // one version with more rows than a batch
+            h.Source.Changes.Add(Change(11, "U", id)); // one version with more rows than a batch
         }
 
-        var (poller, store, channel) = Create(source, batchSize: 3);
-        await store.TryAdvanceWatermarkAsync(Table, 5, 1);
-
-        var first = await poller.PollTableChangesAsync(Table, 1);
-        (await store.GetWatermarkAsync(Table)).ShouldBe(10); // version 11 was cut by the batch: not committed yet
-        var second = await poller.PollTableChangesAsync(Table, 1);
-        var third = await poller.PollTableChangesAsync(Table, 1);
+        var first = await h.Poller.PollTableChangesAsync(TableId, 1);
+        h.InnerStore.Only.Watermark.ShouldBe(10); // version 11 was cut by the batch: not committed yet
+        var second = await h.Poller.PollTableChangesAsync(TableId, 1);
+        var third = await h.Poller.PollTableChangesAsync(TableId, 1);
 
         first.ShouldBe(2);
         second.ShouldBe(4); // the whole version is fetched without TOP
         third.ShouldBe(0);
-        channel.Published.Select(e => e.EventId).Distinct().Count().ShouldBe(6);
-        (await store.GetWatermarkAsync(Table)).ShouldBe(11);
+        h.InnerStore.Only.Events.Select(e => e.Offset).ShouldBe([1L, 2, 3, 4, 5, 6]);
+        h.InnerStore.Only.Watermark.ShouldBe(11);
     }
 
     [Fact]
-    public async Task MinValidVersionNull_ThrowsConfigurationException()
+    public async Task EmptyPoll_WritesNothing_AndTouchesLastPolledAtMostEveryMinute()
     {
-        var source = new FakeChangeSource { MinValidVersion = null };
-        var (poller, store, channel) = Create(source);
-        await store.TryAdvanceWatermarkAsync(Table, 5, 1);
+        var h = await Seeded(new CdcProducerHarness());
+        var appendsBefore = h.InnerStore.AppendCalls;
 
-        await Should.ThrowAsync<CdcSourceConfigurationException>(() => poller.PollTableChangesAsync(Table, 1));
+        await h.Poller.PollTableChangesAsync(TableId, 1);
+        await h.Poller.PollTableChangesAsync(TableId, 1);
+        h.InnerStore.TouchCalls.ShouldBe(1);
+        h.Time.Advance(TimeSpan.FromSeconds(61));
+        await h.Poller.PollTableChangesAsync(TableId, 1);
 
-        channel.Published.ShouldBeEmpty();
+        h.InnerStore.TouchCalls.ShouldBe(2);
+        h.InnerStore.AppendCalls.ShouldBe(appendsBefore);
+        h.Signal.Notified.ShouldBeEmpty();
     }
 
     [Fact]
-    public async Task TransientPrimaryKeyQueryFailure_TakesNormalPath_NotConfigurationError()
+    public async Task BeforeImage_FollowsTheLastImage_AndUnknownBeforeIsMarked()
     {
-        var source = new FakeChangeSource { PkQueryFails = true };
-        var (poller, store, channel) = Create(source);
-        await store.TryAdvanceWatermarkAsync(Table, 5, 1);
+        var h = await Seeded(new CdcProducerHarness());
+        h.Source.Changes.Add(Change(10, "I", 1, "first"));
+        await h.Poller.PollTableChangesAsync(TableId, 1);
+        h.Source.Changes.Add(Change(11, "U", 1, "second"));
+        h.Source.Changes.Add(Change(12, "U", 2, "never-seen")); // key without a stored image
+        await h.Poller.PollTableChangesAsync(TableId, 1);
+        h.Source.Changes.Add(Change(13, "D", 1));
+        await h.Poller.PollTableChangesAsync(TableId, 1);
 
-        var processed = await poller.PollTableChangesAsync(Table, 1);
+        var changes = await h.ReadChangesAsync();
 
-        processed.ShouldBe(0);
-        channel.Published.ShouldBeEmpty();
+        changes[1].Payload.Before!["Name"].ShouldBe("first");
+        changes[1].Payload.After!["Name"].ShouldBe("second");
+        changes[2].Payload.Before.ShouldBeNull();
+        changes[2].Payload.BeforeUnknown.ShouldBeTrue();
+        changes[3].Record.Operation.ShouldBe(CdcOperation.Delete);
+        changes[3].Payload.Before!["Name"].ShouldBe("second");
+        changes[3].Payload.After.ShouldBeNull();
+        changes[3].Payload.Key["Id"].ShouldBe(1);
+        h.InnerStore.Only.Images.Count.ShouldBe(1); // row 1 deleted, row 2 stored
     }
 
     [Fact]
-    public async Task FirstRun_FencedCommit_ThrowsFencingTokenRejected()
+    public async Task KeyFingerprint_IsNotInTheEvents_AndIsStablePerKey()
     {
-        var source = new FakeChangeSource { CurrentVersion = 100 };
-        var (poller, _, _) = Create(source);
-        var store = Substitute.For<IMssqlWatermarkStore>();
-        store.GetWatermarkAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<long?>((long?)null));
-        store.TryAdvanceWatermarkAsync(Arg.Any<TableIdentifier>(), Arg.Any<long>(), Arg.Any<long>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<bool>(false));
-        var fenced = CreateWith(source, store);
+        var h = await Seeded(new CdcProducerHarness());
+        h.Source.Changes.Add(Change(10, "I", 1));
+        h.Source.Changes.Add(Change(11, "I", 2));
+        await h.Poller.PollTableChangesAsync(TableId, 1);
 
-        await Should.ThrowAsync<FencingTokenRejectedException>(() => fenced.PollTableChangesAsync(Table, 1));
+        var images = h.InnerStore.Only.Images.Values.ToList();
+
+        images.Count.ShouldBe(2);
+        images.Select(i => Convert.ToHexString(i.KeyFingerprint)).Distinct().Count().ShouldBe(2);
+        images.ShouldAllBe(i => i.KeyFingerprint.Length == 32);
     }
 
     [Fact]
-    public async Task CompositePrimaryKey_EventIdJoinsAllKeyValues()
+    public async Task ExpiredWatermark_Restart_AppendsAControlEvent_AndContinuesAtTheCurrentVersion()
     {
-        var source = new FakeChangeSource { PrimaryKey = ["Id", "Region"] };
-        source.Changes.Add(new Change(10, "I", 7));
-        var (poller, store, channel) = Create(source);
-        await store.TryAdvanceWatermarkAsync(Table, 5, 1);
+        // AC-4: change table B, then enable CT on table A (its min valid version = current), store watermark 0 for A
+        var h = await Seeded(new CdcProducerHarness(), watermark: 0);
+        h.Source.MinValidVersion = 10;
+        h.Source.CurrentVersion = 12;
+        h.Source.Changes.Add(Change(11, "I", 1));
 
-        await poller.PollTableChangesAsync(Table, 1);
+        var appended = await h.Poller.PollTableChangesAsync(TableId, 1);
 
-        channel.Published.Single().EventId.ShouldEndWith("_10_7|k7");
+        appended.ShouldBe(1);
+        var state = h.InnerStore.Only;
+        state.Watermark.ShouldBe(12);
+        var control = state.Events.Single();
+        control.Kind.ShouldBe(CdcStreamEventKind.WatermarkExpired);
+        control.Offset.ShouldBe(1);
+        control.Operation.ShouldBeNull();
+        control.TenantScope.ShouldBe(CdcTenantScope.Shared);
+        var text = System.Text.Encoding.UTF8.GetString(await h.Crypto.UnprotectEventAsync(control));
+        text.ShouldContain("\"StoredVersion\":0");
+        text.ShouldContain("\"MinValidVersion\":10");
+        text.ShouldContain("\"CurrentVersion\":12");
+
+        // the poller continues from there
+        h.Source.Changes.Add(Change(13, "U", 2));
+        (await h.Poller.PollTableChangesAsync(TableId, 1)).ShouldBe(1);
+        h.InnerStore.Only.Events.Select(e => e.Offset).ShouldBe([1L, 2]);
     }
 
     [Fact]
-    public async Task PartialBatch_CommitsMaxVersion()
+    public async Task ExpiredWatermark_Halt_StopsUntilResync()
     {
-        var source = new FakeChangeSource();
-        source.Changes.Add(new Change(10, "I", 1));
-        source.Changes.Add(new Change(11, "D", 2));
-        var (poller, store, channel) = Create(source);
-        await store.TryAdvanceWatermarkAsync(Table, 5, 1);
+        var h = await Seeded(
+            new CdcProducerHarness(o => new MssqlChangeTrackingOptions { Enabled = true, TrackedTables = ["finance.dbo.invoices"], OnWatermarkExpired = CdcOnWatermarkExpired.Halt }),
+            watermark: 0);
+        h.Source.MinValidVersion = 10;
+        h.Source.CurrentVersion = 12;
 
-        var processed = await poller.PollTableChangesAsync(Table, 1);
+        (await h.Poller.PollTableChangesAsync(TableId, 1)).ShouldBe(0);
 
-        processed.ShouldBe(2);
-        channel.Published.Select(e => e.Operation).ShouldBe([CdcOperation.Insert, CdcOperation.Delete]);
-        (await store.GetWatermarkAsync(Table)).ShouldBe(11);
+        h.InnerStore.Only.Status.ShouldBe(CdcStreamStatus.Halted);
+        h.InnerStore.Only.ActivationCode.ShouldBe(CdcActivationCodes.WatermarkExpired);
+        h.InnerStore.Only.Events.ShouldBeEmpty();
+        h.InnerStore.Only.Watermark.ShouldBe(0);
+
+        // halted: no further source access until an administrator resyncs
+        h.Source.Opened = 0;
+        (await h.Poller.PollTableChangesAsync(TableId, 1)).ShouldBe(0);
+        h.Source.Opened.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task PerTablePolicy_OverridesTheGlobalWatermarkPolicy()
+    {
+        var h = await Seeded(
+            new CdcProducerHarness(o => new MssqlChangeTrackingOptions
+            {
+                Enabled = true,
+                OnWatermarkExpired = CdcOnWatermarkExpired.Restart,
+                Tables = [new CdcTrackedTableOptions { Table = "finance.dbo.invoices", OnWatermarkExpired = CdcOnWatermarkExpired.Halt }]
+            }),
+            watermark: 0);
+        h.Source.MinValidVersion = 10;
+
+        await h.Poller.PollTableChangesAsync(TableId, 1);
+
+        h.InnerStore.Only.Status.ShouldBe(CdcStreamStatus.Halted);
+    }
+
+    [Fact]
+    public async Task StaleFencingToken_IsRejected_AndNothingIsAppended()
+    {
+        var h = new CdcProducerHarness();
+        await h.SeedWatermarkAsync(5, token: 9); // a newer lease owner already wrote
+        h.Source.Changes.Add(Change(12, "I", 1));
+
+        await Should.ThrowAsync<FencingTokenRejectedException>(() => h.Poller.PollTableChangesAsync(TableId, 4));
+
+        h.InnerStore.Only.Events.ShouldBeEmpty();
+        h.InnerStore.Only.Watermark.ShouldBe(5);
+        h.Signal.Notified.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task FirstRun_StaleToken_IsFenced()
+    {
+        var h = new CdcProducerHarness();
+        h.Source.CurrentVersion = 100;
+        var stream = await h.Store.EnsureStreamAsync(CdcTableActivator.StreamSource, TableId);
+        h.InnerStore.Streams[stream.Id].WatermarkToken = 9;
+
+        await Should.ThrowAsync<FencingTokenRejectedException>(() => h.Poller.PollTableChangesAsync(TableId, 1));
+    }
+
+    [Fact]
+    public async Task LostHeadRace_AppendsNothing_AndReturnsZero()
+    {
+        var h = await Seeded(new CdcProducerHarness());
+        h.Source.Changes.Add(Change(10, "I", 1));
+        h.Store.BeforeAppend = () =>
+        {
+            h.InnerStore.Only.Head += 1; // a concurrent producer advanced the stream
+            return Task.CompletedTask;
+        };
+
+        (await h.Poller.PollTableChangesAsync(TableId, 1)).ShouldBe(0);
+
+        h.InnerStore.Only.Events.ShouldBeEmpty();
+        h.Signal.Notified.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task TransientSourceFailure_Propagates_AndAppendsNothing()
+    {
+        var h = await Seeded(new CdcProducerHarness());
+        h.Source.Changes.Add(Change(10, "I", 1));
+        h.Source.ThrowOnRead = true;
+
+        await Should.ThrowAsync<InvalidOperationException>(() => h.Poller.PollTableChangesAsync(TableId, 1));
+
+        h.InnerStore.Only.Events.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task FailedSignal_DoesNotFailTheAppend()
+    {
+        var h = await Seeded(new CdcProducerHarness());
+        h.Source.Changes.Add(Change(10, "I", 1));
+        h.Signal.Throws = true;
+
+        (await h.Poller.PollTableChangesAsync(TableId, 1)).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task UnsupportedColumnType_FailsTheWholeBatch_WithAStableCode_AndWritesNothing()
+    {
+        var h = await Seeded(new CdcProducerHarness());
+        h.Source.Changes.Add(new FakeChangeSource.Change(10, "I", new Dictionary<string, object?> { ["Id"] = 1, ["Name"] = new Uri("http://unsupported") }));
+        h.Source.Changes.Add(Change(11, "I", 2));
+
+        var ex = await Should.ThrowAsync<CdcSourceConfigurationException>(() => h.Poller.PollTableChangesAsync(TableId, 1));
+
+        ex.Message.ShouldBe(CdcActivationCodes.UnsupportedType);
+        h.InnerStore.Only.Events.ShouldBeEmpty();
+        h.InnerStore.Only.Watermark.ShouldBe(5);
+        h.InnerStore.Only.Status.ShouldBe(CdcStreamStatus.ActivationFailed);
+    }
+
+    [Fact]
+    public async Task OversizeRow_ProducesAnEventWithoutValues_AndDropsItsImage()
+    {
+        var h = await Seeded(new CdcProducerHarness(cdcStream: new CdcStreamOptions { MaxEventPayloadBytes = 200 }));
+        h.Source.Changes.Add(Change(10, "I", 1, new string('x', 500)));
+
+        await h.Poller.PollTableChangesAsync(TableId, 1);
+
+        var (_, payload) = (await h.ReadChangesAsync()).Single();
+        payload.PayloadOversize.ShouldBeTrue();
+        payload.After.ShouldBeNull();
+        payload.Key.ShouldBeEmpty();
+        h.InnerStore.Only.Images.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task ActivationFailure_ThrowsTheStableCode_AndPollsNothing()
+    {
+        var h = new CdcProducerHarness();
+        h.Source.MinValidVersion = null;
+
+        var ex = await Should.ThrowAsync<CdcSourceConfigurationException>(() => h.Poller.PollTableChangesAsync(TableId, 1));
+
+        ex.Message.ShouldBe(CdcActivationCodes.TrackingDisabled);
+        h.InnerStore.Only.Events.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task UntrackedTable_IsIgnored()
+    {
+        var h = new CdcProducerHarness();
+
+        (await h.Poller.PollTableChangesAsync(new TableIdentifier("finance", "dbo", "other"), 1)).ShouldBe(0);
+
+        h.Source.Opened.ShouldBe(0);
+    }
+
+    [Theory]
+    [InlineData("dbo; DROP TABLE Users;--", "invoices")]
+    [InlineData("dbo", "invoices]; DROP TABLE Users;--")]
+    [InlineData("dbo", "inv oices")]
+    [InlineData("dbo", "invoices' OR '1'='1")]
+    public async Task MaliciousIdentifiers_AreRejectedBeforeAnyStatement(string schema, string tableName)
+    {
+        var h = new CdcProducerHarness();
+
+        await Should.ThrowAsync<ArgumentException>(() => h.Poller.PollTableChangesAsync(new TableIdentifier("finance", schema, tableName), 1));
+
+        h.Source.Statements.ShouldBeEmpty();
     }
 
     [Fact]
     public async Task Cancellation_Propagates()
     {
-        var source = new FakeChangeSource();
-        var (poller, store, _) = Create(source);
-        await store.TryAdvanceWatermarkAsync(Table, 5, 1);
+        var h = await Seeded(new CdcProducerHarness());
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
-        await Should.ThrowAsync<OperationCanceledException>(() => poller.PollTableChangesAsync(Table, 1, cts.Token));
-    }
-
-    // ----- scripted ADO.NET fakes
-
-    private sealed class FakeConnection(Func<string, IReadOnlyDictionary<string, object?>, object> responder) : DbConnection
-    {
-#pragma warning disable CS8765
-        public override string ConnectionString { get; set; } = string.Empty;
-#pragma warning restore CS8765
-
-        public override string Database => "fake";
-
-        public override string DataSource => "fake";
-
-        public override string ServerVersion => "1.0";
-
-        public override ConnectionState State => ConnectionState.Open;
-
-        public override void ChangeDatabase(string databaseName)
-        {
-        }
-
-        public override void Close()
-        {
-        }
-
-        public override void Open()
-        {
-        }
-
-        protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel) => throw new NotSupportedException();
-
-        protected override DbCommand CreateDbCommand() => new FakeCommand(this, responder);
-    }
-
-    private sealed class FakeCommand(DbConnection connection, Func<string, IReadOnlyDictionary<string, object?>, object> responder) : DbCommand
-    {
-        private readonly FakeParameterCollection _parameters = new();
-
-#pragma warning disable CS8765
-        public override string CommandText { get; set; } = string.Empty;
-#pragma warning restore CS8765
-
-        public override int CommandTimeout { get; set; }
-
-        public override CommandType CommandType { get; set; }
-
-        public override bool DesignTimeVisible { get; set; }
-
-        public override UpdateRowSource UpdatedRowSource { get; set; }
-
-        protected override DbConnection? DbConnection { get => connection; set { } }
-
-        protected override DbParameterCollection DbParameterCollection => _parameters;
-
-        protected override DbTransaction? DbTransaction { get; set; }
-
-        public override void Cancel()
-        {
-        }
-
-        public override int ExecuteNonQuery() => throw new NotSupportedException();
-
-        public override object? ExecuteScalar() => Respond();
-
-        public override void Prepare()
-        {
-        }
-
-        protected override DbParameter CreateDbParameter() => new FakeParameter();
-
-        protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior) => ((DataTable)Respond()).CreateDataReader();
-
-        private object Respond() => responder(
-            CommandText,
-            _parameters.Items.ToDictionary(p => p.ParameterName, p => (object?)p.Value, StringComparer.OrdinalIgnoreCase));
-    }
-
-    private sealed class FakeParameter : DbParameter
-    {
-        public override DbType DbType { get; set; }
-
-        public override ParameterDirection Direction { get; set; }
-
-        public override bool IsNullable { get; set; }
-
-#pragma warning disable CS8765
-        public override string ParameterName { get; set; } = string.Empty;
-#pragma warning restore CS8765
-
-        public override int Size { get; set; }
-
-#pragma warning disable CS8765
-        public override string SourceColumn { get; set; } = string.Empty;
-#pragma warning restore CS8765
-
-        public override bool SourceColumnNullMapping { get; set; }
-
-        public override object? Value { get; set; }
-
-        public override void ResetDbType()
-        {
-        }
-    }
-
-    private sealed class FakeParameterCollection : DbParameterCollection
-    {
-        public List<DbParameter> Items { get; } = [];
-
-        public override int Count => Items.Count;
-
-        public override object SyncRoot => ((ICollection)Items).SyncRoot;
-
-        public override int Add(object value)
-        {
-            Items.Add((DbParameter)value);
-            return Items.Count - 1;
-        }
-
-        public override void AddRange(Array values)
-        {
-            foreach (var value in values)
-            {
-                Add(value);
-            }
-        }
-
-        public override void Clear() => Items.Clear();
-
-        public override bool Contains(object value) => Items.Contains((DbParameter)value);
-
-        public override bool Contains(string value) => Items.Any(p => p.ParameterName == value);
-
-        public override void CopyTo(Array array, int index) => ((ICollection)Items).CopyTo(array, index);
-
-        public override IEnumerator GetEnumerator() => Items.GetEnumerator();
-
-        public override int IndexOf(object value) => Items.IndexOf((DbParameter)value);
-
-        public override int IndexOf(string parameterName) => Items.FindIndex(p => p.ParameterName == parameterName);
-
-        public override void Insert(int index, object value) => Items.Insert(index, (DbParameter)value);
-
-        public override void Remove(object value) => Items.Remove((DbParameter)value);
-
-        public override void RemoveAt(int index) => Items.RemoveAt(index);
-
-        public override void RemoveAt(string parameterName) => Items.RemoveAll(p => p.ParameterName == parameterName);
-
-        protected override DbParameter GetParameter(int index) => Items[index];
-
-        protected override DbParameter GetParameter(string parameterName) => Items.First(p => p.ParameterName == parameterName);
-
-        protected override void SetParameter(int index, DbParameter value) => Items[index] = value;
-
-        protected override void SetParameter(string parameterName, DbParameter value) => Items[IndexOf(parameterName)] = value;
+        await Should.ThrowAsync<OperationCanceledException>(() => h.Poller.PollTableChangesAsync(TableId, 1, cts.Token));
     }
 }

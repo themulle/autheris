@@ -46,6 +46,9 @@ public static class GatewayEventServiceExtensions
             services.AddHostedService<WebhookEventBridgeHostedService>();
         }
 
+        // REQ-CDC-99 I1-C: governed CDC stream crypto, signal, tail hub, retention and the compatibility feed.
+        services.AddAutherisCdcStream(gatewayOptions);
+
         return services;
     }
 }

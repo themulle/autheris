@@ -5,12 +5,11 @@ using System.Threading.Tasks;
 using Autheris.Domain.Common;
 
 /// <summary>
-/// Service responsible for polling CHANGETABLE changes from a Microsoft SQL Server database
-/// and publishing them as strongly typed CdcEvents to the ICdcEventChannel.
+/// Polls CHANGETABLE changes of one tracked Microsoft SQL Server table and appends them to the durable CDC stream
+/// (<see cref="ICdcStreamStore"/>). MSSQL changes are never published on the <see cref="ICdcEventChannel"/>.
 /// </summary>
 public interface IMssqlChangeTrackingPoller
 {
-    /// <summary>Polls one table and publishes its changes. <paramref name="fencingToken"/> is the lease token guarding the watermark commit.</summary>
+    /// <summary>Polls one table and appends its changes to the stream; returns the number of appended events. <paramref name="fencingToken"/> is the table lease token guarding the append transaction.</summary>
     Task<int> PollTableChangesAsync(TableIdentifier table, long fencingToken, CancellationToken ct = default);
-    Task<long?> GetCurrentDbVersionAsync(CancellationToken ct = default);
 }

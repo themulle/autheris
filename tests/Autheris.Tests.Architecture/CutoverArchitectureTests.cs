@@ -395,7 +395,7 @@ public sealed class CutoverArchitectureTests
         // -- statements of the gateway itself (no client text) --
         ("Autheris.Application.Services.DbSessionContextInitializer", "fixed session-initialisation statements (tenant and user session context)"),
         ("Autheris.Infrastructure.Persistence.SqlConnectionFactory", "fixed session pinning and hardening statements of a new connection"),
-        ("Autheris.Extensions.Cdc.MssqlChangeTrackingPoller", "CDC polling: fixed change-tracking queries over catalog table and column names"),
+        ("Autheris.Extensions.Cdc.CdcSourceQueries", "CDC producer: fixed change-tracking statements over validated declared table and column names, bound values, no client text"),
         ("Autheris.Application.Procedures.Services.MssqlProcedureInvoker", "stored-procedure call by a validated catalog name with bound parameters (not a WebSQL statement)"),
         ("Autheris.Application.Procedures.Services.SqlProcedureRowScopeResolver", "procedure row-scope key query over validated catalog identifiers, bound values, read-only; splices validated policy row-filter text (§7.3 consumer)"),
         ("Autheris.Application.Procedures.Services.StoredProcedureCatalogValidator", "catalog validation queries over the procedure definitions (metadata only)"),
@@ -417,6 +417,7 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.AccessProfileStore", "access profile tables of the governance store (WP-SC-03): fixed statements with bound values, only integer-indexed parameter names and enum literals are spliced, no client text"),
         ("Autheris.Application.Sql.Federation.CoLocation.CoLocationVerificationService", "co-location verification (Issue #132, SEC-DATA132-05): fixed 'SELECT @@SERVERNAME' verification statement on SQL Server connection, no client text"),
         ("Autheris.Infrastructure.Persistence.ConsumerAggregationStore", "consumer aggregation store (Issue #114, SEC-AUD114-05): fixed rollup statements with bound parameters, no client text"),
+        ("Autheris.Infrastructure.Persistence.CdcStreamSqlCore", "CDC durable stream store (Issue #99, SEC-CDC-05): fixed event and row-image statements over engine-specific schemas, bound values, no client text"),
     ];
 
     private static bool IsAllowedCommandTextSite(string top) =>
