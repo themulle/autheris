@@ -212,7 +212,7 @@ public static class CatalogApiEndpoints
         group.MapPut("/relations/{relationId:guid}/cross-data-source", async (
             Guid relationId,
             SetRelationCrossDataSourceDto request,
-            Autheris.Application.Interfaces.ITableRelationRepository relationRepo,
+            [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Interfaces.ITableRelationRepository relationRepo,
             CancellationToken ct) =>
         {
             var updated = await relationRepo.SetRelationCrossDataSourceOptInAsync(relationId, request.AllowCrossDataSource, ct);
@@ -595,7 +595,9 @@ public sealed record DatasetCatalogSettingsDto(
     System.Collections.Generic.IReadOnlyList<DatasetTagDto> Tags,
     string Visibility,
     bool TierEffective,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     System.Collections.Generic.IReadOnlyList<string>? RequiredFilterColumns = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<string>>? RequiredFilterColumnGroups = null);
 
 public sealed record SetDatasetRequiredFiltersDto(
