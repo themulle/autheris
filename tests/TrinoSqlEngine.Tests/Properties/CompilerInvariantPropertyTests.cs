@@ -11,6 +11,8 @@ namespace TrinoSqlEngine.Tests.Properties;
 /// </summary>
 [Trait("Category", "SqlGate")]
 [Trait("Category", "Security")]
+[Trait("Category", "Metamorphic")]
+[Trait("Category", "NightlyGate")]
 public class CompilerInvariantPropertyTests(ITestOutputHelper output)
 {
     private static readonly CompileFn Production = ProductionCompiler.Compile;

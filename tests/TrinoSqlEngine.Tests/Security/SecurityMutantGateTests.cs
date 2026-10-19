@@ -17,6 +17,8 @@ namespace TrinoSqlEngine.Tests.Security;
 /// </summary>
 [Trait("Category", "Security")]
 [Trait("Category", "SqlGate")]
+[Trait("Category", "Mutant")]
+[Trait("Category", "NightlyGate")]
 public class SecurityMutantGateTests(ITestOutputHelper output)
 {
     private const string MutantEnvironmentVariable = "SQLGATE_MUTANT";

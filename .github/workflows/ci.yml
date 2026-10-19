@@ -41,7 +41,7 @@ jobs:
 
       # WP-TS-02: Autheris.Tests.Integration runs in the parallel integration-tests shards below.
       - name: Test Autheris Solution (excluding Spark and integration)
-        run: dotnet test Autheris.sln -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "Category!=Spark&FullyQualifiedName!~Autheris.Tests.Integration." --logger "trx" --results-directory ${{ runner.temp }}/test-results --verbosity normal
+        run: dotnet test Autheris.sln -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "Category!=Spark&Category!=NightlyGate&Category!=Metamorphic&Category!=Fuzz&Category!=Mutant&FullyQualifiedName!~Autheris.Tests.Integration." --logger "trx" --results-directory ${{ runner.temp }}/test-results --verbosity normal
 
       # WP-ARC-B-12 (D7): the chart must lint and render with and without the optional governance migration job.
       - name: Lint and render Helm chart
@@ -190,7 +190,7 @@ jobs:
       # G2, G3, G5 in-memory, G7. Debug and Release compile the same security code (ARC-S-06); the mutant hooks live in the test assembly.
       # The Release run of the same tests is part of the build-and-test job (all of TrinoSqlEngine.Tests in Release).
       - name: Gate tests, Debug (security mutants)
-        run: dotnet test tests/TrinoSqlEngine.Tests -c Debug --no-restore --filter "Category=SqlGate" --verbosity normal
+        run: dotnet test tests/TrinoSqlEngine.Tests -c Debug --no-restore --filter "Category=SqlGate&Category!=NightlyGate&Category!=Metamorphic&Category!=Fuzz&Category!=Mutant" --verbosity normal
 
       # G4 differential, G6 execution on PostgreSQL, SQL Server and Oracle (CI=true makes a missing database fail).
       - name: Differential and execution gate

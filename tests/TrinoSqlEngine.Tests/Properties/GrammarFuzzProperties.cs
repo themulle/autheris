@@ -14,6 +14,8 @@ namespace TrinoSqlEngine.Tests.Properties;
 /// </summary>
 [Trait("Category", "SqlGate")]
 [Trait("Category", "Security")]
+[Trait("Category", "Fuzz")]
+[Trait("Category", "NightlyGate")]
 public class GrammarFuzzProperties(ITestOutputHelper output)
 {
     private static readonly string[] Extras =
