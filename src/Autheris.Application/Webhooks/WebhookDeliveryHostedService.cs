@@ -109,8 +109,7 @@ public sealed class WebhookDeliveryHostedService : BackgroundService
                 }
                 catch (Exception ex)
                 {
-                    // Messages of storage exceptions may carry connection details: log the type only.
-                    _logger.LogError("Webhook delivery loop failed ({ErrorType}); retrying on the next tick.", ex.GetType().Name);
+                    _logger.LogError(ex, "Webhook delivery loop failed ({ErrorType}: {ErrorMessage}); retrying on the next tick.", ex.GetType().Name, ex.Message);
                 }
             }
         }

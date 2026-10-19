@@ -215,9 +215,32 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             return new McpToolCallResult(IsSuccess: !isError, ContentJson: scrubbedDocJson, ErrorMessage: isError ? scrubbedDocJson : null, IsMasked: docWasMasked);
         }
 
-        var resolvedTables = string.Equals(tool.Name, McpDatasetTools.QueryGraphQl, StringComparison.OrdinalIgnoreCase)
-            ? await ResolveGraphQlTablesAsync(request.ArgumentsJson, cancellationToken).ConfigureAwait(false)
-            : ParseTablesFromTool(tool, request.ArgumentsJson, _sqlEngine, _options.Value.WebSql?.DefaultDataSourceName);
+        string? sqlSyntaxError = null;
+        IReadOnlyList<TableIdentifier>? resolvedTables;
+        if (string.Equals(tool.Name, McpDatasetTools.QueryGraphQl, StringComparison.OrdinalIgnoreCase))
+        {
+            resolvedTables = await ResolveGraphQlTablesAsync(request.ArgumentsJson, cancellationToken).ConfigureAwait(false);
+        }
+        else if (string.Equals(tool.Name, McpDatasetTools.QuerySql, StringComparison.OrdinalIgnoreCase))
+        {
+            var sql = McpDatasetTools.TryGetStringArgument(request.ArgumentsJson, "query", out var s) ? s : null;
+            var (tables, syntaxErr) = McpDataTargetResolver.TryResolveSqlTables(sql, _sqlEngine, _options.Value.WebSql?.DefaultDataSourceName);
+            resolvedTables = tables;
+            sqlSyntaxError = syntaxErr;
+        }
+        else
+        {
+            resolvedTables = ParseTablesFromTool(tool, request.ArgumentsJson, _sqlEngine, _options.Value.WebSql?.DefaultDataSourceName);
+        }
+
+        if (sqlSyntaxError != null)
+        {
+            activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
+            McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
+            _logger.LogWarning("SQL syntax error in MCP tool '{ToolName}': {Error}", tool.Name, sqlSyntaxError);
+            await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", $"SQL_SYNTAX_ERROR: {sqlSyntaxError}", false, false, 0, cancellationToken).ConfigureAwait(false);
+            return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"SQL_SYNTAX_ERROR: {sqlSyntaxError}");
+        }
 
         if (string.Equals(tool.Name, McpDatasetTools.DescribeDataset, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(tool.Name, McpDatasetTools.SampleRows, StringComparison.OrdinalIgnoreCase))
@@ -228,7 +251,10 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             }
         }
 
-        if (resolvedTables == null && (tool.Name.StartsWith("query_", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrWhiteSpace(tool.TargetGraphQLOperation)))
+        bool isSelfAccessTool = string.Equals(tool.Name, McpDatasetTools.DescribeMyAccess, StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(tool.Name, McpDatasetTools.GetMyPermissions, StringComparison.OrdinalIgnoreCase);
+
+        if (resolvedTables == null && !isSelfAccessTool && (tool.Name.StartsWith("query_", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrWhiteSpace(tool.TargetGraphQLOperation)))
         {
             activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
             McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
@@ -345,9 +371,9 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                     {
                         activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
                         McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
-                        _logger.LogWarning("Four-Eyes approval denied or timed out for tool '{ToolName}' on table '{Table}'. Status: {Status}", tool.Name, resolvedTable, approvalResult.Ticket.Status);
-                        await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", $"Tool execution denied: Four-Eyes approval failed or timed out. Status: {approvalResult.Ticket.Status}. {approvalResult.Message}", false, false, 0, cancellationToken).ConfigureAwait(false);
-                        return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Tool '{tool.Name}' requires Four-Eyes approval: {approvalResult.Message ?? "Approval denied or timed out."}");
+                        _logger.LogWarning("Four-Eyes approval denied or timed out for tool '{ToolName}' on table '{Table}'. Status: {Status}", tool.Name, resolvedTable, approvalResult.Ticket?.Status.ToString() ?? "denied/timed out");
+                        await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", $"Tool execution denied: Four-Eyes approval failed or timed out. Status: {approvalResult.Ticket?.Status.ToString() ?? "denied/timed out"}. {approvalResult.Message}", false, false, 0, cancellationToken).ConfigureAwait(false);
+                        return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Tool '{tool.Name}' requires Four-Eyes approval: status is {approvalResult.Ticket?.Status.ToString() ?? "denied/timed out"}. {approvalResult.Message ?? "Approval was not granted within timeout period. Re-request with valid justification."}");
                     }
                     _logger.LogInformation("Four-Eyes approval granted for tool '{ToolName}' on table '{Table}' by approver '{Approver}'.", tool.Name, resolvedTable, approvalResult.Ticket.ApproverSid);
                 }
@@ -357,7 +383,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                     McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
                     _logger.LogWarning("Tool '{ToolName}' targets table '{Table}' which requires Four-Eyes approval. Denying automated AI agent execution.", tool.Name, resolvedTable);
                     await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", $"Tool execution denied: table {resolvedTable} requires interactive Four-Eyes justification approval.", false, false, 0, cancellationToken).ConfigureAwait(false);
-                    return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Tool '{tool.Name}' requires interactive Four-Eyes justification approval. Consent ticket must be generated.");
+                    return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Tool '{tool.Name}' requires interactive Four-Eyes justification approval for table '{resolvedTable}'. Consent ticket must be generated.");
                 }
             }
         }

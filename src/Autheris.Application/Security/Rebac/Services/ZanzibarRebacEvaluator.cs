@@ -202,13 +202,14 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         }
 
         // 2. Perform graph resolution with cycle & depth guard
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var onStack = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var visitedFailed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var tracker = new ExpiryTracker();
         var maxDepth = _gatewayOptions.Value.Rebac.MaxTraversalDepth;
 
         try
         {
-            var allowed = await TraverseAndEvaluateAsync(tenant, request.User, request.Relation, request.Object, depth: 0, maxDepth, visited, tracker, ct).ConfigureAwait(false);
+            var allowed = await TraverseAndEvaluateAsync(tenant, request.User, request.Relation, request.Object, depth: 0, maxDepth, onStack, visitedFailed, tracker, ct).ConfigureAwait(false);
 
             // 3. Store in cache (only if not degraded and generation is known)
             if (!isDegraded && currentGen.HasValue)
@@ -314,7 +315,8 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         string obj,
         int depth,
         int maxDepth,
-        HashSet<string> visited,
+        HashSet<string> onStack,
+        HashSet<string> visitedFailed,
         ExpiryTracker tracker,
         CancellationToken ct)
     {
@@ -338,93 +340,106 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         }
 
         var visitKey = $"{user}#{relation}@{obj}";
-        if (!visited.Add(visitKey))
+        if (visitedFailed.Contains(visitKey))
         {
-            // Cycle detected! Fail-closed
+            return false;
+        }
+
+        if (!onStack.Add(visitKey))
+        {
+            // True cycle detected on current call stack! Fail-closed
             _logger.LogWarning("F-SEC-04 ReBAC cyclic relationship detected: {CycleKey}. Decision: Denied.", visitKey);
             return false;
         }
 
-        // 1. Direct check: Is there an exact tuple (tenant, user, relation, obj)?
-        // WP-SC-16: expired tuples are filtered here as well, so a store that does not filter cannot grant access (fail closed).
-        var now = DateTimeOffset.UtcNow;
-        var directTuples = await _store.GetTuplesAsync(tenantId, user, relation, obj, ct).ConfigureAwait(false);
-        var direct = directTuples
-            .Where(t => !t.IsExpired(now) && !string.IsNullOrWhiteSpace(t.User) && string.Equals(t.User, user, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-        if (direct.Count > 0)
+        try
         {
-            tracker.Note(direct.Any(t => t.ExpiresAt is null) ? null : direct.Max(t => t.ExpiresAt));
-            return true;
-        }
-
-        // 2. Transitive inheritance: Are there relations that inherit 'relation'? (e.g. editor -> viewer)
-        if (_inheritedBy.TryGetValue(relation, out var parentRelations))
-        {
-            List<string> parents;
-            lock (parentRelations)
+            // 1. Direct check: Is there an exact tuple (tenant, user, relation, obj)?
+            // WP-SC-16: expired tuples are filtered here as well, so a store that does not filter cannot grant access (fail closed).
+            var now = DateTimeOffset.UtcNow;
+            var directTuples = await _store.GetTuplesAsync(tenantId, user, relation, obj, ct).ConfigureAwait(false);
+            var direct = directTuples
+                .Where(t => !t.IsExpired(now) && !string.IsNullOrWhiteSpace(t.User) && string.Equals(t.User, user, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (direct.Count > 0)
             {
-                parents = parentRelations.ToList();
+                tracker.Note(direct.Any(t => t.ExpiresAt is null) ? null : direct.Max(t => t.ExpiresAt));
+                return true;
             }
 
-            foreach (var parentRel in parents)
+            // 2. Transitive inheritance: Are there relations that inherit 'relation'? (e.g. editor -> viewer)
+            if (_inheritedBy.TryGetValue(relation, out var parentRelations))
             {
-                if (await TraverseAndEvaluateAsync(tenantId, user, parentRel, obj, depth + 1, maxDepth, visited, tracker, ct).ConfigureAwait(false))
+                List<string> parents;
+                lock (parentRelations)
                 {
-                    return true;
+                    parents = parentRelations.ToList();
                 }
-            }
-        }
 
-        // 3. User-set expansion: Does user belong to a group that has this relation?
-        // E.g., user is "user:alice", check if there's a tuple (tenantId, group, relation, obj) and alice is member of group
-        var objectTuples = await _store.GetTuplesAsync(tenantId, user: null, relation: relation, obj: obj, ct).ConfigureAwait(false);
-        foreach (var t in objectTuples)
-        {
-            if (string.IsNullOrWhiteSpace(t.User) || t.IsExpired(now))
-            {
-                // POL-7: Empty User in tuple must never be treated as wildcard or allow! Expired tuples are absent.
-                continue;
-            }
-
-            if (t.User.Contains('#'))
-            {
-                // User-set: e.g. "group:engineering#member"
-                var parts = t.User.Split('#');
-                if (parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[0]) && !string.IsNullOrWhiteSpace(parts[1]))
+                foreach (var parentRel in parents)
                 {
-                    var groupObj = parts[0];
-                    var groupRel = parts[1];
-                    // Check if current user has 'groupRel' on 'groupObj'
-                    if (await TraverseAndEvaluateAsync(tenantId, user, groupRel, groupObj, depth + 1, maxDepth, visited, tracker, ct).ConfigureAwait(false))
+                    if (await TraverseAndEvaluateAsync(tenantId, user, parentRel, obj, depth + 1, maxDepth, onStack, visitedFailed, tracker, ct).ConfigureAwait(false))
                     {
-                        tracker.Note(t.ExpiresAt);
                         return true;
                     }
                 }
             }
-        }
 
-        // 4. Hierarchical parent delegation: Does 'obj' have a parent that grants access?
-        // E.g. tuple (tenantId, parentObj, "parent", obj) -> check if user has relation on parentObj
-        var parentTuples = await _store.GetTuplesAsync(tenantId, user: null, relation: "parent", obj: obj, ct).ConfigureAwait(false);
-        foreach (var pt in parentTuples)
+            // 3. User-set expansion: Does user belong to a group that has this relation?
+            // E.g., user is "user:alice", check if there's a tuple (tenantId, group, relation, obj) and alice is member of group
+            var objectTuples = await _store.GetTuplesAsync(tenantId, user: null, relation: relation, obj: obj, ct).ConfigureAwait(false);
+            foreach (var t in objectTuples)
+            {
+                if (string.IsNullOrWhiteSpace(t.User) || t.IsExpired(now))
+                {
+                    // POL-7: Empty User in tuple must never be treated as wildcard or allow! Expired tuples are absent.
+                    continue;
+                }
+
+                if (t.User.Contains('#'))
+                {
+                    // User-set: e.g. "group:engineering#member"
+                    var parts = t.User.Split('#');
+                    if (parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[0]) && !string.IsNullOrWhiteSpace(parts[1]))
+                    {
+                        var groupObj = parts[0];
+                        var groupRel = parts[1];
+                        // Check if current user has 'groupRel' on 'groupObj'
+                        if (await TraverseAndEvaluateAsync(tenantId, user, groupRel, groupObj, depth + 1, maxDepth, onStack, visitedFailed, tracker, ct).ConfigureAwait(false))
+                        {
+                            tracker.Note(t.ExpiresAt);
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            // 4. Hierarchical parent delegation: Does 'obj' have a parent that grants access?
+            // E.g. tuple (tenantId, parentObj, "parent", obj) -> check if user has relation on parentObj
+            var parentTuples = await _store.GetTuplesAsync(tenantId, user: null, relation: "parent", obj: obj, ct).ConfigureAwait(false);
+            foreach (var pt in parentTuples)
+            {
+                var parentEntity = pt.User; // In parent relation, User column stores the parent entity identifier
+                if (string.IsNullOrWhiteSpace(parentEntity) || pt.IsExpired(now))
+                {
+                    // POL-7: Empty User in parent relation must never be treated as wildcard or parent!
+                    continue;
+                }
+
+                if (await TraverseAndEvaluateAsync(tenantId, user, relation, parentEntity, depth + 1, maxDepth, onStack, visitedFailed, tracker, ct).ConfigureAwait(false))
+                {
+                    tracker.Note(pt.ExpiresAt);
+                    return true;
+                }
+            }
+
+            visitedFailed.Add(visitKey);
+            return false;
+        }
+        finally
         {
-            var parentEntity = pt.User; // In parent relation, User column stores the parent entity identifier
-            if (string.IsNullOrWhiteSpace(parentEntity) || pt.IsExpired(now))
-            {
-                // POL-7: Empty User in parent relation must never be treated as wildcard or parent!
-                continue;
-            }
-
-            if (await TraverseAndEvaluateAsync(tenantId, user, relation, parentEntity, depth + 1, maxDepth, visited, tracker, ct).ConfigureAwait(false))
-            {
-                tracker.Note(pt.ExpiresAt);
-                return true;
-            }
+            onStack.Remove(visitKey);
         }
-
-        return false;
     }
 
     private void InitializeDefaultInheritance()

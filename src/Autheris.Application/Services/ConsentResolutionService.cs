@@ -60,6 +60,23 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         // Rule 2: Zero Trust - If A is empty, deny access
         if (aConsents.Count == 0)
         {
+            var clampedConsent = activeConsents
+                .Where(c => c.Effect == ConsentEffect.Allow &&
+                            c.TableIdentifier == table &&
+                            !c.IsRevoked &&
+                            c.ValidFrom <= now &&
+                            now < c.ValidTo &&
+                            now >= c.EffectiveValidTo &&
+                            IsSubjectMatch(c, userSid, subjectGroupSids, userRoles, allUserSids))
+                .OrderByDescending(c => c.EffectiveValidTo)
+                .FirstOrDefault();
+
+            if (clampedConsent != null)
+            {
+                return TableAccessDecision.Denied(table,
+                    $"Zero Trust: No active ALLOW consent granted to subject (consent expired on {clampedConsent.EffectiveValidTo:yyyy-MM-dd} due to maximum duration clamp).");
+            }
+
             return TableAccessDecision.Denied(table, "Zero Trust: No active ALLOW consent granted to subject.");
         }
 

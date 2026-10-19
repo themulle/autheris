@@ -24,12 +24,11 @@ internal static class McpDataTargetResolver
     /// <summary>Stand-in for <c>invoke_api</c> calls on catalog / self-service endpoints that read no dataset rows.</summary>
     internal static readonly TableIdentifier ApiNoTable = new("governance", "api", "invoke");
 
-    /// <summary>All tables of a SQL statement; null when the statement cannot be parsed and analysed.</summary>
-    internal static IReadOnlyList<TableIdentifier>? ResolveSqlTables(string? sql, ISqlEngine? sqlEngine, string? defaultDataSourceName)
+    internal static (IReadOnlyList<TableIdentifier>? Tables, string? SyntaxError) TryResolveSqlTables(string? sql, ISqlEngine? sqlEngine, string? defaultDataSourceName)
     {
         if (string.IsNullOrWhiteSpace(sql))
         {
-            return null;
+            return (null, "SQL query cannot be empty.");
         }
 
         try
@@ -38,7 +37,7 @@ internal static class McpDataTargetResolver
             var metadata = engine.Analyze(sql.AsMemory());
             if (metadata.ReferencedTables.Count == 0)
             {
-                return [SqlNoTable];
+                return ([SqlNoTable], null);
             }
 
             var tables = new List<TableIdentifier>(metadata.ReferencedTables.Count);
@@ -51,15 +50,17 @@ internal static class McpDataTargetResolver
                 }
             }
 
-            return tables;
+            return (tables, null);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Parse errors (ParseCanceledException derives from OperationCanceledException), security exceptions of
-            // the token guards, depth limits: nothing can be proven, so deny. Analysis is synchronous and not cancellable.
-            return null;
+            return (null, ex.Message);
         }
     }
+
+    /// <summary>All tables of a SQL statement; null when the statement cannot be parsed and analysed.</summary>
+    internal static IReadOnlyList<TableIdentifier>? ResolveSqlTables(string? sql, ISqlEngine? sqlEngine, string? defaultDataSourceName) =>
+        TryResolveSqlTables(sql, sqlEngine, defaultDataSourceName).Tables;
 
     /// <summary>
     /// Tables of an <c>invoke_api</c> call: the dataset of a <c>/api/v1/data</c> call (path and the <c>dataset</c> parameter the

@@ -346,7 +346,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 _maskingProvider,
                 _options?.DataMasking?.HmacKeyId,
                 MaskingDisabled: _options?.IsColumnMaskingDisabled == true,
-                MaxBytes: maxBytes));
+                MaxBytes: maxBytes,
+                RequestedColumns: (requestedFields != null && requestedFields.Count > 0) ? effectiveRequestedFields : null));
 
         _usageRecorder?.RecordUsage(metadata.Identifier, tenantId, userSid, ConsumerOutcome.Allow, processedRows.Count, rowsMeasured: true);
 
