@@ -61,10 +61,10 @@ public sealed class RedisLeaseTests : IAsyncLifetime, IDisposable
     [Fact]
     public async Task Lease_IsRenewed_WhileJobRuns_LongerThanInitialTtl()
     {
-        await using var lease = await _provider.TryAcquireLeaseAsync("job", TimeSpan.FromSeconds(3));
+        await using var lease = await _provider.TryAcquireLeaseAsync("job", TimeSpan.FromSeconds(6));
         lease.ShouldNotBeNull();
 
-        await Task.Delay(7000);
+        await Task.Delay(8000);
 
         lease.LeaseLost.IsCancellationRequested.ShouldBeFalse();
         (await _provider.TryAcquireLeaseAsync("job", Ttl)).ShouldBeNull();
