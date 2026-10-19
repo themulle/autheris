@@ -250,12 +250,18 @@ public sealed class CdcStreamTailHubTests : IAsyncDisposable
     [Fact]
     public async Task LiveReader_BehindTail_EmitsGap()
     {
+        var readGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _store.GateReads = readGate;
+
         await using var e = Hub().AttachAsync(Id, null, CancellationToken.None).GetAsyncEnumerator();
         var next = e.MoveNextAsync().AsTask();
         await AppendAsync(1);
         await AppendAsync(2);
         await AppendAsync(3);
         await _store.PurgeAsync(Id, 3, 100, 1);
+        _store.GateReads = null;
+        readGate.TrySetResult();
+
         await _signal.NotifyAdvancedAsync(Id, 3);
         (await next.WaitAsync(Guard)).ShouldBeTrue();
         e.Current.Record.Kind.ShouldBe(CdcStreamEventKind.Gap);
