@@ -4,10 +4,11 @@
     "configuration": "Debug",
     "test-case-filter": "Category=SqlGate",
     "mutate": [
-      "**/Ast/Visitors/AstSecurityVisitor*.cs",
-      "**/Ast/Visitors/AstSimplificationVisitor.cs",
+      "**/Ast/Visitors/*.cs",
       "**/Ast/Security/*.cs",
-      "**/Ast/Emit/*.cs"
+      "**/Ast/Emit/*.cs",
+      "**/Ast/Generators/*.cs",
+      "**/Ast/Capabilities/*.cs"
     ],
     "thresholds": {
       "high": 90,

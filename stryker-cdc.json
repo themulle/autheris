@@ -1,0 +1,22 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker-net/master/src/Stryker.Core/Stryker.Core/stryker-config.schema.json",
+  "stryker-config": {
+    "configuration": "Release",
+    "test-case-filter": "FullyQualifiedName~Cdc|FullyQualifiedName~MultiWatermark|FullyQualifiedName~CustomQueryPoller",
+    "mutate": [
+      "**/Cdc/**/*.cs"
+    ],
+    "thresholds": {
+      "high": 90,
+      "low": 85,
+      "break": 80
+    },
+    "concurrency": 2,
+    "reporters": [
+      "progress",
+      "json",
+      "html"
+    ],
+    "project": "Autheris.Extensions.csproj"
+  }
+}
