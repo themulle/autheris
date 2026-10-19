@@ -1,7 +1,10 @@
 using System.Buffers;
 using System.Net;
 using System.Net.Security;
+using System.Reflection;
 using System.Security;
+using System.Security.Authentication;
+using System.Security.Authentication.ExtendedProtection;
 using System.Text;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Security;
@@ -618,12 +621,14 @@ public static class SqlServerWindowsAuthConfigurator
             _ = SecretScrubber.Redact(msg.Trim());
             string diagnosticAdvice =
                 "SQL Server Windows Authentication login failed with untrusted domain / EPA error (Error 18452). " +
-                "In Linux container environments, managed NTLM cannot negotiate TLS Channel-Binding Tokens (CBT). " +
-                "If the target SQL Server enforces Extended Protection for Authentication (EPA / 'Erweiterter Schutz' = Required), " +
-                "connections will be rejected with Error 18452. Actionable remediations: " +
-                "(1) Configure SQL Server Extended Protection (EPA) to 'Allowed' or 'Off'; " +
-                "(2) Use Kerberos authentication with a Keytab (F-AUTH-04); " +
-                "(3) Use SQL Server native authentication (SqlPassword). " +
+                "In Linux container environments, managed NTLM requires TLS Channel-Binding Tokens (CBT) to satisfy Extended Protection. " +
+                "If Microsoft.Data.SqlClient did not provide TLS Channel Binding and the target SQL Server enforces Extended Protection for Authentication (EPA / 'Erweiterter Schutz' = Required, or Allowed over TLS), " +
+                "connections are rejected with Error 18452. Autheris extracts TLS session channel bindings from the underlying connection SslStream; " +
+                "if channel binding extraction was unavailable (e.g. unencrypted connection or reflection mismatch), EPA rejection occurs. Actionable remediations: " +
+                "(1) Verify that TLS encryption is active ('Encrypt=True' or 'Mandatory') so a TLS Channel-Binding Token is generated; " +
+                "(2) Configure SQL Server Extended Protection (EPA) to 'Allowed' or 'Off' if channel binding cannot be passed; " +
+                "(3) Use Kerberos authentication with a Keytab (F-AUTH-04); " +
+                "(4) Use SQL Server native authentication (SqlPassword). " +
                 "WARNING: Repeated failed authentication attempts can lock out the Active Directory account!";
 
             return new SqlServerWindowsAuthException(
@@ -850,27 +855,242 @@ public static class SqlServerWindowsAuthConfigurator
 }
 
 /// <summary>
+/// Issue #230: Extracts the TLS session channel binding token (CBT) from Microsoft.Data.SqlClient's
+/// internal managed SNI SslStream so .NET's <see cref="NegotiateAuthentication"/> can populate
+/// the NTLM-AUTHENTICATE message with MsvAvChannelBindings (AV pair 10) under Extended Protection for Authentication (EPA).
+/// </summary>
+public static class SqlClientChannelBindingExtractor
+{
+    public static bool IsSupportedSqlClientVersion(Assembly? assembly)
+    {
+        if (assembly is null) return false;
+        var version = assembly.GetName().Version;
+        return version is not null && version.Major >= 7;
+    }
+
+    public static ChannelBindingExtractionResult ExtractChannelBinding(
+        SspiContextProvider? provider,
+        ILogger? logger = null)
+    {
+        if (provider is null)
+        {
+            return new ChannelBindingExtractionResult(null, null, "SspiContextProvider was null.", false, null);
+        }
+
+        var assembly = typeof(SspiContextProvider).Assembly;
+        bool supportedVersion = IsSupportedSqlClientVersion(assembly);
+        if (!supportedVersion)
+        {
+            logger?.LogWarning(
+                "Microsoft.Data.SqlClient assembly version '{Version}' is not verified for managed NTLM TLS channel binding extraction. Attempting best-effort reflection.",
+                assembly.GetName().Version);
+        }
+
+        try
+        {
+            // 1. Traverse SspiContextProvider._physicalStateObj
+            var stateObjField = FindField(provider.GetType(), "_physicalStateObj")
+                ?? FindField(typeof(SspiContextProvider), "_physicalStateObj");
+            var stateObj = stateObjField?.GetValue(provider);
+            if (stateObj is null)
+            {
+                return new ChannelBindingExtractionResult(
+                    null, null, "SspiContextProvider._physicalStateObj was not initialized or null.", false, null);
+            }
+
+            // 2. Traverse TdsParserStateObjectManaged._sessionHandle (or SessionHandle property)
+            var handle = FindField(stateObj.GetType(), "_sessionHandle")?.GetValue(stateObj)
+                ?? FindProperty(stateObj.GetType(), "SessionHandle")?.GetValue(stateObj);
+
+            // In test doubles, stateObj itself might expose _sslStream
+            if (handle is null && (FindField(stateObj.GetType(), "_sslStream") != null || FindProperty(stateObj.GetType(), "SslStream") != null))
+            {
+                handle = stateObj;
+            }
+
+            if (handle is null)
+            {
+                return new ChannelBindingExtractionResult(
+                    null, null, $"No session handle found on state object of type '{stateObj.GetType().FullName}'.", false, null);
+            }
+
+            // 3. If MARS handle (SniMarsHandle), unpack connection lower handle
+            if (handle.GetType().Name.Contains("Mars", StringComparison.OrdinalIgnoreCase))
+            {
+                var conn = FindField(handle.GetType(), "_connection")?.GetValue(handle);
+                if (conn is not null)
+                {
+                    var lower = FindField(conn.GetType(), "_lowerHandle")?.GetValue(conn);
+                    if (lower is not null)
+                    {
+                        handle = lower;
+                    }
+                }
+            }
+
+            // Check if handle itself has _lowerHandle
+            var directLower = FindField(handle.GetType(), "_lowerHandle")?.GetValue(handle);
+            if (directLower is not null)
+            {
+                handle = directLower;
+            }
+
+            // 4. Retrieve _sslStream from handle
+            var sslStreamObj = FindField(handle.GetType(), "_sslStream")?.GetValue(handle)
+                ?? FindProperty(handle.GetType(), "SslStream")?.GetValue(handle);
+
+            if (sslStreamObj is null)
+            {
+                return new ChannelBindingExtractionResult(
+                    null, null, $"No _sslStream found on handle '{handle.GetType().FullName}'. Connection may be unencrypted.", false, null);
+            }
+
+            if (sslStreamObj is not SslStream sslStream)
+            {
+                return new ChannelBindingExtractionResult(
+                    null, null, $"Handle _sslStream object '{sslStreamObj.GetType().FullName}' is not an SslStream.", false, null);
+            }
+
+            // 5. Query TransportContext from SslStream
+            var transportContext = sslStream.TransportContext;
+            if (transportContext is null)
+            {
+                return new ChannelBindingExtractionResult(
+                    null, null, "SslStream.TransportContext returned null.", false, null);
+            }
+
+            // 6. Query ChannelBinding depending on TLS protocol
+            ChannelBinding? binding = null;
+            ChannelBindingKind? kindUsed = null;
+
+            // TLS 1.3: tls-server-end-point (RFC 8446 forbids tls-unique)
+            if (sslStream.SslProtocol == SslProtocols.Tls13)
+            {
+                try
+                {
+                    binding = transportContext.GetChannelBinding(ChannelBindingKind.Endpoint);
+                    if (binding is not null && !binding.IsInvalid)
+                    {
+                        kindUsed = ChannelBindingKind.Endpoint;
+                    }
+                }
+                catch (Exception ex) when (ex is NotSupportedException or PlatformNotSupportedException or InvalidOperationException)
+                {
+                    // Fallback below
+                }
+            }
+
+            // TLS <= 1.2: tls-unique preferred
+            if (binding is null || binding.IsInvalid)
+            {
+                try
+                {
+                    binding = transportContext.GetChannelBinding(ChannelBindingKind.Unique);
+                    if (binding is not null && !binding.IsInvalid)
+                    {
+                        kindUsed = ChannelBindingKind.Unique;
+                    }
+                }
+                catch (Exception ex) when (ex is NotSupportedException or PlatformNotSupportedException or InvalidOperationException)
+                {
+                    // Fallback to endpoint below
+                }
+            }
+
+            // Fallback to Endpoint if Unique is null/invalid/unsupported
+            if (binding is null || binding.IsInvalid)
+            {
+                try
+                {
+                    binding = transportContext.GetChannelBinding(ChannelBindingKind.Endpoint);
+                    if (binding is not null && !binding.IsInvalid)
+                    {
+                        kindUsed = ChannelBindingKind.Endpoint;
+                    }
+                }
+                catch (Exception ex) when (ex is NotSupportedException or PlatformNotSupportedException or InvalidOperationException)
+                {
+                    // Both kinds failed
+                }
+            }
+
+            if (binding is null || binding.IsInvalid)
+            {
+                return new ChannelBindingExtractionResult(
+                    null, null, "TransportContext did not provide a valid Endpoint or Unique channel binding.", false, null);
+            }
+
+            return new ChannelBindingExtractionResult(
+                binding, kindUsed, $"Successfully extracted TLS Channel Binding ({kindUsed}).", true, null);
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "Unexpected error during managed NTLM TLS channel binding extraction.");
+            return new ChannelBindingExtractionResult(
+                null, null, $"Reflection error during channel binding extraction: {ex.Message}", false, ex);
+        }
+    }
+
+    internal static FieldInfo? FindField(Type? type, string fieldName)
+    {
+        for (var t = type; t is not null && t != typeof(object); t = t.BaseType)
+        {
+            var field = t.GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.DeclaredOnly);
+            if (field is not null) return field;
+        }
+        return null;
+    }
+
+    internal static PropertyInfo? FindProperty(Type? type, string propertyName)
+    {
+        for (var t = type; t is not null && t != typeof(object); t = t.BaseType)
+        {
+            var prop = t.GetProperty(propertyName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.DeclaredOnly);
+            if (prop is not null) return prop;
+        }
+        return null;
+    }
+}
+
+/// <summary>
+/// Issue #230: Result of attempting to extract TLS Channel Binding from Microsoft.Data.SqlClient.
+/// </summary>
+public sealed record ChannelBindingExtractionResult(
+    ChannelBinding? Binding,
+    ChannelBindingKind? Kind,
+    string? StatusMessage,
+    bool Success,
+    Exception? Error);
+
+/// <summary>
 /// Issue #102: Custom <see cref="SspiContextProvider"/> for <see cref="SqlConnection"/> that uses .NET's
 /// <see cref="NegotiateAuthentication"/> with explicit per-datasource <see cref="NetworkCredential"/> and
 /// <c>System.Net.Security.UseManagedNtlm = true</c>.
+/// Issue #230: Under EPA, extracts the TLS session channel binding and populates <see cref="NegotiateAuthenticationClientOptions.Binding"/>.
 /// </summary>
 public sealed class ManagedNtlmSspiContextProvider : SspiContextProvider, IDisposable
 {
     private readonly NetworkCredential _credential;
     private readonly string? _targetSpnOverride;
     private readonly string _package;
+    private readonly Func<SspiContextProvider, ChannelBinding?>? _channelBindingAccessor;
     private NegotiateAuthentication? _negotiateAuth;
+    private ChannelBinding? _channelBinding;
     private ManagedNtlmFailure? _lastFailure;
+    private string? _channelBindingStatus;
+    private ChannelBindingKind? _channelBindingKindUsed;
 
     public ManagedNtlmSspiContextProvider(
         NetworkCredential credential,
         string? targetSpnOverride = null,
-        string package = "NTLM")
+        string package = "NTLM",
+        Func<SspiContextProvider, ChannelBinding?>? channelBindingAccessor = null)
     {
         ArgumentNullException.ThrowIfNull(credential);
         _credential = credential;
         _targetSpnOverride = targetSpnOverride;
         _package = string.IsNullOrWhiteSpace(package) ? "NTLM" : package;
+        _channelBindingAccessor = channelBindingAccessor;
         // SqlClient makes the SspiContextProvider part of the connection pool key and expects a stable identity per resource. A provider is
         // created per open, so equality is by credential identity: equal credentials share a pool, different accounts or passwords never do.
         _identity = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(
@@ -888,6 +1108,15 @@ public sealed class ManagedNtlmSspiContextProvider : SspiContextProvider, IDispo
     /// <summary>The most recent failure of <see cref="TryGenerateContext"/> (cleared when a new negotiation starts); never contains secrets.</summary>
     public ManagedNtlmFailure? LastFailure => Volatile.Read(ref _lastFailure);
 
+    /// <summary>Issue #230: Status message describing TLS Channel Binding extraction.</summary>
+    public string? ChannelBindingStatus => Volatile.Read(ref _channelBindingStatus);
+
+    /// <summary>Issue #230: The TLS Channel Binding kind used for this session, if acquired.</summary>
+    public ChannelBindingKind? ChannelBindingKindUsed => _channelBindingKindUsed;
+
+    /// <summary>Issue #230: Indicates whether a valid TLS Channel Binding was acquired and assigned to NegotiateAuthentication.</summary>
+    public bool ChannelBindingAcquired => _channelBindingKindUsed is not null;
+
     protected override bool GenerateContext(
         ReadOnlySpan<byte> incomingBlob,
         IBufferWriter<byte> outgoingBlobWriter,
@@ -897,6 +1126,7 @@ public sealed class ManagedNtlmSspiContextProvider : SspiContextProvider, IDispo
     /// <summary>
     /// Performs one negotiation step. An empty <paramref name="incomingBlob"/> starts a new negotiation (negotiate message);
     /// a non-empty one is the server challenge. Failures are recorded in <see cref="LastFailure"/> instead of being swallowed.
+    /// Under EPA, the TLS session channel binding is extracted and passed to <see cref="NegotiateAuthenticationClientOptions.Binding"/>.
     /// </summary>
     public bool TryGenerateContext(ReadOnlySpan<byte> incomingBlob, IBufferWriter<byte> outgoingBlobWriter, string? resource)
     {
@@ -907,13 +1137,43 @@ public sealed class ManagedNtlmSspiContextProvider : SspiContextProvider, IDispo
             {
                 Volatile.Write(ref _lastFailure, null);
                 _negotiateAuth?.Dispose();
+                _negotiateAuth = null;
+                _channelBinding?.Dispose();
+                _channelBinding = null;
+                _channelBindingKindUsed = null;
+
                 string? targetName = !string.IsNullOrWhiteSpace(_targetSpnOverride) ? _targetSpnOverride : resource;
+
+                ChannelBinding? binding = null;
+                if (_channelBindingAccessor is not null)
+                {
+                    binding = _channelBindingAccessor(this);
+                    _channelBinding = binding;
+                    if (binding is not null && !binding.IsInvalid)
+                    {
+                        _channelBindingKindUsed = ChannelBindingKind.Endpoint;
+                        Volatile.Write(ref _channelBindingStatus, "Channel binding provided via custom accessor.");
+                    }
+                    else
+                    {
+                        Volatile.Write(ref _channelBindingStatus, "Custom channel binding accessor returned null or invalid binding.");
+                    }
+                }
+                else
+                {
+                    var extraction = SqlClientChannelBindingExtractor.ExtractChannelBinding(this);
+                    binding = extraction.Binding;
+                    _channelBinding = binding;
+                    _channelBindingKindUsed = extraction.Kind;
+                    Volatile.Write(ref _channelBindingStatus, extraction.StatusMessage);
+                }
 
                 _negotiateAuth = new NegotiateAuthentication(new NegotiateAuthenticationClientOptions
                 {
                     Package = _package,
                     Credential = _credential,
-                    TargetName = targetName
+                    TargetName = targetName,
+                    Binding = binding
                 });
             }
 
@@ -953,6 +1213,8 @@ public sealed class ManagedNtlmSspiContextProvider : SspiContextProvider, IDispo
     {
         _negotiateAuth?.Dispose();
         _negotiateAuth = null;
+        _channelBinding?.Dispose();
+        _channelBinding = null;
     }
 }
 

@@ -148,4 +148,90 @@ public sealed class SqlServerWindowsAuthSecurityTests
         var blocked = Should.Throw<SqlSourceLoginBlockedException>(() => breaker.ThrowIfOpen(options));
         blocked.Remaining.ShouldBeGreaterThan(TimeSpan.Zero);
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void T_SEC_SEC230_01_ClassifyOpenException_Error18452_ClarifiesSqlClientTlsChannelBindingAndEPA()
+    {
+        // SEC-SEC230-01 & SEC-SEC230-04: On SqlNumber 18452, clarify that SqlClient did not provide TLS Channel Binding and server enforces EPA.
+        var fakeEx = new FakeSqlExceptionWithDiagnostics(
+            18452,
+            state: 1,
+            cls: 14,
+            message: "Login failed. The login is from an untrusted domain and cannot be used with Integrated authentication.");
+
+        var classified = SqlServerWindowsAuthConfigurator.ClassifyOpenException(fakeEx, IntegratedOptions());
+
+        var authEx = classified.ShouldBeOfType<SqlServerWindowsAuthException>();
+        authEx.Category.ShouldBe(SqlServerWindowsAuthFailureCategory.LoginRejected);
+        authEx.SqlNumber.ShouldBe(18452);
+        authEx.SqlState.ShouldBe(1);
+        authEx.SqlClass.ShouldBe(14);
+
+        // Required Issue #230 clarification: SqlClient did not provide TLS Channel Binding
+        authEx.Message.ShouldContain("Microsoft.Data.SqlClient did not provide TLS Channel Binding and the target SQL Server enforces Extended Protection", Case.Insensitive);
+        authEx.Message.ShouldContain("Extended Protection for Authentication (EPA");
+        authEx.Message.ShouldContain("Channel-Binding Token", Case.Insensitive);
+        authEx.Message.ShouldContain("Encrypt=True", Case.Insensitive);
+        authEx.Message.ShouldContain("Allowed");
+        authEx.Message.ShouldContain("Kerberos", Case.Insensitive);
+        authEx.Message.ShouldContain("SqlPassword", Case.Insensitive);
+        authEx.Message.ShouldContain("lock out the Active Directory account", Case.Insensitive);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void T_SEC_SEC230_02_ChannelBindingExtraction_DoesNotLeakSecrets()
+    {
+        // SEC-SEC230-01: Neither ChannelBindingStatus nor failure records leak passwords or credentials.
+        const string secretPassword = "SuperSensitivePassword#2026";
+        using var provider = new ManagedNtlmSspiContextProvider(
+            new System.Net.NetworkCredential("svc-app", secretPassword, "CORP"));
+
+        var writer = new System.Buffers.ArrayBufferWriter<byte>();
+        provider.TryGenerateContext(ReadOnlySpan<byte>.Empty, writer, "MSSQLSvc/host:1433");
+
+        provider.ChannelBindingStatus.ShouldNotBeNull();
+        provider.ChannelBindingStatus!.ShouldNotContain(secretPassword);
+        provider.LastFailure?.ToString().ShouldNotContain(secretPassword);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void T_SEC_SEC230_03_ReflectionFailSafe_DoesNotThrowAndRecordsStatus()
+    {
+        // SEC-SEC230-03: Reflection extraction failures on unexpected driver types degrade gracefully without throwing.
+        var unexpectedProvider = new DummyFailingSspiContextProvider();
+        var result = SqlClientChannelBindingExtractor.ExtractChannelBinding(unexpectedProvider);
+
+        result.Success.ShouldBeFalse();
+        result.Binding.ShouldBeNull();
+        result.StatusMessage.ShouldNotBeNullOrWhiteSpace();
+        result.StatusMessage.ShouldContain("was not initialized or null");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void T_SEC_SEC230_05_ChannelBindingLifecycle_SafeDisposal()
+    {
+        // SEC-SEC230-02: ManagedNtlmSspiContextProvider disposes resources without leaking handles.
+        var provider = new ManagedNtlmSspiContextProvider(
+            new System.Net.NetworkCredential("svc", "pass", "DOM"));
+
+        var writer = new System.Buffers.ArrayBufferWriter<byte>();
+        provider.TryGenerateContext(ReadOnlySpan<byte>.Empty, writer, "MSSQLSvc/db:1433");
+
+        // Dispose provider
+        provider.Dispose();
+        // Subsequent dispose is idempotent and safe
+        provider.Dispose();
+    }
+
+    private sealed class DummyFailingSspiContextProvider : Microsoft.Data.SqlClient.SspiContextProvider
+    {
+        protected override bool GenerateContext(
+            ReadOnlySpan<byte> incomingBlob,
+            System.Buffers.IBufferWriter<byte> outgoingBlobWriter,
+            Microsoft.Data.SqlClient.SspiAuthenticationParameters authParams) => true;
+    }
 }
