@@ -39,4 +39,20 @@ public static class DataSourceAllowlistGuard
 
         return resolved;
     }
+
+    /// <summary>
+    /// SEC-DS05-03: Enforces transport isolation for a data source based on granular per-data-source configuration.
+    /// Fails closed if the data source profile excludes the requested transport protocol.
+    /// </summary>
+    public static void EnsureTransportAllowed(
+        Autheris.Application.DataSources.IDataSourceOptionsResolver? resolver,
+        string? dataSourceName,
+        Autheris.Domain.Options.DataSources.DataSourceTransportFlags transport)
+    {
+        if (resolver != null && !resolver.IsTransportAllowed(dataSourceName, transport))
+        {
+            throw new WebSqlPolicyException($"Access to data source '{dataSourceName}' is not allowed over transport '{transport}'.");
+        }
+    }
 }
+
