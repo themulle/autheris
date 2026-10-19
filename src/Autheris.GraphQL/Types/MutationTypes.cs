@@ -134,6 +134,45 @@ public sealed class Mutation
             approved.Id, approved.TenantId.Value, ex.GetType().Name);
     }
 
+    private static void EnsureReviewScope(IHttpContextAccessor? httpContextAccessor, ClaimsPrincipal? principal)
+    {
+        var scopes = TokenAccessScope.GetScopeSet(principal?.Claims);
+        if (scopes.Count == 0) return;
+
+        var gatewayOptions = httpContextAccessor?.HttpContext?.RequestServices != null
+            ? Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>(httpContextAccessor.HttpContext.RequestServices)?.Value
+            : null;
+        var configuredReviewScopes = gatewayOptions?.Authentication?.EntraId?.AccessReviewScopes;
+        var reviewScopes = configuredReviewScopes is { Count: > 0 } ? configuredReviewScopes : ["data.access.review"];
+        if (!reviewScopes.Any(s => scopes.Contains(s)))
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("FORBIDDEN")
+                .SetMessage("The 'data.access.review' scope is required to review consent requests.")
+                .Build());
+        }
+    }
+
+    private static string? ValidateOptionalConsentDescription(IHttpContextAccessor? httpContextAccessor, string? description)
+    {
+        if (description is null) return null;
+
+        var textOptions = httpContextAccessor?.HttpContext?.RequestServices != null
+            ? Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<Microsoft.Extensions.Options.IOptions<GovernanceTextOptions>>(httpContextAccessor.HttpContext.RequestServices)
+            : null;
+        var defaultOptions = new GovernanceTextOptions();
+        var maxLength = textOptions?.Value?.ConsentDescriptionMaxLength ?? defaultOptions.ConsentDescriptionMaxLength;
+        var check = UntrustedText.Normalize(description, maxLength, allowLineFeed: false);
+        if (!check.IsValid)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("VALIDATION_ERROR")
+                .SetMessage("The description is not valid.")
+                .Build());
+        }
+        return check.Value;
+    }
+
     private static GraphQLException ConsentNotFound() => new(ErrorBuilder.New()
         .SetCode("NOT_FOUND")
         .SetMessage("The consent was not found.")
@@ -465,36 +504,9 @@ public sealed class Mutation
         var approverSid = GetAuthenticatedUserSid(httpContextAccessor);
 
         var approvePrincipal = httpContextAccessor.HttpContext?.User;
-        var scopes = TokenAccessScope.GetScopeSet(approvePrincipal?.Claims);
-        if (scopes.Count > 0)
-        {
-            var gatewayOptions = httpContextAccessor.HttpContext?.RequestServices.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>()?.Value;
-            var configuredReviewScopes = gatewayOptions?.Authentication?.EntraId?.AccessReviewScopes;
-            var reviewScopes = configuredReviewScopes is { Count: > 0 } ? configuredReviewScopes : ["data.access.review"];
-            if (!reviewScopes.Any(s => scopes.Contains(s)))
-            {
-                throw new GraphQLException(ErrorBuilder.New()
-                    .SetCode("FORBIDDEN")
-                    .SetMessage("The 'data.access.review' scope is required to review consent requests.")
-                    .Build());
-            }
-        }
+        EnsureReviewScope(httpContextAccessor, approvePrincipal);
 
-        string? validatedDescription = null;
-        if (description is not null)
-        {
-            var textOptions = httpContextAccessor.HttpContext?.RequestServices.GetService<Microsoft.Extensions.Options.IOptions<GovernanceTextOptions>>();
-            var maxLength = (textOptions?.Value ?? new GovernanceTextOptions()).ConsentDescriptionMaxLength;
-            var check = UntrustedText.Normalize(description, maxLength, allowLineFeed: false);
-            if (!check.IsValid)
-            {
-                throw new GraphQLException(ErrorBuilder.New()
-                    .SetCode("VALIDATION_ERROR")
-                    .SetMessage("The description is not valid.")
-                    .Build());
-            }
-            validatedDescription = check.Value;
-        }
+        string? validatedDescription = ValidateOptionalConsentDescription(httpContextAccessor, description);
 
         var approveFingerprint = IdempotencyFingerprint(
             ResolveMutationTenantId(httpContextAccessor, approvePrincipal, Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(approvePrincipal)).Value,
@@ -791,20 +803,7 @@ public sealed class Mutation
         _ = RequireDecisionService<IGrantPolicy>(httpContextAccessor); // composition fail-fast: both decision resolvers need the same services
 
         var rejectPrincipal = httpContextAccessor.HttpContext?.User;
-        var scopes = TokenAccessScope.GetScopeSet(rejectPrincipal?.Claims);
-        if (scopes.Count > 0)
-        {
-            var gatewayOptions = httpContextAccessor.HttpContext?.RequestServices.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>()?.Value;
-            var configuredReviewScopes = gatewayOptions?.Authentication?.EntraId?.AccessReviewScopes;
-            var reviewScopes = configuredReviewScopes is { Count: > 0 } ? configuredReviewScopes : ["data.access.review"];
-            if (!reviewScopes.Any(s => scopes.Contains(s)))
-            {
-                throw new GraphQLException(ErrorBuilder.New()
-                    .SetCode("FORBIDDEN")
-                    .SetMessage("The 'data.access.review' scope is required to review consent requests.")
-                    .Build());
-            }
-        }
+        EnsureReviewScope(httpContextAccessor, rejectPrincipal);
 
         var approverSid = GetAuthenticatedUserSid(httpContextAccessor);
 
