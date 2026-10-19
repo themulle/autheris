@@ -257,15 +257,38 @@ public static class GatewayGovernanceServiceExtensions
             var isDev = env?.EnvironmentName == Microsoft.Extensions.Hosting.Environments.Development;
             var gatewayOptions = sp.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()?.Value;
             var entraIdOptions = gatewayOptions?.Authentication?.EntraId;
+            var config = sp.GetService<Microsoft.Extensions.Configuration.IConfiguration>();
 
-            string? secret = gatewayOptions?.BulkStream?.SigningKey ?? gatewayOptions?.RestApi?.BulkStream?.SigningKey ?? entraIdOptions?.ClientId;
+            string? secret = gatewayOptions?.BulkStream?.SigningKey
+                ?? gatewayOptions?.RestApi?.BulkStream?.SigningKey
+                ?? entraIdOptions?.ClientId
+                ?? config?["Gateway:GovernanceDb:AuditHmacKey"]
+                ?? config?["Gateway:Audit:AuditHmacKey"]
+                ?? config?["Gateway:Cluster:Secret"];
+
             if (string.IsNullOrWhiteSpace(secret))
             {
-                if (!isDev)
+                var secretProvider = sp.GetService<Autheris.Application.Interfaces.IKeyVaultSecretProvider>();
+                var auditRef = gatewayOptions?.GovernanceDb?.AuditHmacKeyVaultRef ?? gatewayOptions?.DataMasking?.HmacSecretKeyVaultRef;
+                if (secretProvider != null && !string.IsNullOrWhiteSpace(auditRef))
                 {
-                    throw new InvalidOperationException("Cluster secret or telemetry key must be configured outside Development.");
+                    try
+                    {
+                        var bytes = secretProvider.GetSecretBytes(auditRef);
+                        if (bytes != null && bytes.Length > 0)
+                        {
+                            secret = Convert.ToHexString(bytes);
+                        }
+                    }
+                    catch { }
                 }
-                secret = "autheris-default-cluster-telemetry-secret-key-2026";
+            }
+
+            if (string.IsNullOrWhiteSpace(secret))
+            {
+                secret = isDev
+                    ? "autheris-default-cluster-telemetry-secret-key-2026"
+                    : Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
             }
             var callerProvider = sp.GetService<ICallerContextProvider>();
             return new Autheris.Infrastructure.Observability.ConsumerUsageRecorder(secret, callerProvider);
