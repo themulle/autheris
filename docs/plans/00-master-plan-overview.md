@@ -40,6 +40,8 @@
 | 1.6 | **#230** Windows Authentication (NTLM) TLS Channel Binding (EPA / CBT) extraction for SQL Server ([`REQ-SEC-230`](2026-10-19-req-issue-230-ntlm-tls-channel-binding.md)) | Production blocker: NTLM auth fails with 18452 when SQL Server enforces Extended Protection (EPA) due to zeroed CBT | S-M | ✅ | **COMPLETED & VERIFIED ✅** (Phases 1–5 done, [`PLAN-SEC-230`](2026-10-19-plan-issue-230-ntlm-tls-channel-binding.md), all 43 unit & security tests passing) |
 | 1.11 | **#39 Addendum** pagination truncation signal: `PaginationTruncated` context key in GraphQL execution & root list cursor guidance ([`REQ-GOV-39`](2026-10-19-req-issue-39-graphql-pagination-truncation-signal.md)) | Silent data loss: queries sliced at `MaxResponseRows` or client limit omit truncation signal | S | ✅ | **COMPLETED & VERIFIED ✅** (Merged to `main` via `feat/closed-issues-addenda`, [`PLAN-GOV-39`](2026-10-19-plan-issue-39-graphql-pagination-truncation-signal.md)) |
 | 1.12 | **#220–#227** Governance & Federation Refinements: usage recording (#220), required filter dbt/API/groups/joins (#221), bulk stream body trailer/signed cursor/own switch (#222), cross-source real reader & opt-in schema (#223), single-row cost factor & nested rows settlement (#224), query analysis tier limits & row reporting (#225), self-service configurable scopes (#226), consent description on approval (#227) ([`REQ-GOV-220-227`](2026-10-19-req-issues-220-227-governance-refinements.md)) | Critical operational governance fixes across 8 areas | M-L | ✅ | **COMPLETED & VERIFIED ✅** (Phases 1–5 done, [`PLAN-GOV-220-227`](2026-10-19-plan-issues-220-227-governance-refinements.md), all unit & regression tests passing) |
+| 1.13 | **#236** Required filter column groups (#221) ignored by REST reads, typed aggregation, bulk stream and federated staging ([`REQ-GOV-236`](2026-10-19-req-issue-236-unified-required-filter-column-groups.md)) | Critical fail-open security defect: allows queries to scan partitioned/tenant tables without required filters | M | ✅ | **P0 IMMEDIATE HOTFIX 🚨** Phase 1 approved; next: Phase 2 implementation plan |
+| 1.14 | **#237** v1.2.4 delivery follow-ups: telemetry tags (#220), cursor HMAC binding & rotation (#222), nested cost settlement precision (#224), query analysis rowsPerRequest (#225), self-service disable gate (#226) ([`REQ-GOV-237`](2026-10-19-req-issue-237-v1-2-4-delivery-follow-ups.md)) | Production polish, gap closure, and cryptographic defense-in-depth across v1.2.4 features | S-M | ✅ | **P1 PRIORITY ⚡** Phase 1 approved; next: Phase 2 implementation plan |
 
 **Delivery tracker for Waves 2 and 3:** [`PLAN-DELIVERY-W23`](2026-10-16-plan-waves-2-3-delivery.md) holds the gate status per item, the strictly sequential planning order (all Phase 2 and Phase 3 first) and the single-developer implementation order.
 
@@ -106,6 +108,7 @@ Guiding rule (owner): rights are checked by the backend, not by the calling agen
 |---:|---|:---:|:---:|---|
 | 4.1 | **#99** governed CDC fan-out (I1 rest, I2, I3; I1-0 contracts merged) | XL | ✅ | Phase 4 |
 | 4.2 | **BL-03 Wave 2** scale to 5,000 users (identity realms, SCIM, delegation, Access Policies, …) | XL | ✅ | Owner re-evaluation, re-reviews |
+| 4.2b | **#238** Databricks OBO: run queries as calling person for Unity Catalog access enforcement (`WP-SC-15`, [`REQ-DATA-238`](2026-10-19-req-issue-238-databricks-obo-unity-catalog.md)) | Strategic architectural feature: delegates RLS/masking to native Unity Catalog, MSAL OBO exchange | M-L | ✅ | **PLANNED FOR v1.3.0 📦** (Scale/Enterprise track, Phase 2 in progress) |
 | 4.3 | **#132** co-located data sources: run joins across databases of one server as one statement (`REQ-DATA-132`, `WP-FED-16`, spike first) | L | ✅ | **COMPLETED & VERIFIED ✅** (PR #198, [`PLAN-DATA-132`](2026-10-18-plan-issue-132-colocated-data-sources.md), closed) |
 | 4.4 | **BL-05** per-data-source configuration | ? | ❌ intake only | Phase 1 |
 | 4.5 | **BL-08** C# DLL extension points for authentication and authorization | ? | ❌ intake only | Phase 1 |
@@ -181,6 +184,9 @@ Assessment: [`INTAKE-2026-10-19-ADDENDA`](2026-10-19-issue-intake-closed-issues-
 
 | Plan / Category Document | Topic & Scope | Open Requirements & Components | Status | Next Milestone |
 |---|---|---|:---:|---|
+| [`2026-10-19-req-issue-236-unified-required-filter-column-groups.md`](2026-10-19-req-issue-236-unified-required-filter-column-groups.md)<br/>`REQ-GOV-236` | **Issue #236: Unified Required Filter Column Groups across All Read Paths (REST, Aggregation, Stream, Staging)** | Critical fail-open security defect fix: centralizes required filter column group evaluation in `IRequiredFilterValidator`; enforces disjunctive column groups across REST single-table reads, GraphQL `<table>_aggregate`, keyset bulk stream, and federated OLAP staging. | **P0 IMMEDIATE HOTFIX 🚨 (PRD APPROVED)** | Phase 2 implementation plan |
+| [`2026-10-19-req-issue-237-v1-2-4-delivery-follow-ups.md`](2026-10-19-req-issue-237-v1-2-4-delivery-follow-ups.md)<br/>`REQ-GOV-237` | **Issue #237: v1.2.4 Delivery Follow-Ups (#220, #222, #224, #225, #226)** | 5 polish and gap items: (1) OTel telemetry dimensions for consumer metrics (#220); (2) Keyset cursor HMAC context binding to tenant/source/table and rotation kid (#222); (3) Nested cost settlement precision with depth bounding and refund (#224); (4) Query analysis rowsPerRequest & tier limit violation diagnostics (#225); (5) Self-service access request disable gate on empty scopes (#226). | **P1 PRIORITY ⚡ (PRD APPROVED)** | Phase 2 implementation plan |
+| [`2026-10-19-req-issue-238-databricks-obo-unity-catalog.md`](2026-10-19-req-issue-238-databricks-obo-unity-catalog.md)<br/>`REQ-DATA-238` / `WP-SC-15` | **Issue #238: Databricks OBO: Run Queries as Calling Person for Unity Catalog Access Enforcement (WP-SC-15)** | Connector-agnostic delegated enforcement (`IDelegationCapability`); MSAL.NET OAuth 2.0 On-Behalf-Of (OBO) token exchange for Azure Databricks; `EnforcementMode` (`AutherisEnforced`, `Delegated`, `DelegatedDefenceInDepth`); bounded in-memory token cache; zero token leakage; query tags for Unity Catalog audit correlation. | **PLANNED FOR v1.3.0 📦 (PRD APPROVED)** | Phase 2 implementation plan (Scale Track) |
 | [`2026-10-19-issue-intake-closed-issues-addenda.md`](2026-10-19-issue-intake-closed-issues-addenda.md)<br/>`INTAKE-2026-10-19-ADDENDA` | **Issue intake: Closed Issues Addenda (#39, #29, #75, #112, #175)** | Claims verified against codebase; verdicts: approved with conditions. PRDs: `REQ-GOV-39`, `REQ-GOV-29`, `REQ-DATA-75`, `REQ-DATA-112B`, `REQ-GOV-175B`. Guardrails: fail-closed 4-eyes & clear keys for cross-source relations; source DB time-bucketing pushdown bounded by #163 required filters; caller bucket state & system caps probe in `/analyze`; per-scope rate limiting isolating `Agent.Read` from `Apps.Read`; pagination truncation signal in GraphQL `extensions.pagination`. | **PHASE 1 DONE ✅** | Phase 2 plans for #39, #29, #75, #112, #175 |
 | [`2026-10-19-req-issue-210-sqlserver-windows-auth-governance-upgrade.md`](2026-10-19-req-issue-210-sqlserver-windows-auth-governance-upgrade.md)<br/>`REQ-SEC-210`<br/>[`2026-10-19-plan-issue-210-sqlserver-windows-auth-governance-upgrade.md`](2026-10-19-plan-issue-210-sqlserver-windows-auth-governance-upgrade.md)<br/>`PLAN-SEC-210` | **Issue #210: SQL Server Windows Auth NTLM/EPA Diagnostics, v1.1.x Governance DB Upgrade & Container Release Gate** | Resolves containerized NTLM failure 18452 via EPA documentation & `SqlError.State` diagnostic logs; fixes 500 `KeyNotFoundException` in `/datasources/{id}/test` for uncataloged sources; delivers official forward migration `tools/migrations/upgrade_governance_v1_1_to_v1_2.sql` for SQLite v1.1.x upgrade; clears CI publication gate (`BenchmarkDockerfiles_AreHardened`, `CutoverArchitectureTests` allowlist, host DI registration for `ICdcStreamStore`). | **PHASE 2 DONE ✅** | Phase 3 Security Review |
 | [`2026-10-19-req-issue-39-graphql-pagination-truncation-signal.md`](2026-10-19-req-issue-39-graphql-pagination-truncation-signal.md)<br/>`REQ-GOV-39` | **Issue #39 Addendum: GraphQL Pagination Truncation Signal (`extensions.pagination`) & Root Cursor Guidance** | Fixes silent data loss on capped queries: sets `context.ContextData["PaginationTruncated"] = true` upon slicing at `MaxResponseRows` or client limit; emits `isTruncated` and `maxRowsReached` in `extensions.pagination`; provides cursor & pagination guidance on root fields. | **PRD READY ✅** | Phase 2 plan (Wave 1 rank 1.11) |
@@ -255,6 +261,9 @@ flowchart TD
     I112B["2026-10-19-req-issue-112-...md<br/>REQ-DATA-112B time-bucketing aggregations"]
     I175B["2026-10-19-req-issue-175-...md<br/>REQ-GOV-175B caller bucket & caps analyze"]
     I210["2026-10-19-req-issue-210-...md<br/>REQ-SEC-210 SQL Server auth & upgrade"]
+    I236["2026-10-19-req-issue-236-...md<br/>REQ-GOV-236 required filter groups"]
+    I237["2026-10-19-req-issue-237-...md<br/>REQ-GOV-237 v1.2.4 follow-ups"]
+    I238["2026-10-19-req-issue-238-...md<br/>REQ-DATA-238 Databricks OBO (WP-SC-15)"]
 
     MP --> AG
     MP --> SR
@@ -271,7 +280,6 @@ flowchart TD
     MP --> B127
     MP --> R128
     R128 --> FED1
-    MP --> BL
     BL --> BL6
     MP --> I39
     MP --> I29
@@ -280,6 +288,9 @@ flowchart TD
     MP --> I112B
     MP --> I175B
     MP --> I210
+    MP --> I236
+    MP --> I237
+    MP --> I238
     SR --> IR
     AR --> IR
     FT --> IR
