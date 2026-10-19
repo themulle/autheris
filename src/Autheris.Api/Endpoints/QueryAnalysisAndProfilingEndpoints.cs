@@ -46,14 +46,23 @@ public static class QueryAnalysisAndProfilingEndpoints
 {
     /// <param name="mapSampleRows">
     /// PLAN-SEC-115 C-115-1: the sample-rows route returns rows, so it belongs to the REST data family and is mapped only while
-    /// <c>Gateway:RestApi:DataEndpoint:Enabled</c> is on. The other analysis and consent routes stay unconditional.
+    /// <c>Gateway:RestApi:DataEndpoint:Enabled</c> is on.
     /// </param>
-    public static IEndpointRouteBuilder MapQueryAnalysisAndProfilingEndpoints(this IEndpointRouteBuilder app, bool mapSampleRows = true)
+    /// <param name="mapQueryAnalysis">
+    /// PLAN-GOV-240: dedicated switch for <c>POST /api/v1/governance/queries/analyze</c>, gated by <c>Gateway:Governance:QueryAnalysis:Enabled</c>.
+    /// </param>
+    public static IEndpointRouteBuilder MapQueryAnalysisAndProfilingEndpoints(
+        this IEndpointRouteBuilder app,
+        bool mapSampleRows = true,
+        bool mapQueryAnalysis = true)
     {
-        app.MapPost("/api/v1/governance/queries/analyze", HandleAnalyzeQueriesAsync)
-            .WithName("AnalyzeQueriesStatic")
-            .RequireAuthorization()
-            .WithAudit(AuditLevel.Summarized, AuditEventTypes.QueryAnalysisEvaluated);
+        if (mapQueryAnalysis)
+        {
+            app.MapPost("/api/v1/governance/queries/analyze", HandleAnalyzeQueriesAsync)
+                .WithName("AnalyzeQueriesStatic")
+                .RequireAuthorization()
+                .WithAudit(AuditLevel.Summarized, AuditEventTypes.QueryAnalysisEvaluated);
+        }
 
         app.MapPost("/api/v1/governance/consents/bundle", HandleSubmitBundledConsentAsync)
             .WithName("SubmitBundledConsentRequest")

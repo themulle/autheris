@@ -42,6 +42,16 @@ public sealed class GraphQLOptions
 
     /// <summary>#112: typed aggregate fields (<c>Gateway:GraphQL:Aggregation</c>).</summary>
     public GraphQLAggregationOptions Aggregation { get; init; } = new();
+
+    /// <summary>Issue #240: GraphQL metrics options (<c>Gateway:GraphQL:Metrics</c>).</summary>
+    public GraphQLMetricsOptions Metrics { get; init; } = new();
+}
+
+/// <summary>Issue #240: switches for GraphQL metrics read path (queryMetrics).</summary>
+public sealed class GraphQLMetricsOptions
+{
+    /// <summary>Enable the queryMetrics GraphQL root field. Default true.</summary>
+    public bool Enabled { get; init; } = true;
 }
 
 /// <summary>#112: switches and bounds of the typed GraphQL aggregation surface.</summary>

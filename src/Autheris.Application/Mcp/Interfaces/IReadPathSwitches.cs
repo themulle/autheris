@@ -14,6 +14,9 @@ public interface IReadPathSwitches
     /// <summary>Issue #222: Dedicated switch for bulk keyset streaming endpoint (/stream, /bulk).</summary>
     bool BulkStreamEnabled { get; }
 
+    /// <summary>Issue #240: Dedicated switch for query analysis endpoint (POST /api/v1/governance/queries/analyze).</summary>
+    bool QueryAnalysisEnabled { get; }
+
     bool IsGroupEnabled(McpToolGroup group);
 
     /// <summary>False when the tool's group is off or the name is listed in <c>Mcp:DisabledTools</c>. Unknown (dynamic) names follow <see cref="McpToolGroup.Query"/>.</summary>

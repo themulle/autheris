@@ -220,7 +220,9 @@ public static class GatewayApplicationBuilderExtensions
         app.MapHitLEndpoints();
         app.MapGovernanceApiEndpoints();
         app.MapGovernancePlanEndpoints();
-        app.MapQueryAnalysisAndProfilingEndpoints(mapSampleRows: switches.RestDataEndpointEnabled);
+        app.MapQueryAnalysisAndProfilingEndpoints(
+            mapSampleRows: switches.RestDataEndpointEnabled,
+            mapQueryAnalysis: switches.QueryAnalysisEnabled);
         app.MapTokenRevocationEndpoints(); // SEC M-14 (GAP-B)
         app.MapTenantRegistryAdminEndpoints(); // M-A2: operator resolution of a tenant id collision
         app.MapFinOpsEndpoints();

@@ -67,6 +67,7 @@ public sealed class GatewayOptions
     [Required] public WebhooksOptions Webhooks { get; init; } = new();
     [Required] public FieldSunsettingOptions FieldSunsetting { get; init; } = new();
     [Required] public QueryCostOptions QueryCost { get; init; } = new();
+    [Required] public GovernanceOptions Governance { get; init; } = new();
 
     /// <summary>
     /// Getting Started Preset Profile: "Strict" (Default) or "Quickstart".
