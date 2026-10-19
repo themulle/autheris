@@ -157,9 +157,9 @@ public static class CatalogApiEndpoints
                 var result = await testingService.TestDatasourceAsync(id, effectiveRequest, httpContext.User, ct);
                 return Results.Ok(result);
             }
-            catch (System.Collections.Generic.KeyNotFoundException ex)
+            catch (System.Collections.Generic.KeyNotFoundException)
             {
-                return Results.NotFound(new { error = ex.Message });
+                return Results.NotFound(new { error = "Datasource was not found in catalog or configuration." });
             }
         })
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)

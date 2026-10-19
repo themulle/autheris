@@ -21,6 +21,7 @@ public static class CdcStreamServiceExtensions
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<ICdcKeyEncryptionKeyProvider, KeyVaultCdcKekProvider>();
         services.TryAddSingleton<CdcStreamKeyring>();
+        services.TryAddSingleton<ICdcPayloadCodec, CdcPayloadCodec>();
         services.TryAddSingleton<ICdcStreamCrypto, CdcStreamCrypto>();
         services.TryAddSingleton<ICdcStreamSignal, CdcStreamSignal>();
         services.TryAddSingleton<ICdcStreamTailHub, CdcStreamTailHub>();

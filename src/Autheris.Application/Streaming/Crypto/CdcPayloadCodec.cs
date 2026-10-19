@@ -6,6 +6,7 @@ using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text.Json;
+using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Model;
 
 /// <summary>A payload could not be encoded or decoded. Carries a stable code only, never row data.</summary>
@@ -36,8 +37,55 @@ public sealed class CdcPayloadCodecException : Exception
 /// named by the data, never uses polymorphic deserialisation, and is bounded in size and depth. Decoded dictionaries are immutable
 /// (SEC-CDC99-05).
 /// </summary>
-public static class CdcPayloadCodec
+public sealed class CdcPayloadCodec : ICdcPayloadCodec
 {
+    public static readonly CdcPayloadCodec Instance = new();
+
+    public byte[] SerializeChange(CdcChangePayload payload)
+    {
+        try
+        {
+            return EncodeChange(payload);
+        }
+        catch (CdcPayloadCodecException ex) when (ex.Code == CdcActivationCodes.UnsupportedType)
+        {
+            throw new NotSupportedException("Unsupported type in change payload.", ex);
+        }
+    }
+
+    public byte[] SerializeControl(CdcControlPayload payload) => EncodeControl(payload);
+
+    public byte[] SerializeImage(IReadOnlyDictionary<string, object?> row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        try
+        {
+            var buffer = new ArrayBufferWriter<byte>(256);
+            using (var w = new Utf8JsonWriter(buffer))
+            {
+                WriteRow(w, row);
+            }
+            return buffer.WrittenSpan.ToArray();
+        }
+        catch (CdcPayloadCodecException ex) when (ex.Code == CdcActivationCodes.UnsupportedType)
+        {
+            throw new NotSupportedException("Unsupported type in row image.", ex);
+        }
+    }
+
+    public IReadOnlyDictionary<string, object?> DeserializeImage(ReadOnlySpan<byte> plaintext)
+    {
+        try
+        {
+            using var doc = Parse(plaintext);
+            return ReadRow(doc.RootElement) ?? FrozenDictionary<string, object?>.Empty;
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException or OverflowException or KeyNotFoundException)
+        {
+            throw new CdcPayloadCodecException(InvalidCode, ex);
+        }
+    }
+
     public const int MaxDecodeBytes = 16 * 1024 * 1024;
     public const string InvalidCode = "CDC_PAYLOAD_INVALID";
     private const int MaxDepth = 8;
