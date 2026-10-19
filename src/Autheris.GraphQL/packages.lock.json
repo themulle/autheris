@@ -609,11 +609,11 @@
         "type": "Project",
         "dependencies": {
           "Apache.Arrow": "[23.0.0, )",
-          "Autheris.Domain": "[1.0.0, )",
+          "Autheris.Domain": "[1.2.1, )",
           "BitFaster.Caching": "[2.5.4, )",
           "Casbin.NET": "[2.21.3, )",
           "DuckDB.NET.Data.Full": "[1.5.6, )",
-          "FastSqlEngine": "[1.0.0, )",
+          "FastSqlEngine": "[1.2.1, )",
           "FluentValidation": "[12.2.0, )",
           "HotChocolate.Language": "[16.6.8, )",
           "MemoryPack": "[1.21.4, )",
