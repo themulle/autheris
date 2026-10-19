@@ -47,7 +47,8 @@ public sealed record WebhookOutboxMessage(
     string? LeaseOwner,
     int? LastStatusCode,
     string? LastErrorCode,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    string? TraceParent = null);
 
 /// <summary>Stable, machine-readable delivery error codes. Never free text (no resolved IPs, no exception messages).</summary>
 public static class WebhookDeliveryErrorCodes

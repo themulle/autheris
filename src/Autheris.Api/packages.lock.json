@@ -54,6 +54,15 @@
           "ModelContextProtocol": "[2.2.0]"
         }
       },
+      "OpenTelemetry": {
+        "type": "Direct",
+        "requested": "[1.19.1, )",
+        "resolved": "1.19.1",
+        "contentHash": "6ywhc3upf+dq8EsOohj7I7zS3l4yX9vfbtFkvyEC8xIUY4Z9iDIOVuke356eCAzIZaWtmwmmyl2UXYCp5n7I3Q==",
+        "dependencies": {
+          "OpenTelemetry.Api.ProviderBuilderExtensions": "1.19.1"
+        }
+      },
       "OpenTelemetry.Exporter.OpenTelemetryProtocol": {
         "type": "Direct",
         "requested": "[1.19.1, )",
@@ -79,21 +88,6 @@
         "contentHash": "/4TfTvbwIDqpaKTiWvEsjUywiHYF9zZvGZF5sK15avoDsUO/WPQbKsF8TiMaesuphdFQPK2z52P0zk6j26V0rQ==",
         "dependencies": {
           "prometheus-net": "8.2.1"
-        }
-      },
-      "Serilog.AspNetCore": {
-        "type": "Direct",
-        "requested": "[10.0.0, )",
-        "resolved": "10.0.0",
-        "contentHash": "a/cNa1mY4On1oJlfGG1wAvxjp5g7OEzk/Jf/nm7NF9cWoE7KlZw1GldrifUBWm9oKibHkR7Lg/l5jy3y7ACR8w==",
-        "dependencies": {
-          "Serilog": "4.3.0",
-          "Serilog.Extensions.Hosting": "10.0.0",
-          "Serilog.Formatting.Compact": "3.0.0",
-          "Serilog.Settings.Configuration": "10.0.0",
-          "Serilog.Sinks.Console": "6.1.1",
-          "Serilog.Sinks.Debug": "3.0.0",
-          "Serilog.Sinks.File": "7.0.0"
         }
       },
       "Antlr4.Runtime.Standard": {
@@ -752,11 +746,6 @@
         "resolved": "10.8.3",
         "contentHash": "K0B05oApxmviWalNHPMBBcRC7erKiDATz3ENNR/jqTR9JwIwLRefgDhj2jCRwL1aca99pXUe0qyQC73/xIuZig=="
       },
-      "Microsoft.Extensions.DependencyModel": {
-        "type": "Transitive",
-        "resolved": "10.0.0",
-        "contentHash": "RFYJR7APio/BiqdQunRq6DB+nDB6nc2qhHr77mlvZ0q0BT8PubMXN7XicmfzCbrDE/dzhBnUKBRXLTcqUiZDGg=="
-      },
       "Microsoft.Garnet": {
         "type": "Transitive",
         "resolved": "2.2.1",
@@ -879,14 +868,6 @@
         "resolved": "10.0.3",
         "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w=="
       },
-      "OpenTelemetry": {
-        "type": "Transitive",
-        "resolved": "1.19.1",
-        "contentHash": "6ywhc3upf+dq8EsOohj7I7zS3l4yX9vfbtFkvyEC8xIUY4Z9iDIOVuke356eCAzIZaWtmwmmyl2UXYCp5n7I3Q==",
-        "dependencies": {
-          "OpenTelemetry.Api.ProviderBuilderExtensions": "1.19.1"
-        }
-      },
       "OpenTelemetry.Api": {
         "type": "Transitive",
         "resolved": "1.19.1",
@@ -931,69 +912,6 @@
         "type": "Transitive",
         "resolved": "3.4.5",
         "contentHash": "EzMx67+IXC8lQRI78yeSBWKCTn9qvSIaale6XZ1RJLKpr2NJqmptgn3UqgguWqoeGUsoohiy3SWeiVLAj1n9DA=="
-      },
-      "Serilog": {
-        "type": "Transitive",
-        "resolved": "4.3.0",
-        "contentHash": "+cDryFR0GRhsGOnZSKwaDzRRl4MupvJ42FhCE4zhQRVanX0Jpg6WuCBk59OVhVDPmab1bB+nRykAnykYELA9qQ=="
-      },
-      "Serilog.Extensions.Hosting": {
-        "type": "Transitive",
-        "resolved": "10.0.0",
-        "contentHash": "E7juuIc+gzoGxgzFooFgAV8g9BfiSXNKsUok9NmEpyAXg2odkcPsMa/Yo4axkJRlh0se7mkYQ1GXDaBemR+b6w==",
-        "dependencies": {
-          "Serilog": "4.3.0",
-          "Serilog.Extensions.Logging": "10.0.0"
-        }
-      },
-      "Serilog.Extensions.Logging": {
-        "type": "Transitive",
-        "resolved": "10.0.0",
-        "contentHash": "vx0kABKl2dWbBhhqAfTOk53/i8aV/5VaT3a6il9gn72Wqs2pM7EK2OB6No6xdqK2IaY6Zf9gdjLuK9BVa2rT+Q==",
-        "dependencies": {
-          "Serilog": "4.2.0"
-        }
-      },
-      "Serilog.Formatting.Compact": {
-        "type": "Transitive",
-        "resolved": "3.0.0",
-        "contentHash": "wQsv14w9cqlfB5FX2MZpNsTawckN4a8dryuNGbebB/3Nh1pXnROHZov3swtu3Nj5oNG7Ba+xdu7Et/ulAUPanQ==",
-        "dependencies": {
-          "Serilog": "4.0.0"
-        }
-      },
-      "Serilog.Settings.Configuration": {
-        "type": "Transitive",
-        "resolved": "10.0.0",
-        "contentHash": "LNq+ibS1sbhTqPV1FIE69/9AJJbfaOhnaqkzcjFy95o+4U+STsta9mi97f1smgXsWYKICDeGUf8xUGzd/52/uA==",
-        "dependencies": {
-          "Microsoft.Extensions.DependencyModel": "10.0.0",
-          "Serilog": "4.3.0"
-        }
-      },
-      "Serilog.Sinks.Console": {
-        "type": "Transitive",
-        "resolved": "6.1.1",
-        "contentHash": "8jbqgjUyZlfCuSTaJk6lOca465OndqOz3KZP6Cryt/IqZYybyBu7GP0fE/AXBzrrQB3EBmQntBFAvMVz1COvAA==",
-        "dependencies": {
-          "Serilog": "4.0.0"
-        }
-      },
-      "Serilog.Sinks.Debug": {
-        "type": "Transitive",
-        "resolved": "3.0.0",
-        "contentHash": "4BzXcdrgRX7wde9PmHuYd9U6YqycCC28hhpKonK7hx0wb19eiuRj16fPcPSVp0o/Y1ipJuNLYQ00R3q2Zs8FDA==",
-        "dependencies": {
-          "Serilog": "4.0.0"
-        }
-      },
-      "Serilog.Sinks.File": {
-        "type": "Transitive",
-        "resolved": "7.0.0",
-        "contentHash": "fKL7mXv7qaiNBUC71ssvn/dU0k9t0o45+qm2XgKAlSt19xF+ijjxyA3R6HmCgfKEKwfcfkwWjayuQtRueZFkYw==",
-        "dependencies": {
-          "Serilog": "4.2.0"
-        }
       },
       "Snappier": {
         "type": "Transitive",
@@ -1126,11 +1044,11 @@
         "type": "Project",
         "dependencies": {
           "Apache.Arrow": "[23.0.0, )",
-          "Autheris.Domain": "[1.0.0, )",
+          "Autheris.Domain": "[1.2.1, )",
           "BitFaster.Caching": "[2.5.4, )",
           "Casbin.NET": "[2.21.3, )",
           "DuckDB.NET.Data.Full": "[1.5.6, )",
-          "FastSqlEngine": "[1.0.0, )",
+          "FastSqlEngine": "[1.2.1, )",
           "FluentValidation": "[12.2.0, )",
           "HotChocolate.Language": "[16.6.8, )",
           "MemoryPack": "[1.21.4, )",
@@ -1150,15 +1068,15 @@
       "autheris.extensions": {
         "type": "Project",
         "dependencies": {
-          "Autheris.Application": "[1.0.0, )",
-          "Autheris.Domain": "[1.0.0, )"
+          "Autheris.Application": "[1.2.1, )",
+          "Autheris.Domain": "[1.2.1, )"
         }
       },
       "autheris.graphql": {
         "type": "Project",
         "dependencies": {
-          "Autheris.Application": "[1.0.0, )",
-          "Autheris.Domain": "[1.0.0, )",
+          "Autheris.Application": "[1.2.1, )",
+          "Autheris.Domain": "[1.2.1, )",
           "HotChocolate.AspNetCore": "[16.6.8, )",
           "HotChocolate.Data": "[16.6.8, )"
         }
@@ -1166,19 +1084,19 @@
       "autheris.infrastructure": {
         "type": "Project",
         "dependencies": {
-          "Autheris.Application": "[1.0.0, )",
-          "Autheris.Domain": "[1.0.0, )",
+          "Autheris.Application": "[1.2.1, )",
+          "Autheris.Domain": "[1.2.1, )",
           "MemoryPack": "[1.21.4, )",
           "Microsoft.Data.SqlClient": "[7.1.1, )",
           "Microsoft.Data.Sqlite": "[10.0.13, )",
           "Microsoft.Garnet": "[2.2.1, )",
           "Npgsql": "[10.0.3, )",
+          "OpenTelemetry": "[1.19.1, )",
           "OpenTelemetry.Exporter.OpenTelemetryProtocol": "[1.19.1, )",
           "Oracle.ManagedDataAccess.Core": "[23.26.301, )",
           "StackExchange.Redis": "[3.4.5, )",
           "System.Numerics.Tensors": "[10.0.13, )",
-          "System.Security.Cryptography.Pkcs": "[10.0.13, )",
-          "prometheus-net": "[8.2.1, )"
+          "System.Security.Cryptography.Pkcs": "[10.0.13, )"
         }
       },
       "FastSqlEngine": {

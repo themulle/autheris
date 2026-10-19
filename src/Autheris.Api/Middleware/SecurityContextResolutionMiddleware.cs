@@ -14,6 +14,7 @@ using Autheris.Domain.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
 
@@ -225,6 +226,14 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
         context.Items[SecurityPrincipalContext.ItemKey] = securityContext;
         context.Items[TenantResolutionMiddleware.TenantIdItemKey] = securityContext.TenantId;
 
-        await next(context).ConfigureAwait(false);
+        using (TelemetryTenantContext.Enter(securityContext.TenantId))
+        {
+            if (System.Diagnostics.Activity.Current != null && System.Diagnostics.Activity.Current.IsAllDataRequested)
+            {
+                System.Diagnostics.Activity.Current.SetTag(TelemetryAttributes.AutherisTenantId, securityContext.TenantId.Value);
+            }
+
+            await next(context).ConfigureAwait(false);
+        }
     }
 }

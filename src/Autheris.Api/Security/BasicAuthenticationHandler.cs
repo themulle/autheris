@@ -29,8 +29,9 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
     private readonly string _dummyStoredHash;
     private readonly Autheris.Application.Interfaces.IClientIpResolver? _clientIpResolver;
 
-    private static readonly Prometheus.Counter PasswordHashRejectedTotal = Prometheus.Metrics.CreateCounter(
-        "autheris_password_hash_rejected_total", "Number of password hashing requests rejected due to concurrency saturation");
+    private static readonly System.Diagnostics.Metrics.Meter Meter = new("Autheris.Core");
+    private static readonly System.Diagnostics.Metrics.Counter<long> PasswordHashRejectedTotal = Meter.CreateCounter<long>(
+        "autheris.auth.password_hash.rejections", description: "Number of password hashing requests rejected due to concurrency saturation");
 
     private static SemaphoreSlim? _hashSemaphore;
     private static readonly object _semaphoreLock = new();
@@ -248,7 +249,7 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
 
             if (!await semaphore.WaitAsync(TimeSpan.FromSeconds(2), Context.RequestAborted).ConfigureAwait(false))
             {
-                PasswordHashRejectedTotal.Inc();
+                PasswordHashRejectedTotal.Add(1);
                 Logger.LogWarning("Password hash verification concurrency limit ({Limit}) exceeded; rejecting request.", maxConcurrency);
                 return AuthenticateResult.Fail("Password verification queue full.");
             }

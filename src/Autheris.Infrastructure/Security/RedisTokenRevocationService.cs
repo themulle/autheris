@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Diagnostics.Metrics;
 using StackExchange.Redis;
 
 namespace Autheris.Infrastructure.Security;
@@ -23,9 +24,14 @@ public sealed class RedisTokenRevocationService : ITokenRevocationService
     private readonly bool _failClosed;
     private readonly TimeSpan _grace;
 
-    private static readonly Prometheus.Counter LookupFailures = Prometheus.Metrics.CreateCounter(
-        "autheris_token_revocation_lookup_failures_total", "Number of token revocation lookups that failed against Redis",
-        new Prometheus.CounterConfiguration { LabelNames = ["outcome"] });
+    private static readonly Meter Meter = new("Autheris.Core");
+    private static readonly Counter<long> RedisFailures = Meter.CreateCounter<long>(
+        "autheris.redis.failures", description: "Number of Redis errors");
+
+    private static void RecordRedisFailure(string operation) =>
+        RedisFailures.Add(1,
+            new KeyValuePair<string, object?>("autheris.redis.component", "revocation"),
+            new KeyValuePair<string, object?>("autheris.redis.operation", operation));
 
     public RedisTokenRevocationService(
         IConnectionMultiplexer multiplexer,
@@ -206,7 +212,7 @@ public sealed class RedisTokenRevocationService : ITokenRevocationService
     {
         if (!_failClosed)
         {
-            LookupFailures.WithLabels("fail_open").Inc();
+            RecordRedisFailure("lookup_fail_open");
             return false;
         }
 
@@ -216,12 +222,12 @@ public sealed class RedisTokenRevocationService : ITokenRevocationService
             if (age >= TimeSpan.FromMinutes(-1) && age <= _grace)
             {
                 // Younger than the grace window: it cannot have been revoked on another node before the outage began.
-                LookupFailures.WithLabels("grace").Inc();
+                RecordRedisFailure("lookup_grace");
                 return false;
             }
         }
 
-        LookupFailures.WithLabels("fail_closed").Inc();
+        RecordRedisFailure("lookup_fail_closed");
         throw new TokenRevocationUnavailableException("The token revocation status could not be determined.", failure);
     }
 

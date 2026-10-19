@@ -34,7 +34,14 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
             return false;
         }
 
-        var traceId = Activity.Current?.Id ?? httpContext.TraceIdentifier;
+        var traceId = Activity.Current?.TraceId.ToHexString() ?? httpContext.TraceIdentifier;
+
+        if (Activity.Current != null && Activity.Current.IsAllDataRequested)
+        {
+            var errType = Autheris.Domain.Diagnostics.TelemetryExceptionPolicy.ErrorType(exception);
+            Activity.Current.SetStatus(ActivityStatusCode.Error, errType);
+            Activity.Current.SetTag(Autheris.Domain.Diagnostics.TelemetryAttributes.ErrorType, errType);
+        }
 
         if (httpContext.RequestAborted.IsCancellationRequested)
         {

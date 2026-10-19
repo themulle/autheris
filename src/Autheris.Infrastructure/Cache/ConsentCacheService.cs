@@ -11,6 +11,7 @@ using Autheris.Domain.Options;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Diagnostics.Metrics;
 using StackExchange.Redis;
 
 namespace Autheris.Infrastructure.Cache;
@@ -86,10 +87,14 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
         });
     }
 
-    private static readonly Prometheus.Counter CacheHits = Prometheus.Metrics.CreateCounter(
-        "autheris_consent_cache_hits_total", "Number of ConsentCache hits");
-    private static readonly Prometheus.Counter CacheMisses = Prometheus.Metrics.CreateCounter(
-        "autheris_consent_cache_misses_total", "Number of ConsentCache misses");
+    private static readonly Meter Meter = new("Autheris.Core");
+    private static readonly Counter<long> CacheRequests = Meter.CreateCounter<long>("autheris.cache.requests", description: "Number of cache requests");
+
+    private static void RecordCacheHit() =>
+        CacheRequests.Add(1, new KeyValuePair<string, object?>("autheris.cache.name", "consent"), new KeyValuePair<string, object?>("autheris.cache.result", "hit"));
+
+    private static void RecordCacheMiss() =>
+        CacheRequests.Add(1, new KeyValuePair<string, object?>("autheris.cache.name", "consent"), new KeyValuePair<string, object?>("autheris.cache.result", "miss"));
 
     public Task<TableAccessDecision?> GetCachedDecisionAsync(
         Sid userSid,
@@ -174,7 +179,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
                     else
                     {
                         result[table] = null;
-                        CacheMisses.Inc();
+                        RecordCacheMiss();
                         RemoveKeyFromTableIndex(table, cacheKey);
                     }
                 }
@@ -188,7 +193,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
                     if (!result.ContainsKey(table) && !candidateEntries.ContainsKey(table))
                     {
                         result[table] = null;
-                        CacheMisses.Inc();
+                        RecordCacheMiss();
                         RemoveKeyFromTableIndex(table, BuildCacheKey(tenant, userSid, table, contextHash));
                     }
                 }
@@ -200,7 +205,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
             {
                 var cacheKey = BuildCacheKey(tenant, userSid, table, contextHash);
                 result[table] = null;
-                CacheMisses.Inc();
+                RecordCacheMiss();
                 RemoveKeyFromTableIndex(table, cacheKey);
             }
         }
@@ -224,12 +229,12 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
                     SetL1Internal(table, candidate.CacheKey, new CacheEntryEnvelope(candidate.Decision, candidate.Epoch), candidate.L1PromotionTtl.Value);
                 }
 
-                CacheHits.Inc();
+                RecordCacheHit();
                 result[table] = candidate.Decision;
             }
             else
             {
-                CacheMisses.Inc();
+                RecordCacheMiss();
                 if (!candidate.FromL2)
                 {
                     _memoryCache.Remove(candidate.CacheKey);
@@ -267,13 +272,13 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
             var isValid = await _epochValidationService.IsEpochValidAsync(table, envelope.Epoch, ct).ConfigureAwait(false);
             if (!isValid)
             {
-                CacheMisses.Inc();
+                RecordCacheMiss();
                 _memoryCache.Remove(cacheKey);
                 RemoveKeyFromTableIndex(table, cacheKey);
                 return null;
             }
 
-            CacheHits.Inc();
+            RecordCacheHit();
             return envelope.Decision;
         }
 
@@ -313,7 +318,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
                             SetL1Internal(table, cacheKey, new CacheEntryEnvelope(decision, l2Env.Epoch), l1Ttl);
                         }
 
-                        CacheHits.Inc();
+                        RecordCacheHit();
                         return decision;
                     }
                     else if (!isL2EpochValid)
@@ -329,7 +334,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
             }
         }
 
-        CacheMisses.Inc();
+        RecordCacheMiss();
         RemoveKeyFromTableIndex(table, cacheKey);
         return null;
     }

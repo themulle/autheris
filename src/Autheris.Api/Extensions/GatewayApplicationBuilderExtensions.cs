@@ -26,6 +26,7 @@ public static class GatewayApplicationBuilderExtensions
         // O9: first middleware, so it catches everything below it. In Development ASP.NET Core puts the developer
         // exception page in front of the pipeline; it never sees an exception because this handler answers first.
         app.UseExceptionHandler();
+        app.UseMiddleware<TraceIdentifierMiddleware>();
 
         // Capture physical TCP remote IP before UseForwardedHeaders() overrides it with X-Forwarded-For, and resolve correlation ID.
         app.UseMiddleware<CorrelationIdMiddleware>();
@@ -65,7 +66,12 @@ public static class GatewayApplicationBuilderExtensions
         // Anti-CSRF Middleware: Enforce custom preflight header and Origin validation on GraphQL and state-changing REST requests
         app.UseMiddleware<GatewayCorsCsrfMiddleware>(gatewayOptions, hostAllowList, app.Environment);
 
-        app.UseHttpMetrics();
+        Prometheus.Metrics.ConfigureMeterAdapter(o =>
+        {
+            o.InstrumentFilterPredicate = Autheris.Api.Telemetry.AutherisTelemetrySources.IsExposedMeter;
+            o.ResolveHistogramBuckets = instrument => Autheris.Infrastructure.Telemetry.TelemetryViews.BucketsFor(instrument.Name) ?? Autheris.Infrastructure.Telemetry.TelemetryViews.DurationBucketsSeconds;
+        });
+        Prometheus.Metrics.SuppressDefaultMetrics();
         if (DevFeatures.Resolve(gatewayOptions, app.Environment.IsDevelopment()).VerboseErrors)
         {
             // F-AUTH-DX: bodyless 403s get a diagnostic problem+json (never outside Development)
@@ -100,7 +106,6 @@ public static class GatewayApplicationBuilderExtensions
         app.UseMiddleware<SchemaContractMiddleware>();
         app.UseMiddleware<IncrementalDeliveryMiddleware>();
         app.UseMiddleware<TrafficShadowingMiddleware>();
-        app.UseMiddleware<OpenTelemetryTracingMiddleware>();
         // F-DATA-01: Parquet output negotiation is the outermost output transformation around the governed JSON
         // (egress interceptors / audit below still operate on JSON).
         app.UseMiddleware<ParquetGraphQLResponseMiddleware>();
