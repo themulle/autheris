@@ -109,8 +109,22 @@ public static class GraphQlTreeBuilder
         {
             var offsetVal = ResolveValue(offsetArg.ValueLiteral, context);
             if (offsetVal is int oInt) offset = oInt;
-            else if (offsetVal is long oLng) offset = (int)oLng;
-            else if (int.TryParse(Convert.ToString(offsetVal, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedOffset)) offset = parsedOffset;
+            else if (offsetVal is long oLng)
+            {
+                if (oLng < 0) throw new GatewayInvalidQueryException("The offset cannot be negative.");
+                if (oLng > maxAllowedOffset) throw new GatewayInvalidQueryException($"The offset cannot exceed {maxAllowedOffset}.");
+                offset = (int)oLng;
+            }
+            else if (long.TryParse(Convert.ToString(offsetVal, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedLongOffset))
+            {
+                if (parsedLongOffset < 0) throw new GatewayInvalidQueryException("The offset cannot be negative.");
+                if (parsedLongOffset > maxAllowedOffset) throw new GatewayInvalidQueryException($"The offset cannot exceed {maxAllowedOffset}.");
+                offset = (int)parsedLongOffset;
+            }
+            else
+            {
+                throw new GatewayInvalidQueryException("The offset is invalid.");
+            }
         }
 
         if (offset < 0)
@@ -180,13 +194,16 @@ public static class GraphQlTreeBuilder
             }
         }
 
+        int executionLimit = isRoot ? Math.Min(limit + 1, maxAllowedLimit + 1) : limit;
+
         return new TreeQueryNode(currentTable.Identifier, columns.ToList())
         {
             Relations = relations,
             Where = whereFilter,
             OrderBy = orderByList,
             Limit = limit,
-            Offset = offset
+            Offset = offset,
+            ExecutionLimit = executionLimit
         };
     }
 

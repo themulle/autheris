@@ -54,6 +54,7 @@ public sealed record TreeQueryNode(TableIdentifier Table, IReadOnlyList<string> 
     public IReadOnlyList<TreeOrder> OrderBy { get; init; } = [];
     public int Limit { get; init; } = 100;
     public int Offset { get; init; }
+    public int? ExecutionLimit { get; init; }
 }
 
 /// <summary>

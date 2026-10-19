@@ -163,14 +163,24 @@ public sealed class CostAndQuotaMiddleware
 
         if (!limitResult.Allowed)
         {
-            var error = ErrorBuilder.New()
+            var errorBuilder = ErrorBuilder.New()
                 .SetMessage("Rate limit exceeded. Wait until the next time window.")
                 .SetCode("RATE_LIMIT_EXCEEDED")
-                .SetExtension("retryAfterSeconds", limitResult.RetryAfterSeconds)
-                .Build();
+                .SetExtension("retryAfterSeconds", limitResult.RetryAfterSeconds);
+
+            if (!string.IsNullOrWhiteSpace(clientContext.ResolvedScope))
+            {
+                errorBuilder.SetExtension("scope", clientContext.ResolvedScope);
+            }
+
+            var error = errorBuilder.Build();
             context.Result = OperationResult.FromError(error);
             HttpResponseGuard.SetStatus(httpContext, StatusCodes.Status429TooManyRequests);
             HttpResponseGuard.SetHeader(httpContext, "Retry-After", limitResult.RetryAfterSeconds.ToString(CultureInfo.InvariantCulture));
+            if (!string.IsNullOrWhiteSpace(clientContext.ResolvedScope))
+            {
+                HttpResponseGuard.SetHeader(httpContext, "X-RateLimit-Scope", clientContext.ResolvedScope);
+            }
             return;
         }
 

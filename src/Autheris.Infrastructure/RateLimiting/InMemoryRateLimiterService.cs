@@ -393,4 +393,31 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
             return Task.FromResult(new CostQuotaResult(true, (int)Math.Floor(bucket.Tokens), 0));
         }
     }
+
+    /// <summary>
+    /// SEC-GOV175B-01 &amp; SEC-GOV175B-03: Non-destructive probe of token bucket state without mutations or deductions.
+    /// </summary>
+    public Task<CallerBucketState?> GetBucketStateAsync(string key, ClientQuotaPolicy policy, CancellationToken ct = default)
+    {
+        var capacity = policy.MaxTokensCapacity;
+        var refillRate = policy.TokenRefillRatePerSecond > 0 ? policy.TokenRefillRatePerSecond : 1.0;
+        var currentTimestamp = Stopwatch.GetTimestamp();
+
+        if (!_costBuckets.TryGetValue(key, out var bucket))
+        {
+            return Task.FromResult<CallerBucketState?>(new CallerBucketState(capacity, capacity, refillRate));
+        }
+
+        lock (bucket.Lock)
+        {
+            var elapsed = Stopwatch.GetElapsedTime(bucket.LastRefillTimestamp, currentTimestamp).TotalSeconds;
+            var tokens = Math.Min(capacity, bucket.Tokens + (elapsed * refillRate));
+            return Task.FromResult<CallerBucketState?>(new CallerBucketState(capacity, Math.Round(tokens, 2), refillRate));
+        }
+    }
+
+    public Task<CallerBucketState?> GetBucketStateAsync(string key, CancellationToken ct = default)
+    {
+        return GetBucketStateAsync(key, ClientQuotaPolicy.ForTier(ClientTier.Standard), ct);
+    }
 }

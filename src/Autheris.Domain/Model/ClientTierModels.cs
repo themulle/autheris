@@ -42,6 +42,20 @@ public sealed record ClientQuotaPolicy(
 
         return defaultPolicy;
     }
+
+    public static ClientQuotaPolicy ForScopeLimit(ClientTier tier, Options.ClientTierLimitOverride scopeLimit, Options.ClientTierOptions? tierOptions = null)
+    {
+        var basePolicy = ForTier(tier, tierOptions);
+        if (scopeLimit == null) return basePolicy;
+
+        return new ClientQuotaPolicy(
+            tier,
+            MaxCostPerQuery: scopeLimit.MaxCostPerQuery ?? basePolicy.MaxCostPerQuery,
+            MaxComplexityDepth: scopeLimit.MaxComplexityDepth ?? basePolicy.MaxComplexityDepth,
+            MaxTokensCapacity: scopeLimit.MaxTokensCapacity ?? basePolicy.MaxTokensCapacity,
+            TokenRefillRatePerSecond: scopeLimit.TokenRefillRatePerSecond ?? basePolicy.TokenRefillRatePerSecond,
+            ExposeCostExtensions: scopeLimit.ExposeCostExtensions ?? basePolicy.ExposeCostExtensions);
+    }
 }
 
 public readonly record struct CostQuotaResult(bool Allowed, int RemainingTokens, int RetryAfterSeconds);

@@ -14,15 +14,21 @@ public sealed class ClientTierOptions
     public Dictionary<string, ClientTierLimitOverride> TierLimits { get; init; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> RoleTierMappings { get; init; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> ApiKeys { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> ScopeTierMappings { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, ClientTierLimitOverride> ScopeLimits { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
-public sealed class ClientTierLimitOverride
+public class ClientTierLimitOverride
 {
     public int? MaxCostPerQuery { get; init; }
     public int? MaxComplexityDepth { get; init; }
     public int? MaxTokensCapacity { get; init; }
     public double? TokenRefillRatePerSecond { get; init; }
     public bool? ExposeCostExtensions { get; init; }
+}
+
+public sealed class TierLimitDefinition : ClientTierLimitOverride
+{
 }
 
 public sealed class PreAuthIpRateLimitOptions

@@ -284,11 +284,12 @@ public static class TableStreamEndpoints
         int reservedCost = baseCost + (sliceLimit * costPerRow);
 
         ClientQuotaPolicy policy;
+        ClientQuotaContext? clientContext = null;
         string subjectId = EndpointSecurity.GetCallerIdentity(httpContext) ?? "anonymous";
         if (tierResolver != null)
         {
             string? apiKey = httpContext.Request.Headers.TryGetValue("X-API-Key", out var ak) ? ak.ToString() : null;
-            var clientContext = await tierResolver.ResolveAsync(httpContext.User, apiKey, clientIp, ct).ConfigureAwait(false);
+            clientContext = await tierResolver.ResolveAsync(httpContext.User, apiKey, clientIp, ct).ConfigureAwait(false);
             policy = clientContext.Policy;
             subjectId = clientContext.SubjectId;
         }
@@ -304,11 +305,16 @@ public static class TableStreamEndpoints
             {
                 httpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
                 httpContext.Response.Headers["Retry-After"] = reservation.RetryAfterSeconds.ToString(CultureInfo.InvariantCulture);
+                if (!string.IsNullOrWhiteSpace(clientContext?.ResolvedScope))
+                {
+                    httpContext.Response.Headers["X-RateLimit-Scope"] = clientContext.ResolvedScope;
+                }
                 await httpContext.Response.WriteAsJsonAsync(new
                 {
                     error = "Rate limit exceeded. Wait until the next time window.",
                     code = "RATE_LIMIT_EXCEEDED",
-                    retryAfterSeconds = reservation.RetryAfterSeconds
+                    retryAfterSeconds = reservation.RetryAfterSeconds,
+                    scope = clientContext?.ResolvedScope
                 }, ct).ConfigureAwait(false);
                 return;
             }
