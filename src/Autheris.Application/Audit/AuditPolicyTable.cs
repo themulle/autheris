@@ -30,6 +30,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.WebSqlCrossSourceSourceRead] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.WebSqlCrossSourceSubtreeRead] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CrossSourceRelationResolved] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.CrossSourceOptInChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.WebSqlDmlExecuted] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.WebSqlDmlRejected] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.WebSqlDmlFailed] = AuditFailurePolicy.FailClosed,
