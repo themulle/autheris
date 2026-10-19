@@ -63,6 +63,11 @@ public sealed class ConsentRequestService : IConsentRequestService
         var principal = command.Principal;
         EnsurePersonSubject(principal);
 
+        if (_gatewayOptions?.Value.Authentication.EntraId.SelfServiceEnabled == false)
+        {
+            throw new ConsentRequestException("FORBIDDEN", "Self-service access requests are disabled.");
+        }
+
         if (string.IsNullOrWhiteSpace(command.Domain) || string.IsNullOrWhiteSpace(command.Schema) || string.IsNullOrWhiteSpace(command.TableName))
         {
             throw Invalid("Domain, Schema and TableName must be valid, non-empty values.");

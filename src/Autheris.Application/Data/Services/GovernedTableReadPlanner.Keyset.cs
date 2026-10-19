@@ -103,17 +103,56 @@ public sealed partial class GovernedTableReadPlanner
             }
         }
 
-        // 3. Enforce Required Filter Columns (#163 / SEC-DATA178-04)
-        if (metadata.RequiredFilterColumns.Length > 0)
+        // 3. Enforce Required Filter Columns & Groups (#163 / #221 / #236 / SEC-DATA178-04)
+        if (metadata.RequiredFilterColumns.Length > 0 || metadata.RequiredFilterColumnGroups.Length > 0)
         {
-            foreach (var req in metadata.RequiredFilterColumns)
+            bool IsSatisfied(string req)
             {
-                bool satisfiedInFilter = request.Filter != null && IsColumnConstrained(request.Filter, req);
-                bool satisfiedInPolicy = !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql) && decision.CombinedRowFilterSql.Contains(req, StringComparison.OrdinalIgnoreCase);
-
-                if (!satisfiedInFilter && !satisfiedInPolicy)
+                if (request.Filter != null && IsColumnConstrained(request.Filter, req))
                 {
-                    throw new RequiredFilterColumnMissingException($"REQUIRED_FILTER_COLUMN_MISSING: Table requires filter on column '{req}'.");
+                    return true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql) && decision.CombinedRowFilterSql.Contains(req, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                if (decision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rls && rls.Predicate.ReferencedColumns.Contains(req.ToLowerInvariant()))
+                {
+                    return true;
+                }
+
+                return false;
+            }
+
+            if (metadata.RequiredFilterColumnGroups.Length > 0)
+            {
+                bool anyGroupSatisfied = false;
+                foreach (var group in metadata.RequiredFilterColumnGroups)
+                {
+                    if (group.Length == 0) continue;
+                    if (group.All(IsSatisfied))
+                    {
+                        anyGroupSatisfied = true;
+                        break;
+                    }
+                }
+
+                if (!anyGroupSatisfied)
+                {
+                    throw new RequiredFilterColumnMissingException("REQUIRED_FILTER_COLUMN_MISSING: Table requires filter satisfying at least one required filter column group.");
+                }
+            }
+
+            if (metadata.RequiredFilterColumns.Length > 0)
+            {
+                foreach (var req in metadata.RequiredFilterColumns)
+                {
+                    if (!IsSatisfied(req))
+                    {
+                        throw new RequiredFilterColumnMissingException($"REQUIRED_FILTER_COLUMN_MISSING: Table requires filter on column '{req}'.");
+                    }
                 }
             }
         }
@@ -140,7 +179,14 @@ public sealed partial class GovernedTableReadPlanner
         if (!string.IsNullOrWhiteSpace(request.Cursor))
         {
             var encoder = new KeysetCursorEncoder();
-            var pkValues = encoder.DecodeCursor(request.Cursor, metadata);
+            var cursorContext = new KeysetCursorContext(
+                TenantId: metadata.TenantColumnName,
+                DataSource: metadata.Identifier.Domain,
+                TableName: metadata.Identifier.TableName,
+                Direction: "asc",
+                Columns: pkCols,
+                Caller: null);
+            var pkValues = encoder.DecodeCursor(request.Cursor, metadata, cursorContext);
 
             var cursorParamNames = new List<string>(pkCols.Count);
             for (int i = 0; i < pkCols.Count; i++)

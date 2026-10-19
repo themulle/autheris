@@ -121,7 +121,10 @@ public sealed record QueryCostEstimate(
     int MaxAllowedCost,
     bool IsWithinCostLimit,
     IReadOnlyDictionary<string, int>? RootFieldCosts = null,
-    int? EstimatedRows = null);
+    int? EstimatedRows = null,
+    int? RowsPerRequest = null,
+    int? Requests = null,
+    double? SecondsAtCurrentBucket = null);
 
 /// <summary>
 /// Issue #79: Output 1 of static query analysis — validation report (syntax, schema, output columns, filter flags, cost, deprecations).
@@ -140,6 +143,9 @@ public sealed record QueryValidationReport(
     public int EstimatedCost => CostEstimate.EstimatedCost;
     public int MaxAllowedCost => CostEstimate.MaxAllowedCost;
     public bool IsWithinCostLimit => CostEstimate.IsWithinCostLimit;
+    public int? RowsPerRequest => CostEstimate.RowsPerRequest;
+    public int? Requests => CostEstimate.Requests;
+    public double? SecondsAtCurrentBucket => CostEstimate.SecondsAtCurrentBucket;
     public IReadOnlyDictionary<string, IReadOnlyList<string>> EffectivePopulatedReferencedTables =>
         PopulatedReferencedTables ?? new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
 }

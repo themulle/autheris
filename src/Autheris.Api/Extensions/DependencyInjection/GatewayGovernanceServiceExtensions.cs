@@ -251,7 +251,25 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<ILineageGraphStore, LineageGraphStore>();
         services.AddScoped<ILineageImpactAnalyzerService, LineageImpactAnalyzerService>();
         services.AddSingleton<IGdprAuditReportExporter, GdprAuditReportPdfExporter>();
-        services.AddSingleton<Autheris.Infrastructure.Observability.ConsumerUsageRecorder>();
+        services.AddSingleton<Autheris.Infrastructure.Observability.ConsumerUsageRecorder>(sp =>
+        {
+            var env = sp.GetService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
+            var isDev = env?.EnvironmentName == Microsoft.Extensions.Hosting.Environments.Development;
+            var gatewayOptions = sp.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()?.Value;
+            var entraIdOptions = gatewayOptions?.Authentication?.EntraId;
+
+            string? secret = gatewayOptions?.BulkStream?.SigningKey ?? gatewayOptions?.RestApi?.BulkStream?.SigningKey ?? entraIdOptions?.ClientId;
+            if (string.IsNullOrWhiteSpace(secret))
+            {
+                if (!isDev)
+                {
+                    throw new InvalidOperationException("Cluster secret or telemetry key must be configured outside Development.");
+                }
+                secret = "autheris-default-cluster-telemetry-secret-key-2026";
+            }
+            var callerProvider = sp.GetService<ICallerContextProvider>();
+            return new Autheris.Infrastructure.Observability.ConsumerUsageRecorder(secret, callerProvider);
+        });
         services.AddSingleton<IConsumerUsageRecorder>(sp => sp.GetRequiredService<Autheris.Infrastructure.Observability.ConsumerUsageRecorder>());
         services.AddHostedService<Autheris.Infrastructure.Observability.ConsumerUsageFlushWorker>();
 

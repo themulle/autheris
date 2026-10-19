@@ -195,6 +195,12 @@ public sealed class EntraIdAuthOptions
     public IReadOnlyList<string> GetEffectiveReadOnlyScopes() => ReadOnlyScopes ?? (IReadOnlyList<string>)DefaultReadOnlyScopes;
 
     /// <summary>
+    /// SEC-GOV113-01 / Issue #226 / #237: Global switch for self-service access requests and reviews.
+    /// When false, self-service operations are disabled.
+    /// </summary>
+    public bool SelfServiceEnabled { get; init; } = true;
+
+    /// <summary>
     /// SEC-GOV113-01: Scopes that permit self-service access requests for read-only tokens.
     /// A token carrying these scopes remains read-only (writes rejected), but is permitted to execute self-service mutations.
     /// </summary>

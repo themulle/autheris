@@ -43,7 +43,7 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
         _signingKeyBytes = signingKeyBytes ?? EphemeralProcessFallbackKey;
     }
 
-    public string EncodeCursor(IReadOnlyDictionary<string, object?> pkValues)
+    public string EncodeCursor(IReadOnlyDictionary<string, object?> pkValues, KeysetCursorContext? context = null)
     {
         ArgumentNullException.ThrowIfNull(pkValues);
         if (pkValues.Count == 0)
@@ -65,11 +65,11 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
 
         var bytes = memoryStream.ToArray();
         var payload = Base64UrlEncode(bytes);
-        var sig = ComputeSignature(payload);
+        var sig = ComputeSignature(payload, context);
         return $"{payload}.{sig}";
     }
 
-    public IReadOnlyDictionary<string, object?> DecodeCursor(string cursorBase64, TableMetadata metadata)
+    public IReadOnlyDictionary<string, object?> DecodeCursor(string cursorBase64, TableMetadata metadata, KeysetCursorContext? context = null)
     {
         ArgumentNullException.ThrowIfNull(metadata);
         if (string.IsNullOrWhiteSpace(cursorBase64))
@@ -85,11 +85,25 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
 
         var payloadBase64 = cursorBase64[..dotIndex];
         var providedSig = cursorBase64[(dotIndex + 1)..];
-        var expectedSig = ComputeSignature(payloadBase64);
 
-        if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(expectedSig), Encoding.UTF8.GetBytes(providedSig)))
+        var effectiveContext = context ?? new KeysetCursorContext(
+            TenantId: metadata.TenantColumnName,
+            DataSource: metadata.Identifier.Domain,
+            TableName: metadata.Identifier.TableName,
+            Direction: "asc",
+            Columns: metadata.PrimaryKeyColumns);
+
+        var expectedSig = ComputeSignature(payloadBase64, effectiveContext);
+
+        bool isValid = CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(expectedSig), Encoding.UTF8.GetBytes(providedSig));
+        if (!isValid)
         {
-            throw new InvalidCursorException("INVALID_CURSOR: Cursor signature verification failed; cursor may have been tampered with.");
+            // Also test fallback to bare payload signature if context was not originally bound
+            var bareSig = ComputeSignature(payloadBase64, null);
+            if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(bareSig), Encoding.UTF8.GetBytes(providedSig)))
+            {
+                throw new InvalidCursorException("INVALID_CURSOR: Cursor signature verification failed; cursor may have been tampered with or used across different tables/tenants.");
+            }
         }
 
         byte[] bytes;
@@ -353,9 +367,18 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
         return Convert.FromBase64String(padded);
     }
 
-    private string ComputeSignature(string payload)
+    private static string FormatContext(KeysetCursorContext? context)
     {
-        var hash = HMACSHA256.HashData(_signingKeyBytes, Encoding.UTF8.GetBytes(payload));
+        if (context == null) return string.Empty;
+        var cols = context.Columns != null ? string.Join(",", context.Columns) : string.Empty;
+        return $"{context.TenantId?.ToLowerInvariant()}|{context.DataSource?.ToLowerInvariant()}|{context.TableName?.ToLowerInvariant()}|{context.Direction?.ToLowerInvariant()}|{cols.ToLowerInvariant()}|{context.Caller?.ToLowerInvariant()}";
+    }
+
+    private string ComputeSignature(string payload, KeysetCursorContext? context = null)
+    {
+        var contextStr = FormatContext(context);
+        var dataToSign = string.IsNullOrEmpty(contextStr) ? payload : $"{payload}:{contextStr}";
+        var hash = HMACSHA256.HashData(_signingKeyBytes, Encoding.UTF8.GetBytes(dataToSign));
         return Base64UrlEncode(hash);
     }
 }

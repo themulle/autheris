@@ -91,37 +91,69 @@ public sealed class FederatedStagingService : IFederatedStagingService
                 _gatewayOptions.Value.WebSql ?? new WebSqlOptions(), tenantId,
                 req.Metadata.Identifier.Domain);
 
-            if (req.Metadata.RequiredFilterColumns.Length > 0)
+            if (req.Metadata.RequiredFilterColumns.Length > 0 || req.Metadata.RequiredFilterColumnGroups.Length > 0)
             {
-                foreach (var reqCol in req.Metadata.RequiredFilterColumns)
+                bool IsSatisfied(string reqCol)
                 {
                     if (req.Metadata.TenantColumnName != null &&
                         string.Equals(req.Metadata.TenantColumnName, reqCol, StringComparison.OrdinalIgnoreCase))
                     {
-                        continue;
+                        return true;
                     }
 
                     if (req.Decision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rls &&
                         rls.Predicate.ReferencedColumns.Contains(reqCol.ToLowerInvariant()))
                     {
-                        continue;
+                        return true;
                     }
 
                     if (!string.IsNullOrWhiteSpace(req.Decision.CombinedRowFilterSql) &&
                         req.Decision.CombinedRowFilterSql.Contains(reqCol, StringComparison.OrdinalIgnoreCase))
                     {
-                        continue;
+                        return true;
                     }
 
                     if (req.PushdownFilter != null &&
                         req.PushdownFilter.ReferencedColumns.Any(c => string.Equals(c, reqCol, StringComparison.OrdinalIgnoreCase)))
                     {
-                        continue;
+                        return true;
                     }
 
-                    throw new GatewaySecurityException(
-                        GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.RequiredFilterColumnMissing),
-                        GovernedSqlErrorCodes.RequiredFilterColumnMissing);
+                    return false;
+                }
+
+                if (req.Metadata.RequiredFilterColumnGroups.Length > 0)
+                {
+                    bool anyGroupSatisfied = false;
+                    foreach (var group in req.Metadata.RequiredFilterColumnGroups)
+                    {
+                        if (group.Length == 0) continue;
+                        if (group.All(IsSatisfied))
+                        {
+                            anyGroupSatisfied = true;
+                            break;
+                        }
+                    }
+
+                    if (!anyGroupSatisfied)
+                    {
+                        throw new GatewaySecurityException(
+                            GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.RequiredFilterColumnMissing),
+                            GovernedSqlErrorCodes.RequiredFilterColumnMissing);
+                    }
+                }
+
+                if (req.Metadata.RequiredFilterColumns.Length > 0)
+                {
+                    foreach (var reqCol in req.Metadata.RequiredFilterColumns)
+                    {
+                        if (!IsSatisfied(reqCol))
+                        {
+                            throw new GatewaySecurityException(
+                                GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.RequiredFilterColumnMissing),
+                                GovernedSqlErrorCodes.RequiredFilterColumnMissing);
+                        }
+                    }
                 }
             }
 
