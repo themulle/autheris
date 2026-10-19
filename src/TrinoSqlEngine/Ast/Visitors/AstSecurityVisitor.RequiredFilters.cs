@@ -140,44 +140,13 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         // 4. Check JOIN ON conditions
         foreach (var onPred in onPredicates)
         {
-            if (IsColumnConstrainedInJoin(onPred, tbl, alias, reqCol))
+            if (IsColumnConstrained(onPred, tbl, alias, reqCol))
             {
                 return true;
             }
         }
 
         return false;
-    }
-
-    private static bool IsColumnConstrainedInJoin(Expression expr, string tbl, string? alias, string col)
-    {
-        while (expr is ParenthesizedExpression p)
-        {
-            expr = p.Expression;
-        }
-
-        switch (expr)
-        {
-            case BinaryExpression b when b.Operator == BinaryOperator.And:
-                return IsColumnConstrainedInJoin(b.Left, tbl, alias, col) || IsColumnConstrainedInJoin(b.Right, tbl, alias, col);
-
-            case BinaryExpression b when b.Operator == BinaryOperator.Or:
-                return IsColumnConstrainedInJoin(b.Left, tbl, alias, col) && IsColumnConstrainedInJoin(b.Right, tbl, alias, col);
-
-            case BinaryExpression b when b.Operator is BinaryOperator.Equal
-                                      or BinaryOperator.LessThan
-                                      or BinaryOperator.LessThanOrEqual
-                                      or BinaryOperator.GreaterThan
-                                      or BinaryOperator.GreaterThanOrEqual:
-                if (MatchesTargetColumn(b.Left, tbl, alias, col) && !MatchesTargetColumn(b.Right, tbl, alias, col))
-                    return true;
-                if (MatchesTargetColumn(b.Right, tbl, alias, col) && !MatchesTargetColumn(b.Left, tbl, alias, col))
-                    return true;
-                return false;
-
-            default:
-                return IsColumnConstrained(expr, tbl, alias, col);
-        }
     }
 
     private static bool IsColumnConstrained(Expression expr, string tbl, string? alias, string col)

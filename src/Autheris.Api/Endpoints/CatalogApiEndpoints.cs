@@ -213,8 +213,6 @@ public static class CatalogApiEndpoints
             Guid relationId,
             SetRelationCrossDataSourceDto request,
             Autheris.Application.Interfaces.ITableRelationRepository relationRepo,
-            Autheris.Application.Interfaces.IAuditLogRepository auditRepo,
-            HttpContext httpContext,
             CancellationToken ct) =>
         {
             var updated = await relationRepo.SetRelationCrossDataSourceOptInAsync(relationId, request.AllowCrossDataSource, ct);
@@ -222,17 +220,6 @@ public static class CatalogApiEndpoints
             {
                 return Results.NotFound(new { error = $"Relation '{relationId}' not found." });
             }
-            var tenant = EndpointSecurity.GetRequestTenant(httpContext);
-            var sid = httpContext.User.GetUserSid() ?? new Sid("anonymous");
-            await auditRepo.RecordAuditEventAsync(new AuditLogEntry
-            {
-                EventType = AuditEventTypes.CrossSourceOptInChanged,
-                ActorSid = sid,
-                TargetTable = relationId.ToString(),
-                TenantId = tenant,
-                Decision = request.AllowCrossDataSource ? "ALLOW" : "DENY",
-                DetailsJson = $"{{\"allowCrossDataSource\":{request.AllowCrossDataSource.ToString().ToLowerInvariant()}}}"
-            }, ct);
             return Results.Ok(new { relationId, allowCrossDataSource = request.AllowCrossDataSource });
         })
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)

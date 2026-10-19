@@ -46,9 +46,11 @@ public sealed class ReadPathSwitches : IReadPathSwitches
             .Where(n => !string.IsNullOrWhiteSpace(n))
             .Select(n => n.Trim())
             .ToArray();
-        bool bulkStream = (options.BulkStream?.Enabled ?? true) && (options.RestApi?.BulkStream?.Enabled ?? true);
+        bool restData = options.RestApi?.DataEndpoint?.Enabled ?? true;
+        bool? bulkOption = options.BulkStream?.Enabled ?? options.RestApi?.BulkStream?.Enabled;
+        bool bulkStream = bulkOption ?? restData;
         return new ReadPathSwitches(
-            options.RestApi?.DataEndpoint?.Enabled ?? true,
+            restData,
             bulkStream,
             mcp.Tools ?? new McpToolGroupOptions(),
             disabled);

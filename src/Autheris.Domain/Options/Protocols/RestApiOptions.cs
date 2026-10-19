@@ -23,7 +23,7 @@ public sealed class RestDataEndpointOptions
 /// </summary>
 public sealed class BulkStreamOptions
 {
-    public bool Enabled { get; init; } = true;
+    public bool? Enabled { get; init; }
     public string? SigningKey { get; init; }
 }
 
