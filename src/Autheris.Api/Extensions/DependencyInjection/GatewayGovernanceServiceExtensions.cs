@@ -292,7 +292,9 @@ public static class GatewayGovernanceServiceExtensions
             IAuditPurgeKeyProvider,
             ICdcWatermarkRepository,
             Autheris.Application.Dbt.Interfaces.ISemanticManifestStore,
-            ICloudEventSubscriptionStore
+            ICloudEventSubscriptionStore,
+            Autheris.Application.Streaming.Interfaces.ICdcStreamStore,
+            Autheris.Application.Streaming.Interfaces.ICdcStreamKeyStore
         where TMigrationRunner : class, IGovernanceMigrationRunner
     {
         services.AddSingleton<TRepository>();
@@ -325,6 +327,9 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IConsumerAggregationRepository>(sp => sp.GetRequiredService<TRepository>());
         // #112 A-9: per-tenant persisted semantic manifest.
         services.AddSingleton<Autheris.Application.Dbt.Interfaces.ISemanticManifestStore>(sp => sp.GetRequiredService<TRepository>());
+        // SEC-SEC210-06: register durable CDC stream store and key store from the governance repository
+        services.AddSingleton<Autheris.Application.Streaming.Interfaces.ICdcStreamStore>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<Autheris.Application.Streaming.Interfaces.ICdcStreamKeyStore>(sp => sp.GetRequiredService<TRepository>());
         if (cdcWebhooksEnabled)
         {
             services.AddSingleton<ICloudEventSubscriptionStore>(sp => sp.GetRequiredService<TRepository>());

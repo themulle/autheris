@@ -552,10 +552,10 @@ public static class SqlServerWindowsAuthConfigurator
 
         var getEnvironmentVariable = getEnvVar ?? Environment.GetEnvironmentVariable;
         string msg = FullExceptionText(exception);
-        var sqlEx = FindSqlException(exception);
-        int? sqlNumber = sqlEx?.Number;
-        int? sqlState = sqlEx is null ? null : sqlEx.State;
-        int? sqlClass = sqlEx is null ? null : sqlEx.Class;
+        var sqlDiag = ExtractSqlErrorDiagnostics(exception);
+        int? sqlNumber = sqlDiag?.Number;
+        int? sqlState = sqlDiag?.State;
+        int? sqlClass = sqlDiag?.Class;
 
         // 1. Missing GSSAPI / gss-ntlmssp native library or mechanism
         if (msg.Contains("libgssapi_krb5", StringComparison.OrdinalIgnoreCase) ||
@@ -611,30 +611,78 @@ public static class SqlServerWindowsAuthConfigurator
                 sqlNumber, sqlState, sqlClass);
         }
 
-        // 3. SQL Server Login failed (Error 18456 / 18452) - warn about AD account lockout!
-        if (sqlNumber is 18456 or 18452 ||
-            msg.Contains("Login failed for user", StringComparison.OrdinalIgnoreCase) ||
-            msg.Contains("untrusted domain", StringComparison.OrdinalIgnoreCase))
+        // 3. SQL Server Login failed (Error 18452 / untrusted domain) - EPA Channel-Binding Token (CBT) / untrusted domain mismatch
+        if (sqlNumber == 18452 ||
+            (sqlNumber is null or not 18456 && msg.Contains("untrusted domain", StringComparison.OrdinalIgnoreCase)))
         {
+            _ = SecretScrubber.Redact(msg.Trim());
+            string diagnosticAdvice =
+                "SQL Server Windows Authentication login failed with untrusted domain / EPA error (Error 18452). " +
+                "In Linux container environments, managed NTLM cannot negotiate TLS Channel-Binding Tokens (CBT). " +
+                "If the target SQL Server enforces Extended Protection for Authentication (EPA / 'Erweiterter Schutz' = Required), " +
+                "connections will be rejected with Error 18452. Actionable remediations: " +
+                "(1) Configure SQL Server Extended Protection (EPA) to 'Allowed' or 'Off'; " +
+                "(2) Use Kerberos authentication with a Keytab (F-AUTH-04); " +
+                "(3) Use SQL Server native authentication (SqlPassword). " +
+                "WARNING: Repeated failed authentication attempts can lock out the Active Directory account!";
+
             return new SqlServerWindowsAuthException(
                 SqlServerWindowsAuthFailureCategory.LoginRejected,
-                "SQL Server Windows Authentication login was rejected by the server (Error 18456/18452). " +
-                "WARNING: Repeated failed Windows authentication attempts can lock out the Active Directory service account! " +
-                "Verify the domain name, username, password secret, and that the AD account has CONNECT/LOGIN permission on the target SQL Server before retrying.",
+                diagnosticAdvice,
                 exception,
-                sqlNumber, sqlState, sqlClass);
+                sqlNumber ?? 18452, sqlState, sqlClass);
+        }
+
+        // 3b. SQL Server Login failed (Error 18456) - Bad credentials or login disabled
+        if (sqlNumber == 18456 ||
+            msg.Contains("Login failed for user", StringComparison.OrdinalIgnoreCase))
+        {
+            _ = SecretScrubber.Redact(msg.Trim());
+            string diagnosticAdvice =
+                "SQL Server Windows Authentication login was rejected by the server (Error 18456). " +
+                "WARNING: Repeated failed Windows authentication attempts can lock out the Active Directory service account! " +
+                "Verify the domain name, username, password secret, and that the AD account has CONNECT/LOGIN permission on the target SQL Server before retrying.";
+
+            return new SqlServerWindowsAuthException(
+                SqlServerWindowsAuthFailureCategory.LoginRejected,
+                diagnosticAdvice,
+                exception,
+                sqlNumber ?? 18456, sqlState, sqlClass);
         }
 
         return exception;
     }
 
-    private static SqlException? FindSqlException(Exception ex)
+    private static (int? Number, int? State, int? Class, string Message)? ExtractSqlErrorDiagnostics(Exception ex)
     {
         for (var current = ex; current is not null; current = current.InnerException)
         {
             if (current is SqlException sql)
             {
-                return sql;
+                int num = sql.Number;
+                int state = sql.State;
+                int cls = sql.Class;
+                if (sql.Errors.Count > 0 && sql.Errors[0] != null)
+                {
+                    num = sql.Errors[0].Number;
+                    state = sql.Errors[0].State;
+                    cls = sql.Errors[0].Class;
+                }
+
+                return (num, state, cls, sql.Message);
+            }
+
+            // Duck typing for test doubles and provider exceptions
+            var type = current.GetType();
+            var numProp = type.GetProperty("Number");
+            if (numProp != null && numProp.PropertyType == typeof(int))
+            {
+                int num = (int)numProp.GetValue(current)!;
+                int? state = type.GetProperty("State")?.GetValue(current) as int?
+                    ?? (type.GetProperty("State")?.GetValue(current) is byte b ? (int)b : null);
+                int? cls = type.GetProperty("Class")?.GetValue(current) as int?
+                    ?? (type.GetProperty("Class")?.GetValue(current) is byte cb ? (int)cb : null);
+                return (num, state, cls, current.Message);
             }
         }
 
