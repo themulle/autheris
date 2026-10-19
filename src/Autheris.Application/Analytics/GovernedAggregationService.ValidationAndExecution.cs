@@ -384,7 +384,7 @@ public sealed partial class GovernedAggregationService
                 ? rawRows.ToList()
                 : InMemoryRowFilterEvaluator.FilterRows(rawRows.ToList(), decision, metadata);
             var filteredRows = FilterRowsByWhere(rlsRows, query.Where, metadata);
-            return new BucketRead(BuildBucketsFromRows(filteredRows, groupByColumns, resolvedAggregates, metadata));
+            return new BucketRead(BuildBucketsFromRows(filteredRows, groupByColumns, resolvedAggregates, metadata, query.TimeBuckets));
         }
 
         if (_gatewayExecutionService != null && _sqlExecutionService == null)
@@ -401,7 +401,7 @@ public sealed partial class GovernedAggregationService
             }
 
             var filteredRows = FilterRowsByWhere(rows.ToList(), query.Where, metadata);
-            return new BucketRead(BuildBucketsFromRows(filteredRows, groupByColumns, resolvedAggregates, metadata));
+            return new BucketRead(BuildBucketsFromRows(filteredRows, groupByColumns, resolvedAggregates, metadata, query.TimeBuckets));
         }
 
         if (_sqlExecutionService != null)
@@ -419,7 +419,8 @@ public sealed partial class GovernedAggregationService
                     trinoFilter,
                     query.OrderBy,
                     Limit: sqlLimit + 1,
-                    Transport: query.Transport ?? SqlTransports.Rest),
+                    Transport: query.Transport ?? SqlTransports.Rest,
+                    TimeBuckets: query.TimeBuckets),
                 metadata,
                 decision);
 
@@ -442,7 +443,7 @@ public sealed partial class GovernedAggregationService
 
             var rlsRows = InMemoryRowFilterEvaluator.FilterRows(sqlResult.Rows.ToList(), decision, metadata);
             var filteredRows = FilterRowsByWhere(rlsRows, query.Where, metadata);
-            return new BucketRead(BuildBucketsFromRows(filteredRows, groupByColumns, resolvedAggregates, metadata));
+            return new BucketRead(BuildBucketsFromRows(filteredRows, groupByColumns, resolvedAggregates, metadata, query.TimeBuckets));
         }
 
         throw new GatewayNotImplementedException("No SQL execution service or data source executor is configured to execute aggregation queries.");

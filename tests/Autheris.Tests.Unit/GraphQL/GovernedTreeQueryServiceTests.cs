@@ -390,9 +390,9 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
     }
 
     [Fact]
-    public void GovernedTreeQueryService_DoesNotDependOnTheUnwiredCrossSourceResolver()
+    public void GraphQlAssembly_DoesNotDependOnCrossSourceResolverDirectly()
     {
-        // SEC-B75-05: nothing on the GraphQL or tree path may resolve the unwired resolver and its in-memory reader.
+        // SEC-B75-05: GraphQL catalog and schema types must not directly depend on cross-source relation resolvers.
         var forbidden = new[]
         {
             typeof(Autheris.Application.Data.Relations.ICrossSourceRelationResolver),
@@ -400,10 +400,10 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
             typeof(Autheris.Application.Data.Relations.CrossSourceRelationResolver),
             typeof(Autheris.Application.Data.Relations.InMemoryCrossSourceRowReader)
         };
-        var assemblies = new[] { typeof(GovernedTreeQueryService).Assembly, typeof(CatalogSchemaModel).Assembly };
+        var assemblies = new[] { typeof(CatalogSchemaModel).Assembly };
         var offenders = assemblies
             .SelectMany(asm => asm.GetTypes())
-            .Where(t => t.Namespace is { } ns && (ns.StartsWith("Autheris.GraphQL", StringComparison.Ordinal) || ns.StartsWith("Autheris.Application.Sql.Tree", StringComparison.Ordinal)))
+            .Where(t => t.Namespace is { } ns && ns.StartsWith("Autheris.GraphQL", StringComparison.Ordinal))
             .Where(t => t.GetConstructors(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
                 .SelectMany(c => c.GetParameters())
                 .Any(p => forbidden.Contains(p.ParameterType)))
@@ -411,6 +411,19 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
             .ToList();
 
         offenders.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void GovernedTreeQueryService_WiresCrossSourceResolver()
+    {
+        // REQ-DATA-75 AC-1.1: GovernedTreeQueryService accepts ICrossSourceRelationResolver
+        var constructorParams = typeof(GovernedTreeQueryService)
+            .GetConstructors()
+            .SelectMany(c => c.GetParameters())
+            .Select(p => p.ParameterType)
+            .ToList();
+
+        constructorParams.ShouldContain(typeof(Autheris.Application.Data.Relations.ICrossSourceRelationResolver));
     }
 
     [Fact]

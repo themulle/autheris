@@ -32,6 +32,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
     private readonly Microsoft.Extensions.Logging.ILogger<CatalogGraphQlTypeModule>? _logger;
     private readonly TimeSpan _refreshInterval;
     private readonly bool _aggregationEnabled;
+    private readonly bool _crossSourceEnabled;
     private readonly object _timerLock = new();
     private Timer? _refreshTimer;
     private sealed record BuiltState(string? Fingerprint, IReadOnlyList<CatalogOmittedTable> OmittedTables);
@@ -47,9 +48,11 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         Microsoft.Extensions.Logging.ILogger<CatalogGraphQlTypeModule>? logger = null,
         TimeSpan? refreshInterval = null,
         Autheris.Application.Catalog.ICatalogVersionProvider? versionProvider = null,
-        bool aggregationEnabled = true)
+        bool aggregationEnabled = true,
+        bool crossSourceEnabled = false)
     {
         _aggregationEnabled = aggregationEnabled;
+        _crossSourceEnabled = crossSourceEnabled;
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _relationRepo = relationRepo ?? throw new ArgumentNullException(nameof(relationRepo));
         _logger = logger;
@@ -92,7 +95,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
             string current;
             try
             {
-                current = (await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, null, ct).ConfigureAwait(false)).Fingerprint();
+                current = (await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, null, dialectRegistry: null, crossSourceEnabled: _crossSourceEnabled, ct).ConfigureAwait(false)).Fingerprint();
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -144,7 +147,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         CatalogSchemaModel schemaModel;
         try
         {
-            schemaModel = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, _logger, cancellationToken)
+            schemaModel = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, _logger, dialectRegistry: null, crossSourceEnabled: _crossSourceEnabled, cancellationToken)
                 .ConfigureAwait(false);
             _built = new BuiltState(schemaModel.Fingerprint(), schemaModel.OmittedTables);
             if (_versionProvider != null)
@@ -614,6 +617,10 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                 .SetMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing))
                 .SetCode(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing)
                 .Build());
+        }
+        catch (Autheris.Application.Data.Relations.CrossSourceRelationException ex)
+        {
+            throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode(ex.ErrorCode).Build());
         }
         catch (GatewayForbiddenException)
         {

@@ -125,13 +125,22 @@ public sealed partial class CatalogSchemaModel
         ITableRelationRepository relationRepository,
         Microsoft.Extensions.Logging.ILogger? logger = null,
         CancellationToken ct = default)
-        => BuildAsync(metadataRepository, relationRepository, logger, dialectRegistry: null, ct);
+        => BuildAsync(metadataRepository, relationRepository, logger, dialectRegistry: null, crossSourceEnabled: false, ct);
+
+    public static Task<CatalogSchemaModel> BuildAsync(
+        ITableMetadataRepository metadataRepository,
+        ITableRelationRepository relationRepository,
+        Microsoft.Extensions.Logging.ILogger? logger,
+        Autheris.Application.Sql.Dialects.ISqlDialectRegistry? dialectRegistry,
+        CancellationToken ct = default)
+        => BuildAsync(metadataRepository, relationRepository, logger, dialectRegistry, crossSourceEnabled: false, ct);
 
     public static async Task<CatalogSchemaModel> BuildAsync(
         ITableMetadataRepository metadataRepository,
         ITableRelationRepository relationRepository,
         Microsoft.Extensions.Logging.ILogger? logger,
         Autheris.Application.Sql.Dialects.ISqlDialectRegistry? dialectRegistry,
+        bool crossSourceEnabled,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(metadataRepository);
@@ -324,7 +333,7 @@ public sealed partial class CatalogSchemaModel
                         invalidRelations.Add(rel.Id);
                         continue;
                     }
-                    if (!RelationExecutability.IsSameExecutionSource(meta, targetTable.Metadata))
+                    if (!RelationExecutability.IsExecutable(rel, meta, targetTable.Metadata, crossSourceEnabled))
                     {
                         omittedRelations++;
                         continue;
@@ -379,7 +388,7 @@ public sealed partial class CatalogSchemaModel
                         // Already recorded by the forward loop of the parent table.
                         continue;
                     }
-                    if (!RelationExecutability.IsSameExecutionSource(other.Metadata, meta))
+                    if (!RelationExecutability.IsExecutable(rel, other.Metadata, meta, crossSourceEnabled))
                     {
                         // Already counted by the forward loop of the parent table; a parent that is not in tableBuilders
                         // (inactive or not SQL) emits no relation at all, so nothing is lost by not counting here.

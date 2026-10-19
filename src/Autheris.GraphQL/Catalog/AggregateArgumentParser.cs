@@ -12,7 +12,8 @@ internal sealed record ParsedAggregateArguments(
     IReadOnlyList<CatalogColumnField> GroupBy,
     IReadOnlyList<ResolvedAggregate> Aggregates,
     IReadOnlyList<TableOrderBy> OrderBy,
-    int Limit);
+    int Limit,
+    IReadOnlyList<TimeBucketSpecification>? TimeBuckets = null);
 
 /// <summary>
 /// #112 A-2 / A-4 / C-4: argument shape, alias rules and the function/type matrix, decided before the engine is called. Errors carry
@@ -32,7 +33,8 @@ internal static partial class AggregateArgumentParser
         IValueNode? orderBy,
         IValueNode? limit,
         AggregationOptions options,
-        Func<string, IValueNode?> variable)
+        Func<string, IValueNode?> variable,
+        IValueNode? timeBuckets = null)
     {
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(options);
@@ -40,12 +42,17 @@ internal static partial class AggregateArgumentParser
 
         var columns = AggregateColumnEnum.Build(table).ToDictionary(e => e.EnumValue, e => e.Column, StringComparer.Ordinal);
 
-        var groupColumns = ParseGroupBy(groupBy, columns, options, variable);
+        var (groupColumns, timeBucketSpecs) = ParseGroupBy(groupBy, timeBuckets, columns, options, variable);
         var parsedAggregates = ParseAggregates(aggregates, columns, groupColumns, options, variable);
         var order = ParseOrderBy(orderBy, columns, groupColumns, parsedAggregates, options, variable);
         var parsedLimit = ParseLimit(limit, variable);
 
-        return new ParsedAggregateArguments(groupColumns, parsedAggregates, order, parsedLimit);
+        if (timeBucketSpecs.Count > 0 && parsedLimit > 1000)
+        {
+            throw AggregateErrors.Create("QUERY_TOO_COMPLEX", "Time-bucketed aggregation queries cannot exceed a limit of 1000 groups.");
+        }
+
+        return new ParsedAggregateArguments(groupColumns, parsedAggregates, order, parsedLimit, timeBucketSpecs.Count > 0 ? timeBucketSpecs : null);
     }
 
     private static IValueNode? Resolve(IValueNode? node, Func<string, IValueNode?> variable) =>
@@ -68,36 +75,141 @@ internal static partial class AggregateArgumentParser
             _ => throw AggregateErrors.ArgumentInvalid()
         };
 
-    private static List<CatalogColumnField> ParseGroupBy(
-        IValueNode? node,
+    private static (List<CatalogColumnField> Columns, List<TimeBucketSpecification> TimeBuckets) ParseGroupBy(
+        IValueNode? groupByNode,
+        IValueNode? timeBucketsNode,
         IReadOnlyDictionary<string, CatalogColumnField> columns,
         AggregationOptions options,
         Func<string, IValueNode?> variable)
     {
-        var result = new List<CatalogColumnField>();
-        var resolved = Resolve(node, variable);
-        if (IsAbsent(resolved))
-        {
-            return result;
-        }
+        var groupCols = new List<CatalogColumnField>();
+        var timeBuckets = new List<TimeBucketSpecification>();
 
-        var items = Items(resolved!, variable);
-        if (items.Count > options.MaxGroupByColumns)
+        var resolvedGroup = Resolve(groupByNode, variable);
+        if (!IsAbsent(resolvedGroup))
         {
-            throw AggregateErrors.ArgumentInvalid();
-        }
-
-        foreach (var item in items)
-        {
-            if (!columns.TryGetValue(EnumName(item, variable), out var column) || result.Contains(column))
+            var items = Items(resolvedGroup!, variable);
+            if (items.Count > options.MaxGroupByColumns)
             {
                 throw AggregateErrors.ArgumentInvalid();
             }
 
-            result.Add(column);
+            foreach (var item in items)
+            {
+                if (item is ObjectValueNode objNode)
+                {
+                    var spec = ParseTimeBucketObject(objNode, columns, variable);
+                    var col = columns.Values.First(c => string.Equals(c.ColumnName, spec.Column, StringComparison.OrdinalIgnoreCase));
+                    if (!groupCols.Contains(col))
+                    {
+                        groupCols.Add(col);
+                    }
+                    timeBuckets.Add(spec);
+                }
+                else
+                {
+                    if (!columns.TryGetValue(EnumName(item, variable), out var column) || groupCols.Contains(column))
+                    {
+                        throw AggregateErrors.ArgumentInvalid();
+                    }
+                    groupCols.Add(column);
+                }
+            }
         }
 
-        return result;
+        var resolvedBuckets = Resolve(timeBucketsNode, variable);
+        if (!IsAbsent(resolvedBuckets))
+        {
+            var bItems = Items(resolvedBuckets!, variable);
+            foreach (var bItem in bItems)
+            {
+                if (bItem is not ObjectValueNode bObj)
+                {
+                    throw AggregateErrors.ArgumentInvalid();
+                }
+
+                var spec = ParseTimeBucketObject(bObj, columns, variable);
+                var col = columns.Values.First(c => string.Equals(c.ColumnName, spec.Column, StringComparison.OrdinalIgnoreCase));
+                if (!groupCols.Contains(col))
+                {
+                    if (groupCols.Count >= options.MaxGroupByColumns)
+                    {
+                        throw AggregateErrors.ArgumentInvalid();
+                    }
+                    groupCols.Add(col);
+                }
+                if (!timeBuckets.Any(tb => string.Equals(tb.Column, spec.Column, StringComparison.OrdinalIgnoreCase)))
+                {
+                    timeBuckets.Add(spec);
+                }
+            }
+        }
+
+        return (groupCols, timeBuckets);
+    }
+
+    private static TimeBucketSpecification ParseTimeBucketObject(
+        ObjectValueNode obj,
+        IReadOnlyDictionary<string, CatalogColumnField> columns,
+        Func<string, IValueNode?> variable)
+    {
+        var fields = obj.Fields.ToDictionary(f => f.Name.Value, f => Resolve(f.Value, variable), StringComparer.Ordinal);
+        if (!fields.TryGetValue("column", out var colNode) || IsAbsent(colNode))
+        {
+            throw AggregateErrors.ArgumentInvalid();
+        }
+
+        var colName = EnumName(colNode, variable);
+        if (!columns.TryGetValue(colName, out var colField))
+        {
+            throw AggregateErrors.ArgumentInvalid();
+        }
+
+        if (!fields.TryGetValue("bucket", out var bucketNode) || IsAbsent(bucketNode))
+        {
+            throw AggregateErrors.ArgumentInvalid();
+        }
+
+        var bucketStr = EnumName(bucketNode, variable);
+        if (!TryParseTimeBucketInterval(bucketStr, out var interval))
+        {
+            throw AggregateErrors.ArgumentInvalid();
+        }
+
+        var timeZone = "UTC";
+        if (fields.TryGetValue("timeZone", out var tzNode) && !IsAbsent(tzNode))
+        {
+            var resolvedTz = Resolve(tzNode, variable);
+            if (resolvedTz is StringValueNode sNode)
+            {
+                timeZone = sNode.Value;
+            }
+            else
+            {
+                throw AggregateErrors.ArgumentInvalid();
+            }
+        }
+
+        if (!TrinoSqlEngine.TimeZoneRegistry.Contains(timeZone))
+        {
+            throw AggregateErrors.Create("INVALID_QUERY", $"Time zone '{timeZone}' is not recognized.");
+        }
+
+        return new TimeBucketSpecification(colField.ColumnName, interval, timeZone);
+    }
+
+    private static bool TryParseTimeBucketInterval(string name, out TimeBucketInterval interval)
+    {
+        switch (name)
+        {
+            case "HOUR": interval = TimeBucketInterval.Hour; return true;
+            case "DAY": interval = TimeBucketInterval.Day; return true;
+            case "WEEK": interval = TimeBucketInterval.Week; return true;
+            case "MONTH": interval = TimeBucketInterval.Month; return true;
+            case "QUARTER": interval = TimeBucketInterval.Quarter; return true;
+            case "YEAR": interval = TimeBucketInterval.Year; return true;
+            default: interval = default; return false;
+        }
     }
 
     private static List<ResolvedAggregate> ParseAggregates(

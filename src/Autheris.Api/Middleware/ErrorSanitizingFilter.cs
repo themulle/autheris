@@ -42,7 +42,14 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         // WP-0 (PLAN-GOV-113): fixed messages without ids or names; expected business outcomes, not server faults.
         "DECISION_NOT_PERMITTED",
         "ACCESS_REQUEST_NOT_PENDING",
-        "READ_ONLY_TOKEN"
+        "READ_ONLY_TOKEN",
+        // Issue #75 and #112 addenda
+        "RELATION_KEY_MASKED",
+        "CROSS_SOURCE_KEY_MASKED",
+        "CROSS_SOURCE_RELATION_NOT_ENABLED",
+        "REQUIRED_FILTER_MISSING",
+        "AGGREGATION_ON_MASKED_COLUMN",
+        "INVALID_ARGUMENT"
     };
 
     private static readonly HashSet<string> ExpectedOutcomeCodes = new(StringComparer.OrdinalIgnoreCase)
