@@ -40,8 +40,10 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-AUTH-03** | RFC 6238 TOTP Two-Factor Authentication & HitL Step-Up Engine | [f-auth-03-rfc6238-totp-2fa-stepup.md](f-auth-03-rfc6238-totp-2fa-stepup.md) |
 | **F-AUTH-04** | SQL Server Windows Authentication (NTLM & Kerberos) in Containers | [f-auth-04-sqlserver-windows-auth-ntlm-kerberos.md](f-auth-04-sqlserver-windows-auth-ntlm-kerberos.md) |
 | **F-AUTH-DX** | Basic Auth with Cookie Session and Developer Helpers (Development / internal test environments) | [f-auth-dx-basic-auth-session.md](f-auth-dx-basic-auth-session.md) |
+| **F-CDC-01** | Durable CDC Event Streaming & Multi-Protocol Fanout | [f-cdc-01-durable-streaming-and-fanout.md](f-cdc-01-durable-streaming-and-fanout.md) |
 | **F-CDC-02** | Native MSSQL Change Tracking Ingestion Provider | [f-cdc-02-mssql-change-tracking.md](f-cdc-02-mssql-change-tracking.md) |
 | **F-CDC-03** | Zero-Kafka PostgreSQL CDC via Logical Streaming Replication | [f-cdc-03-zero-kafka-postgresql-cdc.md](f-cdc-03-zero-kafka-postgresql-cdc.md) |
+| **F-CDC-04** | Governed Multi-Watermark Query Poller | [f-cdc-04-governed-multi-watermark-poller.md](f-cdc-04-governed-multi-watermark-poller.md) |
 | **F-DATA-01** | Hierarchical Parquet Egress & Nested Query Serialization | [f-data-01-parquet-egress.md](f-data-01-parquet-egress.md) |
 | **F-DATA-02** | Governed WebSQL Engine | [f-data-02-governed-websql.md](f-data-02-governed-websql.md) |
 | **F-DATA-03** | Embedded In-Memory OLAP via DuckDB.NET | [f-data-03-duckdb-olap.md](f-data-03-duckdb-olap.md) |
