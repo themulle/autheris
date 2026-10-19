@@ -36,6 +36,7 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-ARCH-10** | Standardized Connector SPI (Trino Pattern) | [f-arch-10-connector-spi.md](f-arch-10-connector-spi.md) |
 | **F-ARCH-11** | Envoy External Authorization (ext_authz) & Istio Service Mesh Integration | [f-arch-11-envoy-external-authorization.md](f-arch-11-envoy-external-authorization.md) |
 | **F-AUDIT-01** | Hardened Cryptographic Audit & Asymmetric KMS Anchors (AU-01..19) | [f-audit-01-hardened-cryptographic-audit.md](f-audit-01-hardened-cryptographic-audit.md) |
+| **F-AUDIT-02** | Cryptographic Audit Retention Purge & Checkpoint Anchors | [f-audit-02-retention-purge-and-checkpoints.md](f-audit-02-retention-purge-and-checkpoints.md) |
 | **F-AUTH-03** | RFC 6238 TOTP Two-Factor Authentication & HitL Step-Up Engine | [f-auth-03-rfc6238-totp-2fa-stepup.md](f-auth-03-rfc6238-totp-2fa-stepup.md) |
 | **F-AUTH-04** | SQL Server Windows Authentication (NTLM & Kerberos) in Containers | [f-auth-04-sqlserver-windows-auth-ntlm-kerberos.md](f-auth-04-sqlserver-windows-auth-ntlm-kerberos.md) |
 | **F-AUTH-DX** | Basic Auth with Cookie Session and Developer Helpers (Development / internal test environments) | [f-auth-dx-basic-auth-session.md](f-auth-dx-basic-auth-session.md) |
@@ -50,6 +51,8 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-DATA-07** | Asynchronous Query Job Engine & Sandbox Storage | [f-data-07-async-query-jobs.md](f-data-07-async-query-jobs.md) |
 | **F-DATA-08** | Governed Aggregations & Minimum Group Size (k-Anonymity Guard) | [f-data-08-governed-aggregations-and-k-anonymity.md](f-data-08-governed-aggregations-and-k-anonymity.md) |
 | **F-DATA-09** | Governed Change Detection (ETag) & Stateless changesSince Cursor | [f-data-09-change-detection-and-changes-since-cursor.md](f-data-09-change-detection-and-changes-since-cursor.md) |
+| **F-DATA-10** | Cross-Source WebSQL Optimizations & Pushdown Pipeline | [f-data-10-cross-source-websql-optimizations.md](f-data-10-cross-source-websql-optimizations.md) |
+| **F-DATA-11** | Governed Bulk Keyset Streaming & Chunked Zero-LOH Serialization | [f-data-11-bulk-keyset-streaming.md](f-data-11-bulk-keyset-streaming.md) |
 | **F-DBT-1** | dbt Data Health Circuit Breaker | [f-dbt-01-health-circuit-breaker.md](f-dbt-01-health-circuit-breaker.md) |
 | **F-DBT-2** | dbt Model Contract Enforcement & Breaking-Change CI Gate | [f-dbt-02-contract-enforcement.md](f-dbt-02-contract-enforcement.md) |
 | **F-DBT-3** | Live-Telemetry Exposure Publisher | [f-dbt-03-telemetry-exposures.md](f-dbt-03-telemetry-exposures.md) |
@@ -78,6 +81,7 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-GOV-21** | Declared Table Keys & Indexes, Deterministic Read Ordering & Least-Privilege Grants | [f-gov-21-declared-table-keys-and-read-ordering.md](f-gov-21-declared-table-keys-and-read-ordering.md) |
 | **F-GOV-22** | Time-Bound Individual Grants (Grant Policy, Class Maxima, Renewal & Read-Time Clamp) | [f-gov-22-time-bound-individual-grants.md](f-gov-22-time-bound-individual-grants.md) |
 | **F-GOV-23** | Row Filter Key-Set Cache (Evaluation Strategy Settings, Persistence & Administration, Key Query Compiler, Key-Set Substitution) | [f-gov-23-row-filter-key-set-cache.md](f-gov-23-row-filter-key-set-cache.md) |
+| **F-GOV-24** | Self-Service Access Requests & Read-Only Token Gating | [f-gov-24-access-requests-and-readonly-tokens.md](f-gov-24-access-requests-and-readonly-tokens.md) |
 | **F-INT-01** | Spotify Backstage Software Catalog Integration | [f-int-01-backstage-software-catalog.md](f-int-01-backstage-software-catalog.md) |
 | **F-MASK-02** | Extended Column Masking Engine (GEO_JITTER, PARTIAL_MASK, TOKENIZATION) | [f-mask-02-extended-masking-engine.md](f-mask-02-extended-masking-engine.md) |
 | **F-OPEN-01** | OpenSchema Mode, Multi-File OpenAPI & Catalog Slicing | [f-open-01-openschema-catalog-slicing.md](f-open-01-openschema-catalog-slicing.md) |
