@@ -13,6 +13,8 @@ using RequestDelegate = HotChocolate.Execution.RequestDelegate;
 public sealed class PaginationTruncationMiddleware
 {
     public const string ContextKey = "PaginationTruncated";
+    public const string MaxRowsReachedKey = "PaginationMaxRowsReached";
+    public const string PageSizeKey = "PaginationPageSize";
     private readonly RequestDelegate _next;
 
     public PaginationTruncationMiddleware(RequestDelegate next)
@@ -28,10 +30,14 @@ public sealed class PaginationTruncationMiddleware
             context.ContextData.TryGetValue(ContextKey, out var truncatedObj) &&
             truncatedObj is true)
         {
+            var maxRowsReached = context.ContextData.TryGetValue(MaxRowsReachedKey, out var maxObj) && maxObj is true;
+            var pageSize = context.ContextData.TryGetValue(PageSizeKey, out var sizeObj) && sizeObj is int sz ? sz : 0;
+
             var paginationInfo = new Dictionary<string, object?>
             {
                 ["isTruncated"] = true,
-                ["maxRowsReached"] = true
+                ["maxRowsReached"] = maxRowsReached,
+                ["pageSize"] = pageSize
             };
 
             var extensions = opResult.Extensions ?? HotChocolate.Collections.Immutable.ImmutableOrderedDictionary<string, object?>.Empty;

@@ -375,4 +375,56 @@ public sealed class RedisRateLimiterService : IRateLimiterService
             }
         }
     }
+
+    /// <summary>
+    /// SEC-GOV175B-01 &amp; SEC-GOV175B-03: Non-destructive probe of Redis bucket state via read-only HMGET.
+    /// </summary>
+    public async Task<CallerBucketState?> GetBucketStateAsync(string key, ClientQuotaPolicy policy, CancellationToken ct = default)
+    {
+        var capacity = policy.MaxTokensCapacity;
+        var refillRate = policy.TokenRefillRatePerSecond > 0 ? policy.TokenRefillRatePerSecond : 1.0;
+
+        try
+        {
+            var sanitizedKey = key.Replace("{", "_").Replace("}", "_");
+            var redisKey = (RedisKey)$"{_prefix}ratelimit:quota:{sanitizedKey}";
+
+            var data = await _db.HashGetAsync(redisKey, [(RedisValue)"tokens", (RedisValue)"last_refill"]).ConfigureAwait(false);
+
+            if (data == null || data.Length < 2 || data[0].IsNullOrEmpty || data[1].IsNullOrEmpty)
+            {
+                // Uninitialized bucket: uniform full capacity
+                return new CallerBucketState(capacity, capacity, refillRate);
+            }
+
+            if (double.TryParse((string?)data[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var tokens) &&
+                long.TryParse((string?)data[1], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var lastRefillMs))
+            {
+                var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                var elapsedSec = Math.Max(0.0, (nowMs - lastRefillMs) / 1000.0);
+                var currentTokens = Math.Min(capacity, tokens + (elapsedSec * refillRate));
+                return new CallerBucketState(capacity, Math.Round(currentTokens, 2), refillRate);
+            }
+
+            return new CallerBucketState(capacity, capacity, refillRate);
+        }
+        catch (Exception ex)
+        {
+            RateLimiterRedisErrors.WithLabels("cost_quota").Inc();
+            _logger.LogWarning(ex, "Redis cost quota probe failed for key {Key}. Falling back to in-memory probe.", key);
+            try
+            {
+                return await _inMemoryFallback.GetBucketStateAsync(key, policy, ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+
+    public Task<CallerBucketState?> GetBucketStateAsync(string key, CancellationToken ct = default)
+    {
+        return GetBucketStateAsync(key, ClientQuotaPolicy.ForTier(ClientTier.Standard), ct);
+    }
 }

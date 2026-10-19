@@ -14,6 +14,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
@@ -35,6 +36,8 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
     private readonly Microsoft.Extensions.Logging.ILogger<QueryAnalysisService>? _logger;
     private readonly Autheris.Domain.Security.IRestrictedScopePolicy _restrictedScopes;
     private readonly IGraphQlCostAnalysisEngine? _costAnalysisEngine;
+    private readonly Autheris.Application.Caching.Interfaces.IClientTierResolver? _clientTierResolver;
+    private readonly IRateLimiterService? _rateLimiterService;
     private readonly int _maxRootFields;
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
@@ -50,7 +53,9 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null,
         Microsoft.Extensions.Logging.ILogger<QueryAnalysisService>? logger = null,
         Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
-        IGraphQlCostAnalysisEngine? costAnalysisEngine = null)
+        IGraphQlCostAnalysisEngine? costAnalysisEngine = null,
+        Autheris.Application.Caching.Interfaces.IClientTierResolver? clientTierResolver = null,
+        IRateLimiterService? rateLimiterService = null)
     {
         // The default is the secure list (REQ-GOV-143), never "off".
         _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
@@ -65,6 +70,8 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         _sunsettingService = sunsettingService;
         _gatewayOptions = gatewayOptions?.Value ?? new GatewayOptions();
         _costAnalysisEngine = costAnalysisEngine;
+        _clientTierResolver = clientTierResolver;
+        _rateLimiterService = rateLimiterService;
         _maxRootFields = _gatewayOptions.GraphQL.MaxRootFieldsPerOperation > 0
             ? _gatewayOptions.GraphQL.MaxRootFieldsPerOperation
             : 10;
@@ -87,7 +94,9 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null,
         Microsoft.Extensions.Logging.ILogger<QueryAnalysisService>? logger = null,
         Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
-        IGraphQlCostAnalysisEngine? costAnalysisEngine = null)
+        IGraphQlCostAnalysisEngine? costAnalysisEngine = null,
+        Autheris.Application.Caching.Interfaces.IClientTierResolver? clientTierResolver = null,
+        IRateLimiterService? rateLimiterService = null)
     {
         // The default is the secure list (REQ-GOV-143), never "off".
         _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
@@ -101,6 +110,8 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         _sunsettingService = sunsettingService;
         _gatewayOptions = gatewayOptions?.Value ?? new GatewayOptions();
         _costAnalysisEngine = costAnalysisEngine;
+        _clientTierResolver = clientTierResolver;
+        _rateLimiterService = rateLimiterService;
         _maxRootFields = _gatewayOptions.GraphQL.MaxRootFieldsPerOperation > 0
             ? _gatewayOptions.GraphQL.MaxRootFieldsPerOperation
             : 10;
@@ -462,11 +473,48 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                 coLocatedGroups.Count > 0 ? coLocatedGroups : null)
             : null;
 
+        CallerQuotaSummary? callerQuota = null;
+        if (_clientTierResolver != null)
+        {
+            try
+            {
+                var quotaCtx = await _clientTierResolver.ResolveAsync(callerPrincipal, apiKey: null, clientIp: null, ct).ConfigureAwait(false);
+                CallerBucketState? bucketState = null;
+                if (_rateLimiterService != null)
+                {
+                    try
+                    {
+                        bucketState = await _rateLimiterService.GetBucketStateAsync(quotaCtx.SubjectId, quotaCtx.Policy, ct).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.LogWarning(ex, "Failed to probe bucket state; falling back to null.");
+                        bucketState = null;
+                    }
+                }
+
+                var systemCaps = new ActiveSystemCaps(
+                    MaxAllowedComplexity: maxAllowedCost,
+                    MaxResponseRows: _gatewayOptions.GraphQL?.MaxResponseRows > 0 ? _gatewayOptions.GraphQL.MaxResponseRows : 1000,
+                    MaxAllowedOffset: _gatewayOptions.GraphQL?.MaxAllowedOffset >= 0 ? _gatewayOptions.GraphQL.MaxAllowedOffset : 10000,
+                    MaxNestingDepth: 10,
+                    MaxAggregateRowBudget: _gatewayOptions.GraphQL?.MaxAggregateRowBudget > 0 ? _gatewayOptions.GraphQL.MaxAggregateRowBudget : 50000);
+
+                callerQuota = new CallerQuotaSummary(quotaCtx.Tier.ToString(), bucketState, systemCaps);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to resolve caller quota for static query analysis; falling back to null.");
+                callerQuota = null;
+            }
+        }
+
         return new QueryAnalysisResult(
             ValidationReport: validationReport,
             AccessRequirements: accessRequirements,
             SourceDatabaseReadsExecuted: 0,
-            Federation: federation);
+            Federation: federation,
+            CallerQuota: callerQuota);
     }
 
     public async Task<IReadOnlyList<DatasetGrantGapSummary>> EvaluateGroupAccessRequirementsAsync(

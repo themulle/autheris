@@ -22,7 +22,7 @@ namespace Autheris.Application.Sql.Tree;
 public static partial class TreeSqlCompiler
 {
     public const int MaxDepth = 5;
-    public const int MaxLimit = 10_000;
+    public const int MaxLimit = 10_001;
     public const int MaxInListSize = 1_000;
     public const int MaxParameters = 2_000;
     public const int MaxFilterDepth = 15;
@@ -268,7 +268,8 @@ public static partial class TreeSqlCompiler
             throw new GatewayForbiddenException("Access denied.");
         }
 
-        if (node.Limit < 1 || node.Limit > MaxLimit)
+        var effectiveLimit = node.ExecutionLimit ?? node.Limit;
+        if (effectiveLimit < 1 || effectiveLimit > MaxLimit)
         {
             throw new GatewayInvalidQueryException($"The page size must be between 1 and {MaxLimit}.");
         }
@@ -583,7 +584,7 @@ public static partial class TreeSqlCompiler
         var metadata = plan.Access.Metadata;
         var node = plan.Node;
         var isRoot = parent == null;
-        var limit = relation is { IsList: false } ? 1 : node.Limit;
+        var limit = relation is { IsList: false } ? 1 : (node.ExecutionLimit ?? node.Limit);
 
         var sb = new StringBuilder("SELECT ");
         if (!isRoot && dialect == DatabaseDialect.SqlServer)

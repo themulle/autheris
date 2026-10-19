@@ -3,6 +3,7 @@ namespace Autheris.Application.Governance.Analysis;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Autheris.Application.Interfaces;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
@@ -219,13 +220,36 @@ public sealed record AnalyzedPushedPredicate(string Column, string Operator);
 public sealed record AnalyzedResidualPredicate(string Column, string Reason);
 
 /// <summary>
-/// Issue #79: Combined result of zero-read static query analysis.
+/// Issue #175B: Active gateway governance ceilings surfaced in query analysis.
+/// </summary>
+public sealed record ActiveSystemCaps(
+    int MaxAllowedComplexity,
+    int MaxResponseRows,
+    int MaxAllowedOffset,
+    int MaxNestingDepth,
+    int MaxAggregateRowBudget);
+
+/// <summary>
+/// Issue #175B: Caller quota and token bucket runtime state surfaced in query analysis.
+/// </summary>
+public sealed record CallerQuotaSummary(
+    string ClientTier,
+    CallerBucketState? BucketState,
+    ActiveSystemCaps SystemCaps)
+{
+    [System.Text.Json.Serialization.JsonPropertyName("callerBucket")]
+    public CallerBucketState? CallerBucket => BucketState;
+}
+
+/// <summary>
+/// Issue #79 &amp; #175B: Combined result of zero-read static query analysis.
 /// </summary>
 public sealed record QueryAnalysisResult(
     QueryValidationReport ValidationReport,
     QueryAccessRequirementsReport AccessRequirements,
     int SourceDatabaseReadsExecuted = 0,
-    QueryFederationAnalysis? Federation = null);
+    QueryFederationAnalysis? Federation = null,
+    CallerQuotaSummary? CallerQuota = null);
 
 /// <summary>
 /// Issue #79: Request to submit a bundled multi-table consent request derived from an access requirements report.

@@ -5,7 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Domain.Model;
 
-public sealed record ClientQuotaContext(string SubjectId, ClientTier Tier, ClientQuotaPolicy Policy);
+public sealed record ClientQuotaContext(string SubjectId, ClientTier Tier, ClientQuotaPolicy Policy, string? ResolvedScope = null);
 
 public interface IClientTierResolver
 {

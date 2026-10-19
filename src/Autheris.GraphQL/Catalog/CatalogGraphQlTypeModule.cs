@@ -11,6 +11,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Autheris.GraphQL.Catalog;
+using Autheris.GraphQL.Interceptors;
 using HotChocolate;
 using HotChocolate.Execution.Configuration;
 using HotChocolate.Language;
@@ -258,8 +259,13 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
 
                 foreach (var table in schemaModel.Tables)
                 {
+                    var pk = table.Metadata.PrimaryKeyColumns.Count > 0 ? table.Metadata.PrimaryKeyColumns[0] : "id";
+                    if (string.IsNullOrWhiteSpace(pk) || !System.Text.RegularExpressions.Regex.IsMatch(pk, @"^[a-zA-Z_][a-zA-Z0-9_]*$"))
+                    {
+                        pk = "id";
+                    }
                     d.Field(table.QueryFieldName)
-                        .Description($"Query {table.TypeName}. Keyset paging can be performed via where: {{ id: {{ gt: $lastId }} }}, orderBy: [{{ id: ASC }}].")
+                        .Description($"Query {table.TypeName}. Keyset paging can be performed via where: {{ {pk}: {{ gt: $last{pk} }} }}, orderBy: [{{ {pk}: ASC }}]. Offset pagination is supported up to offset 10000.")
                         .Type(new NonNullTypeNode(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode(table.TypeName)))))
                         .Argument("where", a => a.Type(new NamedTypeNode(table.FilterTypeName)))
                         .Argument("orderBy", a => a.Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode(table.OrderByTypeName)))))
@@ -557,10 +563,32 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                 list.Add(item);
             }
 
+            var isTruncated = false;
+            var maxRowsReached = false;
+            var requestedLimit = queryNode.Limit;
+            if (list.Count > requestedLimit)
+            {
+                isTruncated = true;
+                maxRowsReached = requestedLimit >= maxResponseRows;
+                list.RemoveAt(list.Count - 1);
+            }
+            else if (list.Count >= maxResponseRows)
+            {
+                isTruncated = true;
+                maxRowsReached = true;
+            }
+
             lock (ctx.ContextData)
             {
                 var currentRows = ctx.ContextData.TryGetValue("AutherisRowsReturned", out var rObj) && rObj is long rVal ? rVal : 0L;
                 ctx.ContextData["AutherisRowsReturned"] = currentRows + list.Count;
+
+                if (isTruncated)
+                {
+                    ctx.ContextData[PaginationTruncationMiddleware.ContextKey] = true;
+                    ctx.ContextData[PaginationTruncationMiddleware.MaxRowsReachedKey] = maxRowsReached;
+                    ctx.ContextData[PaginationTruncationMiddleware.PageSizeKey] = list.Count;
+                }
             }
 
             return list;
