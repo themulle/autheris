@@ -134,7 +134,7 @@ public sealed class ClientTierResolver : IClientTierResolver
             }
 
             // Check Scope-to-Tier mappings and ScopeLimits (prioritize scope mapping ahead of default role fallback, clamped by anti-escalation ceiling)
-            var scopes = Autheris.Domain.Security.TokenAccessScope.GetScopes(principal);
+            var scopes = Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims);
             ClientTier? matchedScopeTier = null;
             ClientTierLimitOverride? matchedScopeLimit = null;
 
@@ -214,7 +214,7 @@ public sealed class ClientTierResolver : IClientTierResolver
     {
         if (principal == null) return null;
 
-        var rawScopes = Autheris.Domain.Security.TokenAccessScope.GetScopes(principal);
+        var rawScopes = Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims);
         if (rawScopes == null || rawScopes.Count == 0) return null;
 
         var sanitizedScopes = new HashSet<string>(StringComparer.Ordinal);

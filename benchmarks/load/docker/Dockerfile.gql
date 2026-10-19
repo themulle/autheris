@@ -39,7 +39,7 @@ LABEL org.opencontainers.image.description="BENCHMARK ONLY – never publish"
 WORKDIR /app
 
 ENV ASPNETCORE_URLS=http://+:5000 \
-    ASPNETCORE_ENVIRONMENT=Development \
+    ASPNETCORE_ENVIRONMENT=Benchmark \
     DOTNET_gcServer=1 \
     DOTNET_GCConcurrent=1 \
     DOTNET_GCDynamicAdaptationMode=1 \
@@ -51,7 +51,6 @@ ENV ASPNETCORE_URLS=http://+:5000 \
 
 COPY --from=build /app/publish .
 COPY benchmarks/load/configs/gql-gateway/appsettings.bench.json appsettings.Benchmark.json
-COPY benchmarks/load/configs/gql-gateway/appsettings.bench.json appsettings.Development.json
 
 EXPOSE 5000
 

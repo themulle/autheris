@@ -60,6 +60,21 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<DatasourceTestingService>.Instance;
     }
 
+    public static bool IsValidDatasourceId(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id) || id.Length > 128)
+        {
+            return false;
+        }
+
+        if (id.IndexOfAny(['\0', '\r', '\n', '/', '\\']) >= 0 || id.Contains("..", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return id.All(c => char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ':' or '#' or '$');
+    }
+
     public async Task<DatasourceTestResult> TestDatasourceAsync(
         string datasourceId,
         DatasourceTestRequest request,
@@ -70,6 +85,11 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(user);
         ct.ThrowIfCancellationRequested();
+
+        if (!IsValidDatasourceId(datasourceId))
+        {
+            throw new ArgumentException("Invalid datasource identifier format.", nameof(datasourceId));
+        }
 
         // 1. Resolve Datasource Metadata
         var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
@@ -95,20 +115,45 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
             }
         }
 
-        if (matchedTable == null)
+        if (matchedTable != null)
         {
-            throw new KeyNotFoundException($"Datasource '{datasourceId}' was not found in catalog.");
+            var dsType = matchedTable.Table.DataSourceType;
+
+            if (dsType == DataSourceType.HttpDeclarative || dsType == DataSourceType.HttpPlugin)
+            {
+                return await TestHttpDatasourceAsync(datasourceId, matchedTable, request, user, ct).ConfigureAwait(false);
+            }
+
+            // Fallback for SQL or other types
+            return await TestSqlDatasourceAsync(datasourceId, matchedTable, request, user, ct).ConfigureAwait(false);
         }
 
-        var dsType = matchedTable.Table.DataSourceType;
-
-        if (dsType == DataSourceType.HttpDeclarative || dsType == DataSourceType.HttpPlugin)
+        // 2. Pre-flight connectivity testing when catalog tables have not yet been populated
+        if (_gateway?.Value.DataSources?.Connections is { } connections)
         {
-            return await TestHttpDatasourceAsync(datasourceId, matchedTable, request, user, ct).ConfigureAwait(false);
+            DataSourceConnectionOptions? configuredConnection = null;
+            if (connections.TryGetValue(datasourceId, out configuredConnection))
+            {
+            }
+            else
+            {
+                foreach (var (key, conn) in connections)
+                {
+                    if (string.Equals(key, datasourceId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        configuredConnection = conn;
+                        break;
+                    }
+                }
+            }
+
+            if (configuredConnection != null)
+            {
+                return await TestSqlDatasourceAsync(datasourceId, null, request, user, ct).ConfigureAwait(false);
+            }
         }
 
-        // Fallback for SQL or other types
-        return await TestSqlDatasourceAsync(datasourceId, matchedTable, request, user, ct).ConfigureAwait(false);
+        throw new KeyNotFoundException($"Datasource '{datasourceId}' was not found in catalog or configuration.");
     }
 
     private async Task<DatasourceTestResult> TestHttpDatasourceAsync(
@@ -394,17 +439,36 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
 
     private async Task<DatasourceTestResult> TestSqlDatasourceAsync(
         string datasourceId,
-        TableMetadata table,
+        TableMetadata? table,
         DatasourceTestRequest request,
         ClaimsPrincipal user,
         CancellationToken ct)
     {
-        string sourceName = table.Table.SourceName;
+        string? sourceName = table?.Table.SourceName;
         DataSourceConnectionOptions? connection = null;
-        if (_gateway?.Value.DataSources?.Connections is { } connections && !string.IsNullOrWhiteSpace(sourceName))
+        if (_gateway?.Value.DataSources?.Connections is { } connections)
         {
-            connections.TryGetValue(sourceName, out connection);
+            if (!string.IsNullOrWhiteSpace(sourceName) && connections.TryGetValue(sourceName, out connection))
+            {
+            }
+            else if (connections.TryGetValue(datasourceId, out connection))
+            {
+            }
+            else
+            {
+                foreach (var (key, conn) in connections)
+                {
+                    if (string.Equals(key, datasourceId, StringComparison.OrdinalIgnoreCase) ||
+                        (!string.IsNullOrWhiteSpace(sourceName) && string.Equals(key, sourceName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        connection = conn;
+                        break;
+                    }
+                }
+            }
         }
+
+        var dsType = table?.Table.DataSourceType ?? DataSourceType.Sql;
 
         if (_sqlConnectionFactory is null || connection is null)
         {
@@ -412,7 +476,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
             await AppendAuditAsync(datasourceId, user, isSuccess: false, notConfigured, ct).ConfigureAwait(false);
             return new DatasourceTestResult(
                 DatasourceId: datasourceId,
-                Type: table.Table.DataSourceType,
+                Type: dsType,
                 IsSuccess: false,
                 HttpStatusCode: null,
                 LatencyMs: 0,
@@ -457,7 +521,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
 
             return new DatasourceTestResult(
                 DatasourceId: datasourceId,
-                Type: table.Table.DataSourceType,
+                Type: dsType,
                 IsSuccess: true,
                 HttpStatusCode: null,
                 LatencyMs: Math.Max(1, sw.ElapsedMilliseconds),
@@ -470,7 +534,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
             string timeoutMsg = $"Connection probe timed out after {timeout.TotalSeconds}s.";
             details["Category"] = "Timeout";
             await AppendAuditAsync(datasourceId, user, isSuccess: false, timeoutMsg, ct).ConfigureAwait(false);
-            return SqlFailure(datasourceId, table, sw, timeoutMsg, description, details);
+            return SqlFailure(datasourceId, dsType, sw, timeoutMsg, description, details);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -498,7 +562,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
             var safeDatasourceId = datasourceId.Replace("\r", string.Empty).Replace("\n", string.Empty);
             _logger.LogWarning("Datasource test failed for {DatasourceId} ({Category}, {ExceptionType}).", safeDatasourceId, details["Category"], ex.GetType().Name);
             await AppendAuditAsync(datasourceId, user, isSuccess: false, message, ct).ConfigureAwait(false);
-            return SqlFailure(datasourceId, table, sw, message, description, details);
+            return SqlFailure(datasourceId, dsType, sw, message, description, details);
         }
     }
 
@@ -527,10 +591,10 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
             ProbeDetails: details);
 
     private static DatasourceTestResult SqlFailure(
-        string datasourceId, TableMetadata table, Stopwatch sw, string message, SqlSourceDescription description, Dictionary<string, string> details) =>
+        string datasourceId, DataSourceType dsType, Stopwatch sw, string message, SqlSourceDescription description, Dictionary<string, string> details) =>
         new(
             DatasourceId: datasourceId,
-            Type: table.Table.DataSourceType,
+            Type: dsType,
             IsSuccess: false,
             HttpStatusCode: null,
             LatencyMs: sw.ElapsedMilliseconds,

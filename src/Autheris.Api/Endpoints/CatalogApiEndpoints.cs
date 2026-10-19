@@ -147,9 +147,20 @@ public static class CatalogApiEndpoints
             HttpContext httpContext,
             CancellationToken ct) =>
         {
-            var effectiveRequest = request ?? new DatasourceTestRequest();
-            var result = await testingService.TestDatasourceAsync(id, effectiveRequest, httpContext.User, ct);
-            return Results.Ok(result);
+            if (string.IsNullOrWhiteSpace(id) || !DatasourceTestingService.IsValidDatasourceId(id))
+            {
+                return Results.BadRequest(new { error = "Invalid datasource identifier format." });
+            }
+            try
+            {
+                var effectiveRequest = request ?? new DatasourceTestRequest();
+                var result = await testingService.TestDatasourceAsync(id, effectiveRequest, httpContext.User, ct);
+                return Results.Ok(result);
+            }
+            catch (System.Collections.Generic.KeyNotFoundException)
+            {
+                return Results.NotFound(new { error = "Datasource was not found in catalog or configuration." });
+            }
         })
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.DatasourceTested);
