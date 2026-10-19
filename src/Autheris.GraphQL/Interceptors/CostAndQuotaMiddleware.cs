@@ -146,8 +146,8 @@ public sealed class CostAndQuotaMiddleware
             if (usageRecorder != null)
             {
                 var tableId = ExtractTableFromDocument(doc);
-                var tenantId = !string.IsNullOrWhiteSpace(clientContext.SubjectId) ? new TenantId(clientContext.SubjectId) : TenantId.LegacySingleTenant;
-                var userSid = new Sid(principal?.Identity?.Name ?? clientContext.SubjectId ?? "anonymous");
+                var tenantId = principal.GetTenantId();
+                var userSid = principal.GetUserSid() ?? new Sid(principal?.Identity?.Name ?? "anonymous");
                 usageRecorder.RecordUsage(tableId, tenantId, userSid, ConsumerOutcome.DenyCost, 0, false);
             }
 
@@ -176,8 +176,8 @@ public sealed class CostAndQuotaMiddleware
             if (usageRecorder != null)
             {
                 var tableId = ExtractTableFromDocument(doc);
-                var tenantId = !string.IsNullOrWhiteSpace(clientContext.SubjectId) ? new TenantId(clientContext.SubjectId) : TenantId.LegacySingleTenant;
-                var userSid = new Sid(principal?.Identity?.Name ?? clientContext.SubjectId ?? "anonymous");
+                var tenantId = principal.GetTenantId();
+                var userSid = principal.GetUserSid() ?? new Sid(principal?.Identity?.Name ?? "anonymous");
                 usageRecorder.RecordUsage(tableId, tenantId, userSid, ConsumerOutcome.DenyRateLimit, 0, false);
             }
 
