@@ -124,7 +124,7 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
             throw new UnauthorizedAccessException($"Access to table '{intent.Table.ToQualifiedName()}' is forbidden: {reasons}");
         }
 
-        EnsureRequiredFilterColumnsSatisfied(metadata, decision, intent.Filter);
+        EnsureRequiredFilterColumnsSatisfied(metadata, decision, intent.Filter, isAggregate: true);
 
         var groupByCols = new List<string>();
         if (intent.GroupBy is { Count: > 0 })
@@ -506,7 +506,8 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
     private static void EnsureRequiredFilterColumnsSatisfied(
         TableMetadata metadata,
         TableAccessDecision decision,
-        TableFilterClause? filter)
+        TableFilterClause? filter,
+        bool isAggregate = false)
     {
         if (metadata.RequiredFilterColumns.Length == 0)
         {
@@ -515,7 +516,8 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
 
         foreach (var reqCol in metadata.RequiredFilterColumns)
         {
-            if (metadata.TenantColumnName != null &&
+            if (!isAggregate &&
+                metadata.TenantColumnName != null &&
                 string.Equals(metadata.TenantColumnName, reqCol, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
