@@ -237,9 +237,9 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         {
             activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
             McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
-            _logger.LogWarning("SQL syntax error in MCP tool '{ToolName}': {Error}", tool.Name, sqlSyntaxError);
-            await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", $"SQL_SYNTAX_ERROR: {sqlSyntaxError}", false, false, 0, cancellationToken).ConfigureAwait(false);
-            return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"SQL_SYNTAX_ERROR: {sqlSyntaxError}");
+            _logger.LogWarning("SQL syntax error in MCP tool '{ToolName}': target data table could not be resolved: {Error}", tool.Name, sqlSyntaxError);
+            await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", $"SQL_SYNTAX_ERROR: target data table could not be resolved: {sqlSyntaxError}", false, false, 0, cancellationToken).ConfigureAwait(false);
+            return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"SQL_SYNTAX_ERROR: target data table could not be resolved: {sqlSyntaxError}");
         }
 
         if (string.Equals(tool.Name, McpDatasetTools.DescribeDataset, StringComparison.OrdinalIgnoreCase) ||
