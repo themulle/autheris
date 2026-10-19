@@ -51,6 +51,8 @@ public static class GatewaySections
     public const string SystemMetrics = "Gateway:SystemMetrics";
     public const string TrafficShadowing = "Gateway:TrafficShadowing";
     public const string FinOps = "Gateway:FinOps";
+    public const string Governance = "Gateway:Governance";
+    public const string QueryAnalysis = "Gateway:Governance:QueryAnalysis";
     public const string QueryCost = "Gateway:Governance:QueryCost";
 
     // Storage & Caching
@@ -73,6 +75,7 @@ public static class GatewaySections
 
     // Protocols
     public const string GraphQL = "Gateway:GraphQL";
+    public const string GraphQLMetrics = "Gateway:GraphQL:Metrics";
     public const string IncrementalDelivery = "Gateway:IncrementalDelivery";
     public const string GoldenQueries = "Gateway:GoldenQueries";
     public const string OData = "Gateway:OData";

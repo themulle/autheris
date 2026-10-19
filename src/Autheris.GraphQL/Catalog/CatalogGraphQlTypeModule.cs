@@ -33,6 +33,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
     private readonly TimeSpan _refreshInterval;
     private readonly bool _aggregationEnabled;
     private readonly bool _crossSourceEnabled;
+    private readonly bool _metricsEnabled;
     private readonly object _timerLock = new();
     private Timer? _refreshTimer;
     private sealed record BuiltState(string? Fingerprint, IReadOnlyList<CatalogOmittedTable> OmittedTables);
@@ -49,10 +50,12 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         TimeSpan? refreshInterval = null,
         Autheris.Application.Catalog.ICatalogVersionProvider? versionProvider = null,
         bool aggregationEnabled = true,
-        bool crossSourceEnabled = false)
+        bool crossSourceEnabled = false,
+        bool metricsEnabled = true)
     {
         _aggregationEnabled = aggregationEnabled;
         _crossSourceEnabled = crossSourceEnabled;
+        _metricsEnabled = metricsEnabled;
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _relationRepo = relationRepo ?? throw new ArgumentNullException(nameof(relationRepo));
         _logger = logger;
@@ -178,7 +181,10 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         RegisterOperatorFilterTypes(types);
 
         AggregateGraphQlTypes.RegisterShared(types);
-        MetricGraphQlTypes.Register(types);
+        if (_metricsEnabled)
+        {
+            MetricGraphQlTypes.Register(types);
+        }
 
         foreach (var table in schemaModel.Tables)
         {
@@ -258,7 +264,10 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
             {
                 d.Name("Query");
 
-                MetricGraphQlTypes.AddQueryField(d);
+                if (_metricsEnabled)
+                {
+                    MetricGraphQlTypes.AddQueryField(d);
+                }
 
                 foreach (var table in schemaModel.Tables)
                 {
