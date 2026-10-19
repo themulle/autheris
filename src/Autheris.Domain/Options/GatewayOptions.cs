@@ -38,6 +38,7 @@ public sealed class GatewayOptions
     [Required] public HitLStepUpOptions HitLStepUp { get; init; } = new();
     public TotpOptions Totp { get; init; } = new();
     [Required] public WebSqlOptions WebSql { get; init; } = new();
+    [Required] public CrossSourceOptions CrossSource { get; init; } = new();
     [Required] public TransportRowLimitsOptions RowLimits { get; init; } = new();
     [Required] public AsyncJobOptions AsyncJobs { get; init; } = new();
     [Required] public SqlEndpointsOptions SqlEndpoints { get; init; } = new();
@@ -130,6 +131,7 @@ public sealed class GatewayOptions
     /// </summary>
     public bool IsLegacyWebSqlDmlSwitchActive => Insecure.warn_allow_websql_dml;
     public bool IsWebSqlGovernanceBypassed => Insecure.danger_bypass_websql_governance;
+    public bool IsCrossSourceEnabled => CrossSource.Enabled || WebSql.CrossSource.Enabled;
 
     /// <summary>
     /// SEC H-02: OpenSchema (global or Catalog) opens catalog/OpenAPI documentation routes to anonymous callers

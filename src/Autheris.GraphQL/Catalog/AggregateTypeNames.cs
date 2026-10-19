@@ -24,12 +24,13 @@ internal readonly record struct AggregateTypeNames(
     public const string MetricGroup = "AutherisMetricGroup";
     public const string MetricDefinition = "AutherisMetricDefinition";
     public const string MetricQueryResult = "AutherisMetricQueryResult";
+    public const string TimeBucketInterval = "TimeBucketInterval";
 
     /// <summary>Shared type names of the typed aggregation and metric surface; they join the schema model's reserved names.</summary>
     public static IReadOnlyList<string> SharedTypeNames { get; } =
     [
         AggregateFn, ValueKind, AggregateValue, TypedFilter, DimensionFilter, MetricFilter, MetricOrderBy,
-        DimensionValue, MetricGroup, MetricDefinition, MetricQueryResult
+        DimensionValue, MetricGroup, MetricDefinition, MetricQueryResult, TimeBucketInterval
     ];
 
     public static AggregateTypeNames For(string tableTypeName)
@@ -49,11 +50,16 @@ internal readonly record struct AggregateTypeNames(
         ? Column[..^7] + "_group_by_fields"
         : Column + "_group_by_fields";
 
+    public string TimeBucketInput => Column.EndsWith("_column", StringComparison.Ordinal)
+        ? Column[..^7] + "_time_bucket_input"
+        : Column + "_time_bucket_input";
+
     /// <summary>All names the table reserves besides its entity, filter and order-by types.</summary>
     public IEnumerable<string> All()
     {
         yield return Column;
         yield return GroupByFields;
+        yield return TimeBucketInput;
         yield return Input;
         yield return OrderBy;
         yield return Key;

@@ -44,4 +44,23 @@ public static class RelationExecutability
             && DatabaseDialectExtensions.TryParseDialect(child.Table.SourceType, out var childDialect)
             && parentDialect == childDialect;
     }
+
+    /// <summary>
+    /// Issue #75: True when a relation between <paramref name="parent"/> and <paramref name="child"/> can be executed:
+    /// either within the same SQL source (<see cref="IsSameExecutionSource"/>) or across distinct data sources
+    /// when <paramref name="crossSourceEnabled"/> is true and <paramref name="relation"/> permits cross-data-source resolution.
+    /// </summary>
+    public static bool IsExecutable(TableRelation relation, TableMetadata parent, TableMetadata child, bool crossSourceEnabled = false)
+    {
+        ArgumentNullException.ThrowIfNull(relation);
+        ArgumentNullException.ThrowIfNull(parent);
+        ArgumentNullException.ThrowIfNull(child);
+
+        if (IsSameExecutionSource(parent, child))
+        {
+            return true;
+        }
+
+        return crossSourceEnabled && relation.AllowCrossDataSource;
+    }
 }

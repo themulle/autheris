@@ -49,7 +49,8 @@ public sealed record TableAggregateIntent(
     TableFilterClause? Filter,
     IReadOnlyList<TableOrderBy>? OrderBy,
     int Limit,
-    string? Transport = null);
+    string? Transport = null,
+    IReadOnlyList<TimeBucketSpecification>? TimeBuckets = null);
 
 /// <summary>
 /// Planned Trino SQL statement for a governed aggregation query (#28, #37).

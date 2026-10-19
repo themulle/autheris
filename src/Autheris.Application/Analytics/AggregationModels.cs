@@ -36,6 +36,27 @@ public sealed record AggregateSelection(
 }
 
 /// <summary>
+/// Supported intervals for date/time bucketing in pushdown aggregations (Issue #112 Addendum).
+/// </summary>
+public enum TimeBucketInterval
+{
+    Hour = 0,
+    Day = 1,
+    Week = 2,
+    Month = 3,
+    Quarter = 4,
+    Year = 5
+}
+
+/// <summary>
+/// Specification for grouping aggregate queries by truncated date/time buckets with time-zone awareness (Issue #112 Addendum).
+/// </summary>
+public sealed record TimeBucketSpecification(
+    string Column,
+    TimeBucketInterval Interval,
+    string TimeZone = "UTC");
+
+/// <summary>
 /// Transport-neutral governed aggregation request (#28, #37).
 /// </summary>
 public sealed record AggregationQuery(
@@ -49,7 +70,8 @@ public sealed record AggregationQuery(
     SmallGroupStrategy? SmallGroupStrategyOverride = null,
     string? Transport = null,
     bool BypassTableConsent = false,
-    TableAccessDecision? PreEvaluatedDecision = null);
+    TableAccessDecision? PreEvaluatedDecision = null,
+    IReadOnlyList<TimeBucketSpecification>? TimeBuckets = null);
 
 /// <summary>
 /// A single aggregated bucket (or grand total row) after minimum group size enforcement (#28, #37).

@@ -157,11 +157,42 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
             }
         }
 
+        if (intent.TimeBuckets is { Count: > 0 })
+        {
+            foreach (var tb in intent.TimeBuckets)
+            {
+                var colMeta = metadata.GetColumn(tb.Column) ?? throw UnknownColumn(tb.Column, intent);
+                var access = decision.GetEffectiveColumnAccess(colMeta.ColumnName, metadata);
+                if (access == ColumnAccessLevel.Mask)
+                {
+                    throw new MaskedAggregationException(colMeta.ColumnName, $"Time-bucketing on masked column '{colMeta.ColumnName}' is forbidden.");
+                }
+                if (access != ColumnAccessLevel.Clear)
+                {
+                    throw UnknownColumn(tb.Column, intent);
+                }
+            }
+        }
+
+        var timeBucketMap = intent.TimeBuckets?
+            .ToDictionary(b => b.Column, b => b, StringComparer.OrdinalIgnoreCase);
+
         var resolvedAggregates = new List<AggregateSelection>();
         var selectItems = new List<string>();
+        var groupByExpressions = new List<string>();
         foreach (var gCol in groupByCols)
         {
-            selectItems.Add(DataApiFilterTranslator.QuoteIdentifier(gCol));
+            if (timeBucketMap != null && timeBucketMap.TryGetValue(gCol, out var bucketSpec))
+            {
+                var (selectExpr, groupByExpr) = BuildTimeBucketExpression(gCol, bucketSpec, metadata.Dialect);
+                selectItems.Add(selectExpr);
+                groupByExpressions.Add(groupByExpr);
+            }
+            else
+            {
+                selectItems.Add(DataApiFilterTranslator.QuoteIdentifier(gCol));
+                groupByExpressions.Add(DataApiFilterTranslator.QuoteIdentifier(gCol));
+            }
         }
 
         selectItems.Add($"COUNT(*) AS {DataApiFilterTranslator.QuoteIdentifier(GroupCountColumnAlias)}");
@@ -299,10 +330,10 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
             sb.Append(" WHERE ").Append(predicate);
         }
 
-        if (groupByCols.Count > 0)
+        if (groupByExpressions.Count > 0)
         {
             sb.Append(" GROUP BY ")
-              .Append(string.Join(", ", groupByCols.Select(DataApiFilterTranslator.QuoteIdentifier)));
+              .Append(string.Join(", ", groupByExpressions));
         }
 
         if (orderByItems.Count > 0)
@@ -484,12 +515,6 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
 
         foreach (var reqCol in metadata.RequiredFilterColumns)
         {
-            if (metadata.TenantColumnName != null &&
-                string.Equals(metadata.TenantColumnName, reqCol, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
             if (decision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rls &&
                 rls.Predicate.ReferencedColumns.Contains(reqCol.ToLowerInvariant()))
             {
@@ -505,6 +530,95 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
             throw new TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException(
                 TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(
                     TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing));
+        }
+    }
+
+    private static (string SelectExpr, string GroupByExpr) BuildTimeBucketExpression(
+        string columnName,
+        TimeBucketSpecification spec,
+        DatabaseDialect dialect)
+    {
+        var unit = spec.Interval switch
+        {
+            TimeBucketInterval.Hour => "hour",
+            TimeBucketInterval.Day => "day",
+            TimeBucketInterval.Week => "week",
+            TimeBucketInterval.Month => "month",
+            TimeBucketInterval.Quarter => "quarter",
+            TimeBucketInterval.Year => "year",
+            _ => throw new ArgumentOutOfRangeException(nameof(spec), $"Unsupported interval '{spec.Interval}'.")
+        };
+
+        var quotedCol = dialect.QuoteIdentifier(columnName);
+        var timeZone = string.IsNullOrWhiteSpace(spec.TimeZone) ? "UTC" : spec.TimeZone;
+
+        if (!TrinoSqlEngine.TimeZoneRegistry.Contains(timeZone))
+        {
+            throw new ArgumentException($"Time zone '{timeZone}' is not recognized.");
+        }
+
+        switch (dialect)
+        {
+            case DatabaseDialect.PostgreSql:
+            {
+                TrinoSqlEngine.TimeZoneRegistry.TryResolve(
+                    TrinoSqlEngine.TargetSqlDialect.PostgreSql,
+                    timeZone,
+                    out var dialectZone);
+                var zone = string.IsNullOrWhiteSpace(dialectZone) ? timeZone : dialectZone;
+                var expr = $"date_trunc('{unit}', {quotedCol} AT TIME ZONE '{zone}')";
+                return ($"{expr} AS {quotedCol}", expr);
+            }
+            case DatabaseDialect.SqlServer:
+            {
+                TrinoSqlEngine.TimeZoneRegistry.TryResolve(
+                    TrinoSqlEngine.TargetSqlDialect.SqlServer,
+                    timeZone,
+                    out var winZone);
+                var zone = string.IsNullOrWhiteSpace(winZone) ? timeZone : winZone;
+                var expr = $"DATETRUNC({unit}, {quotedCol} AT TIME ZONE '{zone}')";
+                return ($"{expr} AS {quotedCol}", expr);
+            }
+            case DatabaseDialect.Sqlite:
+            {
+                string fmt = unit switch
+                {
+                    "hour" => "%Y-%m-%d %H:00:00",
+                    "day" => "%Y-%m-%d",
+                    "week" => "%Y-%W",
+                    "month" => "%Y-%m-01",
+                    "quarter" => "%Y-m",
+                    "year" => "%Y-01-01",
+                    _ => "%Y-%m-%d"
+                };
+
+                string expr;
+                if (string.Equals(timeZone, "UTC", StringComparison.OrdinalIgnoreCase))
+                {
+                    expr = $"strftime('{fmt}', datetime({quotedCol}))";
+                }
+                else
+                {
+                    TimeSpan offset = TimeSpan.Zero;
+                    try
+                    {
+                        var tzi = TimeZoneInfo.FindSystemTimeZoneById(timeZone);
+                        offset = tzi.BaseUtcOffset;
+                    }
+                    catch
+                    {
+                        // Fallback
+                    }
+                    var offsetStr = (offset >= TimeSpan.Zero ? "+" : "-") + offset.ToString(@"hh\:mm", CultureInfo.InvariantCulture);
+                    expr = $"strftime('{fmt}', datetime({quotedCol}, '{offsetStr}'))";
+                }
+                return ($"{expr} AS {quotedCol}", expr);
+            }
+            default:
+            {
+                var expr = $"date_trunc('{unit}', {quotedCol})";
+                return ($"{expr} AS {quotedCol}", expr);
+            }
         }
     }
 }

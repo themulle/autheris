@@ -57,6 +57,16 @@ internal static class AggregateGraphQlTypes
             }
         }));
 
+        types.Add(new EnumType(d =>
+        {
+            d.Name(AggregateTypeNames.TimeBucketInterval);
+            d.Description("Time bucketing interval for timestamp group-by fields.");
+            foreach (var name in new[] { "HOUR", "DAY", "WEEK", "MONTH", "QUARTER", "YEAR" })
+            {
+                d.Value(name).Name(name);
+            }
+        }));
+
         types.Add(new ObjectType(d =>
         {
             d.Name(AggregateTypeNames.AggregateValue);
@@ -95,6 +105,15 @@ internal static class AggregateGraphQlTypes
             {
                 d.Value(value).Name(value);
             }
+        }));
+
+        types.Add(new InputObjectType(d =>
+        {
+            d.Name(names.TimeBucketInput);
+            d.Description($"Time-bucketed group-by specification for {table.TypeName}.");
+            d.Field("column").Type(NonNull(names.Column));
+            d.Field("bucket").Type(NonNull(AggregateTypeNames.TimeBucketInterval));
+            d.Field("timeZone").Type(new NamedTypeNode("String")).DefaultValue(new StringValueNode("UTC"));
         }));
 
         types.Add(new InputObjectType(d =>
@@ -159,6 +178,7 @@ internal static class AggregateGraphQlTypes
             .Description($"Typed governed aggregation for {table.TypeName} with k-anonymity and differential privacy.")
             .Type(NonNull(names.Result))
             .Argument("groupBy", a => a.Type(new ListTypeNode(NonNull(names.Column))))
+            .Argument("timeBuckets", a => a.Type(new ListTypeNode(NonNull(names.TimeBucketInput))))
             .Argument("aggregates", a => a.Type(NonNullList(names.Input)))
             .Argument("where", a => a.Type(new NamedTypeNode(table.FilterTypeName)))
             .Argument("orderBy", a => a.Type(new ListTypeNode(NonNull(names.OrderBy))))
@@ -186,7 +206,14 @@ internal static class AggregateGraphQlTypes
             IValueNode? Variable(string name) => ctx.Variables.TryGetValue<IValueNode>(name, out var node) ? node : null;
 
             var parsed = AggregateArgumentParser.Parse(
-                table, Argument("groupBy"), Argument("aggregates"), Argument("orderBy"), Argument("limit"), analytics.Aggregation, Variable);
+                table,
+                Argument("groupBy"),
+                Argument("aggregates"),
+                Argument("orderBy"),
+                Argument("limit"),
+                analytics.Aggregation,
+                Variable,
+                Argument("timeBuckets") ?? Argument("time_buckets"));
 
             var whereLiteral = Argument("where") is VariableNode v ? Variable(v.Name.Value) : Argument("where");
             TableFilterClause? where = null;
@@ -203,7 +230,8 @@ internal static class AggregateGraphQlTypes
                 Where: where,
                 OrderBy: parsed.OrderBy.Count == 0 ? null : parsed.OrderBy,
                 Limit: parsed.Limit,
-                Transport: "graphql");
+                Transport: "graphql",
+                TimeBuckets: parsed.TimeBuckets);
 
             var result = await ctx.Service<IGovernedAggregationService>()
                 .ExecuteAggregationAsync(principal, query, ctx.RequestAborted).ConfigureAwait(false);

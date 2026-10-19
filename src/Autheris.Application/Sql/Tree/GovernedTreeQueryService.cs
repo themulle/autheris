@@ -1,13 +1,16 @@
 using System.Data;
 using System.Data.Common;
+using System.Globalization;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Autheris.Application.Data.Relations;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Tree.Federation;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
@@ -86,6 +89,8 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
     private readonly ILogger<GovernedTreeQueryService>? _logger;
     private readonly IDbSessionContextInitializer _sessionInitializer;
+    private readonly ICrossSourceRelationResolver? _crossSourceResolver;
+    private readonly ITableRelationRepository? _relationRepository;
 
     // G3, G4, G7, D7 & R-GQL-3: memo and audit are scoped per operationId, tenant, and user to isolate operations and prevent cross-tenant/cross-principal leak.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, OperationMemo> _memos = new();
@@ -101,7 +106,9 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         ITableReadConcurrencyGate? concurrencyGate = null,
         ILogger<GovernedTreeQueryService>? logger = null,
         IDbSessionContextInitializer? sessionInitializer = null,
-        Autheris.Application.Audit.IAuditWriter? auditWriter = null)
+        Autheris.Application.Audit.IAuditWriter? auditWriter = null,
+        ICrossSourceRelationResolver? crossSourceResolver = null,
+        ITableRelationRepository? relationRepository = null)
     {
         _accessResolver = accessResolver ?? throw new ArgumentNullException(nameof(accessResolver));
         _connectionFactory = connectionFactory ?? throw new ArgumentNullException(nameof(connectionFactory));
@@ -112,6 +119,8 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         _concurrencyGate = concurrencyGate;
         _logger = logger;
         _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
+        _crossSourceResolver = crossSourceResolver;
+        _relationRepository = relationRepository;
     }
 
     public IReadOnlyList<TreeMaskedColumn> GetMaskedColumns(ClaimsPrincipal? principal, TreeQueryNode root, string operationId)
@@ -268,8 +277,117 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         //    failure keeps its own exception and message. Together they are never more permissive than the schema predicate.
         var rootAccess = resolved[root.Table];
         var sourceName = rootAccess.Metadata.Table.SourceName;
-        foreach (var access in resolved.Values)
+
+        // Partition root relations into single-source vs cross-source
+        var sameSourceRelations = new List<TreeRelationNode>();
+        var crossSourceRelations = new List<TreeRelationNode>();
+
+        foreach (var rel in root.Relations)
         {
+            var childAccess = resolved[rel.Child.Table];
+            if (RelationExecutability.HasSameSourceName(rootAccess.Metadata, childAccess.Metadata))
+            {
+                sameSourceRelations.Add(rel);
+            }
+            else
+            {
+                crossSourceRelations.Add(rel);
+            }
+        }
+
+        if (crossSourceRelations.Count > 0)
+        {
+            if (_crossSourceResolver == null)
+            {
+                throw new GatewayInvalidQueryException("Relations across data sources are not supported in one query.");
+            }
+
+            // SEC-DATA75-02: Master federation opt-in check
+            if (!_options.IsCrossSourceEnabled)
+            {
+                throw new CrossSourceRelationException(
+                    CrossSourceRelationErrorCodes.CrossSourceRelationNotEnabled,
+                    "Cross-source relations are disabled by configuration.");
+            }
+
+            foreach (var cr in crossSourceRelations)
+            {
+                var childAccess = resolved[cr.Child.Table];
+
+                // SEC-DATA75-01: Clear keys check on parent join keys
+                foreach (var parentCol in cr.ParentColumns)
+                {
+                    var col = rootAccess.Metadata.GetColumn(parentCol);
+                    if (col == null || rootAccess.Decision.GetEffectiveColumnAccess(col.ColumnName, rootAccess.Metadata) != ColumnAccessLevel.Clear)
+                    {
+                        throw new CrossSourceRelationException(
+                            CrossSourceRelationErrorCodes.RelationKeyMasked,
+                            $"Parent join key column '{parentCol}' on table '{root.Table}' must have Clear access for cross-source relation resolution.");
+                    }
+                }
+
+                // SEC-DATA75-01: Clear keys check on child join keys
+                foreach (var childCol in cr.ChildColumns)
+                {
+                    var col = childAccess.Metadata.GetColumn(childCol);
+                    if (col == null || childAccess.Decision.GetEffectiveColumnAccess(col.ColumnName, childAccess.Metadata) != ColumnAccessLevel.Clear)
+                    {
+                        throw new CrossSourceRelationException(
+                            CrossSourceRelationErrorCodes.RelationKeyMasked,
+                            $"Target join key column '{childCol}' on table '{cr.Child.Table}' must have Clear access for cross-source relation resolution.");
+                    }
+                }
+
+                // SEC-DATA75-02: Four-eyes consent check
+                TableRelation? tableRel = null;
+                if (_relationRepository != null)
+                {
+                    var parentRels = await _relationRepository.GetRelationsForTableAsync(root.Table, ct).ConfigureAwait(false);
+                    tableRel = parentRels.FirstOrDefault(r =>
+                        (r.ParentTableIdentifier.Equals(root.Table) && r.ChildTableIdentifier.Equals(cr.Child.Table) &&
+                         r.JoinKeysParent.SequenceEqual(cr.ParentColumns) && r.JoinKeysChild.SequenceEqual(cr.ChildColumns)) ||
+                        (r.ParentTableIdentifier.Equals(cr.Child.Table) && r.ChildTableIdentifier.Equals(root.Table) &&
+                         r.JoinKeysParent.SequenceEqual(cr.ChildColumns) && r.JoinKeysChild.SequenceEqual(cr.ParentColumns)));
+
+                    if (tableRel == null)
+                    {
+                        var childRels = await _relationRepository.GetRelationsForTableAsync(cr.Child.Table, ct).ConfigureAwait(false);
+                        tableRel = childRels.FirstOrDefault(r =>
+                            (r.ParentTableIdentifier.Equals(root.Table) && r.ChildTableIdentifier.Equals(cr.Child.Table) &&
+                             r.JoinKeysParent.SequenceEqual(cr.ParentColumns) && r.JoinKeysChild.SequenceEqual(cr.ChildColumns)) ||
+                            (r.ParentTableIdentifier.Equals(cr.Child.Table) && r.ChildTableIdentifier.Equals(root.Table) &&
+                             r.JoinKeysParent.SequenceEqual(cr.ChildColumns) && r.JoinKeysChild.SequenceEqual(cr.ParentColumns)));
+                    }
+                }
+
+                if (tableRel != null && !tableRel.AllowCrossDataSource)
+                {
+                    throw new CrossSourceRelationException(
+                        CrossSourceRelationErrorCodes.CrossSourceRelationNotEnabled,
+                        $"Relation '{tableRel.RelationName}' between '{root.Table}' and '{cr.Child.Table}' crosses data sources, but AllowCrossDataSource is false.");
+                }
+            }
+        }
+
+        // Collect all tables belonging to the primary single-source query
+        var sameSourceTables = new HashSet<TableIdentifier> { root.Table };
+        void CollectSameSourceTables(TreeRelationNode rel)
+        {
+            sameSourceTables.Add(rel.Child.Table);
+            foreach (var r in rel.Child.Relations)
+            {
+                CollectSameSourceTables(r);
+            }
+        }
+        foreach (var rel in sameSourceRelations)
+        {
+            CollectSameSourceTables(rel);
+        }
+
+        // Validate that all tables in the primary query belong to the same SQL data source
+        foreach (var tableId in sameSourceTables)
+        {
+            var access = resolved[tableId];
             if (access.Metadata.DataSourceType != DataSourceType.Sql)
             {
                 throw new GatewayInvalidQueryException($"The table '{access.Metadata.Identifier}' is not a SQL table and cannot be queried with relations.");
@@ -291,43 +409,196 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         {
             throw new InvalidOperationException($"The provider '{provider}' of data source '{sourceName}' is not supported.");
         }
-        foreach (var access in resolved.Values)
+        foreach (var tableId in sameSourceTables)
         {
+            var access = resolved[tableId];
             if (access.Metadata.Dialect != dialect)
             {
                 throw new InvalidOperationException($"Catalog dialect '{access.Metadata.Dialect}' of '{access.Metadata.Identifier}' does not match the provider '{provider}' of data source '{sourceName}'.");
             }
         }
 
-        // 3. Compile (tenant filter per table, masks, row filters).
-        var treeAccess = new Dictionary<TableIdentifier, TreeTableAccess>();
-        foreach (var (table, access) in resolved)
+        // 3. Compile primary query (stripping cross-source relations, appending join keys to parent Columns)
+        var primaryColumns = new List<string>(root.Columns);
+        foreach (var cr in crossSourceRelations)
         {
+            foreach (var pCol in cr.ParentColumns)
+            {
+                if (!primaryColumns.Contains(pCol, StringComparer.OrdinalIgnoreCase))
+                {
+                    primaryColumns.Add(pCol);
+                }
+            }
+        }
+
+        var primaryRootNode = root with
+        {
+            Columns = primaryColumns,
+            Relations = sameSourceRelations
+        };
+
+        var treeAccess = new Dictionary<TableIdentifier, TreeTableAccess>();
+        foreach (var tableId in sameSourceTables)
+        {
+            var access = resolved[tableId];
             var tenantColumn = TableMetadata.RequireTenantColumnOrThrow(
                 access.Metadata,
                 _options.DataSources?.RequireTenantColumn == true,
                 _options.DataSources?.TenantColumnExemptTables);
-            treeAccess[table] = new TreeTableAccess(access.Metadata, access.Decision, tenantColumn, tenantColumn == null ? null : access.Tenant.Value);
+            treeAccess[tableId] = new TreeTableAccess(access.Metadata, access.Decision, tenantColumn, tenantColumn == null ? null : access.Tenant.Value);
         }
 
-        var compiled = TreeSqlCompiler.Compile(root, treeAccess, dialect, _options.IsColumnMaskingDisabled);
+        var compiled = TreeSqlCompiler.Compile(primaryRootNode, treeAccess, dialect, _options.IsColumnMaskingDisabled);
 
         // 4. Bounded concurrency per user and root table, then one round trip.
         using var lease = AcquireLease(rootAccess);
         var json = await RunAsync(compiled, connOptions, dialect, rootAccess.Tenant, rootAccess.UserSid.Value, purpose: null, ct).ConfigureAwait(false);
 
-        // 5. Parse once; rewrite only HMAC columns.
-        if (compiled.HmacColumns.Count == 0)
+        // Fast path: no cross-source relations and no HMAC columns
+        if (crossSourceRelations.Count == 0 && compiled.HmacColumns.Count == 0)
         {
             return JsonDocument.Parse(json);
         }
 
+        // Parse JSON for HMAC pseudonymization or cross-source merging
         var node = JsonNode.Parse(json) ?? new JsonArray();
         tenant = rootAccess.Tenant.Value;
         foreach (var hmac in compiled.HmacColumns)
         {
             var rule = MaskingRule.CreateTenantScopedHmacRule(hmac.Rule, tenant, _options.DataMasking?.HmacKeyId);
             Pseudonymize(node, hmac.Path, 0, hmac.Column, rule);
+        }
+
+        if (crossSourceRelations.Count > 0 && node is JsonArray rootArray)
+        {
+            // SEC-DATA75-03: Parameter-bounded batching & row cap limit
+            if (rootArray.Count > maxRows)
+            {
+                throw new RowLimitExceededException($"Cross-source parent row count of {rootArray.Count} exceeds the maximum allowed limit of {maxRows}.");
+            }
+
+            if (rootArray.Count > 0)
+            {
+                if (_crossSourceResolver == null)
+                {
+                    throw new InvalidOperationException("ICrossSourceRelationResolver is not available for cross-source relation execution.");
+                }
+
+                var parentRowDicts = new List<IReadOnlyDictionary<string, object?>>(rootArray.Count);
+                foreach (var item in rootArray)
+                {
+                    if (item is JsonObject obj)
+                    {
+                        var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var (propName, propVal) in obj)
+                        {
+                            dict[propName] = JsonNodeToObject(propVal);
+                        }
+                        parentRowDicts.Add(dict);
+                    }
+                    else
+                    {
+                        parentRowDicts.Add(new Dictionary<string, object?>());
+                    }
+                }
+
+                foreach (var cr in crossSourceRelations)
+                {
+                    var childAccess = resolved[cr.Child.Table];
+                    TableRelation? relModel = null;
+                    if (_relationRepository != null)
+                    {
+                        var parentRels = await _relationRepository.GetRelationsForTableAsync(root.Table, ct).ConfigureAwait(false);
+                        relModel = parentRels.FirstOrDefault(r =>
+                            (r.ParentTableIdentifier.Equals(root.Table) && r.ChildTableIdentifier.Equals(cr.Child.Table) &&
+                             r.JoinKeysParent.SequenceEqual(cr.ParentColumns) && r.JoinKeysChild.SequenceEqual(cr.ChildColumns)) ||
+                            (r.ParentTableIdentifier.Equals(cr.Child.Table) && r.ChildTableIdentifier.Equals(root.Table) &&
+                             r.JoinKeysParent.SequenceEqual(cr.ChildColumns) && r.JoinKeysChild.SequenceEqual(cr.ParentColumns)));
+                    }
+
+                    relModel ??= new TableRelation
+                    {
+                        ParentTableIdentifier = root.Table,
+                        ChildTableIdentifier = cr.Child.Table,
+                        RelationName = cr.ResponseKey,
+                        JoinKeysParent = cr.ParentColumns,
+                        JoinKeysChild = cr.ChildColumns,
+                        Cardinality = cr.IsList ? RelationCardinality.OneToMany : RelationCardinality.ManyToOne,
+                        AllowCrossDataSource = true
+                    };
+
+                    var crossRequest = new CrossSourceRelationRequest(
+                        Relation: relModel,
+                        ParentRows: parentRowDicts,
+                        User: principal ?? new ClaimsPrincipal(),
+                        TenantId: rootAccess.Tenant,
+                        SelectColumns: cr.Child.Columns.Count > 0 ? cr.Child.Columns : null,
+                        PerParentLimit: cr.Child.Limit,
+                        ParentDecision: rootAccess.Decision);
+
+                    var crossResult = await _crossSourceResolver.ResolveRelationAsync(crossRequest, ct).ConfigureAwait(false);
+
+                    for (int i = 0; i < rootArray.Count; i++)
+                    {
+                        if (rootArray[i] is JsonObject parentObj)
+                        {
+                            if (cr.IsList)
+                            {
+                                var childArray = new JsonArray();
+                                if (crossResult.OneToManyByParentIndex != null && i < crossResult.OneToManyByParentIndex.Count)
+                                {
+                                    foreach (var childRow in crossResult.OneToManyByParentIndex[i])
+                                    {
+                                        var childObj = new JsonObject();
+                                        foreach (var (k, v) in childRow)
+                                        {
+                                            childObj[k] = ToJsonNode(v);
+                                        }
+                                        childArray.Add(childObj);
+                                    }
+                                }
+                                parentObj[cr.ResponseKey] = childArray;
+                            }
+                            else
+                            {
+                                var singleChild = crossResult.ManyToOneByParentIndex != null && i < crossResult.ManyToOneByParentIndex.Count ? crossResult.ManyToOneByParentIndex[i] : null;
+                                if (singleChild == null)
+                                {
+                                    parentObj[cr.ResponseKey] = null;
+                                }
+                                else
+                                {
+                                    var childObj = new JsonObject();
+                                    foreach (var (k, v) in singleChild)
+                                    {
+                                        childObj[k] = ToJsonNode(v);
+                                    }
+                                    parentObj[cr.ResponseKey] = childObj;
+                                }
+                            }
+                        }
+                    }
+
+                    // SEC-DATA75-05: Dedicated audit log event
+                    var auditEntry = GovernedQueryStages.BuildEntry(
+                        AuditEventTypes.CrossSourceRelationResolved,
+                        rootAccess.Tenant,
+                        rootAccess.UserSid,
+                        target: cr.Child.Table.ToString(),
+                        allowed: true,
+                        details: new Dictionary<string, object?>
+                        {
+                            ["parent_table"] = root.Table.ToString(),
+                            ["child_table"] = cr.Child.Table.ToString(),
+                            ["parent_source"] = rootAccess.Metadata.Table.SourceName,
+                            ["child_source"] = childAccess.Metadata.Table.SourceName,
+                            ["relation"] = cr.ResponseKey,
+                            ["rows_stitched"] = crossResult.TargetRowsMaterialized,
+                            ["batches"] = crossResult.BatchesExecuted
+                        });
+                    await GovernedQueryStages.WriteAsync(_auditWriter, auditEntry, AuditTier.BestEffort, ct).ConfigureAwait(false);
+                }
+            }
         }
 
         using var stream = new System.IO.MemoryStream();
@@ -569,4 +840,33 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         dialect == DatabaseDialect.Sqlite && value is DateTimeOffset dto
             ? dto.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'", System.Globalization.CultureInfo.InvariantCulture)
             : value;
+
+    private static object? JsonNodeToObject(JsonNode? node)
+    {
+        if (node == null) return null;
+        if (node is JsonValue val)
+        {
+            if (val.TryGetValue<long>(out var l)) return l;
+            if (val.TryGetValue<double>(out var d)) return d;
+            if (val.TryGetValue<bool>(out var b)) return b;
+            if (val.TryGetValue<string>(out var s)) return s;
+            return val.ToString();
+        }
+        return node;
+    }
+
+    private static JsonNode? ToJsonNode(object? value) => value switch
+    {
+        null or DBNull => null,
+        string s => JsonValue.Create(s),
+        bool b => JsonValue.Create(b),
+        int i => JsonValue.Create(i),
+        long l => JsonValue.Create(l),
+        double d => JsonValue.Create(d),
+        float f => JsonValue.Create(f),
+        decimal m => JsonValue.Create(m),
+        DateTime dt => JsonValue.Create(dt.ToString("O", CultureInfo.InvariantCulture)),
+        DateTimeOffset dto => JsonValue.Create(dto.ToString("O", CultureInfo.InvariantCulture)),
+        _ => JsonValue.Create(Convert.ToString(value, CultureInfo.InvariantCulture))
+    };
 }

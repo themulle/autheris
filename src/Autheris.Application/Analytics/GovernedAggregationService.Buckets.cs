@@ -22,7 +22,8 @@ public sealed partial class GovernedAggregationService
         List<IReadOnlyDictionary<string, object?>> rows,
         IReadOnlyList<string> groupByColumns,
         IReadOnlyList<AggregateSelection> aggregates,
-        TableMetadata metadata)
+        TableMetadata metadata,
+        IReadOnlyList<TimeBucketSpecification>? timeBuckets = null)
     {
         if (groupByColumns.Count == 0)
         {
@@ -35,6 +36,7 @@ public sealed partial class GovernedAggregationService
             return [ComputeBucketFromRows(emptyKey, rows, aggregates, metadata, isMergedOther: false)];
         }
 
+        var bucketMap = timeBuckets?.ToDictionary(b => b.Column, b => b, StringComparer.OrdinalIgnoreCase);
         var groups = new Dictionary<string, (Dictionary<string, object?> Key, List<IReadOnlyDictionary<string, object?>> Rows)>(StringComparer.Ordinal);
         foreach (var row in rows)
         {
@@ -44,6 +46,10 @@ public sealed partial class GovernedAggregationService
             {
                 var col = groupByColumns[i];
                 var val = GetRowValue(row, col);
+                if (bucketMap != null && bucketMap.TryGetValue(col, out var spec))
+                {
+                    val = TruncateValueToTimeBucket(val, spec);
+                }
                 keyDict[col] = val;
                 compositeParts[i] = val is null or DBNull
                     ? "\u0000NULL\u0000"
@@ -696,5 +702,57 @@ public sealed partial class GovernedAggregationService
                 Convert.ToString(y, CultureInfo.InvariantCulture),
                 StringComparison.Ordinal);
         }
+    }
+
+    private static object? TruncateValueToTimeBucket(object? val, TimeBucketSpecification spec)
+    {
+        if (val is null or DBNull)
+        {
+            return val;
+        }
+
+        DateTimeOffset dto;
+        if (val is DateTime dt)
+        {
+            dto = dt.Kind == DateTimeKind.Unspecified
+                ? new DateTimeOffset(dt, TimeSpan.Zero)
+                : new DateTimeOffset(dt);
+        }
+        else if (val is DateTimeOffset o)
+        {
+            dto = o;
+        }
+        else if (val is string s && DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDto))
+        {
+            dto = parsedDto;
+        }
+        else
+        {
+            return val;
+        }
+
+        TimeZoneInfo tzi;
+        try
+        {
+            tzi = TimeZoneInfo.FindSystemTimeZoneById(spec.TimeZone);
+        }
+        catch
+        {
+            tzi = TimeZoneInfo.Utc;
+        }
+
+        var local = TimeZoneInfo.ConvertTime(dto, tzi);
+        DateTimeOffset truncated = spec.Interval switch
+        {
+            TimeBucketInterval.Hour => new DateTimeOffset(local.Year, local.Month, local.Day, local.Hour, 0, 0, local.Offset),
+            TimeBucketInterval.Day => new DateTimeOffset(local.Year, local.Month, local.Day, 0, 0, 0, local.Offset),
+            TimeBucketInterval.Week => new DateTimeOffset(local.Date.AddDays(-(7 + (local.DayOfWeek - DayOfWeek.Monday)) % 7), local.Offset),
+            TimeBucketInterval.Month => new DateTimeOffset(local.Year, local.Month, 1, 0, 0, 0, local.Offset),
+            TimeBucketInterval.Quarter => new DateTimeOffset(local.Year, ((local.Month - 1) / 3) * 3 + 1, 1, 0, 0, 0, local.Offset),
+            TimeBucketInterval.Year => new DateTimeOffset(local.Year, 1, 1, 0, 0, 0, local.Offset),
+            _ => local
+        };
+
+        return truncated.ToString("yyyy-MM-ddTHH:mm:sszzz", CultureInfo.InvariantCulture);
     }
 }

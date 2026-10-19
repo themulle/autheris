@@ -15,6 +15,8 @@ public static class CrossSourceRelationErrorCodes
 {
     public const string CrossSourceRelationNotEnabled = "CROSS_SOURCE_RELATION_NOT_ENABLED";
     public const string CrossSourceRelationKeyNotClear = "CROSS_SOURCE_RELATION_KEY_NOT_CLEAR";
+    public const string RelationKeyMasked = "RELATION_KEY_MASKED";
+    public const string CrossSourceKeyMasked = "CROSS_SOURCE_KEY_MASKED";
     public const string CrossSourceFilterKeySetExceeded = "CROSS_SOURCE_FILTER_KEY_SET_EXCEEDED";
     public const string CrossSourceSortNotSupported = "CROSS_SOURCE_SORT_NOT_SUPPORTED";
 }
