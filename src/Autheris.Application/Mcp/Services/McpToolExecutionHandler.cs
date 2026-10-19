@@ -146,9 +146,16 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             var limit = root.TryGetProperty("limit", out var lProp) && lProp.TryGetInt32(out var l) ? l : 50;
             var offset = root.TryGetProperty("offset", out var offProp) && offProp.TryGetInt32(out var off) ? off : 0;
 
-            var datasetRequest = new DatasetQueryRequest(tableId, select, filter, orderBy, limit, offset, SqlTransports.Mcp);
-            var result = await _dataQueryService.ExecuteQueryAsync(datasetRequest, requestContext, ct).ConfigureAwait(false);
-            return JsonSerializer.Serialize(result, JsonOpts);
+            try
+            {
+                var datasetRequest = new DatasetQueryRequest(tableId, select, filter, orderBy, limit, offset, SqlTransports.Mcp);
+                var result = await _dataQueryService.ExecuteQueryAsync(datasetRequest, requestContext, ct).ConfigureAwait(false);
+                return JsonSerializer.Serialize(result, JsonOpts);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return JsonSerializer.Serialize(new { error = "Unauthorized", message = ex.Message }, JsonOpts);
+            }
         }
 
         if (string.Equals(tool.Name, McpDatasetTools.SearchCatalog, StringComparison.OrdinalIgnoreCase))

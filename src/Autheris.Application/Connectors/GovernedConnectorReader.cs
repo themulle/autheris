@@ -27,7 +27,8 @@ public sealed record GovernedRowPolicy(
     int? MaxRows = null,
     long? MaxBytes = null,
     VirtualFilterEnforcement? VirtualFilterEnforcement = null,
-    bool SkipUpstream = false);
+    bool SkipUpstream = false,
+    IReadOnlyCollection<string>? RequestedColumns = null);
 
 /// <summary>
 /// Rows after governance. <paramref name="RowsBeforeVirtualFilter"/> is the number of upstream rows the Virtual
@@ -220,8 +221,17 @@ public static class GovernedConnectorReader
         ArgumentNullException.ThrowIfNull(rawRow);
         ArgumentNullException.ThrowIfNull(policy);
 
+        IEnumerable<TableColumn> targetColumns = metadata.Columns;
+        if (policy.RequestedColumns != null && policy.RequestedColumns.Count > 0)
+        {
+            var requestedSet = policy.RequestedColumns is HashSet<string> set
+                ? set
+                : new HashSet<string>(policy.RequestedColumns, StringComparer.OrdinalIgnoreCase);
+            targetColumns = metadata.Columns.Where(c => requestedSet.Contains(c.ColumnName));
+        }
+
         var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var col in metadata.Columns)
+        foreach (var col in targetColumns)
         {
             // Zero-Trust: sensitive columns in the catalog never leave in clear text without an explicit Clear rule (for a holder of a
             // restricted scope a scope-specific one, REQ-GOV-143). The decision owns that rule; no path-local copy of it.
