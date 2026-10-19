@@ -6,6 +6,7 @@ namespace Autheris.Domain.Options;
 public sealed class RestApiOptions
 {
     public RestDataEndpointOptions DataEndpoint { get; init; } = new();
+    public BulkStreamOptions BulkStream { get; init; } = new();
 }
 
 /// <summary>
@@ -15,6 +16,15 @@ public sealed class RestApiOptions
 public sealed class RestDataEndpointOptions
 {
     public bool Enabled { get; init; } = true;
+}
+
+/// <summary>
+/// Issue #222: Dedicated switch for bulk keyset streaming endpoints (/stream, /bulk).
+/// </summary>
+public sealed class BulkStreamOptions
+{
+    public bool Enabled { get; init; } = true;
+    public string? SigningKey { get; init; }
 }
 
 public sealed class WebSqlOptions

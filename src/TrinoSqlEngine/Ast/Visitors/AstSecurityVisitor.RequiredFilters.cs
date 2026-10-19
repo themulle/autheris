@@ -29,15 +29,44 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 continue;
 
             var entry = _typed.Catalog.Resolve(source.Name);
-            if (entry == null || entry.RequiredFilterColumns.Length == 0)
+            if (entry == null || (entry.RequiredFilterColumns.Length == 0 && entry.RequiredFilterColumnGroups.Length == 0))
                 continue;
 
-            foreach (var reqCol in entry.RequiredFilterColumns)
+            if (entry.RequiredFilterColumnGroups.Length > 0)
             {
-                if (IsRequiredFilterSatisfied(entry, reqCol, tbl, alias, node.Where, onPredicates))
-                    continue;
+                bool anyGroupSatisfied = false;
+                foreach (var group in entry.RequiredFilterColumnGroups)
+                {
+                    if (group.Length == 0) continue;
+                    bool groupAllSatisfied = true;
+                    foreach (var reqCol in group)
+                    {
+                        if (!IsRequiredFilterSatisfied(entry, reqCol, tbl, alias, node.Where, onPredicates))
+                        {
+                            groupAllSatisfied = false;
+                            break;
+                        }
+                    }
+                    if (groupAllSatisfied)
+                    {
+                        anyGroupSatisfied = true;
+                        break;
+                    }
+                }
+                if (!anyGroupSatisfied)
+                {
+                    throw new RequiredFilterColumnMissingException(_typed.Capabilities.Dialect);
+                }
+            }
+            else
+            {
+                foreach (var reqCol in entry.RequiredFilterColumns)
+                {
+                    if (IsRequiredFilterSatisfied(entry, reqCol, tbl, alias, node.Where, onPredicates))
+                        continue;
 
-                throw new RequiredFilterColumnMissingException(_typed.Capabilities.Dialect);
+                    throw new RequiredFilterColumnMissingException(_typed.Capabilities.Dialect);
+                }
             }
         }
     }
@@ -111,13 +140,44 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         // 4. Check JOIN ON conditions
         foreach (var onPred in onPredicates)
         {
-            if (IsColumnConstrained(onPred, tbl, alias, reqCol))
+            if (IsColumnConstrainedInJoin(onPred, tbl, alias, reqCol))
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    private static bool IsColumnConstrainedInJoin(Expression expr, string tbl, string? alias, string col)
+    {
+        while (expr is ParenthesizedExpression p)
+        {
+            expr = p.Expression;
+        }
+
+        switch (expr)
+        {
+            case BinaryExpression b when b.Operator == BinaryOperator.And:
+                return IsColumnConstrainedInJoin(b.Left, tbl, alias, col) || IsColumnConstrainedInJoin(b.Right, tbl, alias, col);
+
+            case BinaryExpression b when b.Operator == BinaryOperator.Or:
+                return IsColumnConstrainedInJoin(b.Left, tbl, alias, col) && IsColumnConstrainedInJoin(b.Right, tbl, alias, col);
+
+            case BinaryExpression b when b.Operator is BinaryOperator.Equal
+                                      or BinaryOperator.LessThan
+                                      or BinaryOperator.LessThanOrEqual
+                                      or BinaryOperator.GreaterThan
+                                      or BinaryOperator.GreaterThanOrEqual:
+                if (MatchesTargetColumn(b.Left, tbl, alias, col) && !MatchesTargetColumn(b.Right, tbl, alias, col))
+                    return true;
+                if (MatchesTargetColumn(b.Right, tbl, alias, col) && !MatchesTargetColumn(b.Left, tbl, alias, col))
+                    return true;
+                return false;
+
+            default:
+                return IsColumnConstrained(expr, tbl, alias, col);
+        }
     }
 
     private static bool IsColumnConstrained(Expression expr, string tbl, string? alias, string col)

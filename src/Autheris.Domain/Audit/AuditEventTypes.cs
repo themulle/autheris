@@ -29,6 +29,7 @@ public static class AuditEventTypes
     public const string WebSqlCrossSourceSourceRead = "WEBSQL_CROSS_SOURCE_SOURCE_READ";
     public const string WebSqlCrossSourceSubtreeRead = "WEBSQL_CROSS_SOURCE_SUBTREE_READ";
     public const string CrossSourceRelationResolved = "CROSS_SOURCE_RELATION_RESOLVED";
+    public const string CrossSourceOptInChanged = "CROSS_SOURCE_OPT_IN_CHANGED";
     public const string WebSqlDmlExecuted = "WEBSQL_DML_EXECUTED";
     public const string WebSqlDmlRejected = "WEBSQL_DML_REJECTED";
     public const string WebSqlDmlFailed = "WEBSQL_DML_FAILED";

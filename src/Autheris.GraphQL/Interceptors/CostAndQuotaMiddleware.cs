@@ -286,49 +286,146 @@ public sealed class CostAndQuotaMiddleware
     private static long CountResultRows(object? data)
     {
         if (data is null) return 0;
+        return CountRootRows(data, 0);
+    }
+
+    private static long CountRootRows(object data, int depth)
+    {
+        if (depth > 32) return 0;
         long total = 0;
+
         if (data is IReadOnlyDictionary<string, object?> dict)
         {
             foreach (var kvp in dict)
             {
-                if (kvp.Value is System.Collections.IEnumerable enumerable and not string)
+                if (kvp.Value is null) continue;
+                if (kvp.Value is string)
                 {
-                    int count = 0;
-                    foreach (var _ in enumerable) count++;
-                    total += count;
+                    total += 1;
                 }
-                else if (kvp.Value is not null)
+                else if (kvp.Value is System.Collections.IEnumerable enumerable)
+                {
+                    total += CountListRows(enumerable, depth + 1);
+                }
+                else if (kvp.Value is IReadOnlyDictionary<string, object?> childDict)
+                {
+                    total += 1 + CountNestedChildren(childDict, depth + 1);
+                }
+                else if (kvp.Value is System.Collections.IDictionary childLegacy)
+                {
+                    total += 1 + CountNestedChildren(childLegacy, depth + 1);
+                }
+                else
                 {
                     total += 1;
                 }
             }
+            return total;
         }
-        else if (data is System.Collections.IDictionary legacyDict)
+
+        if (data is System.Collections.IDictionary legacyDict)
         {
             foreach (System.Collections.DictionaryEntry entry in legacyDict)
             {
-                if (entry.Value is System.Collections.IEnumerable enumerable and not string)
+                if (entry.Value is null) continue;
+                if (entry.Value is string)
                 {
-                    int count = 0;
-                    foreach (var _ in enumerable) count++;
-                    total += count;
+                    total += 1;
                 }
-                else if (entry.Value is not null)
+                else if (entry.Value is System.Collections.IEnumerable enumerable)
+                {
+                    total += CountListRows(enumerable, depth + 1);
+                }
+                else if (entry.Value is IReadOnlyDictionary<string, object?> childDict)
+                {
+                    total += 1 + CountNestedChildren(childDict, depth + 1);
+                }
+                else if (entry.Value is System.Collections.IDictionary childLegacy)
+                {
+                    total += 1 + CountNestedChildren(childLegacy, depth + 1);
+                }
+                else
                 {
                     total += 1;
                 }
             }
+            return total;
         }
-        else if (data is System.Collections.IEnumerable enumerable and not string)
+
+        if (data is System.Collections.IEnumerable topList and not string)
         {
-            int count = 0;
-            foreach (var _ in enumerable) count++;
-            total += count;
+            return CountListRows(topList, depth + 1);
         }
-        else
+
+        return 1;
+    }
+
+    private static long CountListRows(System.Collections.IEnumerable enumerable, int depth)
+    {
+        if (depth > 32) return 0;
+        long count = 0;
+        foreach (var item in enumerable)
         {
-            total = 1;
+            count += 1;
+            if (item is IReadOnlyDictionary<string, object?> dict)
+            {
+                count += CountNestedChildren(dict, depth + 1);
+            }
+            else if (item is System.Collections.IDictionary legacy)
+            {
+                count += CountNestedChildren(legacy, depth + 1);
+            }
+            else if (item is System.Collections.IEnumerable nestedList and not string)
+            {
+                count += CountListRows(nestedList, depth + 1);
+            }
         }
-        return total;
+        return count;
+    }
+
+    private static long CountNestedChildren(IReadOnlyDictionary<string, object?> dict, int depth)
+    {
+        if (depth > 32) return 0;
+        long count = 0;
+        foreach (var kvp in dict)
+        {
+            if (kvp.Value is null || kvp.Value is string) continue;
+            if (kvp.Value is System.Collections.IEnumerable enumerable)
+            {
+                count += CountListRows(enumerable, depth + 1);
+            }
+            else if (kvp.Value is IReadOnlyDictionary<string, object?> childDict)
+            {
+                count += 1 + CountNestedChildren(childDict, depth + 1);
+            }
+            else if (kvp.Value is System.Collections.IDictionary childLegacy)
+            {
+                count += 1 + CountNestedChildren(childLegacy, depth + 1);
+            }
+        }
+        return count;
+    }
+
+    private static long CountNestedChildren(System.Collections.IDictionary dict, int depth)
+    {
+        if (depth > 32) return 0;
+        long count = 0;
+        foreach (System.Collections.DictionaryEntry entry in dict)
+        {
+            if (entry.Value is null || entry.Value is string) continue;
+            if (entry.Value is System.Collections.IEnumerable enumerable)
+            {
+                count += CountListRows(enumerable, depth + 1);
+            }
+            else if (entry.Value is System.Collections.IDictionary childLegacy)
+            {
+                count += 1 + CountNestedChildren(childLegacy, depth + 1);
+            }
+            else if (entry.Value is IReadOnlyDictionary<string, object?> childDict)
+            {
+                count += 1 + CountNestedChildren(childDict, depth + 1);
+            }
+        }
+        return count;
     }
 }

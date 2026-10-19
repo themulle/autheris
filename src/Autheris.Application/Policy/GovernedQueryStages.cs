@@ -203,8 +203,19 @@ public static class GovernedQueryStages
         CancellationToken ct,
         AuditTier tier = AuditTier.Required,
         string eventType = AuditEventTypes.TableQuery,
-        string? traceId = null) =>
-        WriteAsync(audit, BuildEntry(eventType, tenant, actor, table.ToString(), allowed, details, traceId), tier, ct);
+        string? traceId = null,
+        IConsumerUsageRecorder? usageRecorder = null)
+    {
+        usageRecorder?.RecordUsage(
+            table,
+            tenant,
+            actor,
+            allowed ? ConsumerOutcome.Allow : ConsumerOutcome.DenyAccess,
+            rowsReturned: 0,
+            rowsMeasured: false);
+
+        return WriteAsync(audit, BuildEntry(eventType, tenant, actor, table.ToString(), allowed, details, traceId), tier, ct);
+    }
 
     /// <summary>Builds and writes a <c>TABLE_QUERY</c>-family entry through the unified audit contract.</summary>
     public static Task RecordTableReadAsync(
@@ -217,6 +228,17 @@ public static class GovernedQueryStages
         CancellationToken ct,
         AuditTier tier = AuditTier.Required,
         string eventType = AuditEventTypes.TableQuery,
-        string? traceId = null) =>
-        WriteAsync(audit, BuildEntry(eventType, tenant, actor, table.ToString(), allowed, details, traceId), tier, ct);
+        string? traceId = null,
+        IConsumerUsageRecorder? usageRecorder = null)
+    {
+        usageRecorder?.RecordUsage(
+            table,
+            tenant,
+            actor,
+            allowed ? ConsumerOutcome.Allow : ConsumerOutcome.DenyAccess,
+            rowsReturned: 0,
+            rowsMeasured: false);
+
+        return WriteAsync(audit, BuildEntry(eventType, tenant, actor, table.ToString(), allowed, details, traceId), tier, ct);
+    }
 }

@@ -269,7 +269,8 @@ internal sealed class SqliteBaselineSchema
                 parent_table_id TEXT NOT NULL,
                 child_table_id TEXT NOT NULL,
                 relation_name TEXT NOT NULL,
-                cardinality TEXT NOT NULL
+                cardinality TEXT NOT NULL,
+                allow_cross_data_source INTEGER NOT NULL DEFAULT 0
             );
 
             -- Issue #151: composite-key relations. One row per ordered key pair; column names are validated on write.

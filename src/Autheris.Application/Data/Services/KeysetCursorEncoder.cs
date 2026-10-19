@@ -5,18 +5,44 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Autheris.Application.Data.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using Microsoft.Extensions.Options;
 
 /// <summary>
-/// PLAN-DATA-178 / SEC-DATA178-03: Implementation of deterministic keyset cursor encoder and decoder.
-/// Generates opaque base64url JSON tuples of composite primary key values.
-/// Validates cursor integrity and strong typing to prevent SQL injection or pagination desynchronization.
+/// PLAN-DATA-178 / SEC-DATA178-03 / SEC-BC-02: Implementation of deterministic keyset cursor encoder and decoder.
+/// Generates opaque signed base64url JSON tuples of composite primary key values.
+/// Validates cursor integrity via HMAC-SHA256 signature and strong typing to prevent SQL injection or pagination desynchronization.
 /// </summary>
 public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
 {
+    private static readonly byte[] EphemeralProcessFallbackKey = RandomNumberGenerator.GetBytes(32);
+    private readonly byte[] _signingKeyBytes;
+
+    public KeysetCursorEncoder(IOptions<GatewayOptions>? gatewayOptions = null)
+    {
+        var secret = gatewayOptions?.Value?.RestApi?.BulkStream?.SigningKey;
+        _signingKeyBytes = string.IsNullOrWhiteSpace(secret)
+            ? EphemeralProcessFallbackKey
+            : Encoding.UTF8.GetBytes(secret);
+    }
+
+    public KeysetCursorEncoder(string signingKey)
+    {
+        _signingKeyBytes = string.IsNullOrWhiteSpace(signingKey)
+            ? EphemeralProcessFallbackKey
+            : Encoding.UTF8.GetBytes(signingKey);
+    }
+
+    public KeysetCursorEncoder(byte[] signingKeyBytes)
+    {
+        _signingKeyBytes = signingKeyBytes ?? EphemeralProcessFallbackKey;
+    }
+
     public string EncodeCursor(IReadOnlyDictionary<string, object?> pkValues)
     {
         ArgumentNullException.ThrowIfNull(pkValues);
@@ -38,10 +64,9 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
         }
 
         var bytes = memoryStream.ToArray();
-        return Convert.ToBase64String(bytes)
-            .TrimEnd('=')
-            .Replace('+', '-')
-            .Replace('/', '_');
+        var payload = Base64UrlEncode(bytes);
+        var sig = ComputeSignature(payload);
+        return $"{payload}.{sig}";
     }
 
     public IReadOnlyDictionary<string, object?> DecodeCursor(string cursorBase64, TableMetadata metadata)
@@ -52,17 +77,25 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
             throw new InvalidCursorException("INVALID_CURSOR: Cursor cannot be empty.");
         }
 
+        var dotIndex = cursorBase64.LastIndexOf('.');
+        if (dotIndex <= 0 || dotIndex >= cursorBase64.Length - 1)
+        {
+            throw new InvalidCursorException("INVALID_CURSOR: Cursor is missing valid cryptographic signature.");
+        }
+
+        var payloadBase64 = cursorBase64[..dotIndex];
+        var providedSig = cursorBase64[(dotIndex + 1)..];
+        var expectedSig = ComputeSignature(payloadBase64);
+
+        if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(expectedSig), Encoding.UTF8.GetBytes(providedSig)))
+        {
+            throw new InvalidCursorException("INVALID_CURSOR: Cursor signature verification failed; cursor may have been tampered with.");
+        }
+
         byte[] bytes;
         try
         {
-            var padded = cursorBase64.Trim().Replace('-', '+').Replace('_', '/');
-            switch (padded.Length % 4)
-            {
-                case 2: padded += "=="; break;
-                case 3: padded += "="; break;
-                case 1: throw new InvalidCursorException("INVALID_CURSOR: Malformed base64 length.");
-            }
-            bytes = Convert.FromBase64String(padded);
+            bytes = Base64UrlDecode(payloadBase64);
         }
         catch (FormatException ex)
         {
@@ -298,5 +331,31 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
         {
             throw new InvalidCursorException($"INVALID_CURSOR: Failed to convert value for column '{column.ColumnName}' to type '{column.DataType}'.", ex);
         }
+    }
+
+    private static string Base64UrlEncode(byte[] bytes)
+    {
+        return Convert.ToBase64String(bytes)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+    }
+
+    private static byte[] Base64UrlDecode(string input)
+    {
+        var padded = input.Trim().Replace('-', '+').Replace('_', '/');
+        switch (padded.Length % 4)
+        {
+            case 2: padded += "=="; break;
+            case 3: padded += "="; break;
+            case 1: throw new InvalidCursorException("INVALID_CURSOR: Malformed base64 length.");
+        }
+        return Convert.FromBase64String(padded);
+    }
+
+    private string ComputeSignature(string payload)
+    {
+        var hash = HMACSHA256.HashData(_signingKeyBytes, Encoding.UTF8.GetBytes(payload));
+        return Base64UrlEncode(hash);
     }
 }

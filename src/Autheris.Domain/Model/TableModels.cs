@@ -74,6 +74,8 @@ public sealed record Table
     public SmallGroupStrategy? SmallGroupStrategy { get; init; }
     /// <summary>Issue #163: Table-level required filter columns enforced across every read path.</summary>
     public ImmutableArray<string> RequiredFilterColumns { get; init; } = ImmutableArray<string>.Empty;
+    /// <summary>Issue #221: Table-level required filter column groups (disjunction across groups, conjunction within group).</summary>
+    public ImmutableArray<ImmutableArray<string>> RequiredFilterColumnGroups { get; init; } = ImmutableArray<ImmutableArray<string>>.Empty;
     /// <summary>Issue #124: Optional cardinality hint (expected row count) used for cross-source join ordering.</summary>
     public long? ExpectedRows { get; init; }
 
@@ -226,33 +228,55 @@ public sealed record TableMetadata
     public ImmutableArray<string> RequiredFilterColumns =>
         Table.RequiredFilterColumns.IsDefault ? ImmutableArray<string>.Empty : Table.RequiredFilterColumns;
 
+    /// <summary>Issue #221: Table-level required filter column groups.</summary>
+    public ImmutableArray<ImmutableArray<string>> RequiredFilterColumnGroups =>
+        Table.RequiredFilterColumnGroups.IsDefault ? ImmutableArray<ImmutableArray<string>>.Empty : Table.RequiredFilterColumnGroups;
+
     /// <summary>
     /// Validates required filter columns on catalog ingestion or load (SEC-GOV163-01, fail closed).
     /// </summary>
     public void ValidateRequiredFilterColumns()
     {
-        if (RequiredFilterColumns.IsDefaultOrEmpty)
+        if (!RequiredFilterColumns.IsDefaultOrEmpty)
         {
-            return;
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var colName in RequiredFilterColumns)
+            {
+                if (string.IsNullOrWhiteSpace(colName))
+                {
+                    throw new CatalogValidationException($"Table '{Identifier}' contains an empty required filter column name.");
+                }
+
+                var trimmed = colName.Trim();
+                if (!HasColumn(trimmed))
+                {
+                    throw new CatalogValidationException($"Required filter column '{trimmed}' does not exist in table '{Identifier}'.");
+                }
+
+                if (!seen.Add(trimmed))
+                {
+                    throw new CatalogValidationException($"Table '{Identifier}' lists required filter column '{trimmed}' more than once.");
+                }
+            }
         }
 
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var colName in RequiredFilterColumns)
+        if (!RequiredFilterColumnGroups.IsDefaultOrEmpty)
         {
-            if (string.IsNullOrWhiteSpace(colName))
+            foreach (var group in RequiredFilterColumnGroups)
             {
-                throw new CatalogValidationException($"Table '{Identifier}' contains an empty required filter column name.");
-            }
-
-            var trimmed = colName.Trim();
-            if (!HasColumn(trimmed))
-            {
-                throw new CatalogValidationException($"Required filter column '{trimmed}' does not exist in table '{Identifier}'.");
-            }
-
-            if (!seen.Add(trimmed))
-            {
-                throw new CatalogValidationException($"Table '{Identifier}' lists required filter column '{trimmed}' more than once.");
+                if (group.IsDefaultOrEmpty) continue;
+                foreach (var colName in group)
+                {
+                    if (string.IsNullOrWhiteSpace(colName))
+                    {
+                        throw new CatalogValidationException($"Table '{Identifier}' contains an empty required filter column name in group.");
+                    }
+                    var trimmed = colName.Trim();
+                    if (!HasColumn(trimmed))
+                    {
+                        throw new CatalogValidationException($"Required filter column '{trimmed}' in group does not exist in table '{Identifier}'.");
+                    }
+                }
             }
         }
     }
@@ -346,5 +370,5 @@ public sealed class TableRelation
     public RelationCardinality Cardinality { get; init; } = RelationCardinality.OneToMany;
 
     /// <summary>Issue #75: Explicitly enables resolving this relation across distinct data sources via gateway-level batched key lookup.</summary>
-    public bool AllowCrossDataSource { get; init; }
+    public bool AllowCrossDataSource { get; set; }
 }

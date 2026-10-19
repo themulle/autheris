@@ -441,7 +441,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                         effectiveRows = _maxResponseRows;
                     }
 
-                    int multiplier = isList ? _defaultListMultiplier : _payloadRowMultiplier;
+                    int multiplier = (isList && effectiveRows > 1) ? _defaultListMultiplier : _payloadRowMultiplier;
                     cost = SafeAdd(cost, (int)Math.Min((long)int.MaxValue, (long)multiplier * effectiveRows));
 
                     if (field.SelectionSet != null)

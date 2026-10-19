@@ -335,6 +335,11 @@ public interface ITableRelationRepository
     /// tables and unknown key columns; nothing is written then.
     /// </summary>
     Task<RelationWriteResult> CreateRelationAsync(TableRelation relation, CancellationToken ct = default);
+
+    /// <summary>
+    /// Issue #223: Admin/owner approval path to opt-in or revoke cross-data-source navigation for a relation.
+    /// </summary>
+    Task<bool> SetRelationCrossDataSourceOptInAsync(Guid relationId, bool allowCrossDataSource, CancellationToken ct = default);
 }
 
 /// <summary>Outcome of <see cref="ITableRelationRepository.CreateRelationAsync"/>: the stored relation id, whether the row was inserted, and whether the ordered key pairs of an existing relation changed (SEC-REL151-04).</summary>

@@ -14,7 +14,8 @@ internal readonly record struct RelationRowData(
     TableIdentifier Child,
     int? KeyOrdinal,
     string? ParentColumn,
-    string? ChildColumn);
+    string? ChildColumn,
+    bool AllowCrossDataSource = false);
 
 /// <summary>
 /// Engine-neutral assembly of <see cref="TableRelation"/> from the single relation read statement (issue #151, PLAN-REL-151 decision 5).
@@ -62,8 +63,8 @@ internal static class RelationRowAssembler
                     RelationName = head.RelationName,
                     JoinKeysParent = [.. parentKeys],
                     JoinKeysChild = [.. childKeys],
-                    Cardinality = Enum.TryParse<RelationCardinality>(head.Cardinality, true, out var card) ? card : RelationCardinality.OneToMany
-                    // AllowCrossDataSource stays false: only an explicit approval path may set it (SEC-REL151-04).
+                    Cardinality = Enum.TryParse<RelationCardinality>(head.Cardinality, true, out var card) ? card : RelationCardinality.OneToMany,
+                    AllowCrossDataSource = head.AllowCrossDataSource
                 });
             }
             else

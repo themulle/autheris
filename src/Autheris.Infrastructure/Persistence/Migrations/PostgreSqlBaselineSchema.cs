@@ -266,7 +266,8 @@ internal static class PostgreSqlBaselineSchema
                 parent_table_id TEXT NOT NULL,
                 child_table_id TEXT NOT NULL,
                 relation_name TEXT NOT NULL,
-                cardinality TEXT NOT NULL
+                cardinality TEXT NOT NULL,
+                allow_cross_data_source BOOLEAN NOT NULL DEFAULT FALSE
             );
 
             -- Issue #151: composite-key relations. One row per ordered key pair; column names are validated on write.

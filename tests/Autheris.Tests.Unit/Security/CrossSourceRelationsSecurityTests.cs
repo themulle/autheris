@@ -157,6 +157,9 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
 
         public Task<RelationWriteResult> CreateRelationAsync(TableRelation relation, CancellationToken ct = default) =>
             throw new NotSupportedException();
+
+        public Task<bool> SetRelationCrossDataSourceOptInAsync(Guid relationId, bool allowCrossDataSource, CancellationToken ct = default) =>
+            Task.FromResult(true);
     }
 
     [Fact]

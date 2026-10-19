@@ -13,7 +13,8 @@ public sealed record BulkTableStreamRequest(
     [property: JsonPropertyName("filter")] TypedFilterNode? Filter = null,
     [property: JsonPropertyName("cursor")] string? Cursor = null,
     [property: JsonPropertyName("limit")] int Limit = 5000,
-    [property: JsonPropertyName("format")] string Format = "ndjson")
+    [property: JsonPropertyName("format")] string Format = "ndjson",
+    [property: JsonPropertyName("includeMetadata")] bool IncludeMetadata = false)
 {
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? AdditionalProperties { get; init; }

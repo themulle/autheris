@@ -181,6 +181,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         var isBlockedByMandatoryFilter = false;
         var hiddenMissingDatasetsCount = 0;
         var totalEstimatedCost = 0;
+        int? totalEstimatedRows = null;
         var aggregatedRootFieldCosts = new Dictionary<string, int>(StringComparer.Ordinal);
 
         for (var i = 0; i < queries.Count; i++)
@@ -226,6 +227,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     ref isBlockedByMandatoryFilter,
                     ref hiddenMissingDatasetsCount,
                     ref totalEstimatedCost,
+                    ref totalEstimatedRows,
                     federatedTables,
                     keySetPushdowns,
                     plannedSubtrees,
@@ -269,6 +271,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     ref isBlockedByMandatoryFilter,
                     ref hiddenMissingDatasetsCount,
                     ref totalEstimatedCost,
+                    ref totalEstimatedRows,
                     federatedTables,
                     keySetPushdowns,
                     plannedSubtrees,
@@ -314,6 +317,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                         ref isBlockedByMandatoryFilter,
                         ref hiddenMissingDatasetsCount,
                         ref totalEstimatedCost,
+                        ref totalEstimatedRows,
                         federatedTables,
                     keySetPushdowns,
                     plannedSubtrees,
@@ -349,6 +353,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                         ref isBlockedByMandatoryFilter,
                         ref hiddenMissingDatasetsCount,
                         ref totalEstimatedCost,
+                        ref totalEstimatedRows,
                         federatedTables,
                     keySetPushdowns,
                     plannedSubtrees,
@@ -384,6 +389,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     ref isBlockedByMandatoryFilter,
                     ref hiddenMissingDatasetsCount,
                     ref totalEstimatedCost,
+                    ref totalEstimatedRows,
                     federatedTables,
                     keySetPushdowns,
                     plannedSubtrees,
@@ -399,6 +405,15 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         }
 
         var maxAllowedCost = _analysisOptions.MaxAllowedCost > 0 ? _analysisOptions.MaxAllowedCost : 500;
+        if (_clientTierResolver != null && effectivePrincipal != null)
+        {
+            var quotaCtx = await _clientTierResolver.ResolveAsync(effectivePrincipal, apiKey: null, clientIp: null, ct).ConfigureAwait(false);
+            if (quotaCtx?.Policy?.MaxCostPerQuery > 0)
+            {
+                maxAllowedCost = quotaCtx.Policy.MaxCostPerQuery;
+            }
+        }
+
         if (totalEstimatedCost > maxAllowedCost)
         {
             var queryName = queries.Count == 1 ? (queries[0].Name ?? "query_1") : null;
@@ -412,7 +427,8 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
             EstimatedCost: totalEstimatedCost,
             MaxAllowedCost: maxAllowedCost,
             IsWithinCostLimit: totalEstimatedCost <= maxAllowedCost,
-            RootFieldCosts: aggregatedRootFieldCosts.Count > 0 ? aggregatedRootFieldCosts : null);
+            RootFieldCosts: aggregatedRootFieldCosts.Count > 0 ? aggregatedRootFieldCosts : null,
+            EstimatedRows: totalEstimatedRows);
 
         var isValid = diagnostics.All(d =>
             !string.Equals(d.Code, QueryDiagnosticCodes.SyntaxError, StringComparison.OrdinalIgnoreCase) &&

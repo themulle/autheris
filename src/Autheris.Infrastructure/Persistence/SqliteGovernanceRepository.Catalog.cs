@@ -1193,7 +1193,8 @@ public partial class SqliteGovernanceRepository
         cmd.CommandText = @"SELECT r.id, r.parent_table_id, r.child_table_id, r.relation_name, r.cardinality,
                                    COALESCE(tp.source_name, 'default'), tp.schema_name, tp.table_name,
                                    COALESCE(tc.source_name, 'default'), tc.schema_name, tc.table_name,
-                                   k.key_ordinal, k.parent_column, k.child_column
+                                   k.key_ordinal, k.parent_column, k.child_column,
+                                   COALESCE(r.allow_cross_data_source, 0)
                             FROM TABLE_RELATIONS r
                             JOIN TABLES tp ON r.parent_table_id = tp.id
                             JOIN TABLES tc ON r.child_table_id = tc.id
@@ -1215,7 +1216,8 @@ public partial class SqliteGovernanceRepository
                     new TableIdentifier(reader.GetString(8), reader.GetString(9), reader.GetString(10)),
                     reader.IsDBNull(11) ? null : reader.GetInt32(11),
                     reader.IsDBNull(12) ? null : reader.GetString(12),
-                    reader.IsDBNull(13) ? null : reader.GetString(13)));
+                    reader.IsDBNull(13) ? null : reader.GetString(13),
+                    !reader.IsDBNull(14) && reader.GetInt64(14) != 0));
             }
         }
 
@@ -1252,8 +1254,8 @@ public partial class SqliteGovernanceRepository
         using (var cmd = conn.CreateCommand())
         {
             cmd.Transaction = tx;
-            cmd.CommandText = @"INSERT INTO TABLE_RELATIONS (id, parent_table_id, child_table_id, relation_name, cardinality)
-                                VALUES (@id, @pId, @cId, @relName, @card)
+            cmd.CommandText = @"INSERT INTO TABLE_RELATIONS (id, parent_table_id, child_table_id, relation_name, cardinality, allow_cross_data_source)
+                                VALUES (@id, @pId, @cId, @relName, @card, @allowCross)
                                 ON CONFLICT (parent_table_id, child_table_id, relation_name) DO UPDATE SET cardinality = excluded.cardinality
                                 RETURNING id";
             cmd.Parameters.AddWithValue("@id", relation.Id.ToString());
@@ -1261,6 +1263,7 @@ public partial class SqliteGovernanceRepository
             cmd.Parameters.AddWithValue("@cId", childTableId);
             cmd.Parameters.AddWithValue("@relName", relation.RelationName);
             cmd.Parameters.AddWithValue("@card", relation.Cardinality.ToString());
+            cmd.Parameters.AddWithValue("@allowCross", relation.AllowCrossDataSource ? 1 : 0);
             storedId = (string)(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
         }
 
@@ -1336,8 +1339,18 @@ public partial class SqliteGovernanceRepository
         {
             names.Add(reader.GetString(0));
         }
-
         return names;
     }
 
+    public async Task<bool> SetRelationCrossDataSourceOptInAsync(Guid relationId, bool allowCrossDataSource, CancellationToken ct = default)
+    {
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"UPDATE TABLE_RELATIONS SET allow_cross_data_source = @allowed WHERE id = @id";
+        cmd.Parameters.AddWithValue("@id", relationId.ToString());
+        cmd.Parameters.AddWithValue("@allowed", allowCrossDataSource ? 1 : 0);
+        int rows = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        return rows > 0;
+    }
 }

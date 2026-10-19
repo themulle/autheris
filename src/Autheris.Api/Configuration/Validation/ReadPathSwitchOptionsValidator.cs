@@ -77,10 +77,17 @@ public sealed class ReadPathSwitchOptionsValidator : IValidateOptions<GatewayOpt
         CheckParentForTypos(configuration.GetSection($"{root}:Mcp"), $"{root}:Mcp", typeof(McpOptions), failures);
 
         var restApi = configuration.GetSection($"{root}:RestApi");
-        CheckNode(restApi, $"{root}:RestApi", ["DataEndpoint"], failures);
+        CheckNode(restApi, $"{root}:RestApi", ["DataEndpoint", "BulkStream"], failures);
         var dataEndpoint = restApi.GetSection("DataEndpoint");
         CheckNode(dataEndpoint, $"{root}:RestApi:DataEndpoint", DataEndpointKeys, failures);
         CheckSwitch(dataEndpoint, "Enabled", $"{root}:RestApi:DataEndpoint:Enabled", failures);
+
+        var bulkStream = restApi.GetSection("BulkStream");
+        if (bulkStream.Exists())
+        {
+            CheckNode(bulkStream, $"{root}:RestApi:BulkStream", DataEndpointKeys, failures);
+            CheckSwitch(bulkStream, "Enabled", $"{root}:RestApi:BulkStream:Enabled", failures);
+        }
 
         var tools = configuration.GetSection($"{root}:Mcp:Tools");
         CheckNode(tools, $"{root}:Mcp:Tools", ToolGroupKeys, failures);
@@ -92,7 +99,7 @@ public sealed class ReadPathSwitchOptionsValidator : IValidateOptions<GatewayOpt
         CheckDisabledToolsShape(configuration.GetSection($"{root}:Mcp:DisabledTools"), $"{root}:Mcp:DisabledTools", failures);
     }
 
-    private static readonly string[] SwitchNodeNames = ["Tools", "DisabledTools", "RestApi", "DataEndpoint"];
+    private static readonly string[] SwitchNodeNames = ["Tools", "DisabledTools", "RestApi", "DataEndpoint", "BulkStream"];
 
     /// <summary>
     /// A misspelt parent key (<c>Gateway:Mcp:Tool</c>, <c>Gateway:Mcp:DisabledTool</c>, <c>Gateway:RestApis</c>) is ignored by the binder, so

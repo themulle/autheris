@@ -374,6 +374,9 @@ public sealed partial class QueryAnalysisService
         var unpaginatedPenalty = !metadata.HasExplicitLimit ? _analysisOptions.UnboundedScanPenalty : 0;
 
         outcome.EstimatedCost = fieldCost + joinCost + subqueryCost + unpaginatedPenalty;
+        outcome.EstimatedRows = metadata.HasExplicitLimit && metadata.ExplicitLimitValue.HasValue
+            ? (int)Math.Min((long)int.MaxValue, metadata.ExplicitLimitValue.Value)
+            : 1000;
         return outcome;
     }
 
