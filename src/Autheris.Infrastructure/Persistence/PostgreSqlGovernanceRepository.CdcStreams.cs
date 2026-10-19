@@ -80,4 +80,22 @@ public partial class PostgreSqlGovernanceRepository : ICdcStreamStore
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         return await Core.DiscardUnreadableAsync(conn, id, unreadableDekIds, ct).ConfigureAwait(false);
     }
+
+    public async Task<string?> GetWatermarkStateAsync(CdcStreamId id, CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        return await Core.GetWatermarkStateAsync(conn, id, ct).ConfigureAwait(false);
+    }
+
+    public async Task<MultiWatermarkVectorRecord?> GetWatermarkVectorAsync(CdcStreamId id, CancellationToken ct = default)
+    {
+        var json = await GetWatermarkStateAsync(id, ct).ConfigureAwait(false);
+        return new MultiWatermarkVectorRecord(id, MultiWatermarkVector.FromJson(json), 0);
+    }
+
+    public async Task ResetWatermarkAsync(CdcStreamId id, string? watermarkState, CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await Core.ResetWatermarkAsync(conn, id, watermarkState, ct).ConfigureAwait(false);
+    }
 }

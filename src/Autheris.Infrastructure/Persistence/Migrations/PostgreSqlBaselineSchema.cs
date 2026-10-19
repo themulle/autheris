@@ -474,6 +474,7 @@ internal static class PostgreSqlBaselineSchema
                 fencing_token BIGINT NOT NULL,
                 updated_at TEXT NOT NULL,
                 updated_by TEXT NOT NULL,
+                watermark_state TEXT NULL,
                 PRIMARY KEY (source, domain_name, schema_name, table_name)
             );
 

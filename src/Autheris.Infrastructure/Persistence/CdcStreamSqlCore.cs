@@ -249,39 +249,42 @@ internal sealed class CdcStreamSqlCore(CdcSqlDialect dialect)
 
     private async Task<bool> UpsertWatermarkAsync(DbConnection conn, DbTransaction tx, CdcAppendBatch batch, CancellationToken ct)
     {
-        const string insertColumns = "source, domain_name, schema_name, table_name, watermark, fencing_token, updated_at, updated_by";
+        const string insertColumns = "source, domain_name, schema_name, table_name, watermark, fencing_token, updated_at, updated_by, watermark_state";
         string sql = dialect switch
         {
             CdcSqlDialect.Sqlite => $@"
                 INSERT INTO {_watermarks} ({insertColumns})
-                VALUES (@source, @domain, @schema, @table, @watermark, @token, @updatedAt, @updatedBy)
+                VALUES (@source, @domain, @schema, @table, @watermark, @token, @updatedAt, @updatedBy, @watermarkState)
                 ON CONFLICT(source, domain_name, schema_name, table_name) DO UPDATE SET
                     watermark = MAX(watermark, excluded.watermark),
                     fencing_token = excluded.fencing_token,
                     updated_at = excluded.updated_at,
-                    updated_by = excluded.updated_by
+                    updated_by = excluded.updated_by,
+                    watermark_state = COALESCE(excluded.watermark_state, {_watermarks}.watermark_state)
                 WHERE excluded.fencing_token >= {_watermarks}.fencing_token;",
             CdcSqlDialect.PostgreSql => $@"
                 INSERT INTO {_watermarks} AS t ({insertColumns})
-                VALUES (@source, @domain, @schema, @table, @watermark, @token, @updatedAt, @updatedBy)
+                VALUES (@source, @domain, @schema, @table, @watermark, @token, @updatedAt, @updatedBy, @watermarkState)
                 ON CONFLICT (source, domain_name, schema_name, table_name) DO UPDATE SET
                     watermark = GREATEST(t.watermark, EXCLUDED.watermark),
                     fencing_token = EXCLUDED.fencing_token,
                     updated_at = EXCLUDED.updated_at,
-                    updated_by = EXCLUDED.updated_by
+                    updated_by = EXCLUDED.updated_by,
+                    watermark_state = COALESCE(EXCLUDED.watermark_state, t.watermark_state)
                 WHERE EXCLUDED.fencing_token >= t.fencing_token;",
             _ => $@"
                 DECLARE @affected INT = 0;
                 UPDATE {_watermarks} WITH (UPDLOCK, HOLDLOCK)
                    SET watermark = IIF(watermark > @watermark, watermark, @watermark),
-                       fencing_token = @token, updated_at = @updatedAt, updated_by = @updatedBy
+                       fencing_token = @token, updated_at = @updatedAt, updated_by = @updatedBy,
+                       watermark_state = COALESCE(@watermarkState, watermark_state)
                  WHERE source = @source AND domain_name = @domain AND schema_name = @schema AND table_name = @table
                    AND fencing_token <= @token;
                 SET @affected = @@ROWCOUNT;
                 IF @affected = 0
                 BEGIN
                     INSERT INTO {_watermarks} ({insertColumns})
-                    SELECT @source, @domain, @schema, @table, @watermark, @token, @updatedAt, @updatedBy
+                    SELECT @source, @domain, @schema, @table, @watermark, @token, @updatedAt, @updatedBy, @watermarkState
                      WHERE NOT EXISTS (SELECT 1 FROM {_watermarks} WITH (UPDLOCK, HOLDLOCK)
                                         WHERE source = @source AND domain_name = @domain AND schema_name = @schema AND table_name = @table);
                     SET @affected = @@ROWCOUNT;
@@ -298,12 +301,51 @@ internal sealed class CdcStreamSqlCore(CdcSqlDialect dialect)
         P(cmd, "@token", batch.FencingToken);
         P(cmd, "@updatedAt", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
         P(cmd, "@updatedBy", Environment.MachineName);
+        P(cmd, "@watermarkState", batch.WatermarkState);
         if (dialect == CdcSqlDialect.SqlServer)
         {
             return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false), CultureInfo.InvariantCulture) > 0;
         }
 
         return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
+    }
+
+    public async Task<string?> GetWatermarkStateAsync(DbConnection conn, CdcStreamId id, CancellationToken ct)
+    {
+        await using var cmd = Cmd(conn, null, $@"
+            SELECT w.watermark_state
+              FROM {_streams} s
+              JOIN {_watermarks} w ON w.source = s.source AND w.domain_name = s.domain_name
+                   AND w.schema_name = s.schema_name AND w.table_name = s.table_name
+             WHERE s.stream_id = @id");
+        P(cmd, "@id", id.Value ?? string.Empty);
+        var val = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return val is null or DBNull ? null : (string)val;
+    }
+
+    public async Task ResetWatermarkAsync(DbConnection conn, CdcStreamId id, string? watermarkState, CancellationToken ct)
+    {
+        var sql = dialect switch
+        {
+            CdcSqlDialect.SqlServer => $@"
+                UPDATE w
+                   SET watermark = 0, fencing_token = 0, watermark_state = @state, updated_at = @now, updated_by = @by
+                  FROM {_watermarks} w
+                  JOIN {_streams} s ON w.source = s.source AND w.domain_name = s.domain_name AND w.schema_name = s.schema_name AND w.table_name = s.table_name
+                 WHERE s.stream_id = @id",
+            _ => $@"
+                UPDATE {_watermarks}
+                   SET watermark = 0, fencing_token = 0, watermark_state = @state, updated_at = @now, updated_by = @by
+                 WHERE (source, domain_name, schema_name, table_name) IN
+                       (SELECT source, domain_name, schema_name, table_name FROM {_streams} WHERE stream_id = @id)"
+        };
+
+        await using var cmd = Cmd(conn, null, sql);
+        P(cmd, "@id", id.Value ?? string.Empty);
+        P(cmd, "@state", watermarkState);
+        P(cmd, "@now", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+        P(cmd, "@by", Environment.MachineName);
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
     private async Task ThrowCasFailureAsync(DbConnection conn, DbTransaction tx, string id, long token, string resource, CancellationToken ct)

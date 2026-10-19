@@ -62,12 +62,16 @@ public static class CdcActivationCodes
     public const string KeyUnavailable = "CDC_KEY_UNAVAILABLE";
     public const string WatermarkExpired = "CDC_WATERMARK_EXPIRED";
     public const string UnsupportedType = "CDC_UNSUPPORTED_TYPE";
+    public const string QueryAstInvalid = "CDC_QUERY_AST_INVALID";
+    public const string QueryParameterMissing = "CDC_QUERY_PARAMETER_MISSING";
+    public const string WatermarkStateCorrupt = "CDC_WATERMARK_STATE_CORRUPT";
 
     /// <summary>All codes, for allow-list checks (metric labels, audit details).</summary>
     public static IReadOnlyList<string> All { get; } =
     [
         TableUnavailable, NoDeclaredPk, PkMismatch, TrackingDisabled, SnapshotIsolationOff,
-        TenantColumnMissing, KeyUnavailable, WatermarkExpired, UnsupportedType
+        TenantColumnMissing, KeyUnavailable, WatermarkExpired, UnsupportedType,
+        QueryAstInvalid, QueryParameterMissing, WatermarkStateCorrupt
     ];
 }
 
@@ -142,7 +146,10 @@ public sealed record CdcRowImageRecord(byte[] KeyFingerprint, CdcTenantScope Ten
 
 public sealed record CdcAppendBatch(
     CdcStreamId StreamId, string Source, TableIdentifier Table, long FencingToken, long ExpectedHeadOffset,
-    long NewWatermark, IReadOnlyList<CdcStreamEventRecord> Events, IReadOnlyList<CdcRowImageWrite> ImageWrites);
+    long NewWatermark, IReadOnlyList<CdcStreamEventRecord> Events, IReadOnlyList<CdcRowImageWrite> ImageWrites,
+    string? WatermarkState = null);
+
+public sealed record MultiWatermarkVectorRecord(CdcStreamId StreamId, MultiWatermarkVector Vector, long FencingToken);
 
 public sealed record CdcReadResult(long TailOffset, long HeadOffset, IReadOnlyList<CdcStreamEventRecord> Events);
 

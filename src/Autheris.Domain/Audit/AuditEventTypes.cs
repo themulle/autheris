@@ -46,6 +46,7 @@ public static class AuditEventTypes
     public const string CdcConsumerOffsetReset = "CDC_CONSUMER_OFFSET_RESET";
     public const string CdcDeadLetterReplayed = "CDC_DEAD_LETTER_REPLAYED";
     public const string CdcStreamResync = "CDC_STREAM_RESYNC";
+    public const string CdcStreamWatermarkReset = "CDC_STREAM_WATERMARK_RESET";
     public const string CdcStreamKeyRotated = "CDC_STREAM_KEY_ROTATED";
     public const string CdcPluginReceiverBound = "CDC_PLUGIN_RECEIVER_BOUND";
     public const string CdcPluginReceiverRejected = "CDC_PLUGIN_RECEIVER_REJECTED";

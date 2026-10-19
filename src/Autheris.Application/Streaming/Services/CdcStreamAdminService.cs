@@ -94,4 +94,23 @@ public sealed class CdcStreamAdminService(
         await keyring.RotateImageKeyAsync(id, ct).ConfigureAwait(false);
         return true;
     }
+
+    /// <summary>
+    /// SEC-CDC101-06: Resets the multi-watermark vector state of a governed stream with an audited administrative justification.
+    /// </summary>
+    public async Task<bool> ResetWatermarkAsync(
+        CdcStreamId id, IReadOnlyDictionary<string, string> dimensions, string justification, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(justification);
+        ArgumentNullException.ThrowIfNull(dimensions);
+
+        if (await store.GetStreamAsync(id, ct).ConfigureAwait(false) is null)
+        {
+            return false;
+        }
+
+        var vector = new MultiWatermarkVector(dimensions);
+        await store.ResetWatermarkAsync(id, vector.ToJson(), ct).ConfigureAwait(false);
+        return true;
+    }
 }

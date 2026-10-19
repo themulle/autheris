@@ -723,6 +723,11 @@
           "name": "updated_by",
           "type": "NVARCHAR",
           "family": "string"
+        },
+        {
+          "name": "watermark_state",
+          "type": "NVARCHAR",
+          "family": "string"
         }
       ],
       "primaryKey": [
