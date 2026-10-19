@@ -14,15 +14,21 @@ public sealed class DatabricksDbConnection : DbConnection
 {
     private ConnectionState _state = ConnectionState.Closed;
 
-    public DatabricksDbConnection(DatabricksStatementExecutionClient client, DatabricksDataSourceOptions options, string? dataSourceName)
+    public DatabricksDbConnection(
+        DatabricksStatementExecutionClient client,
+        DatabricksDataSourceOptions options,
+        string? dataSourceName,
+        Autheris.Domain.Connectors.DelegationContext? delegationContext = null)
     {
         Client = client ?? throw new ArgumentNullException(nameof(client));
         Options = options ?? throw new ArgumentNullException(nameof(options));
         DataSourceName = dataSourceName;
+        DelegationContext = delegationContext;
     }
 
     internal DatabricksStatementExecutionClient Client { get; }
     internal DatabricksDataSourceOptions Options { get; }
+    public Autheris.Domain.Connectors.DelegationContext? DelegationContext { get; set; }
 
     /// <summary>The configured data source name; null lets the client pick the single configured Databricks source.</summary>
     internal string? DataSourceName { get; }

@@ -12,7 +12,9 @@ public sealed record DatabricksStatementRequest(
     string Catalog,
     string Schema,
     TimeSpan WaitTimeout,
-    string? DataSource = null);
+    string? DataSource = null,
+    IReadOnlyDictionary<string, string>? QueryTags = null,
+    Autheris.Domain.Connectors.DelegationContext? Delegation = null);
 
 public readonly record struct DatabricksColumn(string Name, string TypeName);
 

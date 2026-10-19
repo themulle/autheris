@@ -771,6 +771,20 @@ public static class GatewayStartupValidator
                 throw new ValidationException($"Databricks data source '{name}': WarehouseId is required.");
             }
 
+            // Issue #238 (SEC-OBO238-04): EnforcementMode cross-validation
+            if (connection.EnforcementMode is EnforcementMode.Delegated or EnforcementMode.DelegatedDefenceInDepth)
+            {
+                if (connection.KeySetCacheAllowed)
+                {
+                    throw new ValidationException($"Security violation (SEC-RF107-01 / SEC-OBO238-04): Databricks data source '{name}' has EnforcementMode = '{connection.EnforcementMode}', but KeySetCacheAllowed is true. KeySetCacheAllowed must be false for delegated enforcement to prevent cross-user tenant cache pollution.");
+                }
+
+                if (db.Auth.Mode != DatabricksAuthMode.OAuthObo)
+                {
+                    throw new ValidationException($"Security violation (SEC-OBO238-04): Databricks data source '{name}' has EnforcementMode = '{connection.EnforcementMode}', but Auth.Mode is '{db.Auth.Mode}'. Delegated enforcement requires Auth.Mode = OAuthObo.");
+                }
+            }
+
             if (db.Auth.Mode == DatabricksAuthMode.Pat)
             {
                 if (!environment.IsDevelopment())
@@ -781,6 +795,21 @@ public static class GatewayStartupValidator
                 if (string.IsNullOrWhiteSpace(db.Auth.PatRef))
                 {
                     throw new ValidationException($"Databricks data source '{name}': Auth.PatRef is required for Pat mode.");
+                }
+            }
+            else if (db.Auth.Mode == DatabricksAuthMode.OAuthObo)
+            {
+                var obo = db.Auth.Obo
+                    ?? throw new ValidationException($"Databricks data source '{name}': Auth.Mode OAuthObo requires the Auth.Obo section.");
+
+                if (string.IsNullOrWhiteSpace(obo.ClientId))
+                {
+                    throw new ValidationException($"Databricks data source '{name}': Auth.Obo.ClientId is required for OAuthObo mode.");
+                }
+
+                if (string.IsNullOrWhiteSpace(obo.ClientSecretRef) && string.IsNullOrWhiteSpace(obo.ClientCertificateRef))
+                {
+                    throw new ValidationException($"Databricks data source '{name}': Auth.Obo requires either ClientSecretRef or ClientCertificateRef.");
                 }
             }
             else if (string.IsNullOrWhiteSpace(db.Auth.ClientId) || string.IsNullOrWhiteSpace(db.Auth.ClientSecretRef))

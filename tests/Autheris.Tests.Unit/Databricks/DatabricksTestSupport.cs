@@ -97,9 +97,22 @@ internal static class DatabricksTestSupport
                     Schema = "default",
                     ByteLimit = byteLimit,
                     PollIntervalMilliseconds = 10,
-                    Auth = mode == DatabricksAuthMode.Pat
-                        ? new DatabricksAuthOptions { Mode = DatabricksAuthMode.Pat, PatRef = "kv://dbx-pat" }
-                        : new DatabricksAuthOptions { ClientId = "sp-id", ClientSecretRef = "kv://dbx-sp-secret" }
+                    Auth = mode switch
+                    {
+                        DatabricksAuthMode.Pat => new DatabricksAuthOptions { Mode = DatabricksAuthMode.Pat, PatRef = "kv://dbx-pat" },
+                        DatabricksAuthMode.OAuthObo => new DatabricksAuthOptions
+                        {
+                            Mode = DatabricksAuthMode.OAuthObo,
+                            Obo = new DatabricksOboOptions
+                            {
+                                TenantId = "tenant-123",
+                                ClientId = "obo-client-id",
+                                ClientSecretRef = "kv://dbx-obo-secret",
+                                Scopes = "2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default"
+                            }
+                        },
+                        _ => new DatabricksAuthOptions { Mode = DatabricksAuthMode.OAuthM2M, ClientId = "sp-id", ClientSecretRef = "kv://dbx-sp-secret" }
+                    }
                 }
             }
         };
@@ -120,6 +133,7 @@ internal static class DatabricksTestSupport
         var vault = Substitute.For<IKeyVaultSecretProvider>();
         vault.GetSecretBytes("kv://dbx-sp-secret").Returns(Encoding.UTF8.GetBytes(ClientSecret));
         vault.GetSecretBytes("kv://dbx-pat").Returns(Encoding.UTF8.GetBytes(Pat));
+        vault.GetSecretBytes("kv://dbx-obo-secret").Returns(Encoding.UTF8.GetBytes(ClientSecret));
         return vault;
     }
 

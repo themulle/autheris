@@ -106,6 +106,7 @@ public static class GatewaySecurityServiceExtensions
         services.AddHttpContextAccessor();
         services.AddScoped<IClientIpResolver, HttpContextClientIpResolver>();
         services.AddSingleton<Autheris.Application.Interfaces.ICallerContextProvider, Autheris.Api.Security.HttpCallerContextProvider>();
+        services.AddSingleton<Autheris.Application.Interfaces.IDelegationContextProvider, Autheris.Api.Security.HttpDelegationContextProvider>();
         services.AddScoped<AuditContext>();
         services.AddSingleton<IAuthFailureAggregator, AuthFailureAggregator>();
         services.AddSingleton<ITableReadConcurrencyGate, TableReadConcurrencyGate>();

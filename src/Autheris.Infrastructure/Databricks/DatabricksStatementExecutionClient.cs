@@ -29,7 +29,8 @@ public sealed partial class DatabricksStatementExecutionClient(
     IHostEnvironment? environment = null,
     DatabricksTokenCache? tokenCache = null,
     ILogger<DatabricksStatementExecutionClient>? logger = null,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    IDatabricksCredentialProvider? credentialProvider = null)
 {
     /// <summary>Allowance for the manifest and JSON framing on top of <c>ByteLimit</c> (also used for the HttpClient buffer).</summary>
     public const int ResponseOverheadBytes = 256 * 1024;
@@ -43,6 +44,8 @@ public sealed partial class DatabricksStatementExecutionClient(
 
     private readonly DatabricksTokenCache _tokenCache = tokenCache ?? new DatabricksTokenCache();
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+    private readonly IDatabricksCredentialProvider _credentialProvider = credentialProvider
+        ?? new DatabricksOboTokenProvider(http, options, secrets, environment, tokenCache, null, timeProvider);
 
     [GeneratedRegex("^[0-9a-fA-F-]{36}$", RegexOptions.CultureInvariant)]
     private static partial Regex StatementIdRegex();
@@ -63,7 +66,7 @@ public sealed partial class DatabricksStatementExecutionClient(
         ArgumentNullException.ThrowIfNull(request);
         var settings = ResolveSettings(request.DataSource);
         ValidateRequest(request);
-        var token = await AcquireTokenAsync(settings.Databricks, ct).ConfigureAwait(false);
+        var token = await _credentialProvider.AcquireTokenAsync(settings.Databricks, request.Delegation, ct).ConfigureAwait(false);
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(TimeSpan.FromSeconds(settings.CommandTimeoutSeconds));
@@ -217,53 +220,8 @@ public sealed partial class DatabricksStatementExecutionClient(
 
     // ---- authentication ----
 
-    private async Task<string> AcquireTokenAsync(DatabricksDataSourceOptions db, CancellationToken ct)
-    {
-        var auth = db.Auth;
-        if (auth.Mode == DatabricksAuthMode.Pat)
-        {
-            return SecretReferenceResolver.Resolve(secrets, auth.PatRef, environment, true, logger, "Databricks PAT")
-                   ?? throw Config("The Databricks PAT reference is missing.");
-        }
-
-        if (string.IsNullOrWhiteSpace(auth.ClientId) || string.IsNullOrWhiteSpace(auth.ClientSecretRef))
-        {
-            throw Config("OAuthM2M requires Auth.ClientId and Auth.ClientSecretRef.");
-        }
-
-        var now = _time.GetUtcNow();
-        if (_tokenCache.TryGet(db.Host, auth.ClientId, now, out var cached))
-        {
-            return cached;
-        }
-
-        var secret = SecretReferenceResolver.Resolve(secrets, auth.ClientSecretRef, environment, true, logger, "Databricks client secret")
-                     ?? throw Config("The Databricks client secret could not be resolved.");
-
-        // SEC-ADG-09 item 3: the token endpoint is derived from the host, never configurable.
-        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri($"https://{db.Host}/oidc/v1/token"))
-        {
-            Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["grant_type"] = "client_credentials", ["scope"] = "all-apis" })
-        };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{auth.ClientId}:{secret}")));
-
-        using var response = await SendRawAsync(request, ct).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new DatabricksProviderException(DatabricksErrorCodes.AuthFailed, $"Databricks authentication failed (HTTP {(int)response.StatusCode}).");
-        }
-
-        using var doc = ParseJson(await ReadBoundedAsync(response, MaxTokenResponseBytes, ct).ConfigureAwait(false));
-        if (!doc.RootElement.TryGetProperty("access_token", out var tokenEl) || tokenEl.ValueKind != JsonValueKind.String || string.IsNullOrEmpty(tokenEl.GetString()))
-        {
-            throw new DatabricksProviderException(DatabricksErrorCodes.AuthFailed, "Databricks authentication returned no access token.");
-        }
-
-        var token = tokenEl.GetString()!;
-        var lifetime = doc.RootElement.TryGetProperty("expires_in", out var exp) && exp.TryGetInt32(out var seconds) ? seconds : 300;
-        _tokenCache.Set(db.Host, auth.ClientId, token, now.AddSeconds(Math.Max(30, lifetime - 60)));
-        return token;
-    }
+    private Task<string> AcquireTokenAsync(DatabricksDataSourceOptions db, CancellationToken ct) =>
+        _credentialProvider.AcquireTokenAsync(db, null, ct);
 
     // ---- HTTP ----
 
@@ -379,6 +337,37 @@ public sealed partial class DatabricksStatementExecutionClient(
             w.WriteString("disposition", "INLINE");
             w.WriteString("format", "JSON_ARRAY");
             w.WriteNumber("byte_limit", db.ByteLimit);
+
+            var queryTags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (request.QueryTags is not null)
+            {
+                foreach (var (k, v) in request.QueryTags)
+                {
+                    queryTags[k] = v;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.Delegation?.CorrelationId) && !queryTags.ContainsKey("autheris_correlation_id"))
+            {
+                queryTags["autheris_correlation_id"] = request.Delegation.CorrelationId;
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.Delegation?.TraceId) && !queryTags.ContainsKey("autheris_trace_id"))
+            {
+                queryTags["autheris_trace_id"] = request.Delegation.TraceId;
+            }
+
+            if (queryTags.Count > 0)
+            {
+                w.WriteStartObject("query_tags");
+                foreach (var (k, v) in queryTags)
+                {
+                    w.WriteString(k, v);
+                }
+
+                w.WriteEndObject();
+            }
+
             w.WriteEndObject();
         }
 
