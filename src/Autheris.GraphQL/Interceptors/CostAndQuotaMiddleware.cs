@@ -142,6 +142,15 @@ public sealed class CostAndQuotaMiddleware
         // 3. Check query cost against effective max limit (min of Tier and MaxAllowedComplexity)
         if (calculatedCost > maxAllowedCost)
         {
+            var usageRecorder = services?.GetService<IConsumerUsageRecorder>();
+            if (usageRecorder != null)
+            {
+                var tableId = ExtractTableFromDocument(doc);
+                var tenantId = !string.IsNullOrWhiteSpace(clientContext.SubjectId) ? new TenantId(clientContext.SubjectId) : TenantId.LegacySingleTenant;
+                var userSid = new Sid(principal?.Identity?.Name ?? clientContext.SubjectId ?? "anonymous");
+                usageRecorder.RecordUsage(tableId, tenantId, userSid, ConsumerOutcome.DenyCost, 0, false);
+            }
+
             var error = ErrorBuilder.New()
                 .SetMessage($"The query cost ({calculatedCost}) exceeds the limit of {maxAllowedCost}. Nested list fields require 'first' (e.g. first: 10) or lower pagination limits to bound query cost within budget.")
                 .SetCode("QUERY_COST_QUOTA_EXCEEDED")
@@ -163,6 +172,15 @@ public sealed class CostAndQuotaMiddleware
 
         if (!limitResult.Allowed)
         {
+            var usageRecorder = services?.GetService<IConsumerUsageRecorder>();
+            if (usageRecorder != null)
+            {
+                var tableId = ExtractTableFromDocument(doc);
+                var tenantId = !string.IsNullOrWhiteSpace(clientContext.SubjectId) ? new TenantId(clientContext.SubjectId) : TenantId.LegacySingleTenant;
+                var userSid = new Sid(principal?.Identity?.Name ?? clientContext.SubjectId ?? "anonymous");
+                usageRecorder.RecordUsage(tableId, tenantId, userSid, ConsumerOutcome.DenyRateLimit, 0, false);
+            }
+
             var errorBuilder = ErrorBuilder.New()
                 .SetMessage("Rate limit exceeded. Wait until the next time window.")
                 .SetCode("RATE_LIMIT_EXCEEDED")
@@ -247,7 +265,7 @@ public sealed class CostAndQuotaMiddleware
         }
     }
 
-    private static int ComputeActualCost(
+    internal static int ComputeActualCost(
         RequestContext context,
         QueryCostOptions? costOptions,
         ClientQuotaPolicy policy)
@@ -271,9 +289,13 @@ public sealed class CostAndQuotaMiddleware
             executedDepth = Math.Max(1, dInt);
         }
 
-        if (rowsReturned == 0 && context.Result is OperationResult opResult && opResult.Data is not null)
+        if (context.Result is OperationResult opResult && opResult.Data is not null)
         {
-            rowsReturned = CountResultRows(opResult.Data.Value);
+            var counted = CountResultRows(opResult.Data.Value);
+            if (counted > 0)
+            {
+                rowsReturned = Math.Max(rowsReturned, counted);
+            }
         }
 
         int rowCost = (int)Math.Ceiling(rowsReturned * rowFactor);
@@ -283,7 +305,7 @@ public sealed class CostAndQuotaMiddleware
         return (int)Math.Clamp(totalComputed, baseCost, policy.MaxCostPerQuery);
     }
 
-    private static long CountResultRows(object? data)
+    internal static long CountResultRows(object? data)
     {
         if (data is null) return 0;
         return CountRootRows(data, 0);
@@ -427,5 +449,25 @@ public sealed class CostAndQuotaMiddleware
             }
         }
         return count;
+    }
+
+    private static TableIdentifier ExtractTableFromDocument(DocumentNode? doc)
+    {
+        if (doc != null)
+        {
+            var op = doc.Definitions.OfType<OperationDefinitionNode>().FirstOrDefault();
+            var field = op?.SelectionSet.Selections.OfType<FieldNode>().FirstOrDefault();
+            if (field != null && !string.IsNullOrWhiteSpace(field.Name.Value))
+            {
+                var val = field.Name.Value;
+                if (val.Contains('_'))
+                {
+                    var parts = val.Split('_', 2);
+                    return new TableIdentifier(parts[0], "public", parts[1]);
+                }
+                return new TableIdentifier("graphql", "public", val);
+            }
+        }
+        return new TableIdentifier("graphql", "query", "graphql");
     }
 }

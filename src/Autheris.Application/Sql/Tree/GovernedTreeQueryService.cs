@@ -456,7 +456,18 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         // 4. Bounded concurrency per user and root table, then one round trip.
         using var lease = AcquireLease(rootAccess);
         var json = await RunAsync(compiled, connOptions, dialect, rootAccess.Tenant, rootAccess.UserSid.Value, purpose: null, ct).ConfigureAwait(false);
-        _usageRecorder?.RecordUsage(rootAccess.Metadata.Identifier, rootAccess.Tenant, rootAccess.UserSid, ConsumerOutcome.Allow, rowsReturned: 0, rowsMeasured: false);
+
+        long measuredRows = 0;
+        try
+        {
+            using var tempDoc = JsonDocument.Parse(json);
+            measuredRows = tempDoc.RootElement.ValueKind == JsonValueKind.Array ? tempDoc.RootElement.GetArrayLength() : 1;
+        }
+        catch
+        {
+            measuredRows = 1;
+        }
+        _usageRecorder?.RecordUsage(rootAccess.Metadata.Identifier, rootAccess.Tenant, rootAccess.UserSid, ConsumerOutcome.Allow, rowsReturned: measuredRows, rowsMeasured: true);
 
         // Fast path: no cross-source relations and no HMAC columns
         if (crossSourceRelations.Count == 0 && compiled.HmacColumns.Count == 0)
@@ -680,7 +691,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         await GovernedQueryStages.RecordTableReadAsync(
             _auditWriter, access.Tenant, access.UserSid, table, access.Decision.IsAllowed,
             GovernedQueryStages.DecisionDetails(access.Decision, path: "graphql_tree"), ct,
-            usageRecorder: _usageRecorder).ConfigureAwait(false);
+            usageRecorder: access.Decision.IsAllowed ? null : _usageRecorder).ConfigureAwait(false);
     }
 
     private IDisposable? AcquireLease(ResolvedTableAccess rootAccess)

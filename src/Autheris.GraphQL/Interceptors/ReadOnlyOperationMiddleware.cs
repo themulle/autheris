@@ -33,7 +33,19 @@ public sealed class ReadOnlyOperationMiddleware
             if (principal.IsReadOnly())
             {
                 var gatewayOptions = context.RequestServices.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>()?.Value;
-                var configuredScopes = gatewayOptions?.Authentication?.EntraId?.ReadOnlySelfServiceScopes;
+                var entraId = gatewayOptions?.Authentication?.EntraId;
+                var selfServiceEnabled = entraId?.SelfServiceEnabled ?? true;
+                var configuredScopes = entraId?.ReadOnlySelfServiceScopes;
+
+                if (!selfServiceEnabled || configuredScopes is { Count: 0 })
+                {
+                    context.Result = OperationResult.FromError(ErrorBuilder.New()
+                        .SetMessage("This token only permits read access; mutations are rejected.")
+                        .SetCode("READ_ONLY_TOKEN")
+                        .Build());
+                    return;
+                }
+
                 var selfServiceScopes = configuredScopes is { Count: > 0 } ? configuredScopes : ["data.access.request"];
                 var hasSelfServiceScope = selfServiceScopes.Any(s => principal?.HasScope(s) == true);
 

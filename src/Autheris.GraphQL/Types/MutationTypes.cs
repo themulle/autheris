@@ -134,21 +134,31 @@ public sealed class Mutation
             approved.Id, approved.TenantId.Value, ex.GetType().Name);
     }
 
-    private static void EnsureReviewScope(IHttpContextAccessor? httpContextAccessor, ClaimsPrincipal? principal)
+    internal static void EnsureReviewScope(IHttpContextAccessor? httpContextAccessor, ClaimsPrincipal? principal)
     {
-        var scopes = TokenAccessScope.GetScopeSet(principal?.Claims);
-        if (scopes.Count == 0) return;
-
         var gatewayOptions = httpContextAccessor?.HttpContext?.RequestServices != null
             ? Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>(httpContextAccessor.HttpContext.RequestServices)?.Value
             : null;
-        var configuredReviewScopes = gatewayOptions?.Authentication?.EntraId?.AccessReviewScopes;
-        var reviewScopes = configuredReviewScopes is { Count: > 0 } ? configuredReviewScopes : ["data.access.review"];
-        if (!reviewScopes.Any(s => scopes.Contains(s)))
+        var entraId = gatewayOptions?.Authentication?.EntraId;
+        if (entraId != null && (!entraId.SelfServiceEnabled || entraId.AccessReviewScopes is { Count: 0 }))
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
-                .SetMessage("The 'data.access.review' scope is required to review consent requests.")
+                .SetMessage("Self-service access review is disabled.")
+                .Build());
+        }
+
+        var scopes = TokenAccessScope.GetScopeSet(principal?.Claims);
+        if (scopes.Count == 0) return;
+
+        var configuredReviewScopes = entraId?.AccessReviewScopes;
+        var reviewScopes = configuredReviewScopes is { Count: > 0 } ? configuredReviewScopes : ["data.access.review"];
+        if (!reviewScopes.Any(s => scopes.Contains(s)))
+        {
+            var formattedScopes = string.Join("', '", reviewScopes);
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("FORBIDDEN")
+                .SetMessage($"The '{formattedScopes}' scope is required to review consent requests.")
                 .Build());
         }
     }

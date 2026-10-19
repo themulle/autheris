@@ -405,12 +405,25 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         }
 
         var maxAllowedCost = _analysisOptions.MaxAllowedCost > 0 ? _analysisOptions.MaxAllowedCost : 500;
+        CallerBucketState? bucketState = null;
         if (_clientTierResolver != null && effectivePrincipal != null)
         {
             var quotaCtx = await _clientTierResolver.ResolveAsync(effectivePrincipal, apiKey: null, clientIp: null, ct).ConfigureAwait(false);
             if (quotaCtx?.Policy?.MaxCostPerQuery > 0)
             {
                 maxAllowedCost = quotaCtx.Policy.MaxCostPerQuery;
+            }
+            if (_rateLimiterService != null && quotaCtx != null)
+            {
+                try
+                {
+                    bucketState = await _rateLimiterService.GetBucketStateAsync(quotaCtx.SubjectId, quotaCtx.Policy, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Failed to probe bucket state; falling back to null.");
+                    bucketState = null;
+                }
             }
         }
 
@@ -423,12 +436,52 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                 QueryName: queryName));
         }
 
+        int? rowsPerRequest = null;
+        int? requests = null;
+        double? secondsAtCurrentBucket = null;
+
+        if (totalEstimatedRows is > 0)
+        {
+            if (totalEstimatedCost <= maxAllowedCost)
+            {
+                rowsPerRequest = totalEstimatedRows.Value;
+                requests = 1;
+            }
+            else
+            {
+                double ratio = (double)maxAllowedCost / Math.Max(1, totalEstimatedCost);
+                rowsPerRequest = Math.Max(1, (int)Math.Floor(totalEstimatedRows.Value * ratio));
+                requests = (int)Math.Ceiling((double)totalEstimatedRows.Value / rowsPerRequest.Value);
+            }
+        }
+        else
+        {
+            rowsPerRequest = maxAllowedCost;
+            requests = 1;
+        }
+
+        if (bucketState != null && bucketState.RefillRatePerSecond > 0)
+        {
+            if (totalEstimatedCost <= bucketState.CurrentBalance)
+            {
+                secondsAtCurrentBucket = 0.0;
+            }
+            else
+            {
+                var deficit = totalEstimatedCost - bucketState.CurrentBalance;
+                secondsAtCurrentBucket = Math.Round(deficit / bucketState.RefillRatePerSecond, 2);
+            }
+        }
+
         var costEstimate = new QueryCostEstimate(
             EstimatedCost: totalEstimatedCost,
             MaxAllowedCost: maxAllowedCost,
             IsWithinCostLimit: totalEstimatedCost <= maxAllowedCost,
             RootFieldCosts: aggregatedRootFieldCosts.Count > 0 ? aggregatedRootFieldCosts : null,
-            EstimatedRows: totalEstimatedRows);
+            EstimatedRows: totalEstimatedRows,
+            RowsPerRequest: rowsPerRequest,
+            Requests: requests,
+            SecondsAtCurrentBucket: secondsAtCurrentBucket);
 
         var isValid = diagnostics.All(d =>
             !string.Equals(d.Code, QueryDiagnosticCodes.SyntaxError, StringComparison.OrdinalIgnoreCase) &&
@@ -495,17 +548,17 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
             try
             {
                 var quotaCtx = await _clientTierResolver.ResolveAsync(callerPrincipal, apiKey: null, clientIp: null, ct).ConfigureAwait(false);
-                CallerBucketState? bucketState = null;
+                CallerBucketState? callerBucketState = null;
                 if (_rateLimiterService != null)
                 {
                     try
                     {
-                        bucketState = await _rateLimiterService.GetBucketStateAsync(quotaCtx.SubjectId, quotaCtx.Policy, ct).ConfigureAwait(false);
+                        callerBucketState = await _rateLimiterService.GetBucketStateAsync(quotaCtx.SubjectId, quotaCtx.Policy, ct).ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
                         _logger?.LogWarning(ex, "Failed to probe bucket state; falling back to null.");
-                        bucketState = null;
+                        callerBucketState = null;
                     }
                 }
 
@@ -516,7 +569,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     MaxNestingDepth: 10,
                     MaxAggregateRowBudget: _gatewayOptions.GraphQL?.MaxAggregateRowBudget > 0 ? _gatewayOptions.GraphQL.MaxAggregateRowBudget : 50000);
 
-                callerQuota = new CallerQuotaSummary(quotaCtx.Tier.ToString(), bucketState, systemCaps);
+                callerQuota = new CallerQuotaSummary(quotaCtx.Tier.ToString(), callerBucketState, systemCaps);
             }
             catch (Exception ex)
             {

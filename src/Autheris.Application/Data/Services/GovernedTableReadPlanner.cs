@@ -509,35 +509,75 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
         TableFilterClause? filter,
         bool isAggregate = false)
     {
-        if (metadata.RequiredFilterColumns.Length == 0)
+        if (metadata.RequiredFilterColumns.Length == 0 && metadata.RequiredFilterColumnGroups.Length == 0)
         {
             return;
         }
 
-        foreach (var reqCol in metadata.RequiredFilterColumns)
+        bool IsSatisfied(string reqCol)
         {
             if (!isAggregate &&
                 metadata.TenantColumnName != null &&
                 string.Equals(metadata.TenantColumnName, reqCol, StringComparison.OrdinalIgnoreCase))
             {
-                continue;
+                return true;
             }
 
             if (decision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rls &&
                 rls.Predicate.ReferencedColumns.Contains(reqCol.ToLowerInvariant()))
             {
-                continue;
+                return true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql) &&
+                decision.CombinedRowFilterSql.Contains(reqCol, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
             }
 
             if (filter != null &&
                 filter.ReferencedColumns.Any(c => string.Equals(c, reqCol, StringComparison.OrdinalIgnoreCase)))
             {
-                continue;
+                return true;
             }
 
-            throw new TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException(
-                TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(
-                    TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing));
+            return false;
+        }
+
+        if (metadata.RequiredFilterColumnGroups.Length > 0)
+        {
+            bool anyGroupSatisfied = false;
+            foreach (var group in metadata.RequiredFilterColumnGroups)
+            {
+                if (group.Length == 0) continue;
+                if (group.All(IsSatisfied))
+                {
+                    anyGroupSatisfied = true;
+                    break;
+                }
+            }
+
+            if (!anyGroupSatisfied)
+            {
+                throw new TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException(
+                    TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(
+                        TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing));
+            }
+        }
+
+        if (metadata.RequiredFilterColumns.Length > 0)
+        {
+            foreach (var reqCol in metadata.RequiredFilterColumns)
+            {
+                if (IsSatisfied(reqCol))
+                {
+                    continue;
+                }
+
+                throw new TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException(
+                    TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(
+                        TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing));
+            }
         }
     }
 

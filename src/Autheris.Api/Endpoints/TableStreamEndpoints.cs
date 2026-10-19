@@ -182,6 +182,9 @@ public static class TableStreamEndpoints
 
         // 4. Governance Authorization Stage (PDP)
         var tenant = EndpointSecurity.GetRequestTenant(httpContext);
+        var userSid = new Sid(EndpointSecurity.GetCallerIdentity(httpContext) ?? "anonymous");
+        var callerSid = userSid.Value;
+        var usageRecorder = httpContext.RequestServices?.GetService<IConsumerUsageRecorder>();
         var clientIp = httpContext.Connection.RemoteIpAddress?.ToString();
 
         TableAccessDecision decision;
@@ -199,6 +202,7 @@ public static class TableStreamEndpoints
         }
         catch (UnauthorizedAccessException)
         {
+            usageRecorder?.RecordUsage(tableId, tenant, userSid, ConsumerOutcome.DenyAccess, 0, false);
             // Anti-enumeration parity: unauthorized table returns 404
             httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
             await httpContext.Response.WriteAsJsonAsync(new { error = $"Table '{tableId.ToQualifiedName()}' not found." }, ct).ConfigureAwait(false);
@@ -312,6 +316,7 @@ public static class TableStreamEndpoints
             var reservation = await rateLimiter.ReserveCostQuotaAsync(subjectId, reservedCost, policy, ct).ConfigureAwait(false);
             if (!reservation.Allowed)
             {
+                usageRecorder?.RecordUsage(tableId, tenant, userSid, ConsumerOutcome.DenyRateLimit, 0, false);
                 httpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
                 httpContext.Response.Headers["Retry-After"] = reservation.RetryAfterSeconds.ToString(CultureInfo.InvariantCulture);
                 if (!string.IsNullOrWhiteSpace(clientContext?.ResolvedScope))
@@ -464,7 +469,8 @@ public static class TableStreamEndpoints
 
                 if (lastRowPk != null && (hasMore || truncatedReason != null))
                 {
-                    nextCursor = cursorEncoder.EncodeCursor(lastRowPk);
+                    var cursorContext = new KeysetCursorContext(tenant.Value, domain, table, "asc", pkCols, callerSid);
+                    nextCursor = cursorEncoder.EncodeCursor(lastRowPk, cursorContext);
                 }
             }
             else
@@ -585,7 +591,8 @@ public static class TableStreamEndpoints
 
                 if (lastRowPk != null && (hasMore || truncatedReason != null))
                 {
-                    nextCursor = cursorEncoder.EncodeCursor(lastRowPk);
+                    var cursorContext = new KeysetCursorContext(tenant.Value, domain, table, "asc", pkCols, callerSid);
+                    nextCursor = cursorEncoder.EncodeCursor(lastRowPk, cursorContext);
                 }
 
                 if (hasMore || truncatedReason != null || request.IncludeMetadata)
@@ -611,6 +618,7 @@ public static class TableStreamEndpoints
         finally
         {
             // 9. Post-Stream Settlement & Response Metadata
+            usageRecorder?.RecordUsage(tableId, tenant, userSid, ConsumerOutcome.Allow, rowsEmitted, rowsMeasured: true);
             SetResponseMetadata(httpContext.Response, "X-Rows-Streamed", rowsEmitted.ToString(CultureInfo.InvariantCulture));
             if (!string.IsNullOrEmpty(nextCursor))
             {
