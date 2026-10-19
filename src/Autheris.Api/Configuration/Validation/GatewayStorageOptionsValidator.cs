@@ -48,6 +48,20 @@ public sealed class GatewayStorageOptionsValidator : IValidateOptions<GatewayOpt
             failures.Add("NF-HA-02 violation: In MultiNodeClusterMode or with more than one replica (PG-6), cluster-wide cache and epoch invalidation requires Caching.Redis.Enabled = true.");
         }
 
+        // Nested data annotations are not evaluated; the read concurrency limit (stored procedure and SQL leases) must stay in range.
+        if (opts.DataSources.MaxConcurrentReadsPerUserAndTable is < 0 or > 1000)
+        {
+            failures.Add("DataSources.MaxConcurrentReadsPerUserAndTable must be between 0 (disabled) and 1000.");
+        }
+
+        // Nested data annotations are not evaluated (SEC-PROC152I2-14): the scan cap must cover the row limit and stay bounded.
+        var procedures = opts.SqlEndpoints.Procedures;
+        int effectiveScanRows = procedures.EffectiveMaxScanRows;
+        if (effectiveScanRows < procedures.MaxRows || effectiveScanRows is < 1 or > 100000)
+        {
+            failures.Add("SqlEndpoints.Procedures.MaxScanRows must be between 1 and 100000 and not below SqlEndpoints.Procedures.MaxRows.");
+        }
+
         return failures.Count > 0
             ? ValidateOptionsResult.Fail(failures)
             : ValidateOptionsResult.Success;

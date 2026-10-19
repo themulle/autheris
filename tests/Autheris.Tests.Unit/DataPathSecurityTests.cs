@@ -30,6 +30,7 @@ public class DataPathSecurityTests : IDisposable
     private readonly ColumnMaskingProvider _maskingProvider;
     private readonly GatewayExecutionService _executionService;
     private readonly Query _query;
+    private readonly Autheris.Application.Catalog.Services.CatalogVisibilityService _visibility;
 
     public DataPathSecurityTests()
     {
@@ -56,6 +57,7 @@ public class DataPathSecurityTests : IDisposable
             gatewayOptions,
             dataSourceExecutors: [sqlExecutor], policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
         _query = new Query();
+        _visibility = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(_repository, _repository);
     }
 
     public void Dispose()
@@ -121,19 +123,19 @@ public class DataPathSecurityTests : IDisposable
         var userWithoutRole = new Sid("S-1-5-21-USER-NO-ROLE");
         var accessorWithoutRole = CreateAccessor(userWithoutRole, roles: new[] { "Auditor" });
 
-        var catalogWithoutRole = await _query.GetCatalogAsync(_repository, accessorWithoutRole);
+        var catalogWithoutRole = await _query.GetCatalogAsync(_repository, accessorWithoutRole, null, _visibility);
         catalogWithoutRole.ShouldNotContain(t => t.TableName == "finance_table_2");
 
         // User WITH role 'FinanceManager'
         var userWithRole = new Sid("S-1-5-21-USER-HAS-ROLE");
         var accessorWithRole = CreateAccessor(userWithRole, roles: new[] { "FinanceManager" });
 
-        var catalogWithRole = await _query.GetCatalogAsync(_repository, accessorWithRole);
+        var catalogWithRole = await _query.GetCatalogAsync(_repository, accessorWithRole, null, _visibility);
         catalogWithRole.ShouldContain(t => t.TableName == "finance_table_2");
     }
 
     [Fact]
-    public async Task Catalog_WhenAllowAuthenticatedCatalogDiscoveryEnabled_AllAuthenticatedUsersSeeAllTables()
+    public async Task Catalog_WhenAllowAuthenticatedCatalogDiscoveryEnabled_FlagIsDeprecatedAndDoesNotWidenTheCatalog()
     {
         var userWithoutRole = new Sid("S-1-5-21-USER-NO-ROLE");
         var accessorWithoutRole = CreateAccessor(userWithoutRole, roles: new[] { "Auditor" });
@@ -146,9 +148,10 @@ public class DataPathSecurityTests : IDisposable
             }
         });
 
-        var catalog = await _query.GetCatalogAsync(_repository, accessorWithoutRole, options);
-        catalog.ShouldContain(t => t.TableName == "finance_table_2");
-        catalog.ShouldContain(t => t.TableName == "finance_table_1");
+        // WP-0: the flag no longer widens anything; a caller without consent keeps an empty catalog.
+        var catalog = await _query.GetCatalogAsync(_repository, accessorWithoutRole, options, _visibility);
+        catalog.ShouldNotContain(t => t.TableName == "finance_table_2");
+        catalog.ShouldNotContain(t => t.TableName == "finance_table_1");
     }
 
     [Fact]
@@ -165,7 +168,7 @@ public class DataPathSecurityTests : IDisposable
             HttpContext = new DefaultHttpContext()
         };
 
-        var catalog = await _query.GetCatalogAsync(_repository, anonymousAccessor, options);
+        var catalog = await _query.GetCatalogAsync(_repository, anonymousAccessor, options, _visibility);
         catalog.ShouldContain(t => t.TableName == "finance_table_1");
         catalog.ShouldContain(t => t.TableName == "finance_table_2");
     }
@@ -179,11 +182,11 @@ public class DataPathSecurityTests : IDisposable
         var accessor = new HttpContextAccessor { HttpContext = httpContext };
 
         var catalogFromScope = await _query.GetCatalogAsync(domain: null, first: null, after: null, search: null,
-            _repository, _repository, accessor, options);
+            _repository, _repository, accessor, options, _visibility);
         catalogFromScope.All(t => t.Domain == "finance").ShouldBeTrue();
 
         var emptyDomainCatalog = await _query.GetCatalogAsync(domain: "nonexistent", first: null, after: null, search: null,
-            _repository, _repository, accessor, options);
+            _repository, _repository, accessor, options, _visibility);
         emptyDomainCatalog.ShouldBeEmpty();
     }
 
@@ -194,7 +197,7 @@ public class DataPathSecurityTests : IDisposable
         var accessor = new HttpContextAccessor { HttpContext = new DefaultHttpContext() };
 
         var searchResult = await _query.GetCatalogAsync(domain: null, first: 1, after: null, search: "finance_table_1",
-            _repository, _repository, accessor, options);
+            _repository, _repository, accessor, options, _visibility);
         searchResult.Count.ShouldBe(1);
         searchResult[0].TableName.ShouldBe("finance_table_1");
     }
@@ -243,7 +246,7 @@ public class DataPathSecurityTests : IDisposable
         });
 
         var accessor = CreateAccessor(userSid);
-        var catalog = await _query.GetCatalogAsync(_repository, accessor);
+        var catalog = await _query.GetCatalogAsync(_repository, accessor, null, _visibility);
 
         var tableDto = catalog.FirstOrDefault(t => t.TableName == "finance_table_1");
         tableDto.ShouldNotBeNull();
@@ -514,7 +517,7 @@ public class DataPathSecurityTests : IDisposable
         });
 
         var accessor = CreateAccessor(userSid);
-        var catalog = await _query.GetCatalogAsync(_repository, accessor);
+        var catalog = await _query.GetCatalogAsync(_repository, accessor, null, _visibility);
 
         var financeTable = catalog.FirstOrDefault(t => t.TableName == "finance_table_1");
         financeTable.ShouldNotBeNull();

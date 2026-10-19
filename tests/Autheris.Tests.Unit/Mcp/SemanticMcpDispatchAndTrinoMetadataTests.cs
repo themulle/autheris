@@ -27,6 +27,8 @@ using Xunit;
 
 public sealed class SemanticMcpDispatchAndTrinoMetadataTests
 {
+    private static readonly IOptions<GatewayOptions> SingleMode = Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Single" } });
+
     private static readonly DbtMetric SampleMetric = new(
         Name: "monthly_recurring_revenue",
         Type: "simple",
@@ -68,8 +70,8 @@ public sealed class SemanticMcpDispatchAndTrinoMetadataTests
     [Fact]
     public async Task McpToolExecutionHandler_And_AiDataGuardrailService_ShouldExecute_SemanticTools()
     {
-        var catalog = new InMemorySemanticCatalog();
-        await catalog.RegisterManifestAsync(new DbtSemanticManifest([SampleModel], [SampleMetric], "1.2"));
+        var catalog = new InMemorySemanticCatalog(SingleMode);
+        await catalog.RegisterManifestAsync(new DbtSemanticManifest([SampleModel], [SampleMetric], "1.2"), TenantId.LegacySingleTenant);
 
         var metricQueryService = Substitute.For<ISemanticMetricQueryService>();
         metricQueryService.QueryMetricsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<MetricQueryRequest>(), Arg.Any<CancellationToken>())
@@ -86,7 +88,7 @@ public sealed class SemanticMcpDispatchAndTrinoMetadataTests
                     SuppressedRowsCount: 0,
                     MergedIntoOther: false,
                     Truncated: false),
-                MetricDefinitions: new Dictionary<string, DbtMetric> { ["monthly_recurring_revenue"] = SampleMetric }));
+                MetricDefinitions: new Dictionary<string, MetricDefinitionSummary> { ["monthly_recurring_revenue"] = MetricDefinitionSummary.From(SampleMetric) }));
 
         var handler = new McpToolExecutionHandler(
             Substitute.For<IGovernedSqlExecutionService>(),
@@ -96,7 +98,8 @@ public sealed class SemanticMcpDispatchAndTrinoMetadataTests
             Substitute.For<ILineageGraphStore>(),
             Substitute.For<ITableMetadataRepository>(),
             catalog,
-            metricQueryService);
+            metricQueryService,
+            SingleMode);
 
         handler.CanHandle(McpSemanticTools.ListMetrics).Should().BeTrue();
         handler.CanHandle(McpSemanticTools.DescribeMetric).Should().BeTrue();
@@ -170,7 +173,7 @@ public sealed class SemanticMcpDispatchAndTrinoMetadataTests
     [Fact]
     public async Task DbtSemanticManifestIngestionService_ShouldRegister_SemanticCatalogView_WhenRepositoryProvided()
     {
-        var catalog = new InMemorySemanticCatalog();
+        var catalog = new InMemorySemanticCatalog(SingleMode);
         var tableRepo = Substitute.For<ITableMetadataRepository>();
         TableMetadata? capturedMeta = null;
         tableRepo.UpsertTableMetadataAsync(Arg.Do<TableMetadata>(m => capturedMeta = m), Arg.Any<CancellationToken>())
@@ -179,7 +182,8 @@ public sealed class SemanticMcpDispatchAndTrinoMetadataTests
         var ingestion = new DbtSemanticManifestIngestionService(
             catalog,
             NullLogger<DbtSemanticManifestIngestionService>.Instance,
-            tableRepo);
+            tableRepo,
+            gatewayOptions: SingleMode);
 
         const string manifestJson = """
         {
@@ -206,13 +210,13 @@ public sealed class SemanticMcpDispatchAndTrinoMetadataTests
         }
         """;
 
-        await ingestion.ParseAndIngestAsync(manifestJson);
+        await ingestion.ParseAndIngestAsync(manifestJson, TenantId.LegacySingleTenant);
 
         capturedMeta.Should().NotBeNull();
         capturedMeta!.Identifier.Should().Be(new TableIdentifier("semantic", "semantic", "orders"));
         capturedMeta.Table.Description.Should().Be("Orders semantic model");
-        capturedMeta.Table.Tags.Should().Contain("dbt");
-        capturedMeta.Table.Tags.Should().Contain("semantic-model");
+        // Issue #111: the upsert ignores Table.Tags; the synthetic tags are imported as dbt dataset tags (see DbtDatasetTagTests).
+        capturedMeta.Table.Tags.Should().BeEmpty();
         var columnPairs = capturedMeta.Columns.Select(c => $"{c.ColumnName}:{c.DataType}").ToList();
         columnPairs.Should().Contain("order_id:varchar");
         columnPairs.Should().Contain("region:varchar");

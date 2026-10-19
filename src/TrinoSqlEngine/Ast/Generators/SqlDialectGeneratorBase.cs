@@ -43,14 +43,14 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
     /// Generates with the capabilities the compiler resolved for the request (the bind limit comes from them, not from a second lookup in
     /// the default table), so the capability provider of the compiler governs the whole pipeline.
     /// </summary>
-    internal CompiledSql Generate(SqlStatement statement, ParameterSource values, DialectCapabilities capabilities, CancellationToken cancellationToken)
+    internal CompiledSql Generate(SqlStatement statement, ParameterSource values, DialectCapabilities capabilities, CancellationToken cancellationToken, bool timeZoneCallsValidated = false)
     {
         ArgumentNullException.ThrowIfNull(statement);
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(capabilities);
 
         cancellationToken.ThrowIfCancellationRequested();
-        var context = new SqlEmitterContext(TargetDialect, capabilities, values, cancellationToken);
+        var context = new SqlEmitterContext(TargetDialect, capabilities, values, cancellationToken) { TimeZoneCallsValidated = timeZoneCallsValidated };
         Span<char> initialBuffer = stackalloc char[512];
         var builder = new ValueStringBuilder(initialBuffer);
         string sql;
@@ -156,6 +156,23 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         try
         {
             var context = new SqlEmitterContext(TargetDialect, InlineParameterBudget(TargetDialect));
+            GenerateSql(statement, ref builder, context);
+            return builder.ToString();
+        }
+        finally
+        {
+            builder.Dispose();
+        }
+    }
+
+    public virtual string GenerateSql(SqlStatement statement, SqlEmitterContext context)
+    {
+        ArgumentNullException.ThrowIfNull(statement);
+        ArgumentNullException.ThrowIfNull(context);
+        Span<char> initialBuffer = stackalloc char[512];
+        var builder = new ValueStringBuilder(initialBuffer);
+        try
+        {
             GenerateSql(statement, ref builder, context);
             return builder.ToString();
         }

@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Analytics;
 using Autheris.Application.Dbt.Interfaces;
+using Autheris.Application.Dbt.Services;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
@@ -105,10 +106,13 @@ public static class McpSemanticTools
 
     public static async Task<string> ExecuteListMetricsAsync(
         ISemanticCatalogService catalog,
+        ClaimsPrincipal? principal,
+        SemanticTenancy tenancy,
         string? argumentsJson,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(tenancy);
 
         string? datasetFilter = null;
         if (!string.IsNullOrWhiteSpace(argumentsJson))
@@ -126,20 +130,27 @@ public static class McpSemanticTools
             }
         }
 
-        var metrics = await catalog.ListMetricsAsync(datasetFilter, ct).ConfigureAwait(false);
+        // A1-3 / A1-6: the caller's own tenant partition (no SID or no tenant standing = nothing); descriptive fields unless administrator.
+        var tenant = tenancy.ResolveCallerTenant(principal);
+        IReadOnlyList<DbtMetric> metrics = tenant is { } t
+            ? await catalog.ListMetricsAsync(datasetFilter, t, ct).ConfigureAwait(false)
+            : [];
         return JsonSerializer.Serialize(new
         {
             total = metrics.Count,
-            metrics = metrics
+            metrics = SemanticMetricCatalogProjection.Project(metrics, principal)
         }, IndentedOptions);
     }
 
     public static async Task<string> ExecuteDescribeMetricAsync(
         ISemanticCatalogService catalog,
+        ClaimsPrincipal? principal,
+        SemanticTenancy tenancy,
         string? argumentsJson,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(tenancy);
 
         string? metricName = null;
         if (!string.IsNullOrWhiteSpace(argumentsJson))
@@ -162,13 +173,16 @@ public static class McpSemanticTools
             return JsonSerializer.Serialize(new { error = "Argument 'metric' is required." });
         }
 
-        var metric = await catalog.GetMetricAsync(metricName, ct).ConfigureAwait(false);
+        var tenant = tenancy.ResolveCallerTenant(principal);
+        var metric = tenant is { } t
+            ? await catalog.GetMetricAsync(metricName, t, ct).ConfigureAwait(false)
+            : null;
         if (metric == null)
         {
             return JsonSerializer.Serialize(new { error = $"Metric '{metricName}' was not found in the semantic catalog." });
         }
 
-        return JsonSerializer.Serialize(metric, IndentedOptions);
+        return JsonSerializer.Serialize(SemanticMetricCatalogProjection.ProjectOne(metric, principal), IndentedOptions);
     }
 
     public static async Task<string> ExecuteQueryMetricsAsync(

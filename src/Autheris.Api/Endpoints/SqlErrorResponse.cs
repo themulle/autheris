@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Application.Common;
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -22,11 +23,11 @@ internal static class SqlErrorResponse
         if (mapped.Status >= StatusCodes.Status500InternalServerError && mapped.Status != StatusCodes.Status503ServiceUnavailable &&
             mapped.Status != StatusCodes.Status504GatewayTimeout)
         {
-            logger.LogError(ex, "{Surface} failed with {Code}. TraceId={TraceId}", surface, mapped.Code, httpContext.TraceIdentifier);
+            logger.Error(ex, "{Surface} failed with {Code}. TraceId={TraceId}", surface, mapped.Code, httpContext.TraceIdentifier);
         }
         else
         {
-            logger.LogWarning(ex, "{Surface} rejected with {Code}. TraceId={TraceId}", surface, mapped.Code, httpContext.TraceIdentifier);
+            logger.Warning(ex, "{Surface} rejected with {Code}. TraceId={TraceId}", surface, mapped.Code, httpContext.TraceIdentifier);
         }
 
         httpContext.Response.StatusCode = mapped.Status;

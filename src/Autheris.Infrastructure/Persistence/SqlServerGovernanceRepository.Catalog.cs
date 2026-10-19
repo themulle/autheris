@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Data;
 using System.Text.Json;
 using Autheris.Domain.Common;
@@ -10,8 +11,20 @@ namespace Autheris.Infrastructure.Persistence;
 
 public partial class SqlServerGovernanceRepository
 {
-    public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) =>
-        GetTableMetadataCoreAsync(table, null, ct);
+    public async Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
+    {
+        var structural = await GetTableMetadataCoreAsync(table, null, ct).ConfigureAwait(false);
+        if (structural is null)
+        {
+            return null;
+        }
+
+        // Issue #111 (A-6): tier and tags are never part of the cached entry; a fresh read is overlaid on every call, without mutating the cached record.
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        var overlay = await DatasetCatalogStore.ReadOverlayAsync(
+            conn, null, CatalogKeyDefinitionStore.SqlServer, structural.Table.Id, _logger, ct).ConfigureAwait(false);
+        return DatasetCatalogStore.Apply(structural, overlay);
+    }
 
     private async Task<TableMetadata?> GetTableMetadataCoreAsync(
         TableIdentifier table,
@@ -32,7 +45,7 @@ public partial class SqlServerGovernanceRepository
         {
             await using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source
+                cmd.CommandText = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json
                                     FROM TABLES
                                     WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
                 cmd.Parameters.AddWithValue("@domain", table.Domain);
@@ -49,6 +62,11 @@ public partial class SqlServerGovernanceRepository
                     var httpEndpoint = !string.IsNullOrWhiteSpace(httpEndpointJson)
                         ? JsonSerializer.Deserialize<HttpEndpointDescriptor>(httpEndpointJson)
                         : null;
+                    var reqFiltersJson = reader.IsDBNull(15) ? null : reader.GetString(15);
+                    var reqFilters = string.IsNullOrWhiteSpace(reqFiltersJson)
+                        ? ImmutableArray<string>.Empty
+                        : JsonSerializer.Deserialize<ImmutableArray<string>>(reqFiltersJson);
+                    if (reqFilters.IsDefault) reqFilters = ImmutableArray<string>.Empty;
 
                     tableEntity = new Table
                     {
@@ -66,7 +84,8 @@ public partial class SqlServerGovernanceRepository
                         PluginName = pluginName,
                         Description = reader.IsDBNull(12) ? null : reader.GetString(12),
                         LongDescription = reader.IsDBNull(13) ? null : reader.GetString(13),
-                        DocumentationSource = reader.IsDBNull(14) ? null : reader.GetString(14)
+                        DocumentationSource = reader.IsDBNull(14) ? null : reader.GetString(14),
+                        RequiredFilterColumns = reqFilters
                     };
                 }
             }
@@ -143,6 +162,9 @@ public partial class SqlServerGovernanceRepository
                 throw;
             }
 
+            var rowFilterEvaluation = await RowFilterEvaluationStore.ReadObjectAsync(
+                conn, null, CatalogKeyDefinitionStore.SqlServer, tableId.Value, ct).ConfigureAwait(false);
+
             var result = new TableMetadata
             {
                 Identifier = table,
@@ -150,8 +172,10 @@ public partial class SqlServerGovernanceRepository
                 Columns = columns,
                 ColumnMaskingRules = maskingRules,
                 PrimaryKeyColumns = pkColumns,
-                Indexes = indexes
+                Indexes = indexes,
+                RowFilterEvaluation = rowFilterEvaluation
             };
+            result.ValidateRequiredFilterColumns();
 
             _metadataCache[cacheKey] = (result, DateTime.UtcNow.Ticks);
             return result;
@@ -208,11 +232,29 @@ public partial class SqlServerGovernanceRepository
             }
         }
 
+        if (result.Count == 0)
+        {
+            return result;
+        }
+
+        // Issue #111 (F-C6): rows served from the structural cache and freshly loaded rows alike get a fresh tier/tags overlay (`with`, no mutation).
+        await using (var overlayConn = await OpenConnectionAsync(ct).ConfigureAwait(false))
+        {
+            var overlay = await DatasetCatalogStore.ReadOverlayAsync(
+                overlayConn, null, CatalogKeyDefinitionStore.SqlServer, null, _logger, ct).ConfigureAwait(false);
+            for (var i = 0; i < result.Count; i++)
+            {
+                result[i] = DatasetCatalogStore.Apply(result[i], overlay);
+            }
+        }
+
         return result;
     }
 
     public async Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
     {
+        metadata.ValidateRequiredFilterColumns();
+        Autheris.Application.Dbt.Services.SemanticVirtualTables.EnsureNamespaceRespected(metadata);
         // Only a replacing write validates (and later persists) the definition; any other upsert never reads or rewrites it (SEC-94-01).
         if (metadata.ReplaceKeyDefinition)
         {
@@ -224,6 +266,7 @@ public partial class SqlServerGovernanceRepository
         try
         {
             var tableId = metadata.Table.Id == Guid.Empty ? Guid.NewGuid() : metadata.Table.Id;
+            var tableExisted = false;
 
             await using (var cmd = conn.CreateCommand())
             {
@@ -239,6 +282,7 @@ public partial class SqlServerGovernanceRepository
                 if (await reader.ReadAsync(ct).ConfigureAwait(false))
                 {
                     tableId = Guid.Parse(reader.GetString(0));
+                    tableExisted = true;
                 }
             }
 
@@ -266,9 +310,10 @@ public partial class SqlServerGovernanceRepository
                                               plugin_name = @plugin,
                                               description = COALESCE(@desc, t.description),
                                               long_description = COALESCE(@longDesc, t.long_description),
-                                              doc_source = COALESCE(@docSource, t.doc_source)
-                                          WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source)
-                                              VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource);";
+                                              doc_source = COALESCE(@docSource, t.doc_source),
+                                              required_filter_columns_json = @requiredFilterColumnsJson
+                                          WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json)
+                                              VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson);";
                 upsertCmd.Parameters.AddWithValue("@id", tableId.ToString());
                 upsertCmd.Parameters.AddWithValue("@sourceType", metadata.Table.SourceType);
                 upsertCmd.Parameters.AddWithValue("@domain", metadata.Identifier.Domain);
@@ -284,7 +329,14 @@ public partial class SqlServerGovernanceRepository
                 upsertCmd.Parameters.AddWithValue("@desc", (object?)metadata.Table.Description ?? DBNull.Value);
                 upsertCmd.Parameters.AddWithValue("@longDesc", (object?)metadata.Table.LongDescription ?? DBNull.Value);
                 upsertCmd.Parameters.AddWithValue("@docSource", (object?)metadata.Table.DocumentationSource ?? DBNull.Value);
+                upsertCmd.Parameters.AddWithValue("@requiredFilterColumnsJson", metadata.RequiredFilterColumns.IsDefaultOrEmpty ? (object)DBNull.Value : JsonSerializer.Serialize(metadata.RequiredFilterColumns));
                 await upsertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            // Issue #111 (A-10): the configured default tier is given to a NEW table only; the Hidden default writes no row.
+            if (!tableExisted && _options?.Catalog?.DefaultVisibility == DatasetVisibility.Summary)
+            {
+                await DatasetCatalogStore.InsertDefaultAsync(conn, tx, CatalogKeyDefinitionStore.SqlServer, tableId, DatasetVisibility.Summary, ct).ConfigureAwait(false);
             }
 
             var colIdByName = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
@@ -438,6 +490,100 @@ public partial class SqlServerGovernanceRepository
         return change;
     }
 
+    public async Task<RowFilterEvaluationChange?> SetRowFilterEvaluationAsync(
+        TableIdentifier table, RowFilterEvaluationSettings? settings, Sid actor, CancellationToken ct = default)
+    {
+        RowFilterEvaluationChange? change;
+        await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
+        {
+            await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
+            {
+                change = await RowFilterEvaluationStore.SetObjectAsync(
+                    conn, tx, CatalogKeyDefinitionStore.SqlServer, table, settings, actor,
+                    () => IncrementTableEpochInternalAsync(conn, tx, table, ct), ct).ConfigureAwait(false);
+                if (change is null)
+                {
+                    await tx.RollbackAsync(ct).ConfigureAwait(false);
+                    return null;
+                }
+
+                await tx.CommitAsync(ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                await tx.RollbackAsync(ct).ConfigureAwait(false);
+                throw;
+            }
+        }
+
+        _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
+        await _epochValidationService.InvalidateEpochAsync(table, ct).ConfigureAwait(false);
+        return change;
+    }
+
+    public async Task<DatasetVisibilityCounts> GetDatasetVisibilityCountsAsync(CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        return await DatasetCatalogStore.CountByVisibilityAsync(conn, null, CatalogKeyDefinitionStore.SqlServer, ct).ConfigureAwait(false);
+    }
+
+    public async Task<DatasetCatalogSettings?> GetDatasetCatalogSettingsAsync(TableIdentifier table, bool strict = true, CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        return await DatasetCatalogStore.ReadSettingsAsync(
+            conn, null, CatalogKeyDefinitionStore.SqlServer, table, strict, _logger, ct).ConfigureAwait(false);
+    }
+
+    public Task<DatasetCatalogChange?> ReplaceDatasetTagsAsync(
+        TableIdentifier table, IReadOnlyList<string> tags, DatasetTagSource source, Sid actor, CancellationToken ct = default) =>
+        WriteCatalogSettingsAsync(table, (conn, tx) =>
+            DatasetCatalogStore.ReplaceTagsAsync(conn, tx, CatalogKeyDefinitionStore.SqlServer, table, tags, source, actor, ct), ct);
+
+    public Task<DatasetCatalogChange?> ChangeDatasetTagsAsync(
+        TableIdentifier table, IReadOnlyList<string> add, IReadOnlyList<string> remove, Sid actor, CancellationToken ct = default) =>
+        WriteCatalogSettingsAsync(table, (conn, tx) =>
+            DatasetCatalogStore.ChangeTagsAsync(conn, tx, CatalogKeyDefinitionStore.SqlServer, table, add, remove, actor, ct), ct);
+
+    public Task<DatasetCatalogChange?> SetDatasetVisibilityAsync(
+        TableIdentifier table, DatasetVisibility visibility, Sid actor, CancellationToken ct = default) =>
+        WriteCatalogSettingsAsync(table, (conn, tx) =>
+            DatasetCatalogStore.SetVisibilityAsync(conn, tx, CatalogKeyDefinitionStore.SqlServer, table, visibility, actor, ct), ct);
+
+    /// <summary>Issue #111: one transaction (locked before read, write, after read); no epoch (tags are not policy inputs); the local metadata entry is dropped after the commit.</summary>
+    private async Task<DatasetCatalogChange?> WriteCatalogSettingsAsync(
+        TableIdentifier table, Func<SqlConnection, SqlTransaction, Task<DatasetCatalogChange?>> write, CancellationToken ct)
+    {
+        DatasetCatalogChange? change;
+        await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
+        {
+            await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
+            {
+                change = await write(conn, tx).ConfigureAwait(false);
+                if (change is null)
+                {
+                    await tx.RollbackAsync(ct).ConfigureAwait(false);
+                    return null;
+                }
+
+                await tx.CommitAsync(ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                await tx.RollbackAsync(ct).ConfigureAwait(false);
+                throw;
+            }
+        }
+
+        if (change.Changed)
+        {
+            _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
+        }
+
+        return change;
+    }
+
     public async Task<TableIdentifier?> GetActiveTableIdentifierAsync(TableIdentifier table, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
@@ -562,98 +708,154 @@ public partial class SqlServerGovernanceRepository
 
     public async Task<IReadOnlyList<TableRelation>> GetRelationsForTableAsync(TableIdentifier parentTable, CancellationToken ct = default)
     {
-        var list = new List<TableRelation>();
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"SELECT r.id, r.parent_table_id, r.child_table_id, r.relation_name, r.join_key_parent, r.join_key_child, r.cardinality,
+
+        // One statement: a reader never sees a mixed key set (SEC-REL151-06). Key rows are only reached through the join (SEC-REL151-08).
+        cmd.CommandText = @"SELECT r.id, r.parent_table_id, r.child_table_id, r.relation_name, r.cardinality,
                                    tp.source_name, tp.schema_name, tp.table_name,
-                                   tc.source_name, tc.schema_name, tc.table_name
+                                   tc.source_name, tc.schema_name, tc.table_name,
+                                   k.key_ordinal, k.parent_column, k.child_column
                             FROM TABLE_RELATIONS r
                             JOIN TABLES tp ON r.parent_table_id = tp.id
                             JOIN TABLES tc ON r.child_table_id = tc.id
-                            WHERE LOWER(tp.source_name) = LOWER(@pDomain) AND LOWER(tp.schema_name) = LOWER(@pSchema) AND LOWER(tp.table_name) = LOWER(@pTable)";
+                            LEFT JOIN TABLE_RELATION_KEYS k ON k.relation_id = r.id
+                            WHERE LOWER(tp.source_name) = LOWER(@pDomain) AND LOWER(tp.schema_name) = LOWER(@pSchema) AND LOWER(tp.table_name) = LOWER(@pTable)
+                            ORDER BY r.id, k.key_ordinal";
         cmd.Parameters.AddWithValue("@pDomain", parentTable.Domain);
         cmd.Parameters.AddWithValue("@pSchema", parentTable.Schema);
         cmd.Parameters.AddWithValue("@pTable", parentTable.TableName);
 
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        var rows = new List<RelationRowData>();
+        await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
-            var pId = new TableIdentifier(reader.GetString(7), reader.GetString(8), reader.GetString(9));
-            var cId = new TableIdentifier(reader.GetString(10), reader.GetString(11), reader.GetString(12));
-            var cardStr = reader.GetString(6);
-            var card = Enum.TryParse<RelationCardinality>(cardStr, true, out var parsedCard) ? parsedCard : RelationCardinality.OneToMany;
-
-            list.Add(new TableRelation
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                Id = Guid.Parse(reader.GetString(0)),
-                ParentTableId = Guid.Parse(reader.GetString(1)),
-                ParentTableIdentifier = pId,
-                ChildTableId = Guid.Parse(reader.GetString(2)),
-                ChildTableIdentifier = cId,
-                RelationName = reader.GetString(3),
-                JoinKeyParent = reader.GetString(4),
-                JoinKeyChild = reader.GetString(5),
-                Cardinality = card
-            });
+                rows.Add(new RelationRowData(
+                    reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4),
+                    new TableIdentifier(reader.GetString(5), reader.GetString(6), reader.GetString(7)),
+                    new TableIdentifier(reader.GetString(8), reader.GetString(9), reader.GetString(10)),
+                    reader.IsDBNull(11) ? null : reader.GetInt32(11),
+                    reader.IsDBNull(12) ? null : reader.GetString(12),
+                    reader.IsDBNull(13) ? null : reader.GetString(13)));
+            }
         }
 
-        return list;
+        return RelationRowAssembler.Assemble(rows, _logger);
     }
 
-    public async Task CreateRelationAsync(TableRelation relation, CancellationToken ct = default)
+    public async Task<RelationWriteResult> CreateRelationAsync(TableRelation relation, CancellationToken ct = default)
     {
+        // Rule check before any connection is opened (SEC-REL151-03).
+        RelationWriteSupport.ValidateKeysOrThrow(relation);
+
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        // One connection, one explicit transaction; disposing it uncommitted (failure or cancellation) rolls back all rows (SEC-REL151-06).
+        await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
 
-        string? parentTableId = null;
-        string? childTableId = null;
+        var parentTableId = await ResolveActiveTableIdAsync(conn, tx, relation.RelationName, relation.ParentTableIdentifier, ct).ConfigureAwait(false);
+        var childTableId = await ResolveActiveTableIdAsync(conn, tx, relation.RelationName, relation.ChildTableIdentifier, ct).ConfigureAwait(false);
+        var parentKeys = RelationWriteSupport.Canonicalize(relation.RelationName, "parent", relation.JoinKeysParent, await LoadColumnNamesAsync(conn, tx, parentTableId, ct).ConfigureAwait(false));
+        var childKeys = RelationWriteSupport.Canonicalize(relation.RelationName, "child", relation.JoinKeysChild, await LoadColumnNamesAsync(conn, tx, childTableId, ct).ConfigureAwait(false));
 
+        string storedId;
+        bool created;
+        // Natural-key upsert: only discovery-owned columns are in the update list (I-18 keeps allow_cross_data_source out of it).
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT TOP (1) id FROM TABLES WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
-            cmd.Parameters.AddWithValue("@domain", relation.ParentTableIdentifier.Domain);
-            cmd.Parameters.AddWithValue("@schema", relation.ParentTableIdentifier.Schema);
-            cmd.Parameters.AddWithValue("@table", relation.ParentTableIdentifier.TableName);
-            parentTableId = (await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false))?.ToString();
-        }
-
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = "SELECT TOP (1) id FROM TABLES WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
-            cmd.Parameters.AddWithValue("@domain", relation.ChildTableIdentifier.Domain);
-            cmd.Parameters.AddWithValue("@schema", relation.ChildTableIdentifier.Schema);
-            cmd.Parameters.AddWithValue("@table", relation.ChildTableIdentifier.TableName);
-            childTableId = (await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false))?.ToString();
-        }
-
-        if (parentTableId == null || childTableId == null)
-        {
-            throw new InvalidOperationException($"Cannot create relation '{relation.RelationName}': One or both tables do not exist in the catalog.");
-        }
-
-        await using (var cmd = conn.CreateCommand())
-        {
+            cmd.Transaction = tx;
             cmd.CommandText = @"MERGE TABLE_RELATIONS WITH (HOLDLOCK) AS t
-                                USING (SELECT @id AS id) AS s
-                                ON t.id = s.id
-                                WHEN MATCHED THEN UPDATE SET
-                                    parent_table_id = @pId,
-                                    child_table_id = @cId,
-                                    relation_name = @relName,
-                                    join_key_parent = @jkp,
-                                    join_key_child = @jkc,
-                                    cardinality = @card
-                                WHEN NOT MATCHED THEN INSERT (id, parent_table_id, child_table_id, relation_name, join_key_parent, join_key_child, cardinality)
-                                    VALUES (@id, @pId, @cId, @relName, @jkp, @jkc, @card);";
+                                USING (SELECT @pId AS p, @cId AS c, @relName AS n) AS s
+                                ON t.parent_table_id = s.p AND t.child_table_id = s.c AND t.relation_name = s.n
+                                WHEN MATCHED THEN UPDATE SET cardinality = @card
+                                WHEN NOT MATCHED THEN INSERT (id, parent_table_id, child_table_id, relation_name, cardinality)
+                                    VALUES (@id, @pId, @cId, @relName, @card)
+                                OUTPUT inserted.id, $action;";
             cmd.Parameters.AddWithValue("@id", relation.Id.ToString());
             cmd.Parameters.AddWithValue("@pId", parentTableId);
             cmd.Parameters.AddWithValue("@cId", childTableId);
             cmd.Parameters.AddWithValue("@relName", relation.RelationName);
-            cmd.Parameters.AddWithValue("@jkp", relation.JoinKeyParent);
-            cmd.Parameters.AddWithValue("@jkc", relation.JoinKeyChild);
             cmd.Parameters.AddWithValue("@card", relation.Cardinality.ToString());
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            await reader.ReadAsync(ct).ConfigureAwait(false);
+            storedId = reader.GetString(0);
+            created = string.Equals(reader.GetString(1), "INSERT", StringComparison.Ordinal);
+        }
+
+        // The upsert holds the relation row (row lock / HOLDLOCK range), so the stored pairs read here are consistent with the replace below.
+        var stored = new List<(string Parent, string Child)>();
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = "SELECT parent_column, child_column FROM TABLE_RELATION_KEYS WHERE relation_id = @id ORDER BY key_ordinal";
+            cmd.Parameters.AddWithValue("@id", storedId);
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                stored.Add((reader.GetString(0), reader.GetString(1)));
+            }
+        }
+
+        var keysChanged = !created && !RelationWriteSupport.SamePairs(stored, parentKeys, childKeys);
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = "DELETE FROM TABLE_RELATION_KEYS WHERE relation_id = @id";
+            cmd.Parameters.AddWithValue("@id", storedId);
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
+
+        for (var i = 0; i < parentKeys.Count; i++)
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = "INSERT INTO TABLE_RELATION_KEYS (relation_id, key_ordinal, parent_column, child_column) VALUES (@id, @ord, @pc, @cc)";
+            cmd.Parameters.AddWithValue("@id", storedId);
+            cmd.Parameters.AddWithValue("@ord", i + 1);
+            cmd.Parameters.AddWithValue("@pc", parentKeys[i]);
+            cmd.Parameters.AddWithValue("@cc", childKeys[i]);
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        ct.ThrowIfCancellationRequested();
+        await tx.CommitAsync(ct).ConfigureAwait(false);
+        return new RelationWriteResult(Guid.Parse(storedId), created, keysChanged);
+    }
+
+    /// <summary>Resolves an active table id from its identifier: zero or several matches throw (SEC-REL151-07, no LIMIT 1).</summary>
+    private static async Task<string> ResolveActiveTableIdAsync(SqlConnection conn, SqlTransaction tx, string relationName, TableIdentifier table, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SELECT id FROM TABLES WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table) AND is_active = 1";
+        cmd.Parameters.AddWithValue("@domain", table.Domain);
+        cmd.Parameters.AddWithValue("@schema", table.Schema);
+        cmd.Parameters.AddWithValue("@table", table.TableName);
+        var ids = new List<string>(2);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            ids.Add(reader.GetString(0));
+        }
+
+        return ids.Count == 1 ? ids[0] : throw RelationWriteSupport.TableNotResolved(relationName, table, ids.Count);
+    }
+
+    private static async Task<List<string>> LoadColumnNamesAsync(SqlConnection conn, SqlTransaction tx, string tableId, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SELECT column_name FROM TABLE_COLUMNS WHERE table_id = @t";
+        cmd.Parameters.AddWithValue("@t", tableId);
+        var names = new List<string>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            names.Add(reader.GetString(0));
+        }
+
+        return names;
     }
 
     public async Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default)

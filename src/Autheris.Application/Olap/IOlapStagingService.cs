@@ -11,9 +11,10 @@ public sealed record OlapQueryCommand(string Sql, IReadOnlyList<string>? TableNa
 
 /// <summary>
 /// Outcome of an OLAP execution: <see cref="Result"/> is set only for <c>200</c>; every failure carries the status code and the
-/// client-facing <see cref="Error"/> (and <see cref="Details"/> when the host allows exposing them).
+/// client-facing <see cref="Error"/> (and <see cref="Details"/> when the host allows exposing them). <see cref="ErrorCode"/> is a stable
+/// machine-readable code for policy denials; it never contains table, column or rule names.
 /// </summary>
-public sealed record OlapStagingOutcome(int StatusCode, string? Error = null, string? Details = null, OlapQueryResult? Result = null)
+public sealed record OlapStagingOutcome(int StatusCode, string? Error = null, string? Details = null, OlapQueryResult? Result = null, string? ErrorCode = null)
 {
     public bool IsSuccess => Result != null;
 }

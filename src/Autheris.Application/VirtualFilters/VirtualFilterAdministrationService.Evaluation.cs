@@ -22,7 +22,8 @@ public sealed partial class VirtualFilterAdministrationService
         {
             var catalog = _catalog ?? throw new ArgumentException("Virtual filters with a sql definition need the catalog to be validated.", nameof(filter));
             var tables = await catalog.GetAllTablesAsync(ct).ConfigureAwait(false);
-            return SqlFilterCompiler.Validate(filter, tables, _options.AllowedReferenceTables, _dataSources?.RequireTenantColumn == true, _dataSources?.TenantColumnExemptTables);
+            var attributes = _callerAttributes is null ? null : await _callerAttributes.GetAsync(ct).ConfigureAwait(false);
+            return SqlFilterCompiler.Validate(filter, tables, _options.AllowedReferenceTables, _dataSources?.RequireTenantColumn == true, _dataSources?.TenantColumnExemptTables, attributes);
         }
 
         if (filter.Structured != null && _catalog != null)

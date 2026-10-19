@@ -32,7 +32,8 @@ internal static class PostgreSqlBaselineSchema
                 is_active INTEGER NOT NULL,
                 data_source_type INTEGER NOT NULL DEFAULT 0,
                 http_endpoint_json TEXT,
-                plugin_name TEXT
+                plugin_name TEXT,
+                required_filter_columns_json TEXT
             );
 
             CREATE TABLE IF NOT EXISTS TABLE_COLUMNS (
@@ -101,6 +102,7 @@ internal static class PostgreSqlBaselineSchema
                 effect TEXT NOT NULL,
                 grantee_type TEXT NOT NULL,
                 grantee_sid TEXT,
+                grantee_sid_norm TEXT,
                 role_id TEXT,
                 role_name TEXT,
                 valid_from TEXT NOT NULL,
@@ -109,7 +111,9 @@ internal static class PostgreSqlBaselineSchema
                 revoked_by_sid TEXT,
                 revoked_at TEXT,
                 revoke_reason TEXT,
-                tenant_id TEXT NOT NULL DEFAULT 'legacy-single-tenant'
+                tenant_id TEXT NOT NULL DEFAULT 'legacy-single-tenant',
+                renewal_count INTEGER NOT NULL DEFAULT 0,
+                description TEXT CHECK (description IS NULL OR char_length(description) <= 2000)
             );
 
             CREATE TABLE IF NOT EXISTS CONSENT_COLUMN_RULES (
@@ -142,7 +146,10 @@ internal static class PostgreSqlBaselineSchema
                 dependent_valid_from_column TEXT,
                 dependent_valid_to_column TEXT,
                 target_table_alias TEXT,
-                additional_hops_json TEXT
+                additional_hops_json TEXT,
+                key_set_strategy INTEGER NULL,
+                key_set_duration_seconds INTEGER NULL,
+                key_set_max_keys INTEGER NULL
             );
 
             CREATE TABLE IF NOT EXISTS POLICY_EPOCHS (
@@ -186,6 +193,17 @@ internal static class PostgreSqlBaselineSchema
                 tenant_id TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS AUDIT_PURGE_CHECKPOINTS (
+                id TEXT PRIMARY KEY,
+                first_surviving_seq BIGINT NOT NULL,
+                surviving_prev_hash TEXT NOT NULL,
+                purged_count BIGINT NOT NULL,
+                purged_through_utc TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                signature TEXT NOT NULL,
+                external_signature TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS CONSENT_REQUESTS (
                 id TEXT PRIMARY KEY,
                 table_id TEXT NOT NULL,
@@ -198,7 +216,8 @@ internal static class PostgreSqlBaselineSchema
                 requested_valid_to TEXT NOT NULL,
                 itsm_ticket_id TEXT,
                 tenant_id TEXT,
-                requester_identifiers_json TEXT
+                requester_identifiers_json TEXT,
+                context_json TEXT
             );
 
             CREATE TABLE IF NOT EXISTS APPROVAL_STEPS (
@@ -229,15 +248,39 @@ internal static class PostgreSqlBaselineSchema
             CREATE UNIQUE INDEX IF NOT EXISTS ux_policy_epochs_natural
                 ON POLICY_EPOCHS (domain, schema_name, table_name);
 
+            -- WP-SC-01: indexes of the consent query. grantee_sid_norm is the upper-invariant grantee SID written by the repository
+            -- (case-insensitive subject match); rows without it (NULL) are always candidates, the C# filter stays authoritative.
+            CREATE INDEX IF NOT EXISTS ix_consents_tenant_table ON CONSENTS (tenant_id, table_id, is_revoked);
+            CREATE INDEX IF NOT EXISTS ix_consents_tenant_grantee ON CONSENTS (tenant_id, grantee_sid_norm, is_revoked);
+            CREATE INDEX IF NOT EXISTS ix_consents_tenant_role ON CONSENTS (tenant_id, role_name);
+            CREATE INDEX IF NOT EXISTS ix_consent_column_rules_consent ON CONSENT_COLUMN_RULES (consent_id);
+            CREATE INDEX IF NOT EXISTS ix_consent_row_filters_consent ON CONSENT_ROW_FILTERS (consent_id);
+            CREATE INDEX IF NOT EXISTS ix_column_masking_rules_column ON COLUMN_MASKING_RULES (table_column_id);
+            CREATE INDEX IF NOT EXISTS ix_role_members_member ON ROLE_MEMBERS (member_sid);
+            CREATE INDEX IF NOT EXISTS ix_table_owners_owner ON TABLE_OWNERS (data_owner_id);
+            CREATE INDEX IF NOT EXISTS ix_tables_natural_ci
+                ON TABLES (LOWER(source_name), LOWER(schema_name), LOWER(table_name));
+
             CREATE TABLE IF NOT EXISTS TABLE_RELATIONS (
                 id TEXT PRIMARY KEY,
                 parent_table_id TEXT NOT NULL,
                 child_table_id TEXT NOT NULL,
                 relation_name TEXT NOT NULL,
-                join_key_parent TEXT NOT NULL,
-                join_key_child TEXT NOT NULL,
                 cardinality TEXT NOT NULL
             );
+
+            -- Issue #151: composite-key relations. One row per ordered key pair; column names are validated on write.
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_table_relations_natural
+                ON TABLE_RELATIONS (parent_table_id, child_table_id, relation_name);
+            CREATE TABLE IF NOT EXISTS TABLE_RELATION_KEYS (
+                relation_id TEXT NOT NULL,
+                key_ordinal INTEGER NOT NULL CHECK (key_ordinal >= 1),
+                parent_column TEXT NOT NULL,
+                child_column TEXT NOT NULL,
+                PRIMARY KEY (relation_id, key_ordinal)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_table_relation_keys_parent ON TABLE_RELATION_KEYS (relation_id, parent_column);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_table_relation_keys_child ON TABLE_RELATION_KEYS (relation_id, child_column);
 
             CREATE TABLE IF NOT EXISTS ITSM_OUTBOX (
                 id TEXT PRIMARY KEY,
@@ -318,13 +361,20 @@ internal static class PostgreSqlBaselineSchema
                 subject_type VARCHAR(32) NOT NULL DEFAULT 'User',
                 assigned_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 expires_at TIMESTAMPTZ NULL,
-                CONSTRAINT pk_access_profile_assignments PRIMARY KEY (tenant_id, profile_id, subject),
+                subject_norm VARCHAR(256) NULL,
+                created_by VARCHAR(256) NULL,
+                approved_by VARCHAR(256) NULL,
+                approved_at TIMESTAMPTZ NULL,
+                justification TEXT NULL,
+                kind VARCHAR(32) NOT NULL DEFAULT 'Standard',
+                renewal_count INTEGER NOT NULL DEFAULT 0,
+                CONSTRAINT pk_access_profile_assignments PRIMARY KEY (tenant_id, profile_id, subject_type, subject),
                 CONSTRAINT fk_profile_assignments_profile FOREIGN KEY (tenant_id, profile_id) 
                     REFERENCES access_profiles (tenant_id, profile_id) ON DELETE CASCADE
             );
 
             CREATE INDEX IF NOT EXISTS ix_access_profile_assignments_subject 
-                ON access_profile_assignments(tenant_id, subject);
+                ON access_profile_assignments(tenant_id, subject_type, subject_norm);
 
             CREATE TABLE IF NOT EXISTS VIRTUAL_FILTER_GENERATION (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -332,6 +382,51 @@ internal static class PostgreSqlBaselineSchema
             );
 
             INSERT INTO VIRTUAL_FILTER_GENERATION (id, generation) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
+
+            -- Issue #129: caller attribute registry (four-eyes, draft beside the active row), service sets and one generation counter
+            CREATE TABLE IF NOT EXISTS CALLER_ATTRIBUTES (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                definition_json TEXT NOT NULL,
+                definition_hash TEXT NOT NULL,
+                status INTEGER NOT NULL,
+                created_by TEXT NOT NULL,
+                approved_by TEXT,
+                approved_at TEXT,
+                draft_definition_json TEXT,
+                draft_definition_hash TEXT,
+                draft_created_by TEXT,
+                pending_deletion INTEGER NOT NULL DEFAULT 0,
+                deletion_requested_by TEXT,
+                updated_by TEXT,
+                updated_at TEXT NOT NULL,
+                UNIQUE (tenant_id, name)
+            );
+
+            CREATE TABLE IF NOT EXISTS CALLER_ATTRIBUTE_SERVICE_SETS (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                application_id TEXT NOT NULL,
+                attribute_name TEXT NOT NULL,
+                values_json TEXT NOT NULL,
+                values_hash TEXT NOT NULL,
+                status INTEGER NOT NULL,
+                created_by TEXT NOT NULL,
+                approved_by TEXT,
+                approved_at TEXT,
+                draft_values_json TEXT,
+                draft_created_by TEXT,
+                updated_at TEXT NOT NULL,
+                UNIQUE (tenant_id, application_id, attribute_name)
+            );
+
+            CREATE TABLE IF NOT EXISTS CALLER_ATTRIBUTE_GENERATION (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                generation BIGINT NOT NULL
+            );
+
+            INSERT INTO CALLER_ATTRIBUTE_GENERATION (id, generation) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
 
             -- CR-ADG-31: tenant registry (grouped by NFKC + upper-case key; collided = 1 denies every spelling of the group)
             CREATE TABLE IF NOT EXISTS TENANT_REGISTRY (
@@ -489,6 +584,47 @@ internal static class PostgreSqlBaselineSchema
                 PRIMARY KEY (index_id, column_ordinal)
             );
             CREATE UNIQUE INDEX IF NOT EXISTS ux_table_index_columns_column ON TABLE_INDEX_COLUMNS (index_id, table_column_id);
+
+            -- Issue #107: object-level row filter evaluation strategy (key-set cache); separate from TABLES because ingestion upserts rewrite TABLES
+            CREATE TABLE IF NOT EXISTS TABLE_ROW_FILTER_STRATEGIES (
+                table_id TEXT PRIMARY KEY,
+                strategy INTEGER NULL,
+                duration_seconds INTEGER NULL,
+                max_keys INTEGER NULL,
+                updated_by TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            -- Issue #111: dataset catalog tags (admin / dbt source) and visibility tier; separate from TABLES because ingestion upserts rewrite TABLES.
+            -- No foreign keys and no CHECK constraints (as TABLE_ROW_FILTER_STRATEGIES): validity is enforced on write and re-validated on read.
+            CREATE TABLE IF NOT EXISTS TABLE_TAGS (
+                table_id TEXT NOT NULL,
+                tag TEXT NOT NULL,
+                source TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (table_id, tag)
+            );
+            CREATE TABLE IF NOT EXISTS TABLE_CATALOG_SETTINGS (
+                table_id TEXT PRIMARY KEY,
+                visibility INTEGER NOT NULL,
+                updated_by TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            -- Issue #112: one validated semantic (dbt) manifest per tenant (latest version only); a save replaces the row atomically.
+            -- No foreign key (tenant registry rows are optional in single-tenant installs). content_hash is the SHA-256 hex of manifest_json.
+            CREATE TABLE IF NOT EXISTS SEMANTIC_MANIFESTS (
+                tenant_id TEXT NOT NULL PRIMARY KEY,
+                manifest_version TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                format_version INTEGER NOT NULL,
+                models_count INTEGER NOT NULL,
+                metrics_count INTEGER NOT NULL,
+                manifest_json TEXT NOT NULL,
+                imported_by TEXT NOT NULL,
+                imported_at TEXT NOT NULL
+            );
         ";
         cmd.ExecuteNonQuery();
 
@@ -496,6 +632,9 @@ internal static class PostgreSqlBaselineSchema
         // hold INSERT/SELECT, the schema is applied with a separate migration role). One command per statement.
         ExecuteSchemaCommand(conn, @"CREATE OR REPLACE FUNCTION autheris_audit_append_only() RETURNS trigger AS $audit$
             BEGIN
+                IF TG_OP = 'DELETE' AND current_setting('autheris.audit_purge_authorized', true) = 'true' THEN
+                    RETURN OLD;
+                END IF;
                 RAISE EXCEPTION 'AUDIT_LOG_ENTRIES is append-only (%)', TG_OP USING ERRCODE = '42501';
             END;
             $audit$ LANGUAGE plpgsql");

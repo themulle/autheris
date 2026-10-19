@@ -16,6 +16,10 @@ public static class QueryDiagnosticCodes
     public const string UnknownColumn = "UNKNOWN_COLUMN";
     public const string MaskedColumnInFilter = "MASKED_COLUMN_IN_FILTER";
     public const string ReferencedTablesMismatch = "REFERENCED_TABLES_MISMATCH";
+    public const string QueryTooComplex = "QUERY_TOO_COMPLEX";
+
+    /// <summary>Informational: the analysis target is another principal whose token scopes are unknown (issue #127).</summary>
+    public const string TargetScopesUnknown = "TARGET_SCOPES_UNKNOWN";
 }
 
 /// <summary>
@@ -114,7 +118,8 @@ public sealed record DeprecatedFieldReference(
 public sealed record QueryCostEstimate(
     int EstimatedCost,
     int MaxAllowedCost,
-    bool IsWithinCostLimit);
+    bool IsWithinCostLimit,
+    IReadOnlyDictionary<string, int>? RootFieldCosts = null);
 
 /// <summary>
 /// Issue #79: Output 1 of static query analysis — validation report (syntax, schema, output columns, filter flags, cost, deprecations).
@@ -169,12 +174,58 @@ public sealed record QueryAccessRequirementsReport(
 }
 
 /// <summary>
+/// Issue #122 / #123 / #124 / #132: Query federation, predicate pushdown, dynamic key-sets, same-source subtrees, and co-located group analysis.
+/// </summary>
+public sealed record QueryFederationAnalysis(
+    IReadOnlyList<AnalyzedFederatedTable> Tables,
+    IReadOnlyList<AnalyzedKeySetPushdown>? KeySetPushdowns = null,
+    IReadOnlyList<AnalyzedSubtree>? Subtrees = null,
+    IReadOnlyList<CoLocatedGroupPlan>? CoLocatedGroups = null);
+
+public sealed record AnalyzedKeySetPushdown(
+    string DrivingTable,
+    string DrivenTable,
+    string TargetColumn,
+    int? PushedKeyCount = null,
+    int? EstimatedBatches = null);
+
+/// <summary>
+/// Issue #132 (PLAN-DATA-132, WP-132-4): Co-located SQL Server group plan in query analysis.
+/// </summary>
+public sealed record CoLocatedGroupPlan(
+    string GroupName,
+    IReadOnlyList<string> Databases,
+    IReadOnlyList<string> MemberTables,
+    bool SingleStatementExecuted);
+
+/// <summary>
+/// Issue #123 (WP-123-4): Analysis of planned same-source AST subtree pushdown.
+/// </summary>
+public sealed record AnalyzedSubtree(
+    string SubtreeId,
+    string SourceName,
+    IReadOnlyList<string> MemberTables,
+    string GeneratedSql,
+    IReadOnlyList<string> ProjectedColumns);
+
+public sealed record AnalyzedFederatedTable(
+    string Table,
+    string DataSource,
+    bool PushdownApplied,
+    IReadOnlyList<AnalyzedPushedPredicate> PushedPredicates,
+    IReadOnlyList<AnalyzedResidualPredicate> ResidualPredicates);
+
+public sealed record AnalyzedPushedPredicate(string Column, string Operator);
+public sealed record AnalyzedResidualPredicate(string Column, string Reason);
+
+/// <summary>
 /// Issue #79: Combined result of zero-read static query analysis.
 /// </summary>
 public sealed record QueryAnalysisResult(
     QueryValidationReport ValidationReport,
     QueryAccessRequirementsReport AccessRequirements,
-    int SourceDatabaseReadsExecuted = 0);
+    int SourceDatabaseReadsExecuted = 0,
+    QueryFederationAnalysis? Federation = null);
 
 /// <summary>
 /// Issue #79: Request to submit a bundled multi-table consent request derived from an access requirements report.

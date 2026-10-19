@@ -7,4 +7,7 @@ using System;
 /// profile, Virtual Filter, Casbin merge) and the column mask factory. A site without it produces string-only decisions, which the compiler
 /// path denies; DI registers it once for every site.
 /// </summary>
-public sealed record TypedPolicySources(RowPolicyFactory RowPolicies, ColumnMaskPolicyFactory MaskPolicies);
+public sealed record TypedPolicySources(
+    RowPolicyFactory RowPolicies,
+    ColumnMaskPolicyFactory MaskPolicies,
+    Autheris.Application.Identity.Attributes.ICallerAttributeResolver? CallerAttributes = null);

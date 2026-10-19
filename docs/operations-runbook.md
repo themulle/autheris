@@ -299,6 +299,32 @@ Reference: F-SEC-06.
 - **Cluster state outage.** The decision cache is bypassed on affected tenants (warning `Casbin policy epoch could not be read; decision cache bypassed.`). Decisions stay correct; expect higher policy evaluation latency until the store is back.
 - **Reload failures.** A missing or invalid policy file during a cluster-triggered reload keeps the last-known-good policy set and is retried at the next epoch check; check the gateway log for `Casbin policy reload after a cluster epoch change failed` or `policy file ... is missing`.
 
+### 4.ai Decision cache kill switch (shape-shared decisions)
+
+By default, users that match exactly the same Casbin rules share one cached decision when no candidate rule reads a user-specific input ([F-SEC-06, section 2.2a](features/f-sec-06-casbin-decision-cache-policy-epoch.md)). If a shared decision is suspected to be wrong for a user (for example after adding a rule whose `sub_rule` uses an unusual construct):
+
+1. Set `Gateway:Casbin:DecisionCache:ShareAcrossUsers=false` (environment variable `Gateway__Casbin__DecisionCache__ShareAcrossUsers=false`) and roll the replicas. Every decision is keyed by user again; nothing else changes.
+2. Expect a lower hit ratio and more `sub_rule` evaluations per request until the cache warms up per user. Keep `Capacity` at the default `100000` or raise it.
+3. Re-enable sharing after the rule set was corrected. Decisions for delegated sources are never shared, regardless of the switch.
+
+A full decision cache flush is a policy publish or a restart; there is no flush endpoint.
+
+### 4.aj Audit group commit
+
+Required audit writes (administrative changes, security events, denials and allow records written through `IAuditWriter.RecordRequiredAsync`) are coalesced by `AuditGroupCommitSink` into batches of up to 64 entries (5 ms coalescing window, 4,096 pending entries before back-pressure), each written in one transaction with one chain-tail read and one anchor ([F-AUDIT-01, section 10](features/f-audit-01-hardened-cryptographic-audit.md)).
+
+- **Latency:** a required write may wait up to the coalescing window plus one batch commit. Callers block until their batch is committed (and, for Tier-A entries, anchored).
+- **Anchor failures:** when the anchor of a batch with a Tier-A entry cannot be persisted, the rows are committed but the callers get `503` (`AuditUnavailableException`). Check the anchor store (file path, WORM directory, KMS signer) and `autheris_audit_write_failed_total{tier="required"}`. The next successful batch anchors the tail; chain verification (section 4.2) stays valid.
+- **Back-pressure:** when the governance database is slow, pending entries fill the channel and callers wait instead of losing entries. Watch governance DB latency and connection pool usage before raising replica counts.
+
+### 4.ak Individual grant expiry and clamped grants
+
+Individual grants are time-bound ([F-GOV-22](features/f-gov-22-time-bound-individual-grants.md)). Existing individual grants with no or an over-long expiry are clamped at read time, and grants older than the class maximum become inactive immediately after an upgrade.
+
+- **Before an upgrade or a change of `Gateway:Governance:IndividualGrants`:** list the affected grants with `GET /api/v1/governance/grants?clamped=true&includeInactive=true` (paged with `cursor`), and plan renewals with the data owners.
+- **After a user reports lost access:** check the grant in `GET /api/v1/governance/grants?grantee=<sid>&includeInactive=true` (`effectiveValidTo`, `clamped`, `isActive`). Restore access through a renewal by an owner or delegate, or convert recurring needs into a group/role mapping. The grantee cannot renew its own grant.
+- **`Unmasked` profiles:** an `Unmasked` assignment is effective only as an approved group/role mapping, a four-eyes individual grant (≤ 30 days) or a break-glass exception (≤ 72 hours, approved within 24 hours). Unapproved assignments are ignored, so masking stays on.
+
 ## 5. Data Catalog Synchronization Operations
 
 ### 5.1 Monitoring Background Sync
@@ -453,6 +479,35 @@ For high-throughput environments, configure ASP.NET Core Kestrel limits in `apps
 * **Connection Pooling:** Set upstream database `MaxPoolSize` according to pod replica count to avoid exhausting database connection pools (`MaxPoolSize=100` per pod on typical setups).
 * **Redis Sizing:** Maintain an active connection pool with `abortConnect=false` and keep-alive pings enabled; L2 policy cache size rarely exceeds 200 MB even with 50,000 active consents.
 
+
+### 9.4 Sizing for 5,000 Named Users
+
+Reference workload: 5,000 named users (plus about 50 service principals), 10% concurrently active, 1 request per 10 seconds per active user (about 50 rps steady), a peak factor of 10 plus about 100 rps of agents, ETL and MCP, giving a **design peak of about 600 rps cluster-wide** with about 2.5 tables per request; 20 to 50 group SIDs per token; 2,000 to 10,000 governed tables; 500 to 5,000 Casbin lines.
+
+| Resource | Recommendation |
+| :--- | :--- |
+| Gateway replicas | **3 × 4 vCPU / 8 GB** (2 would carry the load; 3 for HA). Expected hot-path CPU about 1.5 to 3 cores cluster-wide. |
+| Gateway memory | About 1.5 to 2.5 GB steady per replica with the bounded caches. Keep `Caching:L1MemoryCache:SizeLimitMb` at 512; leave headroom for buffered exports. |
+| Casbin decision cache | `Capacity` 100,000 (default) and `ShareAcrossUsers=true`. With mostly group-based rules the working set is per rule shape, not per user. |
+| Governance database | PostgreSQL (or SQL Server) with the consent indexes of the baseline ([F-GOV-12](features/f-gov-12-multi-engine-governance-storage.md)). Default pool of 100 connections per replica; verify `replicas × pool ≤ max_connections − headroom`. Audit load is about 5 to 10 batch commits per second at peak instead of one round trip per row. |
+| Redis | Standalone or Redis Cluster (epoch reads are single-key and Cluster-safe). About 2,000 ops/s at peak; the 150 ms staleness budget saves one round trip per request for non-sensitive tables. Enable AOF persistence (F-OPS-02). |
+| Basic-auth clients | Set `Authentication:BasicAuth:MarkerKeyRef` so BI tools pay the password hash once per cluster, not once per replica. |
+| Source databases | Size `Max Pool Size` per source as source capacity divided by the replica count; concurrency per node is bounded by the Interactive resource group (50). |
+| Async jobs | Per-node limits apply (`MaxConcurrentJobs` etc., section 4.ag); raise them per node size and use a shared scratch volume when exports are common. |
+
+Bounded in-process caches (BitFaster `ConcurrentLru`, eviction only produces a recomputation from the authoritative source):
+
+| Cache | Bound |
+| :--- | :--- |
+| Mandatory row filter memo (virtual filters) | 50,000 entries; object patterns 10,000 |
+| Repository table metadata (all engines) | 20,000 tables |
+| Casbin candidate rules per (tenant, table, action) | 20,000 |
+| Policy shape analysis | 20,000 rules |
+| Compiled `sub_rule` delegates | 20,000 expressions |
+| Governed SQL stage-1 analyses | 4,096 statements |
+| Masking regular expressions | 2,000 patterns |
+
+Validate a deployment with a load test at the design peak before go-live (ramp to 600 rps, then 1.5× for headroom) and watch, in this order: audit write latency, decision cache hit ratio, consent cache misses after epoch bumps, gateway memory, and thread-pool queue length.
 
 ## 10. CDC Webhook Subscriptions: Key Provisioning and Rotation
 

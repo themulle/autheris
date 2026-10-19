@@ -7,6 +7,7 @@ using System.Text.Json.Nodes;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Services;
+using Autheris.Application.Sql.Tree.Federation;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
@@ -29,6 +30,12 @@ public interface IGovernedTreeQueryService
         IReadOnlyDictionary<string, string[]>? requestHeaders,
         string operationId,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Lists the columns of <paramref name="root"/> that are masked for the caller, using the access decisions memoized
+    /// by a preceding <see cref="ExecuteAsync"/> of the same operation. Empty when nothing is masked or no decision exists.
+    /// </summary>
+    IReadOnlyList<TreeMaskedColumn> GetMaskedColumns(ClaimsPrincipal? principal, TreeQueryNode root, string operationId);
 
     /// <summary>
     /// Cleans up any cached table access decisions, locks, and audit tracking for the given GraphQL operation.
@@ -105,6 +112,42 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         _concurrencyGate = concurrencyGate;
         _logger = logger;
         _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
+    }
+
+    public IReadOnlyList<TreeMaskedColumn> GetMaskedColumns(ClaimsPrincipal? principal, TreeQueryNode root, string operationId)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        if (string.IsNullOrWhiteSpace(operationId))
+        {
+            return [];
+        }
+
+        var tenant = principal.GetTenantId().Value;
+        var userSid = principal.GetUserSid()?.Value;
+        if (string.IsNullOrWhiteSpace(userSid))
+        {
+            userSid = "anonymous";
+        }
+
+        if (!_memos.TryGetValue($"{operationId}|{tenant}|{userSid}", out var memo))
+        {
+            return [];
+        }
+
+        var columnsByTable = new Dictionary<TableIdentifier, List<string>>();
+        CollectColumns(root, columnsByTable);
+
+        var treeAccess = new Dictionary<TableIdentifier, TreeTableAccess>();
+        foreach (var table in columnsByTable.Keys)
+        {
+            if (!memo.AccessByTable.TryGetValue((table, tenant, userSid), out var access) || !access.Decision.IsAllowed)
+            {
+                return [];
+            }
+            treeAccess[table] = new TreeTableAccess(access.Metadata, access.Decision);
+        }
+
+        return TreeSqlCompiler.CollectMaskedColumns(root, treeAccess, _options.IsColumnMaskingDisabled);
     }
 
     public void ClearOperation(string operationId)
@@ -220,7 +263,9 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             resolved[table] = access;
         }
 
-        // 2. One SQL data source, provider dialect == catalog dialect.
+        // 2. One SQL data source, provider dialect == catalog dialect. The source-name rule is shared with the schema
+        //    (RelationExecutability.IsSameExecutionSource); the type and dialect checks stay separate here so that each
+        //    failure keeps its own exception and message. Together they are never more permissive than the schema predicate.
         var rootAccess = resolved[root.Table];
         var sourceName = rootAccess.Metadata.Table.SourceName;
         foreach (var access in resolved.Values)
@@ -229,7 +274,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             {
                 throw new GatewayInvalidQueryException($"The table '{access.Metadata.Identifier}' is not a SQL table and cannot be queried with relations.");
             }
-            if (!string.Equals(access.Metadata.Table.SourceName, sourceName, StringComparison.OrdinalIgnoreCase))
+            if (!RelationExecutability.HasSameSourceName(rootAccess.Metadata, access.Metadata))
             {
                 throw new GatewayInvalidQueryException("Relations across data sources are not supported in one query.");
             }

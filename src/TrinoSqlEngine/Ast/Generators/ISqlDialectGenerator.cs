@@ -15,6 +15,7 @@ public interface ISqlDialectGenerator
     TargetSqlDialect TargetDialect { get; }
     void GenerateSql(SqlStatement statement, ref ValueStringBuilder builder, SqlEmitterContext context);
     string GenerateSql(SqlStatement statement);
+    string GenerateSql(SqlStatement statement, SqlEmitterContext context);
 
     /// <summary>Capabilities of the dialect; a dialect without a capability entry throws.</summary>
     DialectCapabilities Capabilities { get; }

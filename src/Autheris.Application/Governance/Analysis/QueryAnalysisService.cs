@@ -13,6 +13,7 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Options;
 
 /// <summary>
@@ -30,6 +31,11 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
     private readonly ISchemaSunsettingService? _sunsettingService;
     private readonly GatewayOptions _gatewayOptions;
     private readonly QueryAnalysisOptions _analysisOptions;
+    private readonly Autheris.Domain.Interfaces.IConsentResolutionService _consentResolution;
+    private readonly Microsoft.Extensions.Logging.ILogger<QueryAnalysisService>? _logger;
+    private readonly Autheris.Domain.Security.IRestrictedScopePolicy _restrictedScopes;
+    private readonly IGraphQlCostAnalysisEngine? _costAnalysisEngine;
+    private readonly int _maxRootFields;
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     public QueryAnalysisService(
@@ -40,15 +46,28 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         IAccessProfileRepository? accessProfileRepository = null,
         ISchemaSunsettingService? sunsettingService = null,
         IOptions<GatewayOptions>? gatewayOptions = null,
-        QueryAnalysisOptions? analysisOptions = null)
+        QueryAnalysisOptions? analysisOptions = null,
+        Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null,
+        Microsoft.Extensions.Logging.ILogger<QueryAnalysisService>? logger = null,
+        Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
+        IGraphQlCostAnalysisEngine? costAnalysisEngine = null)
     {
+        // The default is the secure list (REQ-GOV-143), never "off".
+        _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
         _dataOwnershipRepository = dataOwnershipRepository;
+        // The default is the production resolver (stateless), never a weaker one (issue #127).
+        _consentResolution = consentResolution ?? new Autheris.Application.Services.ConsentResolutionService();
+        _logger = logger;
         _accessProfileRepository = accessProfileRepository;
         _sunsettingService = sunsettingService;
         _gatewayOptions = gatewayOptions?.Value ?? new GatewayOptions();
+        _costAnalysisEngine = costAnalysisEngine;
+        _maxRootFields = _gatewayOptions.GraphQL.MaxRootFieldsPerOperation > 0
+            ? _gatewayOptions.GraphQL.MaxRootFieldsPerOperation
+            : 10;
         _analysisOptions = analysisOptions ?? new QueryAnalysisOptions
         {
             MaxAllowedCost = _gatewayOptions.GraphQL.MaxAllowedComplexity > 0
@@ -64,14 +83,27 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         IAccessProfileRepository? accessProfileRepository = null,
         ISchemaSunsettingService? sunsettingService = null,
         IOptions<GatewayOptions>? gatewayOptions = null,
-        QueryAnalysisOptions? analysisOptions = null)
+        QueryAnalysisOptions? analysisOptions = null,
+        Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null,
+        Microsoft.Extensions.Logging.ILogger<QueryAnalysisService>? logger = null,
+        Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
+        IGraphQlCostAnalysisEngine? costAnalysisEngine = null)
     {
+        // The default is the secure list (REQ-GOV-143), never "off".
+        _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _dataOwnershipRepository = dataOwnershipRepository;
+        // The default is the production resolver (stateless), never a weaker one (issue #127).
+        _consentResolution = consentResolution ?? new Autheris.Application.Services.ConsentResolutionService();
+        _logger = logger;
         _accessProfileRepository = accessProfileRepository;
         _sunsettingService = sunsettingService;
         _gatewayOptions = gatewayOptions?.Value ?? new GatewayOptions();
+        _costAnalysisEngine = costAnalysisEngine;
+        _maxRootFields = _gatewayOptions.GraphQL.MaxRootFieldsPerOperation > 0
+            ? _gatewayOptions.GraphQL.MaxRootFieldsPerOperation
+            : 10;
         _analysisOptions = analysisOptions ?? new QueryAnalysisOptions
         {
             MaxAllowedCost = _gatewayOptions.GraphQL.MaxAllowedComplexity > 0
@@ -112,6 +144,14 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         var sunsetRules = await LoadSunsettingRulesAsync(ct).ConfigureAwait(false);
         var isAdmin = IsAdminPrincipal(effectivePrincipal);
 
+        // Issue #127: the caller's own token scopes (claims overload, as the data path) are only known for the caller itself;
+        // an impersonated target carries no token, so its levels are predicted for the worst case (see ResolveTableColumnLevels).
+        var targetImpersonated = targetPrincipal != null &&
+            !string.Equals(callerSid.Value.Value, effectiveSid.Value, StringComparison.OrdinalIgnoreCase);
+        var scopeContext = new AnalysisScopeContext(
+            targetImpersonated ? new HashSet<string>(StringComparer.OrdinalIgnoreCase) : TokenAccessScope.GetScopeSet(callerPrincipal.Claims),
+            targetImpersonated);
+
         var diagnostics = new List<QueryValidationDiagnostic>();
         var outputColumns = new List<AnalyzedOutputColumn>();
         var outputColumnKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -120,17 +160,30 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         var missingConsents = new List<RequestableConsentItem>();
         var missingConsentKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var populatedReferencedTables = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        var federatedTables = new List<AnalyzedFederatedTable>();
+        var keySetPushdowns = new List<AnalyzedKeySetPushdown>();
+        var plannedSubtrees = new List<AnalyzedSubtree>();
+        var coLocatedGroups = new List<CoLocatedGroupPlan>();
 
         var hasRowFilters = false;
         var hasMandatoryVirtualFilters = false;
         var isBlockedByMandatoryFilter = false;
         var hiddenMissingDatasetsCount = 0;
         var totalEstimatedCost = 0;
+        var aggregatedRootFieldCosts = new Dictionary<string, int>(StringComparer.Ordinal);
 
         for (var i = 0; i < queries.Count; i++)
         {
             var item = queries[i];
             var queryName = string.IsNullOrWhiteSpace(item.Name) ? $"query_{i + 1}" : item.Name!;
+
+            if (scopeContext.TargetImpersonated)
+            {
+                diagnostics.Add(new QueryValidationDiagnostic(
+                    QueryDiagnosticCodes.TargetScopesUnknown,
+                    "The token scopes of the target principal are unknown; the predicted column access assumes the strictest outcome with and without scope-specific consent rules.",
+                    QueryName: queryName));
+            }
 
             if (!string.IsNullOrWhiteSpace(item.GraphQlQuery))
             {
@@ -141,6 +194,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     effectivePrincipal,
                     effectiveSid.Value,
                     isAdmin,
+                    scopeContext,
                     activeConsents,
                     sunsetRules,
                     tableLookup,
@@ -155,11 +209,16 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     deprecatedKeys,
                     missingConsents,
                     missingConsentKeys,
+                    aggregatedRootFieldCosts,
                     ref hasRowFilters,
                     ref hasMandatoryVirtualFilters,
                     ref isBlockedByMandatoryFilter,
                     ref hiddenMissingDatasetsCount,
-                    ref totalEstimatedCost);
+                    ref totalEstimatedCost,
+                    federatedTables,
+                    keySetPushdowns,
+                    plannedSubtrees,
+                    coLocatedGroups);
             }
             else if (item.SqlEndpoint != null)
             {
@@ -170,6 +229,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     effectivePrincipal,
                     effectiveSid.Value,
                     isAdmin,
+                    scopeContext,
                     activeConsents,
                     sunsetRules,
                     tableLookup,
@@ -192,11 +252,16 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     deprecatedKeys,
                     missingConsents,
                     missingConsentKeys,
+                    aggregatedRootFieldCosts,
                     ref hasRowFilters,
                     ref hasMandatoryVirtualFilters,
                     ref isBlockedByMandatoryFilter,
                     ref hiddenMissingDatasetsCount,
-                    ref totalEstimatedCost);
+                    ref totalEstimatedCost,
+                    federatedTables,
+                    keySetPushdowns,
+                    plannedSubtrees,
+                    coLocatedGroups);
             }
             else if (item.StoredProcedure != null)
             {
@@ -209,6 +274,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                         effectivePrincipal,
                         effectiveSid.Value,
                         isAdmin,
+                        scopeContext,
                         activeConsents,
                         sunsetRules,
                         tableLookup,
@@ -231,11 +297,16 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                         deprecatedKeys,
                         missingConsents,
                         missingConsentKeys,
+                        aggregatedRootFieldCosts,
                         ref hasRowFilters,
                         ref hasMandatoryVirtualFilters,
                         ref isBlockedByMandatoryFilter,
                         ref hiddenMissingDatasetsCount,
-                        ref totalEstimatedCost);
+                        ref totalEstimatedCost,
+                        federatedTables,
+                    keySetPushdowns,
+                    plannedSubtrees,
+                    coLocatedGroups);
                 }
                 else
                 {
@@ -246,6 +317,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                         effectivePrincipal,
                         effectiveSid.Value,
                         isAdmin,
+                        scopeContext,
                         activeConsents,
                         sunsetRules,
                         tableLookup,
@@ -260,11 +332,16 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                         deprecatedKeys,
                         missingConsents,
                         missingConsentKeys,
+                        aggregatedRootFieldCosts,
                         ref hasRowFilters,
                         ref hasMandatoryVirtualFilters,
                         ref isBlockedByMandatoryFilter,
                         ref hiddenMissingDatasetsCount,
-                        ref totalEstimatedCost);
+                        ref totalEstimatedCost,
+                        federatedTables,
+                    keySetPushdowns,
+                    plannedSubtrees,
+                    coLocatedGroups);
                 }
             }
             else if (!string.IsNullOrWhiteSpace(item.SqlQuery))
@@ -275,6 +352,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     effectivePrincipal,
                     effectiveSid.Value,
                     isAdmin,
+                    scopeContext,
                     activeConsents,
                     sunsetRules,
                     tableLookup,
@@ -289,11 +367,16 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     deprecatedKeys,
                     missingConsents,
                     missingConsentKeys,
+                    aggregatedRootFieldCosts,
                     ref hasRowFilters,
                     ref hasMandatoryVirtualFilters,
                     ref isBlockedByMandatoryFilter,
                     ref hiddenMissingDatasetsCount,
-                    ref totalEstimatedCost);
+                    ref totalEstimatedCost,
+                    federatedTables,
+                    keySetPushdowns,
+                    plannedSubtrees,
+                    coLocatedGroups);
             }
             else
             {
@@ -305,16 +388,27 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         }
 
         var maxAllowedCost = _analysisOptions.MaxAllowedCost > 0 ? _analysisOptions.MaxAllowedCost : 500;
+        if (totalEstimatedCost > maxAllowedCost)
+        {
+            var queryName = queries.Count == 1 ? (queries[0].Name ?? "query_1") : null;
+            diagnostics.Add(new QueryValidationDiagnostic(
+                QueryDiagnosticCodes.QueryTooComplex,
+                $"The query exceeds the complexity budget of {maxAllowedCost} (calculated cost: {totalEstimatedCost}).",
+                QueryName: queryName));
+        }
+
         var costEstimate = new QueryCostEstimate(
             EstimatedCost: totalEstimatedCost,
             MaxAllowedCost: maxAllowedCost,
-            IsWithinCostLimit: totalEstimatedCost <= maxAllowedCost);
+            IsWithinCostLimit: totalEstimatedCost <= maxAllowedCost,
+            RootFieldCosts: aggregatedRootFieldCosts.Count > 0 ? aggregatedRootFieldCosts : null);
 
         var isValid = diagnostics.All(d =>
             !string.Equals(d.Code, QueryDiagnosticCodes.SyntaxError, StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(d.Code, QueryDiagnosticCodes.UnknownTable, StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(d.Code, QueryDiagnosticCodes.UnknownColumn, StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(d.Code, QueryDiagnosticCodes.ReferencedTablesMismatch, StringComparison.OrdinalIgnoreCase));
+            !string.Equals(d.Code, QueryDiagnosticCodes.ReferencedTablesMismatch, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(d.Code, QueryDiagnosticCodes.QueryTooComplex, StringComparison.OrdinalIgnoreCase));
 
         var validationReport = new QueryValidationReport(
             IsValid: isValid,
@@ -360,10 +454,19 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
             }, ct).ConfigureAwait(false);
         }
 
+        var federation = (federatedTables.Count > 0 || keySetPushdowns.Count > 0 || plannedSubtrees.Count > 0 || coLocatedGroups.Count > 0)
+            ? new QueryFederationAnalysis(
+                federatedTables,
+                keySetPushdowns.Count > 0 ? keySetPushdowns : null,
+                plannedSubtrees.Count > 0 ? plannedSubtrees : null,
+                coLocatedGroups.Count > 0 ? coLocatedGroups : null)
+            : null;
+
         return new QueryAnalysisResult(
             ValidationReport: validationReport,
             AccessRequirements: accessRequirements,
-            SourceDatabaseReadsExecuted: 0);
+            SourceDatabaseReadsExecuted: 0,
+            Federation: federation);
     }
 
     public async Task<IReadOnlyList<DatasetGrantGapSummary>> EvaluateGroupAccessRequirementsAsync(
@@ -422,14 +525,16 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         return !string.IsNullOrWhiteSpace(idClaim) ? new Sid(idClaim.Trim()) : (Sid?)null;
     }
 
+    /// <summary>
+    /// GovernanceAdmin or the canonical ClusterAdmin (same trust root as the catalog; ForwardAuth identities and tenant-prefixed
+    /// roles never qualify as ClusterAdmin).
+    /// </summary>
     internal static bool IsAdminPrincipal(ClaimsPrincipal principal)
     {
         var roles = principal.GetUserRoles();
         return roles.Contains("GovernanceAdmin") ||
-               roles.Contains("ClusterAdmin") ||
                principal.IsInRole("GovernanceAdmin") ||
-               principal.IsInRole("ClusterAdmin") ||
-               principal.IsInRole("admin");
+               Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
     }
 
     internal static bool HasSimulatePrivilege(ClaimsPrincipal principal)

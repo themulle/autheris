@@ -23,6 +23,25 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
     protected override bool SupportsTryCast => true;
     protected override bool SupportsJoinUsing => false;
 
+    protected override bool EmitsTimeZoneConversion => true;
+
+    /// <summary>
+    /// <c>CAST(((ts) AT TIME ZONE from) AT TIME ZONE to AS datetime2)</c>: the first operator reads the plain value as local time of <c>from</c>, the second
+    /// moves the instant to <c>to</c>, and the cast to <c>datetime2</c> keeps the local date and time and drops the offset. Both zones are bound (Windows ids).
+    /// </summary>
+    protected override void FormatConvertTimeZone(ref ValueStringBuilder builder, FunctionCallExpression fn, SqlEmitterContext context)
+    {
+        builder.Append("CAST(((");
+        GenerateExpression(fn.Arguments[2], ref builder, context);
+        builder.Append(") AT TIME ZONE ");
+        AppendZoneArgument(ref builder, fn.Arguments[0], context);
+        builder.Append(") AT TIME ZONE ");
+        AppendZoneArgument(ref builder, fn.Arguments[1], context);
+        builder.Append(" AS ");
+        AppendStructural(ref builder, context, "datetime2");
+        builder.Append(')');
+    }
+
     /// <summary>
     /// T-SQL requires a terminating semicolon after MERGE. It is appended exactly once, as the last character, and registered with
     /// the emitted-text checker, which allows a semicolon nowhere else (SEC-ADG-08 c).
@@ -577,5 +596,25 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
             GenerateStructuralInteger(pagination.Limit, ref builder, context);
             builder.Append(pagination.WithTies ? " ROWS WITH TIES" : " ROWS ONLY");
         }
+    }
+
+    /// <summary>
+    /// Issue #132 (PLAN-DATA-132, WP-132-3): Emits physical three-part table names [database].[schema].[table]
+    /// when <see cref="SqlEmitterContext.EmitThreePartNames"/> is true and the table has 3 parts.
+    /// Otherwise retains standard two-part qualification [schema].[table].
+    /// </summary>
+    public override void FormatTableName(ref ValueStringBuilder builder, SqlQualifiedName name, SqlEmitterContext context)
+    {
+        if (context.EmitThreePartNames && name.Parts.Count == 3)
+        {
+            for (int i = 0; i < name.Parts.Count; i++)
+            {
+                if (i > 0) builder.Append('.');
+                FormatIdentifier(ref builder, name.Parts[i], context);
+            }
+            return;
+        }
+
+        base.FormatTableName(ref builder, name, context);
     }
 }

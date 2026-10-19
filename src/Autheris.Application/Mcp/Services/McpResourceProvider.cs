@@ -30,11 +30,16 @@ public sealed class McpResourceProvider : IMcpResourceProvider
     private readonly ICatalogDiscoveryService _discovery;
     private readonly IApiDispatcherService _dispatcher;
 
-    public McpResourceProvider(ICatalogDiscoveryService discovery, IApiDispatcherService dispatcher)
+    private readonly IReadPathSwitches? _switches;
+
+    public McpResourceProvider(ICatalogDiscoveryService discovery, IApiDispatcherService dispatcher, IReadPathSwitches? switches = null)
     {
         _discovery = discovery ?? throw new ArgumentNullException(nameof(discovery));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
+        _switches = switches;
     }
+
+    public bool IsResourceEnabled(string uri) => _switches?.IsResourceEnabled(uri) ?? true;
 
     public bool IsNativeResource(string uri) =>
         uri.StartsWith("autheris://catalog/", StringComparison.OrdinalIgnoreCase) ||
@@ -45,6 +50,12 @@ public sealed class McpResourceProvider : IMcpResourceProvider
     {
         ArgumentNullException.ThrowIfNull(uri);
         ArgumentNullException.ThrowIfNull(session);
+
+        // PLAN-SEC-115 C-115-6: first statement; a closed resource never reaches a catalog or dispatcher call and answers like an unknown URI.
+        if (!IsResourceEnabled(uri))
+        {
+            throw new McpResourceNotFoundException(uri);
+        }
 
         if (Is(uri, CatalogSummaryUri))
         {
@@ -135,14 +146,26 @@ public sealed class McpResourceProvider : IMcpResourceProvider
     private static RequestContext BuildRequestContext(McpSessionContext session)
     {
         var roles = session.Roles ?? [];
-        return RequestContext.FromCaller(
+        var context = RequestContext.FromCaller(
             new CallerSecurityContext(
                 UserSid: new Sid(session.UserSid ?? session.ServicePrincipalId),
                 GroupSids: (session.GroupSids ?? []).Select(g => new Sid(g)).ToArray(),
                 Roles: roles,
                 Tenant: new TenantId(session.TenantId),
-                IsGovernanceAdmin: roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase),
-                IsClusterAdmin: roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase)),
+                IsGovernanceAdmin: false,
+                IsClusterAdmin: false),
             session.SessionId);
+
+        // The administrator flags above are deliberately false: the discovery service decides the caller class from the principal only, so the
+        // principal is built exactly as for the MCP tools. The synthetic anonymous MCP client keeps the empty principal (nothing visible).
+        var sid = session.UserSid ?? session.ServicePrincipalId;
+        if (string.Equals(sid, AnonymousMcpClientSid, StringComparison.OrdinalIgnoreCase))
+        {
+            return context;
+        }
+
+        return context with { User = McpProtocolHandler.BuildPrincipalFromSession(session)! };
     }
+
+    private const string AnonymousMcpClientSid = "ANONYMOUS_MCP_CLIENT";
 }

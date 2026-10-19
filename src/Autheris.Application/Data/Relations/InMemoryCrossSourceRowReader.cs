@@ -13,6 +13,7 @@ using Autheris.Domain.Model;
 /// <summary>
 /// In-memory implementation of <see cref="ICrossSourceRowReader"/> for unit testing and federated staging (#75).
 /// </summary>
+/// <remarks>Not used by the GraphQL path; replaced by WP-FED-06.</remarks>
 public sealed class InMemoryCrossSourceRowReader : ICrossSourceRowReader
 {
     private readonly ConcurrentDictionary<TableIdentifier, List<IReadOnlyDictionary<string, object?>>> _tables = new();

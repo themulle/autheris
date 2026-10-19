@@ -16,12 +16,12 @@ public class PolicySubqueryAliasTests
     private static ColumnReference Col(params (string Name, bool Quoted)[] parts) =>
         new(new SqlQualifiedName(parts.Select(p => new SqlIdentifier(p.Name, p.Quoted)).ToList()));
 
-    private static PolicyPredicate UnaliasedCorrelatedExists(bool quotedTableName) => PolicyPredicate.Create(
+    private static PolicyPredicate UnaliasedCorrelatedExists(bool quotedTableName, bool quotedTarget = false) => PolicyPredicate.Create(
         new ExistsExpression(new SelectStatement(null,
             new QuerySpecification(false,
                 new SelectItem[] { new ColumnSelectItem(Col(("Entitlements", quotedTableName), ("Id", false)), null) },
                 new NamedTableSource(new SqlQualifiedName(new[] { new SqlIdentifier("dbo", true), new SqlIdentifier("Entitlements", quotedTableName) }), null),
-                new BinaryExpression(Col(("Entitlements", quotedTableName), ("OrderId", false)), BinaryOperator.Equal, Col(("autheris_target", false), ("Id", false))),
+                new BinaryExpression(Col(("Entitlements", quotedTableName), ("OrderId", false)), BinaryOperator.Equal, Col(("autheris_target", quotedTarget), ("Id", false))),
                 null, null), null, null)),
         new Dictionary<string, PolicyValue>());
 
@@ -51,6 +51,19 @@ public class PolicySubqueryAliasTests
         // ("Entitlements") would not match the folded reference ("ENTITLEMENTS"."ID") and fail with ORA-00904.
         Assert.Contains("\"ENTITLEMENTS\"", c.Sql);
         Assert.DoesNotContain("\"Entitlements\" ", c.Sql.Replace("\"dbo\".\"Entitlements\"", string.Empty, StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ReservedTargetAlias_IsSpelledIdentically_OnOracle_Issue107(bool referenceQuoted)
+    {
+        _rowFilters.Predicates[Orders] = UnaliasedCorrelatedExists(quotedTableName: false, quotedTarget: referenceQuoted);
+        var c = Compile(TargetSqlDialect.Oracle);
+
+        // The security rewriter defines the alias unquoted (folded), the typed builders reference it quoted in lower case: one spelling for both.
+        Assert.Contains("\"AUTHERIS_TARGET\"", c.Sql);
+        Assert.DoesNotContain("\"autheris_target\"", c.Sql);
     }
 
     [Fact]

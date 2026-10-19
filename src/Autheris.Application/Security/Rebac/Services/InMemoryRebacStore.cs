@@ -79,7 +79,8 @@ public sealed class InMemoryRebacStore : IRebacStore
             return ValueTask.FromResult<IReadOnlyList<RebacTuple>>([]);
         }
 
-        IEnumerable<RebacTuple> query = store.Values;
+        var now = DateTimeOffset.UtcNow;
+        IEnumerable<RebacTuple> query = store.Values.Where(t => !t.IsExpired(now)); // WP-SC-16: an expired tuple is absent (fail closed)
 
         if (user != null)
         {

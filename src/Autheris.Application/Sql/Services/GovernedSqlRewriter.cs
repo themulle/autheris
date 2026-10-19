@@ -1,5 +1,6 @@
 namespace Autheris.Application.Sql.Services;
 
+using Autheris.Application.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -17,6 +18,7 @@ using Autheris.Application.Sql.Internal;
 using Autheris.Application.Sql.Masking;
 using Autheris.Application.Sql.Pipeline;
 using Autheris.Application.Sql.Policy;
+using Autheris.Application.Sql.Policy.RowFilterKeySets;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -28,6 +30,7 @@ using Microsoft.Extensions.Options;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Analysis;
 using TrinoSqlEngine.Ast;
+using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Visitors;
 using TrinoSqlEngine.Governance;
@@ -68,6 +71,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
     private readonly IMemoryCache? _memoryCache;
     private readonly SqlDataSourceResolver _dataSourceResolver;
     private readonly TypedPolicySources? _typedPolicies;
+    private readonly Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? _timeZoneState;   // null = conversion unavailable (fail closed)
+    private readonly Autheris.Application.Caching.BoundedCache<string, SqlQueryMetadata> _stage1Analyses = new(4_096);
 
     public IReadOnlyList<SqlRewriteStageOrder> StageOrder =>
     [
@@ -96,8 +101,10 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         IAccessProfileRepository? accessProfileRepository = null,
         IMemoryCache? memoryCache = null,
         SqlDataSourceResolver? dataSourceResolver = null,
-        TypedPolicySources? typedPolicies = null)
+        TypedPolicySources? typedPolicies = null,
+        Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? timeZoneState = null)
     {
+        _timeZoneState = timeZoneState;
         _typedPolicies = typedPolicies;
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _policyEnforcement = policyEnforcement; _consentResolution = consentResolution;
@@ -137,7 +144,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         CancellationToken ct,
         SqlRowLimit? rowLimit = null,
         bool probeExtraRow = false,
-        bool plannedTableRead = false)
+        bool plannedTableRead = false,
+        ClientListShapes? clientLists = null)
     {
         if (string.IsNullOrWhiteSpace(rawSql))
         {
@@ -160,7 +168,9 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                 $"SQL query length ({rawSql.Length}) exceeds the maximum allowed limit of {webSqlOptions.MaxQueryLength} characters.");
         }
 
-        if (rawSql.Contains(InternalParameterPrefix, StringComparison.OrdinalIgnoreCase))
+        // SEC-RF107-07(e): "__rls_ks" is the reserved prefix of the key-set subquery parameters.
+        if (rawSql.Contains(InternalParameterPrefix, StringComparison.OrdinalIgnoreCase) ||
+            rawSql.Contains("__rls_ks", StringComparison.OrdinalIgnoreCase))
         {
             throw new WebSqlPolicyException("The SQL statement references a reserved gateway identifier.");
         }
@@ -171,7 +181,15 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         SqlQueryMetadata metadata;
         try
         {
-            metadata = _sqlEngine.Analyze(rawSql.AsMemory(), AnalysisTokenOptions, ct);
+            // WP-PF-12 (Stage 1): the analysis is a pure function of the statement text, so a successful result is shared between
+            // requests. Only the policy checks below depend on the caller and they run every time. The key is a SHA-256 of the text
+            // (a collision would hand one statement's analysis to another); failures and cancellations are never cached.
+            var analysisKey = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(rawSql)));
+            if (!_stage1Analyses.TryGet(analysisKey, out metadata!))
+            {
+                metadata = _sqlEngine.Analyze(rawSql.AsMemory(), AnalysisTokenOptions, ct);
+                _stage1Analyses.Set(analysisKey, metadata);
+            }
         }
         catch (WebSqlPolicyException)
         {
@@ -179,7 +197,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         }
         catch (SecurityException secEx)
         {
-            _logger?.LogWarning(secEx, "WebSQL statement rejected by SQL analyzer.");
+            _logger?.Warning(secEx, "WebSQL statement rejected by SQL analyzer.");
             throw new WebSqlPolicyException("The SQL statement uses a construct that is not permitted by the WebSQL security policy.", secEx);
         }
         catch (OperationCanceledException timeoutEx) when (!ct.IsCancellationRequested && timeoutEx.InnerException is TimeoutException)
@@ -321,6 +339,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         var tablesWithoutRls = new HashSet<TableIdentity>();
         var accessedTables = new List<TableIdentifier>();
         var virtualFilters = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        var callerAttributes = new Dictionary<string, IReadOnlyList<CallerAttributeAuditEntry>>(StringComparer.OrdinalIgnoreCase);
         var accessedTableSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         DatabaseDialect? targetDatabaseDialect = _dataSourceResolver.ResolveConnectionDialect(effectiveDataSourceName);
@@ -477,7 +496,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             var decision = consentBypassed && (_consentRepository == null || _consentResolution == null)
                 ? WithTypedMasks(TableAccessDecision.Allowed(resolvedId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true), tableMeta, tenantId)
                 : await AccessPolicy().DecideAsync(
-                    new TableAccessQuery(userSid, tenantId, groupSids, roles, tableMeta, user.Claims, colList, RebacEnforcement.QueryPaths, clientIp, actionAttribute),
+                    new TableAccessQuery(userSid, tenantId, groupSids, roles, tableMeta, user.Claims, colList, RebacEnforcement.QueryPaths, clientIp, actionAttribute, Principal: user),
                     ct).ConfigureAwait(false);
 
             if (!decision.IsAllowed)
@@ -513,6 +532,11 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             {
                 // One audit key per table: the resolved qualified name (the other spellings of the same table would only multiply the record).
                 virtualFilters[resolvedId.ToQualifiedName()] = applied;
+            }
+
+            if (decision.CallerAttributes is { Count: > 0 } resolvedAttributes)
+            {
+                callerAttributes[resolvedId.ToQualifiedName()] = resolvedAttributes;
             }
 
             var identity = new TableIdentity(tableMeta.Table.SchemaName, tableMeta.Table.TableName);
@@ -589,6 +613,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         }
         TargetSqlDialect targetSqlDialect = SqlDialectMapper.ToTargetDialect(targetDatabaseDialect.Value);
 
+        EnforceEffectiveListMaximum(clientLists, targetSqlDialect, webSqlOptions);
+
         IReadOnlySet<string> allowedFunctions = SqlFunctionAllowlists.Build(targetSqlDialect, webSqlOptions.AdditionalAllowedFunctions);
         if (metadata.FunctionCalls is { Count: > 0 })
         {
@@ -604,13 +630,96 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 
         // Fail closed when the typed assembly is not wired (a DI defect, never a silent downgrade to string policies).
         var policyFactory = _policyFactory ?? throw new SqlCompileConfigurationException();
-        var policy = await policyFactory.CreateAsync(
-            new GovernedPolicyInput(effectiveDataSourceName, tenantId, decisions, tablesWithoutRls, GovernedSubqueryStrategy.Correlated)
-            {
-                Metadata = decidedTableMetadata
-            },
-            ct).ConfigureAwait(false);
 
+        // Issue #107 (D-WPC-1, SEC-RF107-17): IsRead comes from the same classification as isDml; the stage never runs for anything but a SELECT.
+        bool isRead = metadata.StatementType == SqlStatementType.Select && !isDml;
+        GovernedPolicyInput PolicyInput(bool disabled) =>
+            new(effectiveDataSourceName, tenantId, decisions, tablesWithoutRls, GovernedSubqueryStrategy.Correlated)
+            {
+                Metadata = decidedTableMetadata,
+                KeySetStatement = new RowFilterKeySetStatement(isRead, rawSql.Length, CompileRequestFactory.DefaultMaxExpansionFactor, disabled)
+            };
+
+        var assembly = await policyFactory.CreateAssemblyAsync(PolicyInput(disabled: false), ct).ConfigureAwait(false);
+        var request = CreateCompileRequest(assembly.Policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists);
+
+        // -------------------------------------------------------------
+        // Stage 5: Compile (Security invariant 2). Engine exceptions propagate unwrapped: SqlCompilerErrorMapper maps them to
+        // stable codes with fixed messages at every error surface, and no Exception.Message is copied into a new exception.
+        // -------------------------------------------------------------
+        CompiledSql compiled;
+        try
+        {
+            compiled = CompileStatement(rawSql, request, mayRetry: assembly.KeySets.HasSubstitution, ct);
+        }
+        catch (SqlLimitExceededException limit) when (IsRetryableLimit(limit.Kind) && assembly.KeySets.HasSubstitution)
+        {
+            // SEC-RF107-15 / SEC-RF107-19, D-WPC-4: once, only because a site was substituted, only for the bind or expansion limit. The values of the
+            // first exception (Actual, Maximum) are a function of the key-set size: only the kind is used, nothing is logged, audited or surfaced.
+            assembly.KeySets.MarkSubstitutedSitesAsRetried(
+                limit.Kind == SqlLimitKind.BindParameters ? KeySetFallbackReason.BindLimitRetry : KeySetFallbackReason.ExpansionLimitRetry);
+            RecordRetryMetrics(assembly.KeySets, targetSqlDialect);
+
+            // The retry starts from the original decisions and the unsubstituted predicates (never from the first assembly's provider), with the
+            // stage disabled: no epoch read, cache lookup or key query, same token and deadline. Its failure is not retried.
+            var retried = await policyFactory.CreateAssemblyAsync(PolicyInput(disabled: true), ct).ConfigureAwait(false);
+            request = CreateCompileRequest(retried.Policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists);
+            compiled = CompileStatement(rawSql, request, mayRetry: false, ct);
+        }
+
+        if (_options.Value.Logging.LogGeneratedSql)
+        {
+            _logger?.LogDebug("GovernedSqlExecutionService: Compiled secured SQL: {SecuredSql}", compiled.Sql);
+            LogKeySets(assembly.KeySets);
+        }
+
+        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, assembly.KeySets.Outcomes, callerAttributes);
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<TargetSqlDialect, byte> ClampWarned = new();
+
+    /// <summary>
+    /// Stage 2 of the list limits (PLAN-SQL-128 A-6): the dialect is known now, so each list is checked against
+    /// <c>min(configured, MaxBindParameters - 100, MaxInListItems)</c>. A configured value above that is clamped at runtime and logged once
+    /// per dialect, with numbers only. Nothing is truncated: a larger list is refused.
+    /// </summary>
+    private void EnforceEffectiveListMaximum(ClientListShapes? clientLists, TargetSqlDialect dialect, WebSqlOptions webSqlOptions)
+    {
+        if (clientLists is null)
+        {
+            return;
+        }
+
+        int largest = clientLists.MaxCount();
+        if (largest == 0)
+        {
+            return;
+        }
+
+        var limits = Autheris.Application.Sql.ListParameters.ListParameterLimits.From(webSqlOptions);
+        int effective = Autheris.Application.Sql.ListParameters.ListParameterLimits.EffectiveMax(
+            limits.ConfiguredMaxValues, TrinoSqlEngine.Ast.Capabilities.DialectCapabilityTable.Default.Get(dialect));
+        if (effective < limits.ConfiguredMaxValues && ClampWarned.TryAdd(dialect, 0))
+        {
+            _logger?.LogWarning("WebSQL list parameter maximum {Configured} is clamped to {Effective} for dialect {Dialect}.", limits.ConfiguredMaxValues, effective, dialect);
+        }
+
+        if (largest > effective)
+        {
+            throw new ClientListException(GovernedSqlErrorCodes.ListParamTooLarge);
+        }
+    }
+
+    private CompileRequest CreateCompileRequest(
+        GovernancePolicy policy,
+        Dictionary<TableIdentity, TableAccessTarget> decidedTargets,
+        TargetSqlDialect targetSqlDialect,
+        WebSqlOptions webSqlOptions,
+        bool isDml,
+        long enforcedMaxRows,
+        IReadOnlySet<string> allowedFunctions,
+        ClientListShapes? clientLists)
+    {
         // SEC-X1-05: a table that stage 3 admitted but the assembly dropped (no typed policy, catalog load failure, missing column)
         // is denied here with the same exception as every other "table not usable" cause, before the compiler could answer differently.
         foreach (var (identity, deniedTarget) in decidedTargets)
@@ -622,29 +731,51 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             }
         }
 
-        var request = CompileRequestFactory.Create(policy, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions);
+        return CompileRequestFactory.Create(policy, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists,
+            timeZoneConversionAvailable: _timeZoneState?.IsAvailable(targetSqlDialect) ?? false);
+    }
 
-        // -------------------------------------------------------------
-        // Stage 5: Compile (Security invariant 2). Engine exceptions propagate unwrapped: SqlCompilerErrorMapper maps them to
-        // stable codes with fixed messages at every error surface, and no Exception.Message is copied into a new exception.
-        // -------------------------------------------------------------
-        CompiledSql compiled;
+    private CompiledSql CompileStatement(string rawSql, CompileRequest request, bool mayRetry, CancellationToken ct)
+    {
         try
         {
-            compiled = _sqlEngine.Compile(rawSql.AsMemory(), request, ct);
+            return _sqlEngine.Compile(rawSql.AsMemory(), request, ct);
         }
-        catch (Exception ex) when (ex is SecurityException or TrinoSqlEngine.Ast.Builder.AstBuildException)
+        catch (Exception ex) when (ex is SecurityException or TrinoSqlEngine.Ast.Builder.AstBuildException
+                                   && !(mayRetry && ex is SqlLimitExceededException limit && IsRetryableLimit(limit.Kind)))
         {
-            _logger?.LogWarning(ex, "WebSQL statement rejected by the SQL compiler.");
+            // A retryable limit of a statement with substituted key sets is handled by the caller without logging (SEC-RF107-15 b).
+            _logger?.Warning(ex, "WebSQL statement rejected by the SQL compiler.");
             throw;
         }
+    }
 
-        if (_options.Value.Logging.LogGeneratedSql)
+    private static bool IsRetryableLimit(SqlLimitKind kind) => kind is SqlLimitKind.BindParameters or SqlLimitKind.PolicyExpansionFactor;
+
+    private static void RecordRetryMetrics(RowFilterKeySetReport report, TargetSqlDialect dialect)
+    {
+        foreach (var o in report.Outcomes)
         {
-            _logger?.LogDebug("GovernedSqlExecutionService: Compiled secured SQL: {SecuredSql}", compiled.Sql);
+            if (o.Reason is KeySetFallbackReason.BindLimitRetry or KeySetFallbackReason.ExpansionLimitRetry)
+            {
+                Autheris.Domain.Diagnostics.GatewayDiagnostics.RowFilterKeySetFallbacks.Add(
+                    1,
+                    new KeyValuePair<string, object?>("dialect", dialect.ToString()),
+                    new KeyValuePair<string, object?>("outcome", "Fallback"),
+                    new KeyValuePair<string, object?>("reason", o.Reason.ToString()));
+            }
         }
+    }
 
-        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters);
+    /// <summary>A-14: one Debug line per site after the compiled SQL line. Counts are allowed here (SEC-RF107-09 c); never values or hashes.</summary>
+    private void LogKeySets(RowFilterKeySetReport report)
+    {
+        foreach (var o in report.Outcomes)
+        {
+            _logger?.LogDebug(
+                "GovernedSqlExecutionService: Row-filter key set site {Table} outcome={Outcome} reason={Reason} keys={Keys} padded={Padded} ageSeconds={Age}",
+                o.Table, o.Outcome, o.Reason, o.KeyCount, o.PaddedCount, o.AgeSeconds);
+        }
     }
 
     /// <summary>
@@ -666,7 +797,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             _accessProfileRepository,
             _memoryCache,
             rowPolicyFactory: _typedPolicies?.RowPolicies,
-            maskPolicyFactory: _typedPolicies?.MaskPolicies);
+            maskPolicyFactory: _typedPolicies?.MaskPolicies,
+            callerAttributes: _typedPolicies?.CallerAttributes);
 
     private System.Net.IPAddress ResolveClientIp()
     {

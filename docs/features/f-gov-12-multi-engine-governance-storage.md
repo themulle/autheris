@@ -85,6 +85,29 @@ The catalog stores declared primary keys and indexes of governed tables in `TABL
 
 ---
 
+## Consent Query Indexes
+
+The consent lookup of the request path (`GetActiveConsentsForSubjectsAsync`) filters in SQL by tenant, table, revocation flag and grantee instead of loading every consent of a table. All three baselines create:
+
+| Index | Columns |
+| :--- | :--- |
+| `ix_consents_tenant_table` | `CONSENTS (tenant_id, table_id, is_revoked)` |
+| `ix_consents_tenant_grantee` | `CONSENTS (tenant_id, grantee_sid_norm, is_revoked)` |
+| `ix_consents_tenant_role` | `CONSENTS (tenant_id, role_name)` |
+| `ix_consent_column_rules_consent`, `ix_consent_row_filters_consent` | `consent_id` of the rule tables |
+| `ix_column_masking_rules_column` | `COLUMN_MASKING_RULES (table_column_id)` |
+| `ix_role_members_member` | `ROLE_MEMBERS (member_sid)` |
+| `ix_table_owners_owner` | `TABLE_OWNERS (data_owner_id)` |
+| `ix_tables_natural_ci` | case-insensitive natural key of `TABLES` (source, schema, table) |
+
+- `CONSENTS.grantee_sid_norm` holds the upper-invariant grantee SID written by the repository, so the subject match is case-insensitive and sargable. Rows without it (`NULL`) and role consents always pass the SQL prefilter.
+- The SQL filter is only a prefilter: the validity check and the exact subject comparison stay in C#, so results are identical to a full in-memory filter.
+- Subject lists are chunked at 1,000 parameters per statement (SQL Server allows 2,100); PostgreSQL uses `= ANY(@array)`.
+- `CONSENTS.renewal_count` and `access_profile_assignments.renewal_count` count approved renewals of individual grants ([F-GOV-22](f-gov-22-time-bound-individual-grants.md)).
+- Keyset paging of consents (`GET /api/v1/governance/grants`) and audit rows (`GET /api/v1/governance/audit`) uses these indexes and the audit sequence.
+
+---
+
 ## Least-Privilege Logins
 
 Run the application with a runtime login in `Mode=Verify` and apply the schema with a separate DDL-capable login (`MigrationConnectionString` or a `--migrate-governance` job in `Mode=Apply`). The grants per engine are listed in [F-GOV-21, section 6.2](f-gov-21-declared-table-keys-and-read-ordering.md#62-governance-database). The runtime login must not own the governance objects or hold DDL rights, because an owner can disable the append-only audit trigger and the truncate guard.

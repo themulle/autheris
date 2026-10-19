@@ -21,6 +21,12 @@ public static class BenchmarkRunnerApp
             return;
         }
 
+        if (args.Length > 0 && args[0].Equals("casbin", StringComparison.OrdinalIgnoreCase))
+        {
+            CasbinDecisionBenchmark.Run();
+            return;
+        }
+
         if (args.Length > 0 && args[0].Equals("vf", StringComparison.OrdinalIgnoreCase))
         {
             await VirtualFilterResolverBenchmark.RunAsync();
@@ -42,6 +48,12 @@ public static class BenchmarkRunnerApp
         if (args.Length > 0 && args[0].Equals("sla", StringComparison.OrdinalIgnoreCase))
         {
             await SlaValidationBenchmark.RunAllSlaChecksAsync();
+            return;
+        }
+
+        if (args.Length > 0 && args[0].Equals("r2r", StringComparison.OrdinalIgnoreCase))
+        {
+            ReadyToRunBenchmark.Run(args[1..]);
             return;
         }
 

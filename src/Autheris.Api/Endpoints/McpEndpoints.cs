@@ -7,6 +7,7 @@ using System.Security.Claims;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
+using Autheris.Application.Identity.Attributes;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -182,7 +183,18 @@ public static class McpEndpoints
         new[] { "client_id", "appid", "azp" }.Any(t =>
             string.Equals(principal.FindFirst(t)?.Value, userSid, StringComparison.OrdinalIgnoreCase));
 
-    internal static McpCaller ResolveCaller(HttpContext context, bool allowOpenMcp)
+    // Without a security context the raw role claims are used. The session principal is rebuilt with the "MCP" authentication type, which
+    // loses the ForwardAuth marker that ClusterAdminPolicy needs, so a ClusterAdmin claim of a non-canonical identity (forward-auth proxy
+    // headers) is dropped here, exactly as SecurityContextFactory partitions the roles.
+    private static List<string> RolesWithoutUntrustedClusterAdmin(ClaimsPrincipal principal)
+    {
+        var canonicalClusterAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        return principal.GetUserRoles()
+            .Where(r => canonicalClusterAdmin || !ClusterAdminPolicy.IsClusterAdminRole(r))
+            .ToList();
+    }
+
+    internal static McpCaller ResolveCaller(HttpContext context, bool allowOpenMcp, CallerAttributeOptions? attributeOptions = null)
     {
         var principal = context.User;
         var isAuthenticated = principal.Identity?.IsAuthenticated == true;
@@ -209,7 +221,7 @@ public static class McpEndpoints
         }
 
         var roles = isAuthenticated
-            ? (securityContext != null ? securityContext.TenantRoles.Concat(securityContext.ClusterRoles).ToList() : principal.GetUserRoles().ToList())
+            ? (securityContext != null ? securityContext.TenantRoles.Concat(securityContext.ClusterRoles).ToList() : RolesWithoutUntrustedClusterAdmin(principal))
             : new List<string>();
         var groupSids = isAuthenticated
             ? (securityContext != null ? securityContext.GroupSids.Select(s => s.Value).ToList() : principal.GetGroupSids().Select(s => s.Value).ToList())
@@ -227,10 +239,16 @@ public static class McpEndpoints
                             c.Type != ClaimTypes.PrimarySid &&
                             c.Type != ClaimTypes.Role &&
                             c.Type != ClaimTypes.GroupSid &&
-                            c.Type != Autheris.Domain.Security.TokenAccessScope.ClaimType)
+                            c.Type != Autheris.Domain.Security.TokenAccessScope.ClaimType &&
+                            c.Type != CallerAttributeSchemeGate.MarkerClaimType)
                 .GroupBy(c => c.Type, StringComparer.Ordinal)
                 .ToDictionary(g => g.Key, g => g.First().Value, StringComparer.Ordinal)
             : null;
+        if (additionalClaims is not null && CallerAttributeSchemeGate.HasAllowedOriginalScheme(principal, attributeOptions ?? new CallerAttributeOptions()))
+        {
+            // BC-129-01: only the gateway sets this marker, and only for an original identity of an allowed scheme.
+            additionalClaims[CallerAttributeSchemeGate.MarkerClaimType] = "1";
+        }
 
         return new McpCaller(principalId, userSid, tenantId, roles, groupSids, clientIp, isReadOnly, additionalClaims);
     }

@@ -22,12 +22,14 @@ public static class GatewayCatalogServiceExtensions
         services.TryAddSingleton<ICatalogSearchEngine, CatalogSearchEngine>();
         services.AddHostedService<CatalogSearchWarmupService>();
 
+        services.TryAddScoped<ICatalogVisibilityService, CatalogVisibilityService>();
         services.TryAddScoped<ICatalogDiscoveryService, CatalogDiscoveryService>();
         services.TryAddScoped<IPrincipalResolverService, PrincipalResolverService>();
         services.TryAddScoped<IDatasourceTestingService, DatasourceTestingService>();
         services.TryAddSingleton<IColumnValueProfileService, ColumnValueProfileService>();
         services.TryAddSingleton<ISyntheticSampleRowGenerator, SyntheticSampleRowGenerator>();
         services.TryAddScoped<IQueryAnalysisService, QueryAnalysisService>();
+        services.TryAddScoped<IGraphQlCostAnalysisEngine, Autheris.GraphQL.Analysis.HotChocolateGraphQlCostAnalysisEngine>();
         services.TryAddScoped<IBundledConsentRequestService, BundledConsentRequestService>();
         return services;
     }

@@ -20,6 +20,7 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
     private readonly ILineageGraphStore _graphStore;
     private readonly IAuditLogRepository? _auditRepo;
     private readonly ITableMetadataRepository? _tableMetadataRepo;
+    private readonly IConsumerAggregationRepository? _consumerAggregationRepo;
     private readonly ILogger<LineageImpactAnalyzerService> _logger;
 
     public LineageImpactAnalyzerService(
@@ -28,7 +29,8 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
         ILineageGraphStore graphStore,
         IAuditLogRepository auditRepo,
         ITableMetadataRepository tableMetadataRepo,
-        ILogger<LineageImpactAnalyzerService> logger)
+        ILogger<LineageImpactAnalyzerService> logger,
+        IConsumerAggregationRepository? consumerAggregationRepo = null)
     {
         _consentRepo = consentRepo ?? throw new ArgumentNullException(nameof(consentRepo));
         _ownershipRepo = ownershipRepo ?? throw new ArgumentNullException(nameof(ownershipRepo));
@@ -36,6 +38,7 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
         _auditRepo = auditRepo;
         _tableMetadataRepo = tableMetadataRepo;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _consumerAggregationRepo = consumerAggregationRepo;
     }
 
     public LineageImpactAnalyzerService(
@@ -43,7 +46,7 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
         IDataOwnershipRepository ownershipRepo,
         ILineageGraphStore graphStore,
         ILogger<LineageImpactAnalyzerService> logger)
-        : this(consentRepo, ownershipRepo, graphStore, null!, null!, logger)
+        : this(consentRepo, ownershipRepo, graphStore, null!, null!, logger, null)
     {
     }
 
@@ -346,6 +349,62 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
             mitigations.Add("No active consumers or downstream dependencies detected. Schema modifications have minimal blast radius.");
         }
 
+        // 2b. Daily Pre-aggregated Application Metrics (Issue #114)
+        IReadOnlyList<CallingApplicationUsage>? applicationUsages = null;
+        bool suppressedSmallGroups = false;
+
+        if (_consumerAggregationRepo != null)
+        {
+            var window = Math.Clamp(timeWindowDays, 1, 400);
+            var since = DateTimeOffset.UtcNow.AddDays(-window);
+            var tenantId = callerContext?.TenantId ?? new TenantId("default");
+
+            var summaries = await _consumerAggregationRepo.QueryConsumerAppDailyAsync(
+                table, tenantId, since, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+            var actorCounts = await _consumerAggregationRepo.QueryDistinctActorCountsAsync(
+                table, tenantId, since, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+
+            if (canViewRuntimeConsumers)
+            {
+                // Privileged Tier: Data Owner, Delegate, GovernanceAdmin
+                // Expose personal breakdown (ActorSids), exact query names, no folding
+                var privilegedUsages = new List<CallingApplicationUsage>();
+                foreach (var s in summaries)
+                {
+                    int actorCount = s.DistinctActors;
+                    if (actorCounts.TryGetValue(s.Application, out var count))
+                    {
+                        actorCount = Math.Max(actorCount, count);
+                    }
+
+                    var matchingSids = runtimeConsumers.Select(r => r.ActorSid).Distinct().ToList();
+
+                    privilegedUsages.Add(new CallingApplicationUsage(
+                        Application: s.Application,
+                        Day: s.Day,
+                        Calls: s.Calls,
+                        RowsReturned: s.RowsReturned,
+                        RowsMeasuredCalls: s.RowsMeasuredCalls,
+                        Rejections: s.Rejections,
+                        Versions: s.Versions,
+                        QueryNames: s.QueryNames,
+                        DistinctActors: actorCount,
+                        ActorSids: matchingSids
+                    ));
+                }
+                applicationUsages = privilegedUsages;
+                suppressedSmallGroups = false;
+            }
+            else
+            {
+                // General Tier: Non-privileged caller
+                // Personal SIDs suppressed, query names suppressed, k-anonymity (k=3) cell folding applied
+                var (folded, suppressed) = ConsumerFolding.Fold(summaries, actorCounts, minActors: 3);
+                applicationUsages = folded;
+                suppressedSmallGroups = suppressed;
+            }
+        }
+
         sw.Stop();
         GatewayDiagnostics.LineageTraversalDuration.Record(sw.Elapsed.TotalMilliseconds);
 
@@ -357,7 +416,9 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
             lastAccessedAt,
             downstreamConsumers,
             visibleRuntimeConsumers,
-            mitigations);
+            mitigations,
+            applicationUsages,
+            suppressedSmallGroups);
     }
 
     /// <summary>

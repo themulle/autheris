@@ -13,11 +13,12 @@ using Microsoft.Data.SqlClient;
 
 namespace Autheris.Infrastructure.Persistence;
 
-public partial class SqlServerGovernanceRepository : IGovernanceRepository, Migrations.IGovernanceStoreInitializer, IAuditChainExportSource, IDisposable, IAsyncDisposable
+public partial class SqlServerGovernanceRepository : IGovernanceRepository, IConsentDescriptionRepository, Migrations.IGovernanceStoreInitializer, IAuditChainExportSource, IAuditPurgeKeyProvider, IDisposable, IAsyncDisposable
 {
     private readonly string _connectionString;
     private readonly IEpochValidationService _epochValidationService;
-    private readonly ConcurrentDictionary<string, (TableMetadata? Metadata, long CachedAtTicks)> _metadataCache = new(StringComparer.OrdinalIgnoreCase);
+    // WP-PF-06: bounded (a 10k-table catalog must not grow the cache without limit); a miss just reloads the metadata.
+    private readonly Autheris.Application.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks)> _metadataCache = new(20_000, comparer: StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Test seam: drops cached metadata after a test changed rows behind the repository.</summary>
     private readonly CatalogKeyDefinitionStore.KeyTableProbe _keyTables = new();

@@ -185,7 +185,8 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
         }
     }
 
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Regex> RegexCache = new(StringComparer.Ordinal);
+    // WP-PF-06: bounded (rule patterns come from admin data); a miss recompiles the regex.
+    private static readonly Autheris.Application.Caching.BoundedCache<string, Regex> RegexCache = new(2_000, comparer: StringComparer.Ordinal);
 
     private static string ApplyRegexOrFormatMask(string columnName, string text, MaskingRule rule)
     {

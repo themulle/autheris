@@ -10,6 +10,7 @@ using Autheris.Api.Middleware;
 using Autheris.Api.Security;
 using Autheris.Application.Governance;
 using Autheris.Application.Governance.Interfaces;
+using Autheris.Application.Governance.Paging;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -48,8 +49,185 @@ public static partial class GovernanceEndpoints
         return await ownershipRepository.IsAuthorizedApproverForTableAsync(table, new Sid(sid), context.RequestAborted).ConfigureAwait(false);
     }
 
+    private static TenantId ResolveRequestTenant(HttpContext context) =>
+        context.Items.TryGetValue(TenantResolutionMiddleware.TenantIdItemKey, out var itemTenant) && itemTenant is TenantId resolvedTenant
+            ? resolvedTenant
+            : TenantId.LegacySingleTenant;
+
+    /// <summary>
+    /// WP-SC-10 / SEC-SC-16: keyset-paged audit listing. Tenant administrators and auditors read their tenant; a data owner reads only the
+    /// audit of one table they own. A foreign tenant is honoured for ClusterAdmin only. A malformed cursor is a 400, never a silent restart.
+    /// </summary>
+    internal static async Task<IResult> ListAuditPageAsync(
+        HttpContext context,
+        IAuditLogRepository auditRepository,
+        string? cursor,
+        int? pageSize,
+        string? targetTable,
+        string? actor,
+        DateTimeOffset? since,
+        string? tenant)
+    {
+        if (!await IsAuthorizedForSimulationAsync(context, targetTable).ConfigureAwait(false))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var effectiveTenant = ResolveRequestTenant(context);
+        if (!string.IsNullOrWhiteSpace(tenant) && !string.Equals(tenant, effectiveTenant.Value, StringComparison.Ordinal))
+        {
+            if (!GatewayPolicies.HasRole(context.User, GatewayRole.ClusterAdmin) || !TenantId.TryParse(tenant, out var requested))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            effectiveTenant = requested;
+        }
+
+        long? before = null;
+        if (cursor != null)
+        {
+            if (!PageCursor.TryDecodeLong(cursor, out var decoded))
+            {
+                return Results.BadRequest(new { error = "INVALID_CURSOR", message = "The cursor is malformed." });
+            }
+
+            before = decoded;
+        }
+
+        var page = await auditRepository.QueryAuditLogPageAsync(
+            new AuditLogPageQuery(
+                effectiveTenant,
+                string.IsNullOrWhiteSpace(targetTable) ? null : targetTable,
+                string.IsNullOrWhiteSpace(actor) ? (Sid?)null : new Sid(actor),
+                since,
+                before,
+                pageSize ?? AuditLogPageQuery.DefaultPageSize),
+            context.RequestAborted).ConfigureAwait(false);
+
+        return Results.Ok(new
+        {
+            items = page.Items.Select(e => new
+            {
+                sequence = e.ChainSequence,
+                occurredAt = e.OccurredAt,
+                eventType = e.EventType,
+                decision = e.Decision,
+                actorSid = e.ActorSid.Value,
+                targetTable = e.TargetTable,
+                targetColumn = e.TargetColumn,
+                traceId = e.TraceId,
+                tenantId = e.TenantId.Value
+            }),
+            nextCursor = page.NextBeforeSequence is { } next ? PageCursor.Encode(next) : null,
+            pageSize = Math.Clamp(pageSize ?? AuditLogPageQuery.DefaultPageSize, 1, AuditLogPageQuery.MaxPageSize)
+        });
+    }
+
+    /// <summary>
+    /// WP-SC-10: keyset-paged consent / grant listing (also the <c>clamped=true</c> report of legacy individual grants, WP-SC-16 rule 5).
+    /// Same authorization as the audit listing: tenant administrators and auditors for the tenant, a data owner for one owned table.
+    /// </summary>
+    internal static async Task<IResult> ListGrantsPageAsync(
+        HttpContext context,
+        IConsentRepository consentRepository,
+        TimeProvider? timeProvider,
+        string? cursor,
+        int? pageSize,
+        string? table,
+        string? granteeType,
+        string? grantee,
+        bool? includeInactive,
+        bool? clamped)
+    {
+        if (!await IsAuthorizedForSimulationAsync(context, table).ConfigureAwait(false))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        TableIdentifier? tableFilter = null;
+        if (!string.IsNullOrWhiteSpace(table))
+        {
+            if (!TableIdentifier.TryParse(table, out var parsedTable))
+            {
+                return Results.BadRequest(new { error = "INVALID_TABLE", message = "The table filter is malformed." });
+            }
+
+            tableFilter = parsedTable;
+        }
+
+        GranteeType? typeFilter = null;
+        if (!string.IsNullOrWhiteSpace(granteeType))
+        {
+            if (!Enum.TryParse<GranteeType>(granteeType, ignoreCase: true, out var parsedType) || !Enum.IsDefined(parsedType))
+            {
+                return Results.BadRequest(new { error = "INVALID_GRANTEE_TYPE", message = "Supported values: User, Group, Role, ServicePrincipal." });
+            }
+
+            typeFilter = parsedType;
+        }
+
+        Guid? after = null;
+        if (cursor != null)
+        {
+            if (!PageCursor.TryDecode(cursor, out var raw) || !Guid.TryParse(raw, out var afterId))
+            {
+                return Results.BadRequest(new { error = "INVALID_CURSOR", message = "The cursor is malformed." });
+            }
+
+            after = afterId;
+        }
+
+        var now = (timeProvider ?? TimeProvider.System).GetUtcNow();
+        var page = await ConsentPageReader.ReadAsync(
+            consentRepository,
+            new ConsentPageQuery(
+                ResolveRequestTenant(context),
+                tableFilter,
+                typeFilter,
+                string.IsNullOrWhiteSpace(grantee) ? null : grantee,
+                includeInactive == true,
+                after,
+                pageSize ?? ConsentPageQuery.DefaultPageSize),
+            clamped == true,
+            now,
+            context.RequestAborted).ConfigureAwait(false);
+
+        await Autheris.Application.Governance.ConsentDescriptionLoader.LoadAsync(consentRepository, page.Items, context.RequestAborted).ConfigureAwait(false);
+        var descriptionMax = context.RequestServices.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GovernanceTextOptions>>()?.Value.ConsentDescriptionMaxLength
+            ?? new Autheris.Domain.Options.GovernanceTextOptions().ConsentDescriptionMaxLength;
+        return Results.Ok(new
+        {
+            items = page.Items.Select(c => new
+            {
+                id = c.Id,
+                table = c.TableIdentifier.ToString(),
+                description = Autheris.Domain.Security.ConsentDescriptionText.ForOutput(c.Description, descriptionMax),
+                granteeType = c.GranteeType.ToString(),
+                grantee = c.GranteeType == Autheris.Domain.Model.GranteeType.Role ? c.RoleName : c.GranteeSid?.Value,
+                effect = c.Effect.ToString(),
+                validFrom = c.ValidFrom,
+                validTo = c.ValidTo,
+                effectiveValidTo = c.EffectiveValidTo,
+                clamped = ConsentPageReader.IsClamped(c),
+                isActive = c.IsActive(now),
+                renewalCount = c.RenewalCount,
+                message = ConsentPageReader.IsClamped(c)
+                    ? $"individual grant without expiry/over limit, treated as expiring at {c.EffectiveValidTo:O}"
+                    : null
+            }),
+            nextCursor = page.NextAfterId is { } next ? PageCursor.Encode(next.ToString("D")) : null,
+            pageSize = Math.Clamp(pageSize ?? ConsentPageQuery.DefaultPageSize, 1, ConsentPageQuery.MaxPageSize)
+        });
+    }
+
     private static void MapAuditAndComplianceEndpoints(IEndpointRouteBuilder app)
     {
+        app.MapGet("/api/v1/governance/audit", ListAuditPageAsync)
+            .RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.AuditRead);
+        app.MapGet("/api/v1/governance/grants", ListGrantsPageAsync)
+            .RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.AuditRead);
+
         // P10: Multi-Tenant Policy Simulation Sandbox ("What-If" Replay via Audit Logs)
         app.MapPost("/api/governance/policy-simulation/replay", async (
             PolicySimulationRequest request,

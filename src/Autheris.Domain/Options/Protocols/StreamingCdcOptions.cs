@@ -11,6 +11,9 @@ public sealed class MssqlChangeTrackingOptions
 {
     public bool Enabled { get; init; } = false;
 
+    /// <summary>Optional explicit source connection string; when empty the table's catalogued source connection is used.</summary>
+    public string ConnectionString { get; init; } = string.Empty;
+
     /// <summary>Minimum 250.</summary>
     public int PollingIntervalMilliseconds { get; init; } = 1000;
 

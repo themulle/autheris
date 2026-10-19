@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Security;
+using System.Data.Common;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,6 +12,7 @@ using Autheris.Api.Extensions;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
@@ -38,12 +39,12 @@ public static class ProcedureEndpointRoutes
 
         group.MapGet("/", HandleList).WithName("ListProcedureEndpoints").RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        // OpenSchema (documentation mode): anonymous callers see all active procedures in the spec. This is documentation
-        // only; every execution endpoint still requires authorization and the full governance checks.
-        var documentAllForAnonymous = gatewayOptions.IsOpenSchemaAllowed;
+        // OpenSchema (documentation mode) keeps the document reachable anonymously, but it then lists no procedure: visibility
+        // depends on the caller's identity and consent.
         var openApi = group.MapGet("/openapi.json",
-                (HttpContext http, Autheris.Application.Procedures.Interfaces.IProcedureRegistry registry) =>
-                    HandleOpenApi(http, registry, documentAllForAnonymous))
+                (HttpContext http, Autheris.Application.Procedures.Interfaces.IProcedureRegistry registry, IProcedureExecutionService service,
+                    Microsoft.Extensions.Options.IOptions<GatewayOptions> options) =>
+                    HandleOpenApi(http, registry, service, options))
             .WithName("GetProcedureEndpointsOpenApiSpec")
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         if (gatewayOptions.IsOpenSchemaAllowed != true)
@@ -60,33 +61,70 @@ public static class ProcedureEndpointRoutes
         return app;
     }
 
-    private static IResult HandleList(HttpContext http, Autheris.Application.Procedures.Interfaces.IProcedureRegistry registry)
+    internal static async Task<IResult> HandleList(
+        HttpContext http,
+        Autheris.Application.Procedures.Interfaces.IProcedureRegistry registry,
+        IProcedureExecutionService service)
     {
-        // Only active endpoints the caller may see (role gate); consent is evaluated per call.
-        var items = registry.GetAll()
-            .Where(r => r.State == ProcedureState.Active && IsVisibleTo(http, r.Definition))
-            .Select(r => new
+        // Only active procedures the caller may see (identity, role gate and consent on every table: IsVisibleAsync).
+        var items = new List<object>();
+        foreach (var r in await VisibleAsync(http, registry, service).ConfigureAwait(false))
+        {
+            items.Add(new
             {
                 name = r.Definition.Name,
                 summary = r.Definition.Summary,
                 mode = r.Definition.Mode.ToString().ToLowerInvariant(),
-                parameters = r.Definition.Parameters.Select(p => new { name = p.Name, type = p.SqlType, required = p.IsRequired, description = p.Description })
+                parameters = r.Definition.Parameters.Select(p => new { name = p.Name, type = p.SqlType, required = p.IsRequired, description = p.Description }).ToList()
             });
+        }
+
         return Results.Ok(items);
     }
 
-    internal static IResult HandleOpenApi(HttpContext http, Autheris.Application.Procedures.Interfaces.IProcedureRegistry registry, bool documentAllForAnonymous = false)
+    /// <summary>
+    /// SEC-PROC152-10: the visible Active procedures. An evaluation failure for one procedure omits only that procedure.
+    /// </summary>
+    private static async Task<List<RegisteredProcedure>> VisibleAsync(
+        HttpContext http,
+        Autheris.Application.Procedures.Interfaces.IProcedureRegistry registry,
+        IProcedureExecutionService service)
     {
-        var anonymousDocumentation = documentAllForAnonymous && http.User.Identity?.IsAuthenticated != true;
-        var paths = new Dictionary<string, object>();
+        var visible = new List<RegisteredProcedure>();
+        var tenant = EndpointSecurity.GetRequestTenant(http);
         foreach (var reg in registry.GetAll().Where(r => r.State == ProcedureState.Active))
         {
-            var def = reg.Definition;
-            if (!anonymousDocumentation && !IsVisibleTo(http, def))
+            try
             {
-                continue;
+                if (await service.IsVisibleAsync(reg, http.User, tenant, http.RequestAborted).ConfigureAwait(false))
+                {
+                    visible.Add(reg);
+                }
             }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // omitted: no detail in the response
+            }
+        }
 
+        return visible;
+    }
+
+    internal static async Task<IResult> HandleOpenApi(
+        HttpContext http,
+        Autheris.Application.Procedures.Interfaces.IProcedureRegistry registry,
+        IProcedureExecutionService service,
+        Microsoft.Extensions.Options.IOptions<GatewayOptions>? options = null)
+    {
+        int maxRows = options?.Value.SqlEndpoints.Procedures.MaxRows ?? new ProcedureEndpointsOptions().MaxRows;
+
+        // Open-schema documentation mode no longer documents procedures for anonymous callers (OQ-12): visibility needs identity.
+        var paths = new Dictionary<string, object>();
+        var anonymous = http.User.Identity?.IsAuthenticated != true;
+        var visible = anonymous ? new List<RegisteredProcedure>() : await VisibleAsync(http, registry, service).ConfigureAwait(false);
+        foreach (var reg in visible)
+        {
+            var def = reg.Definition;
             var queryParams = def.Parameters.Select(p => new Dictionary<string, object?>
             {
                 ["name"] = p.Name,
@@ -95,6 +133,16 @@ public static class ProcedureEndpointRoutes
                 ["description"] = p.Description ?? $"SQL type {p.SqlType}",
                 ["schema"] = SchemaFor(p)
             }).ToList();
+
+            // SEC-PROC152I2-15: the reserved row-limit input; the maximum is the effective MaxRows (no scan-cap value is published).
+            queryParams.Add(new Dictionary<string, object?>
+            {
+                ["name"] = "limit",
+                ["in"] = "query",
+                ["required"] = false,
+                ["description"] = "Maximum number of rows to return (clamped to the configured maximum).",
+                ["schema"] = new Dictionary<string, object> { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = maxRows }
+            });
 
             var columns = reg.Validation?.ResultColumns ?? [];
             var properties = columns
@@ -146,8 +194,9 @@ public static class ProcedureEndpointRoutes
                             }
                         }
                     },
-                    ["403"] = new Dictionary<string, object> { ["description"] = "Access denied" },
+                    ["404"] = new Dictionary<string, object> { ["description"] = "Procedure not found or not visible to the caller" },
                     ["422"] = new Dictionary<string, object> { ["description"] = "Business error raised by the procedure" },
+                    ["429"] = new Dictionary<string, object> { ["description"] = "Too many concurrent requests" },
                     ["503"] = new Dictionary<string, object> { ["description"] = "Endpoint disabled (validation failed)" }
                 }
             };
@@ -238,18 +287,7 @@ public static class ProcedureEndpointRoutes
         return schema;
     }
 
-    private static bool IsVisibleTo(HttpContext http, ProcedureDefinition def)
-    {
-        if (def.RequiredRoles.Count == 0)
-        {
-            return http.User.Identity?.IsAuthenticated == true;
-        }
-
-        var roles = http.User.GetUserRoles();
-        return def.RequiredRoles.Any(r => http.User.IsInRole(r) || roles.Contains(r));
-    }
-
-    private static async Task HandleGet(string name, HttpContext http, IProcedureExecutionService service, ILoggerFactory loggerFactory)
+    internal static async Task HandleGet(string name, HttpContext http, IProcedureExecutionService service, ILoggerFactory loggerFactory)
     {
         var inputs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var (k, v) in http.Request.Query)
@@ -260,7 +298,7 @@ public static class ProcedureEndpointRoutes
         await ExecuteAsync(name, inputs, http, service, loggerFactory).ConfigureAwait(false);
     }
 
-    private static async Task HandlePost(string name, HttpContext http, IProcedureExecutionService service, ILoggerFactory loggerFactory)
+    internal static async Task HandlePost(string name, HttpContext http, IProcedureExecutionService service, ILoggerFactory loggerFactory)
     {
         var ct = http.RequestAborted;
         if (http.Request.ContentLength > MaxBodyBytes)
@@ -346,25 +384,37 @@ public static class ProcedureEndpointRoutes
         {
             await WriteErrorAsync(http, StatusCodes.Status503ServiceUnavailable, "Procedure endpoint is currently unavailable.", ct).ConfigureAwait(false);
         }
+        catch (GatewayThrottledException ex)
+        {
+            http.Response.Headers.RetryAfter = ex.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            await http.Response.WriteAsJsonAsync(new { error = "Too many concurrent requests. Retry later.", code = "TOO_MANY_REQUESTS" }, ct).ConfigureAwait(false);
+        }
         catch (ArgumentException ex)
         {
             await WriteErrorAsync(http, StatusCodes.Status400BadRequest, ex.Message, ct).ConfigureAwait(false);
         }
-        catch (SecurityException)
-        {
-            await WriteErrorAsync(http, StatusCodes.Status403Forbidden, "Access to the procedure is denied.", ct).ConfigureAwait(false);
-        }
         catch (ProcedureBusinessException ex)
         {
-            await WriteErrorAsync(http, StatusCodes.Status422UnprocessableEntity, ex.Message, ct).ConfigureAwait(false);
+            // Fixed or operator-declared text only; number, SQLSTATE and the database text never reach the response (SEC-PROC152-08).
+            http.Response.StatusCode = StatusCodes.Status422UnprocessableEntity;
+            await http.Response.WriteAsJsonAsync(new { error = ex.MappedMessage ?? ProcedureBusinessException.FixedMessage, code = ex.MappedCode ?? "PROCEDURE_REJECTED", traceId = ex.TraceId }, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             // client disconnected
         }
+        catch (DbException ex)
+        {
+            // Driver text may contain data values: log the type only (SEC-PROC152-08).
+            logger.LogError("Database failure executing a procedure endpoint ({ExceptionType}).", ex.GetType().Name);
+            await WriteErrorAsync(http, StatusCodes.Status500InternalServerError, "An internal error occurred.", ct).ConfigureAwait(false);
+        }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Unexpected error executing procedure endpoint '{Endpoint}'.", name);
+            // Neither the (caller supplied) name nor any parameter value is logged (SEC-PROC152-11).
+            // SEC-PROC152-08: exception type only; the message and inner exceptions may carry values.
+            logger.LogError("Unexpected error executing a procedure endpoint ({ExceptionType}).", ex.GetType().Name);
             await WriteErrorAsync(http, StatusCodes.Status500InternalServerError, "An internal error occurred.", ct).ConfigureAwait(false);
         }
     }

@@ -1,0 +1,120 @@
+# Implementation Plan: Governed Procedures INC-2 - Limits, Read-only POST, Error Map, ddl_hash (#152, #153, #154)
+
+- **ID:** `PLAN-PROC-152-INC2` (master-plan rank 2.9)
+- **PRD:** [`REQ-PROC-152..154`](2026-10-17-req-issues-152-154-governed-procedures.md) section 5.2 (R-154-1/2/3/6/8, R-152-6), AC-7, AC-8, AC-9, AC-13, AC-4 (map part), SR-1/2/3/4/8
+- **Builds on:** [`PLAN-PROC-152-INC1`](2026-10-17-plan-issue-152-154-inc1-procedure-security.md) and its binding conditions `SEC-PROC152-01..11` (all stay in force)
+- **Code base verified:** `origin/fix/procedure-inc1-security` (`b3e30a94`) for every procedure file; `origin/main` (`f0071be6`) otherwise. `GPES` = `GovernedProcedureExecutionService.cs`, `MPI` = `MssqlProcedureInvoker.cs`, `PER` = `ProcedureEndpointRoutes.cs`, `PDL` = `ProcedureDefinitionLoader.cs`, `PDP` = `ProcedureDefinitionParser.cs`, `ROM` = `ReadOnlyTokenMiddleware.cs`.
+
+## 1. Verified current behaviour (INC-1 branch)
+
+1. `MPI.ExecuteReadAsync` (`:46`) reads until `rows.Count >= settings.MaxRows`, then sets `truncated`, cancels and stops (`:153-161`); the byte budget `MaxResponseBytes` throws `RESPONSE_TOO_LARGE` (`:150`, `:179-184`). It knows nothing about row scope.
+2. `GPES.ExecuteAsync` (`:116-256`): row scope runs after the invoke on the already cut set (`:202-211`, `ApplyRowScopeAsync :673-733`, which copies `raw.Truncated`); the result and audit report `raw.Truncated` (`:238`, `:250`). The scope decision (`decisions[ResultTable].CombinedRowFilterSql`) is already known before the invoke (visibility stage, step 2).
+3. `SqlProcedureRowScopeResolver` batches candidate keys (`tuplesPerBatch = min(1000, budget)`, `:113`, loop `:168`), so a larger candidate set costs more round trips, not unbounded parameters.
+4. `PER.HandleGet` copies every query key into `inputs` (`:276-283`); `HandlePost` deserialises the flat body (`:287-321`); `GPES.ValidateInputs` (`:435`) rejects unknown keys after visibility. There is no `limit` and no reserved name; `PDP` only rejects duplicate parameter names (`:230`, `:528`).
+5. `ROM` allows POST only under `_queryPaths` (`:22-30`, `:83-96`); `/api/v1/procedures` is missing, so read-only tokens can call procedures by GET (parameters in the URL) but not by POST.
+6. Write mode is unreachable: `PDL.CheckPolicy` rejects `ProcedureMode.Write` before `Register` (`:209-214`, `:128-155`); the catalog revalidation only refreshes read procedures (`StoredProcedureCatalogValidator.cs:432`). GET and POST call the same `GPES.ExecuteAsync`, so POST adds no capability beyond GET for a read-only token. PostgreSQL calls run in a never-committed transaction (`MPI :199`).
+7. Business errors: `MPI.TryGetBusinessError` (`:325-343`) accepts MSSQL 50000-59999 and SQLSTATE `P0001` only; `GPES` audits number/SQLSTATE and rethrows with the trace id (`:180-192`); `PER` answers 422 `PROCEDURE_REJECTED` with `ProcedureBusinessException.FixedMessage` (`:383-388`).
+8. `ddl_hash`: parsed as `ProcedureDefinition.DdlHash` (`PDP :568`, `ProcedureModels.cs:134`); no warning when missing; options `ProcedureEndpointsOptions` live in `src/Autheris.Domain/Options/Protocols/RestApiOptions.cs:134-166` (`MaxRows` default 5000, `[Range(1,100000)]`). `ValidateDataAnnotations` is not recursive, so nested ranges need an explicit `IValidateOptions<GatewayOptions>` check.
+
+## 2. Design decisions
+
+**D-1 Row budget decided before the invoke (R-154-1, fail-closed).** `IProcedureInvoker.ExecuteReadAsync` gets an explicit `int rowBudget`; `RawProcedureResult.Truncated` is renamed `MoreRowsAvailable` (a further raw row existed after `rowBudget` rows). `GPES` computes `scoped = ResultTable != null && decisions[ResultTable] has a non-empty CombinedRowFilterSql` from the visibility decisions and passes `rowBudget = scoped ? MaxScanRows : effectiveLimit`. The invoker never reads the setting `MaxRows` itself any more (one source of truth). Streaming batch scoping is not done (default taken: PRD baseline, simpler, bounded by `MaxScanRows` and `MaxResponseBytes`).
+
+**D-2 Limit applied only after row scope.** `ApplyRowScopeAsync` returns the full scoped set of the scanned rows; `GPES` then cuts to `effectiveLimit` (`Take`), then runs `GovernResult`. `truncated = scopedCount > effectiveLimit || raw.MoreRowsAvailable` (scoped path) and `truncated = raw.MoreRowsAvailable` (unscoped path, budget = limit, the extra read row detects more). The audit row gets `truncated`, `scanCapReached` and `effectiveLimit`. There is no code path where a cut happens before `ApplyRowScopeAsync` when `scoped` is true; a static test asserts the invoker receives `MaxScanRows` whenever a row filter is active.
+
+**D-3 `MaxScanRows` option.** `ProcedureEndpointsOptions.MaxScanRows` (`int?`, `[Range(1,100000)]`); effective value `MaxScanRows ?? Math.Min(10 * MaxRows, 100000)`. `GatewayStorageOptionsValidator` (already touched by INC-1) fails startup when the effective value is below `MaxRows` or outside 1..100000. `MaxResponseBytes` keeps bounding the raw scan; exceeding it stays `RESPONSE_TOO_LARGE` (fail-closed, no partial answer).
+
+**D-4 `limit` handled in the service, after visibility (R-154-3, SR-1/2).** Routes stay unchanged; `GPES.ValidateInputs` removes the reserved key `limit` (case-insensitive) from the inputs before parameter validation and parses it: JSON integer, or a decimal digit string (GET, `StringValues` joined, so `limit=1&limit=2` is invalid); bool, fraction, exponent, sign, empty, non-digit or value < 1 is `ArgumentException` -> 400 with the fixed text `Invalid 'limit'.`; above `MaxRows` (or `int` overflow of a digit string) clamps to `MaxRows`. Invisible callers never reach this code (404, `SEC-PROC152-01`). Missing `limit` = `MaxRows`.
+
+**D-5 Reserved parameter name.** `PDP.Parse` and `PDP.ParseYaml` reject any parameter or context binding named `limit` (case-insensitive, with or without leading `@`) with `FormatException("Parameter name 'limit' is reserved.")`; `PDL` logs the existing "rejected" warning and does not register the file.
+
+**D-6 Read-only POST (R-154-6, SR-8).** `ROM.IsPermitted`: POST is allowed for `/api/v1/procedures/{name}` only when the remainder after the prefix is exactly one non-empty segment without a further `/` and not `openapi.json` (case-insensitive). `/api/v1/procedures`, `/api/v1/procedures/`, `/api/v1/procedures/a/b`, `/api/v1/procedures/x/` and `/api/v1/procedures/openapi.json` stay 403. `X-Original-Method`/`X-Forwarded-Method` checks run first, unchanged. Defence in depth in `GPES.ExecuteAsync`: a registered definition with `Mode != Read` is treated as not visible (reason `write-mode`, 404, audited like other denials).
+
+**D-7 Declared error map (R-154-8, SR-3).** YAML `error_codes: [{ number | sqlstate, code, message }]` -> `ProcedureDefinition.ErrorCodes` (`IReadOnlyList<ProcedureErrorCode>`, new record in `ProcedureModels.cs`). Load rules (`PDP`, `FormatException` on violation): exactly one of `number` (50000-59999) or `sqlstate` (`^[0-9A-Z]{5}$`, class `00`/`01`/`02` rejected); `code` `^[A-Z][A-Z0-9_]{2,63}$`; `message` 1..200 chars, no control characters, no `{`, `}`, `%`; no duplicate number/SQLSTATE; at most 64 entries. Runtime: `MPI.TryGetBusinessError(ex, definition, ...)` also treats a SQLSTATE declared in the map as business (default taken: lets PostgreSQL procedures use custom `ERRCODE`s; mapped responses are fixed text, so no leak). `GPES` resolves the entry and throws `ProcedureBusinessException(number, sqlState, traceId, mappedCode, mappedMessage)`; `PER` writes 422 `{ error = mappedMessage ?? FixedMessage, code = mappedCode ?? "PROCEDURE_REJECTED", traceId }`. Audit adds `mappedCode`; logs stay as `SEC-PROC152-08` (no DB text, no mapped message needed).
+
+**D-8 `ddl_hash` warning (R-152-6).** New option `ProcedureEndpointsOptions.RequireDdlHashForDeclared` (`bool?`; effective `?? !IsDevelopment()`). In `PDL.CheckPolicy`, after the declared-mode gate: declared mode with empty `DdlHash` -> rejection `"declared mode requires integrity.ddl_hash"` when required, otherwise one `LogWarning("Procedure '{Procedure}' uses validation: declared without integrity.ddl_hash; drift is not detected.")`. `TryLoadFile` runs on start and on every hot-reload event, so the warning repeats per (re)load. Catalog mode is exempt.
+
+**D-9 OpenAPI.** `PER` OpenAPI operation for each visible procedure lists the optional `limit` query parameter (integer, minimum 1, maximum `MaxRows`). No POST operation and no error-code list (INC-3 describe owns caller-specific metadata).
+
+## 3. Work packages (one PR, TDD order; total M)
+
+| WP | Content | Files | Size |
+|---|---|---|:---:|
+| A | D-1, D-2, D-3: row budget, scan cap, limit after scope, truncated semantics | `IProcedureInvoker.cs`, `MPI`, `GPES`, `RestApiOptions.cs`, `GatewayStorageOptionsValidator.cs` | M |
+| B | D-4, D-5, D-9: `limit` parsing and clamp, reserved name, OpenAPI | `GPES.ValidateInputs`, `PDP`, `PER` (OpenAPI only) | S |
+| C | D-6: read-only POST plus write-mode guard | `ROM`, `GPES` | S |
+| D | D-7: error map | `ProcedureModels.cs`, `PDP` (+ YAML model), `MPI`, `IProcedureExecutionService.cs`, `GPES`, `PER` | S-M |
+| E | D-8: `ddl_hash` warning/requirement | `PDL`, `RestApiOptions.cs` | S |
+
+No DDL, no MCP, no DI change. Tests go to a new `tests/Autheris.Tests.Unit/Procedures/ProcedureLimitsInc2Tests.cs` plus `ReadOnlyTokenMiddlewareTests` and parser tests; security tests carry `[Trait("Category","Security")]`.
+
+## 4. Test plan (Red first, per WP)
+
+- **A:** `RowScope_3Of100Allowed_MaxRows10_Returns3_NotTruncated` (AC-7); `RowScope_ScanCapReachedWithUnreadRows_TruncatedTrue`; `RowScope_ScopedRowsExceedLimit_CutAfterScope_TruncatedTrue`; `RowScope_Active_InvokerReceivesMaxScanRowsBudget` (SR-4 static guarantee); `NoRowScope_InvokerReceivesEffectiveLimit_ExtraRowSetsTruncated`; `Invoker_StopsAfterRowBudget_ReportsMoreRowsAvailable`; `Invoker_ByteBudgetExceededDuringScan_ThrowsResponseTooLarge`; `RowScope_NeverReturnsOtherScopeRows_WhenRawExceedsLimit` (SR-4); `Options_MaxScanRowsBelowMaxRows_FailsStartup`; `Options_MaxScanRowsNull_DefaultsTo10xMaxRowsCapped100000`; `Audit_ReportsTruncatedScanCapAndEffectiveLimit`.
+- **B:** `Limit20_MoreScopedRows_Returns20_TruncatedTrue` (AC-8); theory `Limit_Invalid_Returns400_FixedText` (`0`, `-1`, `1.5`, `1e2`, `true`, `""`, `abc`, `1,2`); `Limit_AboveMaxRows_Clamped`; `Limit_InvisibleCaller_InvalidValue_Returns404` (SR-2, GET and POST); `Limit_NotPassedToProcedure_NotInParameterHashes`; `Parser_ParameterNamedLimit_Rejected` (theory `limit`, `LIMIT`, `@limit`, context binding); `OpenApi_ListsLimitQueryParameter`.
+- **C:** `ReadOnlyToken_PostProcedureName_Permitted` (AC-9); theory `ReadOnlyToken_PostOtherProcedurePaths_Forbidden` (root, root slash, two segments, trailing slash, `openapi.json`); `ReadOnlyToken_PostProcedure_WithXOriginalMethodPost_Forbidden`; `WriteModeDefinition_InRegistry_Returns404_AuditedWriteMode` (SR-8); extend T-PROC152-01 differential with `limit` and POST-by-read-only-token rows (SR-1).
+- **D:** `BusinessError_Mapped_Returns422WithDeclaredCodeAndMessage`; `BusinessError_NotInMap_ReturnsGenericProcedureRejected` (AC-4); `BusinessError_DbTextWithValueAndTable_NeverInResponseLogOrAudit` (SR-3, mapped and unmapped); `PostgresDeclaredSqlState_TreatedAsBusiness_Mapped`; `UndeclaredSqlState_StaysGeneric500Path`; theory `Parser_ErrorCodes_Malformed_Rejected` (both/neither key, number out of range, bad code, message too long, placeholder, control char, duplicate, class `00`, more than 64).
+- **E:** `Declared_NoDdlHash_LogsWarningNamingProcedure` (AC-13); `Declared_NoDdlHash_RequireTrue_NotRegistered`; `Declared_NoDdlHash_HotReload_WarnsAgain`; `Catalog_NoDdlHash_NoWarning`; `RequireDdlHash_Null_TrueOutsideDevelopment_FalseInDevelopment`.
+
+## 5. Sequencing and parallelisation
+
+**(a) Shared files.** With 1.6 (INC-1, `fix/procedure-inc1-security`): `GPES`, `MPI`, `PER`, `IProcedureExecutionService.cs`, `GatewayStorageOptionsValidator.cs` and the INC-1 tests (all of them). With chunk 1 step I-25 (#129, `feat/issue-129-caller-attribute-row-filters`, stacked on INC-1): only `RestApiOptions.cs` (it edits `WebSqlOptions`, INC-2 edits `ProcedureEndpointsOptions`; textual merge only); I-25 also changes row-filter construction that feeds `CombinedRowFilterSql`, which INC-2 only reads. `RestApiOptions.cs` is also edited by I-4 (#115), I-5 (#128) and the I-6 validator (#130) - different classes. `fix/issue-158-inc0-explain-access` and `release/chunk1-consolidated` contain INC-1 unchanged. `ROM`, `PDP`, `PDL`, `ProcedureModels.cs`: no other open branch touches them. Lane B (#111 I-7, #138 INC-1, MCP catalog): no shared file (INC-2 does not touch `McpDatasetCatalog.cs` or DDL). Chunks 3-6: no shared file.
+**(b) Hard dependencies.** INC-1 (1.6) merged, or INC-2 branched from a head that contains it (`b3e30a94` or later); INC-3 (3.9) must follow INC-2 (`GovernResult` refactor, PRD section 10).
+**(c) Recommended position.** Chunk 1, directly after 1.6 and before or alongside I-25: branch `fix/procedure-inc2-limits` from the chunk-1 head that contains 1.6 (`release/chunk1-consolidated`). It can run in parallel with I-25 (merge `RestApiOptions.cs` by hand), with lanes A/B/C and with every chunk 2-6 step; it must not run in parallel with any other procedure step (INC-1 follow-ups, INC-3).
+
+## 6. Open questions (defaults taken, no owner input needed)
+
+1. PRD Q-5/Q-6 (OQ-14): `MaxScanRows` default 10 x `MaxRows` capped at 100 000; `RequireDdlHashForDeclared` true outside Development - default taken.
+2. Declared SQLSTATEs count as business errors for that procedure (D-7) - default taken; otherwise the PostgreSQL map could hold only `P0001`.
+3. No streaming batch scoping (D-1) - default taken; revisit if the scan cap proves too small in practice.
+
+## 7. Phase 3 security review
+
+**Reviewer:** `csharp-security-expert`. **Verified against:** `origin/fix/procedure-inc1-security` (GPES `ExecuteAsync`/`ApplyRowScopeAsync`/`ValidateInputs`, MPI read loop and `TryGetBusinessError`, PER `HandleGet`/`HandlePost`, ROM `IsPermitted`, PDL `TryLoadFile`, registration `DdlHash` check). All plan section 1 facts hold. `SEC-PROC152-01..11` stay in force.
+
+**Verdict: APPROVED WITH CONDITIONS.** The design is sound: the budget is decided before the invoke from the visibility decisions, the cut follows row scoping, `limit` is parsed only after the 404 stage, and POST adds no capability beyond GET (write mode is unreachable). The conditions close amplification, oracle and edge-case gaps. No architect rework is required.
+
+### Binding conditions
+
+- **SEC-PROC152I2-01 (scoped predicate, single source).** The `scoped` flag passed to the invoker and the branch that calls `ApplyRowScopeAsync` use one shared helper (today: `ResultTable != null`, decision found, non-blank `CombinedRowFilterSql`, GPES `:215-218`). Two copies are forbidden; if the helper says scoped, the invoker gets `MaxScanRows`, never `effectiveLimit`.
+- **SEC-PROC152I2-02 (cut only after scope).** `Take(effectiveLimit)` runs strictly after `ApplyRowScopeAsync` returns on the scoped path. `ApplyRowScopeAsync` failure (unusable key, resolver error) stays fail-closed (503) and never falls back to an unscoped or pre-cut result.
+- **SEC-PROC152I2-03 (no scope-count leakage).** The response carries only `truncated`; `scanCapReached`, `rowsRemovedByScope`, `effectiveLimit` and raw counts go to the audit row only, never to response, headers or logs at Information level. `truncated` on the scoped path is `scopedCount > effectiveLimit || raw.MoreRowsAvailable`; this may signal "raw set exceeded the scan cap" and is accepted, but no finer signal (for example the number of unread rows) is allowed.
+- **SEC-PROC152I2-04 (off-by-one).** The invoker reads at most `rowBudget` rows, detects `MoreRowsAvailable` by reading one further row header only (no value read, no byte accounting for it) and cancels the command. `rowBudget <= 0` is an `ArgumentOutOfRangeException` (fail-closed, no unbounded read). The invoker has no fallback to `settings.MaxRows`.
+- **SEC-PROC152I2-05 (scan amplification bound).** One request with an active row filter may trigger up to `MaxScanRows / 1000` resolver round trips (100 at the cap). The resolver call stays under the existing procedure timeout/cancellation token and the concurrency lease taken before validation (GPES step 4) is held for the whole scan. The default stays `min(10 * MaxRows, 100000)`; `MaxScanRows` above 100000 fails startup. Document the cost in the option XML comment.
+- **SEC-PROC152I2-06 (byte budget unchanged, no partial answer).** `RESPONSE_TOO_LARGE` during the scan remains a fixed, value-free error for scoped callers; it is not downgraded to a truncated result (a partial raw prefix would change which scoped rows are returned and hide the cut).
+- **SEC-PROC152I2-07 (`limit` parsing).** Parsing happens only after visibility, availability and lease (404, 503, 429 precede 400; 404 for an invisible caller is identical for valid and invalid `limit`). The 400 text is the constant `Invalid 'limit'.`, never the value. A JSON number that is not a plain integer in `int` range (large long, decimal, `1.0`, `1e2`, `JsonElement` of kind String/True/False/Null/Object/Array) is handled by the same rules (overflow clamps to `MaxRows`, everything else 400). A JSON `null` for `limit` counts as absent. `limit` is removed from the inputs before the unknown-parameter check, so it never reaches `parameterHashes`, SQL or `SESSION_CONTEXT`. With `limit=1&LIMIT=2` the existing case-insensitive dictionary keeps the last value; this is accepted and tested (no bypass possible, `MaxRows` still bounds).
+- **SEC-PROC152I2-08 (reserved name, both loaders and catalog).** The `limit` reservation also applies to catalog-discovered parameters: a catalog procedure whose parameter is named `limit` (with or without `@`, any case) is rejected at validation (state not Active, no registration), never silently shadowed. The message is fixed text.
+- **SEC-PROC152I2-09 (read-only middleware path matching).** The new rule works on the raw `request.Path` value after the `/api/v1/procedures` prefix, with a segment-boundary check (so `/api/v1/proceduresX` and `/api/v1/procedures-x` do not match), no URL decoding or trimming by the middleware, case-insensitive compare only for the prefix and for `openapi.json`. Permitted: exactly `/{one non-empty segment}`. Forbidden (403): empty, `/`, `//x`, `/x/`, `/x/y`, `/openapi.json` in any case, `/openapi.json/`, any remainder containing `%2F`/`%2f` (an encoded slash is never a permitted name), `;`, or a dot segment. Header checks (`X-Original-Method`, `X-Forwarded-Method`) keep running first; no `X-HTTP-Method-Override` support is added (none exists in `src`).
+- **SEC-PROC152I2-10 (write-mode guard).** `GPES` treats `Mode != Read` as not visible (404, audit reason `write-mode`) before parameters are looked at, identical response to an unknown procedure.
+- **SEC-PROC152I2-11 (error map confidentiality).** Mapped and generic 422 bodies contain only constant or operator-declared text; `error_codes` messages are never concatenated with exception text, parameters or table names. The log line keeps type and number only (`SEC-PROC152-08`); the audit adds `mappedCode` and number/SQLSTATE only. A DbException that is not a business error (or whose SQLSTATE is not declared) takes the unchanged 500 path with the generic body and no `code` from the map.
+- **SEC-PROC152I2-12 (declared SQLSTATE hardening).** Beyond classes `00/01/02`, `PDP` rejects SQLSTATE classes `08`, `28`, `40`, `53`, `54`, `55`, `57`, `58`, `F0`, `XX` and `HV` (infrastructure, authentication and resource failures must not be reported as business rejections or hide outages). MSSQL numbers stay 50000-59999. A `number` entry is matched only against `SqlException.Number`, a `sqlstate` entry only against a provider SQLSTATE of a non-MSSQL exception.
+- **SEC-PROC152I2-13 (`ddl_hash` enforcement).** `RequireDdlHashForDeclared == null` resolves to required for every environment except `Development` (Staging, Production, unknown, missing environment name: required). An explicit `false` outside Development additionally logs one startup warning (without procedure data). A file rejected on hot reload for a missing hash is unregistered via the existing `ForgetFile` path (fail-closed, the previously registered version does not stay active); the catalog-mode exemption stays. A present hash keeps being verified at registration as today.
+- **SEC-PROC152I2-14 (options validation).** `GatewayStorageOptionsValidator` rejects `MaxScanRows < MaxRows` and outside 1..100000; the validator test also covers `MaxRows = 100000` with `MaxScanRows` null (effective value 100000, valid).
+- **SEC-PROC152I2-15 (OpenAPI).** The `limit` parameter is listed only for operations of procedures visible to the caller (existing filter), with `maximum` = effective `MaxRows`; no scan-cap value is published.
+
+### Mandatory security tests (all `[Trait("Category","Security")]`)
+
+- **T-PROC152I2-01** `RowScope_Active_InvokerReceivesMaxScanRowsBudget_NeverEffectiveLimit` (I2-01, spy invoker).
+- **T-PROC152I2-02** `RowScope_NeverReturnsOtherScopeRows_WhenRawExceedsLimit` (I2-02; 100 raw rows, 3 in scope, limit 10, rows beyond the limit out of scope).
+- **T-PROC152I2-03** `RowScope_ResolverFails_Returns503_NoFallbackToUnscoped` (I2-02).
+- **T-PROC152I2-04** `Response_ContainsNoScopeCountsOrScanCapFlag_AuditDoes` (I2-03).
+- **T-PROC152I2-05** theory `Invoker_RowBudget_Boundaries` (budget-1, budget, budget+1 raw rows; `0`/negative throws; extra row value never read) (I2-04).
+- **T-PROC152I2-06** `Options_MaxScanRowsAbove100000_OrBelowMaxRows_FailsStartup` and `Options_MaxRows100000_ScanNull_Valid` (I2-05, I2-14).
+- **T-PROC152I2-07** `RowScope_ByteBudgetExceededDuringScan_ReturnsResponseTooLarge_FixedBody_NoRows` (I2-06).
+- **T-PROC152I2-08** theory `Limit_Invalid_AfterVisibility_Only` (invisible caller: 404 for every value, GET and POST; visible: 400 fixed text, value not echoed; JSON number kinds, big long clamps, `null` absent, mixed-case duplicate keys) (I2-07).
+- **T-PROC152I2-09** `Limit_NeverInParameterHashes_OrSessionContext` (I2-07).
+- **T-PROC152I2-10** `Catalog_ParameterNamedLimit_NotRegistered` and `Parser_ParameterNamedLimit_Rejected` incl. `@Limit` (I2-08).
+- **T-PROC152I2-11** theory `ReadOnlyToken_PostProcedurePaths` with the full permitted/forbidden table of I2-09 including `%2F`, `//x`, `/proceduresX/a`, `/PROCEDURES/OpenAPI.JSON`, `/x;y`, `/x/..` and permitted `/API/V1/Procedures/x` (also via a real routed request: a permitted path must reach a registered `{name}` route, a forbidden path must not reach any handler).
+- **T-PROC152I2-12** `ReadOnlyToken_PostProcedure_ForwardedOrOriginalMethodPost_Forbidden` (both headers, I2-09).
+- **T-PROC152I2-13** `WriteModeDefinition_InRegistry_Returns404_SameBodyAsUnknown` (I2-10).
+- **T-PROC152I2-14** `BusinessError_DbTextWithValueAndTable_NeverInResponseLogOrAudit` for mapped, unmapped and undeclared-SQLSTATE cases, with a capturing logger and audit sink (I2-11).
+- **T-PROC152I2-15** theory `Parser_ErrorCodes_InfraSqlStateClasses_Rejected` (`08006`, `28000`, `40001`, `53200`, `57014`, `58030`, `XX000`) plus `Mapping_NumberEntry_NotMatchedAgainstSqlState` (I2-12).
+- **T-PROC152I2-16** `DdlHash_Required_ForStagingProductionAndUnknownEnvironment_NotDevelopment`, `Declared_NoHash_HotReload_Unregisters_PreviousVersion`, `Explicit_RequireFalse_Production_LogsStartupWarning` (I2-13).
+- **T-PROC152I2-17** `OpenApi_LimitParameter_OnlyForVisibleProcedures_NoScanCap` (I2-15).
+
+Test ID range: `T-PROC152I2-01..17`. Condition IDs: `SEC-PROC152I2-01..15`.
+
+### Owner questions (defaults, no blocking)
+
+1. Default `MaxScanRows` of up to 100000 means up to 100 resolver round trips per scoped request. Recommended default: keep `min(10 * MaxRows, 100000)` (plan default) and revisit only on evidence.
+2. `RequireDdlHashForDeclared` true outside Development (plan default). Recommended: keep.

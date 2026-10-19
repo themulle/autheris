@@ -332,13 +332,606 @@ public sealed class CatalogSchemaModelTests
         Assert.Equal(["id"], Assert.Single(model.Tables).Columns.Select(c => c.ColumnName));
     }
 
+    // BUG #75: relations between tables the tree service cannot run as one statement are not exposed.
+
+    private static readonly TableIdentifier PartnerId = new("crm", "dbo", "partners");
+    private static readonly TableIdentifier ContactId = new("sales", "dbo", "contacts");
+
+    private static TableRelation Relation(string name, TableIdentifier parent, TableIdentifier child, bool allowCrossDataSource = false) => new()
+    {
+        RelationName = name,
+        ParentTableIdentifier = parent,
+        ChildTableIdentifier = child,
+        Cardinality = RelationCardinality.OneToMany,
+        JoinKeysParent = ["id"],
+        JoinKeysChild = ["partner_id"],
+        AllowCrossDataSource = allowCrossDataSource
+    };
+
+    private static TableMetadata RelTable(TableIdentifier id, string sourceName, string dialect = "PostgreSql") =>
+        CreateTable(id, dialect: dialect, sourceName: sourceName, columns:
+        [
+            new TableColumn { ColumnName = "id", DataType = "int" },
+            new TableColumn { ColumnName = "partner_id", DataType = "int" }
+        ]);
+
+    private static async Task<CatalogSchemaModel> BuildWithRelationsAsync(
+        IReadOnlyList<TableMetadata> tables,
+        IReadOnlyList<TableRelation> relations,
+        Microsoft.Extensions.Logging.ILogger? logger = null)
+    {
+        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var relRepo = Substitute.For<ITableRelationRepository>();
+        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(tables);
+        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(ci => relations.Where(r => r.ParentTableIdentifier == ci.ArgAt<TableIdentifier>(0)).ToList());
+        return await CatalogSchemaModel.BuildAsync(metaRepo, relRepo, logger);
+    }
+
+    private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger
+    {
+        public List<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
+    }
+
+    private static TableMetadata CompositeTable(TableIdentifier id, params string[] cols) =>
+        CreateTable(id, dialect: "PostgreSql", sourceName: "pg1", columns: cols.Select(c => new TableColumn { ColumnName = c, DataType = "int" }).ToArray());
+
+    private static TableRelation CompositeRelation(string name, IReadOnlyList<string> parentKeys, IReadOnlyList<string> childKeys) => new()
+    {
+        RelationName = name,
+        ParentTableIdentifier = PartnerId,
+        ChildTableIdentifier = ContactId,
+        Cardinality = RelationCardinality.OneToMany,
+        JoinKeysParent = parentKeys,
+        JoinKeysChild = childKeys
+    };
+
+    [Fact]
+    public async Task CatalogSchema_KeyCountMismatch_OmitsRelationField()
+    {
+        var model = await BuildWithRelationsAsync(
+            [CompositeTable(PartnerId, "id", "region"), CompositeTable(ContactId, "pid", "region")],
+            [CompositeRelation("contacts", ["id", "region"], ["pid"])]);
+
+        Assert.All(model.Tables, t => Assert.Empty(t.Relations));
+    }
+
+    [Fact]
+    public async Task CatalogSchema_CompositeRelation_KeepsAllPairsInBothDirections()
+    {
+        var model = await BuildWithRelationsAsync(
+            [CompositeTable(PartnerId, "id", "region"), CompositeTable(ContactId, "pid", "reg")],
+            [CompositeRelation("contacts", ["id", "region"], ["pid", "reg"])]);
+
+        var fwd = Assert.Single(Assert.Single(model.Tables, t => t.Identifier == PartnerId).Relations);
+        Assert.Equal(["id", "region"], fwd.ParentColumns);
+        Assert.Equal(["pid", "reg"], fwd.ChildColumns);
+        var rev = Assert.Single(Assert.Single(model.Tables, t => t.Identifier == ContactId).Relations);
+        Assert.Equal(["pid", "reg"], rev.ParentColumns);
+        Assert.Equal(["id", "region"], rev.ChildColumns);
+    }
+
+    [Fact]
+    public async Task CatalogSchema_Fingerprint_ChangesWithSecondKeyPair()
+    {
+        TableMetadata[] tables = [CompositeTable(PartnerId, "id", "region", "zone"), CompositeTable(ContactId, "pid", "reg", "zn")];
+        var one = await BuildWithRelationsAsync(tables, [CompositeRelation("contacts", ["id"], ["pid"])]);
+        var two = await BuildWithRelationsAsync(tables, [CompositeRelation("contacts", ["id", "region"], ["pid", "reg"])]);
+        var twoOther = await BuildWithRelationsAsync(tables, [CompositeRelation("contacts", ["id", "zone"], ["pid", "zn"])]);
+
+        Assert.NotEqual(one.Fingerprint(), two.Fingerprint());
+        Assert.NotEqual(two.Fingerprint(), twoOther.Fingerprint());
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CatalogSchema_DroppedKeyColumn_OmitsRelation(bool dropOnParent)
+    {
+        // SEC-REL151-08 / T-REL151-12: the second key column no longer exists in the table metadata.
+        var parent = dropOnParent ? CompositeTable(PartnerId, "id") : CompositeTable(PartnerId, "id", "region");
+        var child = dropOnParent ? CompositeTable(ContactId, "pid", "reg") : CompositeTable(ContactId, "pid");
+
+        var model = await BuildWithRelationsAsync(
+            [parent, child],
+            [CompositeRelation("contacts", ["id", "region"], ["pid", "reg"])]);
+
+        Assert.All(model.Tables, t => Assert.Empty(t.Relations));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task CatalogSchema_ManyInvalidRelations_LogsBoundedLinesWithIdsOnly()
+    {
+        // SEC-REL151-09: one summary plus at most 10 detail lines, no catalog names.
+        var logger = new CapturingLogger();
+        var relations = Enumerable.Range(0, 50)
+            .Select(i => CompositeRelation($"secret_rel_{i}", ["id", "region"], ["pid"]))
+            .ToList();
+
+        await BuildWithRelationsAsync(
+            [CompositeTable(PartnerId, "id", "region"), CompositeTable(ContactId, "pid", "reg")],
+            relations, logger);
+
+        Assert.True(logger.Entries.Count <= 11, $"Expected at most 11 log lines but got {logger.Entries.Count}.");
+        Assert.All(logger.Entries, e => Assert.DoesNotContain("secret_rel_", e.Message));
+        Assert.All(logger.Entries, e => Assert.DoesNotContain("region", e.Message));
+    }
+
+    [Fact]
+    public async Task BuildAsync_CrossSourceForwardRelation_IsOmitted()
+    {
+        var model = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg2")],
+            [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.Empty(Assert.Single(model.Tables, t => t.Identifier == PartnerId).Relations);
+    }
+
+    [Fact]
+    public async Task BuildAsync_CrossSourceReverseRelation_IsOmitted()
+    {
+        var model = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg2")],
+            [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.Empty(Assert.Single(model.Tables, t => t.Identifier == ContactId).Relations);
+    }
+
+    [Fact]
+    public async Task BuildAsync_CrossSourceRelationWithAllowFlag_IsStillOmitted()
+    {
+        // Interim rule: the flag has no effect on the schema until the federated path exists.
+        var model = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg2")],
+            [Relation("contacts", PartnerId, ContactId, allowCrossDataSource: true)]);
+
+        Assert.All(model.Tables, t => Assert.Empty(t.Relations));
+    }
+
+    [Fact]
+    public async Task BuildAsync_SameSourceDifferentDomain_RelationIsKept()
+    {
+        var model = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg1")],
+            [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.Single(Assert.Single(model.Tables, t => t.Identifier == PartnerId).Relations);
+        Assert.Single(Assert.Single(model.Tables, t => t.Identifier == ContactId).Relations);
+    }
+
+    [Fact]
+    public async Task BuildAsync_SourceNameComparison_IsCaseInsensitive()
+    {
+        var model = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "PG1"), RelTable(ContactId, "pg1")],
+            [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.Single(Assert.Single(model.Tables, t => t.Identifier == PartnerId).Relations);
+    }
+
+    [Fact]
+    public async Task BuildAsync_EmptySourceNameOnBothSides_IsSameSource()
+    {
+        // Documents the decision: empty equals empty (the runtime then fails closed with "has no database connection").
+        var model = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, ""), RelTable(ContactId, "")],
+            [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.Single(Assert.Single(model.Tables, t => t.Identifier == PartnerId).Relations);
+    }
+
+    [Fact]
+    public async Task BuildAsync_EmptyVersusNonEmptySourceName_IsOmitted()
+    {
+        // An empty name is never a wildcard for another source.
+        var model = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, ""), RelTable(ContactId, "pg1")],
+            [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.All(model.Tables, t => Assert.Empty(t.Relations));
+    }
+
+    [Fact]
+    public async Task BuildAsync_SameSourceNameDifferentDialect_IsOmitted()
+    {
+        var model = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "pg1", dialect: "PostgreSql"), RelTable(ContactId, "pg1", dialect: "SqlServer")],
+            [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.All(model.Tables, t => Assert.Empty(t.Relations));
+    }
+
+    [Fact]
+    public async Task BuildAsync_OmittedCrossSourceRelation_DoesNotConsumeFieldNames()
+    {
+        var otherId = new TableIdentifier("crm", "dbo", "others");
+        var model = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg2"), RelTable(otherId, "pg1")],
+            [Relation("profile", PartnerId, ContactId), Relation("profile", PartnerId, otherId)]);
+
+        var field = Assert.Single(Assert.Single(model.Tables, t => t.Identifier == PartnerId).Relations);
+        Assert.Equal("profile", field.FieldName);
+        Assert.Equal(otherId, field.TargetTableIdentifier);
+    }
+
+    [Fact]
+    public async Task BuildAsync_MixedRelations_OnlyCrossSourceOmitted()
+    {
+        var sameId = new TableIdentifier("crm", "dbo", "others");
+        var model = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg2"), RelTable(sameId, "pg1")],
+            [Relation("contacts", PartnerId, ContactId), Relation("others", PartnerId, sameId)]);
+
+        var forward = Assert.Single(Assert.Single(model.Tables, t => t.Identifier == PartnerId).Relations);
+        Assert.Equal(sameId, forward.TargetTableIdentifier);
+        Assert.Empty(Assert.Single(model.Tables, t => t.Identifier == ContactId).Relations);
+        Assert.Single(Assert.Single(model.Tables, t => t.Identifier == sameId).Relations);
+    }
+
+    [Fact]
+    public async Task Fingerprint_AddingOmittedCrossSourceRelation_DoesNotChangeIt_ButSameSourceRelationDoes()
+    {
+        var tables = new[] { RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg2") };
+        var none = await BuildWithRelationsAsync(tables, []);
+        var crossSource = await BuildWithRelationsAsync(tables, [Relation("contacts", PartnerId, ContactId)]);
+        var sameSource = await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg1")],
+            [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.Equal(none.Fingerprint(), crossSource.Fingerprint());
+        Assert.NotEqual(none.Fingerprint(), sameSource.Fingerprint());
+    }
+
+    [Fact]
+    public async Task Fingerprint_ChangesWhenTableMovesToOtherSource()
+    {
+        var relations = new[] { Relation("contacts", PartnerId, ContactId) };
+        var before = await BuildWithRelationsAsync([RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg1")], relations);
+        var after = await BuildWithRelationsAsync([RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg2")], relations);
+
+        Assert.NotEqual(before.Fingerprint(), after.Fingerprint());
+    }
+
+    [Fact]
+    public async Task BuildAsync_OmittedRelations_LogsCountOnceWithoutNames()
+    {
+        var logger = new CapturingLogger();
+
+        await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "secret_source_a"), RelTable(ContactId, "secret_source_b")],
+            [Relation("secret_relation", PartnerId, ContactId)],
+            logger);
+
+        var entry = Assert.Single(logger.Entries, e => e.Message.Contains("relation(s)", StringComparison.Ordinal));
+        Assert.Equal(Microsoft.Extensions.Logging.LogLevel.Information, entry.Level);
+        Assert.Contains("1 relation(s)", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret_relation", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret_source", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("partners", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("contacts", entry.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BuildAsync_NoOmittedRelations_LogsNothingAboutRelations()
+    {
+        var logger = new CapturingLogger();
+
+        await BuildWithRelationsAsync(
+            [RelTable(PartnerId, "pg1"), RelTable(ContactId, "pg1")],
+            [Relation("contacts", PartnerId, ContactId)],
+            logger);
+
+        Assert.DoesNotContain(logger.Entries, e => e.Message.Contains("relation(s)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GraphQlAssembly_DoesNotReadAllowCrossDataSource()
+    {
+        // C-3: the flag has no effect on the schema until the federation gate exists.
+        var root = AppContext.BaseDirectory;
+        var dir = new DirectoryInfo(root);
+        while (dir != null && !Directory.Exists(Path.Combine(dir.FullName, "src", "Autheris.GraphQL")))
+        {
+            dir = dir.Parent;
+        }
+
+        Assert.NotNull(dir);
+        var offenders = Directory.EnumerateFiles(Path.Combine(dir.FullName, "src", "Autheris.GraphQL"), "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Where(f => File.ReadAllText(f).Contains("AllowCrossDataSource", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.Empty(offenders);
+    }
+
+    // BUG #157: tables without queryable columns are omitted instead of producing field-less GraphQL types.
+
+    private static readonly TableColumn[] NoColumns = [];
+    private static readonly TableColumn[] OnlyDashedColumns =
+        [new TableColumn { ColumnName = "secret-col", DataType = "int" }, new TableColumn { ColumnName = "other-col", DataType = "int" }];
+
+    private static async Task<CatalogSchemaModel> BuildTablesAsync(
+        IReadOnlyList<TableMetadata> tables,
+        IReadOnlyList<TableRelation>? relations = null,
+        Microsoft.Extensions.Logging.ILogger? logger = null)
+        => await BuildWithRelationsAsync(tables, relations ?? [], logger);
+
+    [Fact]
+    public async Task BuildAsync_TableWithoutColumns_IsOmittedWithNoQueryableColumns()
+    {
+        var empty = CreateTable(new TableIdentifier("sales", "dbo", "empty"), columns: NoColumns);
+        var valid = CreateTable(new TableIdentifier("sales", "dbo", "valid"));
+
+        var model = await BuildTablesAsync([empty, valid]);
+
+        Assert.Equal(valid.Identifier, Assert.Single(model.Tables).Identifier);
+        var omitted = Assert.Single(model.OmittedTables);
+        Assert.Equal(empty.Identifier, omitted.Table);
+        Assert.Equal(CatalogTableOmissionReason.NoQueryableColumns, omitted.Reason);
+    }
+
+    [Fact]
+    public async Task BuildAsync_TableWhoseColumnsAllFailPlainIdentifierRule_IsOmittedWithNoQueryableColumns()
+    {
+        var dashed = CreateTable(new TableIdentifier("sales", "dbo", "dashed"), columns: OnlyDashedColumns);
+
+        var model = await BuildTablesAsync([dashed]);
+
+        Assert.Empty(model.Tables);
+        Assert.Equal(CatalogTableOmissionReason.NoQueryableColumns, Assert.Single(model.OmittedTables).Reason);
+    }
+
+    [Fact]
+    public async Task BuildAsync_OmittedColumnlessTable_DoesNotReserveTypeNames()
+    {
+        // "sales.dbo.orders" sorts before "sales_dbo.orders.x"? Both sanitise to sales_dbo_orders*; use identical base names.
+        var emptyFirst = CreateTable(new TableIdentifier("sales", "dbo", "orders_item"), columns: NoColumns);
+        var validLater = CreateTable(new TableIdentifier("sales_dbo", "orders", "item"));
+
+        var model = await BuildTablesAsync([emptyFirst, validLater]);
+
+        var kept = Assert.Single(model.Tables);
+        Assert.Equal(validLater.Identifier, kept.Identifier);
+        Assert.Equal("sales_dbo_orders_item", kept.TypeName);
+        Assert.Equal(CatalogTableOmissionReason.NoQueryableColumns, Assert.Single(model.OmittedTables).Reason);
+    }
+
+    [Fact]
+    public async Task BuildAsync_RelationToOrFromOmittedTable_IsNotExposed()
+    {
+        var parent = RelTable(PartnerId, "pg1");
+        var emptyChild = CreateTable(ContactId, sourceName: "pg1", columns: NoColumns);
+
+        var model = await BuildTablesAsync([parent, emptyChild], [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.Empty(Assert.Single(model.Tables).Relations);
+
+        var emptyParent = CreateTable(PartnerId, sourceName: "pg1", columns: NoColumns);
+        var child = RelTable(ContactId, "pg1");
+        var model2 = await BuildTablesAsync([emptyParent, child], [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.Empty(Assert.Single(model2.Tables).Relations);
+    }
+
+    [Fact]
+    public async Task BuildAsync_CollidingTable_IsRecordedAsNameCollision()
+    {
+        var first = CreateTable(new TableIdentifier("sales", "dbo", "orders_item"));
+        var second = CreateTable(new TableIdentifier("sales_dbo", "orders", "item"));
+
+        var model = await BuildTablesAsync([first, second]);
+
+        var omitted = Assert.Single(model.OmittedTables);
+        Assert.Equal(second.Identifier, omitted.Table);
+        Assert.Equal(CatalogTableOmissionReason.NameCollision, omitted.Reason);
+    }
+
+    [Fact]
+    public async Task BuildAsync_TreeUnsupportedDialectTable_IsRecordedAsUnsupportedDialect()
+    {
+        var pg = CreateTable(new TableIdentifier("sales", "public", "orders"));
+        var oracle = CreateTable(new TableIdentifier("erp", "app", "invoices"), dialect: "Oracle");
+        var unknown = CreateTable(new TableIdentifier("erp", "app", "mystery"), dialect: "NoSuchDialect");
+
+        var model = await BuildTablesAsync([pg, oracle, unknown]);
+
+        Assert.Equal(pg.Identifier, Assert.Single(model.Tables).Identifier);
+        Assert.Equal(2, model.OmittedTables.Count);
+        Assert.All(model.OmittedTables, o => Assert.Equal(CatalogTableOmissionReason.UnsupportedDialect, o.Reason));
+    }
+
+    [Fact]
+    public async Task BuildAsync_ColumnlessTable_LogsOneWarningWithQualifiedNameOnly()
+    {
+        var logger = new CapturingLogger();
+        var empty = CreateTable(new TableIdentifier("sales", "dbo", "empty"), columns: NoColumns);
+
+        await BuildTablesAsync([empty], logger: logger);
+
+        var warning = Assert.Single(logger.Entries, e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning);
+        Assert.Contains(empty.Identifier.ToQualifiedName(), warning.Message);
+    }
+
+    [Fact]
+    public async Task BuildAsync_NullLogger_ColumnlessTable_DoesNotThrow()
+    {
+        var empty = CreateTable(new TableIdentifier("sales", "dbo", "empty"), columns: NoColumns);
+
+        var model = await BuildTablesAsync([empty], logger: null);
+
+        Assert.Empty(model.Tables);
+    }
+
+    [Fact]
+    public async Task Model_NeverContainsTableWithZeroColumns()
+    {
+        var tables = new[]
+        {
+            CreateTable(new TableIdentifier("a", "dbo", "valid")),
+            CreateTable(new TableIdentifier("a", "dbo", "empty"), columns: NoColumns),
+            CreateTable(new TableIdentifier("a", "dbo", "filtered"), columns: OnlyDashedColumns),
+            CreateTable(new TableIdentifier("a", "dbo", "valid_filter")),
+            CreateTable(new TableIdentifier("a_dbo", "valid", "filter")),
+        };
+
+        var model = await BuildTablesAsync(tables);
+
+        Assert.NotEmpty(model.Tables);
+        Assert.All(model.Tables, t => Assert.NotEmpty(t.Columns));
+        Assert.Equal(tables.Length, model.Tables.Count + model.OmittedTables.Count);
+    }
+
+    [Fact]
+    public async Task Fingerprint_ChangesWhenColumnlessTableAppears()
+    {
+        var valid = CreateTable(new TableIdentifier("sales", "dbo", "valid"));
+        var before = await BuildTablesAsync([valid]);
+        var after = await BuildTablesAsync([valid, CreateTable(new TableIdentifier("sales", "dbo", "empty"), columns: NoColumns)]);
+
+        Assert.NotEqual(before.Fingerprint(), after.Fingerprint());
+    }
+
+    [Fact]
+    public async Task Fingerprint_ChangesWhenOmittedTableGainsColumns()
+    {
+        var emptyId = new TableIdentifier("sales", "dbo", "later");
+        var before = await BuildTablesAsync([CreateTable(emptyId, columns: NoColumns)]);
+        var after = await BuildTablesAsync([CreateTable(emptyId)]);
+
+        Assert.NotEqual(before.Fingerprint(), after.Fingerprint());
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Model_OmittedTable_HasNoTypesFieldsRelationsOrReservedNames()
+    {
+        // SEC-BUG157-01 / T-BUG157-S01
+        var empty = CreateTable(PartnerId, sourceName: "pg1", columns: NoColumns);
+        var child = RelTable(ContactId, "pg1");
+        var reuser = CreateTable(new TableIdentifier("crm_dbo", "partners", "x"), sourceName: "pg1");
+        var reuserSameName = CreateTable(new TableIdentifier("crm", "dbo", "partners_x"), sourceName: "pg1", columns: NoColumns);
+
+        var model = await BuildTablesAsync(
+            [empty, child, reuser, reuserSameName],
+            [Relation("contacts", PartnerId, ContactId)]);
+
+        Assert.DoesNotContain(model.Tables, t => t.Identifier == empty.Identifier);
+        Assert.DoesNotContain(model.Tables, t => t.Identifier == reuserSameName.Identifier);
+        Assert.False(model.TablesByIdentifier.ContainsKey(empty.Identifier));
+        Assert.DoesNotContain("crm_dbo_partners", model.TablesByTypeName.Keys);
+        Assert.DoesNotContain("crm_dbo_partners", model.TablesByQueryFieldName.Keys);
+        Assert.All(model.Tables, t => Assert.DoesNotContain(t.Relations, r => r.TargetTableIdentifier == empty.Identifier));
+        // The later table keeps the name that the omitted table would otherwise have reserved
+        Assert.Equal("crm_dbo_partners_x", model.TablesByIdentifier[reuser.Identifier].TypeName);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Model_AllColumnsFilteredByRGql13_ReasonIsNoQueryableColumnsAndLeaksNoColumnName()
+    {
+        // SEC-BUG157-05 / T-BUG157-S02: the pre-existing R-GQL-13 information line is out of scope; the new records are checked.
+        var logger = new CapturingLogger();
+        var dashed = CreateTable(new TableIdentifier("sales", "dbo", "dashed"), columns: OnlyDashedColumns);
+
+        var model = await BuildTablesAsync([dashed], logger: logger);
+
+        var omitted = Assert.Single(model.OmittedTables);
+        Assert.Equal(CatalogTableOmissionReason.NoQueryableColumns, omitted.Reason);
+        var warning = Assert.Single(logger.Entries, e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning);
+        Assert.DoesNotContain("secret-col", warning.Message);
+        Assert.DoesNotContain("other-col", warning.Message);
+        Assert.DoesNotContain("secret", omitted.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Model_InactiveAndNonSqlTables_NeverAppearInOmittedTables()
+    {
+        // SEC-BUG157-06 / T-BUG157-S08
+        var inactive = CreateTable(new TableIdentifier("a", "dbo", "inactive"), isActive: false, columns: NoColumns);
+        var inactiveOracle = CreateTable(new TableIdentifier("a", "dbo", "inactive_oracle"), isActive: false, dialect: "Oracle");
+        var nonSql = CreateTable(new TableIdentifier("a", "dbo", "http"), dsType: DataSourceType.HttpDeclarative, columns: NoColumns);
+        var nonSqlUnknown = CreateTable(new TableIdentifier("a", "dbo", "http2"), dsType: DataSourceType.HttpDeclarative, dialect: "Nope");
+        var valid = CreateTable(new TableIdentifier("a", "dbo", "valid"));
+
+        var model = await BuildTablesAsync([inactive, inactiveOracle, nonSql, nonSqlUnknown, valid]);
+
+        Assert.Empty(model.OmittedTables);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Warning_ColumnlessTable_ContainsOnlyQualifiedName()
+    {
+        // SEC-BUG157-05 / T-BUG157-S09: asserts on the new warning record only.
+        var logger = new CapturingLogger();
+        var empty = CreateTable(new TableIdentifier("sales", "dbo", "empty"), columns: OnlyDashedColumns);
+
+        await BuildTablesAsync([empty], logger: logger);
+
+        var warning = Assert.Single(logger.Entries, e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning);
+        Assert.Equal(
+            $"GraphQL catalog schema: table '{empty.Identifier.ToQualifiedName()}' has no queryable columns and is omitted from the GraphQL schema.",
+            warning.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Fingerprint_StableAcrossRepeatedBuilds_NoRebuildLoop()
+    {
+        // SEC-BUG157-09 / T-BUG157-S10: check build (logger null) and real build agree with omissions present.
+        var tables = new[]
+        {
+            CreateTable(new TableIdentifier("a", "dbo", "valid")),
+            CreateTable(new TableIdentifier("a", "dbo", "empty"), columns: NoColumns),
+            CreateTable(new TableIdentifier("a", "dbo", "oracle"), dialect: "Oracle"),
+        };
+
+        var check = await BuildTablesAsync(tables, logger: null);
+        var real = await BuildTablesAsync(tables, logger: new CapturingLogger());
+
+        Assert.Equal(check.Fingerprint(), real.Fingerprint());
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Fingerprint_OmissionEntries_AreUnambiguouslyEncoded()
+    {
+        // SEC-BUG157-09: two different omission sets never produce the same fingerprint.
+        var a = await BuildTablesAsync([CreateTable(new TableIdentifier("a", "b", "c"), columns: NoColumns)]);
+        var b = await BuildTablesAsync([CreateTable(new TableIdentifier("a", "b", "c"), dialect: "Oracle")]);
+
+        Assert.NotEqual(a.Fingerprint(), b.Fingerprint());
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Fingerprint_OmittedTablesDifferingOnlyInDomain_DoNotCollide()
+    {
+        // SEC-BUG157-09: schema.table alone is ambiguous across domains.
+        var a = await BuildTablesAsync([CreateTable(new TableIdentifier("d1", "s", "t"), columns: NoColumns)]);
+        var b = await BuildTablesAsync([CreateTable(new TableIdentifier("d2", "s", "t"), columns: NoColumns)]);
+
+        Assert.NotEqual(a.Fingerprint(), b.Fingerprint());
+    }
+
     private static TableMetadata CreateTable(
         TableIdentifier id,
         bool isActive = true,
         DataSourceType dsType = DataSourceType.Sql,
         string dialect = "PostgreSql",
         IReadOnlyList<TableColumn>? columns = null,
-        IReadOnlyDictionary<string, MaskingRule>? columnMaskingRules = null)
+        IReadOnlyDictionary<string, MaskingRule>? columnMaskingRules = null,
+        string sourceName = "")
     {
         return new TableMetadata
         {
@@ -346,6 +939,7 @@ public sealed class CatalogSchemaModelTests
             Table = new Table
             {
                 IsActive = isActive,
+                SourceName = sourceName,
                 SourceType = dialect,
                 DataSourceType = dsType
             },

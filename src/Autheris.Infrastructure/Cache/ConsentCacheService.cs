@@ -29,6 +29,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
     private readonly object _syncLock = new();
     private readonly byte[] _l2IntegrityKey;
     private readonly ILogger<ConsentCacheService>? _logger;
+    private readonly string _restrictionFingerprint;
 
     // SEC H-01: L2 entries are framed as [version(1)][expiresAtUnixMs(8, BE)][HMAC-SHA256(32)][payload].
     private const byte L2FormatVersion = 0x01;
@@ -50,7 +51,8 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
         IBinaryCacheSerializer? serializer = null,
         IConnectionMultiplexer? multiplexer = null,
         IKeyVaultSecretProvider? secretProvider = null,
-        ILogger<ConsentCacheService>? logger = null)
+        ILogger<ConsentCacheService>? logger = null,
+        Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null)
     {
         _memoryCache = memoryCache;
         _epochValidationService = epochValidationService;
@@ -58,6 +60,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
         _multiplexer = multiplexer;
         _redisDb = multiplexer?.GetDatabase();
         _logger = logger;
+        _restrictionFingerprint = (restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default).Fingerprint;
         _l2IntegrityKey = ResolveL2IntegrityKey(options?.Value, secretProvider, logger, multiplexer != null && serializer != null);
         _prefix = options?.Value?.Caching?.Redis?.InstanceName ?? "Autheris:";
         if (!_prefix.EndsWith(':'))
@@ -129,11 +132,24 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
         {
             try
             {
-                foreach (var table in missingTables)
+                // WP-PF-05: issue every L2 read first (the multiplexer pipelines them), then await them together.
+                // Single-key commands only, so this is also safe on Redis Cluster.
+                var l2Keys = new RedisKey[missingTables.Count];
+                var l2Reads = new Task<RedisValue>[missingTables.Count];
+                for (var i = 0; i < l2Reads.Length; i++)
                 {
+                    l2Keys[i] = (RedisKey)$"{_prefix}consent:l2:{BuildCacheKey(tenant, userSid, missingTables[i], contextHash)}";
+                    l2Reads[i] = _redisDb.StringGetAsync(l2Keys[i]);
+                }
+
+                await Task.WhenAll(l2Reads).ConfigureAwait(false);
+
+                for (var i = 0; i < missingTables.Count; i++)
+                {
+                    var table = missingTables[i];
                     var cacheKey = BuildCacheKey(tenant, userSid, table, contextHash);
-                    var l2Key = (RedisKey)$"{_prefix}consent:l2:{cacheKey}";
-                    var rawValue = await _redisDb.StringGetAsync(l2Key).ConfigureAwait(false);
+                    var l2Key = l2Keys[i];
+                    var rawValue = l2Reads[i].Result;
                     byte[]? payloadBytes = null;
                     DateTimeOffset l2ExpiresAt = default;
                     byte[]? rawBytes = rawValue.IsNullOrEmpty ? null : (byte[]?)rawValue;
@@ -147,9 +163,10 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
                         }
                     }
 
-                    if (payloadBytes != null && _serializer.TryDeserialize<CachedConsentEnvelope>(payloadBytes, out var l2Env) && l2Env != null && MatchesTable(l2Env, table))
+                    TableAccessDecision? decision = null;
+                    if (payloadBytes != null && _serializer.TryDeserialize<CachedConsentEnvelope>(payloadBytes, out var l2Env) && l2Env != null && MatchesTable(l2Env, table)
+                        && (decision = l2Env.ToDecision(_restrictionFingerprint)) != null)
                     {
-                        var decision = l2Env.ToDecision();
                         var remaining = l2ExpiresAt - DateTimeOffset.UtcNow;
                         var l1Ttl = remaining < MaxL1PromotionTtl ? remaining : MaxL1PromotionTtl;
                         candidateEntries[table] = (cacheKey, l2Env.Epoch, decision, true, l1Ttl > TimeSpan.Zero ? l1Ttl : null, l2Key);
@@ -284,9 +301,10 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
                 if (payloadBytes != null && _serializer.TryDeserialize<CachedConsentEnvelope>(payloadBytes, out var l2Env) && l2Env != null && MatchesTable(l2Env, table))
                 {
                     var isL2EpochValid = await _epochValidationService.IsEpochValidAsync(table, l2Env.Epoch, ct).ConfigureAwait(false);
-                    if (isL2EpochValid)
+                    // SEC-GOV143-04: a legacy or foreign-fingerprint entry is a miss; L1 promotion only happens after this check.
+                    var decision = isL2EpochValid ? l2Env.ToDecision(_restrictionFingerprint) : null;
+                    if (isL2EpochValid && decision != null)
                     {
-                        var decision = l2Env.ToDecision();
                         // RR-L4-06: never extend the original (security-relevant) TTL on promotion.
                         var remaining = l2ExpiresAt - DateTimeOffset.UtcNow;
                         var l1Ttl = remaining < MaxL1PromotionTtl ? remaining : MaxL1PromotionTtl;
@@ -298,7 +316,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
                         CacheHits.Inc();
                         return decision;
                     }
-                    else
+                    else if (!isL2EpochValid)
                     {
                         await _redisDb.KeyDeleteAsync(l2Key).ConfigureAwait(false);
                     }
@@ -375,7 +393,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
             try
             {
                 var l2Key = (RedisKey)$"{_prefix}consent:l2:{cacheKey}";
-                var l2Dto = CachedConsentEnvelope.FromDecision(decision, storedEpoch);
+                var l2Dto = CachedConsentEnvelope.FromDecision(decision, storedEpoch, _restrictionFingerprint);
                 var binaryPayload = _serializer.Serialize(l2Dto);
                 var protectedPayload = ProtectL2Payload(l2Key.ToString(), binaryPayload, DateTimeOffset.UtcNow.Add(ttl));
                 await _redisDb.StringSetAsync(l2Key, protectedPayload, ttl).ConfigureAwait(false);

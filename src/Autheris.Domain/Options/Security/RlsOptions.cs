@@ -102,4 +102,124 @@ public sealed class VirtualFilterOptions
 public sealed class RowFilterOptions
 {
     public RowFilterSubqueryStrategy SubqueryStrategy { get; set; } = RowFilterSubqueryStrategy.Exists;
+
+    /// <summary>Issue #107: key-set cache strategy for correlated row filters (<c>Gateway:RowFilters:KeySetCache</c>).</summary>
+    public RowFilterKeySetCacheOptions KeySetCache { get; init; } = new();
+}
+
+/// <summary>
+/// Issue #107 global defaults and caps of the key-set cache strategy. Ranges (validated at startup, runtime values above a lowered cap are clamped):
+/// <c>1 s &lt;= DefaultDuration &lt;= MaxDuration &lt;= 24 h</c>, <c>1 &lt;= MaxKeys &lt;= 10,000</c>, <c>0 &lt;= BindParameterReserve &lt;= 1,000</c>,
+/// <c>1 &lt;= MaxConcurrentKeyQueries &lt;= 64</c>, <c>SizeLimitBytes &gt; 0</c>, <c>KeyQueryTimeout &gt; 0</c>.
+/// </summary>
+public sealed class RowFilterKeySetCacheOptions
+{
+    public const int MaxKeysCeiling = 10_000;
+    public const int BindParameterReserveCeiling = 1_000;
+    public const int MaxConcurrentKeyQueriesCeiling = 64;
+    public static readonly TimeSpan MinDuration = TimeSpan.FromSeconds(1);
+    public static readonly TimeSpan DurationCeiling = TimeSpan.FromHours(24);
+
+    public RowFilterEvaluationStrategy DefaultStrategy { get; init; } = RowFilterEvaluationStrategy.Exists;
+    public TimeSpan DefaultDuration { get; init; } = TimeSpan.FromMinutes(5);
+    public TimeSpan MaxDuration { get; init; } = TimeSpan.FromHours(1);
+    public int MaxKeys { get; init; } = 2000;
+    public long SizeLimitBytes { get; init; } = 64L * 1024 * 1024;
+    public TimeSpan KeyQueryTimeout { get; init; } = TimeSpan.FromSeconds(5);
+    public int BindParameterReserve { get; init; } = 256;
+    /// <summary>SEC-RF107-13: concurrent key query loads per node.</summary>
+    public int MaxConcurrentKeyQueries { get; init; } = 4;
+}
+
+/// <summary>
+/// Issue #129 (PLAN-GOV-129 C-4): <c>Gateway:CallerAttributes</c>. With <see cref="Enabled"/> false (default) nothing changes: a
+/// <c>USER_ATTRIBUTE</c> consent leaf and a <c>{{caller.x}}</c> placeholder stay constants (no rows), and definitions are refused.
+/// </summary>
+public sealed class CallerAttributeOptions
+{
+    public const int MaxValuesHardCapCeiling = 1000;
+    public const int TtlCeilingSeconds = 300;
+
+    public bool Enabled { get; init; }
+
+    [Range(1, MaxValuesHardCapCeiling)] public int MaxValuesHardCap { get; init; } = 200;
+
+    [Range(1, TtlCeilingSeconds)] public int DefaultTtlSeconds { get; init; } = 60;
+
+    /// <summary>Hard upper bound of every attribute TTL; never above 300 s (SEC-129-04: the bound for table and service-set providers).</summary>
+    [Range(1, TtlCeilingSeconds)] public int MaxTtlSeconds { get; init; } = TtlCeilingSeconds;
+
+    /// <summary>Negative cache TTL of a <c>Missing</c> result (a re-provisioned person waits at most this long).</summary>
+    [Range(1, TtlCeilingSeconds)] public int NegativeTtlSeconds { get; init; } = 15;
+
+    [Range(100, 10_000)] public int ProviderTimeoutMilliseconds { get; init; } = 2000;
+
+    /// <summary>Bulkhead per provider kind (BC-129-12); a rejected call is the generic <c>Failed</c> outcome.</summary>
+    [Range(1, 256)] public int ProviderMaxConcurrency { get; init; } = 16;
+
+    [Required] public CallerAttributeCircuitBreakerOptions CircuitBreaker { get; init; } = new();
+
+    /// <summary>Per statement bind budget reserved for caller attribute expansion (BC-129-09); the sum over all attributes of a statement is checked against it.</summary>
+    [Range(0, 5000)] public int BindReserve { get; init; } = 400;
+
+    public bool PadListsToBuckets { get; init; } = true;
+
+    /// <summary>The request memo is discarded after <c>min(attribute TTL, this)</c> seconds (BC-129-07).</summary>
+    [Range(1, 300)] public int RequestMemoSeconds { get; init; } = 30;
+
+    [Required] public CallerAttributeCacheOptions Cache { get; init; } = new();
+
+    [Required] public CallerAttributeClaimsOptions Claims { get; init; } = new();
+
+    /// <summary>BC-129-03: changes of attribute-table providers and service sets need an approver holding the separate approver role.</summary>
+    public bool RequireSeparateApproverRole { get; init; } = true;
+
+    /// <summary>Tables (<c>schema.table</c>, case-insensitive) that may be both an attribute source and a catalog table (explicit opt-in, A-10).</summary>
+    public IReadOnlyList<string> AllowAttributeSourceInCatalog { get; init; } = [];
+
+    /// <summary>BC-129-13: administrator requests per minute of the simulation endpoint.</summary>
+    [Range(1, 600)] public int SimulationRequestsPerMinute { get; init; } = 30;
+
+    /// <summary>
+    /// BC-129-13: secret of the per-tenant peppered value hashes of the simulation output. Empty: a random process-wide pepper (hashes are then only
+    /// comparable within one process lifetime, which is all a simulation needs).
+    /// </summary>
+    public string? SimulationHashPepper { get; init; }
+}
+
+public sealed class CallerAttributeCircuitBreakerOptions
+{
+    [Range(1, 100)] public int FailureThreshold { get; init; } = 5;
+
+    [Range(1, 600)] public int OpenSeconds { get; init; } = 10;
+}
+
+public sealed class CallerAttributeCacheOptions
+{
+    [Range(1, int.MaxValue)] public long SizeLimitBytes { get; init; } = 8L * 1024 * 1024;
+}
+
+/// <summary>An issuer whose validated bearer tokens may supply claims; <see cref="SubjectKeyIsPerson"/> allows <c>sub</c> as a person key (SEC-129-01).</summary>
+public sealed class CallerAttributeTrustedIssuer
+{
+    public string Issuer { get; init; } = string.Empty;
+
+    public bool SubjectKeyIsPerson { get; init; }
+}
+
+public sealed class CallerAttributeClaimsOptions
+{
+    /// <summary>Empty disables the claims provider. Every issuer must also be a <c>ValidIssuers</c> entry of the bearer scheme (startup validation).</summary>
+    public IReadOnlyList<CallerAttributeTrustedIssuer> TrustedIssuers { get; init; } = [];
+
+    /// <summary>Authentication types of the identity that owns a claim. Default: the JwtBearer identity only (F-6); ForwardAuth, Basic and Test are off.</summary>
+    /// <remarks>
+    /// <c>McpAuth</c> is deliberately not listed: the MCP session re-creates its caller as <c>McpAuth</c> and loses the original scheme, so that
+    /// identity passes the gate only with the gateway marker claim, which is set only when the original scheme is listed here (BC-129-01).
+    /// </remarks>
+    public IReadOnlyList<string> AllowedSchemes { get; init; } = ["AuthenticationTypes.Federation", "Bearer"];
+
+    [Range(1, 256)] public int MaxClaimValueLength { get; init; } = 256;
+
+    [Range(1, 16 * 1024)] public int MaxTotalClaimBytes { get; init; } = 16 * 1024;
 }

@@ -23,6 +23,7 @@ public static class GatewaySections
     public const string CasbinDecisionCache = "Gateway:Casbin:DecisionCache";
     public const string Rebac = "Gateway:Rebac";
     public const string RowFilters = "Gateway:RowFilters";
+    public const string CallerAttributes = "Gateway:CallerAttributes";
     public const string VirtualFilters = "Gateway:VirtualFilters";
     public const string VirtualFilterFederation = "Gateway:VirtualFilters:Federation";
     public const string DataMasking = "Gateway:DataMasking";
@@ -50,6 +51,7 @@ public static class GatewaySections
     public const string SystemMetrics = "Gateway:SystemMetrics";
     public const string TrafficShadowing = "Gateway:TrafficShadowing";
     public const string FinOps = "Gateway:FinOps";
+    public const string QueryCost = "Gateway:Governance:QueryCost";
 
     // Storage & Caching
     public const string GovernanceDb = "Gateway:GovernanceDb";

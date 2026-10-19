@@ -37,6 +37,23 @@ public static class GovernedSqlErrorCodes
     public const string Timeout = "SQL_TIMEOUT";
     public const string SourceUnavailable = "SQL_SOURCE_UNAVAILABLE";
 
+    // REQ-SQL-128: client list parameters. Fixed messages, never counts, names or values.
+    public const string RequiredFilterColumnMissing = "REQUIRED_FILTER_COLUMN_MISSING";
+    public const string ListParamPosition = "SQL_LIST_PARAM_POSITION";
+    public const string ListParamType = "SQL_LIST_PARAM_TYPE";
+    public const string ListParamNull = "SQL_LIST_PARAM_NULL";
+    public const string ListParamTooLarge = "SQL_LIST_PARAM_TOO_LARGE";
+    public const string ListParamUnsupported = "SQL_LIST_PARAM_UNSUPPORTED";
+
+    // REQ-SQL-130: time zone conversion. Fixed messages, never the zone, the timestamp, a count or the dialect-specific zone id.
+    public const string TimeZoneInvalid = "SQL_TIMEZONE_INVALID";
+    public const string TimeZoneArgument = "SQL_TIMEZONE_ARGUMENT";
+    public const string FunctionUnsupportedDialect = "SQL_FUNCTION_UNSUPPORTED_DIALECT";
+    public const string TimeZoneUnavailable = "SQL_TIMEZONE_UNAVAILABLE";
+
+    // Issue #132 (PLAN-DATA-132, SEC-DATA132-01): AST rejection of client three-part/four-part physical database names.
+    public const string InvalidIdentifierQualification = "INVALID_IDENTIFIER_QUALIFICATION";
+
     /// <summary>The fixed, value-free message of a code. It never carries driver text, values or object names.</summary>
     public static string FixedMessage(string code) => code switch
     {
@@ -61,6 +78,17 @@ public static class GovernedSqlErrorCodes
         CompilerInvariant => "The statement could not be processed.",
         Timeout => "The SQL statement exceeded the execution time limit. Narrow the query (filter, fewer columns, LIMIT) or contact support with the trace id.",
         SourceUnavailable => "The data source is temporarily unavailable. Retry later.",
+        ListParamPosition => "A list parameter is only allowed as the single item of an IN or NOT IN list.",
+        ListParamType => "A list parameter has an invalid or mixed element type, or a scalar parameter received a list.",
+        ListParamNull => "A list parameter contains an element that is not allowed (null, or text the data source cannot store as given).",
+        ListParamTooLarge => "A list parameter exceeds the maximum number of values.",
+        ListParamUnsupported => "List parameters are not supported for this statement.",
+        TimeZoneInvalid => "The time zone is not supported.",
+        TimeZoneArgument => "The time zone conversion arguments are not valid.",
+        FunctionUnsupportedDialect => "The function is not supported for this data source dialect.",
+        TimeZoneUnavailable => "Time zone conversion is temporarily unavailable.",
+        RequiredFilterColumnMissing => "A required filter column was not constrained by the query or an active row policy.",
+        InvalidIdentifierQualification => "Database-qualified or server-qualified object names are not permitted.",
         _ => "The statement could not be executed."
     };
 }
@@ -106,4 +134,16 @@ public sealed class CheckedExecutionRequiredException : GovernedSqlException
         : base(GovernedSqlErrorCodes.CheckedExecutionRequired, dialect)
     {
     }
+}
+
+/// <summary>
+/// Issue #163: A table-level required filter column was not constrained by the query or an active row policy (fail closed, 400).
+/// </summary>
+public sealed class RequiredFilterColumnMissingException : GovernedSqlException
+{
+    public RequiredFilterColumnMissingException(TargetSqlDialect dialect = TargetSqlDialect.PostgreSql)
+        : base(GovernedSqlErrorCodes.RequiredFilterColumnMissing, dialect) { }
+
+    public RequiredFilterColumnMissingException(string message)
+        : base(GovernedSqlErrorCodes.RequiredFilterColumnMissing, TargetSqlDialect.PostgreSql) { }
 }

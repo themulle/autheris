@@ -80,8 +80,11 @@ public static class EntraTokenPolicy
         }
 
         var readOnlyScopes = options.GetEffectiveReadOnlyScopes();
-        if (scopes.Count > 0 && readOnlyScopes.Count > 0 &&
-            scopes.All(s => readOnlyScopes.Any(r => IsSameScope(r, s))))
+        var selfServiceScopes = options.ReadOnlySelfServiceScopes ?? [];
+        var permittedReadOnlyScopes = readOnlyScopes.Concat(selfServiceScopes).ToList();
+
+        if (scopes.Count > 0 && permittedReadOnlyScopes.Count > 0 &&
+            scopes.All(s => permittedReadOnlyScopes.Any(r => IsSameScope(r, s))))
         {
             TokenAccessScope.MarkReadOnly(identity);
         }
@@ -92,12 +95,7 @@ public static class EntraTokenPolicy
     // scp carries the bare scope name; the configuration may use the full form api://app/Agent.Read.
     private static bool IsSameScope(string configured, string tokenScope)
     {
-        var bare = configured.Trim();
-        var slash = bare.LastIndexOf('/');
-        if (slash >= 0 && slash < bare.Length - 1)
-        {
-            bare = bare[(slash + 1)..];
-        }
+        var bare = ScopeNames.ToBareName(configured.Trim());
 
         return string.Equals(bare, tokenScope, StringComparison.OrdinalIgnoreCase);
     }

@@ -159,8 +159,11 @@ public static partial class AdvancedRlsFilterGenerator
     /// Typed form of <see cref="BuildCorrelatedSubquery"/> (SEC-X1-02): an EXISTS over the reserved target alias whose values are
     /// policy parameters. <paramref name="parameterPrefix"/> keeps the names of independently built predicates distinct.
     /// </summary>
-    public static PolicyPredicate BuildCorrelatedPredicate(ConsentRowFilter filter, string parameterPrefix = "__gql_rls_") =>
-        AdvancedRlsPredicateBuilder.BuildCorrelated(filter, parameterPrefix);
+    public static PolicyPredicate BuildCorrelatedPredicate(
+        ConsentRowFilter filter,
+        string parameterPrefix = "__gql_rls_",
+        Autheris.Application.Sql.Policy.RowFilterKeySets.CorrelatedFilterSource source = Autheris.Application.Sql.Policy.RowFilterKeySets.CorrelatedFilterSource.Consent) =>
+        AdvancedRlsPredicateBuilder.BuildCorrelated(filter, parameterPrefix, source);
 
     /// <summary>Typed form of <see cref="BuildCrossSourceSetFilter"/>: one parameter per value; an unknown dialect throws.</summary>
     public static PolicyPredicate BuildCrossSourceSetPredicate(ConsentRowFilter filter, DatabaseDialect dialect, string parameterPrefix = "__gql_rls_") =>

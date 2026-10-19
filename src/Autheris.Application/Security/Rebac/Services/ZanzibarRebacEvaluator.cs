@@ -203,17 +203,23 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
 
         // 2. Perform graph resolution with cycle & depth guard
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var tracker = new ExpiryTracker();
         var maxDepth = _gatewayOptions.Value.Rebac.MaxTraversalDepth;
 
         try
         {
-            var allowed = await TraverseAndEvaluateAsync(tenant, request.User, request.Relation, request.Object, depth: 0, maxDepth, visited, ct).ConfigureAwait(false);
+            var allowed = await TraverseAndEvaluateAsync(tenant, request.User, request.Relation, request.Object, depth: 0, maxDepth, visited, tracker, ct).ConfigureAwait(false);
 
             // 3. Store in cache (only if not degraded and generation is known)
             if (!isDegraded && currentGen.HasValue)
             {
                 var ttl = _gatewayOptions.Value.Rebac.CacheTtlSeconds;
                 var expiry = DateTimeOffset.UtcNow.AddSeconds(ttl);
+                if (allowed && tracker.Earliest is { } tupleExpiry && tupleExpiry < expiry)
+                {
+                    expiry = tupleExpiry; // WP-SC-16: a decision never outlives the time-bound tuple it rests on
+                }
+
                 StoreInCache(tenant, cacheKey, allowed, expiry, currentGen.Value);
             }
 
@@ -223,6 +229,20 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         {
             _logger.LogError(ex, "F-SEC-04 ReBAC evaluation failed closed due to store exception for {User}#{Rel}@{Obj} in tenant {Tenant}", request.User, request.Relation, request.Object, tenant);
             return RebacCheckResult.Denied;
+        }
+    }
+
+    /// <summary>Earliest expiry of the time-bound tuples a positive decision rests on (null: only standing tuples).</summary>
+    private sealed class ExpiryTracker
+    {
+        public DateTimeOffset? Earliest { get; private set; }
+
+        public void Note(DateTimeOffset? expiresAt)
+        {
+            if (expiresAt is { } e && (Earliest is null || e < Earliest))
+            {
+                Earliest = e;
+            }
         }
     }
 
@@ -295,6 +315,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         int depth,
         int maxDepth,
         HashSet<string> visited,
+        ExpiryTracker tracker,
         CancellationToken ct)
     {
         if (ct.IsCancellationRequested) return false;
@@ -325,9 +346,15 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         }
 
         // 1. Direct check: Is there an exact tuple (tenant, user, relation, obj)?
+        // WP-SC-16: expired tuples are filtered here as well, so a store that does not filter cannot grant access (fail closed).
+        var now = DateTimeOffset.UtcNow;
         var directTuples = await _store.GetTuplesAsync(tenantId, user, relation, obj, ct).ConfigureAwait(false);
-        if (directTuples.Count > 0 && directTuples.Any(t => !string.IsNullOrWhiteSpace(t.User) && string.Equals(t.User, user, StringComparison.OrdinalIgnoreCase)))
+        var direct = directTuples
+            .Where(t => !t.IsExpired(now) && !string.IsNullOrWhiteSpace(t.User) && string.Equals(t.User, user, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (direct.Count > 0)
         {
+            tracker.Note(direct.Any(t => t.ExpiresAt is null) ? null : direct.Max(t => t.ExpiresAt));
             return true;
         }
 
@@ -342,7 +369,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
 
             foreach (var parentRel in parents)
             {
-                if (await TraverseAndEvaluateAsync(tenantId, user, parentRel, obj, depth + 1, maxDepth, visited, ct).ConfigureAwait(false))
+                if (await TraverseAndEvaluateAsync(tenantId, user, parentRel, obj, depth + 1, maxDepth, visited, tracker, ct).ConfigureAwait(false))
                 {
                     return true;
                 }
@@ -354,9 +381,9 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         var objectTuples = await _store.GetTuplesAsync(tenantId, user: null, relation: relation, obj: obj, ct).ConfigureAwait(false);
         foreach (var t in objectTuples)
         {
-            if (string.IsNullOrWhiteSpace(t.User))
+            if (string.IsNullOrWhiteSpace(t.User) || t.IsExpired(now))
             {
-                // POL-7: Empty User in tuple must never be treated as wildcard or allow!
+                // POL-7: Empty User in tuple must never be treated as wildcard or allow! Expired tuples are absent.
                 continue;
             }
 
@@ -369,8 +396,9 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
                     var groupObj = parts[0];
                     var groupRel = parts[1];
                     // Check if current user has 'groupRel' on 'groupObj'
-                    if (await TraverseAndEvaluateAsync(tenantId, user, groupRel, groupObj, depth + 1, maxDepth, visited, ct).ConfigureAwait(false))
+                    if (await TraverseAndEvaluateAsync(tenantId, user, groupRel, groupObj, depth + 1, maxDepth, visited, tracker, ct).ConfigureAwait(false))
                     {
+                        tracker.Note(t.ExpiresAt);
                         return true;
                     }
                 }
@@ -383,14 +411,15 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         foreach (var pt in parentTuples)
         {
             var parentEntity = pt.User; // In parent relation, User column stores the parent entity identifier
-            if (string.IsNullOrWhiteSpace(parentEntity))
+            if (string.IsNullOrWhiteSpace(parentEntity) || pt.IsExpired(now))
             {
                 // POL-7: Empty User in parent relation must never be treated as wildcard or parent!
                 continue;
             }
 
-            if (await TraverseAndEvaluateAsync(tenantId, user, relation, parentEntity, depth + 1, maxDepth, visited, ct).ConfigureAwait(false))
+            if (await TraverseAndEvaluateAsync(tenantId, user, relation, parentEntity, depth + 1, maxDepth, visited, tracker, ct).ConfigureAwait(false))
             {
+                tracker.Note(pt.ExpiresAt);
                 return true;
             }
         }

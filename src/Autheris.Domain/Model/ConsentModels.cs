@@ -63,7 +63,15 @@ public sealed class ConsentRowFilter
     public string? DependentValidToColumn { get; init; }
     public string? TargetTableAlias { get; init; }
     public IReadOnlyList<SubqueryJoinHop>? AdditionalHops { get; init; }
+
+    // Issue #107: key-set cache evaluation settings of this rule (null = inherit object/global). Serialized in ConsentRowFilterRecipe.
+    public RowFilterEvaluationStrategy? KeySetStrategy { get; init; }
+    public int? KeySetDurationSeconds { get; init; }
+    public int? KeySetMaxKeys { get; init; }
 }
+
+/// <summary>PLAN-GOV-158-INC1: an in-place description change of a non-revoked consent (applied inside <c>ReplaceConsentsAsync</c>; never touches validity, rules or the epoch).</summary>
+public sealed record ConsentDescriptionUpdate(Guid ConsentId, TenantId Tenant, string? Description);
 
 public sealed class Consent
 {
@@ -87,15 +95,28 @@ public sealed class Consent
     public DateTimeOffset? RevokedAt { get; init; }
     public string? RevokeReason { get; init; }
 
+    /// <summary>WP-SC-16: number of approved renewals (extensions) of this grant; persisted by the repositories.</summary>
+    public int RenewalCount { get; init; }
+
+    /// <summary>
+    /// PLAN-GOV-158-INC1: owner-authored explanation of why this grant exists (persisted, normalised by <c>UntrustedText</c>). Settable because
+    /// the repositories hydrate it after the row mapper. Untrusted text: it never influences a decision; output only through
+    /// <c>ConsentDescriptionText.ForOutput</c>.
+    /// </summary>
+    public string? Description { get; set; }
+
     public IReadOnlyList<ConsentColumnRule> ColumnRules { get; set; } = Array.Empty<ConsentColumnRule>();
     public IReadOnlyList<ConsentRowFilter> RowFilters { get; set; } = Array.Empty<ConsentRowFilter>();
     public string? RowFilterCondition { get; init; }
+
+    /// <summary>WP-SC-16: expiry after the read-time clamp of legacy individual grants (never later than <see cref="ValidTo"/>).</summary>
+    public DateTimeOffset EffectiveValidTo => IndividualGrantLimits.EffectiveConsentValidTo(GranteeType, ValidFrom, ValidTo, Effect);
 
     public bool IsActive(DateTimeOffset atTime)
     {
         if (IsRevoked) return false;
         if (ValidFrom > atTime) return false;
-        if (atTime >= ValidTo) return false;
+        if (atTime >= EffectiveValidTo) return false;
         return true;
     }
 
@@ -120,5 +141,7 @@ public sealed class Consent
                 throw new InvalidOperationException($"Consent {Id}: GranteeSid must be specified when GranteeType is User, Group or ServicePrincipal.");
             }
         }
+
+        ConsentRowFilterShape.Validate(RowFilters);
     }
 }

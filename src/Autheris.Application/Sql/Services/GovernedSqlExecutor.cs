@@ -10,6 +10,7 @@ using System.Security;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
@@ -21,6 +22,7 @@ using Autheris.Application.Sql;
 using Autheris.Application.Sql.Errors;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Internal;
+using Autheris.Application.Sql.ListParameters;
 using Autheris.Application.Sql.Synthetic;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -41,9 +43,11 @@ using TrinoSqlEngine.Ast.Emit;
 /// X1.2: the only text that reaches a command is <see cref="CompiledSql.Sql"/>, bound through <see cref="CompiledSqlBinders"/>;
 /// governed DML runs through the checked executor inside the session transaction; provider errors are reduced to stable codes.
 /// </summary>
-public sealed class GovernedSqlExecutor
+public sealed partial class GovernedSqlExecutor
 {
     private const string InternalParameterPrefix = GovernedSqlExecutionService.InternalParameterPrefix;
+    // SEC-RF107-07(e): the parameters of a substituted row-filter key-set subquery; user SQL and request parameters cannot use the prefix.
+    private const string KeySetParameterPrefix = "__rls_ks";
     private const int ThrottledRetryAfterSeconds = 2;
 
     private readonly GovernedSqlRewriter _rewriter;
@@ -242,29 +246,21 @@ public sealed class GovernedSqlExecutor
             ? _dataSourceResolver.ResolveAllowedDataSource(request.DataSourceName, tenantId)
             : null;
 
-        if (request.Parameters != null)
-        {
-            foreach (var paramName in request.Parameters.Keys)
-            {
-                var trimmed = paramName.TrimStart('@');
-                if (trimmed.StartsWith(InternalParameterPrefix, StringComparison.OrdinalIgnoreCase) ||
-                    trimmed.StartsWith("p_rls_", StringComparison.OrdinalIgnoreCase) ||
-                    trimmed.StartsWith("rls_", StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new WebSqlPolicyException("A request parameter uses a reserved gateway parameter name.");
-                }
-            }
-        }
+        GovernedSqlExecutionService.EnsureClientParameterNames(request.Parameters);
 
-        // Scalar values only (an array or object is a 400). The binder reads a client value only by the name the statement uses.
-        var clientValues = BuildClientValues(request.Parameters);
-        string sqlForRewrite = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, request.Parameters, out _);
+        string sqlForRewrite = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, request.Parameters, out var referencedNames);
 
         var dmlContext = new DmlAuditContext();
         GovernedRewrite rewrite;
+        IReadOnlyDictionary<string, object?> clientValues;
         try
         {
-            rewrite = await _rewriter.RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit, probeExtraRow: true, plannedTableRead: request.PlannedTableRead).ConfigureAwait(false);
+            // Scalars, and (REQ-SQL-128) lists on the transports that may carry them; an object is a 400. The binder reads a client
+            // value only by the name the statement uses. A list the statement does not reference is dropped here (SEC-128-04).
+            var referenced = referencedNames as IReadOnlySet<string> ?? new HashSet<string>(referencedNames, StringComparer.OrdinalIgnoreCase);
+            clientValues = BuildClientValues(request, referenced);
+            var shapes = ClientListParameters.Shapes(clientValues, referenced);
+            rewrite = await _rewriter.RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit, probeExtraRow: true, plannedTableRead: request.PlannedTableRead, clientLists: shapes).ConfigureAwait(false);
         }
         catch (Exception policyEx) when (IsAuditedRejection(policyEx, ct))
         {
@@ -339,7 +335,9 @@ public sealed class GovernedSqlExecutor
                 ["dataSource"] = dsName,
                 ["virtual_filters"] = rewrite.VirtualFilters
             };
-            AddCompiledAuditFields(fields, compiled);
+            AddCallerAttributeAuditFields(fields, rewrite, compiled);
+            AddCompiledAuditFields(fields, compiled, clientValues);
+            AddKeySetAuditFields(fields, rewrite);
             await _auditWriter.RecordAsync(new AuditLogEntry
             {
                 TenantId = tenantId,
@@ -530,7 +528,7 @@ public sealed class GovernedSqlExecutor
         catch (Exception ex)
         {
             // A driver error is reduced to a stable code first; the original is logged server-side only (see SanitizeProviderError).
-            var sanitized = SanitizeProviderError(ex, binderDialect, dsName);
+            var sanitized = SanitizeProviderError(ex, binderDialect, dsName, BindsValueFromTheCaller(compiled, clientValues));
             var reported = sanitized ?? ex;
 
             if (!dmlContext.IsDml)
@@ -596,11 +594,19 @@ public sealed class GovernedSqlExecutor
     }
 
     /// <summary>
+    /// True when the statement binds a client list (SEC-128-07) or a caller attribute value (BC-129-16): a driver message can quote such a value, so
+    /// the exception text is not logged for it.
+    /// </summary>
+    internal static bool BindsValueFromTheCaller(CompiledSql compiled, IReadOnlyDictionary<string, object?> clientValues) =>
+        clientValues.Values.Any(v => v is ClientListValue) ||
+        compiled.Parameters.Any(p => p.Origin == ParameterOrigin.Policy && p.SourceName != null && Autheris.Application.Identity.Attributes.CallerAttributeParameterName.IsReserved(p.SourceName));
+
+    /// <summary>
     /// A driver error becomes a typed error with a stable code and a fixed message; the original is logged server-side only. A timeout
     /// or an unavailable source is classified first and keeps its own status (504, 503). Everything that is not a driver error
     /// (policy and binder refusals, cancellation, the gateway's own exceptions) passes through unchanged.
     /// </summary>
-    private GovernedSqlException? SanitizeProviderError(Exception error, TargetSqlDialect dialect, string dataSourceName)
+    private GovernedSqlException? SanitizeProviderError(Exception error, TargetSqlDialect dialect, string dataSourceName, bool clientListsBound)
     {
         if (error is GovernedSqlException || !IsProviderError(error))
         {
@@ -612,8 +618,20 @@ public sealed class GovernedSqlExecutor
             return null;
         }
 
-        _logger?.LogWarning(error, "WebSQL provider error on data source {DataSource} ({Dialect}); the caller receives a sanitized error. TraceId={TraceId}",
-            dataSourceName, dialect, Activity.Current?.TraceId.ToString());
+        if (clientListsBound)
+        {
+            // SEC-128-07 / BC-129-16: a driver message can carry a bound list element or caller attribute value ("Conversion failed when converting the nvarchar value '...'"), so
+            // the exception object (message, inner exceptions) is not logged when a client list is bound; its type and number are.
+            var driver = error as DbException;
+            _logger?.LogWarning("WebSQL provider error on data source {DataSource} ({Dialect}); the caller receives a sanitized error. ErrorType={ErrorType} ErrorCode={ErrorCode} TraceId={TraceId}",
+                dataSourceName, dialect, error.GetType().Name, driver?.ErrorCode, Activity.Current?.TraceId.ToString());
+        }
+        else
+        {
+            _logger?.LogWarning(error, "WebSQL provider error on data source {DataSource} ({Dialect}); the caller receives a sanitized error. TraceId={TraceId}",
+                dataSourceName, dialect, Activity.Current?.TraceId.ToString());
+        }
+
         return DmlErrorSanitizer.Map(dialect, error);
     }
 
@@ -653,34 +671,180 @@ public sealed class GovernedSqlExecutor
         (!(error is OperationCanceledException && ct.IsCancellationRequested) &&
          (error is ArgumentException || SqlCompilerErrorMapper.TryMap(error, out _)));
 
-    private static IReadOnlyDictionary<string, object?> BuildClientValues(IReadOnlyDictionary<string, object?>? parameters)
+    private IReadOnlyDictionary<string, object?> BuildClientValues(GovernedSqlQueryRequest request, IReadOnlySet<string> referenced)
     {
         var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        var parameters = request.Parameters;
         if (parameters == null)
         {
             return values;
         }
 
+        var limits = ListParameterLimits.From(_options.Value.WebSql);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        int lists = 0;
         foreach (var (name, value) in parameters)
         {
             // The first spelling wins when two names differ only by case (as before).
-            values.TryAdd(name.TrimStart('@'), WebSqlParameterValues.Normalize(value));
+            string trimmed = name.TrimStart('@');
+            if (Autheris.Application.Identity.Attributes.CallerAttributeParameterName.IsReserved(trimmed))
+            {
+                // REQ-GOV-129 (BC-129-16, ST-129-14): a client parameter never uses the reserved name of a caller attribute slot (any case).
+                throw new ArgumentException("A client parameter must not use a reserved gateway parameter name.");
+            }
+
+            if (!seen.Add(trimmed))
+            {
+                continue;
+            }
+
+            if (value is not ClientListValue && !ListParameterNormalizer.IsListCandidate(value))
+            {
+                values.Add(trimmed, WebSqlParameterValues.Normalize(value));
+                continue;
+            }
+
+            // SEC-128-05: admission by allowlist, before any element is read.
+            AdmitList(request, value);
+            if (++lists > limits.MaxListParameters)
+            {
+                throw new ClientListException(GovernedSqlErrorCodes.ListParamTooLarge);
+            }
+
+            if (!referenced.Contains(trimmed))
+            {
+                continue;   // dropped: it neither enters the cache key nor costs a normalization
+            }
+
+            values.Add(trimmed, value switch
+            {
+                // An endpoint-built value is not trusted: the configured maximum applies again (its elements were validated by Create).
+                ClientListValue list when list.Count > limits.ConfiguredMaxValues => throw new ClientListException(GovernedSqlErrorCodes.ListParamTooLarge),
+                ClientListValue list => list,
+                _ => ListParameterNormalizer.Normalize(value!, limits, null)
+            });
         }
 
         return values;
     }
 
+    /// <summary>
+    /// SEC-128-05: a list value is admitted only on WebSql and Trino (a JSON array) or SqlEndpoints (an already normalized
+    /// <see cref="ClientListValue"/>), never on a planned table read, never with another transport or none, never as a loose collection.
+    /// </summary>
+    private static void AdmitList(GovernedSqlQueryRequest request, object? value)
+    {
+        string? transport = request.Transport;
+        bool admitted = !request.PlannedTableRead && value switch
+        {
+            JsonElement => transport is SqlTransports.WebSql or SqlTransports.Trino,
+            ClientListValue => transport is SqlTransports.SqlEndpoints,
+            _ => false
+        };
+        if (!admitted)
+        {
+            throw new ClientListException(GovernedSqlErrorCodes.ListParamPosition);
+        }
+    }
+
+    /// <summary>
+    /// REQ-SQL-128 (C-4, C-15): <c>list_params</c> = list name to expanded element count. The names come from the compiled statement (the
+    /// binder slots of the SQL's own identifiers, never from a client key) and the counts are the compiled counts; no value. A list that
+    /// expanded to nothing (an empty list) has no slot and is not listed here; <c>list_params_empty</c> names it (names only).
+    /// </summary>
+    [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")]
+    private static partial System.Text.RegularExpressions.Regex AuditListNameRegex();
+
+    private static void AddListAuditField(Dictionary<string, object?> fields, CompiledSql compiled, IReadOnlyDictionary<string, object?>? clientValues)
+    {
+        SortedDictionary<string, int>? lists = null;
+        foreach (var slot in compiled.Parameters)
+        {
+            if (slot is { Origin: ParameterOrigin.ClientNamed, ListCount: { } count, SourceName: { } name })
+            {
+                (lists ??= new SortedDictionary<string, int>(StringComparer.Ordinal))[name] = count;
+            }
+        }
+
+        if (lists is not null)
+        {
+            fields["list_params"] = lists;
+        }
+
+        // An empty list expands to nothing, so it has no slot above: its trace is the name only (no values), limited to plain identifiers.
+        if (clientValues is not null)
+        {
+            SortedSet<string>? empty = null;
+            foreach (var (name, value) in clientValues)
+            {
+                if (value is ClientListValue { Count: 0 } && AuditListNameRegex().IsMatch(name))
+                {
+                    (empty ??= new SortedSet<string>(StringComparer.Ordinal)).Add(name.ToLowerInvariant());
+                }
+            }
+
+            if (empty is not null)
+            {
+                fields["list_params_empty"] = empty.ToArray();
+            }
+        }
+    }
+
+    /// <summary>
+    /// REQ-GOV-129 (A-11, BC-129-15): the caller attributes of the statement per table as registry id, outcome and reason code, and the number of caller
+    /// attribute binds. Absent when no attribute took part; never a name of unregistered input, a subject key or a value.
+    /// </summary>
+    private static void AddCallerAttributeAuditFields(Dictionary<string, object?> fields, GovernedRewrite rewrite, CompiledSql compiled)
+    {
+        if (rewrite.CallerAttributes is not { Count: > 0 } attributes)
+        {
+            return;
+        }
+
+        fields["caller_attributes"] = attributes.ToDictionary(
+            p => p.Key,
+            p => p.Value.Select(a => new Dictionary<string, object?> { ["id"] = a.Id, ["outcome"] = a.Outcome, ["reason"] = a.Reason }).ToList(),
+            StringComparer.OrdinalIgnoreCase);
+        fields["caller_attribute_binds"] = compiled.Parameters.Count(p => p.Origin == ParameterOrigin.Policy && p.SourceName != null && Autheris.Application.Identity.Attributes.CallerAttributeParameterName.IsReserved(p.SourceName));
+    }
+
     /// <summary>X1.2 / SEC-ADG-23: compiler version, dialect, bind count and the digest; the compiled text only with Audit:StoreCompiledSql.</summary>
-    private void AddCompiledAuditFields(Dictionary<string, object?> fields, CompiledSql compiled)
+    private void AddCompiledAuditFields(Dictionary<string, object?> fields, CompiledSql compiled, IReadOnlyDictionary<string, object?>? clientValues = null)
     {
         fields["compiler_version"] = compiled.CompilerVersion;
         fields["dialect"] = compiled.Dialect.ToString();
         fields["bind_count"] = compiled.Parameters.Length;
+        AddListAuditField(fields, compiled, clientValues);
         fields["sql.compiled_digest"] = _digester.Compute(compiled);
         if (_options.Value.Audit.StoreCompiledSql)
         {
             fields["compiledSql"] = compiled.Sql;
         }
+    }
+
+    /// <summary>
+    /// Issue #107 (A-14, SEC-RF107-09): the key-set outcome per site with reason and counts; never key values or a hash of them. Absent when no site
+    /// used or tried the strategy, so a statement without opt-in is audited exactly as before.
+    /// </summary>
+    private static void AddKeySetAuditFields(Dictionary<string, object?> fields, GovernedRewrite rewrite)
+    {
+        if (rewrite.KeySets is not { Count: > 0 } outcomes)
+        {
+            return;
+        }
+
+        fields["row_filter_key_sets"] = outcomes.Select(o => new Dictionary<string, object?>
+        {
+            ["table"] = o.Table,
+            ["rule_id"] = o.RuleId,
+            ["source"] = o.Source.ToString(),
+            ["strategy_source"] = o.StrategySource.ToString(),
+            ["outcome"] = o.Outcome.ToString(),
+            ["reason"] = o.Reason?.ToString(),
+            ["key_count"] = o.KeyCount,
+            ["padded_count"] = o.PaddedCount,
+            ["age_seconds"] = o.AgeSeconds
+        }).ToList();
     }
 
     private async Task RecordDmlAuditAsync(

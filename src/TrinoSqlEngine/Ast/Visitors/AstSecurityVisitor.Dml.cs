@@ -21,15 +21,14 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 {
     public override SqlNode VisitTableQueryBody(TableQueryBody node)
     {
-        var namedTableSource = new NamedTableSource(node.TableName, null);
-        var securedSource = (TableSource)Visit(namedTableSource);
-        return new QuerySpecification(
+        var spec = new QuerySpecification(
             Distinct: false,
             Projections: new[] { new WildcardSelectItem(null) },
-            From: securedSource,
+            From: new NamedTableSource(node.TableName, null),
             Where: null,
             GroupBy: null,
             Having: null);
+        return Visit(spec);
     }
 
     public override SqlNode VisitDeleteStatement(DeleteStatement node) => SecureDeleteTyped(node);

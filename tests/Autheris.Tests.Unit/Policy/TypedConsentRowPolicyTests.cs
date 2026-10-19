@@ -230,7 +230,7 @@ public sealed class TypedConsentRowPolicyTests
     {
         var first = await Decide(Policy(Repo(Consent(ConsentEffect.Allow, Region("EU"))), factory: null));
 
-        var restored = CachedConsentEnvelope.FromDecision(first, epoch: 3).ToDecision();
+        var restored = CachedConsentEnvelope.FromDecision(first, epoch: 3).ToDecision(Autheris.Domain.Security.RestrictedScopePolicy.Default.Fingerprint)!;
 
         restored.ConsentFilterRecipe.ShouldNotBeNull();
         restored.ConsentFilterRecipe!.Allow[0][0].ColumnName.ShouldBe("region");
@@ -240,8 +240,8 @@ public sealed class TypedConsentRowPolicyTests
     [Fact]
     public void Envelope_WithoutARecipe_StaysCompatible()
     {
-        var envelope = new CachedConsentEnvelope { Schema = "main", TableName = "orders", IsAllowed = true, RowFilterSql = "x = 1" };
+        var envelope = new CachedConsentEnvelope { Schema = "main", TableName = "orders", IsAllowed = true, RowFilterSql = "x = 1", RestrictionLayout = CachedConsentEnvelope.CurrentRestrictionLayout, RestrictionFingerprint = Autheris.Domain.Security.RestrictedScopePolicy.Default.Fingerprint };
 
-        envelope.ToDecision().ConsentFilterRecipe.ShouldBeNull();
+        envelope.ToDecision(Autheris.Domain.Security.RestrictedScopePolicy.Default.Fingerprint)!.ConsentFilterRecipe.ShouldBeNull();
     }
 }

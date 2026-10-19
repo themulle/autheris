@@ -23,6 +23,9 @@ public sealed partial class PolicyPredicateLinter
     public const string CodeCorrelatedRejected = "CORRELATED_FILTER_REJECTED";
     public const string CodeVirtualFilterRejected = "VIRTUAL_FILTER_REJECTED";
 
+    /// <summary>REQ-GOV-129 (A-8, ST-129-18): a caller placeholder in an access profile or Casbin predicate; only Virtual Filters may carry one, so a shared decision never embeds an attribute.</summary>
+    public const string CodeCallerPlaceholderNotAllowed = "CALLER_PLACEHOLDER_NOT_ALLOWED";
+
     [GeneratedRegex(@"\$\{[a-zA-Z0-9_.]+\}", RegexOptions.CultureInvariant)]
     private static partial Regex Placeholder();
 
@@ -66,7 +69,7 @@ public sealed partial class PolicyPredicateLinter
             checkedCount++;
             try
             {
-                SqlFilterCompiler.Validate(filter, input.Catalog, null, _dataSources?.RequireTenantColumn == true, _dataSources?.TenantColumnExemptTables);
+                SqlFilterCompiler.Validate(filter, input.Catalog, null, _dataSources?.RequireTenantColumn == true, _dataSources?.TenantColumnExemptTables, input.CallerAttributes);
             }
             catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or NotSupportedException or System.Security.SecurityException)
             {
@@ -117,6 +120,12 @@ public sealed partial class PolicyPredicateLinter
         PolicyLintKind kind, string policyId, string text, TableMetadata table, ITableCatalog catalog,
         PolicyLintInput input, List<PolicyLintFinding> findings)
     {
+        if (CallerPlaceholders.Contains(text))
+        {
+            findings.Add(new PolicyLintFinding(kind, TableId(table), policyId, CodeCallerPlaceholderNotAllowed));
+            return;
+        }
+
         if (!PolicyParserSetup.TryCreateContext(table, catalog, input.AdditionalAllowedFunctions, 0, out var context))
         {
             findings.Add(new PolicyLintFinding(kind, TableId(table), policyId, CodeUnknownDialect));

@@ -27,12 +27,27 @@ public sealed record CatalogColumn(string Name, string DataType, string? Collati
 /// <param name="Identity">Canonical schema-qualified table identity.</param>
 /// <param name="Columns">The columns the gateway exposes. A secured table projects exactly these columns.</param>
 /// <param name="TenantColumn">The tenant isolation column, or null for a table without tenant scoping.</param>
+/// <param name="RequiredFilterColumns">Table-level required filter columns (issue #163).</param>
 /// <param name="Version">Catalog version of this entry; part of every cache key.</param>
 public sealed record TableCatalogEntry(
     TableIdentity Identity,
     ImmutableArray<CatalogColumn> Columns,
     string? TenantColumn,
-    long Version = 0);
+    ImmutableArray<string> RequiredFilterColumns = default,
+    long Version = 0)
+{
+    public TableCatalogEntry(
+        TableIdentity identity,
+        ImmutableArray<CatalogColumn> columns,
+        string? tenantColumn,
+        long version)
+        : this(identity, columns, tenantColumn, ImmutableArray<string>.Empty, version)
+    {
+    }
+
+    public ImmutableArray<string> RequiredFilterColumns { get; init; } =
+        RequiredFilterColumns.IsDefault ? ImmutableArray<string>.Empty : RequiredFilterColumns;
+}
 
 /// <summary>Resolves user-written table names to catalog entries. An unresolved name is never emitted (INV-11).</summary>
 public interface ITableCatalog

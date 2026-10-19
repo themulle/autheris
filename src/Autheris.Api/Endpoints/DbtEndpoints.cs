@@ -7,6 +7,8 @@ using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Extensions;
 using Autheris.Api.Middleware;
 using Autheris.Application.Dbt.Interfaces;
+using Autheris.Application.Dbt.Services;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -338,56 +340,106 @@ public static class DbtEndpoints
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         // Wave 4 / Issue #38: dbt Semantic Manifest Ingestion & Metrics Catalog
-        app.MapPost("/api/extensions/dbt/semantic-manifest", async (
-            HttpContext context,
-            IDbtSemanticManifestIngestionService ingestionService) =>
-        {
-            var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
-                               context.User.IsInRole("DbtAdmin");
-            if (!isPrivileged)
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            var (payload, tooLarge) = await EndpointSecurity.TryReadBodyAsync(
-                context.Request,
-                10 * 1024 * 1024,
-                "Semantic manifest payload exceeds maximum allowed size (10 MB).",
-                context.RequestAborted);
-            if (payload == null)
-            {
-                return tooLarge!;
-            }
-
-            try
-            {
-                var manifest = await ingestionService.ParseAndIngestAsync(payload, context.RequestAborted);
-                return Results.Ok(new
-                {
-                    success = true,
-                    modelsCount = manifest.SemanticModels.Count,
-                    metricsCount = manifest.Metrics.Count
-                });
-            }
-            catch (Exception ex)
-            {
-                SafeErrorResults.LogFailure(context, ex, "DBT_MANIFEST_INVALID");
-                return SafeErrorResults.BadRequest("DBT_MANIFEST_INVALID", "The semantic manifest could not be processed.", context);
-            }
-        }).RequireAuthorization()
+        app.MapPost("/api/extensions/dbt/semantic-manifest", HandleImportSemanticManifestAsync)
+          .RequireAuthorization()
           .WithRequestBodyLimit(10 * 1024 * 1024)
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
-        app.MapGet("/api/extensions/dbt/metrics", async (
-            HttpContext context,
-            ISemanticCatalogService semanticCatalog) =>
-        {
-            var dataset = context.Request.Query["dataset"].ToString();
-            var metrics = await semanticCatalog.ListMetricsAsync(string.IsNullOrWhiteSpace(dataset) ? null : dataset, context.RequestAborted);
-            return Results.Ok(metrics);
-        }).RequireAuthorization()
+        app.MapGet("/api/extensions/dbt/metrics", HandleListDbtMetricsAsync)
+          .RequireAuthorization()
           .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         return app;
+    }
+
+    internal static async Task<IResult> HandleImportSemanticManifestAsync(
+        HttpContext context,
+        IDbtSemanticManifestIngestionService ingestionService,
+        SemanticTenancy semanticTenancy)
+    {
+        var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
+                           context.User.IsInRole("DbtAdmin");
+        if (!isPrivileged)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        // M-1 / A1-3: the import tenant is the server-resolved request tenant only (never a body or query value). A caller without
+        // catalog standing (no SID in either mode, no tenant claim in Multi) cannot import; the catalog additionally rejects the
+        // legacy tenant id in Multi.
+        if (semanticTenancy.ResolveCallerTenant(context.User) is null)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var (payload, tooLarge) = await EndpointSecurity.TryReadBodyAsync(
+            context.Request,
+            10 * 1024 * 1024,
+            "Semantic manifest payload exceeds maximum allowed size (10 MB).",
+            context.RequestAborted);
+        if (payload == null)
+        {
+            return tooLarge!;
+        }
+
+        try
+        {
+            var manifest = await ingestionService.ParseAndIngestAsync(
+                payload,
+                EndpointSecurity.GetRequestTenant(context),
+                EndpointSecurity.GetCallerIdentity(context),
+                context.RequestAborted);
+
+            // M-5: version, content hash and counts go into the audit entry; never the manifest text.
+            if (context.Features.Get<Autheris.Domain.Audit.AuditContext>() is { } auditContext)
+            {
+                auditContext.AdditionalDetails["manifest_version"] = manifest.Version;
+                auditContext.AdditionalDetails["content_hash"] = SemanticManifestJson.ComputeHash(SemanticManifestJson.Serialize(manifest));
+                auditContext.AdditionalDetails["models_count"] = manifest.SemanticModels.Count;
+                auditContext.AdditionalDetails["metrics_count"] = manifest.Metrics.Count;
+            }
+
+            return Results.Ok(new
+            {
+                success = true,
+                modelsCount = manifest.SemanticModels.Count,
+                metricsCount = manifest.Metrics.Count
+            });
+        }
+        catch (GatewayForbiddenException ex)
+        {
+            SafeErrorResults.LogFailure(context, ex, "FORBIDDEN");
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+        catch (SemanticManifestPartialException ex)
+        {
+            SafeErrorResults.LogFailure(context, ex, "DBT_MANIFEST_PARTIAL");
+            return SafeErrorResults.Problem(
+                StatusCodes.Status500InternalServerError,
+                "DBT_MANIFEST_PARTIAL",
+                "The semantic manifest was stored but its catalog tables were not fully updated; import it again.",
+                context);
+        }
+        catch (Exception ex)
+        {
+            SafeErrorResults.LogFailure(context, ex, "DBT_MANIFEST_INVALID");
+            return SafeErrorResults.BadRequest("DBT_MANIFEST_INVALID", "The semantic manifest could not be processed.", context);
+        }
+    }
+
+    internal static async Task<IResult> HandleListDbtMetricsAsync(
+        HttpContext context,
+        ISemanticCatalogService semanticCatalog,
+        SemanticTenancy semanticTenancy)
+    {
+        var dataset = context.Request.Query["dataset"].ToString();
+        var tenant = semanticTenancy.ResolveCallerTenant(context.User);
+        IReadOnlyList<DbtMetric> metrics = tenant is null
+            ? []
+            : await semanticCatalog.ListMetricsAsync(
+                string.IsNullOrWhiteSpace(dataset) ? null : dataset,
+                EndpointSecurity.GetRequestTenant(context),
+                context.RequestAborted);
+        return Results.Ok(SemanticMetricCatalogProjection.Project(metrics, context.User));
     }
 }

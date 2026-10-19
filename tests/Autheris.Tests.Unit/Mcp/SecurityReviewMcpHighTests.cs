@@ -39,7 +39,8 @@ public sealed class SecurityReviewMcpHighTests
     private static AiDataGuardrailService Guardrail(
         IMcpQueryExecutor executor,
         IAccessPlanningService? planning = null,
-        IPolicyEnforcementService? policy = null)
+        IPolicyEnforcementService? policy = null,
+        IConsentRepository? consents = null)
     {
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
         metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
@@ -63,6 +64,7 @@ public sealed class SecurityReviewMcpHighTests
             global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, queryExecutor: executor,
             policyEnforcementService: policy,
             tableMetadataRepository: metadataRepo,
+            consentRepository: consents,
             accessPlanningService: planning);
     }
 
@@ -95,6 +97,24 @@ public sealed class SecurityReviewMcpHighTests
 
         result.IsSuccess.ShouldBeFalse();
         result.ErrorMessage!.ShouldContain("Four-Eyes");
+    }
+
+    // W0-C2: the administrator shortcut before the Four-Eyes gate comes from the canonical caller class, never from session role strings.
+    [Theory]
+    [InlineData("tenant-a", "GovernanceAdmin", "not accessible")]
+    [InlineData("legacy-single-tenant", "GovernanceAdmin", "not accessible")]
+    [InlineData("tenant-a", "tenant:ClusterAdmin", "not accessible")]
+    [InlineData("tenant-a", "ClusterAdmin", "Four-Eyes")]
+    public async Task QuerySql_CatalogVisibilityShortcut_FollowsTheCanonicalCallerClass(string tenant, string role, string expectedDenial)
+    {
+        var session = new McpSessionContext("s1", "agent", tenant, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-ADM", Roles: [role], GroupSids: []);
+        var guardrail = Guardrail(Executor(), consents: Autheris.Tests.Unit.Catalog.Wp0.Consents());
+
+        var result = await guardrail.ExecuteToolWithGuardrailAsync(
+            new McpToolCallRequest("query_sql", SqlArgs("SELECT * FROM sales.public.secret")), session);
+
+        result.IsSuccess.ShouldBeFalse();
+        result.ErrorMessage!.ShouldContain(expectedDenial);
     }
 
     [Theory]

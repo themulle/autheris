@@ -429,6 +429,18 @@ public sealed partial class ODataHandler(
             _logger.LogWarning(ex, "OData query for {Table} failed with a transient data source error.", table);
             return Error(503, "ServiceUnavailable", "The data source is temporarily unavailable. Retry later.", UnavailableRetryAfterSeconds);
         }
+        catch (Exception ex) when (Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped))
+        {
+            _logger.LogWarning("OData query for {Table} rejected by SQL compiler or policy: {Code}", table, mapped.Code);
+            Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.RecordOutcome(mapped);
+            return new ODataQueryResult(
+                Success: false,
+                StatusCode: mapped.Status,
+                Payload: ODataResponseFormatter.FormatErrorResponse(mapped.Code, mapped.Title),
+                ErrorCode: mapped.Code,
+                ErrorMessage: mapped.Title
+            );
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "OData query for {Table} failed unexpectedly.", table);

@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Prometheus;
 using System;
 using System.Linq;
@@ -81,6 +82,12 @@ public static class GatewayApplicationBuilderExtensions
         app.UseMiddleware<BasicAuthSessionMiddleware>();
         // ADR-017 / K-K10: Canonicalize AD Windows SIDs, OIDC claims, client certs, and GatewayRoles before authorization
         app.UseMiddleware<ClaimsNormalizationMiddleware>();
+        // PLAN-SEC-115 A-9: only while the REST data family is switched off (no pipeline element otherwise).
+        if (!ResolveReadPathSwitches(app.Services, gatewayOptions).RestDataEndpointEnabled)
+        {
+            app.UseMiddleware<DisabledReadPathObserverMiddleware>();
+        }
+
         // Finding 3.3 / R13: read-only agent and app tokens may only reach the query endpoints
         app.UseMiddleware<ReadOnlyTokenMiddleware>(
             new PathString(ResolveGraphQlPath(gatewayOptions)),
@@ -123,6 +130,11 @@ public static class GatewayApplicationBuilderExtensions
 
     public static WebApplication MapGatewayEndpoints(this WebApplication app, GatewayOptions gatewayOptions)
     {
+        // PLAN-SEC-115 C-115-8: the route mapping, the MCP registry and the startup line all read the one startup snapshot.
+        var switches = ResolveReadPathSwitches(app.Services, gatewayOptions);
+        var effectiveOptions = app.Services.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()?.Value ?? gatewayOptions;
+        LogReadPathInventory(app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Autheris.ReadPaths"), effectiveOptions);
+
         app.MapMetrics().RequireAuthorization(GatewayPolicies.MetricsScrape).WithAuditExemption("Prometheus scrape endpoint");
 
         // 1. Health & Readiness Probes
@@ -208,12 +220,13 @@ public static class GatewayApplicationBuilderExtensions
         app.MapHitLEndpoints();
         app.MapGovernanceApiEndpoints();
         app.MapGovernancePlanEndpoints();
-        app.MapQueryAnalysisAndProfilingEndpoints();
+        app.MapQueryAnalysisAndProfilingEndpoints(mapSampleRows: switches.RestDataEndpointEnabled);
         app.MapTokenRevocationEndpoints(); // SEC M-14 (GAP-B)
         app.MapTenantRegistryAdminEndpoints(); // M-A2: operator resolution of a tenant id collision
         app.MapFinOpsEndpoints();
         app.MapRebacEndpoints();
         app.MapVirtualFilterEndpoints();
+        app.MapCallerAttributeAdminEndpoints();
         if (gatewayOptions.Arrow.Enabled)
         {
             app.MapArrowExportEndpoints();
@@ -232,9 +245,18 @@ public static class GatewayApplicationBuilderExtensions
         }
         app.MapEnvoyExtAuthzEndpoints();
         app.MapWebSqlEndpoints(gatewayOptions);
-        app.MapDatasetDataEndpoints();
+        if (switches.RestDataEndpointEnabled)
+        {
+            app.MapDatasetDataEndpoints();
+            app.MapTableStreamEndpoints();
+        }
+
         app.MapAnalyticsEndpoints();
-        app.MapChangeDetectionEndpoints();
+        if (switches.RestDataEndpointEnabled)
+        {
+            app.MapChangeDetectionEndpoints();
+        }
+
         app.MapSqlEndpoints(gatewayOptions);
         app.MapProcedureEndpoints(gatewayOptions);
         app.MapDevPortalEndpoints(gatewayOptions);
@@ -245,6 +267,15 @@ public static class GatewayApplicationBuilderExtensions
 
         return app;
     }
+
+    /// <summary>FR-115-6: one secret-free line that lets an operator verify the hardened profile from the log.</summary>
+    internal static void LogReadPathInventory(ILogger logger, GatewayOptions options) =>
+        logger.LogInformation("{ReadPaths}", Autheris.Application.Mcp.Services.ReadPathInventory.Describe(options));
+
+    /// <summary>The registered startup snapshot; a hand-built host without the registration falls back to a snapshot of the passed options.</summary>
+    private static Autheris.Application.Mcp.Interfaces.IReadPathSwitches ResolveReadPathSwitches(IServiceProvider services, GatewayOptions gatewayOptions) =>
+        services.GetService<Autheris.Application.Mcp.Interfaces.IReadPathSwitches>()
+        ?? Autheris.Application.Mcp.Services.ReadPathSwitches.From(gatewayOptions);
 
     /// <summary>
     /// Loads declarative SQL endpoints. Fail-closed: when enabled, a missing loader registration aborts startup.

@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Application.Common;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -44,7 +45,7 @@ public static partial class WebSqlEndpoints
         switch (ex)
         {
             case GatewayThrottledException throttledEx:
-                logger.LogWarning(throttledEx, "WebSQL concurrency limit reached. TraceId={TraceId}", httpContext.TraceIdentifier);
+                logger.Warning(throttledEx, "WebSQL concurrency limit reached. TraceId={TraceId}", httpContext.TraceIdentifier);
                 httpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
                 httpContext.Response.Headers.RetryAfter = throttledEx.RetryAfterSeconds.ToString();
                 httpContext.Response.ContentType = "application/json; charset=utf-8";
@@ -58,7 +59,7 @@ public static partial class WebSqlEndpoints
                 break;
 
             case GatewayNotImplementedException notImplEx:
-                logger.LogWarning(notImplEx, "WebSQL Not Implemented. TraceId={TraceId}", httpContext.TraceIdentifier);
+                logger.Warning(notImplEx, "WebSQL Not Implemented. TraceId={TraceId}", httpContext.TraceIdentifier);
                 httpContext.Response.StatusCode = StatusCodes.Status501NotImplemented;
                 httpContext.Response.ContentType = "application/json; charset=utf-8";
                 await httpContext.Response.WriteAsJsonAsync(new
@@ -70,7 +71,7 @@ public static partial class WebSqlEndpoints
                 break;
 
             case NotSupportedException notSuppEx:
-                logger.LogWarning(notSuppEx, "WebSQL Not Supported. TraceId={TraceId}", httpContext.TraceIdentifier);
+                logger.Warning(notSuppEx, "WebSQL Not Supported. TraceId={TraceId}", httpContext.TraceIdentifier);
                 httpContext.Response.StatusCode = StatusCodes.Status501NotImplemented;
                 httpContext.Response.ContentType = "application/json; charset=utf-8";
                 await httpContext.Response.WriteAsJsonAsync(new
@@ -86,12 +87,12 @@ public static partial class WebSqlEndpoints
                 break;
 
             case Exception timeoutEx when IsExecutionTimeout(timeoutEx):
-                logger.LogWarning(timeoutEx, "WebSQL execution timed out. TraceId={TraceId}", httpContext.TraceIdentifier);
+                logger.Warning(timeoutEx, "WebSQL execution timed out. TraceId={TraceId}", httpContext.TraceIdentifier);
                 await WriteTimeoutProblemAsync(httpContext, FallbackTimeoutCode, ct);
                 break;
 
             case ArgumentException argEx:
-                logger.LogWarning(argEx, "WebSQL Bad Request. TraceId={TraceId}", httpContext.TraceIdentifier);
+                logger.Warning(argEx, "WebSQL Bad Request. TraceId={TraceId}", httpContext.TraceIdentifier);
                 httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
                 httpContext.Response.ContentType = "application/json; charset=utf-8";
                 await httpContext.Response.WriteAsJsonAsync(new
@@ -104,7 +105,8 @@ public static partial class WebSqlEndpoints
 
             default:
                 // SEC M-10: Never echo exception/database messages to the client
-                logger.LogError(ex, "WebSQL Execution Failed. TraceId={TraceId}", httpContext.TraceIdentifier);
+                // SEC-FED-DELTA-01: type and trace id only above Debug; the message can quote staged data values.
+                logger.Error(ex, "WebSQL Execution Failed. TraceId={TraceId}", httpContext.TraceIdentifier);
                 httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
                 httpContext.Response.ContentType = "application/json; charset=utf-8";
                 await httpContext.Response.WriteAsJsonAsync(new
@@ -127,7 +129,7 @@ public static partial class WebSqlEndpoints
         }
 
         SqlCompilerErrorMapper.RecordOutcome(mapped);
-        logger.LogWarning(ex, "WebSQL rejected with {Code}. TraceId={TraceId}", mapped.Code, httpContext.TraceIdentifier);
+        logger.Warning(ex, "WebSQL rejected with {Code}. TraceId={TraceId}", mapped.Code, httpContext.TraceIdentifier);
         await WriteTimeoutProblemAsync(httpContext, mapped.Code, ct);
     }
 

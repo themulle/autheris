@@ -152,6 +152,11 @@
           "System.IO.Hashing": "10.0.1"
         }
       },
+      "BitFaster.Caching": {
+        "type": "Transitive",
+        "resolved": "2.5.4",
+        "contentHash": "1QroTY1PVCZOSG9FnkkCrmCKk/+bZCgI/YXq376HnYwUDJ4Ho0EaV4YaA/5v5WYLnwIwIO7RZkdWbg9pxIpueQ=="
+      },
       "Casbin.NET": {
         "type": "Transitive",
         "resolved": "2.21.3",
@@ -1122,6 +1127,7 @@
         "dependencies": {
           "Apache.Arrow": "[23.0.0, )",
           "Autheris.Domain": "[1.0.0, )",
+          "BitFaster.Caching": "[2.5.4, )",
           "Casbin.NET": "[2.21.3, )",
           "DuckDB.NET.Data.Full": "[1.5.6, )",
           "FastSqlEngine": "[1.0.0, )",
@@ -1180,6 +1186,83 @@
         "dependencies": {
           "Antlr4.Runtime.Standard": "[4.13.1, )"
         }
+      }
+    },
+    "net10.0/linux-x64": {
+      "diskann-garnet": {
+        "type": "Transitive",
+        "resolved": "6.0.0",
+        "contentHash": "V/PaE/kKgh04ZFx1Q+5KPyBCF+/A+D6jk0i0iRPLbszmtHefbdZ2r0y76gl/Tv2YCSE297/ggL+S28hFJYOY6w=="
+      },
+      "DuckDB.NET.Bindings.Full": {
+        "type": "Transitive",
+        "resolved": "1.5.6",
+        "contentHash": "phg/EJHrcG+bqgD/EnDryWlcFtL6L09Wn9o1UVoERTp7OnAmU5AyCSKreZUkFHacNRlxlAfAIJ2IGqJ2R6O18Q=="
+      },
+      "KeraLua": {
+        "type": "Transitive",
+        "resolved": "1.4.9",
+        "contentHash": "oxor0U3bFxMRLY9TQ9QjDiiX1ojH2se5ei1T0hsSovqE+gAkC7ucqvApWBoClHUPOOsp/taWtzbZ+ZfP0Q4Nsw=="
+      },
+      "Microsoft.Data.SqlClient": {
+        "type": "Transitive",
+        "resolved": "7.1.1",
+        "contentHash": "Moz4+bba/OdEM9I4jXWggduJ4sqoNcgVAQyXG/dNnGGvnS/YDr2fTjP83fg5YX3drgRki6fRAhR94P8dAZgZtQ==",
+        "dependencies": {
+          "Microsoft.Bcl.Cryptography": "9.0.18",
+          "Microsoft.Data.SqlClient.Extensions.Abstractions": "[7.1.1, 8.0.0)",
+          "Microsoft.Data.SqlClient.Internal.Logging": "[7.1.1, 8.0.0)",
+          "Microsoft.Data.SqlClient.SNI.runtime": "[7.1.0, 8.0.0)",
+          "Microsoft.IdentityModel.JsonWebTokens": "8.16.0",
+          "Microsoft.IdentityModel.Protocols.OpenIdConnect": "8.16.0",
+          "Microsoft.SqlServer.Server": "[1.0.0, 2.0.0)",
+          "System.Configuration.ConfigurationManager": "9.0.18",
+          "System.Security.Cryptography.Pkcs": "9.0.18"
+        }
+      },
+      "Microsoft.Data.SqlClient.SNI.runtime": {
+        "type": "Transitive",
+        "resolved": "7.1.0",
+        "contentHash": "rWunOb6Dby0lcI82PohARcRbF+4x4wNKxnKRSHXhuwZMu8/cCS68DCfhceq4bv1gUEfoL5dWXHYnfxVvLQUN+Q=="
+      },
+      "Microsoft.Garnet": {
+        "type": "Transitive",
+        "resolved": "2.2.1",
+        "contentHash": "ya99J20PpL5mMDxfKMqf4bEFo1Dk603wSdR1he5fWTT8e5lFj5sswZ064hl/5Yr7idbzyFCxBdGAjv/IB3e2uQ==",
+        "dependencies": {
+          "Azure.Identity": "1.17.0",
+          "Azure.Storage.Blobs": "12.27.0",
+          "CommandLineParser": "2.9.1",
+          "KeraLua": "1.4.9",
+          "Microsoft.Identity.Client": "4.76.0",
+          "Microsoft.IdentityModel.Protocols.OpenIdConnect": "8.17.0",
+          "Microsoft.IdentityModel.Validators": "8.17.0",
+          "System.IdentityModel.Tokens.Jwt": "8.17.0",
+          "diskann-garnet": "6.0.0"
+        }
+      },
+      "SQLitePCLRaw.lib.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "D2UAuiGxFYBqeRXjjjGgvJ5UQifzn6wefmSqeKU7XcNGKLbJRP6X7kcPZ6opOBJGdCIlgbSxTvDpBbLvsN594A=="
+      },
+      "System.Diagnostics.PerformanceCounter": {
+        "type": "Transitive",
+        "resolved": "8.0.0",
+        "contentHash": "lX6DXxtJqVGWw7N/QmVoiCyVQ+Q/Xp+jVXPr3gLK1jJExSn1qmAjJQeb8gnOYeeBTG3E3PmG1nu92eYj/TEjpg==",
+        "dependencies": {
+          "System.Configuration.ConfigurationManager": "8.0.0"
+        }
+      },
+      "System.DirectoryServices.Protocols": {
+        "type": "Transitive",
+        "resolved": "10.0.13",
+        "contentHash": "JZiWshNhK2+lbPnfV+JTYqKKrT27e5LRdbCU2SFkXwIIJPVKw/7KfrHU/DDbO3OXd4KwJZgAdyWbXl+kwzxWOw=="
+      },
+      "System.Security.Cryptography.Pkcs": {
+        "type": "Transitive",
+        "resolved": "10.0.13",
+        "contentHash": "a+EovgC1fBnwdlQ6cn3j4JFBfKqiFaFvoAhjisOoSvazLAcIznaBzPQP0oYnvccmeXfqUH1KebVZOxSeH6rMaw=="
       }
     }
   }

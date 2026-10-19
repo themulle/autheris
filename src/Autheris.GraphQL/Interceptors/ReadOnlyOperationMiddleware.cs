@@ -27,13 +27,22 @@ public sealed class ReadOnlyOperationMiddleware
     public async ValueTask InvokeAsync(RequestContext context)
     {
         var document = context.OperationDocumentInfo?.Document;
-        if (document != null && IsMutation(document, context.Request.OperationName) && ResolvePrincipal(context).IsReadOnly())
+        if (document != null && IsMutation(document, context.Request.OperationName))
         {
-            context.Result = OperationResult.FromError(ErrorBuilder.New()
-                .SetMessage("This token only permits read access; mutations are rejected.")
-                .SetCode("READ_ONLY_TOKEN")
-                .Build());
-            return;
+            var principal = ResolvePrincipal(context);
+            if (principal.IsReadOnly())
+            {
+                var hasSelfServiceScope = principal?.HasScope("data.access.request") == true;
+
+                if (!hasSelfServiceScope || !SelfServiceMutationClassifier.IsExclusivelySelfServiceMutation(document, context.Request.OperationName))
+                {
+                    context.Result = OperationResult.FromError(ErrorBuilder.New()
+                        .SetMessage("This token only permits read access; mutations are rejected.")
+                        .SetCode("READ_ONLY_TOKEN")
+                        .Build());
+                    return;
+                }
+            }
         }
 
         await _next(context).ConfigureAwait(false);

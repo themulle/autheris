@@ -1,9 +1,11 @@
 using System.Data;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Autheris.Application.Audit;
 using Autheris.Application.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -16,6 +18,167 @@ namespace Autheris.Infrastructure.Persistence;
 
 public partial class PostgreSqlGovernanceRepository
 {
+    byte[]? IAuditPurgeKeyProvider.GetAuditHmacKey() => _auditHmacKey;
+
+    public async Task<AuditPurgeCheckpoint?> GetLatestPurgeCheckpointAsync(CancellationToken ct = default)
+    {
+        await FlushAuditChannelAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"SELECT first_surviving_seq, surviving_prev_hash, purged_count, purged_through_utc, created_at, signature, external_signature
+                            FROM AUDIT_PURGE_CHECKPOINTS
+                            ORDER BY first_surviving_seq DESC
+                            LIMIT 1";
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var firstSeq = reader.GetInt64(0);
+            var prevHash = reader.GetString(1);
+            var purgedCount = reader.GetInt64(2);
+            var purgedThroughUtc = DateTimeOffset.Parse(reader.GetString(3), CultureInfo.InvariantCulture);
+            var createdAtUtc = DateTimeOffset.Parse(reader.GetString(4), CultureInfo.InvariantCulture);
+            var sig = reader.GetString(5);
+            var extSig = reader.IsDBNull(6) ? null : reader.GetString(6);
+            return new AuditPurgeCheckpoint(firstSeq, prevHash, purgedCount, purgedThroughUtc, createdAtUtc, sig, extSig);
+        }
+
+        return null;
+    }
+
+    public async Task SavePurgeCheckpointAsync(AuditPurgeCheckpoint checkpoint, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(checkpoint);
+        await FlushAuditChannelAsync(ct).ConfigureAwait(false);
+
+        _auditAnchorStore?.SavePurgeCheckpoint(checkpoint);
+
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"INSERT INTO AUDIT_PURGE_CHECKPOINTS
+                            (id, first_surviving_seq, surviving_prev_hash, purged_count, purged_through_utc, created_at, signature, external_signature)
+                            VALUES (@id, @firstSeq, @prevHash, @purgedCount, @purgedThrough, @createdAt, @sig, @extSig)";
+        cmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString("N"));
+        cmd.Parameters.AddWithValue("@firstSeq", checkpoint.FirstSurvivingSequence);
+        cmd.Parameters.AddWithValue("@prevHash", checkpoint.SurvivingPrevHash);
+        cmd.Parameters.AddWithValue("@purgedCount", checkpoint.PurgedCount);
+        cmd.Parameters.AddWithValue("@purgedThrough", checkpoint.PurgedThroughUtc.ToString("O"));
+        cmd.Parameters.AddWithValue("@createdAt", checkpoint.CreatedAtUtc.ToString("O"));
+        cmd.Parameters.AddWithValue("@sig", checkpoint.Signature);
+        cmd.Parameters.AddWithValue("@extSig", (object?)checkpoint.ExternalSignature ?? DBNull.Value);
+
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<(long MaxEligibleSequence, long FirstSurvivingSequence, string SurvivingPrevHash, long PurgeCount)?> PlanPurgePrefixAsync(
+        DateTimeOffset thresholdUtc,
+        CancellationToken ct = default)
+    {
+        await FlushAuditChannelAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        var thresholdIso = thresholdUtc.ToUniversalTime().ToString("O");
+
+        // 1. Check oldest row
+        await using (var minCmd = conn.CreateCommand())
+        {
+            minCmd.CommandText = "SELECT seq, occurred_at FROM AUDIT_LOG_ENTRIES ORDER BY seq ASC LIMIT 1";
+            await using var minReader = await minCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            if (!await minReader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                return null;
+            }
+
+            var oldestOccurredAt = minReader.GetString(1);
+            if (string.CompareOrdinal(oldestOccurredAt, thresholdIso) >= 0)
+            {
+                return null;
+            }
+        }
+
+        // 2. Find first surviving entry (earliest entry with occurred_at >= thresholdIso)
+        long survivingSeq;
+        string survivingPrevHash;
+        await using (var survCmd = conn.CreateCommand())
+        {
+            survCmd.CommandText = "SELECT seq, prev_hash FROM AUDIT_LOG_ENTRIES WHERE occurred_at >= @threshold ORDER BY seq ASC LIMIT 1";
+            survCmd.Parameters.AddWithValue("@threshold", thresholdIso);
+            await using var survReader = await survCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            if (await survReader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                survivingSeq = survReader.GetInt64(0);
+                survivingPrevHash = survReader.GetString(1);
+            }
+            else
+            {
+                await using var newestCmd = conn.CreateCommand();
+                newestCmd.CommandText = "SELECT seq, prev_hash FROM AUDIT_LOG_ENTRIES ORDER BY seq DESC LIMIT 1";
+                await using var newestReader = await newestCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                if (!await newestReader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    return null;
+                }
+                survivingSeq = newestReader.GetInt64(0);
+                survivingPrevHash = newestReader.GetString(1);
+            }
+        }
+
+        // 3. Find max eligible sequence (< survivingSeq)
+        long maxEligibleSeq;
+        await using (var maxCmd = conn.CreateCommand())
+        {
+            maxCmd.CommandText = "SELECT MAX(seq) FROM AUDIT_LOG_ENTRIES WHERE seq < @survivingSeq";
+            maxCmd.Parameters.AddWithValue("@survivingSeq", survivingSeq);
+            var maxObj = await maxCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+            if (maxObj == null || maxObj is DBNull)
+            {
+                return null;
+            }
+            maxEligibleSeq = Convert.ToInt64(maxObj, CultureInfo.InvariantCulture);
+        }
+
+        long purgeCount = survivingSeq - 1;
+        return (maxEligibleSeq, survivingSeq, survivingPrevHash, purgeCount);
+    }
+
+    public async Task<int> ExecutePurgeBatchAsync(long maxSequenceInclusive, int batchSize, CancellationToken ct = default)
+    {
+        await FlushAuditChannelAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await using (var authCmd = conn.CreateCommand())
+            {
+                authCmd.Transaction = tx;
+                authCmd.CommandText = "SELECT set_config('autheris.audit_purge_authorized', 'true', true);";
+                await authCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            int rowsPurged;
+            await using (var delCmd = conn.CreateCommand())
+            {
+                delCmd.Transaction = tx;
+                delCmd.CommandText = @"DELETE FROM AUDIT_LOG_ENTRIES
+                                      WHERE ctid IN (
+                                          SELECT ctid FROM AUDIT_LOG_ENTRIES
+                                          WHERE seq <= @maxSeq
+                                          ORDER BY seq ASC
+                                          LIMIT @batchSize
+                                      )";
+                delCmd.Parameters.AddWithValue("@maxSeq", maxSequenceInclusive);
+                delCmd.Parameters.AddWithValue("@batchSize", batchSize);
+                rowsPurged = await delCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+            return rowsPurged;
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            throw;
+        }
+    }
+
     public async Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default)
     {
         // Tier-B events are only enqueued (no connection); they must not be accepted before the audit processor runs.
@@ -355,6 +518,7 @@ public partial class PostgreSqlGovernanceRepository
 
     public void OnTransactionCommitted(System.Data.Common.DbTransaction tx)
     {
+        Exception? anchorFailure = null;
         if (_pendingAuditTxStates.TryRemove(tx, out var state))
         {
             lock (_pendingAuditTxStates)
@@ -381,8 +545,15 @@ public partial class PostgreSqlGovernanceRepository
                 catch (Exception ex)
                 {
                     _logger?.LogError(ex, "Failed to persist external audit chain anchor (seq {Sequence}).", state.LastSeq);
+                    anchorFailure = ex;
                 }
             }
+        }
+
+        // M1: the rows are committed, but the Tier-A mutation (consent grant/revoke, manifest apply) is not acknowledged without its anchor.
+        if (anchorFailure != null)
+        {
+            throw new AuditUnavailableException("The audit chain anchor could not be persisted; the change is not acknowledged (fail-closed).", anchorFailure);
         }
     }
 
@@ -460,25 +631,8 @@ public partial class PostgreSqlGovernanceRepository
         long lastSequence = pendingState.LastSeq;
         string lastEntryHash = pendingState.LastHash;
 
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = @"INSERT INTO AUDIT_LOG_ENTRIES (id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq)
-                            VALUES (@id, @occ, @event, @actor, @target, @col, @dec, @trace, @det, @prev, @hash, @tenantId, @seq)";
-
-        var pId = cmd.Parameters.Add("@id", NpgsqlDbType.Text);
-        var pOcc = cmd.Parameters.Add("@occ", NpgsqlDbType.Text);
-        var pEvent = cmd.Parameters.Add("@event", NpgsqlDbType.Text);
-        var pActor = cmd.Parameters.Add("@actor", NpgsqlDbType.Text);
-        var pTarget = cmd.Parameters.Add("@target", NpgsqlDbType.Text);
-        var pCol = cmd.Parameters.Add("@col", NpgsqlDbType.Text);
-        var pDec = cmd.Parameters.Add("@dec", NpgsqlDbType.Text);
-        var pTrace = cmd.Parameters.Add("@trace", NpgsqlDbType.Text);
-        var pDet = cmd.Parameters.Add("@det", NpgsqlDbType.Text);
-        var pPrev = cmd.Parameters.Add("@prev", NpgsqlDbType.Text);
-        var pHash = cmd.Parameters.Add("@hash", NpgsqlDbType.Text);
-        var pTenantId = cmd.Parameters.Add("@tenantId", NpgsqlDbType.Text);
-        var pSeq = cmd.Parameters.Add("@seq", NpgsqlDbType.Bigint);
-
+        // WP-PF-04: hashes are computed in memory from the single tail read; the rows are then written with multi-row inserts.
+        var rows = new List<AuditInsertRow>(batch.Count);
         for (int i = 0; i < batch.Count; i++)
         {
             var entry = batch[i];
@@ -503,32 +657,51 @@ public partial class PostgreSqlGovernanceRepository
 
             entry.PrevHash = currentPrevHash;
             entry.EntryHash = entryHash;
-
-            pId.Value = entry.Id.ToString();
-            pOcc.Value = entry.OccurredAt.ToString("O");
-            pEvent.Value = entry.EventType;
-            pActor.Value = entry.ActorSid.Value;
-            pTarget.Value = entry.TargetTable;
-            pCol.Value = (object?)entry.TargetColumn ?? DBNull.Value;
-            pDec.Value = entry.Decision;
-            pTrace.Value = entry.TraceId;
-            pDet.Value = entry.DetailsJson;
-            pPrev.Value = currentPrevHash;
-            pHash.Value = entryHash;
-            pTenantId.Value = effectiveTenantId;
-            pSeq.Value = currentSequence;
-
-            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            rows.Add(new AuditInsertRow(entry.Id.ToString(), entry.OccurredAt.ToString("O"), entry.EventType, entry.ActorSid.Value, entry.TargetTable,
+                entry.TargetColumn, entry.Decision, entry.TraceId, entry.DetailsJson, currentPrevHash, entryHash, effectiveTenantId, currentSequence));
             lastEntryHash = entryHash;
         }
+
+        await InsertAuditRowsAsync(conn, tx, rows, ct).ConfigureAwait(false);
 
         // In-memory _lastAuditSeq/_lastAuditHash are advanced in OnTransactionCommitted only.
         pendingState.LastSeq = lastSequence;
         pendingState.LastHash = lastEntryHash;
     }
 
+    private static async Task InsertAuditRowsAsync(NpgsqlConnection conn, NpgsqlTransaction tx, IReadOnlyList<AuditInsertRow> rows, CancellationToken ct)
+    {
+        for (int offset = 0; offset < rows.Count; offset += AuditBatchInsertSql.MaxRowsPerStatement)
+        {
+            int count = Math.Min(AuditBatchInsertSql.MaxRowsPerStatement, rows.Count - offset);
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = AuditBatchInsertSql.Build(count);
+            for (int k = 0; k < count; k++)
+            {
+                var r = rows[offset + k];
+                cmd.Parameters.Add($"@id{k}", NpgsqlDbType.Text).Value = r.Id;
+                cmd.Parameters.Add($"@occ{k}", NpgsqlDbType.Text).Value = r.OccurredAt;
+                cmd.Parameters.Add($"@event{k}", NpgsqlDbType.Text).Value = r.EventType;
+                cmd.Parameters.Add($"@actor{k}", NpgsqlDbType.Text).Value = r.ActorSid;
+                cmd.Parameters.Add($"@target{k}", NpgsqlDbType.Text).Value = r.TargetTable;
+                cmd.Parameters.Add($"@col{k}", NpgsqlDbType.Text).Value = (object?)r.TargetColumn ?? DBNull.Value;
+                cmd.Parameters.Add($"@dec{k}", NpgsqlDbType.Text).Value = r.Decision;
+                cmd.Parameters.Add($"@trace{k}", NpgsqlDbType.Text).Value = r.TraceId;
+                cmd.Parameters.Add($"@det{k}", NpgsqlDbType.Text).Value = r.DetailsJson;
+                cmd.Parameters.Add($"@prev{k}", NpgsqlDbType.Text).Value = r.PrevHash;
+                cmd.Parameters.Add($"@hash{k}", NpgsqlDbType.Text).Value = r.EntryHash;
+                cmd.Parameters.Add($"@tenantId{k}", NpgsqlDbType.Text).Value = r.TenantId;
+                cmd.Parameters.Add($"@seq{k}", NpgsqlDbType.Bigint).Value = r.Seq;
+            }
+
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+    }
+
     private async Task WriteAuditBatchOnceAsync(IReadOnlyList<AuditLogEntry> batch, CancellationToken ct)
     {
+        var violationAtStart = Volatile.Read(ref _auditChainViolation); // M1: only a violation latched DURING this write blocks the acknowledgement
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         // READ COMMITTED + advisory lock: the tail is read only after the previous writer has committed. (Under
         // SERIALIZABLE the snapshot would already be taken before the lock is acquired.)
@@ -563,25 +736,8 @@ public partial class PostgreSqlGovernanceRepository
         long lastSequence = dbTailSeq;
         string lastEntryHash = effectiveDbHash;
 
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = @"INSERT INTO AUDIT_LOG_ENTRIES (id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq)
-                            VALUES (@id, @occ, @event, @actor, @target, @col, @dec, @trace, @det, @prev, @hash, @tenantId, @seq)";
-
-        var pId = cmd.Parameters.Add("@id", NpgsqlDbType.Text);
-        var pOcc = cmd.Parameters.Add("@occ", NpgsqlDbType.Text);
-        var pEvent = cmd.Parameters.Add("@event", NpgsqlDbType.Text);
-        var pActor = cmd.Parameters.Add("@actor", NpgsqlDbType.Text);
-        var pTarget = cmd.Parameters.Add("@target", NpgsqlDbType.Text);
-        var pCol = cmd.Parameters.Add("@col", NpgsqlDbType.Text);
-        var pDec = cmd.Parameters.Add("@dec", NpgsqlDbType.Text);
-        var pTrace = cmd.Parameters.Add("@trace", NpgsqlDbType.Text);
-        var pDet = cmd.Parameters.Add("@det", NpgsqlDbType.Text);
-        var pPrev = cmd.Parameters.Add("@prev", NpgsqlDbType.Text);
-        var pHash = cmd.Parameters.Add("@hash", NpgsqlDbType.Text);
-        var pTenantId = cmd.Parameters.Add("@tenantId", NpgsqlDbType.Text);
-        var pSeq = cmd.Parameters.Add("@seq", NpgsqlDbType.Bigint);
-
+        // WP-PF-04: hashes are computed in memory from the single tail read; the rows are then written with multi-row inserts.
+        var rows = new List<AuditInsertRow>(batch.Count);
         for (int i = 0; i < batch.Count; i++)
         {
             var entry = batch[i];
@@ -606,24 +762,12 @@ public partial class PostgreSqlGovernanceRepository
 
             entry.PrevHash = currentPrevHash;
             entry.EntryHash = entryHash;
-
-            pId.Value = entry.Id.ToString();
-            pOcc.Value = entry.OccurredAt.ToString("O");
-            pEvent.Value = entry.EventType;
-            pActor.Value = entry.ActorSid.Value;
-            pTarget.Value = entry.TargetTable;
-            pCol.Value = (object?)entry.TargetColumn ?? DBNull.Value;
-            pDec.Value = entry.Decision;
-            pTrace.Value = entry.TraceId;
-            pDet.Value = entry.DetailsJson;
-            pPrev.Value = currentPrevHash;
-            pHash.Value = entryHash;
-            pTenantId.Value = effectiveTenantId;
-            pSeq.Value = currentSequence;
-
-            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            rows.Add(new AuditInsertRow(entry.Id.ToString(), entry.OccurredAt.ToString("O"), entry.EventType, entry.ActorSid.Value, entry.TargetTable,
+                entry.TargetColumn, entry.Decision, entry.TraceId, entry.DetailsJson, currentPrevHash, entryHash, effectiveTenantId, currentSequence));
             lastEntryHash = entryHash;
         }
+
+        await InsertAuditRowsAsync(conn, tx, rows, ct).ConfigureAwait(false);
 
         await tx.CommitAsync(ct).ConfigureAwait(false);
 
@@ -636,6 +780,7 @@ public partial class PostgreSqlGovernanceRepository
             }
         }
 
+        Exception? anchorFailure = null;
         if (Volatile.Read(ref _auditChainViolation) == null && _auditAnchorStore != null)
         {
             var anchor = CreateSignedAnchor(lastSequence, lastEntryHash);
@@ -651,7 +796,21 @@ public partial class PostgreSqlGovernanceRepository
             catch (Exception ex)
             {
                 _logger?.LogError(ex, "Failed to persist external audit chain anchor at seq {Sequence}.", anchor.Sequence);
+                anchorFailure = ex;
             }
+        }
+
+        // WP-PF-04 / SEC-SC-08: a batch containing a Tier-A event is acknowledged only after its anchor is written. The rows are
+        // committed and the next batch anchors the tail, but the caller fails closed. Tier-B-only batches never fail on a late anchor.
+        // M1: a chain violation latched DURING this write means no anchor was written; the Tier-A event is then not acknowledged (a violation latched before admission follows the configured policy: Tier-A is written marked).
+        if (anchorFailure == null && violationAtStart == null && Volatile.Read(ref _auditChainViolation) != null && ViolationPolicy != AuditChainViolationPolicy.AlertOnly)
+        {
+            anchorFailure = new InvalidOperationException("The audit hash chain is latched as violated; no anchor was written.");
+        }
+
+        if (anchorFailure != null && AuditChainViolationGate.AnyTierA(batch))
+        {
+            throw new AuditUnavailableException("The audit chain anchor could not be persisted; the event is not acknowledged (fail-closed).", anchorFailure);
         }
     }
 
@@ -756,6 +915,65 @@ public partial class PostgreSqlGovernanceRepository
         };
     }
 
+    public async Task<Autheris.Application.Governance.Paging.AuditLogPage> QueryAuditLogPageAsync(
+        Autheris.Application.Governance.Paging.AuditLogPageQuery query, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        await FlushAuditChannelAsync(ct).ConfigureAwait(false);
+        var size = query.EffectivePageSize;
+
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        var where = new List<string> { "seq IS NOT NULL" };
+        if (query.Tenant is { } tenant)
+        {
+            where.Add("tenant_id = @tenantId");
+            cmd.Parameters.AddWithValue("@tenantId", tenant.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.TargetTable))
+        {
+            where.Add("LOWER(target_table) = LOWER(@targetTable)");
+            cmd.Parameters.AddWithValue("@targetTable", query.TargetTable);
+        }
+
+        if (query.Actor is { } actor && !string.IsNullOrWhiteSpace(actor.Value))
+        {
+            where.Add("actor_sid = @actorSid");
+            cmd.Parameters.AddWithValue("@actorSid", actor.Value);
+        }
+
+        if (query.Since is { } since)
+        {
+            where.Add("occurred_at >= @since");
+            cmd.Parameters.AddWithValue("@since", since.ToString("O"));
+        }
+
+        if (query.BeforeSequence is { } before)
+        {
+            where.Add("seq < @before");
+            cmd.Parameters.AddWithValue("@before", before);
+        }
+
+        cmd.CommandText = $@"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq
+                            FROM AUDIT_LOG_ENTRIES
+                            WHERE {string.Join(" AND ", where)}
+                            ORDER BY seq DESC
+                            LIMIT @lim";
+        cmd.Parameters.AddWithValue("@lim", size + 1);
+
+        var items = new List<AuditLogEntry>(size + 1);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var entry = ReadAuditEntry(reader);
+            entry.ChainSequence = reader.GetInt64(12);
+            items.Add(entry);
+        }
+
+        return AuditPageSlicer.Slice(items, size);
+    }
+
     public async Task<bool> VerifyAuditHashChainAsync(CancellationToken ct = default)
     {
         await FlushAuditChannelAsync(ct).ConfigureAwait(false);
@@ -788,8 +1006,15 @@ public partial class PostgreSqlGovernanceRepository
         }
 
         string? hashAtKnownSeq = null;
-        var expectedPrevHash = AuditGenesisHash;
-        long position = 0;
+        AuditPurgeCheckpoint? checkpoint = TryLoadVerifiedPurgeCheckpoint(out bool checkpointInvalid);
+        if (checkpointInvalid)
+        {
+            FlagAuditChainViolation("External audit purge checkpoint has an invalid signature or format.");
+            return false;
+        }
+
+        var expectedPrevHash = checkpoint != null ? checkpoint.SurvivingPrevHash : AuditGenesisHash;
+        long position = checkpoint != null ? checkpoint.FirstSurvivingSequence - 1 : 0;
         AuditChainAnchor? anchor = TryLoadVerifiedAnchor(out bool anchorInvalid);
         if (anchorInvalid)
         {
@@ -797,10 +1022,12 @@ public partial class PostgreSqlGovernanceRepository
         }
 
         bool anchorEntryMatched = false;
+        bool readAnyRows = false;
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
+            readAnyRows = true;
             position++;
             var id = reader.GetString(0);
             var occurredAt = DateTimeOffset.Parse(reader.GetString(1));
@@ -815,6 +1042,12 @@ public partial class PostgreSqlGovernanceRepository
             var entryHash = reader.GetString(10);
             long? sequence = reader.IsDBNull(11) ? null : reader.GetInt64(11);
             var tenantId = reader.IsDBNull(12) ? TenantId.LegacySingleTenant.Value : reader.GetString(12);
+
+            if (checkpoint != null && sequence.HasValue && sequence.Value < checkpoint.FirstSurvivingSequence)
+            {
+                FlagAuditChainViolation($"Audit entry found before purge checkpoint sequence: got seq {sequence.Value}, checkpoint first sequence is {checkpoint.FirstSurvivingSequence}.");
+                return false;
+            }
 
             if (sequence.HasValue && sequence.Value != position)
             {
@@ -866,6 +1099,12 @@ public partial class PostgreSqlGovernanceRepository
             expectedPrevHash = entryHash;
         }
 
+        if (checkpoint != null && (!readAnyRows || position < checkpoint.FirstSurvivingSequence))
+        {
+            FlagAuditChainViolation($"Audit chain missing surviving rows: checkpoint expected seq {checkpoint.FirstSurvivingSequence} but DB has none.");
+            return false;
+        }
+
         // The anchor may lag behind the chain (other replicas, anchor written after commit); it must never be ahead of it.
         if (anchor != null && anchor.Sequence > 0 && (anchor.Sequence > position || !anchorEntryMatched))
         {
@@ -875,7 +1114,7 @@ public partial class PostgreSqlGovernanceRepository
 
         // Review PG-1: a longer chain than this process knew is normal (other replicas / concurrent writers); a shorter one,
         // or a different hash at the known position, is a violation.
-        if (knownSeq > 0 && (position < knownSeq || !FixedTimeEqualsString(hashAtKnownSeq, knownHash)))
+        if (knownSeq > 0 && knownSeq >= (checkpoint?.FirstSurvivingSequence ?? 1) && (position < knownSeq || !FixedTimeEqualsString(hashAtKnownSeq, knownHash)))
         {
             FlagAuditChainViolation($"Tail divergence: last known (seq {knownSeq}, hash {knownHash}) vs scanned chain (seq {position}, hash at known seq {hashAtKnownSeq ?? "n/a"}).");
             return false;
@@ -1084,6 +1323,39 @@ public partial class PostgreSqlGovernanceRepository
         }
 
         return anchor;
+    }
+
+    private AuditPurgeCheckpoint? TryLoadVerifiedPurgeCheckpoint(out bool invalid)
+    {
+        invalid = false;
+        AuditPurgeCheckpoint? checkpoint;
+        try
+        {
+            checkpoint = _auditAnchorStore?.LoadPurgeCheckpoint();
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to load audit purge checkpoint from external store.");
+            invalid = true;
+            return null;
+        }
+
+        if (checkpoint == null) return null;
+
+        if (checkpoint.FirstSurvivingSequence < 1 || string.IsNullOrEmpty(checkpoint.SurvivingPrevHash) || string.IsNullOrEmpty(checkpoint.Signature) || checkpoint.PurgedCount < 0)
+        {
+            invalid = true;
+            return null;
+        }
+
+        if (!AuditChainEngine.VerifyPurgeCheckpointSignature(_auditHmacKey, checkpoint))
+        {
+            _logger?.LogCritical("External audit purge checkpoint signature INVALID at sequence {Sequence}.", checkpoint.FirstSurvivingSequence);
+            invalid = true;
+            return null;
+        }
+
+        return checkpoint;
     }
 
     private void InitializeAuditChainAnchor()

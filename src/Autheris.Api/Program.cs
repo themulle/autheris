@@ -130,6 +130,11 @@ static void LogAuthStartupConfiguration(WebApplication app, GatewayOptions optio
         logger.LogWarning("Dev configuration: {Note}", note);
     }
 
+    foreach (var warning in Autheris.Api.Configuration.InertOptionWarnings.Collect(options))
+    {
+        logger.LogWarning("Configuration: {Warning}", warning);
+    }
+
     var devFeatures = DevFeatures.Resolve(options, app.Environment.IsDevelopment());
     if (devFeatures.Banner)
     {

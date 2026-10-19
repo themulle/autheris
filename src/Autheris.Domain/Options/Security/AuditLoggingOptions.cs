@@ -25,10 +25,18 @@ public enum AuditCatalogReadMode
 
 public sealed class AuditRetentionOptions
 {
-    [Range(365, 7300)] public int SecurityDays { get; init; } = 3650;
-    [Range(30, 7300)] public int DataAccessDays { get; init; } = 400;
-    [Range(30, 7300)] public int AggregatedDays { get; init; } = 90;
-    [Range(7, 7300)] public int OperationsDays { get; init; } = 30;
+    public const string SectionName = GatewaySections.AuditRetention;
+
+    public bool Enabled { get; init; } = true;
+    public int RetentionDays { get; init; } = 90;
+    public int SecurityDays { get; init; } = 3650;
+    public int DataAccessDays { get; init; } = 400;
+    public int AggregatedDays { get; init; } = 90;
+    public int OperationsDays { get; init; } = 30;
+    public int BatchSize { get; init; } = 5000;
+    public TimeSpan PurgeInterval { get; init; } = TimeSpan.FromHours(24);
+    public TimeSpan LockTimeout { get; init; } = TimeSpan.FromMinutes(30);
+    public TimeSpan InterBatchDelay { get; init; } = TimeSpan.FromMilliseconds(50);
 }
 
 /// <summary>

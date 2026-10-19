@@ -39,10 +39,23 @@ public sealed record MandatoryFilterOutcome(bool IsDenied, string? DenyReason, s
     /// </summary>
     public TrinoSqlEngine.Governance.PolicyPredicate? TypedPredicate { get; init; }
 
+    /// <summary>
+    /// REQ-GOV-129 (A-1, A-4): the caller attributes the typed predicate needs bound (its slots). Names only: the memoized outcome never holds a
+    /// value, so it can be served to the next caller with the same key tuple (BC-129-05).
+    /// </summary>
+    public IReadOnlyList<string> CallerAttributes { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// REQ-GOV-129 (BC-129-05): a filter with caller placeholders contributes the constant <c>(1 = 0)</c> to <see cref="PredicateSql"/>. Without a typed
+    /// predicate the text is not authoritative for it, so the decision point denies the table instead of falling back to the text.
+    /// </summary>
+    public bool CallerAttributesTextConstant { get; init; }
+
     public bool Equals(MandatoryFilterOutcome? other) =>
         other is not null && IsDenied == other.IsDenied && DenyReason == other.DenyReason &&
         PredicateSql == other.PredicateSql && TypedPredicate?.Fingerprint == other.TypedPredicate?.Fingerprint && AppliedFilters.SequenceEqual(other.AppliedFilters) &&
-        AppliedBindings.SequenceEqual(other.AppliedBindings);
+        AppliedBindings.SequenceEqual(other.AppliedBindings) && CallerAttributes.SequenceEqual(other.CallerAttributes) &&
+        CallerAttributesTextConstant == other.CallerAttributesTextConstant;
 
     public override int GetHashCode() => HashCode.Combine(IsDenied, DenyReason, PredicateSql);
 }
@@ -176,8 +189,9 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
 {
     private readonly IVirtualFilterSnapshotProvider _snapshots;
     private readonly IVirtualFilterPredicateBuilder _predicates;
-    private readonly ConcurrentDictionary<VirtualFilterMemoKey, MandatoryFilterOutcome> _memo = new();
-    private readonly ConcurrentDictionary<string, ObjectPattern> _patterns = new(StringComparer.Ordinal);
+    // WP-PF-06: bounded per-user memo (5,000 users x 100 tables would otherwise grow to hundreds of MB); a miss re-resolves.
+    private readonly Autheris.Application.Caching.BoundedCache<VirtualFilterMemoKey, MandatoryFilterOutcome> _memo = new(50_000);
+    private readonly Autheris.Application.Caching.BoundedCache<string, ObjectPattern> _patterns = new(10_000, comparer: StringComparer.Ordinal);
     private readonly ITableMetadataRepository? _catalog;
     private readonly SqlDataSourceOptions? _dataSources;
     private long _memoGeneration = -1;
@@ -496,7 +510,10 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
                 var typed = tenantContext == null
                     ? _predicates.BuildTyped(filter, binding, query.Metadata, query.Metadata.Dialect, typedPrefix)
                     : _predicates.BuildTyped(filter, binding, query.Metadata, query.Metadata.Dialect, typedPrefix, tenantContext);
-                if (distinctPredicates.Add(pred))
+                // A caller attribute filter's text is the constant (1 = 0) for every such filter: dedupe by filter and binding, never by text (two different
+                // filters must both stay in the typed predicate).
+                var dedupeKey = CallerPlaceholders.Contains(filter.Sql) ? $"{pred}\u0001{filter.Name}\u0001{binding.TargetPattern}" : pred;
+                if (distinctPredicates.Add(dedupeKey))
                 {
                     parts.Add(pred);
                     if (typed == null)
@@ -515,10 +532,13 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
                 .Select(a => new AppliedVirtualFilterBinding(a.Filter, a.Binding, snapshot.Generation))
                 .Distinct()
                 .ToList();
+            var callerAttributes = typedParts.SelectMany(Autheris.Application.Identity.Attributes.CallerAttributeBinder.SlotAttributes).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
             return new MandatoryFilterOutcome(false, null, predicate, effective.Select(a => a.Filter.Name).Distinct(StringComparer.Ordinal).ToList())
             {
                 AppliedBindings = appliedBindings,
-                TypedPredicate = typedComplete && typedParts.Count > 0 ? typedParts.Aggregate((left, right) => left.And(right)) : null
+                TypedPredicate = typedComplete && typedParts.Count > 0 ? typedParts.Aggregate((left, right) => left.And(right)) : null,
+                CallerAttributes = callerAttributes,
+                CallerAttributesTextConstant = effective.Any(a => CallerPlaceholders.Contains(a.Filter.Sql))
             };
         }
         catch (TargetPatternEvaluationException ex)

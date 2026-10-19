@@ -15,13 +15,16 @@ public enum IdentityProviderType
     TestAuth = 7             // Test Environment
 }
 
+#pragma warning disable CA1069
 public enum SubjectType
 {
     User = 1,
+    Person = 1,
     Group = 2,
     Role = 3,
     ServicePrincipal = 4     // Machine-to-Machine (Batch, ETL, Service Account)
 }
+#pragma warning restore CA1069
 
 public sealed record SubjectIdentity(
     string Id,                     // SID, OID or ClientId

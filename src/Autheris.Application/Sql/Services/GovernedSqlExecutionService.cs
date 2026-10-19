@@ -37,7 +37,7 @@ using TrinoSqlEngine.Analysis;
 public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, ISqlRewritePipeline
 {
     internal const string InternalParameterPrefix = "__gql_";
-    private const string ClientParameterPlaceholderPrefix = "__param_";
+    internal const string ClientParameterPlaceholderPrefix = "__param_";
 
     private readonly GovernedSqlRewriter _rewriter;
     private readonly GovernedSqlExecutor _executor;
@@ -76,7 +76,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             rewrite.ContractManager,
             rewrite.AccessProfileRepository,
             rewrite.MemoryCache,
-            typedPolicies: rewrite.TypedPolicies);
+            typedPolicies: rewrite.TypedPolicies,
+            timeZoneState: rewrite.TimeZoneState);
 
         _executor = new GovernedSqlExecutor(
             _rewriter,
@@ -364,6 +365,25 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         }
 
         return true;
+    }
+
+    internal static void EnsureClientParameterNames(IReadOnlyDictionary<string, object?>? parameters)
+    {
+        if (parameters == null || parameters.Count == 0) return;
+
+        foreach (var paramName in parameters.Keys)
+        {
+            var trimmed = paramName.TrimStart('@');
+            if (trimmed.StartsWith(InternalParameterPrefix, StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("p_rls_", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("rls_", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith(ClientParameterPlaceholderPrefix, StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("p_pd_", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("__rls_ks", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new WebSqlPolicyException("A request parameter uses a reserved gateway parameter name.");
+            }
+        }
     }
 
     internal static string NormalizeClientParameters(

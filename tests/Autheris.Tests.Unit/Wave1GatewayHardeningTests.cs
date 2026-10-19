@@ -223,9 +223,9 @@ public sealed class Wave1GatewayHardeningTests
 
         // Assert
         secContext.Caller.ShouldNotBeNull();
-        secContext.Caller!.Application.ShouldBe("FinancialAnalyticsService");
+        secContext.Caller!.Application.ShouldBe("financialanalyticsservice");
         secContext.Caller.Version.ShouldBe("v2.4.1");
-        secContext.Caller.QueryName.ShouldBe("GetQuarterlyRevenue");
+        secContext.Caller.QueryName.ShouldBe("getquarterlyrevenue");
     }
 
     [Fact]

@@ -32,7 +32,14 @@ public sealed record TreeOrFilter(IReadOnlyList<TreeFilter> Items) : TreeFilter;
 public sealed record TreeNotFilter(TreeFilter Item) : TreeFilter;
 
 /// <summary>For <see cref="TreeFilterOperator.In"/>/<see cref="TreeFilterOperator.NotIn"/> the value is a list.</summary>
-public sealed record TreeComparison(string Column, TreeFilterOperator Operator, object? Value) : TreeFilter;
+public sealed record TreeComparison(string Column, TreeFilterOperator Operator, object? Value) : TreeFilter
+{
+    /// <summary>
+    /// The value kind the typed filter declared (GraphQL <c>string</c>, <c>int</c>, ... leaf), when there is one. The typed metric query
+    /// checks it against the resolved column kind (#112 A-8, METRIC_FILTER_INVALID); it never changes the rendered predicate.
+    /// </summary>
+    public Autheris.Application.Analytics.ColumnValueKind? DeclaredKind { get; init; }
+}
 
 public sealed record TreeOrder(string Column, bool Descending = false);
 
@@ -75,3 +82,9 @@ public sealed record CompiledTreeQuery(
     string Sql,
     IReadOnlyDictionary<string, object?> Parameters,
     IReadOnlyList<TreeHmacColumn> HmacColumns);
+
+/// <summary>
+/// A selected column that is masked for the caller. <see cref="Path"/> is the chain of relation response keys from the
+/// root level (empty for the root table); <see cref="Column"/> is the catalog spelling of the column.
+/// </summary>
+public sealed record TreeMaskedColumn(IReadOnlyList<string> Path, string Column);

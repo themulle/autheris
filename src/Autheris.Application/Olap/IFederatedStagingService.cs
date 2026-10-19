@@ -7,8 +7,16 @@ using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Domain.Common;
+using Autheris.Application.Sql.Federation.Parameters;
 using Autheris.Domain.Model;
 using TrinoSqlEngine.Analysis;
+
+/// <summary>Issue #124: Key-set pushdown plan for cross-source equi-join dependency.</summary>
+public sealed record KeySetPlanInfo(
+    string DrivingStagingName,
+    TableIdentifier DrivingTableIdentifier,
+    string DrivingKeyColumn,
+    string DrivenKeyColumn);
 
 public sealed record StagingTableRequest(
     TableAccessTarget Reference,
@@ -17,7 +25,10 @@ public sealed record StagingTableRequest(
     string StagingName,
     IReadOnlyList<string> Projection,
     TableFilterClause? PushdownFilter = null,
-    VirtualFilterTablePlan? VirtualFilterPlan = null);
+    VirtualFilterTablePlan? VirtualFilterPlan = null,
+    PushedParameterAudit? ParameterAudit = null,
+    KeySetPlanInfo? KeySetPlan = null,
+    Autheris.Application.Sql.Federation.Subtrees.SubtreeExecutionPlan? Subtree = null);
 
 public sealed record FederationBudget(
     int MaxTableCount,

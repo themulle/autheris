@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Autheris.Application.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using System.Text.Json;
@@ -26,6 +27,8 @@ public sealed class FileAuditChainAnchorStore : IAuditChainAnchorStore
     }
 
     public string FilePath => _path;
+    private string PurgeFilePath => _path + ".purge.json";
+    private string PurgeLockPath => _path + ".purge.lock";
 
     public AuditChainAnchor? Load()
     {
@@ -55,6 +58,34 @@ public sealed class FileAuditChainAnchorStore : IAuditChainAnchorStore
         }
     }
 
+    public AuditPurgeCheckpoint? LoadPurgeCheckpoint()
+    {
+        lock (_ioLock)
+        {
+            var purgePath = PurgeFilePath;
+            if (!File.Exists(purgePath))
+            {
+                return null;
+            }
+
+            var json = File.ReadAllText(purgePath);
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return new AuditPurgeCheckpoint(-1, string.Empty, -1, DateTimeOffset.MinValue, DateTimeOffset.MinValue, string.Empty);
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize<AuditPurgeCheckpoint>(json)
+                       ?? new AuditPurgeCheckpoint(-1, string.Empty, -1, DateTimeOffset.MinValue, DateTimeOffset.MinValue, string.Empty);
+            }
+            catch (JsonException)
+            {
+                return new AuditPurgeCheckpoint(-1, string.Empty, -1, DateTimeOffset.MinValue, DateTimeOffset.MinValue, string.Empty);
+            }
+        }
+    }
+
     /// <summary>
     /// SR-L-07: the anchor never moves backwards. A lower sequence than the one already on disk is ignored. Read-compare-write
     /// is serialised in-process by <c>_ioLock</c> and across replicas sharing the path by an exclusive sibling <c>.lock</c> file.
@@ -70,7 +101,7 @@ public sealed class FileAuditChainAnchorStore : IAuditChainAnchorStore
                 Directory.CreateDirectory(directory);
             }
 
-            using var processLock = AcquireProcessLock();
+            using var processLock = AcquireProcessLock(_path + ".lock");
 
             var current = ReadCurrentSequence();
             if (current.HasValue && current.Value > anchor.Sequence)
@@ -84,6 +115,44 @@ public sealed class FileAuditChainAnchorStore : IAuditChainAnchorStore
             {
                 File.WriteAllText(tempPath, JsonSerializer.Serialize(anchor));
                 File.Move(tempPath, _path, overwrite: true);
+            }
+            catch
+            {
+                try { File.Delete(tempPath); } catch (IOException) { }
+                throw;
+            }
+        }
+    }
+
+    public void SavePurgeCheckpoint(AuditPurgeCheckpoint checkpoint)
+    {
+        ArgumentNullException.ThrowIfNull(checkpoint);
+        lock (_ioLock)
+        {
+            var purgePath = PurgeFilePath;
+            var directory = Path.GetDirectoryName(purgePath);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            using var processLock = AcquireProcessLock(PurgeLockPath);
+
+            var current = ReadCurrentPurgeCheckpoint(purgePath);
+            if (current != null)
+            {
+                if (checkpoint.FirstSurvivingSequence <= current.FirstSurvivingSequence || checkpoint.PurgedCount <= current.PurgedCount)
+                {
+                    throw new InvalidOperationException(
+                        $"Purge checkpoint must be strictly monotonic. Current seq: {current.FirstSurvivingSequence}, new: {checkpoint.FirstSurvivingSequence}.");
+                }
+            }
+
+            var tempPath = purgePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllText(tempPath, JsonSerializer.Serialize(checkpoint));
+                File.Move(tempPath, purgePath, overwrite: true);
             }
             catch
             {
@@ -118,9 +187,32 @@ public sealed class FileAuditChainAnchorStore : IAuditChainAnchorStore
         }
     }
 
-    private FileStream AcquireProcessLock()
+    private static AuditPurgeCheckpoint? ReadCurrentPurgeCheckpoint(string path)
     {
-        var lockPath = _path + ".lock";
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            var json = File.ReadAllText(path);
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return null;
+            }
+
+            var existing = JsonSerializer.Deserialize<AuditPurgeCheckpoint>(json);
+            return existing is { FirstSurvivingSequence: >= 0 } ? existing : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static FileStream AcquireProcessLock(string lockPath)
+    {
         var deadline = DateTime.UtcNow.AddSeconds(10);
         while (true)
         {
@@ -143,8 +235,11 @@ public sealed class FileAuditChainAnchorStore : IAuditChainAnchorStore
 public sealed class InMemoryAuditChainAnchorStore : IAuditChainAnchorStore
 {
     private AuditChainAnchor? _anchor;
+    private AuditPurgeCheckpoint? _purgeCheckpoint;
 
     public AuditChainAnchor? Load() => Volatile.Read(ref _anchor);
+
+    public AuditPurgeCheckpoint? LoadPurgeCheckpoint() => Volatile.Read(ref _purgeCheckpoint);
 
     public void Save(AuditChainAnchor anchor)
     {
@@ -165,6 +260,30 @@ public sealed class InMemoryAuditChainAnchorStore : IAuditChainAnchorStore
             }
         }
     }
+
+    public void SavePurgeCheckpoint(AuditPurgeCheckpoint checkpoint)
+    {
+        ArgumentNullException.ThrowIfNull(checkpoint);
+
+        // SEC-AUD161-02: monotonic purge checkpoint
+        while (true)
+        {
+            var current = Volatile.Read(ref _purgeCheckpoint);
+            if (current != null)
+            {
+                if (checkpoint.FirstSurvivingSequence <= current.FirstSurvivingSequence || checkpoint.PurgedCount <= current.PurgedCount)
+                {
+                    throw new InvalidOperationException(
+                        $"Purge checkpoint must be strictly monotonic. Current seq: {current.FirstSurvivingSequence}, new: {checkpoint.FirstSurvivingSequence}.");
+                }
+            }
+
+            if (ReferenceEquals(Interlocked.CompareExchange(ref _purgeCheckpoint, checkpoint, current), current))
+            {
+                return;
+            }
+        }
+    }
 }
 
 /// <summary>
@@ -176,9 +295,11 @@ public sealed class InMemoryAuditChainAnchorStore : IAuditChainAnchorStore
 public sealed class WormDirectoryAuditChainAnchorStore : IAuditChainAnchorStore
 {
     private static readonly AuditChainAnchor Invalid = new(-1, string.Empty, DateTimeOffset.MinValue, string.Empty);
+    private static readonly AuditPurgeCheckpoint InvalidPurge = new(-1, string.Empty, -1, DateTimeOffset.MinValue, DateTimeOffset.MinValue, string.Empty);
     private readonly string _directory;
     private readonly Func<AuditChainAnchor, bool>? _isValidlySigned;
     private readonly ILogger? _logger;
+    private readonly Func<AuditPurgeCheckpoint, bool>? _isValidlySignedPurge;
 
     /// <param name="directory">Append-only anchor directory.</param>
     /// <param name="isValidlySigned">
@@ -186,12 +307,18 @@ public sealed class WormDirectoryAuditChainAnchorStore : IAuditChainAnchorStore
     /// so a planted newest file cannot permanently disable anchor verification.
     /// </param>
     /// <param name="logger">Receives a critical alert for every skipped (poisoned) file.</param>
-    public WormDirectoryAuditChainAnchorStore(string directory, Func<AuditChainAnchor, bool>? isValidlySigned = null, ILogger? logger = null)
+    /// <param name="isValidlySignedPurge">Optional external signature check for purge checkpoints.</param>
+    public WormDirectoryAuditChainAnchorStore(
+        string directory,
+        Func<AuditChainAnchor, bool>? isValidlySigned = null,
+        ILogger? logger = null,
+        Func<AuditPurgeCheckpoint, bool>? isValidlySignedPurge = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         _directory = Path.GetFullPath(directory);
         _isValidlySigned = isValidlySigned;
         _logger = logger;
+        _isValidlySignedPurge = isValidlySignedPurge;
     }
 
     public string DirectoryPath => _directory;
@@ -256,6 +383,62 @@ public sealed class WormDirectoryAuditChainAnchorStore : IAuditChainAnchorStore
         return best;
     }
 
+    public AuditPurgeCheckpoint? LoadPurgeCheckpoint()
+    {
+        if (!Directory.Exists(_directory))
+        {
+            return null;
+        }
+
+        var files = Directory.GetFiles(_directory, "purge-*.json");
+        if (files.Length == 0)
+        {
+            return null;
+        }
+
+        Array.Sort(files, StringComparer.Ordinal);
+        AuditPurgeCheckpoint? best = null;
+        var skipped = 0;
+        foreach (var file in files.Reverse().Take(8))
+        {
+            AuditPurgeCheckpoint? cp;
+            try
+            {
+                cp = JsonSerializer.Deserialize<AuditPurgeCheckpoint>(File.ReadAllText(file));
+            }
+            catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+            {
+                cp = null;
+            }
+
+            if (cp == null || cp.FirstSurvivingSequence < 0 || string.IsNullOrEmpty(cp.SurvivingPrevHash) ||
+                (_isValidlySignedPurge != null && !_isValidlySignedPurge(cp)))
+            {
+                skipped++;
+                _logger?.LogCritical(
+                    "CRITICAL: WORM audit purge checkpoint file '{File}' is invalid or not validly signed and was skipped; falling back to the newest valid anchor. Investigate possible tampering of the anchor directory.",
+                    Path.GetFileName(file));
+                continue;
+            }
+
+            if (best == null)
+            {
+                best = cp;
+            }
+            else if (cp.FirstSurvivingSequence == best.FirstSurvivingSequence && !string.Equals(cp.SurvivingPrevHash, best.SurvivingPrevHash, StringComparison.Ordinal))
+            {
+                return InvalidPurge;
+            }
+        }
+
+        if (best == null && skipped > 0)
+        {
+            return InvalidPurge;
+        }
+
+        return best;
+    }
+
     public void Save(AuditChainAnchor anchor)
     {
         ArgumentNullException.ThrowIfNull(anchor);
@@ -277,6 +460,27 @@ public sealed class WormDirectoryAuditChainAnchorStore : IAuditChainAnchorStore
             // Same sequence and timestamp already archived (replica race): immutable history is not touched.
         }
     }
+
+    public void SavePurgeCheckpoint(AuditPurgeCheckpoint checkpoint)
+    {
+        ArgumentNullException.ThrowIfNull(checkpoint);
+        Directory.CreateDirectory(_directory);
+        var name = string.Create(CultureInfo.InvariantCulture, $"purge-{checkpoint.FirstSurvivingSequence:D20}-{checkpoint.CreatedAtUtc.UtcTicks:D20}.json");
+        var path = Path.Combine(_directory, name);
+        try
+        {
+            using (var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(JsonSerializer.SerializeToUtf8Bytes(checkpoint));
+                stream.Flush(true);
+            }
+
+            try { File.SetAttributes(path, FileAttributes.ReadOnly); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException) { }
+        }
+        catch (IOException) when (File.Exists(path))
+        {
+        }
+    }
 }
 
 /// <summary>
@@ -287,7 +491,13 @@ public sealed class WormDirectoryAuditChainAnchorStore : IAuditChainAnchorStore
 public sealed class CompositeAuditChainAnchorStore : IAuditChainAnchorStore
 {
     private static readonly AuditChainAnchor Invalid = new(-1, string.Empty, DateTimeOffset.MinValue, string.Empty);
+    private static readonly AuditPurgeCheckpoint InvalidPurge = new(-1, string.Empty, -1, DateTimeOffset.MinValue, DateTimeOffset.MinValue, string.Empty);
     private readonly IReadOnlyList<IAuditChainAnchorStore> _stores;
+
+    public CompositeAuditChainAnchorStore(params IAuditChainAnchorStore[] stores)
+        : this((IEnumerable<IAuditChainAnchorStore>)stores)
+    {
+    }
 
     public CompositeAuditChainAnchorStore(IEnumerable<IAuditChainAnchorStore> stores)
     {
@@ -329,6 +539,35 @@ public sealed class CompositeAuditChainAnchorStore : IAuditChainAnchorStore
         return best;
     }
 
+    public AuditPurgeCheckpoint? LoadPurgeCheckpoint()
+    {
+        AuditPurgeCheckpoint? best = null;
+        foreach (var store in _stores)
+        {
+            var cp = store.LoadPurgeCheckpoint();
+            if (cp == null)
+            {
+                continue;
+            }
+
+            if (cp.FirstSurvivingSequence < 0)
+            {
+                return InvalidPurge;
+            }
+
+            if (best == null || cp.FirstSurvivingSequence > best.FirstSurvivingSequence)
+            {
+                best = cp;
+            }
+            else if (cp.FirstSurvivingSequence == best.FirstSurvivingSequence && !string.Equals(cp.SurvivingPrevHash, best.SurvivingPrevHash, StringComparison.Ordinal))
+            {
+                return InvalidPurge;
+            }
+        }
+
+        return best;
+    }
+
     public void Save(AuditChainAnchor anchor)
     {
         List<Exception>? errors = null;
@@ -349,6 +588,27 @@ public sealed class CompositeAuditChainAnchorStore : IAuditChainAnchorStore
             throw new AggregateException("Failed to persist the audit chain anchor to at least one store.", errors);
         }
     }
+
+    public void SavePurgeCheckpoint(AuditPurgeCheckpoint checkpoint)
+    {
+        List<Exception>? errors = null;
+        foreach (var store in _stores)
+        {
+            try
+            {
+                store.SavePurgeCheckpoint(checkpoint);
+            }
+            catch (Exception ex)
+            {
+                (errors ??= []).Add(ex);
+            }
+        }
+
+        if (errors != null)
+        {
+            throw new AggregateException("Failed to persist the audit purge checkpoint to at least one store.", errors);
+        }
+    }
 }
 
 /// <summary>
@@ -358,6 +618,7 @@ public sealed class CompositeAuditChainAnchorStore : IAuditChainAnchorStore
 public sealed class SigningAuditChainAnchorStore : IAuditChainAnchorStore
 {
     private static readonly AuditChainAnchor Invalid = new(-1, string.Empty, DateTimeOffset.MinValue, string.Empty);
+    private static readonly AuditPurgeCheckpoint InvalidPurge = new(-1, string.Empty, -1, DateTimeOffset.MinValue, DateTimeOffset.MinValue, string.Empty);
     private readonly IAuditChainAnchorStore _inner;
     private readonly IAuditAnchorSigner _signer;
 
@@ -372,6 +633,10 @@ public sealed class SigningAuditChainAnchorStore : IAuditChainAnchorStore
     internal static byte[] Payload(AuditChainAnchor a) =>
         Encoding.UTF8.GetBytes(string.Create(CultureInfo.InvariantCulture,
             $"anchor-ext-v1|{a.Sequence}|{a.EntryHash}|{a.UpdatedAt.ToUniversalTime():O}|{a.Signature}"));
+
+    internal static byte[] PurgePayload(AuditPurgeCheckpoint c) =>
+        Encoding.UTF8.GetBytes(string.Create(CultureInfo.InvariantCulture,
+            $"purge-ext-v1|{c.FirstSurvivingSequence}|{c.SurvivingPrevHash}|{c.PurgedCount}|{c.PurgedThroughUtc.ToUniversalTime():O}|{c.CreatedAtUtc.ToUniversalTime():O}|{c.Signature}"));
 
     public AuditChainAnchor? Load()
     {
@@ -389,10 +654,32 @@ public sealed class SigningAuditChainAnchorStore : IAuditChainAnchorStore
         return anchor;
     }
 
+    public AuditPurgeCheckpoint? LoadPurgeCheckpoint()
+    {
+        var cp = _inner.LoadPurgeCheckpoint();
+        if (cp == null || cp.FirstSurvivingSequence < 0)
+        {
+            return cp;
+        }
+
+        if (string.IsNullOrEmpty(cp.ExternalSignature) || !_signer.Verify(PurgePayload(cp), cp.ExternalSignature))
+        {
+            return InvalidPurge;
+        }
+
+        return cp;
+    }
+
     public void Save(AuditChainAnchor anchor)
     {
         ArgumentNullException.ThrowIfNull(anchor);
         _inner.Save(anchor with { ExternalSignature = _signer.Sign(Payload(anchor)) });
+    }
+
+    public void SavePurgeCheckpoint(AuditPurgeCheckpoint checkpoint)
+    {
+        ArgumentNullException.ThrowIfNull(checkpoint);
+        _inner.SavePurgeCheckpoint(checkpoint with { ExternalSignature = _signer.Sign(PurgePayload(checkpoint)) });
     }
 }
 
@@ -496,6 +783,9 @@ public static class AuditChainAnchorStoreFactory
         Func<AuditChainAnchor, bool>? verify = signer == null
             ? null
             : a => !string.IsNullOrEmpty(a.ExternalSignature) && signer.Verify(SigningAuditChainAnchorStore.Payload(a), a.ExternalSignature);
+        Func<AuditPurgeCheckpoint, bool>? verifyPurge = signer == null
+            ? null
+            : cp => !string.IsNullOrEmpty(cp.ExternalSignature) && signer.Verify(SigningAuditChainAnchorStore.PurgePayload(cp), cp.ExternalSignature);
         var stores = new List<IAuditChainAnchorStore> { primary };
         if (options != null)
         {
@@ -506,7 +796,7 @@ public static class AuditChainAnchorStoreFactory
 
             if (!string.IsNullOrWhiteSpace(options.ChainAnchorWormDirectory))
             {
-                stores.Add(new WormDirectoryAuditChainAnchorStore(options.ChainAnchorWormDirectory, verify, logger));
+                stores.Add(new WormDirectoryAuditChainAnchorStore(options.ChainAnchorWormDirectory, verify, logger, verifyPurge));
             }
         }
 

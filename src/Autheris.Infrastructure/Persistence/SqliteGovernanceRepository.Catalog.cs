@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -67,6 +68,21 @@ public partial class SqliteGovernanceRepository
 
     public async Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
     {
+        var structural = await GetStructuralTableMetadataAsync(table, ct).ConfigureAwait(false);
+        if (structural is null)
+        {
+            return null;
+        }
+
+        // Issue #111 (A-6): tier and tags are never part of the cached entry; a fresh read is overlaid on every call, without mutating the cached record.
+        await using var scope = await ReadScopeAsync(ct, snapshot: false).ConfigureAwait(false);
+        var overlay = await DatasetCatalogStore.ReadOverlayAsync(
+            scope.Connection, null, CatalogKeyDefinitionStore.Sqlite, structural.Table.Id, _logger, ct).ConfigureAwait(false);
+        return DatasetCatalogStore.Apply(structural, overlay);
+    }
+
+    private async Task<TableMetadata?> GetStructuralTableMetadataAsync(TableIdentifier table, CancellationToken ct)
+    {
         var cacheKey = table.ToString().ToLowerInvariant();
         var nowTicks = DateTime.UtcNow.Ticks;
         if (_metadataCache.TryGetValue(cacheKey, out var entry) && (nowTicks - entry.CachedAtTicks < MetadataCacheTtlTicks))
@@ -90,7 +106,7 @@ public partial class SqliteGovernanceRepository
 
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source
+                cmd.CommandText = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json
                                     FROM TABLES
                                     WHERE source_name = @domain COLLATE NOCASE AND schema_name = @schema COLLATE NOCASE AND table_name = @table COLLATE NOCASE";
                 cmd.Parameters.AddWithValue("@domain", table.Domain);
@@ -107,6 +123,11 @@ public partial class SqliteGovernanceRepository
                     var httpEndpoint = !string.IsNullOrWhiteSpace(httpEndpointJson)
                         ? JsonSerializer.Deserialize<HttpEndpointDescriptor>(httpEndpointJson)
                         : null;
+                    var reqFiltersJson = reader.IsDBNull(15) ? null : reader.GetString(15);
+                    var reqFilters = string.IsNullOrWhiteSpace(reqFiltersJson)
+                        ? ImmutableArray<string>.Empty
+                        : JsonSerializer.Deserialize<ImmutableArray<string>>(reqFiltersJson);
+                    if (reqFilters.IsDefault) reqFilters = ImmutableArray<string>.Empty;
 
                     tableEntity = new Table
                     {
@@ -124,7 +145,8 @@ public partial class SqliteGovernanceRepository
                         PluginName = pluginName,
                         Description = reader.IsDBNull(12) ? null : reader.GetString(12),
                         LongDescription = reader.IsDBNull(13) ? null : reader.GetString(13),
-                        DocumentationSource = reader.IsDBNull(14) ? null : reader.GetString(14)
+                        DocumentationSource = reader.IsDBNull(14) ? null : reader.GetString(14),
+                        RequiredFilterColumns = reqFilters
                     };
                 }
             }
@@ -141,7 +163,8 @@ public partial class SqliteGovernanceRepository
                                            c.description, c.long_description, c.meta_json, c.doc_source
                                     FROM TABLE_COLUMNS c
                                     LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
-                                    WHERE c.table_id = @tid";
+                                    WHERE c.table_id = @tid
+                                    ORDER BY c.rowid"; // registration order, equal to the list read (a natural-key index scan would sort by name)
                 cmd.Parameters.AddWithValue("@tid", tableId.Value.ToString());
 
                 using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -195,6 +218,9 @@ public partial class SqliteGovernanceRepository
                 throw;
             }
 
+            var rowFilterEvaluation = await RowFilterEvaluationStore.ReadObjectAsync(
+                conn, null, CatalogKeyDefinitionStore.Sqlite, tableId.Value, ct).ConfigureAwait(false);
+
             var result = new TableMetadata
             {
                 Table = tableEntity,
@@ -202,8 +228,10 @@ public partial class SqliteGovernanceRepository
                 Columns = columns,
                 ColumnMaskingRules = maskingRules,
                 PrimaryKeyColumns = pkColumns,
-                Indexes = indexes
+                Indexes = indexes,
+                RowFilterEvaluation = rowFilterEvaluation
             };
+            result.ValidateRequiredFilterColumns();
 
             if (AfterMetadataSnapshotForTesting is { } hook)
             {
@@ -234,7 +262,8 @@ public partial class SqliteGovernanceRepository
                                            t.display_name, t.sensitivity, t.requires_four_eyes, t.is_active,
                                            COALESCE(t.source_name, p.domain, 'default') as domain,
                                            t.data_source_type, t.http_endpoint_json, t.plugin_name,
-                                           t.description, t.long_description, t.doc_source
+                                           t.description, t.long_description, t.doc_source,
+                                           t.required_filter_columns_json
                                     FROM TABLES t
                                     LEFT JOIN POLICY_EPOCHS p ON t.id = p.table_id
                                     WHERE t.is_active = 1";
@@ -254,6 +283,11 @@ public partial class SqliteGovernanceRepository
                     var httpEndpoint = !string.IsNullOrWhiteSpace(httpEndpointJson)
                         ? JsonSerializer.Deserialize<HttpEndpointDescriptor>(httpEndpointJson)
                         : null;
+                    var reqFiltersJson = reader.IsDBNull(16) ? null : reader.GetString(16);
+                    var reqFilters = string.IsNullOrWhiteSpace(reqFiltersJson)
+                        ? ImmutableArray<string>.Empty
+                        : JsonSerializer.Deserialize<ImmutableArray<string>>(reqFiltersJson);
+                    if (reqFilters.IsDefault) reqFilters = ImmutableArray<string>.Empty;
 
                     var table = new Table
                     {
@@ -271,7 +305,8 @@ public partial class SqliteGovernanceRepository
                         PluginName = pluginName,
                         Description = reader.IsDBNull(13) ? null : reader.GetString(13),
                         LongDescription = reader.IsDBNull(14) ? null : reader.GetString(14),
-                        DocumentationSource = reader.IsDBNull(15) ? null : reader.GetString(15)
+                        DocumentationSource = reader.IsDBNull(15) ? null : reader.GetString(15),
+                        RequiredFilterColumns = reqFilters
                     };
                     tableRows.Add((id, domain, name, table));
                   }
@@ -287,7 +322,7 @@ public partial class SqliteGovernanceRepository
             var columnsByTable = new Dictionary<Guid, List<TableColumn>>();
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = @"SELECT id, table_id, column_name, data_type, is_sensitive, description, long_description, meta_json, doc_source FROM TABLE_COLUMNS";
+                cmd.CommandText = @"SELECT id, table_id, column_name, data_type, is_sensitive, description, long_description, meta_json, doc_source FROM TABLE_COLUMNS ORDER BY rowid";
                 using var reader = await cmd.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct))
                 {
@@ -357,7 +392,7 @@ public partial class SqliteGovernanceRepository
                     continue;
                 }
 
-                results.Add(new TableMetadata
+                var meta = new TableMetadata
                 {
                     Table = table,
                     Identifier = identifier,
@@ -365,7 +400,24 @@ public partial class SqliteGovernanceRepository
                     ColumnMaskingRules = new Dictionary<string, MaskingRule>(),
                     PrimaryKeyColumns = pkColumns,
                     Indexes = indexes
-                });
+                };
+                try
+                {
+                    meta.ValidateRequiredFilterColumns();
+                }
+                catch (CatalogValidationException ex)
+                {
+                    _logger?.LogWarning(ex, "Catalog table {Table} was omitted: required filter column definition is invalid.", identifier);
+                    continue;
+                }
+                results.Add(meta);
+            }
+
+            // Issue #111: tier and tags are read fresh inside the same snapshot (two set-based queries) and degrade to Hidden per row.
+            var overlay = await DatasetCatalogStore.ReadOverlayAsync(conn, null, CatalogKeyDefinitionStore.Sqlite, null, _logger, ct).ConfigureAwait(false);
+            for (var i = 0; i < results.Count; i++)
+            {
+                results[i] = DatasetCatalogStore.Apply(results[i], overlay);
             }
 
             return results;
@@ -386,6 +438,8 @@ public partial class SqliteGovernanceRepository
 
     public async Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
     {
+        metadata.ValidateRequiredFilterColumns();
+        Autheris.Application.Dbt.Services.SemanticVirtualTables.EnsureNamespaceRespected(metadata);
         // Only a replacing write validates (and later persists) the definition; any other upsert never reads or rewrites it (SEC-94-01).
         if (metadata.ReplaceKeyDefinition)
         {
@@ -448,7 +502,8 @@ public partial class SqliteGovernanceRepository
                                                       plugin_name = @pluginName,
                                                       description = @description,
                                                       long_description = @longDescription,
-                                                      doc_source = @docSource
+                                                      doc_source = @docSource,
+                                                      required_filter_columns_json = @requiredFilterColumnsJson
                                                   WHERE id = @id";
                         updateCmd.Parameters.AddWithValue("@sourceType", metadata.Table.SourceType);
                         updateCmd.Parameters.AddWithValue("@displayName", metadata.Table.DisplayName);
@@ -461,6 +516,7 @@ public partial class SqliteGovernanceRepository
                         updateCmd.Parameters.AddWithValue("@description", (object?)targetDesc ?? DBNull.Value);
                         updateCmd.Parameters.AddWithValue("@longDescription", (object?)targetLongDesc ?? DBNull.Value);
                         updateCmd.Parameters.AddWithValue("@docSource", (object?)targetDocSource ?? DBNull.Value);
+                        updateCmd.Parameters.AddWithValue("@requiredFilterColumnsJson", metadata.RequiredFilterColumns.IsDefaultOrEmpty ? (object)DBNull.Value : JsonSerializer.Serialize(metadata.RequiredFilterColumns));
                         updateCmd.Parameters.AddWithValue("@id", tableId.ToString());
                         await updateCmd.ExecuteNonQueryAsync(ct);
                     }
@@ -470,8 +526,8 @@ public partial class SqliteGovernanceRepository
                         tableId = metadata.Table.Id == Guid.Empty ? Guid.NewGuid() : metadata.Table.Id;
                         using var insertCmd = conn.CreateCommand();
                         insertCmd.Transaction = tx;
-                        insertCmd.CommandText = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source)
-                                                  VALUES (@id, @sourceType, @sourceName, @schemaName, @tableName, @displayName, @sensitivity, @requiresFourEyes, @isActive, @dataSourceType, @httpEndpointJson, @pluginName, @description, @longDescription, @docSource)";
+                        insertCmd.CommandText = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json)
+                                                  VALUES (@id, @sourceType, @sourceName, @schemaName, @tableName, @displayName, @sensitivity, @requiresFourEyes, @isActive, @dataSourceType, @httpEndpointJson, @pluginName, @description, @longDescription, @docSource, @requiredFilterColumnsJson)";
                         insertCmd.Parameters.AddWithValue("@id", tableId.ToString());
                         insertCmd.Parameters.AddWithValue("@sourceType", metadata.Table.SourceType);
                         insertCmd.Parameters.AddWithValue("@sourceName", metadata.Identifier.Domain);
@@ -487,7 +543,14 @@ public partial class SqliteGovernanceRepository
                         insertCmd.Parameters.AddWithValue("@description", (object?)metadata.Table.Description ?? DBNull.Value);
                         insertCmd.Parameters.AddWithValue("@longDescription", (object?)metadata.Table.LongDescription ?? DBNull.Value);
                         insertCmd.Parameters.AddWithValue("@docSource", (object?)metadata.Table.DocumentationSource ?? DBNull.Value);
+                        insertCmd.Parameters.AddWithValue("@requiredFilterColumnsJson", metadata.RequiredFilterColumns.IsDefaultOrEmpty ? (object)DBNull.Value : JsonSerializer.Serialize(metadata.RequiredFilterColumns));
                         await insertCmd.ExecuteNonQueryAsync(ct);
+
+                        // Issue #111 (A-10): the configured default tier is given to a NEW table only; the Hidden default writes no row.
+                        if (_options?.Catalog?.DefaultVisibility == DatasetVisibility.Summary)
+                        {
+                            await DatasetCatalogStore.InsertDefaultAsync(conn, tx, CatalogKeyDefinitionStore.Sqlite, tableId, DatasetVisibility.Summary, ct).ConfigureAwait(false);
+                        }
                     }
                 }
 
@@ -694,6 +757,8 @@ public partial class SqliteGovernanceRepository
                     return null;
                 }
 
+                // Queued inside the write scope: the scope disposal applies it under the write gate.
+                QueueMetadataInvalidation(table);
                 await tx.CommitAsync(ct);
             }
             catch
@@ -703,9 +768,116 @@ public partial class SqliteGovernanceRepository
             }
         }
 
-        QueueMetadataInvalidation(table);
         await _epochValidationService.InvalidateEpochAsync(table, ct);
         return change;
+    }
+
+    public async Task<RowFilterEvaluationChange?> SetRowFilterEvaluationAsync(
+        TableIdentifier table, RowFilterEvaluationSettings? settings, Sid actor, CancellationToken ct = default)
+    {
+        RowFilterEvaluationChange? change;
+        await using (var scope = await WriteScopeAsync(ct).ConfigureAwait(false))
+        {
+            var conn = scope.Connection;
+            using var tx = conn.BeginTransaction();
+            try
+            {
+                change = await RowFilterEvaluationStore.SetObjectAsync(
+                    conn, tx, CatalogKeyDefinitionStore.Sqlite, table, settings, actor,
+                    () => BumpTableEpochAndReadAsync(conn, tx, table, ct), ct).ConfigureAwait(false);
+                if (change is null)
+                {
+                    await tx.RollbackAsync(ct);
+                    return null;
+                }
+
+                // Queued inside the write scope: the scope disposal applies it under the write gate.
+                QueueMetadataInvalidation(table);
+                await tx.CommitAsync(ct);
+            }
+            catch
+            {
+                await tx.RollbackAsync(ct);
+                throw;
+            }
+        }
+
+        await _epochValidationService.InvalidateEpochAsync(table, ct);
+        return change;
+    }
+
+    public async Task<DatasetVisibilityCounts> GetDatasetVisibilityCountsAsync(CancellationToken ct = default)
+    {
+        await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
+        return await DatasetCatalogStore.CountByVisibilityAsync(scope.Connection, null, CatalogKeyDefinitionStore.Sqlite, ct).ConfigureAwait(false);
+    }
+
+    public async Task<DatasetCatalogSettings?> GetDatasetCatalogSettingsAsync(TableIdentifier table, bool strict = true, CancellationToken ct = default)
+    {
+        await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
+        return await DatasetCatalogStore.ReadSettingsAsync(
+            scope.Connection, null, CatalogKeyDefinitionStore.Sqlite, table, strict, _logger, ct).ConfigureAwait(false);
+    }
+
+    public Task<DatasetCatalogChange?> ReplaceDatasetTagsAsync(
+        TableIdentifier table, IReadOnlyList<string> tags, DatasetTagSource source, Sid actor, CancellationToken ct = default) =>
+        WriteCatalogSettingsAsync(table, (conn, tx) =>
+            DatasetCatalogStore.ReplaceTagsAsync(conn, tx, CatalogKeyDefinitionStore.Sqlite, table, tags, source, actor, ct), ct);
+
+    public Task<DatasetCatalogChange?> ChangeDatasetTagsAsync(
+        TableIdentifier table, IReadOnlyList<string> add, IReadOnlyList<string> remove, Sid actor, CancellationToken ct = default) =>
+        WriteCatalogSettingsAsync(table, (conn, tx) =>
+            DatasetCatalogStore.ChangeTagsAsync(conn, tx, CatalogKeyDefinitionStore.Sqlite, table, add, remove, actor, ct), ct);
+
+    public Task<DatasetCatalogChange?> SetDatasetVisibilityAsync(
+        TableIdentifier table, DatasetVisibility visibility, Sid actor, CancellationToken ct = default) =>
+        WriteCatalogSettingsAsync(table, (conn, tx) =>
+            DatasetCatalogStore.SetVisibilityAsync(conn, tx, CatalogKeyDefinitionStore.Sqlite, table, visibility, actor, ct), ct);
+
+    /// <summary>Issue #111: one transaction (before read, write, after read); no epoch (tags are not policy inputs); the local metadata entry is dropped after the commit.</summary>
+    private async Task<DatasetCatalogChange?> WriteCatalogSettingsAsync(
+        TableIdentifier table, Func<SqliteConnection, SqliteTransaction, Task<DatasetCatalogChange?>> write, CancellationToken ct)
+    {
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            var change = await write(conn, tx).ConfigureAwait(false);
+            if (change is null)
+            {
+                await tx.RollbackAsync(ct);
+                return null;
+            }
+
+            await tx.CommitAsync(ct);
+            if (change.Changed)
+            {
+                QueueMetadataInvalidation(table);
+            }
+
+            return change;
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
+    }
+
+    /// <summary>Bumps the policy epoch inside the caller's transaction and returns the new value (issue #107).</summary>
+    private async Task<long> BumpTableEpochAndReadAsync(SqliteConnection conn, SqliteTransaction tx, TableIdentifier table, CancellationToken ct)
+    {
+        await IncrementTableEpochInternalAsync(conn, table, tx, ct).ConfigureAwait(false);
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = @"SELECT epoch FROM POLICY_EPOCHS
+                            WHERE domain = @domain COLLATE NOCASE AND schema_name = @schema COLLATE NOCASE AND table_name = @table COLLATE NOCASE";
+        cmd.Parameters.AddWithValue("@domain", table.Domain);
+        cmd.Parameters.AddWithValue("@schema", table.Schema);
+        cmd.Parameters.AddWithValue("@table", table.TableName);
+        var result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return result is long l ? l : Convert.ToInt64(result ?? 1L, System.Globalization.CultureInfo.InvariantCulture);
     }
 
     public async Task<TableIdentifier?> GetActiveTableIdentifierAsync(TableIdentifier table, CancellationToken ct = default)
@@ -1015,68 +1187,157 @@ public partial class SqliteGovernanceRepository
     {
         await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
         var conn = scope.Connection;
+
+        // One statement: a reader never sees a mixed key set (SEC-REL151-06). Key rows are only reached through the join (SEC-REL151-08).
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"SELECT r.id, r.parent_table_id, r.child_table_id, r.relation_name, r.cardinality,
+                                   COALESCE(tp.source_name, 'default'), tp.schema_name, tp.table_name,
+                                   COALESCE(tc.source_name, 'default'), tc.schema_name, tc.table_name,
+                                   k.key_ordinal, k.parent_column, k.child_column
+                            FROM TABLE_RELATIONS r
+                            JOIN TABLES tp ON r.parent_table_id = tp.id
+                            JOIN TABLES tc ON r.child_table_id = tc.id
+                            LEFT JOIN TABLE_RELATION_KEYS k ON k.relation_id = r.id
+                            WHERE tp.source_name = @pDomain COLLATE NOCASE AND tp.schema_name = @pSchema COLLATE NOCASE AND tp.table_name = @pTable COLLATE NOCASE
+                            ORDER BY r.id, k.key_ordinal";
+        cmd.Parameters.AddWithValue("@pDomain", parentTable.Domain);
+        cmd.Parameters.AddWithValue("@pSchema", parentTable.Schema);
+        cmd.Parameters.AddWithValue("@pTable", parentTable.TableName);
+
+        var rows = new List<RelationRowData>();
+        using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
-            var relations = new List<TableRelation>();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"SELECT r.id, r.parent_table_id, COALESCE(tp.source_name, 'default'), tp.schema_name, tp.table_name,
-                                       r.child_table_id, COALESCE(tc.source_name, 'default'), tc.schema_name, tc.table_name,
-                                       r.relation_name, r.join_key_parent, r.join_key_child, r.cardinality
-                                FROM TABLE_RELATIONS r
-                                JOIN TABLES tp ON r.parent_table_id = tp.id
-                                JOIN TABLES tc ON r.child_table_id = tc.id
-                                WHERE tp.source_name = @pDomain COLLATE NOCASE AND tp.schema_name = @pSchema COLLATE NOCASE AND tp.table_name = @pTable COLLATE NOCASE";
-            cmd.Parameters.AddWithValue("@pDomain", parentTable.Domain);
-            cmd.Parameters.AddWithValue("@pSchema", parentTable.Schema);
-            cmd.Parameters.AddWithValue("@pTable", parentTable.TableName);
-
-            using var reader = await cmd.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                var relId = Guid.Parse(reader.GetString(0));
-                var parentId = Guid.Parse(reader.GetString(1));
-                var pId = new TableIdentifier(reader.GetString(2), reader.GetString(3), reader.GetString(4));
-                var childId = Guid.Parse(reader.GetString(5));
-                var cId = new TableIdentifier(reader.GetString(6), reader.GetString(7), reader.GetString(8));
-                var relName = reader.GetString(9);
-                var jkParent = reader.GetString(10);
-                var jkChild = reader.GetString(11);
-                var card = Enum.TryParse<RelationCardinality>(reader.GetString(12), true, out var c) ? c : RelationCardinality.OneToMany;
-
-                relations.Add(new TableRelation
-                {
-                    Id = relId,
-                    ParentTableId = parentId,
-                    ParentTableIdentifier = pId,
-                    ChildTableId = childId,
-                    ChildTableIdentifier = cId,
-                    RelationName = relName,
-                    JoinKeyParent = jkParent,
-                    JoinKeyChild = jkChild,
-                    Cardinality = card
-                });
+                rows.Add(new RelationRowData(
+                    reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4),
+                    new TableIdentifier(reader.GetString(5), reader.GetString(6), reader.GetString(7)),
+                    new TableIdentifier(reader.GetString(8), reader.GetString(9), reader.GetString(10)),
+                    reader.IsDBNull(11) ? null : reader.GetInt32(11),
+                    reader.IsDBNull(12) ? null : reader.GetString(12),
+                    reader.IsDBNull(13) ? null : reader.GetString(13)));
             }
-            return relations;
         }
+
+        return RelationRowAssembler.Assemble(rows, _logger);
     }
 
-    public async Task CreateRelationAsync(TableRelation relation, CancellationToken ct = default)
+    public async Task<RelationWriteResult> CreateRelationAsync(TableRelation relation, CancellationToken ct = default)
     {
+        RelationWriteSupport.ValidateKeysOrThrow(relation);
+
+        // The write scope holds the single-writer gate; one explicit transaction covers relation row and key rows (SEC-REL151-06).
         await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
         var conn = scope.Connection;
+        using var tx = conn.BeginTransaction();
+
+        var parentTableId = await ResolveActiveTableIdAsync(conn, tx, relation.RelationName, relation.ParentTableIdentifier, ct).ConfigureAwait(false);
+        var childTableId = await ResolveActiveTableIdAsync(conn, tx, relation.RelationName, relation.ChildTableIdentifier, ct).ConfigureAwait(false);
+        var parentKeys = RelationWriteSupport.Canonicalize(relation.RelationName, "parent", relation.JoinKeysParent, await LoadColumnNamesAsync(conn, tx, parentTableId, ct).ConfigureAwait(false));
+        var childKeys = RelationWriteSupport.Canonicalize(relation.RelationName, "child", relation.JoinKeysChild, await LoadColumnNamesAsync(conn, tx, childTableId, ct).ConfigureAwait(false));
+
+        string storedId;
+        bool created;
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = @"SELECT id FROM TABLE_RELATIONS WHERE parent_table_id = @pId AND child_table_id = @cId AND relation_name = @relName";
+            cmd.Parameters.AddWithValue("@pId", parentTableId);
+            cmd.Parameters.AddWithValue("@cId", childTableId);
+            cmd.Parameters.AddWithValue("@relName", relation.RelationName);
+            created = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) is null;
+        }
+
+        // Natural-key upsert: only discovery-owned columns are in the SET list (I-18 keeps allow_cross_data_source out of it).
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = @"INSERT INTO TABLE_RELATIONS (id, parent_table_id, child_table_id, relation_name, cardinality)
+                                VALUES (@id, @pId, @cId, @relName, @card)
+                                ON CONFLICT (parent_table_id, child_table_id, relation_name) DO UPDATE SET cardinality = excluded.cardinality
+                                RETURNING id";
+            cmd.Parameters.AddWithValue("@id", relation.Id.ToString());
+            cmd.Parameters.AddWithValue("@pId", parentTableId);
+            cmd.Parameters.AddWithValue("@cId", childTableId);
+            cmd.Parameters.AddWithValue("@relName", relation.RelationName);
+            cmd.Parameters.AddWithValue("@card", relation.Cardinality.ToString());
+            storedId = (string)(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
+        }
+
+        var stored = new List<(string Parent, string Child)>();
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = "SELECT parent_column, child_column FROM TABLE_RELATION_KEYS WHERE relation_id = @id ORDER BY key_ordinal";
+            cmd.Parameters.AddWithValue("@id", storedId);
+            using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                stored.Add((reader.GetString(0), reader.GetString(1)));
+            }
+        }
+
+        var keysChanged = !created && !RelationWriteSupport.SamePairs(stored, parentKeys, childKeys);
+
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = "DELETE FROM TABLE_RELATION_KEYS WHERE relation_id = @id";
+            cmd.Parameters.AddWithValue("@id", storedId);
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        for (var i = 0; i < parentKeys.Count; i++)
         {
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"INSERT OR REPLACE INTO TABLE_RELATIONS 
-                                (id, parent_table_id, child_table_id, relation_name, join_key_parent, join_key_child, cardinality)
-                                VALUES (@id, @pId, @cId, @relName, @jkP, @jkC, @card)";
-            cmd.Parameters.AddWithValue("@id", relation.Id.ToString());
-            cmd.Parameters.AddWithValue("@pId", relation.ParentTableId.ToString());
-            cmd.Parameters.AddWithValue("@cId", relation.ChildTableId.ToString());
-            cmd.Parameters.AddWithValue("@relName", relation.RelationName);
-            cmd.Parameters.AddWithValue("@jkP", relation.JoinKeyParent);
-            cmd.Parameters.AddWithValue("@jkC", relation.JoinKeyChild);
-            cmd.Parameters.AddWithValue("@card", relation.Cardinality.ToString());
-            await cmd.ExecuteNonQueryAsync(ct);
+            cmd.Transaction = tx;
+            cmd.CommandText = "INSERT INTO TABLE_RELATION_KEYS (relation_id, key_ordinal, parent_column, child_column) VALUES (@id, @ord, @pc, @cc)";
+            cmd.Parameters.AddWithValue("@id", storedId);
+            cmd.Parameters.AddWithValue("@ord", i + 1);
+            cmd.Parameters.AddWithValue("@pc", parentKeys[i]);
+            cmd.Parameters.AddWithValue("@cc", childKeys[i]);
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
+
+        ct.ThrowIfCancellationRequested();
+        tx.Commit();
+        return new RelationWriteResult(Guid.Parse(storedId), created, keysChanged);
+    }
+
+    /// <summary>Resolves an active table id from its identifier: zero or several matches throw (SEC-REL151-07, no LIMIT 1).</summary>
+    private static async Task<string> ResolveActiveTableIdAsync(SqliteConnection conn, SqliteTransaction tx, string relationName, TableIdentifier table, CancellationToken ct)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = @"SELECT id FROM TABLES
+                            WHERE source_name = @domain COLLATE NOCASE AND schema_name = @schema COLLATE NOCASE AND table_name = @table COLLATE NOCASE AND is_active = 1";
+        cmd.Parameters.AddWithValue("@domain", table.Domain);
+        cmd.Parameters.AddWithValue("@schema", table.Schema);
+        cmd.Parameters.AddWithValue("@table", table.TableName);
+        var ids = new List<string>(2);
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            ids.Add(reader.GetString(0));
+        }
+
+        return ids.Count == 1 ? ids[0] : throw RelationWriteSupport.TableNotResolved(relationName, table, ids.Count);
+    }
+
+    private static async Task<List<string>> LoadColumnNamesAsync(SqliteConnection conn, SqliteTransaction tx, string tableId, CancellationToken ct)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SELECT column_name FROM TABLE_COLUMNS WHERE table_id = @t";
+        cmd.Parameters.AddWithValue("@t", tableId);
+        var names = new List<string>();
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            names.Add(reader.GetString(0));
+        }
+
+        return names;
     }
 
 }

@@ -33,7 +33,7 @@ public sealed class UnorderedPagingException : ArgumentException
 /// compiler binds).
 /// </para>
 /// </summary>
-public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
+public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
 {
     /// <summary>Alias of the single column of <see cref="PlanCount"/>.</summary>
     public const string CountColumnAlias = "total_count";
@@ -54,6 +54,7 @@ public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
         }
 
         EnsureAllowed(intent, decision);
+        EnsureRequiredFilterColumnsSatisfied(metadata, decision, intent.Filter);
         var columnsToSelect = ResolveColumns(intent, metadata, decision);
         var predicate = ResolveFilter(intent, metadata, decision);
         var (orderBy, ordering) = ResolveOrderBy(intent, metadata, decision);
@@ -93,6 +94,7 @@ public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
         ArgumentNullException.ThrowIfNull(decision);
 
         EnsureAllowed(intent, decision);
+        EnsureRequiredFilterColumnsSatisfied(metadata, decision, intent.Filter);
         var predicate = ResolveFilter(intent, metadata, decision);
 
         var sb = new StringBuilder();
@@ -121,6 +123,8 @@ public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
             var reasons = decision.DeniedReasons.Count > 0 ? string.Join("; ", decision.DeniedReasons) : "Access denied by governance policy.";
             throw new UnauthorizedAccessException($"Access to table '{intent.Table.ToQualifiedName()}' is forbidden: {reasons}");
         }
+
+        EnsureRequiredFilterColumnsSatisfied(metadata, decision, intent.Filter);
 
         var groupByCols = new List<string>();
         if (intent.GroupBy is { Count: > 0 })
@@ -467,4 +471,40 @@ public sealed class GovernedTableReadPlanner : IGovernedTableReadPlanner
         intent.Filter == null || intent.Filter.Parameters.Count == 0
             ? new Dictionary<string, object?>()
             : new Dictionary<string, object?>((IEnumerable<KeyValuePair<string, object?>>)intent.Filter.Parameters, StringComparer.Ordinal);
+
+    private static void EnsureRequiredFilterColumnsSatisfied(
+        TableMetadata metadata,
+        TableAccessDecision decision,
+        TableFilterClause? filter)
+    {
+        if (metadata.RequiredFilterColumns.Length == 0)
+        {
+            return;
+        }
+
+        foreach (var reqCol in metadata.RequiredFilterColumns)
+        {
+            if (metadata.TenantColumnName != null &&
+                string.Equals(metadata.TenantColumnName, reqCol, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (decision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rls &&
+                rls.Predicate.ReferencedColumns.Contains(reqCol.ToLowerInvariant()))
+            {
+                continue;
+            }
+
+            if (filter != null &&
+                filter.ReferencedColumns.Any(c => string.Equals(c, reqCol, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            throw new TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException(
+                TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(
+                    TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing));
+        }
+    }
 }

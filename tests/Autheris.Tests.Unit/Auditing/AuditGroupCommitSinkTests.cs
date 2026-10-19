@@ -1,8 +1,10 @@
 using Autheris.Application.Auditing;
 using Autheris.Application.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Infrastructure.Persistence;
+using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -10,6 +12,67 @@ namespace Autheris.Tests.Unit.Auditing;
 
 public sealed class AuditGroupCommitSinkTests
 {
+    private static AuditLogEntry Entry(string trace) => new()
+    {
+        TenantId = TenantId.LegacySingleTenant, EventType = "TABLE_QUERY", ActorSid = new Sid("user"), TargetTable = "t", Decision = "ALLOW", TraceId = trace
+    };
+
+    [Fact]
+    public async Task SEC_SC_08_OneBadEntry_DoesNotFailTheOtherCallersOfTheBatch()
+    {
+        var repo = NSubstitute.Substitute.For<IAuditLogRepository>();
+        var persisted = new System.Collections.Concurrent.ConcurrentBag<string>();
+        repo.RecordAuditEventsAsync(NSubstitute.Arg.Any<IReadOnlyList<AuditLogEntry>>(), NSubstitute.Arg.Any<CancellationToken>()).Returns(ci =>
+        {
+            var entries = ci.Arg<IReadOnlyList<AuditLogEntry>>();
+            if (entries.Any(e => e.TraceId == "bad"))
+            {
+                return Task.FromException(new ArgumentException("entry cannot be persisted"));
+            }
+
+            foreach (var e in entries) persisted.Add(e.TraceId);
+            return Task.CompletedTask;
+        });
+        await using var sink = new AuditGroupCommitSink(repo, new AuditGroupCommitOptions { MaxBatchSize = 16, MaxBatchDelayMs = 100 });
+
+        var good1 = sink.RecordAuditEventAsync(Entry("g1"));
+        var bad = sink.RecordAuditEventAsync(Entry("bad"));
+        var good2 = sink.RecordAuditEventAsync(Entry("g2"));
+
+        await good1;
+        await good2;
+        await Should.ThrowAsync<ArgumentException>(() => bad);
+        persisted.OrderBy(x => x).ShouldBe(["g1", "g2"]);
+    }
+
+    [Fact]
+    public async Task SEC_SC_08_AuditUnavailable_FailsTheWholeBatch_WithoutARetryThatCouldDuplicateCommittedRows()
+    {
+        var repo = NSubstitute.Substitute.For<IAuditLogRepository>();
+        repo.RecordAuditEventsAsync(NSubstitute.Arg.Any<IReadOnlyList<AuditLogEntry>>(), NSubstitute.Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new Autheris.Application.Audit.AuditUnavailableException("anchor")));
+        await using var sink = new AuditGroupCommitSink(repo, new AuditGroupCommitOptions { MaxBatchSize = 16, MaxBatchDelayMs = 100 });
+
+        var a = sink.RecordAuditEventAsync(Entry("a"));
+        var b = sink.RecordAuditEventAsync(Entry("b"));
+
+        await Should.ThrowAsync<Autheris.Application.Audit.AuditUnavailableException>(() => a);
+        await Should.ThrowAsync<Autheris.Application.Audit.AuditUnavailableException>(() => b);
+        await repo.Received(1).RecordAuditEventsAsync(NSubstitute.Arg.Any<IReadOnlyList<AuditLogEntry>>(), NSubstitute.Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SEC_SC_08_DeadDrainLoop_FailsPendingAndLaterCallersImmediately()
+    {
+        var repo = NSubstitute.Substitute.For<IAuditLogRepository>();
+        await using var sink = new AuditGroupCommitSink(repo, new AuditGroupCommitOptions { MaxBatchSize = 16, MaxBatchDelayMs = 0 });
+        sink.OnBatchCollected = _ => throw new InvalidOperationException("loop bug");
+
+        await Should.ThrowAsync<Autheris.Application.Audit.AuditUnavailableException>(() => sink.RecordAuditEventAsync(Entry("pending")).WaitAsync(TimeSpan.FromSeconds(5)));
+        await Should.ThrowAsync<Autheris.Application.Audit.AuditUnavailableException>(() => sink.RecordAuditEventAsync(Entry("later")).WaitAsync(TimeSpan.FromSeconds(5)));
+        await repo.DidNotReceiveWithAnyArgs().RecordAuditEventsAsync(default!, default);
+    }
+
     [Fact]
     public async Task RecordAuditEventAsync_CoalescesConcurrentWritesIntoBatchCommits()
     {

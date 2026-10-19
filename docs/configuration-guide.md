@@ -106,6 +106,8 @@ Ermöglicht direkte Authentifizierung via `Authorization: Basic <base64>` für G
 | `Users[].Roles` | `List<string>` | Rollen-Array | `[]` | Zugewiesene Rollen (`DataConsumer`, `DataOwner`, `GovernanceAdmin`). |
 | `Users[].UserSid` | `string` | SID-Format | `""` | Zugeordnete Windows-User-SID (z. B. `S-1-5-21-CONSUMER-1`). |
 | `Users[].GroupSids` | `List<string>` | SID-Array | `[]` | Zugeordnete Windows-Gruppen-SIDs. |
+| `SuccessCacheSeconds` | `int` | `>= 0` | `30` | Lifetime of a verified-credential marker; spares the password hash on repeated requests. `0` disables it. |
+| `MarkerKeyRef` | `string?` | Secret reference | `null` | Secret (via the key vault secret provider) that keys the **cluster-shared** verified marker in Redis (HMAC bound to the credential version). Unset: the marker is per replica. See [F-AUTH-DX](features/f-auth-dx-basic-auth-session.md#behaviour-and-security). |
 
 > [!IMPORTANT]
 > **Sicherheits-Invariante für Produktion**:
@@ -268,6 +270,8 @@ All official Autheris container images (`Dockerfile`, `Dockerfile.production`, `
 
 Configure `DataSources:Connections:<name>:WindowsAuth` with `Domain`, `Username`, and `PasswordRef` (pointing to a mounted container secret `file:/run/secrets/...` or Key Vault secret). Autheris automatically enforces `Integrated Security=true`, resolves the secret, materializes a `0600`-restricted `NTLM_USER_FILE` in `/app/data/gss/ntlm_users`, and sets `NTLM_USER_FILE`, `NTLMUSER`, and `NETBIOS_DOMAIN_NAME`:
 
+Optional per data source: `WindowsAuth.UseManagedNtlm` (`true` managed NTLM, `false` gss-ntlmssp; unset follows `DOTNET_System_Net_Security_UseManagedNtlm`, default managed) and `LoginFailureCooldownSeconds` (default 300, `0` disables the login circuit breaker). See F-AUTH-04 sections 3.3 and 3.7.
+
 ```json
 "DataSources": {
   "Connections": {
@@ -365,7 +369,9 @@ Steuert den L1 In-Memory Cache, L2 Redis und die Konsistenzprüfung.
 | :--- | :--- | :--- | :--- | :--- |
 | `FailClosedOnSensitiveTables` | `bool` | `true \| false` | `true` | Zero-Trust: Bei Nichterreichbarkeit des Epochen-Stores wird der Zugriff auf sensible Tabellen blockiert. |
 | `DegradedMaxStalenessSeconds` | `int` | `1 .. 300` | `30` | Maximale Staleness für unkritische Tabellen bei Redis-Ausfall. |
-| `PipelinedMGetEnabled` | `bool` | `true \| false` | `true` | Nutzt Redis Batch-Pipelining zur Reduktion von Roundtrips. |
+| `PipelinedMGetEnabled` | `bool` | `true \| false` | `true` | Reads the epochs of several tables as concurrent single-key `GET`s pipelined over one connection (no multi-key `MGET`, so it works on Redis Cluster without `CROSSSLOT`). `false` reads them one after another. |
+| `LocalStalenessBudgetMilliseconds` | `int` | `0 .. 250` | `150` | How long a replica may reuse an epoch read from Redis for **non-sensitive** tables of Autheris-enforced sources. Always 0 for highly sensitive tables and delegated sources; `0` disables the budget. See [F-OPS-02, section 4.5](features/f-ops-02-high-availability-kubernetes-helm.md#45-replica-aware-request-features). |
+| `MaxLocalEpochEntries` | `int` | — | `50000` | Upper bound of locally cached epochs for the staleness budget. |
 
 ```json
 "Caching": {
@@ -384,7 +390,8 @@ Steuert den L1 In-Memory Cache, L2 Redis und die Konsistenzprüfung.
   "EpochValidation": {
     "FailClosedOnSensitiveTables": true,
     "DegradedMaxStalenessSeconds": 30,
-    "PipelinedMGetEnabled": true
+    "PipelinedMGetEnabled": true,
+    "LocalStalenessBudgetMilliseconds": 150
   }
 }
 ```
@@ -682,7 +689,10 @@ Ermöglicht die zentrale Anbindung an externe Unternehmens-Datenkataloge (**Micr
 | `SharedTables` | `List<string>` | `domain.schema.table` | `[]` | Tables visible in the GraphQL `catalog` to administrators and discovery users of every tenant, in addition to the tables the tenant holds a consent record on. |
 
 > [!NOTE]
-> **Tenant-scoped GraphQL catalog and `syncOpenMetadata`**: Outside the single-tenant deployment (`legacy-single-tenant`), the GraphQL `catalog` admin view and `AllowAuthenticatedCatalogDiscovery` are limited to tables on which the caller's tenant holds at least one consent record (Allow or Deny) or that are listed in `Catalog.SharedTables`. Only the canonical `ClusterAdmin` keeps the global view; `GovernanceAdmin` is tenant-scoped. `accessStatus` is computed from the caller's consents. `syncOpenMetadata` is available to the canonical `ClusterAdmin` (all tenants) and to `GovernanceAdmin` (own tenant only: tables mapped to that tenant via `OpenMetadata.ServiceDatabaseToTenantMap`); it returns warnings as stable codes with counts (for example `OM_TABLE_MAP_FAILED: 3`) and failures as the error code `SYNC_FAILED` without detail text. Full details are written to the server log.
+> **Tenant-scoped GraphQL catalog and `syncOpenMetadata`**: In `Gateway:Tenancy:Mode = Multi` (default), the tenant administrator view of the GraphQL `catalog` is limited to tables on which the caller's tenant holds at least one consent record (Allow or Deny) or that are listed in `Catalog.SharedTables`. Only the canonical `ClusterAdmin` keeps the global view; `GovernanceAdmin` is tenant-scoped. `accessStatus` is computed from the caller's consents. `syncOpenMetadata` is available to the canonical `ClusterAdmin` (all tenants) and to `GovernanceAdmin` (own tenant only: tables mapped to that tenant via `OpenMetadata.ServiceDatabaseToTenantMap`); it returns warnings as stable codes with counts (for example `OM_TABLE_MAP_FAILED: 3`) and failures as the error code `SYNC_FAILED` without detail text. Full details are written to the server log.
+
+> [!NOTE]
+> **`AllowAuthenticatedCatalogDiscovery` is deprecated and has no effect.** Every non-administrator (GraphQL, REST, MCP) sees only the tables and columns its consents allow; the flag no longer widens the catalog. A start-up warning is logged when it is set. The explicit `OpenSchema` mode is a separate operator opt-in and is unchanged.
 
 > [!NOTE]
 > **Sensitivity Classification Ranking (D-4 & ADR-010)**:
@@ -829,12 +839,20 @@ Die Dataset-Tools `list_datasets`, `describe_dataset`, `query_graphql` und `samp
 
 | Schlüssel | Typ | Wertebereich | Standard | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
-| `DuckDbOlap:Enabled` | `bool` | `true \| false` | `false` | Aktiviert die eingebettete In-Memory DuckDB-Vektorengine (`F-DATA-03`). |
+| `DuckDbOlap:Enabled` | `bool` | `true \| false` | `true` | Aktiviert die eingebettete In-Memory DuckDB-Vektorengine (`F-DATA-03`). |
 | `DuckDbOlap:MaxMemory` | `string` | z. B. `"512MB"`, `"2GB"` | `"1GB"` | Maximale RAM-Quota pro DuckDB-Session (`PRAGMA max_memory`). |
-| `DuckDbOlap:MaxThreads` | `int` | `1 .. 32` | `2` | Maximale Thread-Anzahl für parallele SIMD-Ausführung. |
+| `DuckDbOlap:MaxThreads` | `int` | `1 .. 8` | `2` | Maximale Thread-Anzahl für parallele SIMD-Ausführung. |
 | `DuckDbOlap:MaxStagedRowsPerTable` | `int` | `1000 .. 5000000` | `250000` | Obergrenze gestagter Zeilen pro temporärer Quelltabelle. |
 | `DuckDbOlap:MaxResultRows` | `int` | `1 ..` | `50000` | Obergrenze der Zeilen eines OLAP-Ergebnisses; ein kleineres `limit` der Anfrage bleibt erhalten. |
-| `DuckDbOlap:QueryTimeoutSeconds` | `int` | `1 .. 300` | `30` | Timeout für analytische In-Memory DuckDB-Abfragen. |
+| `DuckDbOlap:QueryTimeoutSeconds` | `int` | `1 .. 300` | `60` | Timeout for analytical in-memory DuckDB queries; it also covers authorization and the source reads of the request. |
+| `DuckDbOlap:MaxTempDirectorySize` | `string` | e.g. `"256MB"`, `"0B"` | `"256MB"` | Maximum size of the session spill directory (`PRAGMA max_temp_directory_size`). Authoritative for all DuckDB sessions; `WebSql:CrossSource:MaxTempDirectorySize` was removed. |
+| `DuckDbOlap:MaxTableCount` | `int` | `1 ..` | `10` | Maximum distinct tables of one request. |
+| `DuckDbOlap:MaxTotalStagedRows` | `int` | `1 ..` | `500000` | Maximum staged rows across all tables of one request. |
+| `DuckDbOlap:MaxStagedBytesPerTable` | `long` | `1 ..` | `67108864` | Maximum estimated bytes staged from one table (every request). |
+| `DuckDbOlap:MaxTotalStagedBytes` | `long` | `1 ..` | `268435456` | Maximum estimated bytes staged by one request (every request). |
+| `DuckDbOlap:MaxConcurrentQueries` | `int` | `1 .. 64` | `4` | Global cap on concurrent OLAP requests. |
+| `DuckDbOlap:MaxConcurrentQueriesPerTenant` | `int` | `1 ..` | `2` | Per-tenant cap on concurrent OLAP requests (`429` when exceeded). |
+| `DuckDbOlap:MaxSqlLength` | `int` | `1 ..` | `32768` | Maximum length of the client SQL text. |
 | `ArrowExport:Enabled` | `bool` | `true \| false` | `false` | Aktiviert den binären Zero-Copy Apache Arrow Export (`F-DATA-04`). |
 | `ArrowExport:BatchSize` | `int` | `100 .. 100000` | `10000` | Zeilenanzahl pro gestreamtem Arrow-RecordBatch. |
 | `ArrowExport:MaxRowsPerExport` | `int` | `1000 .. 10000000` | `1000000` | Maximale Zeilenanzahl pro Export-Vorgang. |
@@ -854,6 +872,21 @@ Die Dataset-Tools `list_datasets`, `describe_dataset`, `query_graphql` und `samp
 }
 ```
 
+
+#### `WebSql:CrossSource` (federation switch and limits)
+
+| Key | Type | Range | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `WebSql:CrossSource:Enabled` | `bool` | `true \| false` | `false` | Federation switch. When `false`, requests that join several data sources are denied on every transport, including OLAP. |
+| `WebSql:CrossSource:AllowedTransports` | `string[]` | `WebSql`, `Trino`, `Rest`, `Mcp`, `ArrowExport`, `FlightSql`, `SqlEndpoints`, `AsyncJob`, `Olap` (case-insensitive) | `["WebSql", "Trino"]` | Transports that may run cross-source queries. A configured list replaces the default entirely (list every transport you need); an empty list allows none. `Olap` is never implied: add it explicitly to allow cross-source requests on `POST /api/v1/olap/query`. An unknown or blank name aborts the start. A start-up warning is logged when `Olap` is listed while `Enabled` is `false`. |
+| `WebSql:CrossSource:MaxTableCount` | `int` | `1 ..` | `5` | Maximum distinct tables of a cross-source request. |
+| `WebSql:CrossSource:MaxStagedRowsPerTable` / `MaxTotalStagedRows` | `int` | `1 ..` | `50000` / `200000` | Row budgets of the SQL federation. |
+| `WebSql:CrossSource:MaxStagedBytesPerTable` / `MaxTotalStagedBytes` | `long` | `1 ..` | `33554432` / `134217728` | Byte budgets; the OLAP endpoint uses the smaller of these and the `DuckDbOlap` values for cross-source requests. |
+| `WebSql:CrossSource:TimeoutSeconds` | `int` | `1 ..` | `30` | Timeout of the SQL federation. |
+| `WebSql:CrossSource:MaxParallelSourceReads` | `int` | `1 .. 16` | `4` | Upper bound on parallel source reads (reads are currently sequential). |
+| `WebSql:CrossSource:AllowNonEquiJoins` | `bool` | `true \| false` | `false` | Permits cross joins and non-equi joins in cross-source statements (SQL federation and OLAP). |
+
+`WebSql:CrossSource:MaxMemory` and `WebSql:CrossSource:MaxTempDirectorySize` were removed; they never had an effect. Use `DuckDbOlap:MaxMemory` and `DuckDbOlap:MaxTempDirectorySize`. A start-up warning is logged when the old keys are still present. Non-positive limits, an unparsable `DuckDbOlap:MaxMemory` or `MaxTempDirectorySize`, `MaxConcurrentQueries` or `MaxConcurrentQueriesPerTenant` below 1, and `MaxThreads` outside `1 .. 8` abort the start.
 
 ### 2.18 `Casbin` (ABAC/RBAC Policy Engine & Model-Contract)
 
@@ -876,6 +909,18 @@ Das Gateway integriert Casbin für feingranulare Autorisierungs- und Row-Level-S
   "WatchPolicyFile": true
 }
 ```
+
+#### `Casbin:DecisionCache` (Decision Cache & Policy Epoch)
+
+| Key | Type | Range | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `Capacity` | `int` | `100 .. 1000000` | `100000` | Maximum cached decisions per node (sharded LRU). |
+| `ShareAcrossUsers` | `bool` | `true \| false` | `true` | Users matching exactly the same rules share one decision when no candidate rule reads a user-specific input; never for delegated sources. `false` is the kill switch (every decision keyed by user; restart required). |
+| `TtlSeconds` | `int` | `1 .. 3600` | `60` | Maximum age of a cached decision. |
+| `EpochCheckSeconds` | `int` | `1 .. TtlSeconds` | `5` | Interval of cluster policy epoch reads per tenant. |
+| `UnavailableBackoffMilliseconds` | `int` | `100 .. 10000` | `1000` | Cache bypass after a failed epoch read. |
+
+Details: [F-SEC-06](features/f-sec-06-casbin-decision-cache-policy-epoch.md).
 
 #### Startup Validation & Model Contract (Probes M1–M8, W1–W6)
 
@@ -994,7 +1039,7 @@ Steuert die Verwaltung und Cluster-Synchronisation relationsbasierter Zeilenfilt
 | :--- | :--- | :--- | :--- |
 | `VirtualFilters:MaxRemovals` | `int` | `10` | Maximale Anzahl an Bindungen, die ein GitOps-Sync ohne `?force=true` entfernen darf. Das Entfernen erweitert die Sichtrechte des Berechtigten; `0` deaktiviert die Schranke. |
 | `VirtualFilters:GenerationCheckSeconds` | `int` | `5` | Intervall in Sekunden, in dem eine Gateway-Instanz die Generation mit der Datenbank abgleicht. `0` prüft bei jedem Zugriff. |
-| `RowFilter:SubqueryStrategy` | `enum` | `Exists` | SQL-Strategie für RLS-Unterabfragen: `Exists` (`EXISTS (SELECT 1 ...)`), `InCorrelated` oder `In`. |
+| `RowFilters:SubqueryStrategy` | `enum` | `Exists` | SQL strategy for row-filter subqueries built as SQL text: `Exists` (`EXISTS (SELECT 1 ...)`), `InCorrelated` or `In`. Applies to the REST data API, OLAP and federated staging, governed aggregations, procedures and change detection. **No effect on the governed SQL compiler** (WebSQL, Trino protocol, Arrow/Flight SQL, async jobs, SQL endpoints, MCP SQL tools), which always emits correlated policy subqueries; a non-default value is reported as a startup warning (`Configuration: Gateway:RowFilters:SubqueryStrategy ... has no effect ...`). |
 | `Logging:LogGeneratedSql` | `bool` | `false` | Diagnoseschalter zur Protokollierung generierter Ziel-SQL-Abfragen inklusive RLS- und Virtual-Filter-Prädikate. |
 
 ```json
@@ -1002,7 +1047,7 @@ Steuert die Verwaltung und Cluster-Synchronisation relationsbasierter Zeilenfilt
   "MaxRemovals": 10,
   "GenerationCheckSeconds": 5
 },
-"RowFilter": {
+"RowFilters": {
   "SubqueryStrategy": "Exists"
 },
 "Logging": {
@@ -1012,8 +1057,76 @@ Steuert die Verwaltung und Cluster-Synchronisation relationsbasierter Zeilenfilt
 
 ---
 
+### 2.21 `Governance:IndividualGrants` (Time-Bound Individual Grants)
 
+Maxima of individual grants (`User` / `ServicePrincipal` grantees and individual access profile assignments). Every value can only **shorten** the built-in ceiling; a value above the ceiling or below 1 aborts startup. Group and role grants are standing and not affected. Details and error codes: [F-GOV-22](features/f-gov-22-time-bound-individual-grants.md).
 
+| Key | Type | Range | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `RegularMaxDays` | `int` | `1 .. 180` | `180` | Regular data. Also the read-time clamp of user consents. |
+| `SensitiveMaxDays` | `int` | `1 .. 90` | `90` | Sensitive / PII tables (unclassifiable tables count as sensitive). |
+| `UnmaskedMaxDays` | `int` | `1 .. 30` | `30` | Individual `Unmasked` access. |
+| `PrivilegedMaxDays` | `int` | `1 .. 7` | `7` | Individual privileged functional rights. |
+| `BreakGlassMaxHours` | `int` | `1 .. 72` | `72` | Break-glass exceptions. |
+| `ServicePrincipalMaxDays` | `int` | `1 .. 365` | `365` | Service principals as direct grantees. Also their read-time clamp. |
+| `CustomerRegularMaxDays` | `int` | `1 .. 90` | `90` | Regular data for customer-realm users. |
+| `AllowCustomerUnmasked` | `bool` | | `false` | Allows individual `Unmasked` grants in customer realms. |
+| `AllowCustomerPrivileged` | `bool` | | `false` | Allows individual privileged grants in customer realms. |
+| `RoleConversionHintAfterRenewals` | `int` | `1 .. 10` | `2` | Renewals after which a conversion to a group/role mapping is suggested. |
+| `CampaignRequiredAfterRenewals` | `int` | `1 .. 10` | `3` | Renewals after which a direct extension is refused and a campaign decision is required. |
+
+```json
+"Governance": {
+  "IndividualGrants": {
+    "RegularMaxDays": 180,
+    "SensitiveMaxDays": 90,
+    "UnmaskedMaxDays": 30,
+    "PrivilegedMaxDays": 7,
+    "BreakGlassMaxHours": 72,
+    "ServicePrincipalMaxDays": 365
+  }
+}
+```
+
+### 2.22 `Tenancy` (Deployment tenancy mode)
+
+Whether the deployment is single- or multi-tenant is a **deployment setting**. It is never inferred from a missing tenant claim in a token.
+
+| Key | Type | Range | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `Mode` | `string` | `Multi`, `Single` (names only, case-insensitive) | `Multi` (also when empty) | `Multi`: several tenants share the deployment. A principal without tenant claim is never an administrator: it takes the consent path only. `Single`: one tenant owns the deployment, tokens carry no tenant claim, and a `GovernanceAdmin` without tenant claim sees the whole catalog. Any other value fails start-up validation. |
+
+**Catalog caller classes.** Every catalog channel (REST `/api/v1/catalog/*`, GraphQL `catalog`, MCP tools and resources, `invoke_api`, Trino/Arrow/Iceberg metadata) decides the caller class from the authenticated principal only, through one resolver:
+
+| Caller | `Multi` | `Single` |
+| :--- | :--- | :--- |
+| Canonical `ClusterAdmin` (no forward-auth identity, no tenant-prefixed role) | whole catalog, all tenants | whole catalog |
+| `GovernanceAdmin` with a tenant claim | tables of its tenant (consent-derived ownership plus `Gateway:Catalog:SharedTables`) | same |
+| `GovernanceAdmin` without tenant claim | not an administrator: consent path only | whole catalog |
+| Everybody else | consent path: tables and columns allowed by the caller's active consents | same |
+| No principal, unauthenticated, invalid tenant claim | nothing | nothing |
+
+**Semantic metric catalog.** The in-memory semantic catalog (dbt semantic manifest, `GET /api/extensions/dbt/metrics`, metric queries) is partitioned per tenant. In `Multi` mode a tenant sees only its own partition; in `Single` mode a tenant without its own partition falls back to the legacy partition that principals without tenant claim import into. `GET /api/extensions/dbt/metrics` and `GET /api/v1/analytics/metrics` return the full metric definition (filter template, type parameters, meta) only to `GovernanceAdmin` and `DbtAdmin`; everybody else gets name, type, label, description and unit.
+
+The tenant signal of the tenant administrator view is derived from consent records and is not a hard tenant boundary; a dedicated tenant-owner attribute for tables is a separate topic.
+
+**Start-up diagnostics.** The effective mode is logged at start: a Warning when `Mode` is not configured (single-tenant deployments must set `Single`), an Information entry when it is. At runtime a throttled Warning (once per principal and ten minutes) names the option when a principal that holds `GovernanceAdmin` has no tenant claim in `Multi` mode.
+
+#### Breaking changes / upgrade notes
+
+> **Upgrade note: single-tenant installations must set `Gateway:Tenancy:Mode=Single` before upgrading.** The default is `Multi`.
+
+- A `GovernanceAdmin` without tenant claim in `Multi` mode is no administrator any more and loses the administrator view in the catalog (REST, GraphQL, MCP), Trino/WebSQL metadata, Arrow Flight SQL, Iceberg REST catalog and the effective-access explanation.
+- Deployments with ReBAC enabled now need a consent **and** a ReBAC permission to discover a dataset (intersection).
+- `GET /api/v1/catalog/datasources` and its MCP equivalents are administrator-only.
+- `AllowAuthenticatedCatalogDiscovery` has no effect.
+- `sample_rows(synthetic: true)` needs the administrator view or an active table consent.
+- Search recall is reduced for column-restricted callers.
+- Known limitation: the tenant-scoped administrator sees only the tables on which its tenant holds a consent plus `Gateway:Catalog:SharedTables`.
+- Semantic metrics imported without tenant (legacy partition) are no longer visible to tenants with a tenant claim in `Multi` mode; re-import the manifest with a token of the owning tenant, or set `Mode=Single`.
+- The semantic manifest import (`POST /api/extensions/dbt/semantic-manifest`) writes into the tenant of the caller's token.
+
+---
 
 ## 3. Deployment & Umgebungsvariablen
 

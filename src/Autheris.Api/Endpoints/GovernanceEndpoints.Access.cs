@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Security;
+using Autheris.Application.Governance.Grants;
 using Autheris.Application.Interfaces;
 using Autheris.Application.State;
 using Autheris.Domain.Audit;
@@ -186,13 +187,15 @@ public static partial class GovernanceEndpoints
 
         // Calculate matched tables
         int tablesMatched = 0;
+        IReadOnlyList<TableMetadata>? matchedTables = null; // null = classification unavailable (fail closed to Sensitive)
         var metaRepo = context.RequestServices.GetService<ITableMetadataRepository>();
         if (metaRepo != null)
         {
             try
             {
                 var allTables = await metaRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
-                tablesMatched = allTables.Count(t => targetTables.Any(pattern => AccessProfile.MatchesPattern(pattern, t.Identifier)));
+                matchedTables = allTables.Where(t => targetTables.Any(pattern => AccessProfile.MatchesPattern(pattern, t.Identifier))).ToList();
+                tablesMatched = matchedTables.Count;
             }
             catch
             {
@@ -206,6 +209,31 @@ public static partial class GovernanceEndpoints
         }
 
         var subjectType = string.IsNullOrWhiteSpace(req.SubjectType) ? "User" : req.SubjectType.Trim();
+
+        // WP-SC-16: every individual grant is time-bound within the class maximum (also for bulk grants).
+        if (!Enum.TryParse<GranteeType>(subjectType, ignoreCase: true, out var bulkGranteeType) || !Enum.IsDefined(bulkGranteeType))
+        {
+            return Results.BadRequest(new { error = $"Invalid subjectType '{subjectType}'. Supported values: User, Group, Role, ServicePrincipal." });
+        }
+
+        var grantPolicy = context.RequestServices.GetService<IGrantPolicy>() ?? new GrantPolicy();
+        var grantDecision = grantPolicy.Evaluate(new GrantRequest(
+            bulkGranteeType,
+            trimmedSubject,
+            GrantKind.BulkGrant,
+            validTo,
+            now,
+            GrantClassifier.Classify(matchedTables),
+            mode,
+            Requester: callerSid,
+            Justification: req.Justification.Trim()));
+        if (!grantDecision.Allowed)
+        {
+            return Results.Json(
+                new { error = grantDecision.ErrorCode, message = grantDecision.Reason, maxValidTo = grantDecision.MaxValidTo },
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
         var profile = new AccessProfile
         {
             ProfileId = profileId,
@@ -214,7 +242,7 @@ public static partial class GovernanceEndpoints
             MaskingMode = mode,
             TargetTables = targetTables,
             RowFilterPredicate = string.IsNullOrWhiteSpace(req.RowFilter) ? null : req.RowFilter.Trim(),
-            AssignedSubjects = [trimmedSubject],
+            AssignedSubjects = [],
             CreatedAt = now,
             ValidTo = validTo,
             Justification = req.Justification.Trim(),
@@ -222,6 +250,36 @@ public static partial class GovernanceEndpoints
         };
 
         await accessProfileRepo.UpsertProfileAsync(profile, ct).ConfigureAwait(false);
+
+        // WP-SC-03: the assignment goes through the strict assignment API (time-bound individual grants, Unmasked and break-glass rules).
+        // A rejection leaves no unassigned profile behind.
+        var assignmentSubjectType = bulkGranteeType switch
+        {
+            GranteeType.Group => AccessProfileSubjectType.Group,
+            GranteeType.Role => AccessProfileSubjectType.Role,
+            _ => AccessProfileSubjectType.User
+        };
+        try
+        {
+            await accessProfileRepo.AssignProfileAsync(tenantId, profileId, new AccessProfileAssignment
+            {
+                Subject = trimmedSubject,
+                SubjectType = assignmentSubjectType,
+                ExpiresAt = validTo,
+                CreatedBy = callerSid,
+                Justification = profile.Justification
+            }, ct).ConfigureAwait(false);
+        }
+        catch (AccessProfileAssignmentRejectedException ex)
+        {
+            await accessProfileRepo.DeleteProfileAsync(tenantId, profileId, CancellationToken.None).ConfigureAwait(false);
+            return Results.Json(new { error = ex.Code, message = "The access profile assignment violates the grant rules." }, statusCode: StatusCodes.Status400BadRequest);
+        }
+        catch
+        {
+            await accessProfileRepo.DeleteProfileAsync(tenantId, profileId, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
 
         // Tier-A audit anchoring (CONSENT_GRANTED)
         var auditEvent = new AuditLogEntry
@@ -348,6 +406,124 @@ public static partial class GovernanceEndpoints
         }
 
         return Results.Ok(profile);
+    }
+
+    /// <summary>
+    /// WP-SC-03 / SEC-SC-04: the second person approves an access-profile assignment (typically a standing Unmasked group/role mapping or an individual
+    /// Unmasked grant). Four-eyes: the approver is never the creator (requester) nor the grantee; for an individual Unmasked grant the approver must be the data
+    /// owner (or a delegate) of every matched table. The approval is a Tier-A audit event and bumps the profile epoch (an unavailable epoch store is a 503).
+    /// </summary>
+    internal static async Task<IResult> ApproveProfileAssignmentAsync(
+        string id,
+        ApproveProfileAssignmentRequest req,
+        HttpContext context,
+        IAccessProfileRepository accessProfileRepo,
+        CancellationToken ct)
+    {
+        if (!GatewayPolicies.HasAnyRole(context.User, [GatewayRole.ClusterAdmin, GatewayRole.GovernanceAdmin]))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        if (req == null || string.IsNullOrWhiteSpace(req.Subject) || !Enum.TryParse<AccessProfileSubjectType>(req.SubjectType ?? "User", ignoreCase: true, out var subjectType) ||
+            !Enum.IsDefined(subjectType))
+        {
+            return Results.BadRequest(new { error = "subject and a valid subjectType (User, Group, Role) are required." });
+        }
+
+        var callerSid = context.User.GetUserSid()?.Value ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? context.User.Identity?.Name ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(callerSid))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var tenantId = EndpointSecurity.GetRequestTenant(context);
+        var profile = await accessProfileRepo.GetProfileAsync(tenantId, id, ct).ConfigureAwait(false);
+        var subject = req.Subject.Trim();
+        var assignment = profile?.Assignments.FirstOrDefault(a => a.SubjectType == subjectType && string.Equals(a.Subject, subject, StringComparison.OrdinalIgnoreCase));
+        if (profile == null || assignment == null)
+        {
+            return Results.NotFound(new { error = "The assignment does not exist." });
+        }
+
+        if (string.Equals(assignment.CreatedBy?.Trim(), callerSid, StringComparison.OrdinalIgnoreCase) || IsSelfGrantSubject(context, subject))
+        {
+            return Results.Json(new { error = AccessProfileAssignmentRules.SameApprover, message = "Four-eyes: the approver must differ from the requester and the grantee." },
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        // Route (b): an individual Unmasked grant needs the data owner (or delegate) of every matched table.
+        if (profile.MaskingMode == MaskingPolicyMode.Unmasked && subjectType == AccessProfileSubjectType.User && assignment.Kind == AccessProfileAssignmentKind.Standard)
+        {
+            var owners = context.RequestServices.GetService<IDataOwnershipRepository>();
+            var metaRepo = context.RequestServices.GetService<ITableMetadataRepository>();
+            if (owners == null || metaRepo == null)
+            {
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable); // fail closed: ownership cannot be verified
+            }
+
+            var matched = (await metaRepo.GetAllTablesAsync(ct).ConfigureAwait(false))
+                .Where(t => profile.MatchesTable(t.Identifier))
+                .ToList();
+            foreach (var table in matched)
+            {
+                if (!await owners.IsAuthorizedApproverForTableAsync(table.Identifier, new Sid(callerSid), ct).ConfigureAwait(false))
+                {
+                    return Results.Json(new { error = "DATA_OWNER_APPROVAL_REQUIRED", message = $"The approver is not the data owner or a delegate of '{table.Identifier}'." },
+                        statusCode: StatusCodes.Status403Forbidden);
+                }
+            }
+        }
+
+        AccessProfileAssignment approved;
+        try
+        {
+            approved = await accessProfileRepo.ApproveAssignmentAsync(tenantId, id, subjectType, subject, callerSid, ct).ConfigureAwait(false);
+        }
+        catch (AccessProfileAssignmentRejectedException ex)
+        {
+            return Results.Json(new { error = ex.Code, message = "The approval violates the grant rules." }, statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var auditRepo = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
+        var audit = new AuditLogEntry
+        {
+            TenantId = tenantId,
+            EventType = AuditEventTypes.ConsentApproved,
+            ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
+            TargetTable = string.Join(",", profile.TargetTables),
+            Decision = "ALLOW",
+            TraceId = context.TraceIdentifier,
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                profileId = id, subject, subjectType = subjectType.ToString(), maskingMode = profile.MaskingMode.ToString(), approvedBy = callerSid, createdBy = assignment.CreatedBy
+            })
+        };
+        await auditRepo.RecordRequiredAsync(audit, CancellationToken.None).ConfigureAwait(false);
+
+        var cache = context.RequestServices.GetService<Autheris.Application.Policy.Interfaces.IAccessProfileCache>();
+        if (cache != null)
+        {
+            try
+            {
+                await cache.InvalidateTenantAsync(tenantId, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                await auditRepo.RecordRequiredAsync(new AuditLogEntry
+                {
+                    TenantId = tenantId,
+                    EventType = AuditEventTypes.ProfileInvalidationFailed,
+                    ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
+                    Decision = "DENY",
+                    TraceId = context.TraceIdentifier,
+                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason = ex.GetType().Name, tenant = tenantId.Value, profileId = id, subject })
+                }, CancellationToken.None).ConfigureAwait(false);
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
+        }
+
+        return Results.Ok(new { profileId = id, subject, subjectType = subjectType.ToString(), approvedBy = approved.ApprovedBy, approvedAt = approved.ApprovedAt });
     }
 
     internal static async Task<IResult> DeleteProfileAsync(

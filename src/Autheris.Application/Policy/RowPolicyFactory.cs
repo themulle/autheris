@@ -58,11 +58,14 @@ public sealed class RowPolicyFactory
 
     /// <summary>The typed row policy of a consent decision; null when the recipe restricts no rows.</summary>
     /// <exception cref="InvalidOperationException">A filter is invalid (unsafe column, unknown operator); the caller keeps the decision string-only.</exception>
-    public IRowPolicy? FromConsentFilters(ConsentRowFilterRecipe recipe, DatabaseDialect dialect)
+    public IRowPolicy? FromConsentFilters(
+        ConsentRowFilterRecipe recipe, DatabaseDialect dialect,
+        Autheris.Application.Identity.Attributes.CallerAttributeSet? attributes = null,
+        Autheris.Application.Identity.Attributes.CallerAttributePadding? padding = null)
     {
         ArgumentNullException.ThrowIfNull(recipe);
         var target = PolicyParameterNamer.ToTargetDialect(dialect);
-        var predicate = new TypedRowFilterBuilder().BuildCombined(recipe.Allow, recipe.Deny, default, target);
+        var predicate = new TypedRowFilterBuilder().BuildCombined(recipe.Allow, recipe.Deny, default, target, attributes, padding);
         return predicate is null ? null : new PolicyPredicateRowPolicy(predicate, target, _renderer);
     }
 
@@ -99,7 +102,7 @@ public sealed class RowPolicyFactory
         var context = new PolicyParseContext(
             table,
             columns,
-            SqlFunctionAllowlists.Build(target, null),
+            SqlFunctionAllowlists.BuildForPolicy(target, null),   // BC-130-2: a policy predicate runs no time zone validator
             new Dictionary<string, PolicyValue>(),
             CatalogVersion: 0)
         {

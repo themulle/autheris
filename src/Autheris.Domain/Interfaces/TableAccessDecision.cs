@@ -29,6 +29,15 @@ public record TableAccessDecision(
     /// </summary>
     public Autheris.Domain.Model.ConsentRowFilterRecipe? ConsentFilterRecipe { get; init; }
 
+    /// <summary>REQ-GOV-129 (BC-129-15): the caller attributes resolved for this decision (audit only; ids, outcomes and reason codes, no values).</summary>
+    public IReadOnlyList<Autheris.Domain.Model.CallerAttributeAuditEntry>? CallerAttributes { get; init; }
+
+    /// <summary>
+    /// REQ-GOV-143: set for a caller that holds a restricted scope. A catalog-sensitive column is then only in clear when the clearance permits it
+    /// (see <see cref="GetEffectiveColumnAccess"/>); <c>null</c> = unrestricted caller. Init-only, so <c>with</c> copies keep it.
+    /// </summary>
+    public Autheris.Domain.Model.RestrictedScopeClearance? ScopeClearance { get; init; }
+
     /// <summary>The typed Virtual Filter policy behind <see cref="MandatoryRowPredicateSql"/> (null when it was added as text).</summary>
     public IRowPolicy? MandatoryRowPolicy { get; init; }
 
@@ -418,22 +427,39 @@ public record TableAccessDecision(
             return ColumnAccessLevel.Deny;
         }
 
-        bool isSensitiveInCatalog = false;
-        if (metadata != null)
-        {
-            var column = metadata.GetColumn(columnName);
-            isSensitiveInCatalog = column?.IsSensitive == true ||
-                                   metadata.ColumnMaskingRules.ContainsKey(columnName) ||
-                                   (column != null && metadata.ColumnMaskingRules.ContainsKey(column.ColumnName));
-        }
-
-        if (isSensitiveInCatalog && !HasExplicitClear(columnName))
+        // REQ-GOV-143: a restricted-scope caller also needs the scope-specific clearance, not only the base Clear.
+        if (IsCatalogSensitive(columnName, metadata)
+            && (!HasExplicitClear(columnName) || (ScopeClearance is { } clearance && !clearance.Permits(columnName))))
         {
             return ColumnAccessLevel.Mask;
         }
 
         return access;
     }
+
+    /// <summary>True when the catalog marks the column sensitive (<c>IsSensitive</c> or a column masking rule). The one definition used by the effective-access rule.</summary>
+    public static bool IsCatalogSensitive(string columnName, TableMetadata? metadata)
+    {
+        if (metadata == null)
+        {
+            return false;
+        }
+
+        var column = metadata.GetColumn(columnName);
+        return column?.IsSensitive == true ||
+               metadata.ColumnMaskingRules.ContainsKey(columnName) ||
+               (column != null && metadata.ColumnMaskingRules.ContainsKey(column.ColumnName));
+    }
+
+    /// <summary>
+    /// REQ-GOV-143: true when the column is catalog-sensitive with an explicit <c>Clear</c> that the restricted-scope clearance does not
+    /// permit, so the effective level is <c>Mask</c> only because of the scope restriction (used to tell a caller what to request).
+    /// </summary>
+    public bool IsMaskedByScopeRestriction(string columnName, TableMetadata? metadata) =>
+        ScopeClearance is { } clearance
+        && HasExplicitClear(columnName)
+        && IsCatalogSensitive(columnName, metadata)
+        && !clearance.Permits(columnName);
 
     public static TableAccessDecision Denied(TableIdentifier table, params string[] reasons) =>
         new(table, false, new Dictionary<string, ColumnAccessLevel>(), null, reasons, false);

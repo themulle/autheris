@@ -26,7 +26,9 @@ Autheris enriches `describe_dataset` with **Zero-Query Coarsened Column Value Pr
   - `AllowedValues` are published only when explicitly released by the Data Owner (`release_value_list = true`).
   - Small tables ($< 20$ rows) coarsen numeric ranges to order-of-magnitude/10-step buckets, coarsen dates to whole-year boundaries, suppress free-text min/max endpoints, and round distinct counts to 10-buckets.
   - Tables with active row filters default to `DatasetProfilePublicationPolicy.FormatAndEmptyShareOnly` unless the Data Owner opts into `FullCoarsenedProfile`.
-- **Catalog-Viewer Release Gate (`ReleaseProfileToCatalogViewers`):** Data Owners can allow catalog viewers without an active table consent to inspect coarsened value profiles and request `sample_rows(synthetic: true)`, while `sample_rows(synthetic: false)` (real data) remains strictly blocked without an active `ALLOW` consent.
+- **Same Column Level as the Data Path:** The access level that decides a column's profile and synthetic values is resolved by the data-path consent resolver for the calling token: token scopes are read from the claims (`scp`, the Microsoft mapped scope claim and a plain `scope` claim), only consents of the caller's tenant count, and base rules, scope-specific rules and Deny-effect consents combine exactly as for queries. A column that is `Clear` for one scope and `Mask` for another therefore shows a full profile only to tokens without the masking scope. `Deny` columns are not listed and carry no profile. Callers without a table consent (catalog viewers) receive the catalog baseline, lowered by their Deny-effect consents (a table-level Deny leaves no profile at all). Any resolution failure denies every column, and the failure log names only the dataset and the exception type. No level or profile is cached across callers.
+- **Column Meta Follows the Profile:** The raw column meta in `describe_dataset` (`semantics.rawMeta`) can carry data values such as `accepted_values`. It is returned in full only for a `Clear`, non-sensitive column of a caller who may view profiles and only when the value profile publishes values (row-filter policy and small-table coarsening apply). In every other case (`Mask`, `Deny`, unknown level, sensitive column, coarsened profile) only these descriptive keys remain: `role`, `unit`, `business_name`, `dbt_model`, `openmetadata_urn`, `long_description`, `specification`, `deprecated_since`, `sunset_date`, `replacement_field`, `deprecation_reason`, `reason`, `pii`, `is_pii`, `sensitivity`, `foreign_key_table`, `foreign_key_column`. The MCP column documentation resources publish the same descriptive keys only.
+- **Catalog-Viewer Release Gate (`ReleaseProfileToCatalogViewers`):** Data Owners can allow catalog viewers without an active table consent to inspect coarsened value profiles. `sample_rows(synthetic: true)` requires the administrator view or an active table consent: `ReleaseProfileToCatalogViewers` no longer opens it. `sample_rows(synthetic: false)` (real data) `sample_rows(synthetic: false)` (real data) remains strictly blocked without an active `ALLOW` consent.
 
 ---
 
@@ -37,7 +39,7 @@ flowchart LR
     dbt["dbt Metadata / Background Profiler"] --> Store["ColumnValueProfileService<br/>(In-Memory / Cached Snapshots)"]
     Agent["MCP / REST Caller"] --> Describe["McpDatasetCatalog.DescribeDatasetAsync"]
     Agent --> Sample["McpDatasetCatalog.SampleRowsAsync(synthetic: true)"]
-    Describe --> Gate{"Consent OR<br/>ReleaseProfileToCatalogViewers?"}
+    Describe --> Gate{"Consent OR<br/>admin view<br/>(profiles: or ReleaseProfileToCatalogViewers)?"}
     Gate -- Yes --> Coarsen["Apply Sensitivity, Small-Table<br/>& Row-Filter Coarsening"]
     Sample --> Gate
     Gate -- Yes --> Synth["SyntheticSampleRowGenerator<br/>(isSynthetic: true, No DB Read)"]
@@ -131,4 +133,4 @@ Data Owners can configure profile publication on `TableMetadata` and declare col
 
 - **Sensitive Column Redaction in Synthetic Rows:** Synthetic values for sensitive or masked columns are generated purely from safe static placeholders (`SYNTHETIC_REDACTED_0001`, `synthetic.redacted.1@example.invalid`) and never draw from stored snapshots or real values.
 - **Dedicated Metadata Audit Trail:** Calling `sample_rows(synthetic: true)` records an audit event with type `METADATA_SYNTHETIC_SAMPLE`, clearly distinguishing synthetic schema exploration from real data access.
-- **Fail-Closed Real Data Gate:** Enabling `ReleaseProfileToCatalogViewers` never grants access to real rows; calling `sample_rows(synthetic: false)` without an active `ALLOW` consent throws `GatewayForbiddenException`.
+- **Fail-Closed Sample Gate:** Enabling `ReleaseProfileToCatalogViewers` never grants access to real rows and does not open synthetic sample rows (those need the administrator view or an active consent); calling `sample_rows(synthetic: false)` without an active `ALLOW` consent throws `GatewayForbiddenException`.

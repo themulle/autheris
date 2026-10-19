@@ -12,6 +12,7 @@ using HotChocolate;
 using HotChocolate.Types;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
+using Autheris.Application.Catalog.Services;
 
 namespace Autheris.GraphQL.Types;
 
@@ -134,7 +135,8 @@ public sealed class Query
             Status = r.Status,
             RequestedAt = r.RequestedAt,
             RequestedValidTo = r.RequestedValidTo,
-            ItsmTicketId = r.ItsmTicketId
+            ItsmTicketId = r.ItsmTicketId,
+            ContextJson = r.ContextJson
         });
 
         if (after.HasValue && after.Value > 0)
@@ -185,7 +187,8 @@ public sealed class Query
             Status = r.Status,
             RequestedAt = r.RequestedAt,
             RequestedValidTo = r.RequestedValidTo,
-            ItsmTicketId = r.ItsmTicketId
+            ItsmTicketId = r.ItsmTicketId,
+            ContextJson = r.ContextJson
         });
 
         if (after.HasValue && after.Value > 0)
@@ -207,6 +210,7 @@ public sealed class Query
         int? after = null,
         [Service] IConsentRepository consentRepository = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
+        [Service] IOptions<GovernanceTextOptions>? textOptions = null,
         CancellationToken ct = default)
     {
         var principal = httpContextAccessor?.HttpContext?.User;
@@ -240,8 +244,10 @@ public sealed class Query
             consents = await consentRepository.GetAllActiveConsentsForSubjectsAsync(allSubjects, roles, now, tenantId, ct).ConfigureAwait(false);
         }
 
-        var dtos = consents
-            .Where(c => c.IsActive(now) && c.TenantId == tenantId)
+        var descriptionMax = (textOptions?.Value ?? new GovernanceTextOptions()).ConsentDescriptionMaxLength;
+        var activeConsents = consents.Where(c => c.IsActive(now) && c.TenantId == tenantId).ToList();
+        await Autheris.Application.Governance.ConsentDescriptionLoader.LoadAsync(consentRepository, activeConsents, ct).ConfigureAwait(false);
+        var dtos = activeConsents
             .Select(c => new ConsentDto
             {
                 Id = c.Id,
@@ -252,7 +258,8 @@ public sealed class Query
                 RoleName = c.RoleName,
                 ValidFrom = c.ValidFrom,
                 ValidTo = c.ValidTo,
-                Columns = c.ColumnRules.Select(cr => cr.ColumnName).ToList()
+                Columns = c.ColumnRules.Select(cr => cr.ColumnName).ToList(),
+                Description = ConsentDescriptionText.ForOutput(c.Description, descriptionMax)
             });
 
         if (after.HasValue && after.Value > 0)
@@ -285,8 +292,9 @@ public sealed class Query
         [Service] IGovernanceRepository repository,
         [Service] IHttpContextAccessor httpContextAccessor,
         [Service] IOptions<GatewayOptions>? options = null,
+        [Service] Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? visibilityService = null,
         CancellationToken ct = default)
-        => GetCatalogAsync(null, null, null, null, null, repository, repository, repository, repository, httpContextAccessor, options, ct);
+        => GetCatalogAsync(null, null, null, null, null, repository, repository, repository, repository, httpContextAccessor, options, visibilityService, ct);
 
     [GraphQLIgnore]
     public Task<IReadOnlyList<TableMetadataDto>> GetCatalogAsync(
@@ -298,8 +306,9 @@ public sealed class Query
         IConsentRepository consentRepository,
         IHttpContextAccessor httpContextAccessor,
         IOptions<GatewayOptions>? options = null,
+        Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? visibilityService = null,
         CancellationToken ct = default)
-        => GetCatalogAsync(domain, first, after, search, tag: null, metadataRepository, consentRepository, approvalRepository: null, dataOwnershipRepository: null, httpContextAccessor, options, ct);
+        => GetCatalogAsync(domain, first, after, search, tag: null, metadataRepository, consentRepository, approvalRepository: null, dataOwnershipRepository: null, httpContextAccessor, options, visibilityService, ct);
 
     public async Task<IReadOnlyList<TableMetadataDto>> GetCatalogAsync(
         string? domain = null,
@@ -313,6 +322,7 @@ public sealed class Query
         [Service] IDataOwnershipRepository? dataOwnershipRepository = null,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] IOptions<GatewayOptions>? options = null,
+        [Service] Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? visibilityService = null,
         CancellationToken ct = default)
     {
         var httpContext = httpContextAccessor?.HttpContext;
@@ -355,7 +365,7 @@ public sealed class Query
                 Sensitivity = t.Table.Sensitivity,
                 Description = t.Table.Description,
                 Columns = t.Columns.Select(c => c.ColumnName).ToList(),
-                Tags = t.Table.Tags ?? Array.Empty<string>(),
+                Tags = t.CatalogTags,
                 AccessStatus = Autheris.Application.Services.CatalogVisibility.ComputeAccessStatus(t.Identifier, Array.Empty<Consent>(), null, isAdmin: true)
             });
             return FilterAndPaginateCatalog(dtos, domain, search, tag, first, after);
@@ -379,8 +389,6 @@ public sealed class Query
         }
 
         var userSid = userSidNullable.Value;
-        var groupSids = principal.GetGroupSids();
-        var roles = principal.GetUserRoles();
 
         // SR-L-21: fail-closed on an invalid tenant claim (never echoes the claim value).
         TenantId tenantId;
@@ -396,73 +404,88 @@ public sealed class Query
                 .Build());
         }
 
-        // Only the canonical ClusterAdmin keeps the global view; GovernanceAdmin is tenant-scoped.
-        var isClusterAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
-        var isGovernanceAdmin = roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
-        var isAdmin = isClusterAdmin || isGovernanceAdmin;
-        var allowDiscovery = options?.Value?.Catalog?.AllowAuthenticatedCatalogDiscovery == true;
-
-        var allTables = await metadataRepository.GetAllTablesAsync(ct);
-        if (contractDef != null)
+        // #138 INC-1: the one visibility service decides the row set (caller scope, consent, tier, shape, ReBAC); a missing service is empty.
+        // Scope, admin view and shape come from the returned set; this channel never recomputes them (SEC-CAT138-13).
+        if (visibilityService == null)
         {
-            allTables = Autheris.Application.Services.CatalogVisibility.FilterByContract(allTables, contractDef);
+            return [];
         }
 
-        // F-CONS-04: Non-admins only see tables for which they have at least one active ALLOW consent (or visibility SUMMARY/FULL)
-        var allSubjects = groupSids.Append(userSid).ToList();
-        IReadOnlyList<Consent> activeConsents = isAdmin
-            ? Array.Empty<Consent>()
-            : await consentRepository.GetAllActiveConsentsForSubjectsAsync(allSubjects, roles, DateTimeOffset.UtcNow, tenantId, ct);
+        var visible = await visibilityService
+            .GetVisibleAsync(new Autheris.Application.Catalog.Interfaces.CatalogCaller(principal, tenantId, Autheris.Application.Catalog.Interfaces.CatalogChannel.GraphQl), contractDef, ct)
+            .ConfigureAwait(false);
+        var isAdmin = visible.Scope is CallerScope.Global or CallerScope.Unrestricted or CallerScope.Tenant;
 
+        // SEC-CAT138-19: consents and pending requests are loaded only to compute AccessStatus; they never add or remove a row.
+        IReadOnlyList<Consent> activeConsents = Array.Empty<Consent>();
         IReadOnlyList<ConsentRequest> pendingRequests = Array.Empty<ConsentRequest>();
-        if (!isAdmin && approvalRepository != null)
+        if (!isAdmin && visible.Tables.Count > 0)
         {
-            try
+            var allSubjects = principal.GetGroupSids().Append(userSid).ToList();
+            activeConsents = await consentRepository.GetAllActiveConsentsForSubjectsAsync(
+                allSubjects, principal.GetUserRoles(), DateTimeOffset.UtcNow, tenantId, ct);
+            if (approvalRepository != null)
             {
-                pendingRequests = await approvalRepository.GetRequestsByRequesterSidAsync(userSid, "PENDING", ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                // Fail-safe
+                try
+                {
+                    pendingRequests = await approvalRepository.GetRequestsByRequesterSidAsync(userSid, "PENDING", ct).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Fail-safe
+                }
             }
         }
 
-        IReadOnlyList<TableMetadata> visibleTables;
-        if (isClusterAdmin)
-        {
-            visibleTables = allTables;
-        }
-        else if (isGovernanceAdmin || allowDiscovery)
-        {
-            // SR-L-21: admin/discovery views are confined to the caller's tenant (consent-derived ownership + shared tables).
-            var tenantConsentTables = await consentRepository.GetTablesWithConsentsForTenantAsync(tenantId, ct);
-            visibleTables = Autheris.Application.Services.CatalogVisibility.FilterToTenant(
-                allTables, tenantId, tenantConsentTables, options?.Value?.Catalog?.SharedTables);
-        }
-        else
-        {
-            visibleTables = Autheris.Application.Services.CatalogVisibility.FilterForSubject(allTables, activeConsents, tenantId);
-        }
+        // Second line of defence (SEC-CAT138-16): ToCatalogDtos re-applies the shaping rule with the set's admin view.
+        var catalogList = ToCatalogDtos(visible.Tables, visible.IsAdminView, activeConsents, pendingRequests, isAdmin);
 
+        return FilterAndPaginateCatalog(catalogList, domain, search, tag, first, after);
+    }
+
+    /// <summary>The shaping loop of the catalog query: rows that do not exist for the caller are dropped before filtering and paging (F-C11).</summary>
+    internal static List<TableMetadataDto> ToCatalogDtos(
+        IEnumerable<TableMetadata> visibleTables, bool isAdminView, IReadOnlyList<Consent> activeConsents, IReadOnlyList<ConsentRequest> pendingRequests, bool isAdmin)
+    {
         var catalogList = new List<TableMetadataDto>();
         foreach (var t in visibleTables)
         {
             var status = Autheris.Application.Services.CatalogVisibility.ComputeAccessStatus(t.Identifier, activeConsents, pendingRequests, isAdmin);
-            catalogList.Add(new TableMetadataDto
+            var dto = ToCatalogDto(t, isAdminView, status);
+            if (dto != null)
             {
-                Domain = t.Identifier.Domain,
-                Schema = t.Table.SchemaName,
-                TableName = t.Table.TableName,
-                DisplayName = t.Table.DisplayName,
-                Sensitivity = t.Table.Sensitivity,
-                Description = t.Table.Description,
-                Columns = t.Columns.Select(c => c.ColumnName).ToList(),
-                Tags = t.Table.Tags ?? Array.Empty<string>(),
-                AccessStatus = status
-            });
+                catalogList.Add(dto);
+            }
         }
 
-        return FilterAndPaginateCatalog(catalogList, domain, search, tag, first, after);
+        return catalogList;
+    }
+
+    /// <summary>
+    /// Issue #111 shaping of one consent/tier-filtered row (<see cref="Autheris.Application.Services.CatalogViewShaping"/>): null when the row
+    /// does not exist for the caller (a non-administrator row without a recognised view), no columns for <c>Summary</c>. Not used by the
+    /// explicit OpenSchema branch.
+    /// </summary>
+    internal static TableMetadataDto? ToCatalogDto(TableMetadata t, bool isAdminView, string status)
+    {
+        var shape = Autheris.Application.Services.CatalogViewShaping.Resolve(isAdminView, t.CatalogView);
+        if (shape == Autheris.Application.Services.CatalogOutputShape.NotFound)
+        {
+            return null;
+        }
+
+        return new TableMetadataDto
+        {
+            Domain = t.Identifier.Domain,
+            Schema = t.Table.SchemaName,
+            TableName = t.Table.TableName,
+            DisplayName = t.Table.DisplayName,
+            Sensitivity = t.Table.Sensitivity,
+            Description = t.Table.Description,
+            Columns = shape == Autheris.Application.Services.CatalogOutputShape.Summary ? [] : t.Columns.Select(c => c.ColumnName).ToList(),
+            Tags = t.CatalogTags,
+            AccessStatus = status
+        };
     }
 
     private static IReadOnlyList<TableMetadataDto> FilterAndPaginateCatalog(
@@ -684,117 +707,6 @@ public sealed class Query
             tenantId,
             isGovAdmin,
             isClusterAdmin);
-    }
-
-    [GraphQLName("queryMetrics")]
-    public Task<MetricQueryResult> QueryMetricsAsync(
-        IReadOnlyList<string> metrics,
-        IReadOnlyList<string>? groupBy = null,
-        string? where = null,
-        string? timeGranularity = null,
-        IReadOnlyList<string>? orderBy = null,
-        int? limit = null,
-        [Service] ISemanticMetricQueryService metricQueryService = default!,
-        [Service] IHttpContextAccessor httpContextAccessor = default!,
-        CancellationToken ct = default) =>
-        AnalyticsQueryExtensions.ExecuteQueryMetricsAsync(
-            metrics, groupBy, where, timeGranularity, orderBy, limit, metricQueryService, httpContextAccessor, ct);
-}
-
-[ExtendObjectType(typeof(Query))]
-public sealed class AnalyticsQueryExtensions
-{
-    [GraphQLName("queryMetrics")]
-    public Task<MetricQueryResult> QueryMetricsAsync(
-        IReadOnlyList<string> metrics,
-        IReadOnlyList<string>? groupBy = null,
-        string? where = null,
-        string? timeGranularity = null,
-        IReadOnlyList<string>? orderBy = null,
-        int? limit = null,
-        [Service] ISemanticMetricQueryService metricQueryService = default!,
-        [Service] IHttpContextAccessor httpContextAccessor = default!,
-        CancellationToken ct = default) =>
-        ExecuteQueryMetricsAsync(metrics, groupBy, where, timeGranularity, orderBy, limit, metricQueryService, httpContextAccessor, ct);
-
-    internal static async Task<MetricQueryResult> ExecuteQueryMetricsAsync(
-        IReadOnlyList<string> metrics,
-        IReadOnlyList<string>? groupBy,
-        string? where,
-        string? timeGranularity,
-        IReadOnlyList<string>? orderBy,
-        int? limit,
-        ISemanticMetricQueryService metricQueryService,
-        IHttpContextAccessor httpContextAccessor,
-        CancellationToken ct)
-    {
-        var principal = httpContextAccessor?.HttpContext?.User;
-        if (principal?.Identity?.IsAuthenticated != true)
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("UNAUTHORIZED")
-                .SetMessage("Authentication is required for semantic metric queries.")
-                .Build());
-        }
-
-        if (metrics is not { Count: > 0 })
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("INVALID_METRIC_QUERY")
-                .SetMessage("At least one metric name must be specified.")
-                .Build());
-        }
-
-        TableFilterClause? whereClause = !string.IsNullOrWhiteSpace(where)
-            ? TableFilterClause.FromTrinoText(where, Array.Empty<string>())
-            : null;
-
-        List<TableOrderBy>? parsedOrder = null;
-        if (orderBy is { Count: > 0 })
-        {
-            parsedOrder = new List<TableOrderBy>(orderBy.Count);
-            foreach (var entry in orderBy)
-            {
-                if (string.IsNullOrWhiteSpace(entry)) continue;
-                var parts = entry.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                bool desc = parts.Length > 1 && string.Equals(parts[1], "DESC", StringComparison.OrdinalIgnoreCase);
-                parsedOrder.Add(new TableOrderBy(parts[0], desc));
-            }
-        }
-
-        try
-        {
-            var req = new MetricQueryRequest(metrics, groupBy, whereClause, timeGranularity, parsedOrder, limit);
-            return await metricQueryService.QueryMetricsAsync(principal, req, ct).ConfigureAwait(false);
-        }
-        catch (PrivacyBudgetExhaustedException)
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("PRIVACY_BUDGET_EXHAUSTED")
-                .SetMessage("The daily differential privacy epsilon budget has been exhausted.")
-                .Build());
-        }
-        catch (MaskedAggregationException ex)
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode(MaskedAggregationException.ErrorCodeConst)
-                .SetMessage(ex.Message)
-                .Build());
-        }
-        catch (GatewayInvalidQueryException ex)
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode(ex.ErrorCode)
-                .SetMessage(ex.Message)
-                .Build());
-        }
-        catch (GatewaySecurityException ex)
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode(ex.ErrorCode)
-                .SetMessage("Access to the requested semantic metric was denied by governance policy.")
-                .Build());
-        }
     }
 }
 

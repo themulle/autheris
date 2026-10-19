@@ -26,7 +26,7 @@ public sealed class FlightSqlTableListingTests
     private static readonly TenantId Tenant = new("tenant_finance");
 
     private static readonly ClaimsPrincipal Admin =
-        new(new ClaimsIdentity([new Claim(ClaimTypes.Name, "admin"), new Claim(ClaimTypes.Role, "GovernanceAdmin")], "Bearer"));
+        new(new ClaimsIdentity([new Claim(ClaimTypes.Name, "admin"), new Claim(ClaimTypes.PrimarySid, "admin"), new Claim(ClaimTypes.Role, "GovernanceAdmin")], "Bearer"));
 
     private static TableMetadata Table(string domain, string schema, string table) => new()
     {
@@ -38,7 +38,7 @@ public sealed class FlightSqlTableListingTests
     {
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
-        var options = Options.Create(new GatewayOptions { WebSql = webSql });
+        var options = Options.Create(new GatewayOptions { WebSql = webSql, Tenancy = new TenancyOptions { Mode = "Single" } });
         return new ArrowFlightSqlServer(Substitute.For<IArrowExportService>(), repo, options, NullLogger<ArrowFlightSqlServer>.Instance);
     }
 

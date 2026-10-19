@@ -6,6 +6,7 @@ using System.Security;
 using System.Security.Claims;
 using Autheris.Domain.Common;
 using Autheris.Domain.Security;
+using Autheris.Application.Security;
 using Microsoft.AspNetCore.Http;
 
 /// <summary>
@@ -158,43 +159,42 @@ public static class SecurityContextFactory
 
     private static CallerContext? ExtractCallerContext(HttpContext context)
     {
-        string? app = GetHeader(context, CallerAppHeaderName, CallerAppHeaderNameAlt);
-        string? ver = GetHeader(context, CallerVersionHeaderName, CallerVersionHeaderNameAlt);
-        string? qry = GetHeader(context, CallerQueryHeaderName, CallerQueryHeaderNameAlt);
+        string? app = GetRawHeader(context, CallerAppHeaderName, CallerAppHeaderNameAlt);
+        string? ver = GetRawHeader(context, CallerVersionHeaderName, CallerVersionHeaderNameAlt);
+        string? qry = GetRawHeader(context, CallerQueryHeaderName, CallerQueryHeaderNameAlt);
 
         if (app == null && ver == null && qry == null) return null;
-        return new CallerContext(app, ver, qry);
+
+        var normalizedApp = CallerLabelNormalizer.NormalizeApplication(app);
+        var normalizedVer = CallerLabelNormalizer.NormalizeVersion(ver);
+        var normalizedQry = CallerLabelNormalizer.NormalizeQueryName(qry);
+
+        return new CallerContext(normalizedApp, normalizedVer, normalizedQry);
+    }
+
+    private static string? GetRawHeader(HttpContext context, string primary, string alt)
+    {
+        if (context.Request.Headers.TryGetValue(primary, out var val) && !string.IsNullOrWhiteSpace(val))
+        {
+            return val.ToString();
+        }
+        if (context.Request.Headers.TryGetValue(alt, out var altVal) && !string.IsNullOrWhiteSpace(altVal))
+        {
+            return altVal.ToString();
+        }
+        return null;
     }
 
     private static string? GetHeader(HttpContext context, string primary, string alt)
     {
-        if (context.Request.Headers.TryGetValue(primary, out var val) && !string.IsNullOrWhiteSpace(val))
-        {
-            return SanitizeCallerHeader(val.ToString());
-        }
-        if (context.Request.Headers.TryGetValue(alt, out var altVal) && !string.IsNullOrWhiteSpace(altVal))
-        {
-            return SanitizeCallerHeader(altVal.ToString());
-        }
-        return null;
+        var raw = GetRawHeader(context, primary, alt);
+        return raw != null ? SanitizeCallerHeader(raw) : null;
     }
 
     private static string? SanitizeCallerHeader(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
-        var trimmed = value.Trim();
-        if (trimmed.Length > 128) trimmed = trimmed[..128];
-        var chars = new char[trimmed.Length];
-        int count = 0;
-        foreach (var c in trimmed)
-        {
-            if (!char.IsControl(c))
-            {
-                chars[count++] = c;
-            }
-        }
-        if (count == 0) return null;
-        var res = new string(chars, 0, count).Trim();
-        return string.IsNullOrWhiteSpace(res) ? null : res;
+        var norm = CallerLabelNormalizer.NormalizeApplication(value);
+        return norm is CallerLabelNormalizer.InvalidSentinel ? null : norm;
     }
 }

@@ -9,32 +9,172 @@ using System.Threading.Tasks;
 using Autheris.Application.Dbt.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Application.Analytics;
+using Autheris.Application.Policy.Lint;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+/// <summary>The manifest failed validation; nothing was changed. Carries no manifest content.</summary>
+public sealed class SemanticManifestInvalidException : Exception
+{
+    public SemanticManifestInvalidException(IReadOnlyList<string> errorCodes)
+        : base("The semantic manifest is invalid.")
+    {
+        ErrorCodes = errorCodes;
+    }
+
+    /// <summary>Fixed validation codes (for the log), never names or template text.</summary>
+    public IReadOnlyList<string> ErrorCodes { get; }
+}
+
+/// <summary>The manifest was persisted and swapped in, but a virtual-table upsert failed; a re-import repairs it (M-4).</summary>
+public sealed class SemanticManifestPartialException : Exception
+{
+    public SemanticManifestPartialException(Exception inner)
+        : base("The semantic manifest was stored but its catalog tables were not fully updated.", inner)
+    {
+    }
+}
 
 public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIngestionService
 {
     private readonly ISemanticCatalogService _catalogService;
     private readonly ILogger<DbtSemanticManifestIngestionService> _logger;
     private readonly ITableMetadataRepository? _tableRepository;
+    private readonly Autheris.Application.Governance.Interfaces.IDatasetTagImportService? _tagImport;
+    private readonly SemanticManifestValidator _validator;
+    private readonly SemanticTenancy _tenancy;
+    private readonly IConsentRepository? _consentRepository;
+    private readonly IReadOnlyCollection<string> _sharedTables;
+    private static readonly string?[] SemanticModelTags = ["dbt", "semantic-model"];
 
     public DbtSemanticManifestIngestionService(
         ISemanticCatalogService catalogService,
         ILogger<DbtSemanticManifestIngestionService> logger,
-        ITableMetadataRepository? tableRepository = null)
+        ITableMetadataRepository? tableRepository = null,
+        Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport = null,
+        SemanticManifestValidator? validator = null,
+        IOptions<GatewayOptions>? gatewayOptions = null,
+        IConsentRepository? consentRepository = null)
     {
+        _tagImport = tagImport;
         _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _tableRepository = tableRepository;
+        _validator = validator ?? new SemanticManifestValidator(PolicyParserSetup.CreateParser(), Options.Create(new SemanticOptions()));
+        _tenancy = SemanticTenancy.FromOptions(gatewayOptions);
+        _consentRepository = consentRepository ?? (tableRepository as IConsentRepository);
+        _sharedTables = gatewayOptions?.Value.Catalog.SharedTables ?? [];
     }
 
-    public Task<DbtSemanticManifest> ParseAndIngestAsync(string manifestJson, CancellationToken cancellationToken = default) =>
-        ParseAndIngestAsync(manifestJson, TenantId.LegacySingleTenant, cancellationToken);
-
-    public async Task<DbtSemanticManifest> ParseAndIngestAsync(string manifestJson, TenantId tenantId, CancellationToken cancellationToken = default)
+    public async Task<DbtSemanticManifest> ParseAndIngestAsync(string manifestJson, TenantId tenantId, string? importedBy = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(manifestJson);
+        if (!_tenancy.TryMapKey(tenantId, out _))
+        {
+            // SEC-112-13: a tenant without catalog standing is refused before any parsing or side effect.
+            throw new GatewayForbiddenException();
+        }
 
+        var manifest = Parse(manifestJson);
+        var baseTables = await ResolveBaseTablesAsync(manifest, tenantId, cancellationToken).ConfigureAwait(false);
+        var validation = _validator.Validate(manifest, baseTables);
+        if (!validation.IsValid)
+        {
+            _logger.LogWarning("Rejected a semantic manifest import of tenant {TenantId} ({ErrorCodes}).", tenantId.Value, string.Join(',', validation.Errors));
+            throw new SemanticManifestInvalidException(validation.Errors);
+        }
+
+        // Persist and swap the catalog first (atomic, all or nothing); the idempotent virtual-table upserts follow (M-4).
+        await _catalogService.RegisterManifestAsync(manifest, tenantId, importedBy, cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await UpsertVirtualTablesAsync(manifest.SemanticModels, tenantId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "The semantic manifest of tenant {TenantId} was stored but a virtual table upsert failed; a re-import repairs it.", tenantId.Value);
+            throw new SemanticManifestPartialException(ex);
+        }
+
+        _logger.LogInformation("Successfully ingested dbt semantic manifest with {ModelCount} models and {MetricCount} metrics",
+            manifest.SemanticModels.Count, manifest.Metrics.Count);
+
+        return manifest;
+    }
+
+    private async Task<IReadOnlyDictionary<string, TableMetadata>> ResolveBaseTablesAsync(DbtSemanticManifest manifest, TenantId tenantId, CancellationToken ct)
+    {
+        var result = new Dictionary<string, TableMetadata>(StringComparer.OrdinalIgnoreCase);
+        if (_tableRepository is null)
+        {
+            return result;
+        }
+
+        var needed = new Dictionary<string, DbtSemanticModel>(StringComparer.OrdinalIgnoreCase);
+        foreach (var metric in manifest.Metrics.Where(m => !string.IsNullOrWhiteSpace(m.Filter)))
+        {
+            try
+            {
+                var model = SemanticMetricQueryService.ResolveModelAndMeasures(metric, manifest.SemanticModels).Model;
+                needed[model.Name] = model;
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            {
+                // The validator reports the unresolvable metric.
+            }
+        }
+
+        if (needed.Count == 0)
+        {
+            return result;
+        }
+
+        var isVisible = await BuildVisibilityAsync(tenantId, ct).ConfigureAwait(false);
+        var resolver = new SemanticBaseTableResolver(_tableRepository);
+        foreach (var model in needed.Values)
+        {
+            if (await resolver.TryResolveAsync(model, isVisible, ct).ConfigureAwait(false) is { } table)
+            {
+                result[model.Name] = table;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>SEC-112-17: the importer's own scope. Single mode is unrestricted; Multi sees only tables the tenant holds consents on or that are shared.</summary>
+    private async Task<Func<TableMetadata, bool>?> BuildVisibilityAsync(TenantId tenantId, CancellationToken ct)
+    {
+        if (_tenancy.Mode == TenancyMode.Single)
+        {
+            return null;
+        }
+
+        if (_consentRepository is null)
+        {
+            return static _ => false;
+        }
+
+        var consentTables = await _consentRepository.GetTablesWithConsentsForTenantAsync(tenantId, ct).ConfigureAwait(false);
+        var allowed = new HashSet<TableIdentifier>(consentTables);
+        foreach (var shared in _sharedTables)
+        {
+            if (TableIdentifier.TryParse(shared, out var id))
+            {
+                allowed.Add(id);
+            }
+        }
+
+        return t => allowed.Contains(t.Identifier);
+    }
+
+    private static DbtSemanticManifest Parse(string manifestJson)
+    {
         using var doc = JsonDocument.Parse(manifestJson);
         var root = doc.RootElement;
 
@@ -245,9 +385,11 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
             }
         }
 
-        var manifest = new DbtSemanticManifest(semanticModels, metrics, manifestVersion);
-        await _catalogService.RegisterManifestAsync(manifest, tenantId, cancellationToken).ConfigureAwait(false);
+        return new DbtSemanticManifest(semanticModels, metrics, manifestVersion);
+    }
 
+    private async Task UpsertVirtualTablesAsync(IReadOnlyList<DbtSemanticModel> semanticModels, TenantId tenantId, CancellationToken cancellationToken)
+    {
         if (_tableRepository != null)
         {
             foreach (var model in semanticModels)
@@ -321,28 +463,28 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
 
                 var tableMeta = new TableMetadata
                 {
-                    Identifier = new TableIdentifier("semantic", "semantic", model.Name),
+                    Identifier = SemanticVirtualTables.IdentifierFor(tenantId, _tenancy.Mode, model.Name),
                     Table = new Table
                     {
-                        SchemaName = "semantic",
+                        SchemaName = SemanticVirtualTables.SchemaFor(tenantId, _tenancy.Mode),
                         TableName = model.Name,
                         DisplayName = model.Name,
                         Description = model.Description,
-                        DocumentationSource = "dbt",
-                        IsActive = true,
-                        Tags = ["dbt", "semantic-model"]
+                        DocumentationSource = SemanticVirtualTables.SourceMarker,
+                        IsActive = true
                     },
                     Columns = columns,
                     PrimaryKeyColumns = primaryKeys
                 };
 
                 await _tableRepository.UpsertTableMetadataAsync(tableMeta, cancellationToken).ConfigureAwait(false);
+
+                // Issue #111 (A-2): the upsert ignores Table.Tags; the synthetic tags become dbt-source dataset tags (same cap and audit as dbt model tags).
+                if (_tagImport is not null)
+                {
+                    await _tagImport.ImportDbtTagsAsync(tableMeta.Identifier, SemanticModelTags, cancellationToken).ConfigureAwait(false);
+                }
             }
         }
-
-        _logger.LogInformation("Successfully ingested dbt semantic manifest with {ModelCount} models and {MetricCount} metrics",
-            semanticModels.Count, metrics.Count);
-
-        return manifest;
     }
 }

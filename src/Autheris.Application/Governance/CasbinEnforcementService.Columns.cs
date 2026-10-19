@@ -2,6 +2,7 @@ namespace Autheris.Application.Governance;
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Frozen;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
@@ -42,6 +43,12 @@ public sealed partial class CasbinEnforcementService
 
     private static void ValidateSubRuleTokens(string subRule, string? rlsFilter)
     {
+        // REQ-GOV-129 (A-8, ST-129-18): a Casbin rule never carries a caller attribute (a shared decision must not embed one); refused on publish, import and sync alike.
+        if (Autheris.Application.VirtualFilters.CallerPlaceholders.Contains(subRule) || Autheris.Application.VirtualFilters.CallerPlaceholders.Contains(rlsFilter))
+        {
+            throw new ArgumentException("Security validation error: a Casbin rule cannot use a caller attribute placeholder.", nameof(rlsFilter));
+        }
+
         ArgumentException.ThrowIfNullOrWhiteSpace(subRule);
 
         if (subRule.Length > 500)
@@ -335,32 +342,68 @@ public sealed partial class CasbinEnforcementService
         }
     }
 
+    private CandidateSet BuildCandidateSet(PolicySnapshot snapshot, SecurityEvaluationContext context, string tableStr, string requestedAction)
+    {
+        var candidates = new List<CasbinRuleMetadata>();
+        if (snapshot.Rules.TryGetValue("*", out var wildcardRulesList))
+        {
+            AddCandidates(candidates, wildcardRulesList, context, tableStr, requestedAction);
+        }
+
+        if (!string.Equals(context.Tenant.Value, "*", StringComparison.OrdinalIgnoreCase) &&
+            snapshot.Rules.TryGetValue(context.Tenant.Value, out var tenantRulesList))
+        {
+            AddCandidates(candidates, tenantRulesList, context, tableStr, requestedAction);
+        }
+
+        var shareable = true;
+        var readsContext = false;
+        var referencesTime = false;
+        foreach (var rule in candidates)
+        {
+            referencesTime |= ReferencesTime(rule.SubRule);
+            var shape = PolicyShapeAnalyzer.Analyze(rule.SubRule, rule.RlsFilter);
+            shareable &= shape.Shareable;
+            readsContext |= shape.ReadsContext;
+        }
+
+        return new CandidateSet([.. candidates], shareable, readsContext, referencesTime);
+    }
+
+    private static void AddCandidates(
+        List<CasbinRuleMetadata> target,
+        ImmutableArray<CasbinRuleMetadata> rules,
+        SecurityEvaluationContext context,
+        string tableStr,
+        string requestedAction)
+    {
+        foreach (var rule in rules)
+        {
+            var isDeny = string.Equals(rule.Eft, "deny", StringComparison.OrdinalIgnoreCase);
+            var isAllow = string.Equals(rule.Eft, "allow", StringComparison.OrdinalIgnoreCase);
+            if ((!isDeny && !isAllow) ||
+                (!string.Equals(rule.Tenant, "*", StringComparison.OrdinalIgnoreCase) && !string.Equals(rule.Tenant, context.Tenant.Value, StringComparison.OrdinalIgnoreCase)) ||
+                !MatchObjectPattern(rule.Obj, tableStr, failClosedMatch: isDeny) ||
+                !IsActionMatch(rule.Act, requestedAction, isDeny))
+            {
+                continue;
+            }
+
+            target.Add(rule);
+        }
+    }
+
     private ValueTask<TableAccessDecision> EvaluateCore(SecurityEvaluationContext context, bool useCache)
     {
         var snapshot = Volatile.Read(ref _currentSnapshot);
         var requestedAction = ResolveRequestedAction(context);
 
         var tableStr = context.TargetTable.ToString();
-        var cacheKey = DecisionKey.Create(snapshot.Epoch, context, requestedAction, tableStr);
-        useCache &= cacheKey.IsCacheable;
-
-        if (useCache && _decisionCache.TryGet(cacheKey, out var cachedDecision))
+        var candidateKey = new CandidateKey(context.Tenant.Value, tableStr, requestedAction);
+        if (!snapshot.Candidates.TryGet(candidateKey, out var candidates))
         {
-            Interlocked.Increment(ref _decisionCacheHits);
-            return ValueTask.FromResult(cachedDecision);
-        }
-
-        var sw = Stopwatch.StartNew();
-
-        var tenantRulesSnapshot = new List<CasbinRuleMetadata>();
-        if (snapshot.Rules.TryGetValue("*", out var wildcardRulesList))
-        {
-            tenantRulesSnapshot.AddRange(wildcardRulesList);
-        }
-        if (!string.Equals(context.Tenant.Value, "*", StringComparison.OrdinalIgnoreCase) &&
-            snapshot.Rules.TryGetValue(context.Tenant.Value, out var tenantRulesList))
-        {
-            tenantRulesSnapshot.AddRange(tenantRulesList);
+            candidates = BuildCandidateSet(snapshot, context, tableStr, requestedAction);
+            snapshot.Candidates.Set(candidateKey, candidates);
         }
 
         var roleClosure = snapshot.GetRoleClosure(context.Tenant.Value);
@@ -372,8 +415,77 @@ public sealed partial class CasbinEnforcementService
             subjects.AddRange(context.GroupSids.Select(g => g.Value));
         }
 
+        // WP-PF-09 / SEC-SC-09: users that match exactly the same candidate rules share one decision, but only when no candidate rule
+        // reads the user, its aliases or groups, the client IP or the clock, and never for a delegated source (where the source itself
+        // decides per user). Otherwise the key carries the user, as before.
+        DecisionKey cacheKey;
+        if (_shareAcrossUsers && !context.IsDelegatedSource && candidates.Shareable && !candidates.ReferencesTime)
+        {
+            cacheKey = DecisionKey.CreateShared(
+                snapshot.Epoch, context, requestedAction, tableStr,
+                BuildMatchBits(candidates.Rules, subjects, roleClosure), candidates.ReadsContext);
+        }
+        else
+        {
+            cacheKey = DecisionKey.Create(snapshot.Epoch, context, requestedAction, tableStr);
+        }
+
+        useCache &= cacheKey.IsCacheable;
+
+        if (useCache && _decisionCache.TryGet(cacheKey, out var cachedDecision))
+        {
+            Interlocked.Increment(ref _decisionCacheHits);
+            return ValueTask.FromResult(cachedDecision);
+        }
+
+        if (!useCache)
+        {
+            return ValueTask.FromResult(ComputeDecision(context, snapshot, candidates, subjects, roleClosure, tableStr, requestedAction).Decision);
+        }
+
+        // Single-flight: concurrent misses of the same key (for example after a policy publish) share one evaluation.
+        var decision = _decisionCache.GetOrCompute(cacheKey, () =>
+        {
+            var (computed, cacheable) = ComputeDecision(context, snapshot, candidates, subjects, roleClosure, tableStr, requestedAction);
+            // E-5: Do not cache decision if the snapshot epoch has changed while evaluating
+            return (computed, cacheable && Volatile.Read(ref _currentSnapshot).Epoch == snapshot.Epoch);
+        });
+        return ValueTask.FromResult(decision);
+    }
+
+    private static ulong[] BuildMatchBits(CasbinRuleMetadata[] rules, List<string> subjects, FrozenDictionary<string, FrozenSet<string>> roleClosure)
+    {
+        var bits = new ulong[(rules.Length + 63) / 64];
+        for (var i = 0; i < rules.Length; i++)
+        {
+            foreach (var subject in subjects)
+            {
+                if (IsSubjectMatch(rules[i].Sub, subject, roleClosure))
+                {
+                    bits[i >> 6] |= 1UL << (i & 63);
+                    break;
+                }
+            }
+        }
+
+        return bits;
+    }
+
+    private (TableAccessDecision Decision, bool Cacheable) ComputeDecision(
+        SecurityEvaluationContext context,
+        PolicySnapshot snapshot,
+        CandidateSet candidates,
+        List<string> subjects,
+        FrozenDictionary<string, FrozenSet<string>> roleClosure,
+        string tableStr,
+        string requestedAction)
+    {
+        Interlocked.Increment(ref _decisionEvaluations);
+        var sw = Stopwatch.StartNew();
+        var tenantRulesSnapshot = candidates.Rules;
+
         // SEC (Low): Decisions that depend on time-based sub_rules must not be served from the decision cache.
-        bool cacheable = !tenantRulesSnapshot.Any(r => ReferencesTime(r.SubRule));
+        bool cacheable = !candidates.ReferencesTime;
 
         bool allowed = false;
         var matchedAllowRules = new List<CasbinRuleMetadata>();
@@ -388,7 +500,7 @@ public sealed partial class CasbinEnforcementService
                 // Deny rules are matched conservatively (matching action or wildcard, wildcard tenant or current tenant).
                 if (!string.Equals(rule.Eft, "deny", StringComparison.OrdinalIgnoreCase) ||
                     (!string.Equals(rule.Tenant, "*", StringComparison.OrdinalIgnoreCase) && !string.Equals(rule.Tenant, context.Tenant.Value, StringComparison.OrdinalIgnoreCase)) ||
-                    !MatchObjectPattern(rule.Obj, tableStr) ||
+                    !MatchObjectPattern(rule.Obj, tableStr, failClosedMatch: true) ||
                     !IsActionMatch(rule.Act, requestedAction, isDeny: true))
                 {
                     continue;
@@ -480,12 +592,6 @@ public sealed partial class CasbinEnforcementService
                 $"Access to table '{tableStr}' denied by ABAC policy for tenant '{context.Tenant.Value}'.");
         }
 
-        // E-5: Do not cache decision if the snapshot epoch has changed while evaluating
-        if (useCache && cacheable && Volatile.Read(ref _currentSnapshot).Epoch == snapshot.Epoch)
-        {
-            _decisionCache.Set(cacheKey, decision);
-        }
-
-        return ValueTask.FromResult(decision);
+        return (decision, cacheable);
     }
 }

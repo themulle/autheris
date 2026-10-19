@@ -294,6 +294,8 @@ public sealed class StoredProcedureCatalogValidator
         var declared = definition.Parameters.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
         var bound = definition.ContextBindings.Select(b => b.ParameterName).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        errors.AddRange(ReservedParameterErrors(dbParams.Keys));
+
         foreach (var (pname, info) in dbParams)
         {
             if (info.IsOutput)
@@ -503,6 +505,12 @@ public sealed class StoredProcedureCatalogValidator
             errors.Add($"The technical procedure login has direct SELECT permission on '{full}'. It must only hold EXECUTE (ADR-018).");
         }
     }
+
+    /// <summary>SEC-PROC152I2-08: a catalog procedure with a parameter named 'limit' is never registered (fixed message).</summary>
+    internal static IReadOnlyList<string> ReservedParameterErrors(IEnumerable<string> dbParameterNames)
+        => dbParameterNames.Any(ProcedureDefinitionParser.IsReservedName)
+            ? ["Procedure parameter '@limit' uses the reserved name 'limit'."]
+            : [];
 
     private static DbCommand CreateCommand(DbConnection connection, string sql, params (string Name, object Value)[] parameters)
     {

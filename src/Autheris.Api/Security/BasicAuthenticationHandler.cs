@@ -224,6 +224,22 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
             guard.TryGetCachedSuccess(authHeader, out var cachedUser) &&
             string.Equals(cachedUser, configuredUser.Username, StringComparison.Ordinal);
 
+        // WP-PF-08: cluster-shared marker (keyed HMAC bound to the credential version). Lock-outs were checked above, a removed user has no
+        // configuredUser and a changed password has another credential version, so none of them can be revived by a marker.
+        string? credentialVersion = null;
+        if (configuredUser != null)
+        {
+            guard.ConfigureSharedMarker(secretRef =>
+                (Context.RequestServices?.GetService(typeof(Autheris.Application.Interfaces.IKeyVaultSecretProvider)) as Autheris.Application.Interfaces.IKeyVaultSecretProvider)
+                ?.GetSecretBytes(secretRef));
+            credentialVersion = BasicAuthAttemptGuard.CredentialVersion(configuredUser.Password);
+            if (!isCached)
+            {
+                var sharedUser = await guard.TryGetSharedSuccessAsync(authHeader, credentialVersion, Context.RequestAborted).ConfigureAwait(false);
+                isCached = string.Equals(sharedUser, configuredUser.Username, StringComparison.Ordinal);
+            }
+        }
+
         bool passwordVerified = false;
         if (!isCached)
         {
@@ -272,6 +288,10 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
 
         await guard.RecordSuccessAsync(attemptKey, Context.RequestAborted).ConfigureAwait(false);
         guard.CacheSuccess(authHeader, configuredUser!.Username);
+        if (credentialVersion != null)
+        {
+            await guard.CacheSharedSuccessAsync(authHeader, credentialVersion, configuredUser.Username, Context.RequestAborted).ConfigureAwait(false);
+        }
 
         // F-AUTH-DX: claims come from the shared factory so header login and cookie session are identical.
         var claims = BasicAuthPrincipalFactory.BuildClaims(configuredUser!);

@@ -48,11 +48,19 @@ public sealed class ProcedureDefinitionLoader : IDisposable
 
     private ProcedureEndpointsOptions Settings => _options.Value.SqlEndpoints.Procedures;
 
+    /// <summary>INC-2 D-8: null resolves to required in every environment except exactly Development (fail-closed).</summary>
+    private bool RequireDdlHash => Settings.RequireDdlHashForDeclared ?? _environment?.IsDevelopment() != true;
+
     private bool AllowRlsNone => _environment?.IsDevelopment() == true;
 
     /// <summary>Loads all declarations of the configured directory. Returns the number of registered procedures.</summary>
     public int LoadFromDirectory()
     {
+        if (Settings.RequireDdlHashForDeclared == false && _environment?.IsDevelopment() != true)
+        {
+            _logger?.LogWarning("SqlEndpoints.Procedures.RequireDdlHashForDeclared is explicitly false outside Development; declared procedures without integrity.ddl_hash are accepted and drift is not detected.");
+        }
+
         string directory = Settings.Directory;
         if (string.IsNullOrWhiteSpace(directory))
         {
@@ -225,6 +233,16 @@ public sealed class ProcedureDefinitionLoader : IDisposable
             if (string.IsNullOrWhiteSpace(definition.ResultTable) || definition.DeclaredOutputs.Count == 0)
             {
                 return "'validation: declared' requires result_table and a non-empty list of outputs.";
+            }
+
+            if (string.IsNullOrWhiteSpace(definition.DdlHash))
+            {
+                if (RequireDdlHash)
+                {
+                    return "declared mode requires integrity.ddl_hash";
+                }
+
+                _logger?.LogWarning("Procedure '{Procedure}' uses validation: declared without integrity.ddl_hash; drift is not detected.", definition.Name);
             }
         }
 

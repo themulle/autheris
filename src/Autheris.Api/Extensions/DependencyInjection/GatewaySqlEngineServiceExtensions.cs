@@ -93,6 +93,8 @@ public static class GatewaySqlEngineServiceExtensions
         services.AddSingleton<ICrossSourcePlanner>(sp => sp.GetRequiredService<CrossSourcePlanner>());
         services.AddScoped<Autheris.Application.Olap.IFederatedStagingService, Autheris.Application.Olap.FederatedStagingService>();
         services.AddScoped<Autheris.Application.Olap.IOlapStagingService, Autheris.Application.Olap.OlapStagingService>();
+        services.AddSingleton<Autheris.Application.Olap.IOlapRequestLimiter, Autheris.Application.Olap.OlapRequestLimiter>();
+        services.AddSingleton<Autheris.Application.Federation.IFederationGate, Autheris.Application.Federation.FederationGate>();
         services.AddScoped<IFederatedQueryExecutionService, FederatedDuckDbExecutionService>();
 
         // F-SQL-02: governed stored procedure endpoints (SQL Server, read-only in phase 1)
@@ -102,6 +104,7 @@ public static class GatewaySqlEngineServiceExtensions
         services.AddScoped<StoredProcedureCatalogValidator>();
         services.AddSingleton<IProcedureInvoker, MssqlProcedureInvoker>();
         services.AddSingleton<IProcedureRowScopeResolver, SqlProcedureRowScopeResolver>();
+        services.AddSingleton<ProcedureDenialAuditLimiter>();
         services.AddScoped<IProcedureExecutionService, GovernedProcedureExecutionService>();
         services.AddSingleton<IProcedureYamlGenerator, ProcedureYamlGenerator>();
         if (gatewayOptions.SqlEndpoints.Procedures.Enabled)

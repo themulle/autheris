@@ -84,6 +84,11 @@ public sealed class ProcedureYamlGenerator : IProcedureYamlGenerator
             sb.AppendLine("integrity:");
             sb.AppendLine($"  ddl_hash: \"{EscapeYaml(request.DdlHash)}\"");
         }
+        else
+        {
+            // Declared mode without a hash loads in Development only; make that discoverable in the generated file.
+            sb.AppendLine("# WARNING: integrity.ddl_hash is required for 'validation: declared' outside Development.");
+        }
 
         if (request.Parameters.Count > 0 || request.ContextBindings.Count > 0)
         {

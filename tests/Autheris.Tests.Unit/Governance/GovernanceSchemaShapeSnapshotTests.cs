@@ -57,4 +57,60 @@ public sealed class GovernanceSchemaShapeSnapshotTests
         shape.Tables.Select(t => t.Name).ShouldContain("TABLE_INDEX_COLUMNS");
         shape.Tables.ShouldAllBe(t => t.Columns.Count > 0);
     }
+
+    [Theory]
+    [InlineData("sqlite", "TABLE_TAGS", "TABLE_CATALOG_SETTINGS")]
+    [InlineData("postgresql", "table_tags", "table_catalog_settings")]
+    [InlineData("sqlserver", "TABLE_TAGS", "TABLE_CATALOG_SETTINGS")]
+    public void EmbeddedSnapshot_CoversTheCatalogTagAndSettingsTables(string engine, string tags, string settings)
+    {
+        var shape = GovernanceSchemaShapeLoader.LoadEmbedded(engine);
+
+        var tagTable = shape.Tables.Single(t => t.Name == tags);
+        tagTable.Columns.Select(c => c.Name).ShouldBe(["table_id", "tag", "source", "created_by", "created_at"]);
+        tagTable.PrimaryKey.ShouldBe(["table_id", "tag"]);
+
+        var settingsTable = shape.Tables.Single(t => t.Name == settings);
+        settingsTable.Columns.Select(c => c.Name).ShouldBe(["table_id", "visibility", "updated_by", "updated_at"]);
+        settingsTable.PrimaryKey.ShouldBe(["table_id"]);
+    }
+
+    [Theory]
+    [InlineData("sqlite", "TABLE_ROW_FILTER_STRATEGIES", "CONSENT_ROW_FILTERS")]
+    [InlineData("postgresql", "table_row_filter_strategies", "consent_row_filters")]
+    [InlineData("sqlserver", "TABLE_ROW_FILTER_STRATEGIES", "CONSENT_ROW_FILTERS")]
+    public void EmbeddedSnapshot_CoversTheRowFilterStrategyTable(string engine, string strategies, string rowFilters)
+    {
+        var shape = GovernanceSchemaShapeLoader.LoadEmbedded(engine);
+
+        var table = shape.Tables.Single(t => t.Name == strategies);
+        table.Columns.Select(c => c.Name).ShouldBe(["table_id", "strategy", "duration_seconds", "max_keys", "updated_by", "updated_at"]);
+        table.PrimaryKey.ShouldBe(["table_id"]);
+
+        var filters = shape.Tables.Single(t => t.Name == rowFilters);
+        filters.Columns.Select(c => c.Name).ShouldContain("key_set_strategy");
+        filters.Columns.Select(c => c.Name).ShouldContain("key_set_duration_seconds");
+        filters.Columns.Select(c => c.Name).ShouldContain("key_set_max_keys");
+    }
+
+    [Theory]
+    [InlineData("sqlite", "TABLE_RELATIONS", "TABLE_RELATION_KEYS", "UX_TABLE_RELATIONS_NATURAL")]
+    [InlineData("postgresql", "table_relations", "table_relation_keys", "ux_table_relations_natural")]
+    [InlineData("sqlserver", "TABLE_RELATIONS", "TABLE_RELATION_KEYS", "UX_TABLE_RELATIONS_NATURAL")]
+    public void EmbeddedSnapshot_CoversTheRelationKeyTable(string engine, string relations, string keys, string naturalIndex)
+    {
+        var shape = GovernanceSchemaShapeLoader.LoadEmbedded(engine);
+
+        var keyTable = shape.Tables.Single(t => string.Equals(t.Name, keys, StringComparison.Ordinal));
+        keyTable.Columns.Select(c => c.Name).ShouldBe(["relation_id", "key_ordinal", "parent_column", "child_column"]);
+        keyTable.PrimaryKey.ShouldBe(["relation_id", "key_ordinal"]);
+        keyTable.Indexes.Count(i => i.Unique).ShouldBe(2);
+
+        var relationTable = shape.Tables.Single(t => string.Equals(t.Name, relations, StringComparison.Ordinal));
+        var natural = relationTable.Indexes.Single(i => string.Equals(i.Name, naturalIndex, StringComparison.Ordinal));
+        natural.Unique.ShouldBeTrue();
+        natural.Columns.ShouldBe(["parent_table_id", "child_table_id", "relation_name"]);
+        relationTable.Columns.Select(c => c.Name).ShouldNotContain("join_key_parent");
+        relationTable.Columns.Select(c => c.Name).ShouldNotContain("join_key_child");
+    }
 }

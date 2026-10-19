@@ -81,6 +81,25 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
         GovernedQueryStages.EnsureCanonicalClusterAdminClaim(context.Principal, metadata.Identifier);
 
         var tenant = ResolveTenant(context);
+
+        if (context.Items.TryGetValue("SubtreePlan", out var stObj) && stObj is Autheris.Application.Sql.Federation.Subtrees.SubtreeExecutionPlan subtreePlan)
+        {
+            var subtreeService = _executionService();
+            var subtreeResult = await subtreeService.ExecuteQueryBufferedAsync(
+                new GovernedSqlQueryRequest(
+                    subtreePlan.Sql,
+                    subtreePlan.Parameters,
+                    Transport: SqlTransports.WebSql,
+                    PlannedTableRead: true),
+                context.Principal,
+                tenant,
+                ct).ConfigureAwait(false);
+
+            context.Items[InDbColumnMaskingExecutedKey] = true;
+            context.Items[RlsPushdownExecutedKey] = true;
+            return subtreeResult.Rows;
+        }
+
         var selected = ResolveSelectedColumns(context);
         RejectSpatialColumns(metadata, decision, selected);
 
@@ -296,7 +315,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
     /// Equality arguments (GraphQL, MCP) and the pushed-down filter of <see cref="TableQueryItems.Filter"/> as one neutral
     /// clause. Values are client parameters; the planner authorizes every referenced column.
     /// </summary>
-    private static TableFilterClause? BuildFilter(DataSourceExecutionContext context)
+    internal static TableFilterClause? BuildFilter(DataSourceExecutionContext context)
     {
         var clauses = new List<TableFilterClause>();
         var index = 0;
@@ -357,7 +376,8 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
             parameters,
             clauses.SelectMany(c => c.ReferencedColumns).Distinct(StringComparer.OrdinalIgnoreCase).ToList())
         {
-            TrinoSqlFactory = resolve => string.Join(" AND ", clauses.Select(c => "(" + c.GetTrinoPredicate(resolve) + ")"))
+            TrinoSqlFactory = resolve => string.Join(" AND ", clauses.Select(c => "(" + c.GetTrinoPredicate(resolve) + ")")),
+            PushdownPredicates = clauses.SelectMany(c => c.PushdownPredicates ?? Array.Empty<PushdownPredicateInfo>()).ToList()
         };
     }
 

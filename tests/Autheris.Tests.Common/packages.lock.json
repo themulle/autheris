@@ -20,6 +20,11 @@
         "resolved": "23.0.0",
         "contentHash": "i53VmQ505ASXsStf7y29Z5qvhN6PGgFGNb6UUU7z1WmbzEgSjKQuIJkKKVbh+K5rtXRiKyr1Ah3Rmvbeb2BEHQ=="
       },
+      "BitFaster.Caching": {
+        "type": "Transitive",
+        "resolved": "2.5.4",
+        "contentHash": "1QroTY1PVCZOSG9FnkkCrmCKk/+bZCgI/YXq376HnYwUDJ4Ho0EaV4YaA/5v5WYLnwIwIO7RZkdWbg9pxIpueQ=="
+      },
       "Casbin.NET": {
         "type": "Transitive",
         "resolved": "2.21.3",
@@ -205,6 +210,7 @@
         "dependencies": {
           "Apache.Arrow": "[23.0.0, )",
           "Autheris.Domain": "[1.0.0, )",
+          "BitFaster.Caching": "[2.5.4, )",
           "Casbin.NET": "[2.21.3, )",
           "DuckDB.NET.Data.Full": "[1.5.6, )",
           "FastSqlEngine": "[1.0.0, )",

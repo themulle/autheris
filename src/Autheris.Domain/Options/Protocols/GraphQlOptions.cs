@@ -39,6 +39,26 @@ public sealed class GraphQLOptions
     [Range(100, 1000000)] public int MaxAggregateRowBudget { get; init; } = 50000;
     [Range(0, 10000)] public int MaxAllowedOffset { get; init; } = 10000;
     public List<string> TrustedOrigins { get; init; } = [];
+
+    /// <summary>#112: typed aggregate fields (<c>Gateway:GraphQL:Aggregation</c>).</summary>
+    public GraphQLAggregationOptions Aggregation { get; init; } = new();
+}
+
+/// <summary>#112: switches and bounds of the typed GraphQL aggregation surface.</summary>
+public sealed class GraphQLAggregationOptions
+{
+    public const int MinFieldsPerOperation = 1;
+    public const int DefaultMaxFieldsPerOperation = 3;
+    public const int MaxFieldsPerOperationUpperBound = 10;
+
+    /// <summary>Generate the typed aggregate fields (restart or catalog change required).</summary>
+    public bool Enabled { get; init; } = true;
+
+    /// <summary>
+    /// Upper bound for aliased <c>T_aggregate</c> and <c>queryMetrics</c> fields in one operation (SEC-112-19). Out of range (1..10) is a
+    /// start-up failure, never clamped.
+    /// </summary>
+    public int MaxFieldsPerOperation { get; init; } = DefaultMaxFieldsPerOperation;
 }
 
 /// <summary>

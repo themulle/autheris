@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using Autheris.Application.Services;
+using Autheris.Application.Sql.Policy.RowFilterKeySets;
 using Autheris.Domain.Model;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Nodes;
@@ -17,10 +18,13 @@ using TrinoSqlEngine.Governance;
 /// </summary>
 internal static class AdvancedRlsPredicateBuilder
 {
-    public static PolicyPredicate BuildCorrelated(ConsentRowFilter filter, string parameterPrefix = PolicyParameterNamer.DefaultPrefix)
+    public static PolicyPredicate BuildCorrelated(
+        ConsentRowFilter filter,
+        string parameterPrefix = PolicyParameterNamer.DefaultPrefix,
+        CorrelatedFilterSource source = CorrelatedFilterSource.Consent)
     {
         var namer = new PolicyParameterNamer(parameterPrefix);
-        return PolicyPredicate.Create(CorrelatedExpression(filter, namer), namer.Values);
+        return PolicyPredicate.Create(CorrelatedExpression(filter, namer, source), namer.Values);
     }
 
     public static PolicyPredicate BuildCrossSourceSet(ConsentRowFilter filter, TargetSqlDialect dialect, string parameterPrefix = PolicyParameterNamer.DefaultPrefix)
@@ -29,8 +33,13 @@ internal static class AdvancedRlsPredicateBuilder
         return PolicyPredicate.Create(CrossSourceSetExpression(filter, dialect, namer), namer.Values);
     }
 
-    /// <summary>The correlated EXISTS over the reserved target alias. Always the EXISTS form: the SQL Server IN-strategy was a text-level optimisation.</summary>
-    internal static Expression CorrelatedExpression(ConsentRowFilter filter, PolicyParameterNamer namer)
+    /// <summary>
+    /// The correlated EXISTS over the reserved target alias. Always the EXISTS form: the SQL Server IN-strategy was a text-level optimisation.
+    /// Issue #107: the node is registered as a correlated filter site (side table, reference identity); this does not change the AST or the
+    /// generated SQL. <paramref name="source"/> says where the rule comes from: a consent rule carries its own evaluation settings, a Casbin
+    /// rule has none (object and global settings only).
+    /// </summary>
+    internal static Expression CorrelatedExpression(ConsentRowFilter filter, PolicyParameterNamer namer, CorrelatedFilterSource source)
     {
         ArgumentNullException.ThrowIfNull(filter);
         if (filter.DependentTable == null)
@@ -81,17 +90,18 @@ internal static class AdvancedRlsPredicateBuilder
             conditions.AddRange(SubqueryPredicates(filter.SubqueryFilterPredicateJson, Rebase, depAlias, namer));
         }
 
-        if (!string.IsNullOrWhiteSpace(filter.TargetTemporalColumn) && !string.IsNullOrWhiteSpace(filter.DependentValidFromColumn))
+        bool temporal = !string.IsNullOrWhiteSpace(filter.TargetTemporalColumn) && !string.IsNullOrWhiteSpace(filter.DependentValidFromColumn);
+        if (temporal)
         {
-            AdvancedRlsFilterGenerator.ValidateQualifiedIdentifier(filter.TargetTemporalColumn, "TargetTemporalColumn");
-            AdvancedRlsFilterGenerator.ValidateQualifiedIdentifier(filter.DependentValidFromColumn, "DependentValidFromColumn");
+            AdvancedRlsFilterGenerator.ValidateQualifiedIdentifier(filter.TargetTemporalColumn!, "TargetTemporalColumn");
+            AdvancedRlsFilterGenerator.ValidateQualifiedIdentifier(filter.DependentValidFromColumn!, "DependentValidFromColumn");
 
-            ColumnReference Temporal() => filter.TargetTemporalColumn.Contains('.')
-                ? Col(filter.TargetTemporalColumn)
-                : PolicyParameterNamer.Column($"{RowFilterAliases.Target}.{filter.TargetTemporalColumn}");
+            ColumnReference Temporal() => filter.TargetTemporalColumn!.Contains('.')
+                ? Col(filter.TargetTemporalColumn!)
+                : PolicyParameterNamer.Column($"{RowFilterAliases.Target}.{filter.TargetTemporalColumn!}");
             ColumnReference Dep(string column) => column.Contains('.') ? Col(column) : PolicyParameterNamer.Column($"{depAlias}.{column}");
 
-            conditions.Add(new BinaryExpression(Temporal(), BinaryOperator.GreaterThanOrEqual, Dep(filter.DependentValidFromColumn)));
+            conditions.Add(new BinaryExpression(Temporal(), BinaryOperator.GreaterThanOrEqual, Dep(filter.DependentValidFromColumn!)));
             if (!string.IsNullOrWhiteSpace(filter.DependentValidToColumn))
             {
                 AdvancedRlsFilterGenerator.ValidateQualifiedIdentifier(filter.DependentValidToColumn, "DependentValidToColumn");
@@ -102,9 +112,28 @@ internal static class AdvancedRlsPredicateBuilder
             }
         }
 
-        return new ExistsExpression(new SelectStatement(null,
+        var exists = new ExistsExpression(new SelectStatement(null,
             new QuerySpecification(false, [new ColumnSelectItem(new LiteralExpression(1L, LiteralType.Integer), null)],
                 from, And(conditions), null, null), null, null));
+        CorrelatedFilterSiteRegistry.Register(exists, Site(filter, source, temporal));
+        return exists;
+    }
+
+    // Casbin sites carry no per-rule data, so two shared immutable instances replace one allocation per correlated build.
+    private static readonly CorrelatedFilterSite CasbinSite = new(null, CorrelatedFilterSource.Casbin, null, true);
+    private static readonly CorrelatedFilterSite CasbinTemporalSite = new(null, CorrelatedFilterSource.Casbin, null, false);
+
+    private static CorrelatedFilterSite Site(ConsentRowFilter filter, CorrelatedFilterSource source, bool temporal)
+    {
+        if (source == CorrelatedFilterSource.Casbin)
+        {
+            return temporal ? CasbinTemporalSite : CasbinSite;
+        }
+
+        RowFilterEvaluationSettings? settings = filter.KeySetStrategy is null && filter.KeySetDurationSeconds is null && filter.KeySetMaxKeys is null
+            ? null
+            : new RowFilterEvaluationSettings(filter.KeySetStrategy, filter.KeySetDurationSeconds, filter.KeySetMaxKeys);
+        return new CorrelatedFilterSite(filter.Id, source, settings, !temporal);
     }
 
     /// <summary>The set filter: one IN list with one parameter per value (null elements skipped), chunked only at the dialect IN-list limit.</summary>

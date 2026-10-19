@@ -42,4 +42,5 @@ public static class ApiErrorCodes
     public const string RowFilterSyntaxInvalid = "ROW_FILTER_SYNTAX_INVALID";
     public const string DbtProposalConflict = "DBT_PROPOSAL_CONFLICT";
     public const string DbtManifestInvalid = "DBT_MANIFEST_INVALID";
+    public const string RequiredFilterColumnMissing = "REQUIRED_FILTER_COLUMN_MISSING";
 }

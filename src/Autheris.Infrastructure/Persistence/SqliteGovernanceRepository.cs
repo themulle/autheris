@@ -15,7 +15,7 @@ using Microsoft.Extensions.Options;
 
 namespace Autheris.Infrastructure.Persistence;
 
-public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrations.IGovernanceStoreInitializer, IDisposable
+public partial class SqliteGovernanceRepository : IGovernanceRepository, IConsentDescriptionRepository, Migrations.IGovernanceStoreInitializer, IDisposable
 {
     private readonly SqliteGovernanceConnectionProvider _connections;
     internal SqliteGovernanceConnectionProvider Connections => _connections;
@@ -53,6 +53,9 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
     internal void ResetKeyTableProbeForTesting() => _keyTables.Reset();
 
     internal void InvalidateMetadataCacheForTesting() => _metadataCache.Clear();
+
+    /// <summary>Test seam: invalidation keys queued and not yet applied by a write scope.</summary>
+    internal int PendingMetadataInvalidationCountForTesting => _pendingMetadataInvalidations.Count;
 
     private void ApplyMetadataInvalidations()
     {
@@ -194,7 +197,8 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, Migrati
         await using var scope = await ReadScopeAsync(ct, snapshot).ConfigureAwait(false);
         return await body(scope.Connection).ConfigureAwait(false);
     }
-    private readonly ConcurrentDictionary<string, (TableMetadata? Metadata, long CachedAtTicks)> _metadataCache = new(StringComparer.OrdinalIgnoreCase);
+    // WP-PF-06: bounded (a 10k-table catalog must not grow the cache without limit); a miss just reloads the metadata.
+    private readonly Autheris.Application.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks)> _metadataCache = new(20_000, comparer: StringComparer.OrdinalIgnoreCase);
     private static readonly long MetadataCacheTtlTicks = TimeSpan.FromSeconds(30).Ticks;
     private volatile bool _isAuditPipelineFaulted = false;
     public bool IsAuditPipelineFaulted => _isAuditPipelineFaulted || Volatile.Read(ref _auditChainViolation) != null;

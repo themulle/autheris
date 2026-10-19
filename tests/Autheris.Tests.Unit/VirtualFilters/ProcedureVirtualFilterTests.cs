@@ -3,7 +3,6 @@ namespace Autheris.Tests.Unit.VirtualFilters;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Security;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -70,7 +69,7 @@ public sealed class ProcedureVirtualFilterTests
             return new GovernedProcedureExecutionService(
                 Registry, Invoker, Options.Create(options ?? new GatewayOptions()), Audit, Tables,
                 withConsents ? Consents : null, withConsents ? Resolution : null, masking: null,
-                policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, rowScope: RowScope, mandatoryFilters: resolver);
+                policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance, rowScope: RowScope, mandatoryFilters: resolver);
         }
     }
 
@@ -90,7 +89,7 @@ public sealed class ProcedureVirtualFilterTests
         f.Resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
             .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3),
                 new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["serial_number"] = ColumnAccessLevel.Clear, ["name"] = ColumnAccessLevel.Clear }));
-        f.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<CancellationToken>())
+        f.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new RawProcedureResult(["serial_number", "name"], [new object?[] { "100", "delivered" }, new object?[] { "200", "active" }], false));
         f.RowScope.GetAllowedKeysAsync(
                 Arg.Any<ProcedureDefinition>(), Arg.Any<TableMetadata>(), Arg.Any<TableAccessDecision>(), Arg.Any<IReadOnlyList<string>>(),
@@ -125,8 +124,8 @@ public sealed class ProcedureVirtualFilterTests
     {
         var f = Active(Header.Replace("-- @row-scope-key serial_number", string.Empty));
 
-        await Should.ThrowAsync<SecurityException>(() => f.Create(new RecordingResolver(Applied)).ExecuteAsync("get_cranes", null, User(), Tenant));
-        await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default);
+        await Should.ThrowAsync<KeyNotFoundException>(() => f.Create(new RecordingResolver(Applied)).ExecuteAsync("get_cranes", null, User(), Tenant));
+        await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default, default);
     }
 
     [Fact]
@@ -134,8 +133,8 @@ public sealed class ProcedureVirtualFilterTests
     {
         var f = Active();
 
-        await Should.ThrowAsync<SecurityException>(() => f.Create(new RecordingResolver(MandatoryFilterOutcome.Deny("uncovered"))).ExecuteAsync("get_cranes", null, User(), Tenant));
-        await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default);
+        await Should.ThrowAsync<KeyNotFoundException>(() => f.Create(new RecordingResolver(MandatoryFilterOutcome.Deny("uncovered"))).ExecuteAsync("get_cranes", null, User(), Tenant));
+        await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default, default);
     }
 
     [Fact]

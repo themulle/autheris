@@ -31,6 +31,14 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> UnroutedRequestCounter =
         Meter.CreateCounter<long>("autheris_unrouted_requests_total", description: "Requests answered by the router without a matching endpoint (404/405/400); not written to the audit chain");
 
+    /// <summary>PLAN-SEC-115: calls to a read path the operator switched off. Tag <c>path</c> is a closed set (no tool names, no ids).</summary>
+    public static readonly Counter<long> DisabledPathRequestCounter =
+        Meter.CreateCounter<long>("autheris_disabled_path_requests_total", description: "Requests or tool calls that reached a read path switched off by configuration");
+
+    /// <summary>Issue #111 (A-6/A-9): a persisted catalog tag or tier could not be read or was malformed and degraded to Hidden without tags. No table names or ids as tags.</summary>
+    public static readonly Counter<long> CatalogVisibilityDegradedCounter =
+        Meter.CreateCounter<long>("autheris_catalog_visibility_degraded_total", description: "Catalog tier or tag reads that degraded to Hidden because the stored settings were unreadable or malformed");
+
     public static readonly Counter<long> QueryTooComplexCounter =
         Meter.CreateCounter<long>("autheris_query_too_complex_total", description: "Number of requests rejected due to AST complexity");
 
@@ -63,6 +71,35 @@ public static class GatewayDiagnostics
 
     public static readonly Histogram<double> LineageTraversalDuration =
         Meter.CreateHistogram<double>("autheris_lineage_traversal_duration_ms", "ms", description: "Duration of cycle-safe lineage traversal");
+
+    // Issue #107 (SEC-RF107-09 d): tags are limited to dialect, outcome and reason; never tenant, table, rule id or key counts.
+    public static readonly Counter<long> RowFilterKeySetHits =
+        Meter.CreateCounter<long>("autheris.rowfilter.keyset.hits", description: "Correlated row-filter sites served from a cached key set");
+
+    public static readonly Counter<long> RowFilterKeySetMisses =
+        Meter.CreateCounter<long>("autheris.rowfilter.keyset.misses", description: "Correlated row-filter sites whose key set was loaded for the statement");
+
+    public static readonly Counter<long> RowFilterKeySetFallbacks =
+        Meter.CreateCounter<long>("autheris.rowfilter.keyset.fallbacks", description: "Correlated row-filter sites that kept the exact EXISTS form, by reason");
+
+    public static readonly Histogram<double> RowFilterKeyQueryDuration =
+        Meter.CreateHistogram<double>("autheris.rowfilter.keyset.key_query.duration", "ms", description: "Duration of a row-filter key query");
+
+    // Caller attributes (REQ-GOV-129 A-11): tags are limited to the provider kind and the outcome, never an attribute name, subject or value.
+    public static readonly Counter<long> CallerAttributeResolutions =
+        Meter.CreateCounter<long>("autheris.callerattr.resolutions", description: "Caller attribute resolutions, by provider kind and outcome");
+
+    public static readonly Counter<long> CallerAttributeCacheHits =
+        Meter.CreateCounter<long>("autheris.callerattr.cache.hits", description: "Caller attribute value cache hits");
+
+    public static readonly Counter<long> CallerAttributeCacheMisses =
+        Meter.CreateCounter<long>("autheris.callerattr.cache.misses", description: "Caller attribute value cache misses");
+
+    public static readonly Histogram<double> CallerAttributeProviderDuration =
+        Meter.CreateHistogram<double>("autheris.callerattr.provider.duration", "ms", description: "Duration of a caller attribute provider call");
+
+    public static readonly Counter<long> CallerAttributeCircuitOpen =
+        Meter.CreateCounter<long>("autheris.callerattr.circuit.open", description: "Caller attribute provider calls refused by an open circuit");
 
     // Versioned PII allow-list per span type (Frozen for zero-allocation thread-safe lookups)
     private static readonly FrozenDictionary<string, FrozenSet<string>> SpanTagAllowList = new Dictionary<string, FrozenSet<string>>

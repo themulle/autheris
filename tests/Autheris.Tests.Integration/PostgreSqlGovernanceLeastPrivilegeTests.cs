@@ -138,6 +138,80 @@ public sealed class PostgreSqlGovernanceLeastPrivilegeTests : IClassFixture<Post
     }
 
     [Fact]
+    public async Task RuntimeLogin_CanSetReadAndClearRowFilterEvaluation_OnTheNewTableAndColumns()
+    {
+        // Issue #107 (plan section 7): the runtime login needs SELECT/INSERT/UPDATE/DELETE on TABLE_ROW_FILTER_STRATEGIES and UPDATE on
+        // CONSENT_ROW_FILTERS; the generic runtime grant covers both, and the settings flow works without any DDL right.
+        var options = GovernanceSchemaTestSupport.PostgreSqlOptions(_runtimeConnectionString, GovernanceMigrationMode.Verify);
+        using var repository = GovernanceSchemaTestSupport.UnmigratedPostgreSql(options);
+        await new PostgreSqlGovernanceMigrationRunner(repository, options).RunAsync();
+        await repository.InitializeAsync();
+
+        var tableId = Guid.NewGuid();
+        var identifier = new TableIdentifier("lpsource", "dbo", "rfeval_" + Guid.NewGuid().ToString("N")[..8]);
+        var column = new TableColumn { TableId = tableId, ColumnName = "customer_id", DataType = "int" };
+        await repository.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Table = new Table { Id = tableId, DisplayName = "t", TableName = identifier.TableName, SchemaName = "dbo", SourceType = "Sqlite", SourceName = "lpsource" },
+            Identifier = identifier,
+            Columns = [column]
+        });
+        var columnId = (await repository.GetTableMetadataAsync(identifier))!.Columns[0].Id;
+        var tenant = new TenantId("tenant-lp");
+        var consent = await repository.CreateConsentAsync(new Consent
+        {
+            TableId = tableId, TableIdentifier = identifier, TenantId = tenant, GranteeType = GranteeType.User, GranteeSid = new Sid("S-1-5-21-lp"),
+            Effect = ConsentEffect.Allow, ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(5),
+            RowFilters = [new ConsentRowFilter { TableColumnId = columnId, ColumnName = "customer_id", FilterType = RowFilterType.SubqueryCorrelated,
+                DependentTable = new TableIdentifier("lpsource", "dbo", "customers"), ForeignKeyColumn = "customer_id", PrimaryKeyColumn = "id", SubqueryFilterPredicateJson = "[]" }]
+        });
+        var ruleId = (await repository.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-lp")], identifier, DateTimeOffset.UtcNow, tenant))
+            .Single(c => c.Id == consent.Id).RowFilters.Single().Id;
+        var settings = new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.KeySetCache, 60, 10);
+
+        (await repository.UpdateRowFilterEvaluationAsync(ruleId, tenant, settings)).ShouldNotBeNull();
+        (await repository.SetRowFilterEvaluationAsync(identifier, settings, new Sid("S-1-5-21-lp"))).ShouldNotBeNull();
+        (await repository.GetTableMetadataAsync(identifier))!.RowFilterEvaluation.ShouldBe(settings);
+        (await repository.SetRowFilterEvaluationAsync(identifier, null, new Sid("S-1-5-21-lp"))).ShouldNotBeNull();
+        (await repository.GetTableMetadataAsync(identifier))!.RowFilterEvaluation.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task RuntimeLogin_CanSetReadAndClearDatasetTagsAndVisibility_OnTheNewTables()
+    {
+        // Issue #111: the runtime login needs SELECT/INSERT/UPDATE/DELETE on TABLE_TAGS and TABLE_CATALOG_SETTINGS; the generic runtime grant
+        // covers both, and the tag/tier flow (including the tier overlay on every catalog read) works without any DDL right.
+        var options = GovernanceSchemaTestSupport.PostgreSqlOptions(_runtimeConnectionString, GovernanceMigrationMode.Verify);
+        using var repository = GovernanceSchemaTestSupport.UnmigratedPostgreSql(options);
+        await new PostgreSqlGovernanceMigrationRunner(repository, options).RunAsync();
+        await repository.InitializeAsync();
+
+        var identifier = new TableIdentifier("lpsource", "dbo", "tags_" + Guid.NewGuid().ToString("N")[..8]);
+        await repository.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "t", TableName = identifier.TableName, SchemaName = "dbo", SourceType = "Sqlite", SourceName = "lpsource" },
+            Identifier = identifier,
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
+        });
+        var actor = new Sid("S-1-5-21-lp");
+
+        (await repository.ReplaceDatasetTagsAsync(identifier, ["finance", "pii"], DatasetTagSource.Admin, actor)).ShouldNotBeNull();
+        (await repository.ReplaceDatasetTagsAsync(identifier, ["dbt-tag"], DatasetTagSource.Dbt, actor)).ShouldNotBeNull();
+        (await repository.ChangeDatasetTagsAsync(identifier, ["extra"], ["pii"], actor)).ShouldNotBeNull();
+        (await repository.SetDatasetVisibilityAsync(identifier, DatasetVisibility.Full, actor)).ShouldNotBeNull();
+
+        var read = (await repository.GetTableMetadataAsync(identifier))!;
+        read.Table.Visibility.ShouldBe(DatasetVisibility.Full);
+        read.CatalogTags.ShouldBe(["dbt-tag", "extra", "finance"], ignoreOrder: true);
+        (await repository.GetAllTablesAsync()).Single(t => t.Identifier == identifier).Table.Visibility.ShouldBe(DatasetVisibility.Full);
+
+        (await repository.SetDatasetVisibilityAsync(identifier, DatasetVisibility.Hidden, actor)).ShouldNotBeNull();
+        (await repository.ReplaceDatasetTagsAsync(identifier, [], DatasetTagSource.Admin, actor)).ShouldNotBeNull();
+        (await repository.ReplaceDatasetTagsAsync(identifier, [], DatasetTagSource.Dbt, actor)).ShouldNotBeNull();
+        (await repository.GetTableMetadataAsync(identifier))!.CatalogTags.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task RuntimeLogin_CannotUpdateAudit_DisableTrigger_OrWriteMigrationTable()
     {
         foreach (var sql in new[]

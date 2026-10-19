@@ -11,6 +11,8 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Types;
+using Autheris.Tests.Unit.Catalog;
+using Autheris.Tests.Unit.TestSupport;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -78,7 +80,8 @@ public sealed class CatalogTenantIsolationTests
         => new Query().GetCatalogAsync(
             domain: null, first: null, after: null, search: null, tag: null,
             repos.Metadata, repos.Consents, approvalRepository: null, dataOwnershipRepository: null,
-            accessor, Options.Create(options ?? new GatewayOptions()));
+            accessor, Options.Create(options ?? new GatewayOptions()),
+            CatalogVisibilityTestFactory.Create(repos.Metadata, repos.Consents, options ?? new GatewayOptions()));
 
     [Fact]
     public async Task GovernanceAdmin_SeesOnlyTenantTables()
@@ -90,16 +93,14 @@ public sealed class CatalogTenantIsolationTests
     }
 
     [Fact]
-    public async Task DiscoveryMode_DoesNotLeakOtherTenantTables()
+    public async Task DiscoveryFlag_NoLongerWidensTheCatalog_ConsentlessCallerSeesNothing()
     {
         var options = new GatewayOptions { Catalog = new DataCatalogOptions { AllowAuthenticatedCatalogDiscovery = true } };
 
         var catalog = await Catalog(Accessor("tenant-a"), Repositories(), options);
 
-        catalog.Select(t => t.TableName).ShouldBe(["orders_a"]);
-        catalog.ShouldNotContain(t => t.TableName == "invoices_b");
-        // Discovery does not grant access: without a consent for the caller the status is not GRANTED.
-        catalog.ShouldAllBe(t => t.AccessStatus == "NONE");
+        // WP-0: the flag is deprecated; no consent means no table, in no tenant.
+        catalog.ShouldBeEmpty();
     }
 
     [Fact]
@@ -123,7 +124,9 @@ public sealed class CatalogTenantIsolationTests
     [Fact]
     public async Task LegacySingleTenant_GovernanceAdmin_IsNotRestricted()
     {
-        var catalog = await Catalog(Accessor(TenantId.LegacySingleTenant.Value, "GovernanceAdmin"), Repositories());
+        // Single-tenant deployment (Gateway:Tenancy:Mode=Single): a GovernanceAdmin without a real tenant claim is unrestricted.
+        var options = new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Single" } };
+        var catalog = await Catalog(Accessor(TenantId.LegacySingleTenant.Value, "GovernanceAdmin"), Repositories(), options);
 
         catalog.Count.ShouldBe(3);
     }

@@ -388,7 +388,10 @@ public sealed class CutoverArchitectureTests
         // -- the allowed exceptions of §28.9 (the text comes from the typed IR / the compiler, never from a client string) --
         ("Autheris.Application.Sql.Tree.GovernedTreeQueryService", "§28.9 OQ-GQL: executes compiled.Sql of the GraphQL tree compiler"),
         ("Autheris.Application.Olap.DuckDbOlapEngine", "§28.9 DuckDB staging: runs on the in-process staged copy, after the governed fetch"),
+        ("Autheris.Application.Sql.TimeZones.DuckDbIcuProbe", "REQ-SQL-130 (BC-130-7): probe of the time zone state on throw-away in-memory DuckDB databases; constants only (sandbox setup, one conversion, two metadata reads), no client text"),
+        ("Autheris.Application.Olap.OlapSqlInspector", "DuckDB parse-only (json_serialize_sql): the client text is passed as a quoted literal to the parser of a throw-away in-memory database; nothing is executed or staged"),
         ("Autheris.Application.VirtualFilters.Federation.SqlVirtualFilterKeySetProvider", "virtual-filter key set: the query is rendered from the typed key-source definition"),
+        ("Autheris.Application.Sql.Policy.RowFilterKeySets.RowFilterKeySetLoader", "row-filter key set (issue #107): fixed transaction-mode statements (SET TRANSACTION, PRAGMA query_only) only; the key query text is set by the binder through CompiledSqlBinders.BindKeyQuery"),
         // -- statements of the gateway itself (no client text) --
         ("Autheris.Application.Services.DbSessionContextInitializer", "fixed session-initialisation statements (tenant and user session context)"),
         ("Autheris.Infrastructure.Persistence.SqlConnectionFactory", "fixed session pinning and hardening statements of a new connection"),
@@ -402,11 +405,18 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.SqlServerGovernanceRepository", "governance store repository and schema bootstrap"),
         ("Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository", "governance store repository and schema bootstrap"),
         ("Autheris.Infrastructure.Persistence.CatalogKeyDefinitionStore", "governance store: declared key/index tables of the three engines (issue #94), fixed statements with bound values, no client text"),
+        ("Autheris.Infrastructure.Persistence.RowFilterEvaluationStore", "governance store: row filter evaluation settings (issue #107), fixed statements with bound values over the three engines, no client text"),
+        ("Autheris.Infrastructure.Persistence.DatasetCatalogStore", "governance store: dataset catalog tags and visibility tier (issue #111), fixed statements with bound values over the three engines, no client text"),
         ("Autheris.Infrastructure.Persistence.Migrations.*", "governance schema migrations (WP-ARC-B-12): fixed DDL and version-table statements, no client text"),
         ("Autheris.Infrastructure.Persistence.SqliteGovernanceConnectionProvider", "governance SQLite connection setup (WP-ARC-B-13): fixed PRAGMA statements with a validated journal-mode token, no client text"),
         ("Autheris.Infrastructure.Persistence.SqliteGovernanceLintSource", "read-only governance store reader of the pre-deploy policy lint"),
         ("Autheris.Infrastructure.Persistence.TenantRegistryStore", "tenant registry table of the governance store"),
         ("Autheris.Infrastructure.Persistence.VirtualFilterStore", "virtual filter table of the governance store"),
+        ("Autheris.Infrastructure.Persistence.CallerAttributeStore", "caller attribute registry tables of the governance store (REQ-GOV-129): fixed statements with bound values, no client text"),
+        ("Autheris.Application.Identity.Attributes.AttributeTableProvider", "caller attribute lookup (REQ-GOV-129 A-5.2): the statement is built by AttributeTableQuery from validated identifiers (^[A-Za-z_][A-Za-z0-9_]{0,127}$, quoted per dialect) with the subject, tenant and issuer bound; no client text"),
+        ("Autheris.Infrastructure.Persistence.AccessProfileStore", "access profile tables of the governance store (WP-SC-03): fixed statements with bound values, only integer-indexed parameter names and enum literals are spliced, no client text"),
+        ("Autheris.Application.Sql.Federation.CoLocation.CoLocationVerificationService", "co-location verification (Issue #132, SEC-DATA132-05): fixed 'SELECT @@SERVERNAME' verification statement on SQL Server connection, no client text"),
+        ("Autheris.Infrastructure.Persistence.ConsumerAggregationStore", "consumer aggregation store (Issue #114, SEC-AUD114-05): fixed rollup statements with bound parameters, no client text"),
     ];
 
     private static bool IsAllowedCommandTextSite(string top) =>
@@ -680,9 +690,9 @@ public sealed class CutoverArchitectureTests
     {
         var graph = BuildCallGraph(ProductionAssemblies);
         graph.Targets.Where(kv => kv.Value.Contains(CompileTarget)).Select(kv => kv.Key.Type)
-            .Distinct().ShouldBe(new[] { "Autheris.Application.Sql.Services.GovernedSqlRewriter" }, ignoreOrder: true);
+            .Distinct().ShouldBe(new[] { "Autheris.Application.Sql.Services.GovernedSqlRewriter", "Autheris.Application.Sql.Federation.Subtrees.SubtreeCompiler" }, ignoreOrder: true);
         graph.Targets.Where(kv => kv.Value.Contains(BinderTarget)).Select(kv => kv.Key.Type)
-            .Distinct().ShouldBe(new[] { "Autheris.Application.Sql.Services.GovernedSqlExecutor" }, ignoreOrder: true);
+            .Distinct().ShouldBe(new[] { "Autheris.Application.Sql.Services.GovernedSqlExecutor", "Autheris.Application.Olap.DuckDbOlapEngine" }, ignoreOrder: true);
     }
 
     // The fixtures of the controls below are top-level types of this (test) assembly, which the production scans never read

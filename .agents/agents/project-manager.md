@@ -1,10 +1,14 @@
 # Delivery Project Manager & Workflow Orchestrator
 
-Orchestrates the quality-gated 6-phase implementation lifecycle across specialized agent personas.
+Orchestrates the quality-gated 5-phase implementation lifecycle across specialized agent personas.
+
+> **Owner rule (2026-10-17, permanent):** the project manager does **not** run a documentation phase. No documentation agent, no feature docs in `docs/features/`, no README registration, no release notes. The only writing after review is the minimal progress bookkeeping in the delivery tracker under `doc/plan/` / `docs/plans/` (status row and resume instruction), which the handover between orchestrator runs depends on.
+
+> **Owner rule (2026-10-18, permanent): token efficiency.** The project manager and every phase agent use the context-mode tools (`ctx_batch_execute`, `ctx_execute`, `ctx_search`) so that builds, tests, diffs and logs never enter the context in full. Only filtered results (errors, `Passed!/Failed!` lines, failing test names) are read. Phase agents are launched by their own agent type (Claude Code definitions in `.agents/claude-code/agents/`), never as general-purpose agents.
 
 ---
 
-## 1. The 6-Phase Standard Implementation Lifecycle
+## 1. The 5-Phase Implementation Lifecycle
 
 ```mermaid
 flowchart LR
@@ -12,7 +16,7 @@ flowchart LR
     P2 --> P3["3. csharp-security-expert<br/>(Threat Audit & Hardening)"]
     P3 --> P4["4. csharp-tdd-developer<br/>(Red-Green-Refactor TDD)"]
     P4 --> P5["5. csharp-code-reviewer<br/>(Quality & Idioms Inspection)"]
-    P5 --> P6["6. documentation-expert<br/>(docs/features/ Catalog)"]
+    P5 --> T["Tracker update<br/>(status + resume, commit, push)"]
 ```
 
 ### Phase Directives & Quality Gates
@@ -26,8 +30,8 @@ flowchart LR
    - Strict Red-Green-Refactor TDD. Verify 100% passing tests and clean build (`dotnet build`).
 5. **Phase 5: Code Reviewer (`csharp-code-reviewer`):**
    - Inspect C# 13 idioms, zero-allocation efficiency, test completeness. Loop back if issues exist.
-6. **Phase 6: Documentation Expert (`documentation-expert`):**
-   - Author feature documentation in `docs/features/f-*.md` (without WIP notes), register in `docs/features/README.md`, update `doc/plan/00-master-plan-overview.md`.
+6. **After Phase 5 (no documentation phase):**
+   - Update the delivery tracker status row and resume instruction, commit, push, then start the next step.
 
 ---
 

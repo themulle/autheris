@@ -6,14 +6,17 @@ using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Services;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Options;
 
 public static class CatalogApiEndpoints
 {
@@ -51,16 +54,32 @@ public static class CatalogApiEndpoints
         .RequireAuthorization()
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
+        // Data sources disclose endpoint base URLs and authentication state: administrators only. A tenant-scoped GovernanceAdmin
+        // is further confined to the tables of its tenant by the service. A GovernanceAdmin without tenant claim in Multi mode is
+        // answered with a stable 403 that names the option instead of a misleading empty list.
         group.MapGet("/datasources", async (
             ICatalogDiscoveryService discoveryService,
+            IOptions<GatewayOptions> gatewayOptions,
             HttpContext httpContext,
             CancellationToken ct) =>
         {
+            var scope = CallerScopeResolver.Resolve(httpContext.User, gatewayOptions.Value.Tenancy.EffectiveMode);
+            if (scope == CallerScope.Claimless && CallerScopeResolver.HoldsGovernanceAdminRole(httpContext.User))
+            {
+                return Results.Json(
+                    new
+                    {
+                        error = "TENANCY_MODE_CLAIMLESS_ADMIN",
+                        message = "The principal has no tenant claim and Gateway:Tenancy:Mode is Multi; single-tenant deployments must set Gateway:Tenancy:Mode=Single."
+                    },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+
             var context = CreateRequestContext(httpContext);
             var datasources = await discoveryService.ListDatasourcesAsync(context, ct);
             return Results.Ok(datasources);
         })
-        .RequireAuthorization()
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         group.MapPost("/datasources", RegisterDatasourceHandler)
@@ -149,46 +168,130 @@ public static class CatalogApiEndpoints
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogKeyDefinitionChanged);
 
+        // Issue #111: dataset tags and catalog visibility tier. RequireAuthorization() only: owners must reach the routes, so the
+        // decision (admin class, owner or delegate, Full only for administrators) is taken inside DatasetCatalogAdminService.
+        MapDatasetCatalogRoutes(group);
+        MapDatasetCatalogRoutes(app.MapGroup("/api/catalog"));
+
+        // Issue #107: object level of the row filter key-set cache strategy (same authorization and dataset resolution as /keys).
+        group.MapGet("/datasets/{id}/row-filter-strategy", GovernanceEndpoints.GetDatasetRowFilterStrategyAsync)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+
+        group.MapPut("/datasets/{id}/row-filter-strategy", GovernanceEndpoints.SetDatasetRowFilterStrategyAsync)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Full, AuditEventTypes.TableRowFilterStrategyChanged);
+
+        group.MapDelete("/datasets/{id}/row-filter-strategy", GovernanceEndpoints.ClearDatasetRowFilterStrategyAsync)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Full, AuditEventTypes.TableRowFilterStrategyChanged);
+
         return app;
     }
 
-    private const int MaxDatasetIdLength = 512;
+    private static void MapDatasetCatalogRoutes(IEndpointRouteBuilder group)
+    {
+        group.MapGet("/datasets/{id}/catalog-settings", GetDatasetCatalogSettingsHandler)
+        .RequireAuthorization()
+        .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+
+        group.MapPut("/datasets/{id}/tags", PutDatasetTagsHandler)
+        .RequireAuthorization()
+        .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogTagsChanged);
+
+        group.MapPost("/datasets/{id}/tags", PostDatasetTagsHandler)
+        .RequireAuthorization()
+        .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogTagsChanged);
+
+        group.MapPut("/datasets/{id}/visibility", PutDatasetVisibilityHandler)
+        .RequireAuthorization()
+        .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogVisibilityChanged);
+    }
+
+    internal static async Task<IResult> GetDatasetCatalogSettingsHandler(
+        string id,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService service,
+        HttpContext httpContext,
+        CancellationToken ct)
+        => MapCatalogResult(await service.GetAsync(httpContext.User, id, ct).ConfigureAwait(false));
+
+    internal static async Task<IResult> PutDatasetTagsHandler(
+        string id,
+        SetDatasetTagsDto? request,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService service,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var edit = request?.Tags is null
+            ? new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, null) { Malformed = true }
+            : new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(request.Tags, null, null, null);
+        return MapCatalogResult(await service.ApplyAsync(httpContext.User, id, edit, "admin", ct).ConfigureAwait(false));
+    }
+
+    internal static async Task<IResult> PostDatasetTagsHandler(
+        string id,
+        ChangeDatasetTagsDto? request,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService service,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var edit = request is null || (request.Add is null && request.Remove is null)
+            ? new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, null) { Malformed = true }
+            : new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, request.Add, request.Remove, null);
+        return MapCatalogResult(await service.ApplyAsync(httpContext.User, id, edit, "admin", ct).ConfigureAwait(false));
+    }
+
+    internal static async Task<IResult> PutDatasetVisibilityHandler(
+        string id,
+        SetDatasetVisibilityDto? request,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService service,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var edit = request?.Visibility is null
+            ? new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, null) { Malformed = true }
+            : new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, request.Visibility);
+        return MapCatalogResult(await service.ApplyAsync(httpContext.User, id, edit, "admin", ct).ConfigureAwait(false));
+    }
+
+    /// <summary>One mapping for all four routes; NotFound has one fixed body so unknown, inactive and non-manageable datasets cannot be told apart (SEC-111-08).</summary>
+    private static IResult MapCatalogResult(Autheris.Application.Governance.Interfaces.DatasetCatalogResult result)
+    {
+        switch (result.Outcome)
+        {
+            case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.Applied:
+            case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.Unchanged:
+                var settings = result.Settings!;
+                return Results.Ok(new DatasetCatalogSettingsDto(
+                    result.Table!.Value.ToString(),
+                    [.. settings.Tags.OrderBy(t => t.Tag, StringComparer.Ordinal).Select(t => new DatasetTagDto(t.Tag, t.Source == DatasetTagSource.Dbt ? "dbt" : "admin"))],
+                    settings.Visibility.ToString(),
+                    result.TierEffective));
+            case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.Forbidden:
+                return Results.Json(new { error = "FORBIDDEN" }, statusCode: StatusCodes.Status403Forbidden);
+            case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidTag:
+                return Results.Json(new { error = "INVALID_TAG" }, statusCode: StatusCodes.Status400BadRequest);
+            case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.TagLimitExceeded:
+                return Results.Json(new { error = "TAG_LIMIT_EXCEEDED" }, statusCode: StatusCodes.Status400BadRequest);
+            case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidVisibility:
+                return Results.Json(new { error = "INVALID_VISIBILITY" }, statusCode: StatusCodes.Status400BadRequest);
+            case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidRequest:
+                return Results.Json(new { error = "INVALID_REQUEST" }, statusCode: StatusCodes.Status400BadRequest);
+            case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.Unavailable:
+                return Results.Json(new { error = "UNAVAILABLE" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+            default:
+                return Results.Json(new { error = "NOT_FOUND" }, statusCode: StatusCodes.Status404NotFound);
+        }
+    }
 
     private static IResult DatasetKeysNotFound() => Results.NotFound(new { error = "Dataset was not found." });
 
-    /// <summary>
-    /// Resolves an active dataset by table id (strict "D" GUID) or by domain.schema.table without loading the whole catalog.
-    /// Unknown and inactive datasets are indistinguishable (SEC-94-15); a dataset with an invalid stored definition resolves (repair).
-    /// </summary>
-    private static async Task<TableIdentifier?> ResolveActiveDatasetAsync(
+    /// <summary>Resolves an active dataset by table id or domain.schema.table (shared with the row filter strategy endpoints).</summary>
+    private static Task<TableIdentifier?> ResolveActiveDatasetAsync(
         string? id,
         Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
         CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(id) || id.Length > MaxDatasetIdLength)
-        {
-            return null;
-        }
-
-        TableIdentifier identifier;
-        if (Guid.TryParseExact(id, "D", out var tableGuid))
-        {
-            var resolved = await metadataRepository.GetActiveTableIdentifierByIdAsync(tableGuid, ct).ConfigureAwait(false);
-            if (resolved is not { } found)
-            {
-                return null;
-            }
-
-            identifier = found;
-        }
-        else if (!TableIdentifier.TryParse(id.Replace('/', '.'), out identifier))
-        {
-            return null;
-        }
-
-        // Catalog row only: the stored key definition is neither loaded nor validated, so an invalid definition can be replaced.
-        return await metadataRepository.GetActiveTableIdentifierAsync(identifier, ct).ConfigureAwait(false);
-    }
+        => Autheris.Application.Governance.Services.DatasetIdResolver.ResolveActiveAsync(id, metadataRepository, ct);
 
     internal static async Task<IResult> SetDatasetKeysHandler(
         string id,
@@ -198,6 +301,12 @@ public static class CatalogApiEndpoints
         HttpContext httpContext,
         CancellationToken ct)
     {
+        if (httpContext.User.GetUserSid() is not { } actorSid)
+        {
+            // Fail closed: a change without an identifiable actor is never written (no placeholder SID in the HMAC-chained audit).
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
         if (request == null)
         {
             return Results.BadRequest(new { error = "Key definition payload is required." });
@@ -247,7 +356,7 @@ public static class CatalogApiEndpoints
         {
             TenantId = EndpointSecurity.GetRequestTenant(httpContext),
             EventType = AuditEventTypes.CatalogKeyDefinitionChanged,
-            ActorSid = httpContext.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+            ActorSid = actorSid,
             TargetTable = tableId.Value.ToString(),
             Decision = "ALLOW",
             TraceId = httpContext.TraceIdentifier,
@@ -337,3 +446,16 @@ public sealed record SetDatasetKeysDto(
     System.Collections.Generic.IReadOnlyList<string>? PrimaryKeyColumns = null,
     System.Collections.Generic.IReadOnlyList<DatasetIndexDto>? Indexes = null);
 
+
+/// <summary>Issue #111 (C-4): replace the admin-source tags of a dataset.</summary>
+public sealed record SetDatasetTagsDto(System.Collections.Generic.IReadOnlyList<string>? Tags);
+
+/// <summary>Issue #111 (C-4): add and remove admin-source tags.</summary>
+public sealed record ChangeDatasetTagsDto(System.Collections.Generic.IReadOnlyList<string>? Add, System.Collections.Generic.IReadOnlyList<string>? Remove);
+
+/// <summary>Issue #111 (C-4): the requested tier name; parsed by the service, never bound to an enum.</summary>
+public sealed record SetDatasetVisibilityDto(string? Visibility);
+
+public sealed record DatasetTagDto(string Tag, string Source);
+
+public sealed record DatasetCatalogSettingsDto(string DatasetId, System.Collections.Generic.IReadOnlyList<DatasetTagDto> Tags, string Visibility, bool TierEffective);

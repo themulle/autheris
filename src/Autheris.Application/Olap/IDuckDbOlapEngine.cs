@@ -19,7 +19,11 @@ public sealed record OlapQueryRequest(
     string Sql,
     IReadOnlyList<OlapTableSource> Sources,
     int? Limit = null,
-    IReadOnlyList<BoundParameter>? Parameters = null);
+    IReadOnlyList<BoundParameter>? Parameters = null,
+    bool CrossSource = false,
+    bool AllowNonEquiJoins = false,
+    CompiledSql? Compiled = null,
+    IReadOnlyDictionary<string, object?>? ClientValues = null);
 
 public sealed record OlapQueryResult(
     IReadOnlyList<string> Columns,
@@ -27,7 +31,11 @@ public sealed record OlapQueryResult(
     int TotalRowCount,
     TimeSpan ExecutionDuration);
 
-public sealed record GeneratedOlapQuery(string Sql, IReadOnlyList<BoundParameter>? Parameters = null);
+public sealed record GeneratedOlapQuery(
+    string Sql,
+    IReadOnlyList<BoundParameter>? Parameters = null,
+    CompiledSql? Compiled = null,
+    IReadOnlyDictionary<string, object?>? ClientValues = null);
 
 public interface IDuckDbOlapEngine : IDisposable
 {

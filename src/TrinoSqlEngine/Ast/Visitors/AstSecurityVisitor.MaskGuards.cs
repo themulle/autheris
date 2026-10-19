@@ -152,10 +152,17 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     private bool IsKnownUnmaskedColumnOfTarget(string normalizedTableName, string colName)
     {
-        var cols = _options.TableColumns(normalizedTableName);
-        return cols != null &&
-               cols.Any(c => c.Equals(colName, StringComparison.OrdinalIgnoreCase)) &&
-               !_options.MaskedColumns.HasMask(normalizedTableName, colName);
+        var cols = CachedColumns(normalizedTableName);   // asked per column reference: cached, and no closure per call
+        if (cols == null)
+            return false;
+
+        for (int i = 0; i < cols.Count; i++)
+        {
+            if (cols[i].Equals(colName, StringComparison.OrdinalIgnoreCase))
+                return !_options.MaskedColumns.HasMask(normalizedTableName, colName);
+        }
+
+        return false;
     }
 
     private void EnsureNoDerivedMaskedColumnReferencesInPredicate(
@@ -222,6 +229,171 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         }
     }
 
+    // Per-compile state of the mask guards. The visitor is single-use and not thread-safe (one instance per compile), so this state is
+    // plain instance fields: cleared on entry by the owner, never static, pooled or held by the engine.
+    // _specTables/_specDerived: owner PrepareSpecSources; valid from there until the recursion into the children of that specification.
+    private readonly List<(string TableName, string? Alias)> _specTables = new();
+    private readonly List<(string SourceName, string? Alias, HashSet<string> MaskedColumns)> _specDerived = new();
+    // _projectionGuardStack: owner EnsureNoMaskedColumnsInAggregatesAndGrouping / EnsureNoWholeRowReferencesInProjections (never nested).
+    // No callee of those loops may touch it; the callees use _maskGuardStack.
+    private Stack<SqlNode>? _projectionGuardStack;
+    private readonly Dictionary<string, bool> _maskingForTable = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IReadOnlyList<string>?> _tableColumnLists = new(StringComparer.Ordinal);
+    // Number of enclosing specifications whose projection guards ran: a nested specification may reference their (masked) columns.
+    private int _maskedScopeDepth;
+
+    private void PrepareSpecSources(QuerySpecification node)
+    {
+        _specTables.Clear();
+        _specDerived.Clear();
+        if (node.From == null ||
+            !(_options.RejectMaskedColumnsInPredicates || _options.RejectMaskedColumnsInAggregates || _options.RejectWholeRowReferencesInSelect))
+        {
+            return;
+        }
+
+        CollectTableSources(node.From, _specTables);
+        CollectDerivedMaskedSources(node.From, _specDerived);
+    }
+
+    /// <summary>
+    /// Runs the aggregate/GROUP BY and whole-row guards for the specification prepared by <see cref="PrepareSpecSources"/>, unless every
+    /// condition for skipping them is positively established. Returns true when the guards ran (the scope may carry masked columns).
+    /// </summary>
+    private bool EnsureProjectionMaskGuards(QuerySpecification node)
+    {
+        if (node.From == null ||
+            !(_options.RejectMaskedColumnsInAggregates || _options.RejectWholeRowReferencesInSelect) ||
+            CanSkipProjectionGuards(node))
+        {
+            return false;
+        }
+
+        EnsureNoMaskedColumnsInAggregatesAndGrouping(node);
+        EnsureNoWholeRowReferencesInProjections(node);
+        return true;
+    }
+
+    /// <summary>
+    /// Fail closed: skip only when no mask can be reachable through the inputs the guards themselves consult. The caller-supplied set must
+    /// be empty, no derived source carries masks, no enclosing specification ran the guards, and the typed provider reports no mask for
+    /// any FROM table (nor for its simple name or alias, which the guards probe as column qualifiers). A failing lookup runs the guard.
+    /// </summary>
+    private bool CanSkipProjectionGuards(QuerySpecification node)
+    {
+        if (_maskedScopeDepth > 0 || _options.TablesWithMaskedColumns.Count > 0 || _specDerived.Count > 0)
+            return false;
+
+        foreach (var (table, alias) in _specTables)
+        {
+            if (MayHaveMask(table) ||
+                MayHaveMask(SqlIdentifierHelper.GetSimpleName(table)) ||
+                (!string.IsNullOrEmpty(alias) && MayHaveMask(alias)))
+            {
+                return false;
+            }
+        }
+
+        return ReferencesStayWithinFromTables(node);
+    }
+
+    /// <summary>
+    /// The guards ask the provider per referenced column and qualifier, so skipping is only sound when every column reference in the
+    /// guarded clauses (projections and GROUP BY, not subqueries) is a known column of a FROM table, reached through a qualifier that
+    /// names a FROM table or alias. Anything else (an unbound or outer qualifier, a column the catalog list does not cover, a table
+    /// without a column list, an alias, a wildcard of another source) runs the guard. Uses _projectionGuardStack: the probe finishes
+    /// before the guards start, and nothing it calls clears or fills a stack.
+    /// </summary>
+    private bool ReferencesStayWithinFromTables(QuerySpecification node)
+    {
+        var stack = _projectionGuardStack ??= new Stack<SqlNode>(64);
+        stack.Clear();
+        PushAll(node.Projections, stack);
+        if (node.GroupBy != null) stack.Push(node.GroupBy);
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+            if (current is SelectStatement) continue;
+            if (current is ColumnReference reference)
+            {
+                if (!IsKnownFromColumn(reference)) return false;
+                continue;
+            }
+
+            if (current is WildcardSelectItem { Qualifier: { } qualifier })
+            {
+                bool matches = false;
+                foreach (var (table, alias) in _specTables)
+                {
+                    if (MatchesWildcardQualifier(qualifier, table, alias)) { matches = true; break; }
+                }
+
+                if (!matches) return false;
+                continue;
+            }
+
+            PushChildren(current, stack);
+        }
+
+        return true;
+    }
+
+    private bool IsKnownFromColumn(ColumnReference reference)
+    {
+        string name = reference.Name.SimpleName;
+        bool qualified = reference.Name.Parts.Count > 1;
+        string? qualifier = qualified ? reference.Name.Parts[^2].Value : null;
+        foreach (var (table, alias) in _specTables)
+        {
+            if (qualified && !IsWholeRowName(qualifier!, table, alias)) continue;
+            var columns = ColumnsOf(table);
+            if (columns == null) continue;
+            for (int i = 0; i < columns.Count; i++)
+            {
+                if (columns[i].Equals(name, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The cached column list of a table; a failing callback propagates (and is not cached).</summary>
+    private IReadOnlyList<string>? CachedColumns(string table)
+    {
+        if (_tableColumnLists.TryGetValue(table, out var columns))
+            return columns;
+
+        columns = _options.TableColumns(table);
+        _tableColumnLists[table] = columns;
+        return columns;
+    }
+
+    private IReadOnlyList<string>? ColumnsOf(string table)
+    {
+        try
+        {
+            return CachedColumns(table);
+        }
+        catch (Exception)
+        {
+            return null;   // intentionally fails toward "the guard runs"
+        }
+    }
+
+    private bool MayHaveMask(string name)
+    {
+        try
+        {
+            return HasMaskingForTable(name);
+        }
+        catch (Exception)
+        {
+            // Intentional catch-all: any failing lookup is uncertainty, and uncertainty must fail toward "the guard runs"
+            // (the guard then meets the same failing lookup itself and throws).
+            return true;
+        }
+    }
+
     private static readonly FrozenSet<string> AggregateFunctionNames = new[]
     {
         "count", "sum", "avg", "min", "max", "every", "any_value", "median", "mode",
@@ -243,10 +415,8 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         if (!_options.RejectMaskedColumnsInAggregates || node.From == null)
             return;
 
-        var tables = new List<(string TableName, string? Alias)>();
-        CollectTableSources(node.From, tables);
-        var derived = new List<(string SourceName, string? Alias, HashSet<string> MaskedColumns)>();
-        CollectDerivedMaskedSources(node.From, derived);
+        var tables = _specTables;
+        var derived = _specDerived;
         if (tables.Count == 0 && derived.Count == 0)
             return;
 
@@ -255,8 +425,10 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             CheckAggregationScope(tables, derived, node.GroupBy);
         }
 
-        var stack = new Stack<SqlNode>(16);
-        foreach (var item in node.Projections) stack.Push(item);
+        // The loop below is live while CheckAggregationScope runs, and that call clears _maskGuardStack: this loop must keep its own stack.
+        var stack = _projectionGuardStack ??= new Stack<SqlNode>(64);
+        stack.Clear();
+        PushAll(node.Projections, stack);
         while (stack.Count > 0)
         {
             var current = stack.Pop();
@@ -300,13 +472,14 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         if (!_options.RejectWholeRowReferencesInSelect || node.From == null)
             return;
 
-        var tables = new List<(string TableName, string? Alias)>();
-        CollectTableSources(node.From, tables);
+        var tables = _specTables;
         if (tables.Count == 0)
             return;
 
-        var stack = new Stack<SqlNode>(16);
-        foreach (var item in node.Projections) stack.Push(item);
+        // Shares _projectionGuardStack with the aggregate guard: the two never nest (this loop calls no method that touches a stack).
+        var stack = _projectionGuardStack ??= new Stack<SqlNode>(64);
+        stack.Clear();
+        PushAll(node.Projections, stack);
         while (stack.Count > 0)
         {
             var current = stack.Pop();

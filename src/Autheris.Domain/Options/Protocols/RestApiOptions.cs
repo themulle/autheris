@@ -2,6 +2,21 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Autheris.Domain.Options;
 
+/// <summary>PLAN-SEC-115: REST read-path switches (startup only; a restart is required).</summary>
+public sealed class RestApiOptions
+{
+    public RestDataEndpointOptions DataEndpoint { get; init; } = new();
+}
+
+/// <summary>
+/// Switch for the REST data family: <c>/api/v1/data/*</c> (GET, change-token, POST changes) and the sample-rows route.
+/// Off means the routes are not mapped (router 404).
+/// </summary>
+public sealed class RestDataEndpointOptions
+{
+    public bool Enabled { get; init; } = true;
+}
+
 public sealed class WebSqlOptions
 {
     // SEC C-01/C-03: WebSQL is opt-in (secure default).
@@ -15,6 +30,14 @@ public sealed class WebSqlOptions
     public int MaxConcurrentSessionsPerUser { get; init; } = 10;
     public int MaxTotalStatementSessions { get; init; } = 1000;
     public int StatementRetentionMinutes { get; init; } = 5;
+
+    /// <summary>REQ-SQL-128: maximum number of distinct values of one list parameter (1..10,000). Clamped per dialect at runtime.</summary>
+    [Range(1, 10_000)]
+    public int MaxListParameterValues { get; init; } = 1000;
+
+    /// <summary>REQ-SQL-128: maximum number of list-valued parameters per request (1..64).</summary>
+    [Range(1, 64)]
+    public int MaxListParameters { get; init; } = 8;
 
     /// <summary>
     /// SEC C-03: Additional data sources (keys of DataSources.Connections) a WebSQL request may target.
@@ -66,9 +89,10 @@ public sealed class CrossSourceOptions
     public bool Enabled { get; init; } = false;
     /// <summary>
     /// Transport opt-in for federated (cross-source) queries. Valid names are the constants of <c>SqlTransports</c>:
-    /// WebSql, Trino, Rest, Mcp, ArrowExport, FlightSql, SqlEndpoints and AsyncJob. When not configured, only WebSql and
-    /// Trino are allowed; every other channel (including AsyncJob) is rejected on federated queries unless listed here.
-    /// An explicitly empty list allows no transport (fail-closed).
+    /// WebSql, Trino, Rest, Mcp, ArrowExport, FlightSql, SqlEndpoints, AsyncJob and Olap; an unknown name aborts the start.
+    /// When not configured, only WebSql and Trino are allowed; every other channel (including AsyncJob and Olap) is rejected
+    /// on federated queries unless listed here. A configured list replaces the default entirely. An explicitly empty list
+    /// allows no transport (fail-closed).
     /// Nullable on purpose: the configuration binder appends to pre-filled lists, so a non-empty default could not be narrowed.
     /// </summary>
     public List<string>? AllowedTransports { get; init; }
@@ -82,9 +106,17 @@ public sealed class CrossSourceOptions
     public int MaxTotalStagedRows { get; init; } = 200000;
     public long MaxStagedBytesPerTable { get; init; } = 32 * 1024 * 1024;
     public long MaxTotalStagedBytes { get; init; } = 128 * 1024 * 1024;
-    public string MaxMemory { get; init; } = "256MB";
-    public string MaxTempDirectorySize { get; init; } = "0B";
     public int TimeoutSeconds { get; init; } = 30;
+
+    /// <summary>
+    /// Issue #123 (SEC-DATA123-04): Maximum number of tables permitted in a single same-source AST subtree pushdown (default 12).
+    /// </summary>
+    public int MaxTablesPerSubtree { get; init; } = 12;
+
+    /// <summary>
+    /// Upper bound (1..16) on parallel source reads. Currently staging reads sources sequentially, which trivially satisfies the bound.
+    /// DuckDB memory and spill limits are configured with <c>Gateway:DuckDbOlap:MaxMemory</c> and <c>MaxTempDirectorySize</c>.
+    /// </summary>
     public int MaxParallelSourceReads { get; init; } = 4;
     public bool AllowNonEquiJoins { get; init; } = false;
 
@@ -103,6 +135,34 @@ public sealed class CrossSourceOptions
 
     /// <summary>Configured <see cref="AllowedHttpAuthModes"/> or the default list.</summary>
     public IReadOnlyList<string> GetEffectiveAllowedHttpAuthModes() => AllowedHttpAuthModes ?? (IReadOnlyList<string>)DefaultAllowedHttpAuthModes;
+
+    /// <summary>Issue #122: Governed WebSQL filter pushdown to remote relational SQL data sources.</summary>
+    public PredicatePushdownOptions PredicatePushdown { get; init; } = new();
+
+    /// <summary>Issue #124: Governed dynamic key-set filters in cross-source WebSQL joins.</summary>
+    public DynamicKeySetOptions DynamicKeySet { get; init; } = new();
+
+    /// <summary>Issue #132 (PLAN-DATA-132): Co-located SQL Server data source execution options.</summary>
+    public CoLocationOptions CoLocation { get; init; } = new();
+}
+
+public sealed class DynamicKeySetOptions
+{
+    public bool Enabled { get; init; } = true;
+    public int MaxKeySetKeys { get; init; } = 2000;
+    public int MaxKeySetBatches { get; init; } = 10;
+    public int MaxKeySetBatchSize { get; init; } = 500;
+}
+
+public sealed class CoLocationOptions
+{
+    public bool Enabled { get; init; } = false;
+}
+
+public sealed class PredicatePushdownOptions
+{
+    public bool Enabled { get; init; } = true;
+    public int MaxInListCount { get; init; } = 1000;
 }
 
 public sealed class SqlEndpointsOptions
@@ -147,6 +207,19 @@ public sealed class ProcedureEndpointsOptions
     [Range(0, 60000)] public int LockTimeoutMs { get; init; } = 5000;
     [Range(1, 100000)] public int MaxRows { get; init; } = 5000;
 
+    /// <summary>
+    /// Upper bound of raw rows one call with an active row filter (consent row scope) may read before the scope is applied.
+    /// Null resolves to <c>Math.Min(10 * MaxRows, 100000)</c> (see <see cref="EffectiveMaxScanRows"/>). It must not be below
+    /// <see cref="MaxRows"/> and not above 100000 (startup validation). Cost: the row scope resolver checks the candidates in
+    /// batches of at most 1000 keys, so a scoped call can cost up to <c>MaxScanRows / 1000</c> resolver round trips (100 at the
+    /// cap) on the procedure connection while the concurrency lease is held; <see cref="MaxResponseBytes"/> keeps bounding the
+    /// raw scan, and exceeding it is a fixed RESPONSE_TOO_LARGE error without a partial answer.
+    /// </summary>
+    [Range(1, 100000)] public int? MaxScanRows { get; init; }
+
+    /// <summary>Effective raw scan cap: <c>MaxScanRows ?? Math.Min(10 * MaxRows, 100000)</c> (overflow-safe).</summary>
+    public int EffectiveMaxScanRows => MaxScanRows ?? (int)Math.Min(10L * MaxRows, 100000L);
+
     /// <summary>R-SQL-8: response budget of one procedure call (estimated JSON size; binary values count as Base64).</summary>
     [Range(1024, 104857600)] public long MaxResponseBytes { get; init; } = 10485760;
     [Range(1, 1000000)] public int MaxStringParameterLength { get; init; } = 4000;
@@ -160,4 +233,11 @@ public sealed class ProcedureEndpointsOptions
     /// outputs are governed with the consent column rules of the result table.
     /// </summary>
     public bool AllowDeclaredValidation { get; init; } = false;
+
+    /// <summary>
+    /// INC-2 D-8 / SEC-PROC152I2-13: whether <c>validation: declared</c> declarations must carry <c>integrity.ddl_hash</c>.
+    /// Null resolves to required in every environment except exactly <c>Development</c> (Staging, Production, unknown and
+    /// missing environment names: required). A missing hash is then rejected; otherwise it only logs a warning on every (re)load.
+    /// </summary>
+    public bool? RequireDdlHashForDeclared { get; init; }
 }

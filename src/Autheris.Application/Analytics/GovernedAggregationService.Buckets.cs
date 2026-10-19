@@ -312,6 +312,45 @@ public sealed partial class GovernedAggregationService
         IReadOnlyList<AggregateSelection> aggregates,
         TableMetadata metadata)
     {
+        var totals = ComputeDifferencingSafeTotalsCore(survivingBuckets, aggregates, metadata);
+
+        // WP-0 (SEC-112-07): when a merged OTHER row is part of the visible set, the totals must not expose the extremes, the distinct count
+        // or the average of the merged small groups either (a size-1 group can be exactly the global minimum or maximum).
+        return survivingBuckets.Any(b => b.IsMergedOther) ? WithoutNonMergeableValues(totals, aggregates) : totals;
+    }
+
+    private static bool IsNonMergeable(AggregateFunction function) =>
+        function is AggregateFunction.Min or AggregateFunction.Max or AggregateFunction.CountDistinct or AggregateFunction.Avg;
+
+    /// <summary>
+    /// A merged <c>OTHER</c> row is built from groups below the minimum size. <c>MIN</c>, <c>MAX</c>, <c>COUNT_DISTINCT</c> and <c>AVG</c> of such a union
+    /// are not safe to publish (the extreme of the union can be the value of a single suppressed row), so they are returned as <c>null</c>.
+    /// The raw rows stay on the bucket for the differencing-safe totals.
+    /// </summary>
+    private static ComputedBucket WithoutNonMergeableValues(ComputedBucket bucket, IReadOnlyList<AggregateSelection> aggregates) =>
+        bucket with { Aggregates = NullNonMergeable(bucket.Aggregates, aggregates), Avg = EmptyValues(), Min = EmptyValues(), Max = EmptyValues() };
+
+    private static AggregationGroupRow WithoutNonMergeableValues(AggregationGroupRow row, IReadOnlyList<AggregateSelection> aggregates) =>
+        row with { Aggregates = NullNonMergeable(row.Aggregates, aggregates), Avg = EmptyValues(), Min = EmptyValues(), Max = EmptyValues() };
+
+    private static Dictionary<string, object?> EmptyValues() => new(StringComparer.OrdinalIgnoreCase);
+
+    private static Dictionary<string, object?> NullNonMergeable(IReadOnlyDictionary<string, object?> source, IReadOnlyList<AggregateSelection> aggregates)
+    {
+        var values = new Dictionary<string, object?>(source, StringComparer.OrdinalIgnoreCase);
+        foreach (var agg in aggregates.Where(a => IsNonMergeable(a.Function)))
+        {
+            values[agg.EffectiveAlias] = null;
+        }
+
+        return values;
+    }
+
+    private static AggregationGroupRow ComputeDifferencingSafeTotalsCore(
+        IReadOnlyList<ComputedBucket> survivingBuckets,
+        IReadOnlyList<AggregateSelection> aggregates,
+        TableMetadata metadata)
+    {
         var emptyKey = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         if (survivingBuckets.Count == 0)
         {
@@ -352,6 +391,22 @@ public sealed partial class GovernedAggregationService
         return MergePreAggregatedBuckets(emptyKey, survivingBuckets, aggregates, isMergedOther: false).ToGroupRow();
     }
 
+    internal static int ResolveEffectiveMinGroupSize(TableMetadata metadata, AggregationQuery query, int defaultMinGroupSize = 1)
+    {
+        int resolved = defaultMinGroupSize;
+        if (metadata.EffectiveMinGroupSize.HasValue)
+        {
+            resolved = Math.Max(resolved, metadata.EffectiveMinGroupSize.Value);
+        }
+
+        if (query.MinGroupSizeOverride.HasValue)
+        {
+            resolved = Math.Max(resolved, query.MinGroupSizeOverride.Value);
+        }
+
+        return Math.Max(1, resolved);
+    }
+
     private int ResolveEffectiveMinGroupSize(AggregationQuery query, TableMetadata metadata)
     {
         int resolved = _hasExplicitAnalyticsOptions
@@ -376,30 +431,26 @@ public sealed partial class GovernedAggregationService
             }
         }
 
-        if (metadata.EffectiveMinGroupSize.HasValue)
-        {
-            resolved = _hasExplicitAnalyticsOptions
-                ? Math.Max(resolved, metadata.EffectiveMinGroupSize.Value)
-                : metadata.EffectiveMinGroupSize.Value;
-        }
-
-        if (query.MinGroupSizeOverride.HasValue)
-        {
-            resolved = metadata.EffectiveMinGroupSize.HasValue
-                ? Math.Max(resolved, query.MinGroupSizeOverride.Value)
-                : query.MinGroupSizeOverride.Value;
-        }
-
-        return Math.Max(1, resolved);
+        // WP-0 (SEC-112-02): every lower-trust source (table metadata, a manifest metric or measure, a request) may only RAISE the
+        // floor resolved from the operator configuration; none of them can lower it.
+        return ResolveEffectiveMinGroupSize(metadata, query, resolved);
     }
 
     private SmallGroupStrategy ResolveEffectiveSmallGroupStrategy(AggregationQuery query, TableMetadata metadata)
     {
-        if (query.SmallGroupStrategyOverride.HasValue)
+        var configured = ResolveConfiguredSmallGroupStrategy(query, metadata);
+
+        // WP-0 (SEC-112-02): a request or manifest override may not weaken the configured strategy; suppression is stricter than merging.
+        if (query.SmallGroupStrategyOverride.HasValue && configured != SmallGroupStrategy.Suppress)
         {
             return query.SmallGroupStrategyOverride.Value;
         }
 
+        return configured;
+    }
+
+    private SmallGroupStrategy ResolveConfiguredSmallGroupStrategy(AggregationQuery query, TableMetadata metadata)
+    {
         if (metadata.EffectiveSmallGroupStrategy.HasValue)
         {
             return metadata.EffectiveSmallGroupStrategy.Value;

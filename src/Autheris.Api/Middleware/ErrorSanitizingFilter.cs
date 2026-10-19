@@ -36,7 +36,20 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "COLUMN_NOT_RELEASED",
         "FILTER_ON_MASKED_COLUMN",
         "COST_LIMIT",
-        "ROW_LIMIT"
+        "ROW_LIMIT",
+        // Issue #107: fixed message without table or rule names (SEC-RF107-08).
+        "ROW_FILTER_KEY_SET_UNAVAILABLE",
+        // WP-0 (PLAN-GOV-113): fixed messages without ids or names; expected business outcomes, not server faults.
+        "DECISION_NOT_PERMITTED",
+        "ACCESS_REQUEST_NOT_PENDING",
+        "READ_ONLY_TOKEN"
+    };
+
+    private static readonly HashSet<string> ExpectedOutcomeCodes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "DECISION_NOT_PERMITTED",
+        "ACCESS_REQUEST_NOT_PENDING",
+        "READ_ONLY_TOKEN"
     };
 
     private static readonly string[] SensitivePatterns =
@@ -83,7 +96,12 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         }
 
         // In non-development (Staging, QA, Production):
-        if (error.Exception != null)
+        if (error.Exception != null && error.Code != null && ExpectedOutcomeCodes.Contains(error.Code))
+        {
+            // A refused or lost decision is a normal outcome: no Error entry (the denial itself is audited by the resolver).
+            _logger.LogInformation("GraphQL request refused [{Code}].", error.Code);
+        }
+        else if (error.Exception != null)
         {
             _logger.LogError(error.Exception, "GraphQL Execution Error [{Code}]: {Message}", error.Code, error.Message);
         }

@@ -264,6 +264,11 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
             {
                 using (batch)
                 {
+                    if (batch.Length == 0)
+                    {
+                        continue;   // an empty result carries no column data
+                    }
+
                     var column = batch.Column("id");
                     for (int i = 0; i < batch.Length; i++)
                     {
@@ -290,6 +295,24 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
         /// <summary>Virtual filters, phase 7: the same filter written as a sql definition (predicate with target).</summary>
         protected virtual bool UseSqlDefinition => false;
 
+        /// <summary>Issue #107: the key-set cache strategy is the global default and the data source carries the operator attestation.</summary>
+        protected virtual bool UseKeySetCache => false;
+
+        /// <summary>Hook for variants: more tables and rows in the SQLite source (called after the base data was written).</summary>
+        protected virtual void SeedExtraData(SqliteConnection connection) { }
+
+        /// <summary>Hook for variants: more host settings (called after the base settings were applied).</summary>
+        protected virtual void ConfigureHost(IWebHostBuilder builder) { }
+
+        /// <summary>The caller of <see cref="Client"/> (default: David). Variants that compare callers set it before a channel call; the tests of one class run one after the other.</summary>
+        public string CallerSid { get; set; } = DavidSid;
+
+        /// <summary>More test headers for <see cref="Client"/> (for example an application-only caller).</summary>
+        public Dictionary<string, string> ExtraHeaders { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Hook for variants: more governance records (called after the base records were written).</summary>
+        protected virtual Task SeedExtraGovernanceAsync(IGovernanceRepository repo) => Task.CompletedTask;
+
         public const string DavidSid = "S-1-5-21-LWE-DAVID";
         public const string Tenant = "tenant_parity";
 
@@ -308,6 +331,12 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
             Directory.CreateDirectory(queriesDir);
             var dbPath = Path.Combine(_workDir, "data.db");
             SeedData(dbPath);
+            using (var extra = new SqliteConnection($"Data Source={dbPath}"))
+            {
+                extra.Open();
+                SeedExtraData(extra);
+            }
+
             ExpectedIds = ComputeExpected(dbPath);
 
             File.WriteAllText(Path.Combine(queriesDir, "air1_ids.sql"),
@@ -324,6 +353,12 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
                 b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
                 b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={dbPath}");
 
+                if (UseKeySetCache)
+                {
+                    b.UseSetting("Gateway:RowFilters:KeySetCache:DefaultStrategy", "KeySetCache");
+                    b.UseSetting("Gateway:DataSources:Connections:default:KeySetCacheAllowed", "true");
+                }
+
                 b.UseSetting("Gateway:WebSql:Enabled", "true");
                 b.UseSetting("Gateway:WebSql:DefaultDataSourceName", "default");
 
@@ -334,6 +369,7 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
 
                 b.UseSetting("Gateway:Mcp:Enabled", "true");
                 b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
+                ConfigureHost(b);
             });
 
             await SeedGovernanceAsync();
@@ -351,9 +387,14 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
         public HttpClient Client()
         {
             var client = _factory!.CreateClient();
-            client.DefaultRequestHeaders.Add("X-Test-User-Sid", DavidSid);
+            client.DefaultRequestHeaders.Add("X-Test-User-Sid", CallerSid);
             client.DefaultRequestHeaders.Add("X-Test-Roles", "Reader");
             client.DefaultRequestHeaders.Add("X-Test-Tenant", Tenant);
+            foreach (var (name, value) in ExtraHeaders)
+            {
+                client.DefaultRequestHeaders.Add(name, value);
+            }
+
             return client;
         }
 
@@ -421,6 +462,19 @@ WHERE EXISTS (SELECT 1 FROM client c JOIN crane k ON k.serial_number = c.crane_s
             return ids;
         }
 
+        protected static async Task<TableMetadata> RegisterTableAsync(IGovernanceRepository repo, TableIdentifier id, params (string Name, string Type)[] columns)
+        {
+            await repo.UpsertTableMetadataAsync(new TableMetadata
+            {
+                Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = id.Schema, SourceType = "Sqlite", SourceName = "default" },
+                Identifier = id,
+                Columns = columns.Select(c => new TableColumn { ColumnName = c.Name, DataType = c.Type }).ToList()
+            });
+            return (await repo.GetTableMetadataAsync(id))!;
+        }
+
+        protected IServiceProvider Services => _factory!.Services;
+
         private async Task SeedGovernanceAsync()
         {
             using var scope = _factory!.Services.CreateScope();
@@ -449,6 +503,8 @@ WHERE EXISTS (SELECT 1 FROM client c JOIN crane k ON k.serial_number = c.crane_s
             {
                 await SeedConsentRowFilterAsync(repo, air1, client);
             }
+
+            await SeedExtraGovernanceAsync(repo);
 
             var relations = scope.ServiceProvider.GetRequiredService<ITableRelationRepository>();
             await relations.CreateRelationAsync(new TableRelation
@@ -541,12 +597,12 @@ WHERE EXISTS (SELECT 1 FROM client c JOIN crane k ON k.serial_number = c.crane_s
             await repo.CreateConsentAsync(Consent(client, ClientTable, []));
         }
 
-        private static Consent Consent(TableMetadata meta, TableIdentifier id, IReadOnlyList<ConsentRowFilter> rowFilters) => new()
+        protected static Consent Consent(TableMetadata meta, TableIdentifier id, IReadOnlyList<ConsentRowFilter> rowFilters, ConsentEffect effect = ConsentEffect.Allow) => new()
         {
             TableId = meta.Table.Id,
             TableIdentifier = id,
             TenantId = new TenantId(Tenant),
-            Effect = ConsentEffect.Allow,
+            Effect = effect,
             GranteeType = GranteeType.User,
             GranteeSid = new Sid(DavidSid),
             ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),

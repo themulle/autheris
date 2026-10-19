@@ -9,6 +9,7 @@ using Autheris.Application.Mcp.Tools;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
@@ -19,16 +20,58 @@ public sealed class McpToolRegistry : IMcpToolRegistry
 {
     private readonly ConcurrentDictionary<string, McpToolDefinition> _tools = new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly IReadPathSwitches? _switches;
+    private readonly ILogger<McpToolRegistry>? _logger;
+
     /// <param name="demoData">Without a switch (direct construction) the demo tools are registered, as before.</param>
-    public McpToolRegistry(IOptions<GatewayOptions>? options = null, IDemoDataSwitch? demoData = null)
+    /// <param name="switches">PLAN-SEC-115: without switches (direct construction) every tool is registered, as before.</param>
+    public McpToolRegistry(
+        IOptions<GatewayOptions>? options = null,
+        IDemoDataSwitch? demoData = null,
+        IReadPathSwitches? switches = null,
+        ILogger<McpToolRegistry>? logger = null)
     {
+        // C-115-3: the switches must be assigned before the default tools are registered, or the filter would not apply to them.
+        _switches = switches;
+        _logger = logger;
         var mcpOpts = options?.Value.Mcp;
         InitializeDefaultTools(mcpOpts?.AllowedOperations, demoData?.Enabled ?? true);
     }
 
+    /// <summary>
+    /// Registers a tool. A tool registered after the built-in initialisation (GraphQL discovery, <c>Mcp:AllowedOperations</c>) is
+    /// dynamic and belongs to the <c>Query</c> group by origin, whatever its name; a dynamic tool whose name collides with a
+    /// built-in tool is refused instead of overwriting it (PLAN-SEC-115 C-115-3).
+    /// </summary>
     public void RegisterTool(McpToolDefinition tool)
     {
         ArgumentNullException.ThrowIfNull(tool);
+
+        if (McpToolGroups.IsKnownBuiltIn(tool.Name))
+        {
+            _switches?.RecordDropped(tool.Name);
+            _logger?.LogWarning("Refused the registration of a dynamic MCP tool that collides with a built-in tool name.");
+            return;
+        }
+
+        if (_switches is not null && !_switches.IsToolEnabled(tool.Name))
+        {
+            _switches.RecordDropped(tool.Name);
+            _logger?.LogDebug("A dynamic MCP tool was not registered because its group or name is switched off by configuration.");
+            return;
+        }
+
+        _tools[tool.Name] = tool;
+    }
+
+    /// <summary>Registers a built-in tool (group taken from the name table); a switched-off tool is skipped.</summary>
+    private void RegisterBuiltIn(McpToolDefinition tool)
+    {
+        if (_switches is not null && !_switches.IsToolEnabled(tool.Name))
+        {
+            return;
+        }
+
         _tools[tool.Name] = tool;
     }
 
@@ -48,7 +91,7 @@ public sealed class McpToolRegistry : IMcpToolRegistry
         // 1./2. Demo tools (Query Customers, Query Invoices) on the demo catalog: only with demo data enabled
         if (includeDemoTools)
         {
-        RegisterTool(new McpToolDefinition(
+        RegisterBuiltIn(new McpToolDefinition(
             Name: "query_customers",
             Description: "Queries customer records with automatic PII masking and tenant isolation.",
             InputJsonSchema: """
@@ -65,7 +108,7 @@ public sealed class McpToolRegistry : IMcpToolRegistry
         ));
 
         // 2. Built-in tool: Query Invoices
-        RegisterTool(new McpToolDefinition(
+        RegisterBuiltIn(new McpToolDefinition(
             Name: "query_invoices",
             Description: "Queries enterprise financial invoices and billing lines with ABAC authorization.",
             InputJsonSchema: """
@@ -83,7 +126,7 @@ public sealed class McpToolRegistry : IMcpToolRegistry
         }
 
         // 3. Built-in tool: Query Data Catalog Metadata
-        RegisterTool(new McpToolDefinition(
+        RegisterBuiltIn(new McpToolDefinition(
             Name: "query_data_catalog",
             Description: "Inspects enterprise data catalog assets, classifications, and data stewards.",
             InputJsonSchema: """
@@ -99,7 +142,7 @@ public sealed class McpToolRegistry : IMcpToolRegistry
         ));
 
         // 4. Built-in tool: simulate_query (F-AI-04 Pre-Flight AST Simulator & Token Guard)
-        RegisterTool(new McpToolDefinition(
+        RegisterBuiltIn(new McpToolDefinition(
             Name: "simulate_query",
             Description: "Simulates an enterprise GraphQL query AST to calculate estimated rows, DB scan bytes, and token volume before execution.",
             InputJsonSchema: """
@@ -115,7 +158,7 @@ public sealed class McpToolRegistry : IMcpToolRegistry
         ));
 
         // 5. Built-in tool: get_golden_queries (F-AI-03 Dynamic Few-Shot Golden Query Injection)
-        RegisterTool(new McpToolDefinition(
+        RegisterBuiltIn(new McpToolDefinition(
             Name: "get_golden_queries",
             Description: "Retrieves curated golden queries and verified few-shot query patterns to prevent LLM hallucinations on complex schemas.",
             InputJsonSchema: """
@@ -131,27 +174,27 @@ public sealed class McpToolRegistry : IMcpToolRegistry
         ));
 
         // 6. Built-in dataset tools: catalog discovery and governed sample rows
-        foreach (var datasetTool in McpDatasetTools.Definitions())
+        foreach (var datasetTool in McpDatasetTools.Definitions(_switches))
         {
-            RegisterTool(datasetTool);
+            RegisterBuiltIn(datasetTool);
         }
 
         // 7. Built-in admin tools: access planning, apply, datasource registration, etc.
         foreach (var adminTool in McpAdminTools.Definitions())
         {
-            RegisterTool(adminTool);
+            RegisterBuiltIn(adminTool);
         }
 
         // 8. Built-in doc tools: offline documentation and runbook MCP gateway (F-AI-15, F-AI-16)
         foreach (var docTool in McpDocTools.Definitions())
         {
-            RegisterTool(docTool);
+            RegisterBuiltIn(docTool);
         }
 
         // 9. Built-in semantic layer tools: list_metrics, describe_metric, query_metrics (F-DBT-07 / #38)
         foreach (var semanticTool in McpSemanticTools.Definitions())
         {
-            RegisterTool(semanticTool);
+            RegisterBuiltIn(semanticTool);
         }
 
         // Register any explicitly declared operations

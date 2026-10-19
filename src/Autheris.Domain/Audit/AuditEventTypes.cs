@@ -27,6 +27,7 @@ public static class AuditEventTypes
     public const string WebSqlQueryDenied = "WEBSQL_QUERY_DENIED";
     public const string WebSqlCrossSourceQuery = "WEBSQL_CROSS_SOURCE_QUERY";
     public const string WebSqlCrossSourceSourceRead = "WEBSQL_CROSS_SOURCE_SOURCE_READ";
+    public const string WebSqlCrossSourceSubtreeRead = "WEBSQL_CROSS_SOURCE_SUBTREE_READ";
     public const string WebSqlDmlExecuted = "WEBSQL_DML_EXECUTED";
     public const string WebSqlDmlRejected = "WEBSQL_DML_REJECTED";
     public const string WebSqlDmlFailed = "WEBSQL_DML_FAILED";
@@ -59,6 +60,13 @@ public static class AuditEventTypes
     // Catalog definition changes (Tier A, issue #94 SEC-94-06): declared primary key / index replacement with before and after.
     public const string CatalogKeyDefinitionChanged = "CATALOG_KEY_DEFINITION_CHANGED";
 
+    // Catalog visibility and tag changes (Tier A, issue #111): before/after, actor and source.
+    public const string CatalogVisibilityChanged = "CATALOG_VISIBILITY_CHANGED";
+    public const string CatalogTagsChanged = "CATALOG_TAGS_CHANGED";
+
+    // Issue #111 (A-9): aggregated count of probe attempts on datasets the caller cannot manage (one entry per principal and window).
+    public const string CatalogProbeSuppressed = "CATALOG_PROBE_SUPPRESSED";
+
     // System Lifecycle
     public const string ServiceStarted = "SERVICE_STARTED";
     public const string ServiceStopped = "SERVICE_STOPPED";
@@ -69,7 +77,9 @@ public static class AuditEventTypes
     public const string ConsentGranted = "CONSENT_GRANTED";
     public const string ConsentDenied = "CONSENT_DENIED";
     public const string ConsentRevoked = "CONSENT_REVOKED";
+    public const string ConsentWithdrawn = "CONSENT_WITHDRAWN";
     public const string ConsentApplied = "CONSENT_APPLIED";
+    public const string ConsentDescriptionChanged = "CONSENT_DESCRIPTION_CHANGED";
     public const string ProfileInvalidationFailed = "PROFILE_INVALIDATION_FAILED";
     public const string BreakGlassActivated = "BREAK_GLASS_ACTIVATED";
 
@@ -111,5 +121,17 @@ public static class AuditEventTypes
     // Zero-Read Query Analysis & Metadata Synthetic Sample (#79, #80)
     public const string MetadataSyntheticSample = "METADATA_SYNTHETIC_SAMPLE";
     public const string QueryAnalysisEvaluated = "QUERY_ANALYSIS_EVALUATED";
+
+    // Row filter key-set cache strategy administration (#107)
+    public const string RowFilterEvaluationChanged = "ROW_FILTER_EVALUATION_CHANGED";
+    public const string TableRowFilterStrategyChanged = "TABLE_ROW_FILTER_STRATEGY_CHANGED";
+
+    // Caller attribute registry administration (#129; four-eyes steps carry hashes only, never values)
+    public const string CallerAttributeDefinitionPending = "CALLER_ATTRIBUTE_DEFINITION_PENDING";
+    public const string CallerAttributeDefinitionApplied = "CALLER_ATTRIBUTE_DEFINITION_APPLIED";
+    public const string CallerAttributeDefinitionRejected = "CALLER_ATTRIBUTE_DEFINITION_REJECTED";
+    public const string CallerAttributeDefinitionDeleted = "CALLER_ATTRIBUTE_DEFINITION_DELETED";
+    public const string CallerAttributeServiceSetChanged = "CALLER_ATTRIBUTE_SERVICE_SET_CHANGED";
+    public const string CallerAttributeSimulationRead = "CALLER_ATTRIBUTE_SIMULATION_READ";
 }
 

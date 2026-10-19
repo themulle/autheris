@@ -115,6 +115,7 @@ public static class GatewayStorageServiceExtensions
         // admitted to WebSQL (SqlDialectMapper.IsExecutable, S-4) until a green G9 run.
         services.AddDatabricksStatementExecution();
         services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
+        services.AddSingleton<ISqlSourceDescriber, Autheris.Infrastructure.Persistence.SqlSourceDescriber>();
         // SEC-X1-10: SQLite statements are interrupted at the execution timeout and on cancellation.
         services.AddSingleton<Autheris.Application.Sql.Interfaces.IProviderExecutionGuard, SqliteProviderExecutionGuard>();
 

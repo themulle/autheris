@@ -62,11 +62,19 @@ Ad-hoc SQL queries are compiled by the governed AST compiler ([F-DIALECT-02](f-d
 - **ANTLR4 AST Parsing**: Strict Trino syntax validation and rewriting.
 - **Dynamic Policy Injection**: RLS clauses (`WHERE ... AND tenant_id = '...'`) and column masking applied deterministically per tenant and user identity.
 - **Zero-Trust Multi-Tenancy**: Statement continuation via statement ID validates that calling user and tenant match the query creator (fail-closed).
-- **Protection Against Cross-Catalog Queries**: Queries spanning multiple different catalogs/data sources are rejected to enforce isolation boundaries.
+- **Cross-Catalog Queries Only Through the Federated Path**: With `Gateway:WebSql:CrossSource:Enabled = false` (default), a query that spans several catalogs/data sources, or reads a non-SQL table, is rejected (`Cross-catalog queries across multiple data sources are not supported in WebSQL.`). With `Enabled = true` and an allowed transport, such a query is routed to the federated path described below instead of the single-source pushdown.
 
 ### Federated Query Transport Opt-In (`WebSql:CrossSource:AllowedTransports`)
 
 Federated queries that span several data sources are only available when `Gateway:WebSql:CrossSource:Enabled` is true, and only for transports that are explicitly listed in `Gateway:WebSql:CrossSource:AllowedTransports`. Valid names are the constants of `SqlTransports`: `WebSql`, `Trino`, `Rest`, `Mcp`, `ArrowExport`, `FlightSql`, `SqlEndpoints` and `AsyncJob`. When nothing is configured, only `WebSql` and `Trino` are allowed. Every other channel is rejected on federated queries (generic "not supported" response) unless its name is listed. WebSQL itself is part of the default list; other channels that run federated queries (`Rest`, `Mcp`, `ArrowExport`, `FlightSql`, `SqlEndpoints`, `AsyncJob`) must be opted in. An explicitly empty list allows no transport at all (fail-closed). A configured list replaces the default; it is not merged with it.
+
+#### How federated queries read their sources
+
+The federated path stages every referenced table into an embedded DuckDB and runs the query there:
+
+- Each table is read through the governed reader of its source with the caller's row filter, masking and the arguments of mandatory Virtual Filters. **The predicates of the query itself (`WHERE`, `ON`) are not pushed to the sources**; they are evaluated in DuckDB after staging.
+- A table is therefore staged with all rows the caller may see, regardless of how selective the query is. Staging is bounded per query by `Gateway:WebSql:CrossSource`: `MaxTableCount` (default 5 tables), `MaxStagedRowsPerTable` (50,000), `MaxTotalStagedRows` (200,000), `MaxStagedBytesPerTable` (32 MiB) and `MaxTotalStagedBytes` (128 MiB). A table above `MaxStagedRowsPerTable` fails the query with `ROW_LIMIT_EXCEEDED`, the total row limit with `TOTAL_ROW_LIMIT_EXCEEDED`; results are never truncated silently.
+- Joins, aggregation and functions run with DuckDB semantics (for example case-sensitive string comparison), not with the collation of the source.
 
 ```json
 {

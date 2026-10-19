@@ -29,8 +29,10 @@ Autheris provides a transport-neutral **Governed Aggregation Engine** (`IGoverne
 
 ```mermaid
 flowchart LR
-    Client["GraphQL / REST / MCP Client"] --> Endpoint["AnalyticsEndpoints / GraphQL"]
+    Client["REST / MCP Client"] --> Endpoint["AnalyticsEndpoints"]
+    GqlClient["GraphQL Client"] --> GqlField["&lt;table&gt;_aggregate<br/>(count only)"]
     Endpoint --> Service["GovernedAggregationService"]
+    GqlField --> Service
     Service --> Policy["ITableAccessPolicy<br/>(Consent, RLS, Column Masks)"]
     Service --> Cost["AggregationCostCalculator"]
     Service --> Planner["GovernedTableReadPlanner.PlanAggregate"]
@@ -125,10 +127,28 @@ Authorization: Bearer <token>
 }
 ```
 
+### 4.2 GraphQL Aggregate Field (`<table>_aggregate`) - Scope
+
+The catalog-based GraphQL schema exposes `<table>_aggregate` for every table. It uses the same `GovernedAggregationService`, so row-level security, masked column rejection, the k-anonymity guard and the privacy budget apply identically. Its capabilities are deliberately narrower than the REST endpoint:
+
+- **Aggregate function:** only `COUNT`. `SUM`, `AVG`, `MIN`, `MAX` and `COUNT DISTINCT` are not available through GraphQL.
+- **Arguments:** `groupBy` (list of column names), `where` (a SQL-style filter expression passed as a string, not the typed `<table>_filter` input) and `limit` (default 100).
+- **Result type `AutherisAggregationResult`:** `count` (grand total), the guard metadata (`suppressed`, `suppressedGroupsCount`, `suppressedRowsCount`, `minimumGroupSize`, `mergedIntoOther`, `truncated`, `noiseApplied`) and `groupsJson`, a list of strings in which each group is serialized as a JSON document.
+
+Full aggregation (multiple aggregate functions, ordering, typed filters, structured group rows) is available only through `POST /api/v1/analytics/aggregate` (section 4.1).
+
 ---
 
 ## 5. Security, Zero-Trust & Fail-Closed Behavior
 
+- **Operator Floor Is a Minimum:** The effective minimum group size is the maximum of `Privacy.DefaultMinGroupSize`, `TableMinimumGroupSizes`, the dataset override, the table's `MinGroupSize` and any caller- or manifest-supplied value. A manifest metric/measure `min_group_size` or a request override can only raise $k$, never lower it. In the same way a request or manifest `SmallGroupStrategyOverride` cannot weaken the configured strategy: when the configured strategy is `Suppress`, the override is ignored.
+- **Fixed Denial Message:** A denied table answers with the fixed message `Access denied.` (`FORBIDDEN`); the table name and the denial reasons are written to the audit entry only. The merged `OTHER` row keeps `null` for `COUNT_DISTINCT` and `AVG` also when noise is enabled.
+- **Uniform Column Errors (`AGGREGATION_COLUMN_UNAVAILABLE`):** A column that does not exist and a column the caller may not read (`Deny`) are rejected with the same exception type, error code, message and audit reason, in `groupBy`, aggregate arguments, `where` and `orderBy`. REST answers `403`, GraphQL and MCP carry the code `AGGREGATION_COLUMN_UNAVAILABLE`. The message never contains the requested name, so the response is no existence oracle. Masked columns keep their own code `AGGREGATION_ON_MASKED_COLUMN`.
+- **Complete Filter Column Check:** The `where` clause is checked against deny and mask rules for every identifier of its text, in addition to the column set that travels with the clause. This also holds when a clause is combined with a semantic metric filter.
+- **Row Cap Fails Closed (`AGGREGATION_ROW_CAP_EXCEEDED`):** The in-memory aggregation branches read at most 100,000 rows. A read that reaches that number is rejected (REST `400`) instead of returning an aggregate over a truncated prefix. Narrow the filter or aggregate through a smaller dataset.
+- **Merged `OTHER` Row Withholds Non-Mergeable Values:** The merged `OTHER` row and, when an `OTHER` row is present, the totals row return `null` for `MIN`, `MAX`, `COUNT_DISTINCT` and `AVG`. The extreme of a union of small groups can be the value of one suppressed row. `COUNT` and `SUM` stay available.
+- **`suppressedRowsCount` Gating:** `metadata.suppressedRowsCount` is `0` unless `Privacy.ExposeSuppressedGroupsCount` is `true` and noise is disabled; with one suppressed group it would otherwise be that group's exact size. The audit entry always keeps the true values.
+- **Differential Privacy Noise Rules (`Privacy.Noise.Enabled = true`):** Two aggregates with the same function over the same column in one call are rejected, `MIN` and `MAX` are rejected (they are not noised), both with error code `AGGREGATION_ARGUMENT_INVALID`. The budget is charged `Epsilon x (number of noised column aggregates + 1)` per call (the `+ 1` is the row count). Noise is applied before ordering and the `limit` cut, so order and cut follow the noised values.
 - **Masked Column Protection (`AGGREGATION_ON_MASKED_COLUMN`):** Columns subject to dynamic masking cannot be aggregated or grouped on, preventing statistical reconstruction of masked PII or financial fields.
 - **Post-Filter Cardinality Enforcement:** Group sizes are always evaluated after caller RLS filters, mandatory virtual filters, and user-supplied `where` clauses. Narrowing a query with a specific filter that reduces a bucket below $k$ rows suppresses the bucket.
 - **Merge-Into-Other Secondary Floor:** Under `SmallGroupStrategy.MergeIntoOther`, if the combined `"OTHER"` bucket itself contains fewer than $k$ rows, the `"OTHER"` bucket is also suppressed so single-group remainders cannot be inferred.

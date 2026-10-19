@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Mcp;
 
+using Autheris.Tests.Unit.TestSupport;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -85,8 +86,12 @@ public sealed class McpDatasetCatalogTests
 
     private readonly IGraphQlCatalogMap _graphQl = Substitute.For<IGraphQlCatalogMap>();
 
+    // A tenant-scoped GovernanceAdmin sees the tables of its tenant (consent-derived) plus the operator-listed shared tables.
+    private static GatewayOptions AdminView() => new() { Catalog = new DataCatalogOptions { SharedTables = ["sales.public.orders", "hr.public.payroll"] } };
+
     private McpDatasetCatalog Catalog(GatewayOptions? options = null) =>
-        new(_metadata, _consents, _gateway, _golden, Options.Create(options ?? new GatewayOptions()), _graphQl);
+        new(_metadata, _consents, _gateway, _golden, Options.Create(options ?? new GatewayOptions()), _graphQl,
+            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(_metadata.ServeSingleReadsFromCatalog(), _consents, options ?? new GatewayOptions()));
 
     private void MapOrdersToGraphQl() =>
         _graphQl.GetTableAsync(Orders, Arg.Any<CancellationToken>()).Returns(new GraphQlTableMapping(
@@ -146,7 +151,7 @@ public sealed class McpDatasetCatalogTests
     {
         MapOrdersToGraphQl();
 
-        var result = await Catalog().DescribeDatasetAsync(User("GovernanceAdmin"), "sales.public.orders");
+        var result = await Catalog(AdminView()).DescribeDatasetAsync(User("GovernanceAdmin"), "sales.public.orders");
 
         result.GraphQl!.Relations.ShouldHaveSingleItem().ShouldBe(new McpGraphQlRelation("payroll_by_order", "hr.public.payroll", false));
     }
@@ -175,13 +180,13 @@ public sealed class McpDatasetCatalogTests
     [Fact]
     public async Task ListDatasets_Admin_SeesTheWholeCatalog_AndSearchFilters()
     {
-        var all = await Catalog().ListDatasetsAsync(User("GovernanceAdmin"), search: null, domain: null);
+        var all = await Catalog(AdminView()).ListDatasetsAsync(User("GovernanceAdmin"), search: null, domain: null);
         all.Datasets.Select(d => d.Id).ShouldBe(["hr.public.payroll", "sales.public.orders"]);
 
-        var bySearch = await Catalog().ListDatasetsAsync(User("GovernanceAdmin"), search: "salar", domain: null);
+        var bySearch = await Catalog(AdminView()).ListDatasetsAsync(User("GovernanceAdmin"), search: "salar", domain: null);
         bySearch.Datasets.Select(d => d.Id).ShouldBe(["hr.public.payroll"]);
 
-        var byDomain = await Catalog().ListDatasetsAsync(User("GovernanceAdmin"), search: null, domain: "SALES");
+        var byDomain = await Catalog(AdminView()).ListDatasetsAsync(User("GovernanceAdmin"), search: null, domain: "SALES");
         byDomain.Datasets.Select(d => d.Id).ShouldBe(["sales.public.orders"]);
     }
 

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Autheris.Application.Analytics;
 using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Exceptions;
 using HotChocolate.Execution.Processing;
@@ -213,7 +214,7 @@ public static class GraphQlTreeBuilder
         return ParseObjectFilter(objNode, table, context);
     }
 
-    private static TreeFilter? ParseObjectFilter(
+    internal static TreeFilter? ParseObjectFilter(
         ObjectValueNode objNode,
         CatalogTableType table,
         IResolverContext context)
@@ -438,113 +439,21 @@ public static class GraphQlTreeBuilder
         };
     }
 
-    private const NumberStyles StrictDecimalStyles =
-        NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint | NumberStyles.AllowExponent;
+    internal static object? CoerceValue(object? rawVal, CatalogFieldType type, TreeFilterOperator op) =>
+        FilterValueCoercion.Coerce(rawVal, ToKind(type), op);
 
-    internal static object? CoerceValue(object? rawVal, CatalogFieldType type, TreeFilterOperator op)
+    internal static object? CoerceSingleValue(object? val, CatalogFieldType type) =>
+        FilterValueCoercion.CoerceSingle(val, ToKind(type));
+
+    /// <summary>The Application value kind of a GraphQL field type (same members, same order).</summary>
+    internal static ColumnValueKind ToKind(CatalogFieldType type) => type switch
     {
-        if (rawVal == null) return null;
-
-        if (op == TreeFilterOperator.IsNull)
-        {
-            if (rawVal is bool b) return b;
-            if (bool.TryParse(Convert.ToString(rawVal, CultureInfo.InvariantCulture), out var pb)) return pb;
-            throw new GatewayInvalidQueryException("The 'isNull' filter value must be a boolean (true or false).");
-        }
-
-        if (op is TreeFilterOperator.In or TreeFilterOperator.NotIn)
-        {
-            if (rawVal is IEnumerable<object?> list)
-            {
-                return list.Select(item => CoerceSingleValue(item, type)).ToList();
-            }
-            return new List<object?> { CoerceSingleValue(rawVal, type) };
-        }
-
-        return CoerceSingleValue(rawVal, type);
-    }
-
-    internal static object? CoerceSingleValue(object? val, CatalogFieldType type)
-    {
-        if (val == null) return null;
-
-        switch (type)
-        {
-            case CatalogFieldType.Int:
-                if (val is int iVal) return iVal;
-                if (val is long lVal)
-                {
-                    if (lVal is < int.MinValue or > int.MaxValue)
-                    {
-                        throw new GatewayInvalidQueryException($"Integer value '{lVal}' is out of range.");
-                    }
-                    return (int)lVal;
-                }
-                if (val is short sVal) return (int)sVal;
-                if (val is byte bVal) return (int)bVal;
-                break;
-
-            case CatalogFieldType.Long:
-                if (val is long lVal2) return lVal2;
-                if (val is int iVal2) return (long)iVal2;
-                if (val is short sVal2) return (long)sVal2;
-                if (val is byte bVal2) return (long)bVal2;
-                break;
-
-            case CatalogFieldType.Decimal:
-                if (val is decimal decVal) return decVal;
-                if (val is int iDec) return (decimal)iDec;
-                if (val is long lDec) return (decimal)lDec;
-                if (val is double dDec) return (decimal)dDec;
-                if (val is float fDec) return (decimal)fDec;
-                break;
-
-            case CatalogFieldType.Float:
-                if (val is double dVal) return dVal;
-                if (val is float fVal) return (double)fVal;
-                if (val is decimal decF) return (double)decF;
-                if (val is int iF) return (double)iF;
-                if (val is long lF) return (double)lF;
-                break;
-
-            case CatalogFieldType.Boolean:
-                if (val is bool bVal3) return bVal3;
-                break;
-
-            case CatalogFieldType.DateTime:
-                if (val is DateTimeOffset dtoVal) return dtoVal;
-                // R-GQL-10: a DateTime without kind is UTC, not server local time.
-                if (val is DateTime dtVal) return new DateTimeOffset(dtVal.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(dtVal, DateTimeKind.Utc) : dtVal.ToUniversalTime(), TimeSpan.Zero);
-                break;
-
-            default:
-                if (val is string sVal3) return sVal3;
-                break;
-        }
-
-        var str = Convert.ToString(val, CultureInfo.InvariantCulture) ?? string.Empty;
-
-        return type switch
-        {
-            CatalogFieldType.Int => int.TryParse(str, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i)
-                ? (object)i
-                : throw new GatewayInvalidQueryException($"Invalid integer value '{str}'."),
-            CatalogFieldType.Long => long.TryParse(str, NumberStyles.Integer, CultureInfo.InvariantCulture, out var l)
-                ? (object)l
-                : throw new GatewayInvalidQueryException($"Invalid long integer value '{str}'."),
-            CatalogFieldType.Decimal => decimal.TryParse(str, StrictDecimalStyles, CultureInfo.InvariantCulture, out var d)
-                ? (object)d
-                : throw new GatewayInvalidQueryException($"Invalid decimal value '{str}'."),
-            CatalogFieldType.Float => double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out var f)
-                ? (object)f
-                : throw new GatewayInvalidQueryException($"Invalid float value '{str}'."),
-            CatalogFieldType.Boolean => bool.TryParse(str, out var pb)
-                ? (object)pb
-                : throw new GatewayInvalidQueryException($"Invalid boolean value '{str}'."),
-            CatalogFieldType.DateTime => DateTimeOffset.TryParse(str, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var dto)
-                ? (object)dto
-                : throw new GatewayInvalidQueryException($"Invalid datetime value '{str}'."),
-            _ => str
-        };
-    }
+        CatalogFieldType.Int => ColumnValueKind.Int,
+        CatalogFieldType.Long => ColumnValueKind.Long,
+        CatalogFieldType.Float => ColumnValueKind.Float,
+        CatalogFieldType.Decimal => ColumnValueKind.Decimal,
+        CatalogFieldType.Boolean => ColumnValueKind.Boolean,
+        CatalogFieldType.DateTime => ColumnValueKind.DateTime,
+        _ => ColumnValueKind.String
+    };
 }

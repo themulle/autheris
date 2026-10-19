@@ -5,6 +5,10 @@ using System.Collections.Generic;
 using System.Linq;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Olap;
+using Autheris.Application.Sql.Federation.Conjuncts;
+using Autheris.Application.Sql.Federation.KeySet;
+using Autheris.Application.Sql.Federation.Pushdown;
+using Autheris.Application.Sql.Federation.Subtrees;
 using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -18,6 +22,8 @@ using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Generators;
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Visitors;
+using Autheris.Application.Sql.Federation.Optimization;
+using Autheris.Application.Sql.Federation.Parameters;
 
 public sealed record CrossSourcePlan(
     CompiledSql Compiled,
@@ -37,16 +43,19 @@ public interface ICrossSourcePlanner
         IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
         CrossSourceOptions options,
         IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>? virtualFilterPlans = null,
-        SqlStatement? statement = null);
+        SqlStatement? statement = null,
+        FederatedParameterContract? parameters = null);
 }
 
 public sealed class CrossSourcePlanner : ICrossSourcePlanner
 {
     private readonly ISqlEngine _sqlEngine;
+    private readonly Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? _timeZoneState;
 
-    public CrossSourcePlanner(ISqlEngine sqlEngine)
+    public CrossSourcePlanner(ISqlEngine sqlEngine, Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? timeZoneState = null)
     {
         _sqlEngine = sqlEngine ?? throw new ArgumentNullException(nameof(sqlEngine));
+        _timeZoneState = timeZoneState;   // null = conversion unavailable (fail closed)
     }
 
     /// <summary>
@@ -82,7 +91,17 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         IReadOnlyList<ResolvedSourceTable> tables,
         IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
         CrossSourceOptions options) =>
-        Plan(rawSql, metadata, tables, decisions, options, null, null);
+        Plan(rawSql, metadata, tables, decisions, options, null, null, null);
+
+    public CrossSourcePlan Plan(
+        string rawSql,
+        SqlQueryMetadata metadata,
+        IReadOnlyList<ResolvedSourceTable> tables,
+        IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
+        CrossSourceOptions options,
+        IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>? virtualFilterPlans,
+        SqlStatement? statement) =>
+        Plan(rawSql, metadata, tables, decisions, options, virtualFilterPlans, statement, null);
 
     /// <summary>
     /// Plans the staging requests and the DuckDB query. <paramref name="virtualFilterPlans"/> (WI-6) are attached to the
@@ -96,7 +115,8 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
         CrossSourceOptions options,
         IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>? virtualFilterPlans = null,
-        SqlStatement? statement = null)
+        SqlStatement? statement = null,
+        FederatedParameterContract? parameters = null)
     {
         ArgumentNullException.ThrowIfNull(rawSql);
         ArgumentNullException.ThrowIfNull(metadata);
@@ -127,6 +147,36 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         for (int i = 0; i < tables.Count; i++)
         {
             GovernedSqlExecutionService.EnforceMaskedColumnGuardrails(tables[i].Target, tables[i].Metadata, tableDecisions[i], metadata);
+
+            var t = tables[i];
+            var dec = tableDecisions[i];
+            if (t.Metadata.RequiredFilterColumns.Length > 0)
+            {
+                foreach (var reqCol in t.Metadata.RequiredFilterColumns)
+                {
+                    if (t.Metadata.TenantColumnName != null &&
+                        string.Equals(t.Metadata.TenantColumnName, reqCol, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (dec.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rls &&
+                        rls.Predicate.ReferencedColumns.Contains(reqCol.ToLowerInvariant()))
+                    {
+                        continue;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(dec.CombinedRowFilterSql) &&
+                        dec.CombinedRowFilterSql.Contains(reqCol, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    throw new GatewaySecurityException(
+                        GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.RequiredFilterColumnMissing),
+                        GovernedSqlErrorCodes.RequiredFilterColumnMissing);
+                }
+            }
         }
 
         // A Virtual Filter plan for a table that is not part of the query cannot be attached; deny instead of ignoring it.
@@ -152,6 +202,12 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             }
         }
 
+        if (statement == null)
+        {
+            var (tree, _) = _sqlEngine.Parse(rawSql.AsMemory());
+            statement = new SqlAstBuilder().BuildStatement(tree);
+        }
+
         // 4. Staging names and minimal projections
         var targetToStaging = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var targetToAlias = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -159,14 +215,58 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         var identifierToAlias = new Dictionary<TableIdentifier, string>();
         var tableNameCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var t in tables)
+        // Issue #122: AST Conjunct Splitting and Single-Table Classification
+        Dictionary<TableIdentifier, List<SingleTableConjunct>>? conjunctsByTable = null;
+        if (options.PredicatePushdown.Enabled || options.DynamicKeySet.Enabled)
+        {
+            var conjuncts = SqlConjunctSplitter.Split(statement);
+            var classification = SingleTableConjunctClassifier.Classify(conjuncts, tables);
+            conjunctsByTable = classification.SingleTableConjuncts
+                .GroupBy(c => c.Table)
+                .ToDictionary(g => g.Key, g => g.ToList());
+        }
+
+        // Issue #124: Dynamic Key-Set Planning & Dependency Ordering
+        IReadOnlyList<KeySetJoinPlan>? keySetPlans = null;
+        if (options.DynamicKeySet.Enabled && tables.Count > 1)
+        {
+            var decisionDict = new Dictionary<TableIdentifier, TableAccessDecision>();
+            for (int idx = 0; idx < tables.Count; idx++)
+            {
+                decisionDict[DecisionKey(tables[idx])] = tableDecisions[idx];
+            }
+
+            keySetPlans = DynamicKeySetPlanner.Plan(
+                statement,
+                tables,
+                decisionDict,
+                options,
+                conjunctsByTable);
+        }
+
+        var plannedTables = tables.ToList();
+        if (keySetPlans is { Count: > 0 })
+        {
+            var drivingIds = new HashSet<TableIdentifier>(keySetPlans.Select(p => p.DrivingTable.ResolvedIdentifier));
+            var drivenIds = new HashSet<TableIdentifier>(keySetPlans.Select(p => p.DrivenTable.ResolvedIdentifier));
+            plannedTables.Sort((a, b) =>
+            {
+                var idA = DecisionKey(a);
+                var idB = DecisionKey(b);
+                if (drivingIds.Contains(idA) && drivenIds.Contains(idB)) return -1;
+                if (drivenIds.Contains(idA) && drivingIds.Contains(idB)) return 1;
+                return 0;
+            });
+        }
+
+        foreach (var t in plannedTables)
         {
             tableNameCounts[t.Target.TableName] = tableNameCounts.GetValueOrDefault(t.Target.TableName) + 1;
         }
 
         // Short names (schema.table, table) are only usable when exactly one distinct table carries them (SEC-1).
         var shortNameOwners = new Dictionary<string, HashSet<TableIdentifier>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var t in tables)
+        foreach (var t in plannedTables)
         {
             var id = DecisionKey(t);
             foreach (var name in new[] { id.ToQualifiedName(), id.TableName, t.Target.TableName })
@@ -188,13 +288,85 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             }
         }
 
-        var stagingRequests = new List<StagingTableRequest>(tables.Count);
-        var stagingNames = new List<string>(tables.Count);
-
-        for (int i = 0; i < tables.Count; i++)
+        if (statement == null)
         {
-            var t = tables[i];
-            string stagingName = $"s{i}";
+            var (tree, _) = _sqlEngine.Parse(rawSql.AsMemory());
+            statement = new SqlAstBuilder().BuildStatement(tree);
+        }
+
+        // Issue #123 (WP-123-1): AST Subtree Graph Partitioning
+        var partitionResult = SubtreeGraphPartitioner.Partition(statement, tables, options.MaxTablesPerSubtree);
+        var subtreePlans = new List<SubtreeExecutionPlan>();
+
+        foreach (var st in partitionResult.Subtrees)
+        {
+            var plan = SubtreeCompiler.Compile(st, decisions, options, _sqlEngine);
+            subtreePlans.Add(plan);
+        }
+
+        // SEC-DATA123-03: Validate that cross-source joins do not target masked subtree output columns (SEC-FED-19)
+        if (metadata.JoinColumnReferences != null && metadata.JoinColumnReferences.Count > 0)
+        {
+            foreach (var stPlan in subtreePlans)
+            {
+                foreach (var maskedCol in stPlan.MaskedColumns)
+                {
+                    if (metadata.JoinColumnReferences.Any(jc => string.Equals(jc.ColumnName, maskedCol, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        throw new WebSqlPolicyException($"Security Policy Violation: Column '{maskedCol}' in subtree '{stPlan.SubtreeId}' is protected by masking and cannot be used in a relational JOIN predicate across data sources (SEC-FED-19).");
+                    }
+                }
+            }
+        }
+
+        var stagingRequests = new List<StagingTableRequest>();
+        var stagingNames = new List<string>();
+        int stagingIndex = 0;
+
+        // Process Subtrees first (WP-123-3)
+        foreach (var stPlan in subtreePlans)
+        {
+            string stagingName = $"s{stagingIndex++}";
+            stagingNames.Add(stagingName);
+
+            foreach (var m in stPlan.MemberTables)
+            {
+                var identifier = DecisionKey(m);
+                identifierToStaging[identifier] = stagingName;
+                MapName(targetToStaging, m.Target.FullName, stagingName, shortName: false);
+                MapName(targetToStaging, identifier.ToString(), stagingName, shortName: false);
+                MapName(targetToStaging, identifier.ToQualifiedName(), stagingName, shortName: true);
+                MapName(targetToStaging, m.Target.TableName, stagingName, shortName: true);
+
+                identifierToAlias[identifier] = stagingName;
+                targetToAlias[m.Target.FullName] = stagingName;
+                targetToAlias[identifier.ToString()] = stagingName;
+                targetToAlias[identifier.ToQualifiedName()] = stagingName;
+                targetToAlias[m.Target.TableName] = stagingName;
+                if (!string.IsNullOrWhiteSpace(m.Target.Alias))
+                {
+                    targetToAlias[m.Target.Alias] = stagingName;
+                }
+            }
+
+            var rootMember = stPlan.MemberTables[0];
+            var rootDecision = RequireDecision(decisions, rootMember);
+
+            stagingRequests.Add(new StagingTableRequest(
+                Reference: rootMember.Target,
+                Metadata: stPlan.SyntheticMetadata,
+                Decision: rootDecision,
+                StagingName: stagingName,
+                Projection: stPlan.ProjectedColumns,
+                PushdownFilter: null,
+                VirtualFilterPlan: null,
+                Subtree: stPlan));
+        }
+
+        // Process remaining single tables
+        foreach (var t in partitionResult.RemainingSingleTables)
+        {
+            string stagingName = $"s{stagingIndex++}";
             stagingNames.Add(stagingName);
 
             string? alias = t.Target.Alias;
@@ -224,7 +396,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             }
 
             // Minimal projection
-            var dec = tableDecisions[i];
+            var dec = RequireDecision(decisions, t);
 
             var projected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             bool selectAll = metadata.ProjectedColumns.Any(p => p == "*");
@@ -257,31 +429,112 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             VirtualFilterTablePlan? vfPlan = null;
             virtualFilterPlans?.TryGetValue(identifier, out vfPlan);
 
+            TableFilterClause? pushdownFilter = null;
+            PushedParameterAudit? paramAudit = null;
+            if (options.PredicatePushdown.Enabled &&
+                conjunctsByTable != null &&
+                conjunctsByTable.TryGetValue(identifier, out var tableConjuncts))
+            {
+                var pushableConjuncts = new List<SingleTableConjunct>();
+                foreach (var conj in tableConjuncts)
+                {
+                    var evalResult = PushabilityEvaluator.Evaluate(
+                        conj,
+                        t.Metadata,
+                        dec,
+                        t.Metadata.Dialect,
+                        vfPlan,
+                        options.PredicatePushdown);
+
+                    if (evalResult.IsPushable)
+                    {
+                        pushableConjuncts.Add(conj);
+                    }
+                }
+
+                if (pushableConjuncts.Count > 0)
+                {
+                    pushdownFilter = Autheris.Application.Sql.Federation.Pushdown.PushedClauseBuilder.Build(pushableConjuncts, t.Metadata);
+                }
+            }
+            else if (options.PredicatePushdown.Enabled && parameters != null && t.Metadata.Table.DataSourceType == DataSourceType.Sql)
+            {
+                pushdownFilter = Autheris.Application.Sql.Federation.Optimization.PushedClauseBuilder.BuildPushdown(statement, t.Target, t.Metadata, dec, parameters, out paramAudit);
+            }
+
+            KeySetPlanInfo? keySetPlanInfo = null;
+            if (keySetPlans is { Count: > 0 })
+            {
+                var plan = keySetPlans.FirstOrDefault(p => p.DrivenTable.ResolvedIdentifier == DecisionKey(t));
+                if (plan != null && identifierToStaging.TryGetValue(plan.DrivingTable.ResolvedIdentifier, out var drivingStagingName))
+                {
+                    keySetPlanInfo = new KeySetPlanInfo(
+                        drivingStagingName,
+                        plan.DrivingTable.ResolvedIdentifier,
+                        plan.DrivingKeyColumn,
+                        plan.DrivenKeyColumn);
+                }
+            }
+
             stagingRequests.Add(new StagingTableRequest(
                 t.Target,
                 t.Metadata,
                 dec,
                 stagingName,
                 projected.ToList(),
-                PushdownFilter: null,
-                VirtualFilterPlan: vfPlan));
+                PushdownFilter: pushdownFilter,
+                VirtualFilterPlan: vfPlan,
+                ParameterAudit: paramAudit,
+                KeySetPlan: keySetPlanInfo));
         }
 
         // 5. AST rewrite to target s0, s1, etc. (the user query is not touched for Virtual Filters)
-        if (statement == null)
-        {
-            var (tree, _) = _sqlEngine.Parse(rawSql.AsMemory());
-            statement = new SqlAstBuilder().BuildStatement(tree);
-        }
+        // REQ-SQL-130 (BC-130-4): the governed compiler does not run for the DuckDB statement, so the time zone calls are validated here, for a supplied and
+        // a built statement alike (CTEs, subqueries and set operations are traversed), before the AST is rewritten. A masked or denied column is never a timestamp.
+        var timeZoneProof = TimeZoneConversion.ValidateFederated(
+            statement,
+            _timeZoneState?.IsAvailable(TargetSqlDialect.DuckDb) ?? false,
+            (qualifier, column) => IsMaskedOrDenied(qualifier, column, tables, tableDecisions));
 
-        var rewriter = new FederationAstRewriter(targetToStaging, targetToAlias, tables);
+        var rewriter = new FederationAstRewriter(targetToStaging, targetToAlias, tables, subtreePlans);
         var rewrittenAst = (SqlStatement)rewriter.Visit(statement);
 
-        var generator = SqlDialectGeneratorFactory.GetGenerator(TargetSqlDialect.DuckDb);
+        if (parameters?.ListShapes is { IsEmpty: false } listShapes)
+        {
+            rewrittenAst = TrinoSqlEngine.Ast.Visitors.ClientListExpansion.Apply(rewrittenAst, listShapes);
+        }
+
         // WP-X3: every query value is bound ($n); the staged rows are the only data DuckDB sees.
-        var compiled = generator.Generate(rewrittenAst, ParameterSource.Empty);
+        var compiled = TimeZoneConversion.GenerateFederated(rewrittenAst, timeZoneProof);
 
         return new CrossSourcePlan(compiled, stagingRequests, stagingNames);
+    }
+
+    /// <summary>
+    /// Whether a column reference may name a column that the decision masks or denies. A qualifier that belongs to no staged table (a CTE or derived
+    /// table alias) is judged by the column name alone, the same fallback the mask guards use for columns they cannot attribute.
+    /// </summary>
+    private static bool IsMaskedOrDenied(
+        string? qualifier,
+        string column,
+        IReadOnlyList<ResolvedSourceTable> tables,
+        TableAccessDecision[] decisions)
+    {
+        bool qualifierBelongsToATable = qualifier is not null && tables.Any(t => GovernedSqlExecutionService.ReferencesColumn(qualifier, column, column, t.Target));
+        for (int i = 0; i < tables.Count; i++)
+        {
+            foreach (var col in tables[i].Metadata.Columns)
+            {
+                if (!string.Equals(col.ColumnName, column, StringComparison.OrdinalIgnoreCase)) continue;
+                if (decisions[i].GetEffectiveColumnAccess(col.ColumnName, tables[i].Metadata) == ColumnAccessLevel.Clear) continue;
+                if (qualifier is null || !qualifierBelongsToATable || GovernedSqlExecutionService.ReferencesColumn(qualifier, column, col.ColumnName, tables[i].Target))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static bool MatchesProjectedColumn(string p, string colName, TableAccessTarget target)
@@ -302,15 +555,57 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         private readonly Dictionary<string, string> _targetToAlias;
         private readonly IReadOnlyList<ResolvedSourceTable> _tables;
         private readonly HashSet<string> _cteNames = new(StringComparer.OrdinalIgnoreCase);
+        private readonly IReadOnlyList<SubtreeExecutionPlan>? _subtrees;
 
         public FederationAstRewriter(
             Dictionary<string, string> targetToStaging,
             Dictionary<string, string> targetToAlias,
-            IReadOnlyList<ResolvedSourceTable> tables)
+            IReadOnlyList<ResolvedSourceTable> tables,
+            IReadOnlyList<SubtreeExecutionPlan>? subtrees = null)
         {
             _targetToStaging = targetToStaging;
             _targetToAlias = targetToAlias;
             _tables = tables;
+            _subtrees = subtrees;
+        }
+
+        public override SqlNode VisitJoinedTableSource(JoinedTableSource node)
+        {
+            if (_subtrees != null && _subtrees.Count > 0)
+            {
+                foreach (var st in _subtrees)
+                {
+                    if (MatchesSubtree(node, st))
+                    {
+                        var stagingName = _targetToStaging[st.MemberTables[0].Target.FullName];
+                        return new NamedTableSource(
+                            new SqlQualifiedName([new SqlIdentifier(stagingName, false)]),
+                            new SqlIdentifier(stagingName, false));
+                    }
+                }
+            }
+            return base.VisitJoinedTableSource(node);
+        }
+
+        private static bool MatchesSubtree(TableSource node, SubtreeExecutionPlan plan)
+        {
+            var tableNamesInNode = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            CollectTableNames(node, tableNamesInNode);
+            var memberNames = new HashSet<string>(plan.MemberTables.Select(m => m.Target.TableName), StringComparer.OrdinalIgnoreCase);
+            return tableNamesInNode.Count > 0 && tableNamesInNode.SetEquals(memberNames);
+        }
+
+        private static void CollectTableNames(TableSource source, HashSet<string> names)
+        {
+            if (source is NamedTableSource named)
+            {
+                names.Add(named.Name.Parts[^1].Value);
+            }
+            else if (source is JoinedTableSource joined)
+            {
+                CollectTableNames(joined.Left, names);
+                CollectTableNames(joined.Right, names);
+            }
         }
 
         public override SqlNode VisitCommonTableExpression(CommonTableExpression node)

@@ -19,6 +19,7 @@ public sealed class ConsentRequestDto
     public DateTimeOffset RequestedAt { get; init; }
     public DateTimeOffset? RequestedValidTo { get; init; }
     public string? ItsmTicketId { get; init; }
+    public string? ContextJson { get; init; }
 }
 
 /// <summary>
@@ -35,4 +36,7 @@ public sealed class ConsentDto
     public DateTimeOffset ValidFrom { get; init; }
     public DateTimeOffset ValidTo { get; init; }
     public IReadOnlyList<string> Columns { get; init; } = [];
+
+    /// <summary>PLAN-GOV-158-INC1: owner-authored description (output only through <c>ConsentDescriptionText.ForOutput</c>); <c>null</c> when none or not trusted.</summary>
+    public string? Description { get; init; }
 }

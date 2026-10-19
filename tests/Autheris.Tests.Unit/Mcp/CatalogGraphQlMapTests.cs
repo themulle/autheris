@@ -51,10 +51,10 @@ public sealed class CatalogGraphQlMapTests
         _map = new CatalogGraphQlMap(metadata, relations);
     }
 
-    private static TableMetadata Table(TableIdentifier id, IReadOnlyList<TableColumn> columns, DataSourceType type = DataSourceType.Sql) => new()
+    private static TableMetadata Table(TableIdentifier id, IReadOnlyList<TableColumn> columns, DataSourceType type = DataSourceType.Sql, string sourceName = "") => new()
     {
         Identifier = id,
-        Table = new Table { TableName = id.TableName, SchemaName = id.Schema, IsActive = true, SourceType = "PostgreSql", DataSourceType = type },
+        Table = new Table { TableName = id.TableName, SchemaName = id.Schema, IsActive = true, SourceType = "PostgreSql", SourceName = sourceName, DataSourceType = type },
         Columns = columns
     };
 
@@ -69,6 +69,36 @@ public sealed class CatalogGraphQlMapTests
         orders.OrderByType.ShouldBe("crm_dbo_orders_order_by");
         orders.Columns.Select(c => (c.ColumnName, c.GraphQlType)).ShouldBe([("id", "Int"), ("customer_id", "Long"), ("amount", "Decimal")]);
         orders.Relations.ShouldHaveSingleItem().Target.ShouldBe(Customers);
+    }
+
+    [Fact]
+    public async Task GetTable_CrossSourceRelation_IsNotListedAndNamesNoOmittedTarget()
+    {
+        // BUG #75 (S-9): the MCP view is derived from the same model, so an omitted relation never shows up.
+        var metadata = Substitute.For<ITableMetadataRepository>();
+        metadata.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(
+        [
+            Table(Customers, [new TableColumn { ColumnName = "id", DataType = "bigint" }], sourceName: "pg1"),
+            Table(Orders, [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "customer_id", DataType = "bigint" }], sourceName: "pg2")
+        ]));
+        var relations = Substitute.For<ITableRelationRepository>();
+        relations.GetRelationsForTableAsync(Customers, Arg.Any<CancellationToken>()).Returns([new TableRelation
+        {
+            RelationName = "customer_orders",
+            ParentTableIdentifier = Customers,
+            ChildTableIdentifier = Orders,
+            Cardinality = RelationCardinality.OneToMany,
+            JoinKeysParent = ["id"],
+            JoinKeysChild = ["customer_id"]
+        }]);
+        relations.GetRelationsForTableAsync(Orders, Arg.Any<CancellationToken>()).Returns([]);
+        var map = new CatalogGraphQlMap(metadata, relations);
+
+        var customers = await map.GetTableAsync(Customers);
+        var orders = await map.GetTableAsync(Orders);
+
+        customers.ShouldNotBeNull().Relations.ShouldBeEmpty();
+        orders.ShouldNotBeNull().Relations.ShouldBeEmpty();
     }
 
     [Fact]

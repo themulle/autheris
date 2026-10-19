@@ -9,6 +9,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Governance.Grants;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -34,24 +35,33 @@ public sealed class ConsentRequestService : IConsentRequestService
     private readonly IIdempotencyStore? _idempotencyStore;
     private readonly IConsentRequestDispatcher? _dispatcher;
     private readonly IOptions<GatewayOptions>? _gatewayOptions;
+    private readonly IGrantPolicy _grantPolicy;
+    private readonly IIdentitySubjectResolver? _subjectResolver;
 
     public ConsentRequestService(
         ITableMetadataRepository metadataRepository,
         IConsentApprovalRepository approvalRepository,
         IIdempotencyStore? idempotencyStore = null,
         IConsentRequestDispatcher? dispatcher = null,
-        IOptions<GatewayOptions>? gatewayOptions = null)
+        IOptions<GatewayOptions>? gatewayOptions = null,
+        IGrantPolicy? grantPolicy = null,
+        IIdentitySubjectResolver? subjectResolver = null)
     {
+        _grantPolicy = grantPolicy ?? new GrantPolicy();
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _approvalRepository = approvalRepository ?? throw new ArgumentNullException(nameof(approvalRepository));
         _idempotencyStore = idempotencyStore;
         _dispatcher = dispatcher;
         _gatewayOptions = gatewayOptions;
+        _subjectResolver = subjectResolver;
     }
 
     public async Task<SubmitConsentRequestResult> SubmitAsync(ConsentRequestSubmission command, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(command);
+
+        var principal = command.Principal;
+        EnsurePersonSubject(principal);
 
         if (string.IsNullOrWhiteSpace(command.Domain) || string.IsNullOrWhiteSpace(command.Schema) || string.IsNullOrWhiteSpace(command.TableName))
         {
@@ -75,7 +85,6 @@ public sealed class ConsentRequestService : IConsentRequestService
             throw Invalid("The duration (durationDays) must be between 1 and 365 days.");
         }
 
-        var principal = command.Principal;
         var userSid = command.UserSid;
         var isCrossTenantAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
 
@@ -99,7 +108,27 @@ public sealed class ConsentRequestService : IConsentRequestService
         // R-GQL-9: same ClusterAdmin exception as approve, reject and revoke.
         var tenantId = ResolveTenantId(principal, command.ContextTenant, isCrossTenantAdmin);
 
+        // WP-SC-16: a user request is an individual grant; its duration is bounded by the class of the table (fail closed).
+        var now = DateTimeOffset.UtcNow;
+        var grantDecision = _grantPolicy.Evaluate(new GrantRequest(
+            GranteeType.User,
+            userSid.Value,
+            GrantKind.Consent,
+            now.AddDays(durationDays),
+            now,
+            GrantClassifier.Classify([meta]),
+            Requester: userSid.Value,
+            Justification: justification));
+        if (!grantDecision.Allowed)
+        {
+            throw new ConsentRequestException(grantDecision.ErrorCode ?? GrantErrorCodes.Indeterminate, grantDecision.Reason);
+        }
+
         bool isItsmEnabled = _dispatcher != null && (_gatewayOptions?.Value.Itsm.Enabled == true);
+
+        string? contextJson = command.Context != null
+            ? System.Text.Json.JsonSerializer.Serialize(command.Context)
+            : null;
 
         var request = new ConsentRequest
         {
@@ -109,10 +138,11 @@ public sealed class ConsentRequestService : IConsentRequestService
             RequestedGranteeType = GranteeType.User,
             RequestedGranteeRef = userSid.Value,
             BusinessJustification = justification.Trim(),
-            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(durationDays),
+            RequestedValidTo = now.AddDays(durationDays),
             Status = isItsmEnabled ? "PENDING_EXTERNAL_APPROVAL" : "PENDING",
             TenantId = tenantId,
-            RequesterIdentifiers = ExtractPrincipalIdentifiers(principal, userSid.Value)
+            RequesterIdentifiers = ExtractPrincipalIdentifiers(principal, userSid.Value),
+            ContextJson = contextJson
         };
 
         var created = await _approvalRepository.CreateConsentRequestAsync(request, ct).ConfigureAwait(false);
@@ -280,5 +310,81 @@ public sealed class ConsentRequestService : IConsentRequestService
         if (normalizedKey == null || _idempotencyStore == null) return;
         var compositeKey = $"idempotency:{userSid.Value}:{Operation}:{normalizedKey}:{fingerprint}";
         await _idempotencyStore.SetIfNotExistsAsync(compositeKey, result, TimeSpan.FromHours(24), ct).ConfigureAwait(false);
+    }
+
+    public async Task<bool> WithdrawAsync(Guid requestId, ClaimsPrincipal principal, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        EnsurePersonSubject(principal);
+
+        var req = await _approvalRepository.GetConsentRequestAsync(requestId, ct).ConfigureAwait(false);
+        if (req == null)
+        {
+            throw new ConsentRequestException("NOT_FOUND", $"Consent request '{requestId}' was not found.");
+        }
+
+        var isCrossTenantAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        var tenantId = ResolveTenantId(principal, req.TenantId, isCrossTenantAdmin);
+        if (req.TenantId != tenantId && !isCrossTenantAdmin)
+        {
+            throw new ConsentRequestException("FORBIDDEN", "Cross-tenant access forbidden: The consent request belongs to another tenant.");
+        }
+
+        var userSid = principal.GetUserSid() ?? throw new ConsentRequestException("FORBIDDEN", "User SID could not be resolved from token.");
+        var principalIdentifiers = ExtractPrincipalIdentifiers(principal, userSid.Value);
+        bool isOwner = req.RequesterSid == userSid
+            || (req.RequesterIdentifiers != null && req.RequesterIdentifiers.Any(id => principalIdentifiers.Contains(id, StringComparer.OrdinalIgnoreCase)));
+
+        if (!isOwner)
+        {
+            throw new ConsentRequestException("FORBIDDEN", "Only the requester can withdraw their access request.");
+        }
+
+        if (req.Status != "PENDING" && req.Status != "PENDING_SECOND_APPROVAL")
+        {
+            throw new ConsentRequestException("INVALID_STATE", "The consent request is no longer pending.");
+        }
+
+        var success = await _approvalRepository.WithdrawConsentRequestAsync(requestId, req.RequesterSid, ct).ConfigureAwait(false);
+        if (!success)
+        {
+            throw new ConsentRequestException("INVALID_STATE", "The consent request could not be withdrawn.");
+        }
+
+        return true;
+    }
+
+    private void EnsurePersonSubject(ClaimsPrincipal? principal)
+    {
+        if (principal == null || principal.Identity?.IsAuthenticated != true)
+        {
+            throw new ConsentRequestException("FORBIDDEN", "Authenticated principal is required.");
+        }
+
+        if (string.Equals(principal.FindFirst("idtyp")?.Value, "app", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ConsentRequestException("FORBIDDEN", "Machine tokens (idtyp=app) cannot execute self-service access requests.");
+        }
+
+        if (principal.FindFirst(ClaimTypes.AuthenticationMethod)?.Value is "x509" or "Certificate"
+            || principal.FindFirst("auth_method")?.Value is "mTLS" or "cert" or "certificate")
+        {
+            throw new ConsentRequestException("FORBIDDEN", "Certificate subjects cannot execute self-service access requests.");
+        }
+
+        if (principal.HasClaim(c => c.Type == "roles" && c.Value == "AppRole")
+            && !principal.HasClaim(c => c.Type == "scp" || c.Type == "http://schemas.microsoft.com/identity/claims/scope"))
+        {
+            throw new ConsentRequestException("FORBIDDEN", "Application tokens cannot execute self-service access requests.");
+        }
+
+        if (_subjectResolver != null)
+        {
+            var subject = _subjectResolver.ResolveSubject(principal);
+            if (subject.Provider == IdentityProviderType.ClientCertificate || subject.Type != SubjectType.User)
+            {
+                throw new ConsentRequestException("FORBIDDEN", "Self-service access requests require a person subject.");
+            }
+        }
     }
 }

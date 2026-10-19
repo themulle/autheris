@@ -299,6 +299,108 @@ public sealed class CatalogGraphQlSchemaTests
         }
     }
 
+    private static TableMetadata ColumnlessTable(TableIdentifier id, params TableColumn[] columns) => new()
+    {
+        Identifier = id,
+        Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql },
+        Columns = columns,
+        PrimaryKeyColumns = []
+    };
+
+    private void SeedWithOmittedTables()
+    {
+        var valid = new TableMetadata
+        {
+            Identifier = _custTableId,
+            Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql },
+            Columns =
+            [
+                new TableColumn { ColumnName = "id", DataType = "int" },
+                new TableColumn { ColumnName = "account_no", DataType = "bigint" }
+            ],
+            ColumnMaskingRules = new Dictionary<string, MaskingRule>
+            {
+                ["account_no"] = new MaskingRule { RuleType = "HMAC_SHA256" }
+            },
+            PrimaryKeyColumns = ["id"]
+        };
+        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([
+                valid,
+                ColumnlessTable(new TableIdentifier("sales", "dbo", "empty")),
+                ColumnlessTable(new TableIdentifier("sales", "dbo", "dashed"), new TableColumn { ColumnName = "a-b", DataType = "int" })
+            ]);
+        _relationRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns([]);
+    }
+
+    [Fact]
+    public async Task Schema_WithColumnlessAndAllFilteredTables_BuildsAndExecutesQueryOnValidTable()
+    {
+        SeedWithOmittedTables();
+        _treeService.ExecuteAsync(
+                Arg.Any<ClaimsPrincipal>(), Arg.Any<TreeQueryNode>(), Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+                Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(JsonDocument.Parse("""[{ "id": 1 }]"""));
+
+        var executor = await CreateExecutorAsync();
+
+        Assert.NotNull(executor.Schema.QueryType.Fields["sales_dbo_customers"]);
+        Assert.False(executor.Schema.QueryType.Fields.TryGetField("sales_dbo_empty", out _));
+        Assert.False(executor.Schema.QueryType.Fields.TryGetField("sales_dbo_dashed", out _));
+        var result = await executor.ExecuteAsync("query { sales_dbo_customers { id } }");
+        Assert.DoesNotContain("errors", result.ToJson());
+    }
+
+    [Fact]
+    public async Task Schema_NoGeneratedCatalogTypeHasZeroFields()
+    {
+        SeedWithOmittedTables();
+
+        var executor = await CreateExecutorAsync();
+
+        var generated = executor.Schema.Types
+            .Where(t => t.Name.StartsWith("sales_dbo_", StringComparison.Ordinal))
+            .ToList();
+        Assert.NotEmpty(generated);
+        foreach (var type in generated)
+        {
+            switch (type)
+            {
+                case HotChocolate.Types.InputObjectType input:
+                    Assert.True(input.Fields.Count > 0, type.Name);
+                    break;
+                case HotChocolate.Types.ObjectType obj:
+                    Assert.True(obj.Fields.Any(f => !f.IsIntrospectionField), type.Name);
+                    break;
+            }
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Schema_OmittedTableName_NotQueryable_ValidTableStillGoverned()
+    {
+        // SEC-BUG157-01 / T-BUG157-S11
+        SeedWithOmittedTables();
+        ClaimsPrincipal? seenPrincipal = null;
+        _treeService.ExecuteAsync(
+                Arg.Do<ClaimsPrincipal>(p => seenPrincipal = p), Arg.Any<TreeQueryNode>(), Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+                Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(JsonDocument.Parse("""[{ "id": 1, "account_no": "HMAC-HEX" }]"""));
+        var executor = await CreateExecutorAsync();
+
+        var omitted = await executor.ExecuteAsync("query { sales_dbo_empty { id } }");
+        Assert.Contains("errors", omitted.ToJson());
+        await _treeService.DidNotReceive().ExecuteAsync(
+            Arg.Any<ClaimsPrincipal>(), Arg.Any<TreeQueryNode>(), Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            Arg.Any<string>(), Arg.Any<CancellationToken>());
+
+        // The valid table still runs through the governed tree service with the caller principal, and the HMAC column is typed String.
+        var valid = await executor.ExecuteAsync("query { sales_dbo_customers { id account_no } }");
+        Assert.DoesNotContain("errors", valid.ToJson());
+        Assert.NotNull(seenPrincipal);
+    }
+
     [Fact]
     public async Task Schema_WithCollidingCatalogTables_StartsSuccessfullyAndExecutesCanonicalQuery()
     {
@@ -620,5 +722,123 @@ public sealed class CatalogGraphQlSchemaTests
         var order = Assert.Single(captured!.OrderBy);
         Assert.Equal("id", order.Column);
         Assert.True(order.Descending);
+    }
+    // BUG #75: relations between tables of different data sources are not part of the schema.
+
+    private void UseCatalogWithSources(string customersSource, string ordersSource)
+    {
+        TableMetadata Table(TableIdentifier id, string source, params string[] columns) => new()
+        {
+            Identifier = id,
+            Table = new Table { IsActive = true, SourceType = "PostgreSql", SourceName = source, DataSourceType = DataSourceType.Sql },
+            Columns = columns.Select(c => new TableColumn { ColumnName = c, DataType = "int" }).ToList(),
+            PrimaryKeyColumns = ["id"]
+        };
+
+        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([Table(_custTableId, customersSource, "id", "name"), Table(_orderTableId, ordersSource, "order_id", "customer_id")]);
+    }
+
+    private static string TypeBlock(string sdl, string typeName)
+    {
+        var start = sdl.IndexOf($"type {typeName} ", StringComparison.Ordinal);
+        Assert.True(start >= 0, $"type {typeName} not found in SDL");
+        var end = sdl.IndexOf("\n}", start, StringComparison.Ordinal);
+        return sdl[start..end];
+    }
+
+    [Fact]
+    public async Task Schema_SameSourceRelation_IsInSdl()
+    {
+        UseCatalogWithSources("pg1", "pg1");
+        var executor = await CreateExecutorAsync();
+
+        Assert.Contains("orders(", TypeBlock(executor.Schema.ToString(), "sales_dbo_customers"));
+    }
+
+    [Fact]
+    public async Task Schema_CrossSourceRelation_AbsentFromSdlAndQueryFailsValidation()
+    {
+        UseCatalogWithSources("pg1", "pg2");
+        var executor = await CreateExecutorAsync();
+        var sdl = executor.Schema.ToString();
+
+        Assert.DoesNotContain("orders", TypeBlock(sdl, "sales_dbo_customers"));
+        Assert.DoesNotContain("customers_by_orders", TypeBlock(sdl, "sales_dbo_orders"));
+
+        var result = await executor.ExecuteAsync("query { sales_dbo_customers { id orders { order_id } } }");
+
+        Assert.Contains("errors", result.ToJson());
+    }
+
+    [Fact]
+    public async Task Schema_OmittedRelation_QueryFailsValidationAndNeverReachesTreeService()
+    {
+        UseCatalogWithSources("secret_pg1", "secret_pg2");
+        var executor = await CreateExecutorAsync();
+
+        var result = await executor.ExecuteAsync("query { sales_dbo_customers { id orders { order_id } } }");
+        var json = result.ToJson();
+
+        Assert.Contains("errors", json);
+        Assert.DoesNotContain("secret_pg", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("sales_dbo_orders", json, StringComparison.Ordinal);
+        await _treeService.DidNotReceive().ExecuteAsync(
+            Arg.Any<ClaimsPrincipal>(), Arg.Any<TreeQueryNode>(), Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Schema_AggregateAndSubscriptionTypes_HaveNoRelationFields()
+    {
+        UseCatalogWithSources("pg1", "pg1");
+        var executor = await CreateExecutorAsync();
+        var sdl = executor.Schema.ToString();
+
+        Assert.Contains("orders(", TypeBlock(sdl, "sales_dbo_customers")); // the relation exists on the object type only
+        foreach (var typed in new[] { "sales_dbo_customers_aggregate_key", "sales_dbo_customers_aggregate_group", "sales_dbo_customers_aggregate_result" })
+        {
+            Assert.DoesNotContain("orders", TypeBlock(sdl, typed));
+        }
+
+        var aggregateStart = sdl.IndexOf("sales_dbo_customers_aggregate(", StringComparison.Ordinal);
+        Assert.True(aggregateStart >= 0);
+        var aggregateField = sdl[aggregateStart..sdl.IndexOf(')', aggregateStart)];
+        Assert.Contains("groupBy: [sales_dbo_customers_column!]", aggregateField);
+        Assert.DoesNotContain("where: String", aggregateField);
+        Assert.DoesNotContain("orders", aggregateField);
+        if (sdl.Contains("type Subscription ", StringComparison.Ordinal))
+        {
+            Assert.DoesNotContain("orders", TypeBlock(sdl, "Subscription"));
+        }
+    }
+
+    [Fact]
+    public async Task Schema_IsIdenticalForAllCallers()
+    {
+        UseCatalogWithSources("pg1", "pg2");
+        var alice = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "alice"), new Claim("tenant_id", "T1")], "TestAuth")) };
+        var bob = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "bob"), new Claim("tenant_id", "T2")], "TestAuth")) };
+
+        var aliceSdl = (await CreateExecutorAsync(alice)).Schema.ToString();
+        var bobSdl = (await CreateExecutorAsync(bob)).Schema.ToString();
+
+        Assert.Equal(aliceSdl, bobSdl);
+    }
+
+    [Fact]
+    public async Task Schema_StaleRelationField_IsRejectedByTheRuntimeCheck()
+    {
+        // Stale schema between rebuilds (fail closed): the old schema still lists the field, the real tree service rejects it.
+        UseCatalogWithSources("pg1", "pg1");
+        var executor = await CreateExecutorAsync();
+        Assert.Contains("orders(", TypeBlock(executor.Schema.ToString(), "sales_dbo_customers"));
+
+        _treeService.ExecuteAsync(
+                Arg.Any<ClaimsPrincipal>(), Arg.Any<TreeQueryNode>(), Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns<JsonDocument>(_ => throw new GatewayInvalidQueryException("Relations across data sources are not supported in one query."));
+
+        var result = await executor.ExecuteAsync("query { sales_dbo_customers { id orders { order_id } } }");
+
+        Assert.Contains("errors", result.ToJson());
     }
 }

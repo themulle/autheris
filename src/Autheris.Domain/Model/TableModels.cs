@@ -1,5 +1,8 @@
 namespace Autheris.Domain.Model;
 
+using System.Collections.Immutable;
+using Autheris.Domain.Exceptions;
+
 public enum ConsentEffect
 {
     Allow = 1,
@@ -12,6 +15,18 @@ public enum GranteeType
     Group = 2,
     Role = 3,
     ServicePrincipal = 4
+}
+
+/// <summary>
+/// Issue #111: which restriction produced a catalog row. <see cref="Unmarked"/> (0) is the default and the most restrictive value:
+/// consumers check positively (<c>== Full</c>, <c>== Granted</c> with a consent) and never treat <see cref="Unmarked"/> as granted.
+/// </summary>
+public enum CatalogView
+{
+    Unmarked = 0,
+    Granted = 1,
+    Summary = 2,
+    Full = 3
 }
 
 public enum DatasetVisibility
@@ -47,6 +62,8 @@ public sealed record Table
     public bool IsActive { get; init; } = true;
 
     public DataSourceType DataSourceType { get; init; } = DataSourceType.Sql;
+    /// <summary>Issue #132: Explicit physical database name if different from connection string catalog or source name.</summary>
+    public string? PhysicalDatabaseName { get; init; }
     public string? Location { get; init; }
     public HttpEndpointDescriptor? HttpEndpoint { get; init; }
     public string? PluginName { get; init; }
@@ -55,6 +72,10 @@ public sealed record Table
     public string? RlsExpression { get; init; }
     public int? MinGroupSize { get; init; }
     public SmallGroupStrategy? SmallGroupStrategy { get; init; }
+    /// <summary>Issue #163: Table-level required filter columns enforced across every read path.</summary>
+    public ImmutableArray<string> RequiredFilterColumns { get; init; } = ImmutableArray<string>.Empty;
+    /// <summary>Issue #124: Optional cardinality hint (expected row count) used for cross-source join ordering.</summary>
+    public long? ExpectedRows { get; init; }
 
     /// <summary>Rank of a sensitivity class; unknown classes rank like HIGH (fail-closed). Empty means NORMAL.</summary>
     public static int SensitivityRank(string? sensitivity)
@@ -150,10 +171,19 @@ public sealed record TableMetadata
     /// <summary>Declared secondary and unique indexes (used for default ordering). Empty when none was declared.</summary>
     public IReadOnlyList<TableIndexDefinition> Indexes { get; init; } = Array.Empty<TableIndexDefinition>();
 
+    /// <summary>Issue #107: object-level row filter evaluation settings (loaded from TABLE_ROW_FILTER_STRATEGIES, never written by the metadata upsert). Null = inherit global.</summary>
+    public RowFilterEvaluationSettings? RowFilterEvaluation { get; init; }
+
+    /// <summary>Issue #111: which restriction applied to this row; set explicitly by the visibility filter, default <see cref="Model.CatalogView.Unmarked"/> (most restrictive).</summary>
+    public CatalogView CatalogView { get; init; } = CatalogView.Unmarked;
+
+    /// <summary>Issue #111: persisted dataset tags (admin and dbt source), overlaid by the repositories. <see cref="Table.Tags"/> is never written by repositories; tags are not policy inputs.</summary>
+    public IReadOnlyList<string> CatalogTags { get; init; } = Array.Empty<string>();
+
     /// <summary>Write intent: the upsert replaces the stored key/index definition only when true; otherwise it keeps it.</summary>
     public bool ReplaceKeyDefinition { get; init; }
 
-    /// <summary>Issue #80: When true, callers with Summary or Full catalog visibility may view coarsened value profiles and request synthetic sample rows without an active table consent.</summary>
+    /// <summary>Issue #80: When true, callers with Full catalog visibility may view coarsened value profiles and request synthetic sample rows without an active table consent.</summary>
     public bool ReleaseProfileToCatalogViewers { get; init; }
 
     /// <summary>Issue #80: Controls whether full coarsened ranges/distinct counts or only format + empty share are published when row filters apply.</summary>
@@ -161,6 +191,11 @@ public sealed record TableMetadata
 
     /// <summary>Issue #80: Optional estimated row count of the table used for small-table privacy coarsening.</summary>
     public long? EstimatedRowCount { get; init; }
+
+    /// <summary>Issue #124: Optional cardinality hint (expected row count) used for cross-source join ordering.</summary>
+    public long? ExpectedRows { get; init; }
+
+    public long? EffectiveExpectedRows => ExpectedRows ?? Table.ExpectedRows ?? EstimatedRowCount;
 
     /// <summary>Per-table minimum group size override for governed aggregations (#37). Falls back to <see cref="Table.MinGroupSize"/>.</summary>
     public int? MinGroupSize { get; init; }
@@ -184,8 +219,43 @@ public sealed record TableMetadata
     }
 
     public DataSourceType DataSourceType => Table.DataSourceType;
+    public string? PhysicalDatabaseName => Table.PhysicalDatabaseName;
     public HttpEndpointDescriptor? HttpEndpoint => Table.HttpEndpoint;
     public string? PluginName => Table.PluginName;
+    /// <summary>Issue #163: Table-level required filter columns enforced across every read path.</summary>
+    public ImmutableArray<string> RequiredFilterColumns =>
+        Table.RequiredFilterColumns.IsDefault ? ImmutableArray<string>.Empty : Table.RequiredFilterColumns;
+
+    /// <summary>
+    /// Validates required filter columns on catalog ingestion or load (SEC-GOV163-01, fail closed).
+    /// </summary>
+    public void ValidateRequiredFilterColumns()
+    {
+        if (RequiredFilterColumns.IsDefaultOrEmpty)
+        {
+            return;
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var colName in RequiredFilterColumns)
+        {
+            if (string.IsNullOrWhiteSpace(colName))
+            {
+                throw new CatalogValidationException($"Table '{Identifier}' contains an empty required filter column name.");
+            }
+
+            var trimmed = colName.Trim();
+            if (!HasColumn(trimmed))
+            {
+                throw new CatalogValidationException($"Required filter column '{trimmed}' does not exist in table '{Identifier}'.");
+            }
+
+            if (!seen.Add(trimmed))
+            {
+                throw new CatalogValidationException($"Table '{Identifier}' lists required filter column '{trimmed}' more than once.");
+            }
+        }
+    }
 
     public DatabaseDialect Dialect => Table.Dialect;
 
@@ -257,7 +327,8 @@ public enum DeletedKeyPolicy
 public enum RelationCardinality
 {
     OneToMany = 1,
-    ManyToOne = 2
+    ManyToOne = 2,
+    OneToOne = 3
 }
 
 public sealed class TableRelation
@@ -268,21 +339,9 @@ public sealed class TableRelation
     public Guid ChildTableId { get; init; }
     public TableIdentifier ChildTableIdentifier { get; init; }
     public string RelationName { get; init; } = string.Empty;
-    public IReadOnlyList<string> JoinKeysParent { get; init; } = new[] { "id" };
+    public IReadOnlyList<string> JoinKeysParent { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> JoinKeysChild { get; init; } = Array.Empty<string>();
     public bool IsComposite => JoinKeysParent.Count > 1;
-
-    public string JoinKeyParent
-    {
-        get => JoinKeysParent.Count > 0 ? JoinKeysParent[0] : "id";
-        init => JoinKeysParent = new[] { value };
-    }
-
-    public string JoinKeyChild
-    {
-        get => JoinKeysChild.Count > 0 ? JoinKeysChild[0] : string.Empty;
-        init => JoinKeysChild = new[] { value };
-    }
 
     public RelationCardinality Cardinality { get; init; } = RelationCardinality.OneToMany;
 

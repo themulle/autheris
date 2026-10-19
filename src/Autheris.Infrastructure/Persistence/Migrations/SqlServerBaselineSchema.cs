@@ -33,7 +33,11 @@ CREATE TABLE dbo.TABLES (
     is_active INT NOT NULL,
     data_source_type INT NOT NULL DEFAULT 0,
     http_endpoint_json NVARCHAR(MAX) NULL,
-    plugin_name NVARCHAR(256) NULL
+    plugin_name NVARCHAR(256) NULL,
+    required_filter_columns_json NVARCHAR(MAX) NULL,
+    source_name_lc AS LOWER(source_name) PERSISTED,
+    schema_name_lc AS LOWER(schema_name) PERSISTED,
+    table_name_lc AS LOWER(table_name) PERSISTED
 );
 
 IF OBJECT_ID(N'dbo.TABLE_COLUMNS', N'U') IS NULL
@@ -110,6 +114,7 @@ CREATE TABLE dbo.CONSENTS (
     effect NVARCHAR(64) NOT NULL,
     grantee_type NVARCHAR(64) NOT NULL,
     grantee_sid NVARCHAR(256) NULL,
+    grantee_sid_norm NVARCHAR(256) NULL,
     role_id NVARCHAR(128) NULL,
     role_name NVARCHAR(256) NULL,
     valid_from NVARCHAR(64) NOT NULL,
@@ -118,7 +123,9 @@ CREATE TABLE dbo.CONSENTS (
     revoked_by_sid NVARCHAR(256) NULL,
     revoked_at NVARCHAR(64) NULL,
     revoke_reason NVARCHAR(MAX) NULL,
-    tenant_id NVARCHAR(128) NOT NULL DEFAULT 'legacy-single-tenant'
+    tenant_id NVARCHAR(128) NOT NULL DEFAULT 'legacy-single-tenant',
+    renewal_count INT NOT NULL CONSTRAINT DF_CONSENTS_renewals DEFAULT 0,
+    description NVARCHAR(2000) NULL
 );
 
 IF OBJECT_ID(N'dbo.CONSENT_COLUMN_RULES', N'U') IS NULL
@@ -153,7 +160,10 @@ CREATE TABLE dbo.CONSENT_ROW_FILTERS (
     dependent_valid_from_column NVARCHAR(256) NULL,
     dependent_valid_to_column NVARCHAR(256) NULL,
     target_table_alias NVARCHAR(256) NULL,
-    additional_hops_json NVARCHAR(MAX) NULL
+    additional_hops_json NVARCHAR(MAX) NULL,
+    key_set_strategy INT NULL,
+    key_set_duration_seconds INT NULL,
+    key_set_max_keys INT NULL
 );
 
 IF OBJECT_ID(N'dbo.POLICY_EPOCHS', N'U') IS NULL
@@ -205,6 +215,18 @@ CREATE TABLE dbo.AUDIT_DEAD_LETTER (
     tenant_id NVARCHAR(128) NOT NULL
 );
 
+IF OBJECT_ID(N'dbo.AUDIT_PURGE_CHECKPOINTS', N'U') IS NULL
+CREATE TABLE dbo.AUDIT_PURGE_CHECKPOINTS (
+    id NVARCHAR(128) NOT NULL PRIMARY KEY,
+    first_surviving_seq BIGINT NOT NULL,
+    surviving_prev_hash NVARCHAR(128) NOT NULL,
+    purged_count BIGINT NOT NULL,
+    purged_through_utc NVARCHAR(64) NOT NULL,
+    created_at NVARCHAR(64) NOT NULL,
+    signature NVARCHAR(128) NOT NULL,
+    external_signature NVARCHAR(MAX) NULL
+);
+
 IF OBJECT_ID(N'dbo.CONSENT_REQUESTS', N'U') IS NULL
 CREATE TABLE dbo.CONSENT_REQUESTS (
     id NVARCHAR(128) NOT NULL PRIMARY KEY,
@@ -218,7 +240,8 @@ CREATE TABLE dbo.CONSENT_REQUESTS (
     requested_valid_to NVARCHAR(64) NOT NULL,
     itsm_ticket_id NVARCHAR(256) NULL,
     tenant_id NVARCHAR(128) NULL,
-    requester_identifiers_json NVARCHAR(MAX) NULL
+    requester_identifiers_json NVARCHAR(MAX) NULL,
+    context_json NVARCHAR(MAX) NULL
 );
 
 IF OBJECT_ID(N'dbo.APPROVAL_STEPS', N'U') IS NULL
@@ -250,16 +273,63 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ux_table_owners_natural'
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ux_policy_epochs_natural' AND object_id = OBJECT_ID(N'dbo.POLICY_EPOCHS'))
     CREATE UNIQUE INDEX ux_policy_epochs_natural ON dbo.POLICY_EPOCHS (domain, schema_name, table_name);
 
+-- WP-SC-01: indexes of the consent query. grantee_sid_norm is the upper-invariant grantee SID written by the repository; rows without it
+-- (NULL) are always candidates and the C# filter stays authoritative. The lower-case TABLES columns make the natural key sargable.
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_consents_tenant_table' AND object_id = OBJECT_ID(N'dbo.CONSENTS'))
+    CREATE INDEX ix_consents_tenant_table ON dbo.CONSENTS (tenant_id, table_id, is_revoked);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_consents_tenant_grantee' AND object_id = OBJECT_ID(N'dbo.CONSENTS'))
+    CREATE INDEX ix_consents_tenant_grantee ON dbo.CONSENTS (tenant_id, grantee_sid_norm, is_revoked);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_consents_tenant_role' AND object_id = OBJECT_ID(N'dbo.CONSENTS'))
+    CREATE INDEX ix_consents_tenant_role ON dbo.CONSENTS (tenant_id, role_name);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_consent_column_rules_consent' AND object_id = OBJECT_ID(N'dbo.CONSENT_COLUMN_RULES'))
+    CREATE INDEX ix_consent_column_rules_consent ON dbo.CONSENT_COLUMN_RULES (consent_id);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_consent_row_filters_consent' AND object_id = OBJECT_ID(N'dbo.CONSENT_ROW_FILTERS'))
+    CREATE INDEX ix_consent_row_filters_consent ON dbo.CONSENT_ROW_FILTERS (consent_id);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_column_masking_rules_column' AND object_id = OBJECT_ID(N'dbo.COLUMN_MASKING_RULES'))
+    CREATE INDEX ix_column_masking_rules_column ON dbo.COLUMN_MASKING_RULES (table_column_id);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_role_members_member' AND object_id = OBJECT_ID(N'dbo.ROLE_MEMBERS'))
+    CREATE INDEX ix_role_members_member ON dbo.ROLE_MEMBERS (member_sid);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_table_owners_owner' AND object_id = OBJECT_ID(N'dbo.TABLE_OWNERS'))
+    CREATE INDEX ix_table_owners_owner ON dbo.TABLE_OWNERS (data_owner_id);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_tables_natural_ci' AND object_id = OBJECT_ID(N'dbo.TABLES'))
+    CREATE INDEX ix_tables_natural_ci ON dbo.TABLES (source_name_lc, schema_name_lc, table_name_lc);
+
 IF OBJECT_ID(N'dbo.TABLE_RELATIONS', N'U') IS NULL
 CREATE TABLE dbo.TABLE_RELATIONS (
     id NVARCHAR(128) NOT NULL PRIMARY KEY,
     parent_table_id NVARCHAR(128) NOT NULL,
     child_table_id NVARCHAR(128) NOT NULL,
     relation_name NVARCHAR(256) NOT NULL,
-    join_key_parent NVARCHAR(256) NOT NULL,
-    join_key_child NVARCHAR(256) NOT NULL,
     cardinality NVARCHAR(64) NOT NULL
 );
+
+-- Issue #151: composite-key relations. One row per ordered key pair; column names are validated on write.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_TABLE_RELATIONS_NATURAL' AND object_id = OBJECT_ID(N'dbo.TABLE_RELATIONS'))
+    CREATE UNIQUE INDEX UX_TABLE_RELATIONS_NATURAL ON dbo.TABLE_RELATIONS (parent_table_id, child_table_id, relation_name);
+
+IF OBJECT_ID(N'dbo.TABLE_RELATION_KEYS', N'U') IS NULL
+CREATE TABLE dbo.TABLE_RELATION_KEYS (
+    relation_id NVARCHAR(128) NOT NULL,
+    key_ordinal INT NOT NULL CONSTRAINT CK_TABLE_RELATION_KEYS_ordinal CHECK (key_ordinal >= 1),
+    parent_column NVARCHAR(256) NOT NULL,
+    child_column NVARCHAR(256) NOT NULL,
+    CONSTRAINT PK_TABLE_RELATION_KEYS PRIMARY KEY (relation_id, key_ordinal)
+);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_TABLE_RELATION_KEYS_PARENT' AND object_id = OBJECT_ID(N'dbo.TABLE_RELATION_KEYS'))
+    CREATE UNIQUE INDEX UX_TABLE_RELATION_KEYS_PARENT ON dbo.TABLE_RELATION_KEYS (relation_id, parent_column);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_TABLE_RELATION_KEYS_CHILD' AND object_id = OBJECT_ID(N'dbo.TABLE_RELATION_KEYS'))
+    CREATE UNIQUE INDEX UX_TABLE_RELATION_KEYS_CHILD ON dbo.TABLE_RELATION_KEYS (relation_id, child_column);
 
 IF OBJECT_ID(N'dbo.ITSM_OUTBOX', N'U') IS NULL
 CREATE TABLE dbo.ITSM_OUTBOX (
@@ -349,13 +419,20 @@ BEGIN
         subject_type NVARCHAR(32) NOT NULL CONSTRAINT DF_ACCESS_PROFILE_ASSIGNMENTS_type DEFAULT 'User',
         assigned_at DATETIMEOFFSET NOT NULL CONSTRAINT DF_ACCESS_PROFILE_ASSIGNMENTS_assigned DEFAULT SYSDATETIMEOFFSET(),
         expires_at DATETIMEOFFSET NULL,
-        CONSTRAINT PK_ACCESS_PROFILE_ASSIGNMENTS PRIMARY KEY (tenant_id, profile_id, subject),
+        subject_norm NVARCHAR(256) NULL,
+        created_by NVARCHAR(256) NULL,
+        approved_by NVARCHAR(256) NULL,
+        approved_at DATETIMEOFFSET NULL,
+        justification NVARCHAR(MAX) NULL,
+        kind NVARCHAR(32) NOT NULL CONSTRAINT DF_ACCESS_PROFILE_ASSIGNMENTS_kind DEFAULT 'Standard',
+        renewal_count INT NOT NULL CONSTRAINT DF_ACCESS_PROFILE_ASSIGNMENTS_renewals DEFAULT 0,
+        CONSTRAINT PK_ACCESS_PROFILE_ASSIGNMENTS PRIMARY KEY NONCLUSTERED (tenant_id, profile_id, subject_type, subject),
         CONSTRAINT FK_ACCESS_PROFILE_ASSIGNMENTS_PROFILE FOREIGN KEY (tenant_id, profile_id) 
             REFERENCES ACCESS_PROFILES (tenant_id, profile_id) ON DELETE CASCADE
     );
 
     CREATE NONCLUSTERED INDEX IX_ACCESS_PROFILE_ASSIGNMENTS_SUBJECT 
-        ON ACCESS_PROFILE_ASSIGNMENTS(tenant_id, subject);
+        ON ACCESS_PROFILE_ASSIGNMENTS(tenant_id, subject_type, subject_norm);
 END;
 
 IF OBJECT_ID(N'dbo.VIRTUAL_FILTER_GENERATION', N'U') IS NULL
@@ -366,6 +443,55 @@ CREATE TABLE dbo.VIRTUAL_FILTER_GENERATION (
 
 IF NOT EXISTS (SELECT 1 FROM dbo.VIRTUAL_FILTER_GENERATION WHERE id = 1)
     INSERT INTO dbo.VIRTUAL_FILTER_GENERATION (id, generation) VALUES (1, 0);
+
+-- Issue #129: caller attribute registry (four-eyes, draft beside the active row), service sets and one generation counter
+IF OBJECT_ID(N'dbo.CALLER_ATTRIBUTES', N'U') IS NULL
+CREATE TABLE dbo.CALLER_ATTRIBUTES (
+    id NVARCHAR(128) NOT NULL PRIMARY KEY,
+    tenant_id NVARCHAR(128) NOT NULL,
+    name NVARCHAR(128) NOT NULL,
+    definition_json NVARCHAR(MAX) NOT NULL,
+    definition_hash NVARCHAR(128) NOT NULL,
+    status INT NOT NULL,
+    created_by NVARCHAR(256) NOT NULL,
+    approved_by NVARCHAR(256) NULL,
+    approved_at NVARCHAR(64) NULL,
+    draft_definition_json NVARCHAR(MAX) NULL,
+    draft_definition_hash NVARCHAR(128) NULL,
+    draft_created_by NVARCHAR(256) NULL,
+    pending_deletion INT NOT NULL CONSTRAINT DF_CALLER_ATTRIBUTES_pending_deletion DEFAULT 0,
+    deletion_requested_by NVARCHAR(256) NULL,
+    updated_by NVARCHAR(256) NULL,
+    updated_at NVARCHAR(64) NOT NULL,
+    CONSTRAINT uq_caller_attributes_tenant_name UNIQUE (tenant_id, name)
+);
+
+IF OBJECT_ID(N'dbo.CALLER_ATTRIBUTE_SERVICE_SETS', N'U') IS NULL
+CREATE TABLE dbo.CALLER_ATTRIBUTE_SERVICE_SETS (
+    id NVARCHAR(128) NOT NULL PRIMARY KEY,
+    tenant_id NVARCHAR(128) NOT NULL,
+    application_id NVARCHAR(256) NOT NULL,
+    attribute_name NVARCHAR(128) NOT NULL,
+    values_json NVARCHAR(MAX) NOT NULL,
+    values_hash NVARCHAR(128) NOT NULL,
+    status INT NOT NULL,
+    created_by NVARCHAR(256) NOT NULL,
+    approved_by NVARCHAR(256) NULL,
+    approved_at NVARCHAR(64) NULL,
+    draft_values_json NVARCHAR(MAX) NULL,
+    draft_created_by NVARCHAR(256) NULL,
+    updated_at NVARCHAR(64) NOT NULL,
+    CONSTRAINT uq_caller_attribute_service_sets UNIQUE (tenant_id, application_id, attribute_name)
+);
+
+IF OBJECT_ID(N'dbo.CALLER_ATTRIBUTE_GENERATION', N'U') IS NULL
+CREATE TABLE dbo.CALLER_ATTRIBUTE_GENERATION (
+    id INT NOT NULL PRIMARY KEY CHECK (id = 1),
+    generation BIGINT NOT NULL
+);
+
+IF NOT EXISTS (SELECT 1 FROM dbo.CALLER_ATTRIBUTE_GENERATION WHERE id = 1)
+    INSERT INTO dbo.CALLER_ATTRIBUTE_GENERATION (id, generation) VALUES (1, 0);
 
 -- CR-ADG-31: tenant registry (grouped by NFKC + upper-case key; collided = 1 denies every spelling of the group)
 IF OBJECT_ID(N'dbo.TENANT_REGISTRY', N'U') IS NULL
@@ -557,6 +683,51 @@ CREATE TABLE dbo.TABLE_INDEX_COLUMNS (
 );
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_TABLE_INDEX_COLUMNS_COLUMN' AND object_id = OBJECT_ID(N'dbo.TABLE_INDEX_COLUMNS'))
     CREATE UNIQUE INDEX UX_TABLE_INDEX_COLUMNS_COLUMN ON dbo.TABLE_INDEX_COLUMNS (index_id, table_column_id);
+
+-- Issue #107: object-level row filter evaluation strategy (key-set cache); separate from TABLES because ingestion upserts rewrite TABLES
+IF OBJECT_ID(N'dbo.TABLE_ROW_FILTER_STRATEGIES', N'U') IS NULL
+CREATE TABLE dbo.TABLE_ROW_FILTER_STRATEGIES (
+    table_id NVARCHAR(128) NOT NULL PRIMARY KEY,
+    strategy INT NULL,
+    duration_seconds INT NULL,
+    max_keys INT NULL,
+    updated_by NVARCHAR(256) NOT NULL,
+    updated_at NVARCHAR(64) NOT NULL
+);
+
+-- Issue #111: dataset catalog tags (admin / dbt source) and visibility tier; separate from TABLES because ingestion upserts rewrite TABLES.
+-- No foreign keys and no CHECK constraints (as TABLE_ROW_FILTER_STRATEGIES): validity is enforced on write and re-validated on read.
+IF OBJECT_ID(N'dbo.TABLE_TAGS', N'U') IS NULL
+CREATE TABLE dbo.TABLE_TAGS (
+    table_id NVARCHAR(128) NOT NULL,
+    tag NVARCHAR(64) NOT NULL,
+    source NVARCHAR(16) NOT NULL,
+    created_by NVARCHAR(256) NOT NULL,
+    created_at NVARCHAR(64) NOT NULL,
+    CONSTRAINT PK_TABLE_TAGS PRIMARY KEY (table_id, tag)
+);
+IF OBJECT_ID(N'dbo.TABLE_CATALOG_SETTINGS', N'U') IS NULL
+CREATE TABLE dbo.TABLE_CATALOG_SETTINGS (
+    table_id NVARCHAR(128) NOT NULL PRIMARY KEY,
+    visibility INT NOT NULL,
+    updated_by NVARCHAR(256) NOT NULL,
+    updated_at NVARCHAR(64) NOT NULL
+);
+
+-- Issue #112: one validated semantic (dbt) manifest per tenant (latest version only); a save replaces the row atomically.
+-- No foreign key (tenant registry rows are optional in single-tenant installs). content_hash is the SHA-256 hex of manifest_json.
+IF OBJECT_ID(N'dbo.SEMANTIC_MANIFESTS', N'U') IS NULL
+CREATE TABLE dbo.SEMANTIC_MANIFESTS (
+    tenant_id NVARCHAR(128) NOT NULL PRIMARY KEY,
+    manifest_version NVARCHAR(128) NOT NULL,
+    content_hash CHAR(64) NOT NULL,
+    format_version INT NOT NULL,
+    models_count INT NOT NULL,
+    metrics_count INT NOT NULL,
+    manifest_json NVARCHAR(MAX) NOT NULL,
+    imported_by NVARCHAR(256) NOT NULL,
+    imported_at NVARCHAR(64) NOT NULL
+);
 ");
 
             // Append-only audit table (a table owner can still drop the trigger; the runtime login should only
@@ -566,6 +737,13 @@ INSTEAD OF UPDATE, DELETE
 AS
 BEGIN
     SET NOCOUNT ON;
+    IF CAST(SESSION_CONTEXT(N'audit_purge_authorized') AS bit) = 1
+    BEGIN
+        DELETE e
+        FROM dbo.AUDIT_LOG_ENTRIES e
+        INNER JOIN deleted d ON e.id = d.id;
+        RETURN;
+    END;
     THROW 50042, 'AUDIT_LOG_ENTRIES is append-only', 1;
 END");
     }

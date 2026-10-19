@@ -33,10 +33,20 @@ internal static class SharedDatabaseServers
             .Build()));
 
     /// <summary>Connection string of the shared PostgreSQL server (superuser, maintenance database).</summary>
-    public static async Task<string> PostgreSqlServerAsync() => (await PostgreSql.Value).GetConnectionString();
+    public static async Task<string> PostgreSqlServerAsync()
+    {
+        var env = Environment.GetEnvironmentVariable("AUTHERIS_TEST_POSTGRES");
+        if (!string.IsNullOrWhiteSpace(env)) return env;
+        return (await PostgreSql.Value).GetConnectionString();
+    }
 
     /// <summary>Connection string of the shared SQL Server (sa, master).</summary>
-    public static async Task<string> SqlServerServerAsync() => (await SqlServer.Value).GetConnectionString();
+    public static async Task<string> SqlServerServerAsync()
+    {
+        var env = Environment.GetEnvironmentVariable("AUTHERIS_TEST_MSSQL");
+        if (!string.IsNullOrWhiteSpace(env)) return env;
+        return (await SqlServer.Value).GetConnectionString();
+    }
 
     private static async Task<T> StartAsync<T>(T container) where T : IContainer
     {

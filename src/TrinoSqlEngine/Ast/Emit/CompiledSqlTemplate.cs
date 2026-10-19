@@ -22,7 +22,10 @@ public sealed record SqlSlot(
     ParameterOrigin Origin,
     string? SourceName,
     object? LiteralValue,
-    string? ColumnType = null);
+    string? ColumnType = null,
+    int? ListIndex = null,
+    int? ListCount = null,
+    bool ZoneArgument = false);
 
 /// <summary>
 /// Value-free cached compile output (SEC-ADG-01, INV-12). It holds the SQL text and slot descriptors; tenant, policy and
@@ -58,7 +61,7 @@ public sealed record CompiledSqlTemplate(
         {
             slots.Add(new SqlSlot(
                 p.Marker, p.Name, p.Ordinal, p.Type, p.Origin, p.SourceName,
-                p.Origin == ParameterOrigin.QueryLiteral ? p.Value : null, p.ColumnType));
+                p.Origin == ParameterOrigin.QueryLiteral ? p.Value : null, p.ColumnType, p.ListIndex, p.ListCount, p.ZoneArgument));
         }
 
         return slots.MoveToImmutable();
@@ -86,7 +89,7 @@ public sealed record CompiledSqlTemplate(
                 }
             }
 
-            parameters.Add(new BoundParameter(slot.Marker, slot.Name, slot.Ordinal, value, type, slot.Origin, slot.SourceName, slot.ColumnType));
+            parameters.Add(new BoundParameter(slot.Marker, slot.Name, slot.Ordinal, value, type, slot.Origin, slot.SourceName, slot.ColumnType, slot.ListIndex, slot.ListCount, slot.ZoneArgument));
         }
 
         return new CompiledSql(Sql, parameters.ToImmutable(), Dialect, StatementClass, AppliedPredicates, CompilerVersion)
@@ -110,7 +113,10 @@ public sealed class CompiledSqlTemplateCache
         public long LastAccessSequence = lastAccessSequence;
     }
 
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, CacheEntry> _entries = new(StringComparer.Ordinal);
+    // Measured: about 0.6 KB less per engine construction on the 0.5KB benchmark bucket (G8). A fixed small lock count: the default (one lock object per core) is allocated eagerly for every engine, and the benchmark and
+    // short-lived engines pay for it on each construction. Eviction is serialized by _evictionLock anyway.
+    private const int ConcurrencyLevel = 4;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, CacheEntry> _entries = new(ConcurrencyLevel, 16, StringComparer.Ordinal);
     private readonly object _evictionLock = new();
     private readonly int _maxEntries;
     private long _hits;

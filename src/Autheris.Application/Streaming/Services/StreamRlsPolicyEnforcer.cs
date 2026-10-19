@@ -14,6 +14,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -40,6 +41,8 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
     private readonly Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? _rebacEvaluator;
 
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
+    private readonly Autheris.Application.Identity.Attributes.ICallerAttributeResolver? _callerAttributes;
+    private readonly TimeProvider _time;
 
     public StreamRlsPolicyEnforcer(
         IPolicyEnforcementService policyEnforcementService,
@@ -53,8 +56,12 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         IClientIpResolver? clientIpResolver = null,
         IOptions<GatewayOptions>? options = null,
         Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
-        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null)
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
+        Autheris.Application.Identity.Attributes.ICallerAttributeResolver? callerAttributes = null,
+        TimeProvider? time = null)
     {
+        _callerAttributes = callerAttributes;
+        _time = time ?? TimeProvider.System;
         _mandatoryFilters = mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance;
         _policyEnforcementService = policyEnforcementService ?? throw new ArgumentNullException(nameof(policyEnforcementService));
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
@@ -118,6 +125,16 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         var groupSids = subscriber.GetGroupSids();
         var roles = subscriber.GetUserRoles();
 
+        // REQ-GOV-143 (SEC-GOV143-02/-13): the subscriber's token scopes (claims overload) decide whether a restricted scope is held. The scope
+        // set belongs to the token captured at subscribe time and must not outlive it: once the token has expired, nothing is delivered
+        // (the subscriber re-subscribes with a fresh token).
+        var scopes = TokenAccessScope.GetScopeSet(subscriber.Claims);
+        if (scopes.Count > 0 && IsTokenExpired(subscriber))
+        {
+            _logger.LogDebug("Streaming event '{EventId}' dropped: the subscriber token (scopes) has expired", cdcEvent.EventId);
+            return StreamSecurityDecision.Denied("Token expired");
+        }
+
         // 4. Catalog metadata is mandatory (dialect, column list, masking rules) -> fail-closed
         TableMetadata? metadata;
         TableAccessDecision decision;
@@ -131,7 +148,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
             }
 
             // 5. Consent decision (same chain as GatewayExecutionService)
-            decision = await ResolveConsentDecisionAsync(tenantId, userSid, groupSids, roles, cdcEvent.Table, metadata, ct).ConfigureAwait(false);
+            decision = await ResolveConsentDecisionAsync(tenantId, userSid, groupSids, roles, scopes, cdcEvent.Table, metadata, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -244,7 +261,10 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         // 7. In-Stream Row-Level Security Filtering (Fail-Closed, SQL three-valued logic)
         if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
         {
-            if (!MatchesStreamingRowFilter(rawPayload, decision.CombinedRowFilterSql))
+            // REQ-GOV-129 (A-8, BC-129-14): a consent filter with caller attributes is evaluated typed, per event, from the recipe; the text of such a
+            // decision is only a constant. Null: no attribute leaves (or the feature is off), the text evaluator decides as before.
+            bool? attributeVerdict = await EvaluateAttributeFilterAsync(decision, subscriber, tenantId, metadata, rawPayload, ct).ConfigureAwait(false);
+            if (!(attributeVerdict ?? MatchesStreamingRowFilter(rawPayload, decision.CombinedRowFilterSql)))
             {
                 _logger.LogDebug(
                     "Streaming event '{EventId}' filtered out by in-stream row filter for subscriber '{UserSid}'",
@@ -307,6 +327,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         Sid userSid,
         HashSet<Sid> groupSids,
         HashSet<string> roles,
+        IReadOnlySet<string> scopes,
         TableIdentifier table,
         TableMetadata metadata,
         CancellationToken ct)
@@ -316,7 +337,9 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
             return TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true);
         }
 
-        var contextHash = IConsentCacheService.ComputeSubjectContextHash(groupSids, roles);
+        // The scope set is part of the key: a restricted and an unrestricted subscriber never share a cached decision.
+        var resolverScopes = scopes.Count > 0 ? scopes : null;
+        var contextHash = IConsentCacheService.ComputeSubjectContextHash(groupSids, roles, resolverScopes);
         var cached = await _cacheService.GetCachedDecisionAsync(tenantId, userSid, table, contextHash, ct).ConfigureAwait(false);
         if (cached != null)
         {
@@ -334,12 +357,87 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
             .Where(c => c.TenantId == tenantId)
             .ToList();
 
-        var decision = _resolutionService.ResolveAccess(userSid, groupSids, roles, table, tenantConsents, metadata.Dialect);
+        var decision = _resolutionService.ResolveAccess(userSid, groupSids, roles, table, tenantConsents, metadata.Dialect, allUserSids: null, callerScopes: resolverScopes);
 
         var ttl = ConsentResolutionService.ComputeDecisionCacheTtl(metadata.Table.IsHighlySensitive, tenantConsents, now);
         await _cacheService.SetCachedDecisionAsync(tenantId, userSid, table, decision, ttl, contextHash, epochAtLoad, ct).ConfigureAwait(false);
 
         return decision;
+    }
+
+    private bool IsTokenExpired(ClaimsPrincipal subscriber)
+    {
+        var exp = subscriber.FindFirst("exp")?.Value;
+        return exp != null && (!long.TryParse(exp, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var expSeconds) ||
+                               expSeconds <= _time.GetUtcNow().ToUnixTimeSeconds());
+    }
+
+    /// <summary>
+    /// The verdict of a consent row filter that names caller attributes, or null when it names none. The subscriber principal is captured at
+    /// subscribe time, so the event is dropped once its token has expired (<c>exp</c>), and the principal is a long-lived scope (no request memo):
+    /// the value cache keeps the cost per event at one memory lookup.
+    /// </summary>
+    private sealed class SubjectBox
+    {
+        public volatile SubjectEntry? Entry;
+    }
+
+    private sealed record SubjectEntry(TenantId Tenant, Autheris.Application.Identity.Attributes.CallerSubject Subject);
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ConsentRowFilterRecipe, IReadOnlyCollection<string>> RecipeNames = new();
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<ClaimsPrincipal, SubjectBox> Subjects = new();
+
+    private async ValueTask<bool?> EvaluateAttributeFilterAsync(
+        TableAccessDecision decision, ClaimsPrincipal subscriber, TenantId tenantId, TableMetadata metadata,
+        IReadOnlyDictionary<string, object?> payload, CancellationToken ct)
+    {
+        if (_callerAttributes is not { IsEnabled: true } resolver || decision.ConsentFilterRecipe is not { } recipe)
+        {
+            return null;
+        }
+
+        var names = RecipeNames.GetValue(recipe, static r => Autheris.Application.Identity.Attributes.CallerAttributeRecipes.Names(r));
+        if (names.Count == 0)
+        {
+            return null;
+        }
+
+        var exp = subscriber.FindFirst("exp")?.Value;
+        if (exp != null && (!long.TryParse(exp, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var expSeconds) ||
+                            expSeconds <= _time.GetUtcNow().ToUnixTimeSeconds()))
+        {
+            return false;
+        }
+
+        try
+        {
+            // The subscriber principal is fixed for the subscription: its subject is built once, not per event.
+            var cached = Subjects.GetValue(subscriber, _ => new SubjectBox());
+            var entry = cached.Entry;
+            if (entry is null || entry.Tenant != tenantId)
+            {
+                // One immutable pair swapped by a single reference write: a concurrent event never sees a subject with a foreign tenant.
+                entry = new SubjectEntry(tenantId, resolver.CreateSubject(subscriber, tenantId, longLived: true));
+                cached.Entry = entry;
+            }
+
+            var subject = entry.Subject;
+            var (set, padding) = await Autheris.Application.Identity.Attributes.CallerAttributeRecipes.ResolveAsync(resolver, subject, names, ct).ConfigureAwait(false);
+            var predicate = new Autheris.Application.Sql.Policy.TypedRowFilterBuilder().BuildCombined(
+                recipe.Allow, recipe.Deny, default, Autheris.Application.Sql.Policy.PolicyParameterNamer.ToTargetDialect(metadata.Dialect), set, padding);
+            if (predicate is null)
+            {
+                return true;
+            }
+
+            var rows = new List<IReadOnlyDictionary<string, object?>> { payload };
+            return Autheris.Application.Services.PolicyPredicateRowEvaluator.Filter(rows, predicate, metadata).Count == 1;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError("Streaming attribute filter evaluation failed ({ExceptionType}) - failing closed", ex.GetType().Name);
+            return false;
+        }
     }
 
     private IPAddress ResolveClientIp(ClaimsPrincipal subscriber)

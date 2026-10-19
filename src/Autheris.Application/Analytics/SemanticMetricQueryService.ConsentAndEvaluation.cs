@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Data;
 using Autheris.Application.Policy;
+using Autheris.Application.Services;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -18,6 +19,9 @@ using Autheris.Domain.Security;
 
 public sealed partial class SemanticMetricQueryService
 {
+    /// <summary>The production resolver with its secure default (restricted <c>Agent.Read</c>), used when none was injected.</summary>
+    private static readonly IConsentResolutionService FallbackResolver = new ConsentResolutionService();
+
     private async Task<(TableAccessDecision Decision, bool HasMetricConsent)> ResolveMetricAndTableDecisionAsync(
         ClaimsPrincipal principal,
         Sid userSid,
@@ -151,40 +155,25 @@ public sealed partial class SemanticMetricQueryService
                     })
                     .ToList();
 
-                if (_resolutionService != null)
+                var scopes = TokenAccessScope.GetScopeSet(principal.Claims);
+
+                // REQ-GOV-143 (D-7): without an injected resolver the production resolver (secure default list) decides, with the claims scope
+                // set, instead of a copy of the rule logic that knew neither row filters nor the restricted-scope clearance.
+                var resolver = _resolutionService ?? FallbackResolver;
+                var metricDecision = resolver.ResolveAccess(
+                    userSid,
+                    groupSids,
+                    roles,
+                    table,
+                    projectedConsents,
+                    tableMetadata.Dialect,
+                    allSids.Count > 1 ? allSids : null,
+                    scopes.Count > 0 ? scopes : null);
+
+                if (metricDecision is { IsAllowed: true })
                 {
-                    var scopes = TokenAccessScope.GetScopeSet(principal.Claims);
-                    var metricDecision = _resolutionService.ResolveAccess(
-                        userSid,
-                        groupSids,
-                        roles,
-                        table,
-                        projectedConsents,
-                        tableMetadata.Dialect,
-                        allSids.Count > 1 ? allSids : null,
-                        scopes.Count > 0 ? scopes : null);
-
-                    if (metricDecision is { IsAllowed: true })
-                    {
-                        return (metricDecision, true);
-                    }
+                    return (metricDecision, true);
                 }
-
-                // Fallback when no IConsentResolutionService was provided in unit test construction
-                var colAccess = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
-                foreach (var col in tableMetadata.Columns)
-                {
-                    colAccess[col.ColumnName] = col.IsSensitive || tableMetadata.ColumnMaskingRules.ContainsKey(col.ColumnName)
-                        ? ColumnAccessLevel.Mask
-                        : ColumnAccessLevel.Clear;
-                }
-
-                foreach (var rule in projectedConsents.SelectMany(c => c.ColumnRules))
-                {
-                    colAccess[rule.ColumnName] = rule.AccessLevel;
-                }
-
-                return (TableAccessDecision.Allowed(table, colAccess, hasUnconstrainedColumnAllow: true), true);
             }
         }
 
@@ -247,25 +236,46 @@ public sealed partial class SemanticMetricQueryService
         return aggFunc == AggregateFunction.Count ? null : measure.Name;
     }
 
-    private static TableFilterClause? CombineMetricFiltersWithWhere(
+    internal static TableFilterClause? CombineMetricFiltersWithWhere(
         IEnumerable<DbtMetric> metrics,
         TableFilterClause? requestWhere,
         TableMetadata metadata)
     {
-        var predicates = new List<string>();
+        // Each source contributes a (Trino text, SqlPredicate text) pair so that a request clause whose Trino text differs from its
+        // SqlPredicate (a typed clause with bound parameters) is never replaced by the simplified text.
+        var trinoParts = new List<Func<Func<string, string>, string>>();
+        var sqlParts = new List<string>();
         var referencedCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var parameters = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
 
         if (requestWhere != null && !string.IsNullOrWhiteSpace(requestWhere.SqlPredicate))
         {
-            predicates.Add(requestWhere.SqlPredicate);
+            sqlParts.Add(requestWhere.SqlPredicate);
+            var requestClause = requestWhere;
+            // The Trino text is always composed through GetTrinoPredicate (which fails closed without a Trino factory), never from SqlPredicate.
+            trinoParts.Add(resolve => requestClause.GetTrinoPredicate(resolve));
+
             foreach (var c in requestWhere.ReferencedColumns)
             {
                 referencedCols.Add(c);
             }
+
+            // WP-0 (SEC-112-01): the column set of the combined clause is a union. A free-text request clause has an empty set, so its
+            // columns are extracted from its text; otherwise they would be missing next to the metric filter columns and never be checked.
+            if (requestWhere.ReferencedColumns.Count == 0)
+            {
+                foreach (var c in Autheris.Application.Data.Services.DataApiFilterTranslator.ExtractReferencedColumns(requestWhere.SqlPredicate, metadata))
+                {
+                    referencedCols.Add(c);
+                }
+            }
+
             foreach (var (k, v) in requestWhere.Parameters)
             {
-                parameters[k] = v;
+                if (!parameters.TryAdd(k, v))
+                {
+                    throw new ArgumentException("Filter parameter names collide.", nameof(requestWhere));
+                }
             }
         }
 
@@ -276,7 +286,8 @@ public sealed partial class SemanticMetricQueryService
                 var cleaned = CleanDbtFilterTemplate(metric.Filter);
                 if (!string.IsNullOrWhiteSpace(cleaned))
                 {
-                    predicates.Add(cleaned);
+                    sqlParts.Add(cleaned);
+                    trinoParts.Add(_ => cleaned);
                     foreach (var col in Autheris.Application.Data.Services.DataApiFilterTranslator.ExtractReferencedColumns(cleaned, metadata))
                     {
                         referencedCols.Add(col);
@@ -285,27 +296,31 @@ public sealed partial class SemanticMetricQueryService
             }
         }
 
-        if (predicates.Count == 0)
+        if (sqlParts.Count == 0)
         {
             return null;
         }
 
-        if (predicates.Count == 1 && requestWhere != null)
+        // The request clause is returned as is only when it is the sole contributor; a lone metric filter must never be dropped.
+        bool requestContributed = requestWhere != null && !string.IsNullOrWhiteSpace(requestWhere.SqlPredicate);
+        if (sqlParts.Count == 1 && requestContributed)
         {
             return requestWhere;
         }
 
-        string combinedSql = predicates.Count == 1
-            ? predicates[0]
-            : string.Join(" AND ", predicates.Select(p => $"({p})"));
+        string combinedSql = sqlParts.Count == 1
+            ? sqlParts[0]
+            : string.Join(" AND ", sqlParts.Select(p => $"({p})"));
 
         return new TableFilterClause(combinedSql, parameters, referencedCols.ToList())
         {
-            TrinoSqlFactory = _ => combinedSql
+            TrinoSqlFactory = resolve => trinoParts.Count == 1
+                ? trinoParts[0](resolve)
+                : string.Join(" AND ", trinoParts.Select(p => $"({p(resolve)})"))
         };
     }
 
-    private static string CleanDbtFilterTemplate(string rawFilter)
+    internal static string CleanDbtFilterTemplate(string rawFilter)
     {
         var text = rawFilter.Trim();
         if (text.StartsWith("{{", StringComparison.Ordinal) && text.EndsWith("}}", StringComparison.Ordinal))
@@ -317,6 +332,9 @@ public sealed partial class SemanticMetricQueryService
             text,
             @"(?:Dimension|TimeDimension|Entity)\(\s*['""](?:[A-Za-z0-9_]+__)?([A-Za-z0-9_]+)['""]\s*\)",
             "$1");
+
+        // dbt wraps each reference ("{{ Dimension('x') }} = 'y'"): once the reference is a plain column the template braces are noise.
+        text = text.Replace("{{", string.Empty, StringComparison.Ordinal).Replace("}}", string.Empty, StringComparison.Ordinal).Trim();
 
         return text;
     }

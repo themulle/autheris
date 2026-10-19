@@ -11,6 +11,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Logging;
 
 public sealed partial class QueryAnalysisService
 {
@@ -23,6 +24,7 @@ public sealed partial class QueryAnalysisService
         ClaimsPrincipal effectivePrincipal,
         Sid effectiveSid,
         bool isAdmin,
+        AnalysisScopeContext scopeContext,
         IReadOnlyList<Consent> activeConsents,
         IReadOnlyList<FieldSunsettingRule> sunsetRules,
         Dictionary<string, TableMetadata> tableLookup,
@@ -74,6 +76,10 @@ public sealed partial class QueryAnalysisService
                 Column: null,
                 RequestedLevel: "READ",
                 SuggestedPurpose: $"Read access to dataset '{canonicalDataset}' required by query '{queryName}'."));
+
+            // Table-level stop, independent of the catalog visibility value: without a table grant, ownership or administrator class the
+            // column stage (select * expansion, OutputColumns, UnknownColumn, column-level requests) would disclose which columns exist.
+            return;
         }
 
         var tableAllowConsents = activeConsents
@@ -96,6 +102,8 @@ public sealed partial class QueryAnalysisService
             outcome,
             ct).ConfigureAwait(false);
 
+        var columnLevels = ResolveTableColumnLevels(table, effectivePrincipal, effectiveSid, activeConsents, scopeContext);
+
         var columnsToInspect = selectAllColumns
             ? table.Columns.Select(c => c.ColumnName).ToList()
             : requestedColumns.ToList();
@@ -117,10 +125,8 @@ public sealed partial class QueryAnalysisService
             }
 
             var accessLevel = ResolveEffectiveColumnAccess(
-                table,
                 catalogCol,
-                activeConsents,
-                hasTableGrant,
+                columnLevels,
                 isOwner,
                 isAdmin);
 
@@ -164,10 +170,8 @@ public sealed partial class QueryAnalysisService
             }
 
             var filterAccess = ResolveEffectiveColumnAccess(
-                table,
                 catalogCol,
-                activeConsents,
-                hasTableGrant,
+                columnLevels,
                 isOwner,
                 isAdmin);
 
@@ -252,11 +256,16 @@ public sealed partial class QueryAnalysisService
         return false;
     }
 
+    /// <summary>Token scopes of the evaluated principal; <c>Scopes</c> is empty for an impersonated target.</summary>
+    private sealed record AnalysisScopeContext(IReadOnlySet<string> Scopes, bool TargetImpersonated)
+    {
+        /// <summary>Levels per table for the principal of this request (queries of one request run sequentially).</summary>
+        public Dictionary<TableIdentifier, IReadOnlyDictionary<string, ColumnAccessLevel>> LevelCache { get; } = new();
+    }
+
     private static ColumnAccessLevel ResolveEffectiveColumnAccess(
-        TableMetadata table,
         TableColumn column,
-        IReadOnlyList<Consent> activeConsents,
-        bool hasTableGrant,
+        IReadOnlyDictionary<string, ColumnAccessLevel> columnLevels,
         bool isOwner,
         bool isAdmin)
     {
@@ -265,46 +274,75 @@ public sealed partial class QueryAnalysisService
             return ColumnAccessLevel.Clear;
         }
 
-        var tableConsents = activeConsents
-            .Where(c => c.TableIdentifier == table.Identifier)
-            .ToList();
+        return columnLevels.TryGetValue(column.ColumnName, out var level) ? level : ColumnAccessLevel.Deny;
+    }
 
-        var allowConsents = tableConsents
-            .Where(c => c.Effect == ConsentEffect.Allow)
-            .ToList();
-
-        bool isExplicitlyDenied = tableConsents
-            .SelectMany(c => c.ColumnRules)
-            .Any(cr => string.Equals(cr.ColumnName, column.ColumnName, StringComparison.OrdinalIgnoreCase) &&
-                       cr.AccessLevel == ColumnAccessLevel.Deny) ||
-            (table.ColumnMaskingRules != null &&
-             table.ColumnMaskingRules.TryGetValue(column.ColumnName, out var mr) &&
-             string.Equals(mr.RuleType, "DENY", StringComparison.OrdinalIgnoreCase));
-
-        if (isExplicitlyDenied)
+    /// <summary>
+    /// Issue #127: predicted level per column, resolved once per table by the data-path resolver so the analysis never
+    /// promises more than the execution delivers. Consents are restricted to the principal's tenant. An impersonated target has
+    /// no known token: the prediction is the minimum of the evaluation without scopes and the evaluation with every scope named
+    /// by a rule of the table. A resolver failure denies every column.
+    /// </summary>
+    private IReadOnlyDictionary<string, ColumnAccessLevel> ResolveTableColumnLevels(
+        TableMetadata table,
+        ClaimsPrincipal principal,
+        Sid sid,
+        IReadOnlyList<Consent> activeConsents,
+        AnalysisScopeContext scopeContext)
+    {
+        if (scopeContext.LevelCache.TryGetValue(table.Identifier, out var cached))
         {
-            return ColumnAccessLevel.Deny;
+            return cached;
         }
 
-        bool hasExplicitClear = allowConsents
-            .SelectMany(c => c.ColumnRules)
-            .Any(cr => string.Equals(cr.ColumnName, column.ColumnName, StringComparison.OrdinalIgnoreCase) &&
-                       cr.AccessLevel == ColumnAccessLevel.Clear);
-
-        bool hasExplicitMask = allowConsents
-            .SelectMany(c => c.ColumnRules)
-            .Any(cr => string.Equals(cr.ColumnName, column.ColumnName, StringComparison.OrdinalIgnoreCase) &&
-                       cr.AccessLevel == ColumnAccessLevel.Mask);
-
-        bool isSensitiveInCatalog = column.IsSensitive ||
-                                    (table.ColumnMaskingRules != null && table.ColumnMaskingRules.ContainsKey(column.ColumnName));
-
-        if ((isSensitiveInCatalog && !hasExplicitClear) || (hasExplicitMask && !hasExplicitClear))
+        Dictionary<string, ColumnAccessLevel> levels;
+        try
         {
-            return ColumnAccessLevel.Mask;
+            var tenantId = principal.GetTenantId();
+            var tenantConsents = activeConsents.Where(c => c.TenantId == tenantId).ToList();
+            var groups = principal.GetGroupSids();
+            var roles = principal.GetUserRoles();
+
+            var evaluations = new List<IReadOnlySet<string>> { scopeContext.Scopes };
+            if (scopeContext.TargetImpersonated)
+            {
+                var worstCase = CatalogColumnAccessResolver.AllRuleScopes(table, tenantConsents);
+                if (worstCase.Count > 0)
+                {
+                    evaluations.Add(worstCase);
+                }
+
+                // REQ-GOV-143 (SEC-GOV143-12): the target may hold a restricted scope; predict that case too (only while the restriction is
+                // enabled). The minimum across evaluations keeps the prediction on the safe side.
+                if (_restrictedScopes.Scopes.Count > 0)
+                {
+                    evaluations.Add(_restrictedScopes.Scopes);
+                }
+            }
+
+            levels = CatalogColumnAccessResolver.ResolveGranted(_consentResolution, table, sid, groups, roles, tenantConsents, evaluations[0]);
+            for (var i = 1; i < evaluations.Count; i++)
+            {
+                var other = CatalogColumnAccessResolver.ResolveGranted(_consentResolution, table, sid, groups, roles, tenantConsents, evaluations[i]);
+                foreach (var (column, level) in other)
+                {
+                    if (level < levels[column])
+                    {
+                        levels[column] = level;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Fail closed; only the table and the exception type are logged (no consent content, scopes or values).
+            _logger?.LogWarning("Column level prediction failed for {Table} ({ExceptionType}); all columns denied.", table.Identifier.ToString(), ex.GetType().Name);
+            levels = CatalogColumnAccessResolver.AllDeny(table);
         }
 
-        return hasTableGrant ? ColumnAccessLevel.Clear : ColumnAccessLevel.Deny;
+        CatalogColumnAccessResolver.ApplyCatalogDenyRules(levels, table);
+        scopeContext.LevelCache[table.Identifier] = levels;
+        return levels;
     }
 
     private static void CheckDeprecatedField(
@@ -336,13 +374,45 @@ public sealed partial class QueryAnalysisService
         HashSet<string> deprecatedKeys,
         List<RequestableConsentItem> missingConsents,
         HashSet<string> missingConsentKeys,
+        Dictionary<string, int> rootFieldCosts,
         ref bool hasRowFilters,
         ref bool hasMandatoryVirtualFilters,
         ref bool isBlockedByMandatoryFilter,
         ref int hiddenMissingDatasetsCount,
-        ref int totalEstimatedCost)
+        ref int totalEstimatedCost,
+        List<AnalyzedFederatedTable>? federatedTables = null,
+        List<AnalyzedKeySetPushdown>? keySetPushdowns = null,
+        List<AnalyzedSubtree>? plannedSubtrees = null,
+        List<CoLocatedGroupPlan>? coLocatedGroups = null)
     {
         diagnostics.AddRange(source.Diagnostics);
+
+        if (federatedTables != null && source.FederatedTables.Count > 0)
+        {
+            federatedTables.AddRange(source.FederatedTables);
+        }
+
+        if (keySetPushdowns != null && source.KeySetPushdowns.Count > 0)
+        {
+            keySetPushdowns.AddRange(source.KeySetPushdowns);
+        }
+
+        if (plannedSubtrees != null && source.Subtrees.Count > 0)
+        {
+            plannedSubtrees.AddRange(source.Subtrees);
+        }
+
+        if (coLocatedGroups != null && source.CoLocatedGroups.Count > 0)
+        {
+            coLocatedGroups.AddRange(source.CoLocatedGroups);
+        }
+
+        foreach (var (field, cost) in source.RootFieldCosts)
+        {
+            rootFieldCosts[field] = rootFieldCosts.TryGetValue(field, out var existing)
+                ? (int)Math.Min((long)int.MaxValue, (long)existing + cost)
+                : cost;
+        }
 
         foreach (var col in source.OutputColumns)
         {
@@ -385,6 +455,11 @@ public sealed partial class QueryAnalysisService
         public List<AnalyzedOutputColumn> OutputColumns { get; } = new();
         public List<DeprecatedFieldReference> DeprecatedFields { get; } = new();
         public List<RequestableConsentItem> MissingConsents { get; } = new();
+        public Dictionary<string, int> RootFieldCosts { get; } = new(StringComparer.Ordinal);
+        public List<AnalyzedFederatedTable> FederatedTables { get; } = new();
+        public List<AnalyzedKeySetPushdown> KeySetPushdowns { get; } = new();
+        public List<AnalyzedSubtree> Subtrees { get; } = new();
+        public List<CoLocatedGroupPlan> CoLocatedGroups { get; } = new();
         public bool HasRowFilters { get; set; }
         public bool HasMandatoryVirtualFilters { get; set; }
         public bool IsBlockedByMandatoryFilter { get; set; }

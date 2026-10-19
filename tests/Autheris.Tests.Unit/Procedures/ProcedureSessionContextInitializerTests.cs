@@ -72,7 +72,7 @@ public sealed class ProcedureSessionContextInitializerTests
 
         try
         {
-            await invoker.ExecuteReadAsync(def, new Dictionary<string, object?>(), sec, CancellationToken.None);
+            await invoker.ExecuteReadAsync(def, new Dictionary<string, object?>(), sec, 10, CancellationToken.None);
         }
         catch
         {

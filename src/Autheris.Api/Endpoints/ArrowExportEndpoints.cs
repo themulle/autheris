@@ -13,6 +13,7 @@ using Autheris.Application.Data.Interfaces;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Serialization;
 using Autheris.Application.Sql;
+using Autheris.Application.Sql.Errors;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -201,6 +202,17 @@ public static class ArrowExportEndpoints
             var logger = httpContext.RequestServices?.GetService<ILoggerFactory>()?.CreateLogger("Autheris.Api.Endpoints.ArrowExport");
             var traceId = httpContext.TraceIdentifier;
             var isProduction = httpContext.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
+
+            if (SqlCompilerErrorMapper.TryMap(ex, out var mapping))
+            {
+                SqlCompilerErrorMapper.RecordOutcome(mapping);
+                return Results.Problem(
+                    statusCode: mapping.Status,
+                    title: mapping.Title,
+                    detail: mapping.Title,
+                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId, ["errorCode"] = mapping.Code });
+            }
+
             switch (ex)
             {
                 case System.Security.SecurityException secEx:

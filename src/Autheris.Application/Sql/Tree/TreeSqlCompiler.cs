@@ -68,6 +68,57 @@ public static partial class TreeSqlCompiler
         return new CompiledTreeQuery(sql, context.Parameters, context.HmacColumns);
     }
 
+    /// <summary>
+    /// Lists the selected columns that <see cref="Compile"/> masks for the caller (same decision, same column
+    /// resolution), so that transports can report them (GraphQL <c>extensions.maskedFields</c>). Columns that are unknown
+    /// or denied are skipped here; <see cref="Compile"/> rejects them.
+    /// </summary>
+    public static IReadOnlyList<TreeMaskedColumn> CollectMaskedColumns(
+        TreeQueryNode root,
+        IReadOnlyDictionary<TableIdentifier, TreeTableAccess> access,
+        bool maskingDisabled = false)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        ArgumentNullException.ThrowIfNull(access);
+
+        var result = new List<TreeMaskedColumn>();
+        if (maskingDisabled)
+        {
+            return result;
+        }
+
+        CollectMasked(root, access, [], result);
+        return result;
+    }
+
+    private static void CollectMasked(
+        TreeQueryNode node,
+        IReadOnlyDictionary<TableIdentifier, TreeTableAccess> access,
+        IReadOnlyList<string> path,
+        List<TreeMaskedColumn> result)
+    {
+        if (!access.TryGetValue(node.Table, out var tableAccess))
+        {
+            return;
+        }
+
+        foreach (var requested in node.Columns)
+        {
+            var column = tableAccess.Metadata.GetColumn(requested?.Trim() ?? string.Empty)?.ColumnName;
+            if (column != null &&
+                tableAccess.Decision.GetEffectiveColumnAccess(column, tableAccess.Metadata) == ColumnAccessLevel.Mask &&
+                !result.Any(m => string.Equals(m.Column, column, StringComparison.Ordinal) && m.Path.SequenceEqual(path, StringComparer.Ordinal)))
+            {
+                result.Add(new TreeMaskedColumn(path, column));
+            }
+        }
+
+        foreach (var relation in node.Relations)
+        {
+            CollectMasked(relation.Child, access, path.Append(relation.ResponseKey).ToArray(), result);
+        }
+    }
+
     private static int Depth(TreeQueryNode node) =>
         1 + (node.Relations.Count == 0 ? 0 : node.Relations.Max(r => Depth(r.Child)));
 
@@ -315,6 +366,8 @@ public static partial class TreeSqlCompiler
             ValidateFilterColumns(node.Where, metadata, tableAccess.Decision, depth: 0);
         }
 
+        EnsureRequiredFilterColumnsSatisfied(metadata, tableAccess, node.Where);
+
         var children = new List<(TreeRelationNode Relation, NodePlan Child)>();
         foreach (var relation in node.Relations)
         {
@@ -413,6 +466,75 @@ public static partial class TreeSqlCompiler
             default:
                 throw new GatewayInvalidQueryException("Unsupported filter.");
         }
+    }
+
+    private static void EnsureRequiredFilterColumnsSatisfied(
+        TableMetadata metadata,
+        TreeTableAccess tableAccess,
+        TreeFilter? where)
+    {
+        if (metadata.RequiredFilterColumns.Length == 0)
+        {
+            return;
+        }
+
+        foreach (var reqCol in metadata.RequiredFilterColumns)
+        {
+            // 1. Tenant column
+            if (tableAccess.TenantColumn != null &&
+                string.Equals(tableAccess.TenantColumn, reqCol, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // 2. Active RLS
+            if (tableAccess.Decision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rlsPolicy &&
+                rlsPolicy.Predicate.ReferencedColumns.Contains(reqCol.ToLowerInvariant()))
+            {
+                continue;
+            }
+
+            // 3. Query filter
+            if (IsColumnConstrained(where, reqCol))
+            {
+                continue;
+            }
+
+            throw new TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException(
+                TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(
+                    TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing));
+        }
+    }
+
+    private static bool IsColumnConstrained(TreeFilter? filter, string column)
+    {
+        if (filter == null) return false;
+
+        return filter switch
+        {
+            TreeComparison comp =>
+                string.Equals(comp.Column, column, StringComparison.OrdinalIgnoreCase) &&
+                (comp.Operator is TreeFilterOperator.Eq
+                               or TreeFilterOperator.Gt
+                               or TreeFilterOperator.Gte
+                               or TreeFilterOperator.Lt
+                               or TreeFilterOperator.Lte
+                               or TreeFilterOperator.IsNull
+                               or TreeFilterOperator.Contains
+                               or TreeFilterOperator.StartsWith
+                               or TreeFilterOperator.EndsWith ||
+                 (comp.Operator == TreeFilterOperator.In && comp.Value is IEnumerable list && list.Cast<object?>().Any())),
+
+            TreeAndFilter andFilter =>
+                andFilter.Items.Any(item => IsColumnConstrained(item, column)),
+
+            TreeOrFilter orFilter =>
+                orFilter.Items.Count > 0 && orFilter.Items.All(item => IsColumnConstrained(item, column)),
+
+            TreeNotFilter => false,
+
+            _ => false
+        };
     }
 
     private static string Echo(string? name) =>
@@ -665,93 +787,20 @@ public static partial class TreeSqlCompiler
 
     // ---------------------------------------------------------------- filters
 
-    private static string BuildFilter(TreeFilter filter, TableMetadata metadata, CompileContext context, string target)
+    private static string BuildFilter(TreeFilter filter, TableMetadata metadata, CompileContext context, string target) =>
+        TreeFilterRenderer.Render(filter, new CompilerFilterTarget(metadata, context, target));
+
+    /// <summary>Dialect rendering of the shared filter shape: qualified quoted columns, <c>@gqN</c> parameters, backslash LIKE escape.</summary>
+    private sealed class CompilerFilterTarget(TableMetadata metadata, CompileContext context, string target) : ITreeFilterTarget
     {
-        switch (filter)
-        {
-            case TreeAndFilter and:
-                return and.Items.Count == 0
-                    ? "1 = 1"
-                    : "(" + string.Join(" AND ", and.Items.Select(i => BuildFilter(i, metadata, context, target))) + ")";
-            case TreeOrFilter or:
-                return or.Items.Count == 0
-                    ? "1 = 0"
-                    : "(" + string.Join(" OR ", or.Items.Select(i => BuildFilter(i, metadata, context, target))) + ")";
-            case TreeNotFilter not:
-                return "NOT (" + BuildFilter(not.Item, metadata, context, target) + ")";
-            case TreeComparison comparison:
-                return BuildComparison(comparison, metadata, context, target);
-            default:
-                throw new GatewayInvalidQueryException("Unsupported filter.");
-        }
+        public string Column(string column) => $"{target}.{Q(context, metadata.GetColumn(column)!.ColumnName)}";
+
+        public string AddParameter(object? value) => context.AddParameter(value);
+
+        public char LikeEscape => '\\';
+
+        public string LikeSpecials => "%_[";
+
+        public bool AlwaysEmitLikeEscape => true;
     }
-
-    private static string BuildComparison(TreeComparison comparison, TableMetadata metadata, CompileContext context, string target)
-    {
-        var column = $"{target}.{Q(context, metadata.GetColumn(comparison.Column)!.ColumnName)}";
-        var value = comparison.Value;
-
-        switch (comparison.Operator)
-        {
-            case TreeFilterOperator.IsNull:
-                return value is true ? $"{column} IS NULL" : $"{column} IS NOT NULL";
-            case TreeFilterOperator.Eq:
-                return value == null ? $"{column} IS NULL" : $"{column} = {context.AddParameter(value)}";
-            case TreeFilterOperator.Neq:
-                return value == null ? $"{column} IS NOT NULL" : $"{column} <> {context.AddParameter(value)}";
-            case TreeFilterOperator.Gt:
-                return $"{column} > {context.AddParameter(RequireValue(comparison))}";
-            case TreeFilterOperator.Gte:
-                return $"{column} >= {context.AddParameter(RequireValue(comparison))}";
-            case TreeFilterOperator.Lt:
-                return $"{column} < {context.AddParameter(RequireValue(comparison))}";
-            case TreeFilterOperator.Lte:
-                return $"{column} <= {context.AddParameter(RequireValue(comparison))}";
-            case TreeFilterOperator.In:
-            case TreeFilterOperator.NotIn:
-            {
-                var items = ToList(comparison);
-                if (items.Count == 0)
-                {
-                    return comparison.Operator == TreeFilterOperator.In ? "1 = 0" : "1 = 1";
-                }
-                var names = string.Join(", ", items.Select(context.AddParameter));
-                return comparison.Operator == TreeFilterOperator.In ? $"{column} IN ({names})" : $"{column} NOT IN ({names})";
-            }
-            case TreeFilterOperator.Contains:
-                return $"{column} LIKE {context.AddParameter("%" + EscapeLike(RequireText(comparison)) + "%")} ESCAPE '\\'";
-            case TreeFilterOperator.StartsWith:
-                return $"{column} LIKE {context.AddParameter(EscapeLike(RequireText(comparison)) + "%")} ESCAPE '\\'";
-            case TreeFilterOperator.EndsWith:
-                return $"{column} LIKE {context.AddParameter("%" + EscapeLike(RequireText(comparison)))} ESCAPE '\\'";
-            default:
-                throw new GatewayInvalidQueryException("Unsupported filter operator.");
-        }
-    }
-
-    private static object RequireValue(TreeComparison comparison) =>
-        comparison.Value ?? throw new GatewayInvalidQueryException($"The operator '{comparison.Operator}' on '{comparison.Column}' needs a value.");
-
-    private static string RequireText(TreeComparison comparison) =>
-        comparison.Value as string ?? throw new GatewayInvalidQueryException($"The operator '{comparison.Operator}' on '{comparison.Column}' needs a text value.");
-
-    private static List<object?> ToList(TreeComparison comparison)
-    {
-        if (comparison.Value is string || comparison.Value is not IEnumerable enumerable)
-        {
-            throw new GatewayInvalidQueryException($"The operator '{comparison.Operator}' on '{comparison.Column}' needs a list.");
-        }
-        var items = enumerable.Cast<object?>().Where(v => v != null).Distinct().ToList();
-        if (items.Count > MaxInListSize)
-        {
-            throw new GatewayInvalidQueryException($"A list filter may contain at most {MaxInListSize} values.");
-        }
-        return items;
-    }
-
-    private static string EscapeLike(string value) =>
-        value.Replace("\\", "\\\\", StringComparison.Ordinal)
-             .Replace("%", "\\%", StringComparison.Ordinal)
-             .Replace("_", "\\_", StringComparison.Ordinal)
-             .Replace("[", "\\[", StringComparison.Ordinal);
 }

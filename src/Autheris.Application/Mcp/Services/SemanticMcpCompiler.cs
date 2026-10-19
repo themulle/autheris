@@ -23,7 +23,8 @@ public sealed class SemanticMcpCompiler(
     ILogger<SemanticMcpCompiler> logger,
     IGoldenQueryService? goldenQueryService = null,
     IConsentRepository? consentRepo = null,
-    IOptions<GatewayOptions>? options = null) : ISemanticMcpCompiler
+    IOptions<GatewayOptions>? options = null,
+    IReadPathSwitches? switches = null) : ISemanticMcpCompiler
 {
     private readonly ITableMetadataRepository _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
     private readonly ILogger<SemanticMcpCompiler> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -31,6 +32,10 @@ public sealed class SemanticMcpCompiler(
     private readonly IConsentRepository? _consentRepo = consentRepo;
     private readonly IOptions<GatewayOptions>? _options = options;
     private static readonly JsonSerializerOptions CachedIndentedOptions = new() { WriteIndented = true };
+
+    /// <summary>First <paramref name="length"/> UTF-16 units of <paramref name="text"/>, never ending on a lone high surrogate.</summary>
+    private static string CutOnRuneBoundary(string text, int length) =>
+        length > 0 && char.IsHighSurrogate(text[length - 1]) ? text[..(length - 1)] : text[..length];
 
     public async Task<McpToolDefinition> CompileToolAsync(
         string toolName,
@@ -40,14 +45,16 @@ public sealed class SemanticMcpCompiler(
         var meta = await _metadataRepo.GetTableMetadataAsync(targetTable, ct).ConfigureAwait(false);
         var tableDesc = !string.IsNullOrWhiteSpace(meta?.Table.Description)
             ? meta.Table.Description
-            : (meta?.Table.DisplayName ?? $"Dataset for {targetTable.Domain}.{targetTable.TableName}");
+            : (meta is null
+                ? $"Dataset for {targetTable.Domain}.{targetTable.TableName}"
+                : McpCatalogText.DisplayName(meta.Table.DisplayName, targetTable.TableName)); // SEC-CAT146A-01: externally authored text, never raw
 
         // Enforce Dynamic Compactor constraint: Short description < 120 chars for LLM Tool Picker
-        var shortDesc = tableDesc.Length > 110 ? tableDesc[..107] + "..." : tableDesc;
+        var shortDesc = tableDesc.Length > 110 ? CutOnRuneBoundary(tableDesc, 107) + "..." : tableDesc;
         shortDesc = $"{shortDesc} ({targetTable.Domain}.{targetTable.TableName})";
         if (shortDesc.Length > 120)
         {
-            shortDesc = shortDesc[..117] + "...";
+            shortDesc = CutOnRuneBoundary(shortDesc, 117) + "...";
         }
 
         var properties = new Dictionary<string, object>
@@ -106,6 +113,12 @@ public sealed class SemanticMcpCompiler(
         System.Security.Claims.ClaimsPrincipal? principal = null,
         CancellationToken ct = default)
     {
+        // PLAN-SEC-115 A-6: semantic resources render catalog metadata, so they follow the Catalog group (no repository call when off).
+        if (switches is not null && !switches.IsGroupEnabled(McpToolGroup.Catalog))
+        {
+            return [];
+        }
+
         var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
         // SEC H-02: OpenSchema no longer opens MCP resources; only the explicit (production-blocked) MCP auth bypass does.
         var isMcpAuthBypassed = _options?.Value.IsMcpAuthBypassed == true;
@@ -113,7 +126,7 @@ public sealed class SemanticMcpCompiler(
         {
             if (_consentRepo != null)
             {
-                allTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepo, ct).ConfigureAwait(false);
+                allTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepo, _options?.Value, ct).ConfigureAwait(false);
             }
             else if (principal != null)
             {
@@ -170,7 +183,17 @@ public sealed class SemanticMcpCompiler(
             {
                 var hasDesc = !string.IsNullOrWhiteSpace(col.Description);
                 var hasLongDesc = !string.IsNullOrWhiteSpace(col.LongDescription);
-                var hasMeta = col.Meta != null && col.Meta.Count > 0;
+                // Issue #127: the resource is not level aware, so only descriptive meta keys are published (no accepted values, ranges, examples).
+                var docMeta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var (metaKey, metaValue) in col.Meta ?? new Dictionary<string, string>())
+                {
+                    if (McpDatasetCatalog.DescriptiveMetaKeys.Contains(metaKey))
+                    {
+                        docMeta[metaKey] = metaValue;
+                    }
+                }
+
+                var hasMeta = docMeta.Count > 0;
 
                 if (hasDesc || hasLongDesc || hasMeta)
                 {
@@ -202,7 +225,7 @@ public sealed class SemanticMcpCompiler(
                     {
                         sb.AppendLine("## dbt / OpenMetadata Meta");
                         sb.AppendLine("```json");
-                        sb.AppendLine(JsonSerializer.Serialize(col.Meta, CachedIndentedOptions));
+                        sb.AppendLine(JsonSerializer.Serialize(docMeta, CachedIndentedOptions));
                         sb.AppendLine("```");
                         sb.AppendLine();
                     }

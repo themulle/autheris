@@ -23,6 +23,7 @@ public sealed class GatewayOptions
     [Required] public ItsmOptions Itsm { get; init; } = new();
     [Required] public DataCatalogOptions Catalog { get; init; } = new();
     [Required] public McpOptions Mcp { get; init; } = new();
+    [Required] public RestApiOptions RestApi { get; init; } = new();
     [Required] public LakehouseOptions Lakehouse { get; init; } = new();
     [Required] public FederationOptions Federation { get; init; } = new();
     [Required] public ExtensibilityOptions Extensibility { get; init; } = new();
@@ -53,13 +54,16 @@ public sealed class GatewayOptions
     [Required] public ArrowExportOptions Arrow { get; init; } = new();
     [Required] public DuckDbOlapOptions DuckDbOlap { get; init; } = new();
     [Required] public RowFilterOptions RowFilters { get; init; } = new();
+    [Required] public CallerAttributeOptions CallerAttributes { get; init; } = new();
     [Required] public VirtualFilterOptions VirtualFilters { get; init; } = new();
     [Required] public LoggingOptions Logging { get; init; } = new();
     [Required] public ClassificationOptions Classification { get; init; } = new();
     [Required] public TenantIsolationOptions TenantIsolation { get; init; } = new();
+    public TenancyOptions Tenancy { get; init; } = new();
     [Required] public ODataOptions OData { get; init; } = new();
     [Required] public WebhooksOptions Webhooks { get; init; } = new();
     [Required] public FieldSunsettingOptions FieldSunsetting { get; init; } = new();
+    [Required] public QueryCostOptions QueryCost { get; init; } = new();
 
     /// <summary>
     /// Getting Started Preset Profile: "Strict" (Default) or "Quickstart".
