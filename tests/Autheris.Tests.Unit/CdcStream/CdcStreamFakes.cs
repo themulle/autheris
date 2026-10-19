@@ -148,12 +148,19 @@ internal sealed class FakeStreamStore : ICdcStreamStore
 
     public Task ResetWatermarkAsync(CdcStreamId id, string? watermarkState, CancellationToken ct = default) => Task.CompletedTask;
 
-    public Task<CdcReadResult> ReadAsync(CdcStreamId id, long fromOffsetInclusive, int maxEvents, CancellationToken ct = default)
+    public TaskCompletionSource? GateReads { get; set; }
+
+    public async Task<CdcReadResult> ReadAsync(CdcStreamId id, long fromOffsetInclusive, int maxEvents, CancellationToken ct = default)
     {
+        if (GateReads is { } gate)
+        {
+            await gate.Task.WaitAsync(ct).ConfigureAwait(false);
+        }
+
         lock (_gate)
         {
             var rows = Events.Where(e => e.Offset >= fromOffsetInclusive).OrderBy(e => e.Offset).Take(maxEvents).ToList();
-            return Task.FromResult(new CdcReadResult(Descriptor.TailOffset, Descriptor.HeadOffset, rows));
+            return new CdcReadResult(Descriptor.TailOffset, Descriptor.HeadOffset, rows);
         }
     }
 
