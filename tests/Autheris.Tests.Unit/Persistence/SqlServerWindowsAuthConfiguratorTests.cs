@@ -1,7 +1,9 @@
 using System.Buffers;
 using System.ComponentModel.DataAnnotations;
 using System.Net;
+using System.Reflection;
 using System.Security;
+using System.Security.Authentication.ExtendedProtection;
 using System.Text;
 using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Application.Interfaces;
@@ -424,6 +426,164 @@ public sealed class SqlServerWindowsAuthConfiguratorTests : IDisposable
         Assert.NotEqual(IntPtr.Zero, ptr);
         Assert.Equal("native-visible", System.Runtime.InteropServices.Marshal.PtrToStringUTF8(ptr));
         Assert.Equal("native-visible", Environment.GetEnvironmentVariable(name));
+    }
+
+    [Fact]
+    public void SqlClientChannelBindingExtractor_IsSupportedSqlClientVersion_DetectsVersion7AndHigher()
+    {
+        Assert.True(SqlClientChannelBindingExtractor.IsSupportedSqlClientVersion(typeof(SspiContextProvider).Assembly));
+        Assert.False(SqlClientChannelBindingExtractor.IsSupportedSqlClientVersion(null));
+    }
+
+    [Fact]
+    public void SqlClientChannelBindingExtractor_NullProvider_ReturnsGracefulFailureResult()
+    {
+        var result = SqlClientChannelBindingExtractor.ExtractChannelBinding(null);
+
+        Assert.False(result.Success);
+        Assert.Null(result.Binding);
+        Assert.Null(result.Kind);
+        Assert.Contains("SspiContextProvider was null", result.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SqlClientChannelBindingExtractor_UninitializedStateObject_ReturnsGracefulFailure()
+    {
+        using var provider = new ManagedNtlmSspiContextProvider(new NetworkCredential("svc", "secret", "DOM"));
+        var result = SqlClientChannelBindingExtractor.ExtractChannelBinding(provider);
+
+        Assert.False(result.Success);
+        Assert.Null(result.Binding);
+        Assert.Null(result.Kind);
+        Assert.Contains("_physicalStateObj was not initialized", result.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ManagedNtlmSspiContextProvider_WithCustomChannelBindingAccessor_AssignsBindingAndAcquires()
+    {
+        using var testBinding = new TestChannelBinding(new byte[] { 0xAA, 0xBB, 0xCC, 0xDD });
+        using var provider = new ManagedNtlmSspiContextProvider(
+            new NetworkCredential("svc", "SecretPass123", "CORP"),
+            targetSpnOverride: "MSSQLSvc/db01.corp.local:1433",
+            package: "NTLM",
+            channelBindingAccessor: _ => testBinding);
+
+        var writer = new ArrayBufferWriter<byte>();
+        bool negotiateSuccess = provider.TryGenerateContext(ReadOnlySpan<byte>.Empty, writer, "MSSQLSvc/db01.corp.local:1433");
+
+        Assert.True(negotiateSuccess);
+        Assert.True(provider.ChannelBindingAcquired);
+        Assert.Equal(ChannelBindingKind.Endpoint, provider.ChannelBindingKindUsed);
+        Assert.Contains("custom accessor", provider.ChannelBindingStatus, StringComparison.Ordinal);
+        Assert.Null(provider.LastFailure);
+        Assert.True(writer.WrittenCount > 0);
+    }
+
+    [Fact]
+    public void ManagedNtlmSspiContextProvider_Dispose_CleansUpChannelBindingAndNegotiation()
+    {
+        using var testBinding = new TestChannelBinding(new byte[] { 1, 2, 3, 4 });
+        var provider = new ManagedNtlmSspiContextProvider(
+            new NetworkCredential("svc", "SecretPass123", "CORP"),
+            channelBindingAccessor: _ => testBinding);
+
+        var writer = new ArrayBufferWriter<byte>();
+        Assert.True(provider.TryGenerateContext(ReadOnlySpan<byte>.Empty, writer, "resource"));
+        Assert.True(provider.ChannelBindingAcquired);
+
+        provider.Dispose();
+        // Provider disposed without exception
+    }
+
+    [Fact]
+    public void SqlClientChannelBindingExtractor_WithSimulatedObjectGraph_DetectsNonSslStreamGracefully()
+    {
+        var dummyTcpHandle = new DummyTcpHandle(new object()); // not an SslStream
+        var dummyMarsConnection = new DummyMarsConnection(dummyTcpHandle);
+        var dummyMarsHandle = new DummyMarsHandle(dummyMarsConnection);
+        var dummyStateObject = new DummyStateObject(dummyMarsHandle);
+
+        var simulatedProvider = new SimulatedSspiContextProvider(dummyStateObject);
+        var result = SqlClientChannelBindingExtractor.ExtractChannelBinding(simulatedProvider);
+
+        Assert.False(result.Success);
+        Assert.Null(result.Binding);
+        Assert.Contains("is not an SslStream", result.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SqlClientChannelBindingExtractor_WithUnencryptedHandle_ReportsNoSslStream()
+    {
+        var dummyTcpHandle = new DummyTcpHandle(null); // unencrypted connection
+        var dummyStateObject = new DummyStateObject(dummyTcpHandle);
+
+        var simulatedProvider = new SimulatedSspiContextProvider(dummyStateObject);
+        var result = SqlClientChannelBindingExtractor.ExtractChannelBinding(simulatedProvider);
+
+        Assert.False(result.Success);
+        Assert.Null(result.Binding);
+        Assert.Contains("No _sslStream found", result.StatusMessage, StringComparison.Ordinal);
+        Assert.Contains("unencrypted", result.StatusMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class TestChannelBinding : ChannelBinding
+    {
+        private readonly IntPtr _ptr;
+
+        public TestChannelBinding(byte[] data)
+        {
+            _ptr = System.Runtime.InteropServices.Marshal.AllocHGlobal(data.Length);
+            System.Runtime.InteropServices.Marshal.Copy(data, 0, _ptr, data.Length);
+            SetHandle(_ptr);
+            Size = data.Length;
+        }
+
+        public override int Size { get; }
+
+        protected override bool ReleaseHandle()
+        {
+            if (handle != IntPtr.Zero)
+            {
+                System.Runtime.InteropServices.Marshal.FreeHGlobal(handle);
+                handle = IntPtr.Zero;
+            }
+            return true;
+        }
+    }
+
+    private sealed class SimulatedSspiContextProvider : SspiContextProvider
+    {
+        private readonly object _physicalStateObj;
+
+        public SimulatedSspiContextProvider(object stateObj)
+        {
+            _physicalStateObj = stateObj;
+        }
+
+        protected override bool GenerateContext(
+            ReadOnlySpan<byte> incomingBlob,
+            IBufferWriter<byte> outgoingBlobWriter,
+            SspiAuthenticationParameters authParams) => true;
+    }
+
+    private sealed class DummyStateObject(object sessionHandle)
+    {
+        private readonly object _sessionHandle = sessionHandle;
+    }
+
+    private sealed class DummyMarsHandle(object connection)
+    {
+        private readonly object _connection = connection;
+    }
+
+    private sealed class DummyMarsConnection(object lowerHandle)
+    {
+        private readonly object _lowerHandle = lowerHandle;
+    }
+
+    private sealed class DummyTcpHandle(object? sslStream)
+    {
+        private readonly object? _sslStream = sslStream;
     }
 
 #pragma warning disable SYSLIB1054, CA5392, CA2101 // test-only probe of the native environment; the name is marshalled explicitly as UTF-8
