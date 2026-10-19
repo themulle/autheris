@@ -419,6 +419,7 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.ConsumerAggregationStore", "consumer aggregation store (Issue #114, SEC-AUD114-05): fixed rollup statements with bound parameters, no client text"),
         ("Autheris.Infrastructure.Persistence.CdcStreamSqlCore", "CDC durable stream store (Issue #99, SEC-CDC-05): fixed event and row-image statements over engine-specific schemas, bound values, no client text"),
         ("Autheris.Extensions.Cdc.CustomQuery.CustomQueryPollerService", "CDC custom query poller service (Issue #101, Issue #210): reads watermark batches using configured poller queries, bound parameters, no client text"),
+        ("Autheris.Application.Data.Relations.GovernedCrossSourceRowReader", "Cross-source GraphQL relation row reader (Issue #75, Issue #223): executes batched lookup statements with bound parameters over child data sources, no client text"),
     ];
 
     private static bool IsAllowedCommandTextSite(string top) =>
