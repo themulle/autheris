@@ -48,5 +48,5 @@ SERVER_IP=$(hcloud server ip "${SERVER_NAME}")
 echo "Server created successfully! IP: ${SERVER_IP}"
 echo ""
 echo "Next step: copy benchmark workspace to server:"
-echo "  scp -r /root/lis-git/gql root@${SERVER_IP}:/root/"
+echo "  scp -r /root/autheris root@${SERVER_IP}:/root/"
 echo "  ssh root@${SERVER_IP}"

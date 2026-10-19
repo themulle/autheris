@@ -1,6 +1,6 @@
-# GraphQL Gateway Benchmark Suite auf Hetzner (gql_bench)
+# GraphQL Gateway Benchmark Suite auf Hetzner (Autheris)
 
-Dieses Verzeichnis enthält alle Skripte, Konfigurationen, Dockerfiles und Anleitungen, um **GqlGateway** (`lis-git/gql`) objektiv und reproduzierbar gegen führende GraphQL-Engines (**Hasura**, **Apollo Server 5**, **PostGraphile**) auf **Hetzner Cloud oder Dedicated Servern** zu benchmarken.
+Dieses Verzeichnis enthält alle Skripte, Konfigurationen, Dockerfiles und Anleitungen, um **Autheris** objektiv und reproduzierbar gegen führende GraphQL-Engines (**Hasura**, **Apollo Server 5**, **PostGraphile**) auf **Hetzner Cloud oder Dedicated Servern** zu benchmarken.
 
 Als Referenzbasis dient der bewährte Standard-Benchmark [`hasura/graphql-bench`](https://github.com/hasura/graphql-bench) mit der relationalen **Chinook-Datenbank** (PostgreSQL) und dem Lasttest-Tool **k6**.
 
@@ -81,7 +81,7 @@ In der Wurzel des Verzeichnisses stehen zwei komfortable Master-Skripte bereit:
 ### Variante A: Single-Host Schnellstart (`run_single_host.sh`)
 Führt alle Schritte (Setup, DB, Gateways, k6-Lauf, Analyse) auf einem einzigen Server aus:
 ```bash
-cd /root/lis-git/gql/gql_bench
+cd /root/autheris/benchmarks/load
 
 # Standard-Benchmark (30s, 1.000 RPS)
 ./run_single_host.sh --full
@@ -98,7 +98,7 @@ cd /root/lis-git/gql/gql_bench
 ### Variante B: Offizieller 3-Tier Multi-Host Benchmark (`run_multi_host.sh`)
 Orchestriert automatisch die **vollständige 3-Server-Architektur** auf Hetzner Cloud (DB, Gateway, Client-Loadgenerator im 10G-Privatnetz):
 ```bash
-cd /root/lis-git/gql/gql_bench
+cd /root/autheris/benchmarks/load
 export HCLOUD_TOKEN="dein-hetzner-cloud-api-token"
 
 # Startet Cluster, initialisiert DB, deployt Gateways, führt Lasttest aus und sammelt Ergebnisse
@@ -120,18 +120,18 @@ Vom lokalen Entwicklungsrechner:
 ```bash
 # Workspace auf den Hetzner Server übertragen
 rsync -avz --exclude 'bin' --exclude 'obj' --exclude 'node_modules' \
-  /root/lis-git/ root@<HETZNER_SERVER_IP>:/root/lis-git/
+  /root/autheris/ root@<HETZNER_SERVER_IP>:/root/autheris/
 
 # Per SSH einloggen
 ssh root@<HETZNER_SERVER_IP>
-cd /root/lis-git/gql/gql_bench
+cd /root/autheris/benchmarks/load
 ```
 
 ---
 
 ### Schritt 2: Host einrichten & Kernel tunen
 
-Das Skript [`scripts/01_hetzner_setup.sh`](file:///root/lis-git/gql/gql_bench/scripts/01_hetzner_setup.sh) optimiert den Linux-Kernel für hohen Netzwerkdurchsatz (`somaxconn=65535`, `tcp_tw_reuse`, erweiterte Port-Range, `nofile=1048576`) und installiert Docker, k6, .NET 10 und Node.js:
+Das Skript `scripts/01_hetzner_setup.sh` optimiert den Linux-Kernel für hohen Netzwerkdurchsatz (`somaxconn=65535`, `tcp_tw_reuse`, erweiterte Port-Range, `nofile=1048576`) und installiert Docker, k6, .NET 10 und Node.js:
 
 ```bash
 ./scripts/01_hetzner_setup.sh
@@ -184,7 +184,7 @@ SCENARIO=ramp DURATION=70s ./scripts/04_run_benchmarks.sh
 
 ### Schritt 6: Ergebnisse analysieren & Berichte einsehen
 
-Nach dem Benchmark-Lauf generiert [`scripts/05_analyze_results.py`](file:///root/lis-git/gql/gql_bench/scripts/05_analyze_results.py) automatisch:
+Nach dem Benchmark-Lauf generiert `scripts/05_analyze_results.py` automatisch:
 1. Eine sortierte Markdown-Tabelle im Terminal.
 2. Einen Markdown-Bericht in `results/report_<timestamp>.md`.
 3. Eine strukturierte CSV-Datei in `results/report_<timestamp>.csv`.
