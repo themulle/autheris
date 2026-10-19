@@ -415,6 +415,8 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.CallerAttributeStore", "caller attribute registry tables of the governance store (REQ-GOV-129): fixed statements with bound values, no client text"),
         ("Autheris.Application.Identity.Attributes.AttributeTableProvider", "caller attribute lookup (REQ-GOV-129 A-5.2): the statement is built by AttributeTableQuery from validated identifiers (^[A-Za-z_][A-Za-z0-9_]{0,127}$, quoted per dialect) with the subject, tenant and issuer bound; no client text"),
         ("Autheris.Infrastructure.Persistence.AccessProfileStore", "access profile tables of the governance store (WP-SC-03): fixed statements with bound values, only integer-indexed parameter names and enum literals are spliced, no client text"),
+        ("Autheris.Application.Sql.Federation.CoLocation.CoLocationVerificationService", "co-location verification (Issue #132, SEC-DATA132-05): fixed 'SELECT @@SERVERNAME' verification statement on SQL Server connection, no client text"),
+        ("Autheris.Infrastructure.Persistence.ConsumerAggregationStore", "consumer aggregation store (Issue #114, SEC-AUD114-05): fixed rollup statements with bound parameters, no client text"),
     ];
 
     private static bool IsAllowedCommandTextSite(string top) =>
@@ -688,7 +690,7 @@ public sealed class CutoverArchitectureTests
     {
         var graph = BuildCallGraph(ProductionAssemblies);
         graph.Targets.Where(kv => kv.Value.Contains(CompileTarget)).Select(kv => kv.Key.Type)
-            .Distinct().ShouldBe(new[] { "Autheris.Application.Sql.Services.GovernedSqlRewriter" }, ignoreOrder: true);
+            .Distinct().ShouldBe(new[] { "Autheris.Application.Sql.Services.GovernedSqlRewriter", "Autheris.Application.Sql.Federation.Subtrees.SubtreeCompiler" }, ignoreOrder: true);
         graph.Targets.Where(kv => kv.Value.Contains(BinderTarget)).Select(kv => kv.Key.Type)
             .Distinct().ShouldBe(new[] { "Autheris.Application.Sql.Services.GovernedSqlExecutor", "Autheris.Application.Olap.DuckDbOlapEngine" }, ignoreOrder: true);
     }

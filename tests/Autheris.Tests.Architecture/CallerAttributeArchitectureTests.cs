@@ -144,6 +144,7 @@ public sealed partial class CallerAttributeArchitectureTests
             ["src/Autheris.Application/Analytics/NoisyCacheKey.cs"] = "noisy cache key (#112 SEC-112-12/-26): hashes the predicate text with the bound caller-attribute values and the Generation; an unresolved attribute skips the cache",
             ["src/Autheris.Application/Analytics/GovernedAggregationService.ValidationAndExecution.cs"] = "copies the decision, which carries the typed policy; aggregation compiles through the typed path",
             ["src/Autheris.Application/Data/Changes/GovernedChangeDetectionService.Cursors.cs"] = "known-key disclosure check only (presence of a filter); row evaluation goes through InMemoryRowFilterEvaluator.RowPassesDecision",
+            ["src/Autheris.Application/Data/Services/GovernedTableReadPlanner.Keyset.cs"] = "keyset pagination query planner: appends mandatory row predicate to WHERE clause",
             ["src/Autheris.Application/Policy/TableAccessPolicy.cs"] = "the decision point: a caller attribute outcome without a typed predicate denies the table (BC-129-05)",
             ["src/Autheris.Application/Procedures/Services/GovernedProcedureExecutionService.cs"] = "consent bypass without consent services: text only, so a caller attribute filter denies the table (F-4)",
             ["src/Autheris.Application/Services/InMemoryRowFilterEvaluator.cs"] = "in-memory typed first; a Virtual Filter in memory is refused or denies; the text path rejects markers",

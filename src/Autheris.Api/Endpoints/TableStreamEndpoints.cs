@@ -120,8 +120,9 @@ public static class TableStreamEndpoints
             }
             catch (Exception ex)
             {
+                logger.LogWarning(ex, "Failed to deserialize bulk stream request body");
                 httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-                await httpContext.Response.WriteAsJsonAsync(new { error = "Invalid JSON request body: " + ex.Message }, ct).ConfigureAwait(false);
+                await httpContext.Response.WriteAsJsonAsync(new { error = "Invalid JSON request body." }, ct).ConfigureAwait(false);
                 return;
             }
         }
@@ -247,26 +248,30 @@ public static class TableStreamEndpoints
         }
         catch (InvalidCursorException ex)
         {
+            logger.LogWarning(ex, "Invalid cursor in bulk stream request");
             httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = ex.Message, code = InvalidCursorException.ErrorCode }, ct).ConfigureAwait(false);
+            await httpContext.Response.WriteAsJsonAsync(new { error = "The supplied cursor is invalid.", code = InvalidCursorException.ErrorCode }, ct).ConfigureAwait(false);
             return;
         }
         catch (RequiredFilterColumnMissingException ex)
         {
+            logger.LogWarning(ex, "Required filter column missing in bulk stream request");
             httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = ex.Message, code = RequiredFilterColumnMissingException.ErrorCode }, ct).ConfigureAwait(false);
+            await httpContext.Response.WriteAsJsonAsync(new { error = "A required filter column is missing.", code = RequiredFilterColumnMissingException.ErrorCode }, ct).ConfigureAwait(false);
             return;
         }
         catch (KeysetStreamingUnavailableException ex)
         {
+            logger.LogWarning(ex, "Keyset streaming unavailable for bulk stream request");
             httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = ex.Message, code = KeysetStreamingUnavailableException.ErrorCode }, ct).ConfigureAwait(false);
+            await httpContext.Response.WriteAsJsonAsync(new { error = "Keyset streaming is unavailable for this query.", code = KeysetStreamingUnavailableException.ErrorCode }, ct).ConfigureAwait(false);
             return;
         }
         catch (ArgumentException ex)
         {
+            logger.LogWarning(ex, "Invalid argument in bulk stream request");
             httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = ex.Message }, ct).ConfigureAwait(false);
+            await httpContext.Response.WriteAsJsonAsync(new { error = "Invalid streaming argument." }, ct).ConfigureAwait(false);
             return;
         }
 

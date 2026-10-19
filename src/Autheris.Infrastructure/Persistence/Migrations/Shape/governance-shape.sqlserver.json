@@ -2256,6 +2256,11 @@
           "family": "string"
         },
         {
+          "name": "required_filter_columns_json",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
           "name": "source_name_lc",
           "type": "NVARCHAR",
           "family": "string"

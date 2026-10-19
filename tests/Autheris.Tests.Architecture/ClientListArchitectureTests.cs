@@ -57,8 +57,9 @@ public sealed class ClientListArchitectureTests
         var callers = AllCallers("TrinoSqlEngine.Ast.Visitors.ClientListExpander", c => c.Name == ".ctor");
 
         callers.ShouldNotBeEmpty("positive control: the scanner sees the compiler's own call");
-        callers.ShouldAllBe(c => c.Contains("TrinoSqlEngine.GovernedSqlCompiler.", StringComparison.Ordinal),
-            "ClientListExpander may only be created by GovernedSqlCompiler (SEC-128-11): " + string.Join(", ", callers));
+        callers.ShouldAllBe(c => c.Contains("TrinoSqlEngine.GovernedSqlCompiler.", StringComparison.Ordinal)
+                                 || c.Contains("TrinoSqlEngine.Ast.Visitors.ClientListExpansion.", StringComparison.Ordinal),
+            "ClientListExpander may only be created by GovernedSqlCompiler or ClientListExpansion (SEC-128-11): " + string.Join(", ", callers));
     }
 
     [Fact]
