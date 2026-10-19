@@ -16,6 +16,9 @@ namespace TrinoSqlEngine.Tests.Properties;
 /// </summary>
 [Trait("Category", "SqlGate")]
 [Trait("Category", "Security")]
+[Trait("Category", "Metamorphic")]
+[Trait("Category", "Fuzz")]
+[Trait("Category", "NightlyGate")]
 [Collection(ProductionLimitProbes.Name)]
 public class LimitBoundaryProperties(ITestOutputHelper output)
 {

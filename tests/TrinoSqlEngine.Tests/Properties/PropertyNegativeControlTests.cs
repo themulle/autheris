@@ -15,6 +15,8 @@ namespace TrinoSqlEngine.Tests.Properties;
 /// </summary>
 [Trait("Category", "SqlGate")]
 [Trait("Category", "Security")]
+[Trait("Category", "Metamorphic")]
+[Trait("Category", "NightlyGate")]
 public class PropertyNegativeControlTests
 {
     private const int Cases = 2_000;

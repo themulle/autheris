@@ -515,6 +515,12 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
 
         foreach (var reqCol in metadata.RequiredFilterColumns)
         {
+            if (metadata.TenantColumnName != null &&
+                string.Equals(metadata.TenantColumnName, reqCol, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             if (decision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rls &&
                 rls.Predicate.ReferencedColumns.Contains(reqCol.ToLowerInvariant()))
             {

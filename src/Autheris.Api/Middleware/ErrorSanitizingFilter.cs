@@ -48,8 +48,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "CROSS_SOURCE_KEY_MASKED",
         "CROSS_SOURCE_RELATION_NOT_ENABLED",
         "REQUIRED_FILTER_MISSING",
-        "AGGREGATION_ON_MASKED_COLUMN",
-        "INVALID_ARGUMENT"
+        "AGGREGATION_ON_MASKED_COLUMN"
     };
 
     private static readonly HashSet<string> ExpectedOutcomeCodes = new(StringComparer.OrdinalIgnoreCase)

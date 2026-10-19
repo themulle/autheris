@@ -26,7 +26,8 @@ public static class CdcStreamAdminEndpoints
     public static IEndpointRouteBuilder MapCdcStreamAdminEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/v1/cdc/streams", (HttpContext context, CdcStreamAdminService service, CancellationToken ct) => ListAsync(context, service, ct))
-            .RequireAuthorization(GatewayPolicies.GovernanceAdmin);
+            .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+            .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         app.MapPost("/api/v1/cdc/streams/{id}/resync", (
                 string id, bool? discardUnreadable, string? confirmStreamId, HttpContext context, CdcStreamAdminService service, IAuditWriter audit, CancellationToken ct)
