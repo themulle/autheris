@@ -2072,6 +2072,11 @@
           "name": "cardinality",
           "type": "TEXT",
           "family": "string"
+        },
+        {
+          "name": "allow_cross_data_source",
+          "type": "BOOLEAN",
+          "family": "boolean"
         }
       ],
       "primaryKey": [
