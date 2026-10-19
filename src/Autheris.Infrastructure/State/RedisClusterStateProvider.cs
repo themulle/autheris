@@ -8,6 +8,7 @@ using Autheris.Application.State;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Diagnostics.Metrics;
 using StackExchange.Redis;
 
 /// <summary>
@@ -45,19 +46,19 @@ public sealed class RedisClusterStateProvider : IDistributedClusterStateProvider
         _prefix = instance + "state:";
     }
 
-    private static readonly Prometheus.Counter StateFailures = Prometheus.Metrics.CreateCounter(
-        "autheris_cluster_state_failure_total", "Number of infrastructure failures of the Redis cluster state store",
-        new Prometheus.CounterConfiguration { LabelNames = ["operation"] });
+    private static readonly Meter Meter = new("Autheris.Core");
+    private static readonly Counter<long> RedisFailures = Meter.CreateCounter<long>(
+        "autheris.redis.failures", description: "Number of Redis errors");
+    private static readonly Counter<long> ClusterLeaseEvents = Meter.CreateCounter<long>(
+        "autheris.cluster.lease.events", description: "Number of distributed lease events");
 
-    private static readonly Prometheus.Counter SubscriberHandlerFailures = Prometheus.Metrics.CreateCounter(
-        "autheris_cluster_state_handler_failure_total", "Number of failed cluster event handler invocations");
+    private static void RecordRedisFailure(string operation) =>
+        RedisFailures.Add(1,
+            new KeyValuePair<string, object?>("autheris.redis.component", "cluster_state"),
+            new KeyValuePair<string, object?>("autheris.redis.operation", operation));
 
-    private static readonly Prometheus.Counter LeaseLostTotal = Prometheus.Metrics.CreateCounter(
-        "autheris_cluster_lease_lost_total", "Number of distributed leases declared lost by their holder",
-        new Prometheus.CounterConfiguration { LabelNames = ["reason"] });
-
-    private static readonly Prometheus.Counter LeaseRenewFailureTotal = Prometheus.Metrics.CreateCounter(
-        "autheris_cluster_lease_renew_failure_total", "Number of failed distributed lease renewal attempts");
+    private static void RecordLeaseEvent(string reason) =>
+        ClusterLeaseEvents.Add(1, new KeyValuePair<string, object?>("reason", reason));
 
     // Acquire: KEYS[1]=lease key, KEYS[2]=fence counter (no TTL, so tokens stay strictly increasing), ARGV[1]=owner, ARGV[2]=ttl ms, ARGV[3]=fence seed (unix ms * 1000).
     // The seed keeps tokens above those of a previous generation when the counter was lost (restart without persistence).
@@ -90,7 +91,7 @@ return 0
 
     private ClusterStateUnavailableException Unavailable(string operation, string key, Exception ex)
     {
-        StateFailures.WithLabels(operation).Inc();
+        RecordRedisFailure(operation);
         _logger.LogWarning(ex, "Redis cluster state operation {Operation} failed for key {Key}.", operation, key);
         return new ClusterStateUnavailableException(operation, key, ex);
     }
@@ -164,7 +165,7 @@ return 0
         catch (Exception ex) when (IsInfrastructureFailure(ex))
         {
             // Documented contract: null means "store unavailable" for counters (never "zero").
-            StateFailures.WithLabels("increment").Inc();
+            RecordRedisFailure("increment");
             _logger.LogWarning(ex, "Failed to increment counter {Key} in Redis state store.", key);
             return null;
         }
@@ -219,7 +220,7 @@ end
         }
         catch (Exception ex) when (IsInfrastructureFailure(ex))
         {
-            StateFailures.WithLabels("consume_budget").Inc();
+            RecordRedisFailure("consume_budget");
             _logger.LogError(ex, "Failed to execute atomic budget consume script for key {Key} in Redis state store.", key);
             return (BudgetConsumeOutcome.StoreUnavailable, 0);
         }
@@ -277,7 +278,7 @@ end
         }
         catch (Exception ex)
         {
-            SubscriberHandlerFailures.Inc();
+            RecordRedisFailure("handler");
             _logger.LogError(ex, "Cluster event handler failed for channel {Channel}.", channel);
         }
     }
@@ -384,9 +385,9 @@ end
             }
         }
 
-        protected override void OnLeaseLost(string reason) => LeaseLostTotal.WithLabels(reason).Inc();
+        protected override void OnLeaseLost(string reason) => RecordLeaseEvent(reason);
 
-        protected override void OnRenewFailure() => LeaseRenewFailureTotal.Inc();
+        protected override void OnRenewFailure() => RecordLeaseEvent("renew_failure");
     }
 
     private sealed class RedisSubscriptionLease : IAsyncDisposable

@@ -3,6 +3,7 @@ namespace Autheris.Infrastructure.Streaming;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Diagnostics.Metrics;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Infrastructure.Persistence;
@@ -17,8 +18,9 @@ public sealed class GovernanceDbMssqlWatermarkStore : IMssqlWatermarkStore
 {
     private const string Source = "mssql_ct";
 
-    private static readonly Prometheus.Counter FencedTotal = Prometheus.Metrics.CreateCounter(
-        "autheris_cdc_watermark_fenced_total", "Number of CDC watermark writes rejected because a newer fencing token exists");
+    private static readonly Meter Meter = new("Autheris.Core");
+    private static readonly Counter<long> FencedTotal =
+        Meter.CreateCounter<long>("autheris.cdc.watermark.fenced", description: "Number of CDC watermark writes rejected because a newer fencing token exists");
 
     private readonly ICdcWatermarkRepository _repository;
     private readonly ILogger<GovernanceDbMssqlWatermarkStore> _logger;
@@ -39,7 +41,7 @@ public sealed class GovernanceDbMssqlWatermarkStore : IMssqlWatermarkStore
         var accepted = await _repository.TryAdvanceAsync(Source, table.Domain, table.Schema, table.TableName, watermark, fencingToken, ct).ConfigureAwait(false);
         if (!accepted)
         {
-            FencedTotal.Inc();
+            FencedTotal.Add(1);
             _logger.LogCritical("CDC watermark write for {Table} was rejected: fencing token {Token} is stale. Another replica owns the lease, or the fence counter was reset: check cluster-state persistence (AOF).", table, fencingToken);
         }
 

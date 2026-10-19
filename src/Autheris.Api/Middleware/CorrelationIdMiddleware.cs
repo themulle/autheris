@@ -34,6 +34,11 @@ public sealed class CorrelationIdMiddleware
         var correlationId = ResolveCorrelationId(context);
         context.Items[ItemKey] = correlationId;
 
+        if (Activity.Current != null && Activity.Current.IsAllDataRequested)
+        {
+            Activity.Current.SetTag(Autheris.Domain.Diagnostics.TelemetryAttributes.AutherisCorrelationId, correlationId);
+        }
+
         if (context.Request.Headers.ContainsKey(HeaderName))
         {
             context.Response.Headers[HeaderName] = correlationId;

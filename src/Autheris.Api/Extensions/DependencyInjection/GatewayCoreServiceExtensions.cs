@@ -119,20 +119,6 @@ public static class GatewayCoreServiceExtensions
             }
         });
 
-        // OpenTelemetry Tracing & Metrics with OTLP Exporter
-        services.AddOpenTelemetry()
-            .WithTracing(tracing =>
-            {
-                tracing.AddSource(GatewayDiagnostics.ActivitySourceName);
-                tracing.AddSource(Autheris.Application.Governance.Diagnostics.ClassificationDiagnostics.ActivitySourceName);
-                tracing.AddOtlpExporter();
-            })
-            .WithMetrics(metrics =>
-            {
-                metrics.AddMeter(GatewayDiagnostics.MeterName);
-                metrics.AddMeter(Autheris.Application.Governance.Diagnostics.ClassificationDiagnostics.MeterName);
-                metrics.AddOtlpExporter();
-            });
 
         // Extensibility Pipeline & Interceptors (P9)
         services.AddOptions<Autheris.Domain.Options.ExtensibilityPipelineOptions>()

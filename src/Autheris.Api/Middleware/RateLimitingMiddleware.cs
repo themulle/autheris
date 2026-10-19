@@ -3,6 +3,8 @@ using System.Text.Json;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
+using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 
@@ -26,11 +28,14 @@ public sealed class PreAuthIpRateLimitingMiddleware
         _rateLimiter = rateLimiter;
     }
 
-    internal static readonly Prometheus.Counter RateLimitExceededCounter = Prometheus.Metrics.CreateCounter(
-        "autheris_ratelimit_rejected_total", "Rate limit rejections count", new Prometheus.CounterConfiguration
-        {
-            LabelNames = new[] { "type" }
-        });
+    private static readonly Meter Meter = new("Autheris.Core");
+    internal static readonly Counter<long> RateLimitExceededCounter = Meter.CreateCounter<long>(
+        "autheris.ratelimit.rejections", description: "Rate limit rejections count");
+
+    internal static void RecordRejection(string limitKind, string tier = "default") =>
+        RateLimitExceededCounter.Add(1,
+            new KeyValuePair<string, object?>("limit_kind", limitKind),
+            new KeyValuePair<string, object?>("tier", tier));
 
     public async Task InvokeAsync(HttpContext context)
     {
@@ -68,7 +73,7 @@ public sealed class PreAuthIpRateLimitingMiddleware
 
         if (!result.Allowed)
         {
-            RateLimitExceededCounter.WithLabels("pre_auth_ip").Inc();
+            RecordRejection("pre_auth_ip");
             context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
             context.Response.Headers.RetryAfter = result.RetryAfterSeconds.ToString();
             context.Response.ContentType = "application/json";
@@ -175,7 +180,7 @@ public sealed class PostAuthSidRateLimitingMiddleware
         var result = await _rateLimiter.CheckPostAuthSidAsync(sid, _options, context.RequestAborted);
         if (!result.Allowed)
         {
-            PreAuthIpRateLimitingMiddleware.RateLimitExceededCounter.WithLabels("post_auth_sid").Inc();
+            PreAuthIpRateLimitingMiddleware.RecordRejection("post_auth_sid");
             context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
             context.Response.Headers.RetryAfter = result.RetryAfterSeconds.ToString();
             context.Response.ContentType = "application/json";
@@ -235,7 +240,7 @@ public sealed class UnauthenticatedBearerIpRateLimitingMiddleware
         var ipResult = await _rateLimiter.CheckPreAuthIpAsync(clientIp, preAuthOptions, context.RequestAborted);
         if (!ipResult.Allowed)
         {
-            PreAuthIpRateLimitingMiddleware.RateLimitExceededCounter.WithLabels("pre_auth_ip").Inc();
+            PreAuthIpRateLimitingMiddleware.RecordRejection("pre_auth_ip");
             context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
             context.Response.Headers.RetryAfter = ipResult.RetryAfterSeconds.ToString();
             context.Response.ContentType = "application/json";

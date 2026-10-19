@@ -95,6 +95,12 @@ public sealed class WebhookSubscription
 
     public bool IsActive { get; init; } = true;
 
+    /// <summary>
+    /// When true, outbound delivery requests include the W3C traceparent header of the triggering operation.
+    /// Defaults to false.
+    /// </summary>
+    public bool PropagateTraceContext { get; init; }
+
     /// <summary>Delivery attempts per event. Values are clamped to 1..<see cref="MaxAllowedAttempts"/> (SR-M-13).</summary>
     public int MaxAttempts { get; init; } = 8;
 

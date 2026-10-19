@@ -3,6 +3,7 @@ using Autheris.Application.Interfaces;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Diagnostics.Metrics;
 using StackExchange.Redis;
 
 namespace Autheris.Infrastructure.Idempotency;
@@ -28,9 +29,14 @@ public sealed class RedisIdempotencyStore : IIdempotencyStore
         }
     }
 
-    private static readonly Prometheus.Counter IdempotencyRedisErrors = Prometheus.Metrics.CreateCounter(
-        "autheris_idempotency_redis_errors_total", "Number of Redis errors in Idempotency store",
-        new Prometheus.CounterConfiguration { LabelNames = ["operation"] });
+    private static readonly Meter Meter = new("Autheris.Core");
+    private static readonly Counter<long> RedisFailures = Meter.CreateCounter<long>(
+        "autheris.redis.failures", description: "Number of Redis errors");
+
+    private static void RecordRedisFailure(string operation) =>
+        RedisFailures.Add(1,
+            new KeyValuePair<string, object?>("autheris.redis.component", "idempotency"),
+            new KeyValuePair<string, object?>("autheris.redis.operation", operation));
 
     public async Task<T?> GetAsync<T>(string key, CancellationToken ct = default) where T : class
     {
@@ -46,7 +52,7 @@ public sealed class RedisIdempotencyStore : IIdempotencyStore
         }
         catch (Exception ex)
         {
-            IdempotencyRedisErrors.WithLabels("get").Inc();
+            RecordRedisFailure("get");
             _logger.LogError(ex, "Failed to fetch idempotency key {Key} from Redis", key);
         }
         return null;
@@ -63,7 +69,7 @@ public sealed class RedisIdempotencyStore : IIdempotencyStore
         }
         catch (Exception ex)
         {
-            IdempotencyRedisErrors.WithLabels("set").Inc();
+            RecordRedisFailure("set");
             _logger.LogError(ex, "Failed to set idempotency key {Key} in Redis", key);
             return false;
         }

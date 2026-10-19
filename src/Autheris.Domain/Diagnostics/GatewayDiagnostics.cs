@@ -1,10 +1,13 @@
 namespace Autheris.Domain.Diagnostics;
 
-using System.Diagnostics;
-using System.Diagnostics.Metrics;
 using System.Collections.Frozen;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 
+/// <summary>
+/// Gateway-wide diagnostics, activity sources, and metric instruments.
+/// </summary>
 public static class GatewayDiagnostics
 {
     public const string ActivitySourceName = "Autheris.Core";
@@ -72,7 +75,6 @@ public static class GatewayDiagnostics
     public static readonly Histogram<double> LineageTraversalDuration =
         Meter.CreateHistogram<double>("autheris_lineage_traversal_duration_ms", "ms", description: "Duration of cycle-safe lineage traversal");
 
-    // Issue #107 (SEC-RF107-09 d): tags are limited to dialect, outcome and reason; never tenant, table, rule id or key counts.
     public static readonly Counter<long> RowFilterKeySetHits =
         Meter.CreateCounter<long>("autheris.rowfilter.keyset.hits", description: "Correlated row-filter sites served from a cached key set");
 
@@ -85,7 +87,6 @@ public static class GatewayDiagnostics
     public static readonly Histogram<double> RowFilterKeyQueryDuration =
         Meter.CreateHistogram<double>("autheris.rowfilter.keyset.key_query.duration", "ms", description: "Duration of a row-filter key query");
 
-    // Caller attributes (REQ-GOV-129 A-11): tags are limited to the provider kind and the outcome, never an attribute name, subject or value.
     public static readonly Counter<long> CallerAttributeResolutions =
         Meter.CreateCounter<long>("autheris.callerattr.resolutions", description: "Caller attribute resolutions, by provider kind and outcome");
 
@@ -112,10 +113,14 @@ public static class GatewayDiagnostics
         ["Itsm.Webhook"] = (FrozenSet<string>)new[] { "itsm.system", "itsm.ticket_id", "tenant.id", "action" }.ToFrozenSet()
     }.ToFrozenDictionary();
 
+    /// <summary>
+    /// Tags an activity with safety checks against <see cref="TelemetrySpanCatalog"/> and legacy <see cref="SpanTagAllowList"/>.
+    /// </summary>
     public static void SetSafeTag(Activity? activity, string spanName, string key, object? value)
     {
         if (activity == null || value == null) return;
-        if (SpanTagAllowList.TryGetValue(spanName, out var allowedKeys) && allowedKeys.Contains(key))
+        if (TelemetrySpanCatalog.IsAllowed(spanName, key) ||
+            (SpanTagAllowList.TryGetValue(spanName, out var allowedKeys) && allowedKeys.Contains(key)))
         {
             activity.SetTag(key, value);
         }

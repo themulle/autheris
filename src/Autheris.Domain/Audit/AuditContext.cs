@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using Autheris.Domain.Common;
 
 namespace Autheris.Domain.Audit;
@@ -9,7 +10,7 @@ namespace Autheris.Domain.Audit;
 /// </summary>
 public sealed class AuditContext
 {
-    public string TraceId { get; set; } = Guid.NewGuid().ToString("N");
+    public string TraceId { get; set; } = Activity.Current?.TraceId.ToHexString() ?? Guid.NewGuid().ToString("N");
     public string Channel { get; set; } = "REST";
     public string? SourceIp { get; set; }
     public Sid ActorSid { get; set; } = new Sid("S-1-0-0");

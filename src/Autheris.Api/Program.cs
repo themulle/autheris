@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Serilog;
+using Autheris.Api.Extensions.DependencyInjection;
 if (args.Length > 0 && (args[0] == "hash-password" || args[0] == "--hash-password"))
 {
     Environment.ExitCode = Autheris.Api.Security.PasswordHashCli.Run(args);
@@ -40,12 +40,8 @@ builder.WebHost.ConfigureKestrel(options =>
     options.AllowSynchronousIO = false;
 });
 
-// 1. Serilog Setup
-// DEP-8: code defaults first (Microsoft.AspNetCore at Warning, query strings redacted), then the Serilog section.
-builder.Host.UseSerilog((ctx, lc) => Autheris.Api.Logging.SensitiveLogPropertyEnricher.ApplyDefaults(lc)
-    .ReadFrom.Configuration(ctx.Configuration, new Serilog.Settings.Configuration.ConfigurationReaderOptions(typeof(Program).Assembly))
-    .Enrich.FromLogContext()
-    .WriteTo.Console());
+// 1. OpenTelemetry Logging Setup
+builder.Logging.AddGatewayLogging(builder.Configuration);
 
 // 2. DI Container Validation
 builder.Host.UseDefaultServiceProvider(options =>
@@ -56,10 +52,12 @@ builder.Host.UseDefaultServiceProvider(options =>
 
 // 3a. F-AUTH-DX: resolve Gateway:Dev (preset defaults, legacy aliases, persistence) before the options are bound
 Autheris.Api.Configuration.LegacySwitchGuard.ThrowIfLegacyKeysSet(builder.Configuration);
+Autheris.Api.Configuration.SerilogSectionGuard.ThrowIfConfigured(builder.Configuration);
 var devReport = Autheris.Api.Configuration.DevConfiguration.Apply(builder.Configuration, builder.Environment);
 builder.Services.AddSingleton(devReport);
 
 // 3. Modular Service Registrations
+builder.Services.AddGatewayTelemetry(builder.Configuration);
 var gatewayOptions = builder.Services.AddGatewayOptions(builder.Configuration, builder.Environment);
 builder.Services.AddGatewayInfrastructure(gatewayOptions, builder.Environment);
 builder.Services.AddGatewayAuth(gatewayOptions, builder.Environment);

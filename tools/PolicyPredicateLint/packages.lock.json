@@ -680,15 +680,6 @@
           "ZstdSharp.Port": "0.8.8"
         }
       },
-      "prometheus-net": {
-        "type": "Transitive",
-        "resolved": "8.2.1",
-        "contentHash": "3wVgdEPOCBF752s2xps5T+VH+c9mJK8S8GKEDg49084P6JZMumTZI5Te6aJ9MQpX0sx7om6JOnBpIi7ZBmmiDQ==",
-        "dependencies": {
-          "Microsoft.Extensions.Http": "3.1.0",
-          "Microsoft.Extensions.ObjectPool": "7.0.0"
-        }
-      },
       "RESPite": {
         "type": "Transitive",
         "resolved": "3.4.5",
@@ -830,11 +821,11 @@
         "type": "Project",
         "dependencies": {
           "Apache.Arrow": "[23.0.0, )",
-          "Autheris.Domain": "[1.0.0, )",
+          "Autheris.Domain": "[1.2.1, )",
           "BitFaster.Caching": "[2.5.4, )",
           "Casbin.NET": "[2.21.3, )",
           "DuckDB.NET.Data.Full": "[1.5.6, )",
-          "FastSqlEngine": "[1.0.0, )",
+          "FastSqlEngine": "[1.2.1, )",
           "FluentValidation": "[12.2.0, )",
           "HotChocolate.Language": "[16.6.8, )",
           "MemoryPack": "[1.21.4, )",
@@ -861,20 +852,20 @@
       "autheris.infrastructure": {
         "type": "Project",
         "dependencies": {
-          "Autheris.Application": "[1.0.0, )",
-          "Autheris.Domain": "[1.0.0, )",
+          "Autheris.Application": "[1.2.1, )",
+          "Autheris.Domain": "[1.2.1, )",
           "MemoryPack": "[1.21.4, )",
           "Microsoft.Data.SqlClient": "[7.1.1, )",
           "Microsoft.Data.Sqlite": "[10.0.13, )",
           "Microsoft.Extensions.Caching.Memory": "[10.0.13, )",
           "Microsoft.Garnet": "[2.2.1, )",
           "Npgsql": "[10.0.3, )",
+          "OpenTelemetry": "[1.19.1, )",
           "OpenTelemetry.Exporter.OpenTelemetryProtocol": "[1.19.1, )",
           "Oracle.ManagedDataAccess.Core": "[23.26.301, )",
           "StackExchange.Redis": "[3.4.5, )",
           "System.Numerics.Tensors": "[10.0.13, )",
-          "System.Security.Cryptography.Pkcs": "[10.0.13, )",
-          "prometheus-net": "[8.2.1, )"
+          "System.Security.Cryptography.Pkcs": "[10.0.13, )"
         }
       },
       "FastSqlEngine": {

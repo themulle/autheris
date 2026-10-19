@@ -3,6 +3,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Diagnostics.Metrics;
 using StackExchange.Redis;
 
 namespace Autheris.Infrastructure.RateLimiting;
@@ -149,9 +150,14 @@ public sealed class RedisRateLimiterService : IRateLimiterService
         }
     }
 
-    private static readonly Prometheus.Counter RateLimiterRedisErrors = Prometheus.Metrics.CreateCounter(
-        "autheris_ratelimiter_redis_errors_total", "Number of Redis errors in Rate Limiter service",
-        new Prometheus.CounterConfiguration { LabelNames = ["limit_type"] });
+    private static readonly Meter Meter = new("Autheris.Core");
+    private static readonly Counter<long> RedisFailures = Meter.CreateCounter<long>(
+        "autheris.redis.failures", description: "Number of Redis errors");
+
+    private static void RecordRedisFailure(string operation) =>
+        RedisFailures.Add(1,
+            new KeyValuePair<string, object?>("autheris.redis.component", "ratelimiter"),
+            new KeyValuePair<string, object?>("autheris.redis.operation", operation));
 
     private readonly InMemoryRateLimiterService _inMemoryFallback = new();
 
@@ -175,13 +181,13 @@ public sealed class RedisRateLimiterService : IRateLimiterService
                 return new RateLimitResult(count <= options.PermitLimit, retryAfter);
             }
 
-            RateLimiterRedisErrors.WithLabels("pre_auth_ip").Inc();
+            RecordRedisFailure("pre_auth_ip");
             _logger.LogWarning("Redis rate limiting returned unexpected result for IP {Ip}. Falling back to in-memory limiter.", ip);
             return await _inMemoryFallback.CheckPreAuthIpAsync(ip, options, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            RateLimiterRedisErrors.WithLabels("pre_auth_ip").Inc();
+            RecordRedisFailure("pre_auth_ip");
             _logger.LogWarning(ex, "Redis rate limiting failed for IP {Ip}. Falling back to local in-memory rate limiter with conservative degraded budget.", ip);
             try
             {
@@ -233,7 +239,7 @@ public sealed class RedisRateLimiterService : IRateLimiterService
                 return new RateLimitResult(allowed, waitSeconds);
             }
 
-            RateLimiterRedisErrors.WithLabels("post_auth_sid").Inc();
+            RecordRedisFailure("post_auth_sid");
             _logger.LogWarning("Redis post-auth rate limiting returned unexpected result for SID {Sid}. Falling back to in-memory limiter.", sid);
             var degradedFallback = new PostAuthSidRateLimitOptions
             {
@@ -244,7 +250,7 @@ public sealed class RedisRateLimiterService : IRateLimiterService
         }
         catch (Exception ex)
         {
-            RateLimiterRedisErrors.WithLabels("post_auth_sid").Inc();
+            RecordRedisFailure("post_auth_sid");
             _logger.LogWarning(ex, "Redis post-auth rate limiting failed for SID {Sid}. Falling back to local in-memory token bucket with conservative degraded budget.", sid);
             try
             {
@@ -296,13 +302,13 @@ public sealed class RedisRateLimiterService : IRateLimiterService
                 return new CostQuotaResult(allowed, remaining, waitSeconds);
             }
 
-            RateLimiterRedisErrors.WithLabels("cost_quota").Inc();
+            RecordRedisFailure("cost_quota");
             _logger.LogWarning("Redis cost quota returned unexpected result for key {Key}. Falling back to in-memory limiter.", key);
             return await _inMemoryFallback.CheckCostQuotaAsync(key, requestedCost, policy, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            RateLimiterRedisErrors.WithLabels("cost_quota").Inc();
+            RecordRedisFailure("cost_quota");
             _logger.LogWarning(ex, "Redis cost quota failed for key {Key}. Falling back to in-memory limiter.", key);
             try
             {
@@ -356,13 +362,13 @@ public sealed class RedisRateLimiterService : IRateLimiterService
                 return new CostQuotaResult(allowed, remaining, waitSeconds);
             }
 
-            RateLimiterRedisErrors.WithLabels("cost_quota_settle").Inc();
+            RecordRedisFailure("cost_quota_settle");
             _logger.LogWarning("Redis cost quota settlement returned unexpected result for key {Key}. Falling back to in-memory limiter.", key);
             return await _inMemoryFallback.SettleCostQuotaAsync(key, reservedCost, actualCost, policy, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            RateLimiterRedisErrors.WithLabels("cost_quota_settle").Inc();
+            RecordRedisFailure("cost_quota_settle");
             _logger.LogWarning(ex, "Redis cost quota settlement failed for key {Key}. Falling back to in-memory limiter.", key);
             try
             {
@@ -410,7 +416,7 @@ public sealed class RedisRateLimiterService : IRateLimiterService
         }
         catch (Exception ex)
         {
-            RateLimiterRedisErrors.WithLabels("cost_quota").Inc();
+            RecordRedisFailure("cost_quota");
             _logger.LogWarning(ex, "Redis cost quota probe failed for key {Key}. Falling back to in-memory probe.", key);
             try
             {
