@@ -377,7 +377,9 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             DataOwner: dataOwner,
             DataOwnerDelegates: dataOwnerDelegates,
             AccessStatus: accessStatus,
-            Indexes: keyView.Indexes);
+            Indexes: keyView.Indexes,
+            RequiredFilterColumns: table.RequiredFilterColumns.Length > 0 ? table.RequiredFilterColumns : null,
+            RequiredFilterColumnGroups: table.RequiredFilterColumnGroups.Length > 0 ? table.RequiredFilterColumnGroups.Select(g => (IReadOnlyList<string>)g).ToList() : null);
     }
 
     /// <summary>

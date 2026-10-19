@@ -1,6 +1,9 @@
 namespace Autheris.Api.Endpoints;
 
 using System;
+using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
@@ -179,6 +182,15 @@ public static class CatalogApiEndpoints
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogKeyDefinitionChanged);
 
+        // Issue #221: PUT /api/v1/catalog/datasets/{id}/required-filters (and /api/catalog/datasets/{id}/required-filters)
+        group.MapPut("/datasets/{id}/required-filters", SetDatasetRequiredFiltersHandler)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+
+        app.MapPut("/api/catalog/datasets/{id}/required-filters", SetDatasetRequiredFiltersHandler)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+
         // Issue #111: dataset tags and catalog visibility tier. RequireAuthorization() only: owners must reach the routes, so the
         // decision (admin class, owner or delegate, Full only for administrators) is taken inside DatasetCatalogAdminService.
         MapDatasetCatalogRoutes(group);
@@ -196,6 +208,22 @@ public static class CatalogApiEndpoints
         group.MapDelete("/datasets/{id}/row-filter-strategy", GovernanceEndpoints.ClearDatasetRowFilterStrategyAsync)
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.TableRowFilterStrategyChanged);
+
+        group.MapPut("/relations/{relationId:guid}/cross-data-source", async (
+            Guid relationId,
+            SetRelationCrossDataSourceDto request,
+            Autheris.Application.Interfaces.ITableRelationRepository relationRepo,
+            CancellationToken ct) =>
+        {
+            var updated = await relationRepo.SetRelationCrossDataSourceOptInAsync(relationId, request.AllowCrossDataSource, ct);
+            if (!updated)
+            {
+                return Results.NotFound(new { error = $"Relation '{relationId}' not found." });
+            }
+            return Results.Ok(new { relationId, allowCrossDataSource = request.AllowCrossDataSource });
+        })
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Full, AuditEventTypes.CrossSourceOptInChanged);
 
         return app;
     }
@@ -389,6 +417,99 @@ public static class CatalogApiEndpoints
         });
     }
 
+    internal static async Task<IResult> SetDatasetRequiredFiltersHandler(
+        string id,
+        SetDatasetRequiredFiltersDto? request,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Audit.IAuditWriter auditWriter,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var tableId = await ResolveActiveDatasetAsync(id, metadataRepository, ct).ConfigureAwait(false);
+        if (tableId is null)
+        {
+            return DatasetKeysNotFound();
+        }
+
+        var meta = await metadataRepository.GetTableMetadataAsync(tableId.Value, ct).ConfigureAwait(false);
+        if (meta is null)
+        {
+            return DatasetKeysNotFound();
+        }
+
+        var reqCols = request?.RequiredFilterColumns?.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase).ToImmutableArray()
+            ?? ImmutableArray<string>.Empty;
+
+        var reqGroupsList = new List<ImmutableArray<string>>();
+        if (request?.RequiredFilterColumnGroups is not null)
+        {
+            foreach (var g in request.RequiredFilterColumnGroups)
+            {
+                if (g is not null)
+                {
+                    var groupCols = g.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase).ToImmutableArray();
+                    if (groupCols.Length > 0)
+                    {
+                        reqGroupsList.Add(groupCols);
+                    }
+                }
+            }
+        }
+        var reqGroups = reqGroupsList.ToImmutableArray();
+
+        var colNames = new HashSet<string>(meta.Columns.Select(c => c.ColumnName), StringComparer.OrdinalIgnoreCase);
+        foreach (var c in reqCols)
+        {
+            if (!colNames.Contains(c))
+            {
+                return Results.BadRequest(new { error = $"Column '{c}' does not exist on table '{tableId.Value}'." });
+            }
+        }
+        foreach (var group in reqGroups)
+        {
+            foreach (var c in group)
+            {
+                if (!colNames.Contains(c))
+                {
+                    return Results.BadRequest(new { error = $"Column '{c}' does not exist on table '{tableId.Value}'." });
+                }
+            }
+        }
+
+        var updatedTable = meta.Table with
+        {
+            RequiredFilterColumns = reqCols,
+            RequiredFilterColumnGroups = reqGroups
+        };
+
+        var updatedMeta = meta with { Table = updatedTable };
+        await metadataRepository.UpsertTableMetadataAsync(updatedMeta, ct).ConfigureAwait(false);
+
+        var actorSid = httpContext.User.GetUserSid()?.Value ?? httpContext.User.Identity?.Name ?? "system-admin";
+        await auditWriter.RecordRequiredAsync(new AuditLogEntry
+        {
+            TenantId = EndpointSecurity.GetRequestTenant(httpContext),
+            EventType = AuditEventTypes.AuditConfigChanged,
+            ActorSid = actorSid,
+            TargetTable = tableId.Value.ToString(),
+            Decision = "ALLOW",
+            TraceId = httpContext.TraceIdentifier,
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                datasetId = tableId.Value.ToString(),
+                requiredFilterColumns = reqCols,
+                requiredFilterColumnGroups = reqGroups
+            })
+        }, CancellationToken.None).ConfigureAwait(false);
+
+        return Results.Ok(new
+        {
+            datasetId = tableId.Value.ToString(),
+            requiredFilterColumns = reqCols,
+            requiredFilterColumnGroups = reqGroups
+        });
+    }
+
     internal static async Task<IResult> SetDatasetStateHandler(
         string id,
         AdminSetDatasetStateDto? request,
@@ -469,4 +590,16 @@ public sealed record SetDatasetVisibilityDto(string? Visibility);
 
 public sealed record DatasetTagDto(string Tag, string Source);
 
-public sealed record DatasetCatalogSettingsDto(string DatasetId, System.Collections.Generic.IReadOnlyList<DatasetTagDto> Tags, string Visibility, bool TierEffective);
+public sealed record DatasetCatalogSettingsDto(
+    string DatasetId,
+    System.Collections.Generic.IReadOnlyList<DatasetTagDto> Tags,
+    string Visibility,
+    bool TierEffective,
+    System.Collections.Generic.IReadOnlyList<string>? RequiredFilterColumns = null,
+    System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<string>>? RequiredFilterColumnGroups = null);
+
+public sealed record SetDatasetRequiredFiltersDto(
+    System.Collections.Generic.IReadOnlyList<string>? RequiredFilterColumns = null,
+    System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<string>>? RequiredFilterColumnGroups = null);
+
+public sealed record SetRelationCrossDataSourceDto(bool AllowCrossDataSource);

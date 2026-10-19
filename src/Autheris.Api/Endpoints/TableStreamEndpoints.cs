@@ -19,6 +19,7 @@ using Autheris.Application.Data;
 using Autheris.Application.Data.Interfaces;
 using Autheris.Application.Data.Services;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Serialization;
 using Autheris.Application.Sql.Interfaces;
@@ -83,6 +84,14 @@ public static class TableStreamEndpoints
     {
         ArgumentNullException.ThrowIfNull(httpContext);
         var logger = loggerFactory.CreateLogger(typeof(TableStreamEndpoints));
+
+        var readPathSwitches = httpContext.RequestServices?.GetService<IReadPathSwitches>();
+        if (readPathSwitches != null && !readPathSwitches.BulkStreamEnabled)
+        {
+            httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
+            await httpContext.Response.WriteAsJsonAsync(new { error = "Bulk streaming endpoint is disabled." }, ct).ConfigureAwait(false);
+            return;
+        }
 
         // 1. Validate route identifiers
         if (string.IsNullOrWhiteSpace(domain) || string.IsNullOrWhiteSpace(schema) || string.IsNullOrWhiteSpace(table) ||
@@ -276,8 +285,8 @@ public static class TableStreamEndpoints
         }
 
         // 7. Token Bucket Admission (Phase 1: Upfront Reservation)
-        var rateLimiter = httpContext.RequestServices.GetService<IRateLimiterService>();
-        var tierResolver = httpContext.RequestServices.GetService<IClientTierResolver>();
+        var rateLimiter = httpContext.RequestServices!.GetService<IRateLimiterService>();
+        var tierResolver = httpContext.RequestServices!.GetService<IClientTierResolver>();
         int sliceLimit = request.Limit > 0 ? Math.Min(request.Limit, 10000) : 5000;
         int baseCost = 10;
         int costPerRow = 1;
@@ -340,7 +349,7 @@ public static class TableStreamEndpoints
         {
             if (isArrow)
             {
-                var arrowService = httpContext.RequestServices.GetRequiredService<IArrowExportService>();
+                var arrowService = httpContext.RequestServices!.GetRequiredService<IArrowExportService>();
                 httpContext.Response.ContentType = IArrowExportService.ArrowStreamContentType;
                 httpContext.Response.StatusCode = StatusCodes.Status200OK;
 
@@ -577,6 +586,25 @@ public static class TableStreamEndpoints
                 if (lastRowPk != null && (hasMore || truncatedReason != null))
                 {
                     nextCursor = cursorEncoder.EncodeCursor(lastRowPk);
+                }
+
+                if (hasMore || truncatedReason != null || request.IncludeMetadata)
+                {
+                    var metaObj = new
+                    {
+                        _meta = new
+                        {
+                            nextCursor,
+                            hasMore,
+                            truncatedReason,
+                            rowsStreamed = rowsEmitted
+                        }
+                    };
+                    var metaBytes = JsonSerializer.SerializeToUtf8Bytes(metaObj, JsonOptions);
+                    var bodyWriter = httpContext.Response.BodyWriter;
+                    bodyWriter.Write(metaBytes);
+                    bodyWriter.Write(NewLineBytes);
+                    await bodyWriter.FlushAsync(ct).ConfigureAwait(false);
                 }
             }
         }

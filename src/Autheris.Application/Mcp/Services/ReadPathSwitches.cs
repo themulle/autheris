@@ -27,9 +27,10 @@ public sealed class ReadPathSwitches : IReadPathSwitches
     private readonly FrozenSet<string> _disabledTools;
     private readonly ConcurrentDictionary<string, byte> _dropped = new(StringComparer.OrdinalIgnoreCase);
 
-    private ReadPathSwitches(bool restData, McpToolGroupOptions tools, IEnumerable<string> disabled)
+    private ReadPathSwitches(bool restData, bool bulkStream, McpToolGroupOptions tools, IEnumerable<string> disabled)
     {
         RestDataEndpointEnabled = restData;
+        BulkStreamEnabled = bulkStream;
         _catalog = tools.Catalog;
         _query = tools.Query;
         _api = tools.Api;
@@ -45,13 +46,18 @@ public sealed class ReadPathSwitches : IReadPathSwitches
             .Where(n => !string.IsNullOrWhiteSpace(n))
             .Select(n => n.Trim())
             .ToArray();
+        bool restData = options.RestApi?.DataEndpoint?.Enabled ?? true;
+        bool? bulkOption = options.BulkStream?.Enabled ?? options.RestApi?.BulkStream?.Enabled;
+        bool bulkStream = bulkOption ?? restData;
         return new ReadPathSwitches(
-            options.RestApi?.DataEndpoint?.Enabled ?? true,
+            restData,
+            bulkStream,
             mcp.Tools ?? new McpToolGroupOptions(),
             disabled);
     }
 
     public bool RestDataEndpointEnabled { get; }
+    public bool BulkStreamEnabled { get; }
 
     /// <summary>Number of remembered dropped names (test and diagnostics aid).</summary>
     public int DroppedCount => _dropped.Count;

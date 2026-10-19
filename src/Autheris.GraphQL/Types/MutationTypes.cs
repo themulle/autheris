@@ -20,6 +20,7 @@ using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using HotChocolate;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -50,6 +51,7 @@ public sealed class ConsentRequestPayload
     public string Status { get; init; } = string.Empty;
     public string Message { get; init; } = string.Empty;
     public ItsmTicketReference? ItsmTicketReference { get; init; }
+    public string? Description { get; init; }
 }
 
 public sealed class Mutation
@@ -418,7 +420,7 @@ public sealed class Mutation
         [Service] IHttpContextAccessor httpContextAccessor,
         [Service] IIdempotencyStore idempotencyStore = default!,
         CancellationToken ct = default)
-        => ApproveConsentRequestAsync(requestId, idempotencyKey, repository, repository, repository, repository, httpContextAccessor, idempotencyStore, null, null, ct);
+        => ApproveConsentRequestAsync(requestId, idempotencyKey, repository, repository, repository, repository, httpContextAccessor, idempotencyStore, null, null, null, ct);
 
     [GraphQLIgnore]
     public Task<ConsentRequestPayload> ApproveConsentRequestAsync(
@@ -440,6 +442,7 @@ public sealed class Mutation
             default!,
             null,
             null,
+            null,
             ct);
 
     public async Task<ConsentRequestPayload> ApproveConsentRequestAsync(
@@ -453,6 +456,7 @@ public sealed class Mutation
         [Service] IIdempotencyStore idempotencyStore = default!,
         RowFilterInput? rowFilter = null,
         ColumnMaskingInput? columnMasking = null,
+        string? description = null,
         CancellationToken ct = default)
     {
         await EnsureDecisionPermittedAsync(httpContextAccessor, ct).ConfigureAwait(false);
@@ -462,17 +466,40 @@ public sealed class Mutation
 
         var approvePrincipal = httpContextAccessor.HttpContext?.User;
         var scopes = TokenAccessScope.GetScopeSet(approvePrincipal?.Claims);
-        if (scopes.Count > 0 && !scopes.Contains("data.access.review"))
+        if (scopes.Count > 0)
         {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("FORBIDDEN")
-                .SetMessage("The 'data.access.review' scope is required to review consent requests.")
-                .Build());
+            var gatewayOptions = httpContextAccessor.HttpContext?.RequestServices.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>()?.Value;
+            var configuredReviewScopes = gatewayOptions?.Authentication?.EntraId?.AccessReviewScopes;
+            var reviewScopes = configuredReviewScopes is { Count: > 0 } ? configuredReviewScopes : ["data.access.review"];
+            if (!reviewScopes.Any(s => scopes.Contains(s)))
+            {
+                throw new GraphQLException(ErrorBuilder.New()
+                    .SetCode("FORBIDDEN")
+                    .SetMessage("The 'data.access.review' scope is required to review consent requests.")
+                    .Build());
+            }
+        }
+
+        string? validatedDescription = null;
+        if (description is not null)
+        {
+            var textOptions = httpContextAccessor.HttpContext?.RequestServices.GetService<Microsoft.Extensions.Options.IOptions<GovernanceTextOptions>>();
+            var maxLength = (textOptions?.Value ?? new GovernanceTextOptions()).ConsentDescriptionMaxLength;
+            var check = UntrustedText.Normalize(description, maxLength, allowLineFeed: false);
+            if (!check.IsValid)
+            {
+                throw new GraphQLException(ErrorBuilder.New()
+                    .SetCode("VALIDATION_ERROR")
+                    .SetMessage("The description is not valid.")
+                    .Build());
+            }
+            validatedDescription = check.Value;
         }
 
         var approveFingerprint = IdempotencyFingerprint(
             ResolveMutationTenantId(httpContextAccessor, approvePrincipal, Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(approvePrincipal)).Value,
-            requestId);
+            requestId,
+            validatedDescription ?? string.Empty);
         var existing = await TryGetIdempotentAsync(approverSid, "ApproveConsentRequest", idempotencyKey, approveFingerprint, idempotencyStore, ct);
         if (existing != null)
         {
@@ -707,7 +734,8 @@ public sealed class Mutation
                     ValidTo = approved.RequestedValidTo,
                     CreatedBySid = approverSid,
                     ColumnRules = columnRules,
-                    RowFilters = builtRowFilters
+                    RowFilters = builtRowFilters,
+                    Description = validatedDescription
                 };
                 try
                 {
@@ -730,7 +758,8 @@ public sealed class Mutation
         {
             RequestId = approved.Id,
             Status = approved.Status,
-            Message = message
+            Message = message,
+            Description = validatedDescription
         };
 
         await StoreIdempotentAsync(approverSid, "ApproveConsentRequest", idempotencyKey, approveFingerprint, payload, idempotencyStore, ct);
@@ -763,12 +792,18 @@ public sealed class Mutation
 
         var rejectPrincipal = httpContextAccessor.HttpContext?.User;
         var scopes = TokenAccessScope.GetScopeSet(rejectPrincipal?.Claims);
-        if (scopes.Count > 0 && !scopes.Contains("data.access.review"))
+        if (scopes.Count > 0)
         {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("FORBIDDEN")
-                .SetMessage("The 'data.access.review' scope is required to review consent requests.")
-                .Build());
+            var gatewayOptions = httpContextAccessor.HttpContext?.RequestServices.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>()?.Value;
+            var configuredReviewScopes = gatewayOptions?.Authentication?.EntraId?.AccessReviewScopes;
+            var reviewScopes = configuredReviewScopes is { Count: > 0 } ? configuredReviewScopes : ["data.access.review"];
+            if (!reviewScopes.Any(s => scopes.Contains(s)))
+            {
+                throw new GraphQLException(ErrorBuilder.New()
+                    .SetCode("FORBIDDEN")
+                    .SetMessage("The 'data.access.review' scope is required to review consent requests.")
+                    .Build());
+            }
         }
 
         var approverSid = GetAuthenticatedUserSid(httpContextAccessor);

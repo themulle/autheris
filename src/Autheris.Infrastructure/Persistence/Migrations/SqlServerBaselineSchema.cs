@@ -309,7 +309,8 @@ CREATE TABLE dbo.TABLE_RELATIONS (
     parent_table_id NVARCHAR(128) NOT NULL,
     child_table_id NVARCHAR(128) NOT NULL,
     relation_name NVARCHAR(256) NOT NULL,
-    cardinality NVARCHAR(64) NOT NULL
+    cardinality NVARCHAR(64) NOT NULL,
+    allow_cross_data_source BIT NOT NULL DEFAULT 0
 );
 
 -- Issue #151: composite-key relations. One row per ordered key pair; column names are validated on write.

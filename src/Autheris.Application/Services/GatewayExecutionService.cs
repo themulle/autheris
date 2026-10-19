@@ -30,6 +30,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     private readonly Autheris.Application.Connectors.IAutherisConnectorRegistry? _connectorRegistry;
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
     private readonly BatchRelationLoader _batchLoader;
+    private readonly IConsumerUsageRecorder? _usageRecorder;
 
     /// <summary>O10: Retry-After for a throttled read; the typical duration of a slow read is the query timeout.</summary>
     private const int ThrottledRetryAfterSeconds = 2;
@@ -61,8 +62,10 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IAccessProfileRepository? accessProfileRepository = null,
         Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
         TypedPolicySources? typedPolicies = null,
-        Autheris.Application.Audit.IAuditWriter? auditWriter = null)
+        Autheris.Application.Audit.IAuditWriter? auditWriter = null,
+        IConsumerUsageRecorder? usageRecorder = null)
     {
+        _usageRecorder = usageRecorder;
         _typedPolicies = typedPolicies;
         _accessProfileRepository = accessProfileRepository;
         _memoryCache = memoryCache;
@@ -175,7 +178,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         {
             await GovernedQueryStages.RecordTableReadAsync(
                 _auditWriter, tenantId, userSid, table, allowed: false,
-                GovernedQueryStages.DecisionDetails(decision), ct).ConfigureAwait(false);
+                GovernedQueryStages.DecisionDetails(decision), ct,
+                usageRecorder: _usageRecorder).ConfigureAwait(false);
 
             throw new GatewayForbiddenException($"Access to table '{table}' denied: {string.Join("; ", decision.DeniedReasons)}");
         }
@@ -252,14 +256,16 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             failureDetails["is_allowed"] = false;
             failureDetails["reasons"] = new[] { ex.Message };
             await GovernedQueryStages.RecordTableReadAsync(
-                _auditWriter, tenantId, userSid, table, allowed: false, failureDetails, ct).ConfigureAwait(false);
+                _auditWriter, tenantId, userSid, table, allowed: false, failureDetails, ct,
+                usageRecorder: _usageRecorder).ConfigureAwait(false);
             throw;
         }
 
         // SR15-32: ALLOW audit is recorded only after successful validation of all query parameters
         await GovernedQueryStages.RecordTableReadAsync(
             _auditWriter, tenantId, userSid, table, allowed: true,
-            GovernedQueryStages.WithQueryShape(GovernedQueryStages.DecisionDetails(decision), filter, orderBy), ct).ConfigureAwait(false);
+            GovernedQueryStages.WithQueryShape(GovernedQueryStages.DecisionDetails(decision), filter, orderBy), ct,
+            usageRecorder: _usageRecorder).ConfigureAwait(false);
 
         // O10: bound concurrent reads of the same table by the same user (each slow read holds a database worker).
         var maxConcurrentReads = _options?.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
@@ -341,6 +347,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 _options?.DataMasking?.HmacKeyId,
                 MaskingDisabled: _options?.IsColumnMaskingDisabled == true,
                 MaxBytes: maxBytes));
+
+        _usageRecorder?.RecordUsage(metadata.Identifier, tenantId, userSid, ConsumerOutcome.Allow, processedRows.Count, rowsMeasured: true);
 
         // Issue #94: the transport must not offer a continuation when no deterministic order was possible.
         var unordered = pageItems.TryGetValue(TableQueryItems.Ordering, out var orderingKind) &&
@@ -512,7 +520,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                     },
                     ct,
                     eventType: "COLUMN_ACCESS_DENIED",
-                    traceId: traceId ?? string.Empty).ConfigureAwait(false);
+                    traceId: traceId ?? string.Empty,
+                    usageRecorder: _usageRecorder).ConfigureAwait(false);
 
                 var echo = trimmed != null && EchoableColumnNameRegex().IsMatch(trimmed) ? trimmed : "(invalid name)";
                 throw new GatewayInvalidQueryException($"The property '{echo}' does not exist or is not accessible.");
@@ -540,8 +549,13 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         }
 
         var key = $"{tenantId.Value}|{userSid.Value}|{table.ToQualifiedName()}".ToLowerInvariant();
-        return _concurrencyGate.TryEnter(key, maxConcurrentReads)
-               ?? throw new GatewayThrottledException(ThrottledRetryAfterSeconds);
+        var lease = _concurrencyGate.TryEnter(key, maxConcurrentReads);
+        if (lease == null)
+        {
+            _usageRecorder?.RecordUsage(table, tenantId, userSid, ConsumerOutcome.DenyRateLimit, 0, false);
+            throw new GatewayThrottledException(ThrottledRetryAfterSeconds);
+        }
+        return lease;
     }
 
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? _mandatoryFilters;
@@ -654,7 +668,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             await GovernedQueryStages.RecordTableReadAsync(
                 _auditWriter, tenantId, userSid, table, decision.IsAllowed,
                 GovernedQueryStages.DecisionDetails(decision, includeVirtualFilters: false), ct,
-                eventType: "CHILD_RELATION_CHECK").ConfigureAwait(false);
+                eventType: "CHILD_RELATION_CHECK",
+                usageRecorder: _usageRecorder).ConfigureAwait(false);
         }
 
         return decision;

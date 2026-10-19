@@ -32,7 +32,10 @@ public sealed class ReadOnlyOperationMiddleware
             var principal = ResolvePrincipal(context);
             if (principal.IsReadOnly())
             {
-                var hasSelfServiceScope = principal?.HasScope("data.access.request") == true;
+                var gatewayOptions = context.RequestServices.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>()?.Value;
+                var configuredScopes = gatewayOptions?.Authentication?.EntraId?.ReadOnlySelfServiceScopes;
+                var selfServiceScopes = configuredScopes is { Count: > 0 } ? configuredScopes : ["data.access.request"];
+                var hasSelfServiceScope = selfServiceScopes.Any(s => principal?.HasScope(s) == true);
 
                 if (!hasSelfServiceScope || !SelfServiceMutationClassifier.IsExclusivelySelfServiceMutation(document, context.Request.OperationName))
                 {

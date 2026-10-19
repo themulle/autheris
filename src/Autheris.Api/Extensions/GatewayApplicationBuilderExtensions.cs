@@ -248,6 +248,9 @@ public static class GatewayApplicationBuilderExtensions
         if (switches.RestDataEndpointEnabled)
         {
             app.MapDatasetDataEndpoints();
+        }
+        if (switches.BulkStreamEnabled)
+        {
             app.MapTableStreamEndpoints();
         }
 

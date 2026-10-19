@@ -95,7 +95,7 @@ public sealed class ConsumerUsageRecorder : IConsumerUsageRecorder
             string app = CallerLabelNormalizer.NormalizeApplication(effectiveCaller?.Application);
             string ver = CallerLabelNormalizer.NormalizeVersion(effectiveCaller?.Version);
             string qry = CallerLabelNormalizer.NormalizeQueryName(effectiveCaller?.QueryName);
-            string clientId = CallerLabelNormalizer.NormalizeClientId(null);
+            string clientId = CallerLabelNormalizer.NormalizeClientId(effectiveCaller?.ClientId);
             string day = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd");
 
             var key = new DailyUsageKey(tenantId.Value, tableId.ToString(), day, app, clientId, ver);

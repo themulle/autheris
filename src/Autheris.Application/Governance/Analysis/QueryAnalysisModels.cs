@@ -120,7 +120,8 @@ public sealed record QueryCostEstimate(
     int EstimatedCost,
     int MaxAllowedCost,
     bool IsWithinCostLimit,
-    IReadOnlyDictionary<string, int>? RootFieldCosts = null);
+    IReadOnlyDictionary<string, int>? RootFieldCosts = null,
+    int? EstimatedRows = null);
 
 /// <summary>
 /// Issue #79: Output 1 of static query analysis — validation report (syntax, schema, output columns, filter flags, cost, deprecations).

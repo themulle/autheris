@@ -91,6 +91,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
     private readonly IDbSessionContextInitializer _sessionInitializer;
     private readonly ICrossSourceRelationResolver? _crossSourceResolver;
     private readonly ITableRelationRepository? _relationRepository;
+    private readonly IConsumerUsageRecorder? _usageRecorder;
 
     // G3, G4, G7, D7 & R-GQL-3: memo and audit are scoped per operationId, tenant, and user to isolate operations and prevent cross-tenant/cross-principal leak.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, OperationMemo> _memos = new();
@@ -108,7 +109,8 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         IDbSessionContextInitializer? sessionInitializer = null,
         Autheris.Application.Audit.IAuditWriter? auditWriter = null,
         ICrossSourceRelationResolver? crossSourceResolver = null,
-        ITableRelationRepository? relationRepository = null)
+        ITableRelationRepository? relationRepository = null,
+        IConsumerUsageRecorder? usageRecorder = null)
     {
         _accessResolver = accessResolver ?? throw new ArgumentNullException(nameof(accessResolver));
         _connectionFactory = connectionFactory ?? throw new ArgumentNullException(nameof(connectionFactory));
@@ -121,6 +123,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
         _crossSourceResolver = crossSourceResolver;
         _relationRepository = relationRepository;
+        _usageRecorder = usageRecorder;
     }
 
     public IReadOnlyList<TreeMaskedColumn> GetMaskedColumns(ClaimsPrincipal? principal, TreeQueryNode root, string operationId)
@@ -453,6 +456,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         // 4. Bounded concurrency per user and root table, then one round trip.
         using var lease = AcquireLease(rootAccess);
         var json = await RunAsync(compiled, connOptions, dialect, rootAccess.Tenant, rootAccess.UserSid.Value, purpose: null, ct).ConfigureAwait(false);
+        _usageRecorder?.RecordUsage(rootAccess.Metadata.Identifier, rootAccess.Tenant, rootAccess.UserSid, ConsumerOutcome.Allow, rowsReturned: 0, rowsMeasured: false);
 
         // Fast path: no cross-source relations and no HMAC columns
         if (crossSourceRelations.Count == 0 && compiled.HmacColumns.Count == 0)
@@ -675,7 +679,8 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
 
         await GovernedQueryStages.RecordTableReadAsync(
             _auditWriter, access.Tenant, access.UserSid, table, access.Decision.IsAllowed,
-            GovernedQueryStages.DecisionDetails(access.Decision, path: "graphql_tree"), ct).ConfigureAwait(false);
+            GovernedQueryStages.DecisionDetails(access.Decision, path: "graphql_tree"), ct,
+            usageRecorder: _usageRecorder).ConfigureAwait(false);
     }
 
     private IDisposable? AcquireLease(ResolvedTableAccess rootAccess)
@@ -686,7 +691,13 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             return null;
         }
         var key = $"{rootAccess.Tenant.Value}|{rootAccess.UserSid.Value}|{rootAccess.Metadata.Identifier.ToQualifiedName()}".ToLowerInvariant();
-        return _concurrencyGate.TryEnter(key, max) ?? throw new GatewayThrottledException(ThrottledRetryAfterSeconds);
+        var lease = _concurrencyGate.TryEnter(key, max);
+        if (lease == null)
+        {
+            _usageRecorder?.RecordUsage(rootAccess.Metadata.Identifier, rootAccess.Tenant, rootAccess.UserSid, ConsumerOutcome.DenyRateLimit, 0, false);
+            throw new GatewayThrottledException(ThrottledRetryAfterSeconds);
+        }
+        return lease;
     }
 
     private async Task<string> RunAsync(

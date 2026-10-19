@@ -2,6 +2,7 @@ namespace Autheris.Extensions.Dbt;
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -478,6 +479,9 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
 
                 if (existingMeta != null)
                 {
+                    var reqCols = ParseMetaRequiredFilterColumns(model.Meta) ?? existingMeta.Table.RequiredFilterColumns;
+                    var reqGroups = ParseMetaRequiredFilterColumnGroups(model.Meta) ?? existingMeta.Table.RequiredFilterColumnGroups;
+
                     var updatedTableObj = new Table
                     {
                         Id = existingMeta.Table.Id,
@@ -492,8 +496,18 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                         RequiresFourEyes = existingMeta.Table.RequiresFourEyes,
                         IsActive = existingMeta.Table.IsActive,
                         DataSourceType = existingMeta.Table.DataSourceType,
+                        PhysicalDatabaseName = existingMeta.Table.PhysicalDatabaseName,
+                        Location = existingMeta.Table.Location,
                         HttpEndpoint = existingMeta.Table.HttpEndpoint,
-                        PluginName = existingMeta.Table.PluginName
+                        PluginName = existingMeta.Table.PluginName,
+                        Tags = existingMeta.Table.Tags,
+                        Visibility = existingMeta.Table.Visibility,
+                        RlsExpression = existingMeta.Table.RlsExpression,
+                        MinGroupSize = existingMeta.Table.MinGroupSize,
+                        SmallGroupStrategy = existingMeta.Table.SmallGroupStrategy,
+                        RequiredFilterColumns = reqCols,
+                        RequiredFilterColumnGroups = reqGroups,
+                        ExpectedRows = existingMeta.Table.ExpectedRows
                     };
 
                     var updatedColumns = new List<TableColumn>();
@@ -900,6 +914,9 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                 var historyJson = item.TryGetProperty("history", out var hProp) ? hProp.GetRawText() : null;
                 var reviewJson = item.TryGetProperty("classification_review", out var crProp) ? crProp.GetRawText() : null;
 
+                var reqCols = ParseJsonRequiredFilterColumns(item) ?? existingMeta.Table.RequiredFilterColumns;
+                var reqGroups = ParseJsonRequiredFilterColumnGroups(item) ?? existingMeta.Table.RequiredFilterColumnGroups;
+
                 var updatedTable = new Table
                 {
                     Id = existingMeta.Table.Id,
@@ -915,8 +932,18 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                     RequiresFourEyes = existingMeta.Table.RequiresFourEyes,
                     IsActive = existingMeta.Table.IsActive,
                     DataSourceType = existingMeta.Table.DataSourceType,
+                    PhysicalDatabaseName = existingMeta.Table.PhysicalDatabaseName,
+                    Location = existingMeta.Table.Location,
                     HttpEndpoint = existingMeta.Table.HttpEndpoint,
-                    PluginName = existingMeta.Table.PluginName
+                    PluginName = existingMeta.Table.PluginName,
+                    Tags = existingMeta.Table.Tags,
+                    Visibility = existingMeta.Table.Visibility,
+                    RlsExpression = existingMeta.Table.RlsExpression,
+                    MinGroupSize = existingMeta.Table.MinGroupSize,
+                    SmallGroupStrategy = existingMeta.Table.SmallGroupStrategy,
+                    RequiredFilterColumns = reqCols,
+                    RequiredFilterColumnGroups = reqGroups,
+                    ExpectedRows = existingMeta.Table.ExpectedRows
                 };
 
                 var updatedCols = new List<TableColumn>();
@@ -1581,5 +1608,139 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             new RebacTuple(tableId.Domain, schemaObj, "parent", tableObj),
             new RebacTuple(tableId.Domain, domainObj, "parent", schemaObj)
         ], ct).ConfigureAwait(false);
+    }
+
+    private static ImmutableArray<string>? ParseMetaRequiredFilterColumns(IReadOnlyDictionary<string, string>? meta)
+    {
+        if (meta == null) return null;
+        if (!meta.TryGetValue("required_filter_columns", out var val) &&
+            !meta.TryGetValue("requiredFilterColumns", out val))
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(val)) return ImmutableArray<string>.Empty;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(val);
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                var list = new List<string>();
+                foreach (var el in doc.RootElement.EnumerateArray())
+                {
+                    var s = el.GetString();
+                    if (!string.IsNullOrWhiteSpace(s)) list.Add(s);
+                }
+                return list.ToImmutableArray();
+            }
+        }
+        catch (JsonException)
+        {
+            // fallback to comma-separated
+        }
+
+        var parts = val.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.ToImmutableArray();
+    }
+
+    private static ImmutableArray<ImmutableArray<string>>? ParseMetaRequiredFilterColumnGroups(IReadOnlyDictionary<string, string>? meta)
+    {
+        if (meta == null) return null;
+        if (!meta.TryGetValue("required_filter_column_groups", out var val) &&
+            !meta.TryGetValue("requiredFilterColumnGroups", out val))
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(val)) return ImmutableArray<ImmutableArray<string>>.Empty;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(val);
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                var outer = new List<ImmutableArray<string>>();
+                foreach (var groupEl in doc.RootElement.EnumerateArray())
+                {
+                    if (groupEl.ValueKind == JsonValueKind.Array)
+                    {
+                        var inner = new List<string>();
+                        foreach (var el in groupEl.EnumerateArray())
+                        {
+                            var s = el.GetString();
+                            if (!string.IsNullOrWhiteSpace(s)) inner.Add(s);
+                        }
+                        outer.Add(inner.ToImmutableArray());
+                    }
+                }
+                return outer.ToImmutableArray();
+            }
+        }
+        catch (JsonException)
+        {
+            // invalid format
+        }
+
+        return ImmutableArray<ImmutableArray<string>>.Empty;
+    }
+
+    private static ImmutableArray<string>? ParseJsonRequiredFilterColumns(JsonElement item)
+    {
+        if (!item.TryGetProperty("required_filter_columns", out var prop) &&
+            !item.TryGetProperty("requiredFilterColumns", out prop))
+        {
+            return null;
+        }
+
+        if (prop.ValueKind == JsonValueKind.Array)
+        {
+            var list = new List<string>();
+            foreach (var el in prop.EnumerateArray())
+            {
+                var s = el.GetString();
+                if (!string.IsNullOrWhiteSpace(s)) list.Add(s);
+            }
+            return list.ToImmutableArray();
+        }
+
+        if (prop.ValueKind == JsonValueKind.String)
+        {
+            var val = prop.GetString();
+            if (string.IsNullOrWhiteSpace(val)) return ImmutableArray<string>.Empty;
+            return val.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToImmutableArray();
+        }
+
+        return ImmutableArray<string>.Empty;
+    }
+
+    private static ImmutableArray<ImmutableArray<string>>? ParseJsonRequiredFilterColumnGroups(JsonElement item)
+    {
+        if (!item.TryGetProperty("required_filter_column_groups", out var prop) &&
+            !item.TryGetProperty("requiredFilterColumnGroups", out prop))
+        {
+            return null;
+        }
+
+        if (prop.ValueKind == JsonValueKind.Array)
+        {
+            var outer = new List<ImmutableArray<string>>();
+            foreach (var groupEl in prop.EnumerateArray())
+            {
+                if (groupEl.ValueKind == JsonValueKind.Array)
+                {
+                    var inner = new List<string>();
+                    foreach (var el in groupEl.EnumerateArray())
+                    {
+                        var s = el.GetString();
+                        if (!string.IsNullOrWhiteSpace(s)) inner.Add(s);
+                    }
+                    outer.Add(inner.ToImmutableArray());
+                }
+            }
+            return outer.ToImmutableArray();
+        }
+
+        return ImmutableArray<ImmutableArray<string>>.Empty;
     }
 }

@@ -380,6 +380,7 @@ public sealed partial class QueryAnalysisService
         ref bool isBlockedByMandatoryFilter,
         ref int hiddenMissingDatasetsCount,
         ref int totalEstimatedCost,
+        ref int? totalEstimatedRows,
         List<AnalyzedFederatedTable>? federatedTables = null,
         List<AnalyzedKeySetPushdown>? keySetPushdowns = null,
         List<AnalyzedSubtree>? plannedSubtrees = null,
@@ -446,6 +447,10 @@ public sealed partial class QueryAnalysisService
         if (source.IsBlockedByMandatoryFilter) isBlockedByMandatoryFilter = true;
         hiddenMissingDatasetsCount += source.HiddenMissingDatasetsCount;
         totalEstimatedCost += source.EstimatedCost;
+        if (source.EstimatedRows.HasValue)
+        {
+            totalEstimatedRows = (totalEstimatedRows ?? 0) + source.EstimatedRows.Value;
+        }
     }
 
     private sealed class SingleQueryAnalysisOutcome
@@ -465,5 +470,6 @@ public sealed partial class QueryAnalysisService
         public bool IsBlockedByMandatoryFilter { get; set; }
         public int HiddenMissingDatasetsCount { get; set; }
         public int EstimatedCost { get; set; }
+        public int? EstimatedRows { get; set; }
     }
 }

@@ -357,5 +357,16 @@ p, auditor, *, {table}, read, true, allow
             _relations.Add(relation);
             return Task.FromResult(new RelationWriteResult(relation.Id, true, false));
         }
+
+        public Task<bool> SetRelationCrossDataSourceOptInAsync(Guid relationId, bool allowCrossDataSource, CancellationToken ct = default)
+        {
+            var idx = _relations.FindIndex(r => r.Id == relationId);
+            if (idx >= 0)
+            {
+                _relations[idx].AllowCrossDataSource = allowCrossDataSource;
+                return Task.FromResult(true);
+            }
+            return Task.FromResult(false);
+        }
     }
 }

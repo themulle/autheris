@@ -261,7 +261,7 @@ public static partial class TreeSqlCompiler
         public required List<(TreeRelationNode Relation, NodePlan Child)> Children { get; init; }
     }
 
-    private static NodePlan Prepare(TreeQueryNode node, CompileContext context, IReadOnlyList<string> path)
+    private static NodePlan Prepare(TreeQueryNode node, CompileContext context, IReadOnlyList<string> path, IReadOnlyList<string>? joinedChildColumns = null)
     {
         if (!context.Access.TryGetValue(node.Table, out var tableAccess) || !tableAccess.Decision.IsAllowed)
         {
@@ -367,7 +367,7 @@ public static partial class TreeSqlCompiler
             ValidateFilterColumns(node.Where, metadata, tableAccess.Decision, depth: 0);
         }
 
-        EnsureRequiredFilterColumnsSatisfied(metadata, tableAccess, node.Where);
+        EnsureRequiredFilterColumnsSatisfied(metadata, tableAccess, node.Where, joinedChildColumns);
 
         var children = new List<(TreeRelationNode Relation, NodePlan Child)>();
         foreach (var relation in node.Relations)
@@ -391,7 +391,7 @@ public static partial class TreeSqlCompiler
             }
 
             var childPath = path.Append(relation.ResponseKey).ToArray();
-            var childPlan = Prepare(relation.Child, context, childPath);
+            var childPlan = Prepare(relation.Child, context, childPath, relation.ChildColumns);
             foreach (var childColumn in relation.ChildColumns)
             {
                 ResolveClearColumn(childPlan.Access.Metadata, childPlan.Access.Decision, childColumn);
@@ -472,38 +472,74 @@ public static partial class TreeSqlCompiler
     private static void EnsureRequiredFilterColumnsSatisfied(
         TableMetadata metadata,
         TreeTableAccess tableAccess,
-        TreeFilter? where)
+        TreeFilter? where,
+        IReadOnlyList<string>? joinedChildColumns = null)
     {
-        if (metadata.RequiredFilterColumns.Length == 0)
+        if (metadata.RequiredFilterColumns.Length == 0 && metadata.RequiredFilterColumnGroups.Length == 0)
         {
             return;
         }
 
-        foreach (var reqCol in metadata.RequiredFilterColumns)
+        bool IsSatisfied(string reqCol)
         {
             // 1. Tenant column
             if (tableAccess.TenantColumn != null &&
                 string.Equals(tableAccess.TenantColumn, reqCol, StringComparison.OrdinalIgnoreCase))
             {
-                continue;
+                return true;
             }
 
             // 2. Active RLS
             if (tableAccess.Decision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rlsPolicy &&
                 rlsPolicy.Predicate.ReferencedColumns.Contains(reqCol.ToLowerInvariant()))
             {
-                continue;
+                return true;
             }
 
-            // 3. Query filter
-            if (IsColumnConstrained(where, reqCol))
+            // 3. Relation join keys (Issue #221)
+            if (joinedChildColumns != null &&
+                joinedChildColumns.Contains(reqCol, StringComparer.OrdinalIgnoreCase))
             {
-                continue;
+                return true;
             }
 
-            throw new TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException(
-                TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(
-                    TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing));
+            // 4. Query filter
+            return IsColumnConstrained(where, reqCol);
+        }
+
+        if (metadata.RequiredFilterColumnGroups.Length > 0)
+        {
+            bool anyGroupSatisfied = false;
+            foreach (var group in metadata.RequiredFilterColumnGroups)
+            {
+                if (group.Length == 0) continue;
+                if (group.All(IsSatisfied))
+                {
+                    anyGroupSatisfied = true;
+                    break;
+                }
+            }
+
+            if (!anyGroupSatisfied)
+            {
+                throw new TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException(
+                    TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(
+                        TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing));
+            }
+        }
+        else
+        {
+            foreach (var reqCol in metadata.RequiredFilterColumns)
+            {
+                if (IsSatisfied(reqCol))
+                {
+                    continue;
+                }
+
+                throw new TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException(
+                    TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(
+                        TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing));
+            }
         }
     }
 

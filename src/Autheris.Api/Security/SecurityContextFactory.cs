@@ -162,14 +162,18 @@ public static class SecurityContextFactory
         string? app = GetRawHeader(context, CallerAppHeaderName, CallerAppHeaderNameAlt);
         string? ver = GetRawHeader(context, CallerVersionHeaderName, CallerVersionHeaderNameAlt);
         string? qry = GetRawHeader(context, CallerQueryHeaderName, CallerQueryHeaderNameAlt);
+        string? clientId = context.User.FindFirst("azp")?.Value
+            ?? context.User.FindFirst("appid")?.Value
+            ?? context.User.FindFirst("client_id")?.Value;
 
-        if (app == null && ver == null && qry == null) return null;
+        if (app == null && ver == null && qry == null && clientId == null) return null;
 
         var normalizedApp = CallerLabelNormalizer.NormalizeApplication(app);
         var normalizedVer = CallerLabelNormalizer.NormalizeVersion(ver);
         var normalizedQry = CallerLabelNormalizer.NormalizeQueryName(qry);
+        var normalizedClientId = CallerLabelNormalizer.NormalizeClientId(clientId);
 
-        return new CallerContext(normalizedApp, normalizedVer, normalizedQry);
+        return new CallerContext(normalizedApp, normalizedVer, normalizedQry, normalizedClientId);
     }
 
     private static string? GetRawHeader(HttpContext context, string primary, string alt)

@@ -11,6 +11,9 @@ public interface IReadPathSwitches
     /// <summary>False: the REST data family (<c>/api/v1/data/*</c>, change-token, changes, sample-rows) is not mapped and not reachable in-process.</summary>
     bool RestDataEndpointEnabled { get; }
 
+    /// <summary>Issue #222: Dedicated switch for bulk keyset streaming endpoint (/stream, /bulk).</summary>
+    bool BulkStreamEnabled { get; }
+
     bool IsGroupEnabled(McpToolGroup group);
 
     /// <summary>False when the tool's group is off or the name is listed in <c>Mcp:DisabledTools</c>. Unknown (dynamic) names follow <see cref="McpToolGroup.Query"/>.</summary>

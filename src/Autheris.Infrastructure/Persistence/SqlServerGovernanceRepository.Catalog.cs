@@ -715,7 +715,8 @@ public partial class SqlServerGovernanceRepository
         cmd.CommandText = @"SELECT r.id, r.parent_table_id, r.child_table_id, r.relation_name, r.cardinality,
                                    tp.source_name, tp.schema_name, tp.table_name,
                                    tc.source_name, tc.schema_name, tc.table_name,
-                                   k.key_ordinal, k.parent_column, k.child_column
+                                   k.key_ordinal, k.parent_column, k.child_column,
+                                   COALESCE(r.allow_cross_data_source, 0)
                             FROM TABLE_RELATIONS r
                             JOIN TABLES tp ON r.parent_table_id = tp.id
                             JOIN TABLES tc ON r.child_table_id = tc.id
@@ -737,7 +738,8 @@ public partial class SqlServerGovernanceRepository
                     new TableIdentifier(reader.GetString(8), reader.GetString(9), reader.GetString(10)),
                     reader.IsDBNull(11) ? null : reader.GetInt32(11),
                     reader.IsDBNull(12) ? null : reader.GetString(12),
-                    reader.IsDBNull(13) ? null : reader.GetString(13)));
+                    reader.IsDBNull(13) ? null : reader.GetString(13),
+                    !reader.IsDBNull(14) && Convert.ToBoolean(reader.GetValue(14))));
             }
         }
 
@@ -768,14 +770,15 @@ public partial class SqlServerGovernanceRepository
                                 USING (SELECT @pId AS p, @cId AS c, @relName AS n) AS s
                                 ON t.parent_table_id = s.p AND t.child_table_id = s.c AND t.relation_name = s.n
                                 WHEN MATCHED THEN UPDATE SET cardinality = @card
-                                WHEN NOT MATCHED THEN INSERT (id, parent_table_id, child_table_id, relation_name, cardinality)
-                                    VALUES (@id, @pId, @cId, @relName, @card)
+                                WHEN NOT MATCHED THEN INSERT (id, parent_table_id, child_table_id, relation_name, cardinality, allow_cross_data_source)
+                                    VALUES (@id, @pId, @cId, @relName, @card, @allowCross)
                                 OUTPUT inserted.id, $action;";
             cmd.Parameters.AddWithValue("@id", relation.Id.ToString());
             cmd.Parameters.AddWithValue("@pId", parentTableId);
             cmd.Parameters.AddWithValue("@cId", childTableId);
             cmd.Parameters.AddWithValue("@relName", relation.RelationName);
             cmd.Parameters.AddWithValue("@card", relation.Cardinality.ToString());
+            cmd.Parameters.AddWithValue("@allowCross", relation.AllowCrossDataSource ? 1 : 0);
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             await reader.ReadAsync(ct).ConfigureAwait(false);
             storedId = reader.GetString(0);
@@ -1027,5 +1030,16 @@ public partial class SqlServerGovernanceRepository
         cmd.Parameters.AddWithValue("@reason", delegation.Reason);
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         return delegation;
+    }
+
+    public async Task<bool> SetRelationCrossDataSourceOptInAsync(Guid relationId, bool allowCrossDataSource, CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"UPDATE TABLE_RELATIONS SET allow_cross_data_source = @allowed WHERE id = @id";
+        cmd.Parameters.AddWithValue("@id", relationId.ToString());
+        cmd.Parameters.AddWithValue("@allowed", allowCrossDataSource ? 1 : 0);
+        int rows = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        return rows > 0;
     }
 }

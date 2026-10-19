@@ -132,6 +132,7 @@ public sealed partial class QueryAnalysisService
 
         var totalFields = 0;
         var maxDepth = 0;
+        var estimatedRows = 0;
 
         foreach (var op in operations)
         {
@@ -144,6 +145,25 @@ public sealed partial class QueryAnalysisService
                 }
 
                 outcome.ExtractedTables.Add(fieldName);
+
+                var requestedLimit = 10;
+                foreach (var arg in rootField.Arguments)
+                {
+                    if (string.Equals(arg.Name.Value, "first", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(arg.Name.Value, "limit", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (arg.Value is IntValueNode iv && int.TryParse(iv.Value, out var pv) && pv > 0)
+                        {
+                            requestedLimit = pv;
+                        }
+                        else if (arg.Value is VariableNode vn && variables != null && variables.TryGetValue(vn.Name.Value, out var vVal) && vVal is int vInt && vInt > 0)
+                        {
+                            requestedLimit = vInt;
+                        }
+                        break;
+                    }
+                }
+                estimatedRows += requestedLimit;
 
                 var requestedColumns = new List<string>();
                 var filterColumns = new List<string>();
@@ -194,6 +214,7 @@ public sealed partial class QueryAnalysisService
                 + Math.Max(0, maxDepth - 1) * _analysisOptions.CostPerJoin;
         }
 
+        outcome.EstimatedRows = estimatedRows;
         return outcome;
     }
 

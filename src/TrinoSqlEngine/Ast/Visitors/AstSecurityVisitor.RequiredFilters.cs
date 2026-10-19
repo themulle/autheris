@@ -29,15 +29,44 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 continue;
 
             var entry = _typed.Catalog.Resolve(source.Name);
-            if (entry == null || entry.RequiredFilterColumns.Length == 0)
+            if (entry == null || (entry.RequiredFilterColumns.Length == 0 && entry.RequiredFilterColumnGroups.Length == 0))
                 continue;
 
-            foreach (var reqCol in entry.RequiredFilterColumns)
+            if (entry.RequiredFilterColumnGroups.Length > 0)
             {
-                if (IsRequiredFilterSatisfied(entry, reqCol, tbl, alias, node.Where, onPredicates))
-                    continue;
+                bool anyGroupSatisfied = false;
+                foreach (var group in entry.RequiredFilterColumnGroups)
+                {
+                    if (group.Length == 0) continue;
+                    bool groupAllSatisfied = true;
+                    foreach (var reqCol in group)
+                    {
+                        if (!IsRequiredFilterSatisfied(entry, reqCol, tbl, alias, node.Where, onPredicates))
+                        {
+                            groupAllSatisfied = false;
+                            break;
+                        }
+                    }
+                    if (groupAllSatisfied)
+                    {
+                        anyGroupSatisfied = true;
+                        break;
+                    }
+                }
+                if (!anyGroupSatisfied)
+                {
+                    throw new RequiredFilterColumnMissingException(_typed.Capabilities.Dialect);
+                }
+            }
+            else
+            {
+                foreach (var reqCol in entry.RequiredFilterColumns)
+                {
+                    if (IsRequiredFilterSatisfied(entry, reqCol, tbl, alias, node.Where, onPredicates))
+                        continue;
 
-                throw new RequiredFilterColumnMissingException(_typed.Capabilities.Dialect);
+                    throw new RequiredFilterColumnMissingException(_typed.Capabilities.Dialect);
+                }
             }
         }
     }

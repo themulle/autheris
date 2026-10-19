@@ -200,6 +200,11 @@ public sealed class EntraIdAuthOptions
     /// </summary>
     public List<string> ReadOnlySelfServiceScopes { get; init; } = ["data.access.request"];
 
+    /// <summary>
+    /// SEC-GOV113-02 / Issue #226: Scopes that permit reviewing (approving or rejecting) access requests.
+    /// </summary>
+    public List<string> AccessReviewScopes { get; init; } = ["data.access.review"];
+
     /// <summary>How app-only tokens (client credentials, no signed-in person) are treated. Defaults to ReadOnly.</summary>
     public AppOnlyTokenAccess AppOnlyTokens { get; init; } = AppOnlyTokenAccess.ReadOnly;
 }

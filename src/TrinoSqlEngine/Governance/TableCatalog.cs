@@ -29,24 +29,29 @@ public sealed record CatalogColumn(string Name, string DataType, string? Collati
 /// <param name="TenantColumn">The tenant isolation column, or null for a table without tenant scoping.</param>
 /// <param name="RequiredFilterColumns">Table-level required filter columns (issue #163).</param>
 /// <param name="Version">Catalog version of this entry; part of every cache key.</param>
+/// <param name="RequiredFilterColumnGroups">Table-level required filter column groups (issue #221).</param>
 public sealed record TableCatalogEntry(
     TableIdentity Identity,
     ImmutableArray<CatalogColumn> Columns,
     string? TenantColumn,
     ImmutableArray<string> RequiredFilterColumns = default,
-    long Version = 0)
+    long Version = 0,
+    ImmutableArray<ImmutableArray<string>> RequiredFilterColumnGroups = default)
 {
     public TableCatalogEntry(
         TableIdentity identity,
         ImmutableArray<CatalogColumn> columns,
         string? tenantColumn,
         long version)
-        : this(identity, columns, tenantColumn, ImmutableArray<string>.Empty, version)
+        : this(identity, columns, tenantColumn, ImmutableArray<string>.Empty, version, ImmutableArray<ImmutableArray<string>>.Empty)
     {
     }
 
     public ImmutableArray<string> RequiredFilterColumns { get; init; } =
         RequiredFilterColumns.IsDefault ? ImmutableArray<string>.Empty : RequiredFilterColumns;
+
+    public ImmutableArray<ImmutableArray<string>> RequiredFilterColumnGroups { get; init; } =
+        RequiredFilterColumnGroups.IsDefault ? ImmutableArray<ImmutableArray<string>>.Empty : RequiredFilterColumnGroups;
 }
 
 /// <summary>Resolves user-written table names to catalog entries. An unresolved name is never emitted (INV-11).</summary>
