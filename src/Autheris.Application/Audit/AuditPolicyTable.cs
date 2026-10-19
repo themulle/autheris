@@ -46,6 +46,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.CdcConsumerOffsetReset] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CdcDeadLetterReplayed] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CdcStreamResync] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.CdcStreamWatermarkReset] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CdcStreamKeyRotated] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CdcPluginReceiverBound] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CdcPluginReceiverRejected] = AuditFailurePolicy.FailClosed,

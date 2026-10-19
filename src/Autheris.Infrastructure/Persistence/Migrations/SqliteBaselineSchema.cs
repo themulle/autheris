@@ -464,6 +464,7 @@ internal sealed class SqliteBaselineSchema
                 fencing_token INTEGER NOT NULL,
                 updated_at TEXT NOT NULL,
                 updated_by TEXT NOT NULL,
+                watermark_state TEXT NULL,
                 PRIMARY KEY (source, domain_name, schema_name, table_name)
             );
 

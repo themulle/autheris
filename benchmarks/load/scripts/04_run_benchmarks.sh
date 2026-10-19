@@ -52,8 +52,10 @@ QUERY_TYPES=("pk" "filter" "join" "deep")
 # Find k6 binary
 K6_BIN="k6"
 if ! command -v k6 &> /dev/null; then
-    if [ -f "/root/lis-git/graphql-bench/app/queries/bin/k6/k6" ]; then
-        K6_BIN="/root/lis-git/graphql-bench/app/queries/bin/k6/k6"
+    if [ -f "/usr/local/bin/k6" ]; then
+        K6_BIN="/usr/local/bin/k6"
+    elif [ -f "/usr/bin/k6" ]; then
+        K6_BIN="/usr/bin/k6"
     else
         echo "ERROR: k6 binary not found!"
         exit 1

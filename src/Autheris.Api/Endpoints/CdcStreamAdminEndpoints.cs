@@ -40,6 +40,12 @@ public static class CdcStreamAdminEndpoints
             .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
             .WithAudit(AuditLevel.Full, AuditEventTypes.CdcStreamKeyRotated);
 
+        app.MapPost("/api/v1/cdc/streams/{id}/reset-watermark", (
+                string id, ResetWatermarkRequest request, HttpContext context, CdcStreamAdminService service, IAuditWriter audit, CancellationToken ct)
+            => ResetWatermarkAsync(id, request, context, service, audit, ct))
+            .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+            .WithAudit(AuditLevel.Full, AuditEventTypes.CdcStreamWatermarkReset);
+
         return app;
     }
 
@@ -113,6 +119,39 @@ public static class CdcStreamAdminEndpoints
         return Results.Ok(new { streamId = streamId.Value });
     }
 
+    internal static async Task<IResult> ResetWatermarkAsync(
+        string id, ResetWatermarkRequest request, HttpContext context, CdcStreamAdminService service, IAuditWriter audit, CancellationToken ct)
+    {
+        if (!EndpointSecurity.IsGlobalGovernanceAdmin(context.User))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        if (!CdcStreamId.TryParse(id, out var streamId))
+        {
+            return Results.NotFound();
+        }
+
+        if (request is null || string.IsNullOrWhiteSpace(request.Justification) || request.Dimensions is null)
+        {
+            return Results.BadRequest(new { error = "Justification and Dimensions are required." });
+        }
+
+        if (!await service.ResetWatermarkAsync(streamId, request.Dimensions, request.Justification, ct).ConfigureAwait(false))
+        {
+            return Results.NotFound();
+        }
+
+        await RecordAsync(context, audit, AuditEventTypes.CdcStreamWatermarkReset, new
+        {
+            streamId = streamId.Value,
+            justification = request.Justification,
+            dimensions = request.Dimensions
+        }).ConfigureAwait(false);
+
+        return Results.Ok(new { streamId = streamId.Value, status = "reset" });
+    }
+
     private static async Task RecordAsync(HttpContext context, IAuditWriter audit, string eventType, object details)
     {
         TenantId tenant;
@@ -138,3 +177,6 @@ public static class CdcStreamAdminEndpoints
         context.Features.Get<AuditContext>()?.MarkHandled();
     }
 }
+
+public sealed record ResetWatermarkRequest(IReadOnlyDictionary<string, string> Dimensions, string Justification);
+

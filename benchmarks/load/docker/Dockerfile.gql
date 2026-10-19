@@ -28,7 +28,7 @@ COPY src/ src/
 # Publish in Release mode with Server GC, PGO and ready-to-run optimizations
 RUN dotnet publish src/Autheris.Api/Autheris.Api.csproj -c Release -o /app/publish \
     --no-restore \
-    -p:AutherisIncludeTestAuth=false \
+    -p:AutherisIncludeTestAuth=true \
     -p:ServerGarbageCollection=true \
     -p:TieredCompilation=true \
     -p:TieredPGO=true
@@ -39,7 +39,7 @@ LABEL org.opencontainers.image.description="BENCHMARK ONLY – never publish"
 WORKDIR /app
 
 ENV ASPNETCORE_URLS=http://+:5000 \
-    ASPNETCORE_ENVIRONMENT=Benchmark \
+    ASPNETCORE_ENVIRONMENT=Development \
     DOTNET_gcServer=1 \
     DOTNET_GCConcurrent=1 \
     DOTNET_GCDynamicAdaptationMode=1 \
@@ -51,6 +51,7 @@ ENV ASPNETCORE_URLS=http://+:5000 \
 
 COPY --from=build /app/publish .
 COPY benchmarks/load/configs/gql-gateway/appsettings.bench.json appsettings.Benchmark.json
+COPY benchmarks/load/configs/gql-gateway/appsettings.bench.json appsettings.Development.json
 
 EXPOSE 5000
 

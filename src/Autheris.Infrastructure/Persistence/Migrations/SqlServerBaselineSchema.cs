@@ -547,6 +547,7 @@ CREATE TABLE dbo.autheris_cdc_watermarks (
     fencing_token BIGINT NOT NULL,
     updated_at NVARCHAR(64) NOT NULL,
     updated_by NVARCHAR(256) NOT NULL,
+    watermark_state NVARCHAR(MAX) NULL,
     CONSTRAINT PK_autheris_cdc_watermarks PRIMARY KEY (source, domain_name, schema_name, table_name)
 );
 

@@ -2547,6 +2547,11 @@
           "name": "updated_by",
           "type": "TEXT",
           "family": "string"
+        },
+        {
+          "name": "watermark_state",
+          "type": "TEXT",
+          "family": "string"
         }
       ],
       "primaryKey": [

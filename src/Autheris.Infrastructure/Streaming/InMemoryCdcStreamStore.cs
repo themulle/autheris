@@ -114,7 +114,11 @@ public sealed class InMemoryCdcStreamStore : ICdcStreamStore, ICdcStreamKeyStore
             }
 
             // Everything validated: apply (nothing below can fail).
-            _watermarks[key] = new WatermarkState(Math.Max(wm?.Watermark ?? long.MinValue, batch.NewWatermark), batch.FencingToken);
+            var nextStateJson = batch.WatermarkState ?? wm?.WatermarkStateJson;
+            _watermarks[key] = new WatermarkState(Math.Max(wm?.Watermark ?? long.MinValue, batch.NewWatermark), batch.FencingToken)
+            {
+                WatermarkStateJson = nextStateJson
+            };
             s.HeadOffset = batch.ExpectedHeadOffset + batch.Events.Count;
             s.ProducerFencingToken = batch.FencingToken;
             foreach (var e in batch.Events)
@@ -245,6 +249,40 @@ public sealed class InMemoryCdcStreamStore : ICdcStreamStore, ICdcStreamKeyStore
         }
     }
 
+    public Task<string?> GetWatermarkStateAsync(CdcStreamId id, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            if (!_streams.TryGetValue(id.Value ?? string.Empty, out var s)) return Task.FromResult<string?>(null);
+            _watermarks.TryGetValue((s.Source, s.Table), out var wm);
+            return Task.FromResult(wm?.WatermarkStateJson);
+        }
+    }
+
+    public Task<MultiWatermarkVectorRecord?> GetWatermarkVectorAsync(CdcStreamId id, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            if (!_streams.TryGetValue(id.Value ?? string.Empty, out var s)) return Task.FromResult<MultiWatermarkVectorRecord?>(null);
+            _watermarks.TryGetValue((s.Source, s.Table), out var wm);
+            var vector = MultiWatermarkVector.FromJson(wm?.WatermarkStateJson);
+            return Task.FromResult<MultiWatermarkVectorRecord?>(new MultiWatermarkVectorRecord(id, vector, wm?.FencingToken ?? 0));
+        }
+    }
+
+    public Task ResetWatermarkAsync(CdcStreamId id, string? watermarkState, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            if (_streams.TryGetValue(id.Value ?? string.Empty, out var s))
+            {
+                var key = (s.Source, s.Table);
+                _watermarks[key] = new WatermarkState(0, 0) { WatermarkStateJson = watermarkState };
+            }
+        }
+        return Task.CompletedTask;
+    }
+
     public Task<IReadOnlyList<CdcWrappedKey>> GetKeysAsync(CdcStreamId id, CancellationToken ct = default)
     {
         lock (_gate)
@@ -333,7 +371,10 @@ public sealed class InMemoryCdcStreamStore : ICdcStreamStore, ICdcStreamKeyStore
             _watermarks.TryGetValue((s.Source, s.Table), out var w) ? w.Watermark : null,
             s.LastPolledMs is { } ms ? DateTimeOffset.FromUnixTimeMilliseconds(ms) : null);
 
-    private sealed record WatermarkState(long Watermark, long FencingToken);
+    private sealed record WatermarkState(long Watermark, long FencingToken)
+    {
+        public string? WatermarkStateJson { get; set; }
+    }
 
     private sealed class StreamState(CdcStreamId id, string source, TableIdentifier table)
     {

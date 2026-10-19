@@ -142,6 +142,12 @@ internal sealed class FakeStreamStore : ICdcStreamStore
     public Task<IReadOnlyList<CdcRowImageRecord>> GetRowImagesAsync(CdcStreamId id, IReadOnlyList<byte[]> fingerprints, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<CdcRowImageRecord>>([]);
 
+    public Task<string?> GetWatermarkStateAsync(CdcStreamId id, CancellationToken ct = default) => Task.FromResult<string?>(null);
+
+    public Task<MultiWatermarkVectorRecord?> GetWatermarkVectorAsync(CdcStreamId id, CancellationToken ct = default) => Task.FromResult<MultiWatermarkVectorRecord?>(null);
+
+    public Task ResetWatermarkAsync(CdcStreamId id, string? watermarkState, CancellationToken ct = default) => Task.CompletedTask;
+
     public Task<CdcReadResult> ReadAsync(CdcStreamId id, long fromOffsetInclusive, int maxEvents, CancellationToken ct = default)
     {
         lock (_gate)

@@ -47,4 +47,16 @@ public partial class SqliteGovernanceRepository : ICdcStreamStore
 
     public Task<int> DiscardUnreadableAsync(CdcStreamId id, IReadOnlyCollection<string> unreadableDekIds, CancellationToken ct = default) =>
         WriteAsync(async c => await Core.DiscardUnreadableAsync(c, id, unreadableDekIds, ct).ConfigureAwait(false), ct);
+
+    public Task<string?> GetWatermarkStateAsync(CdcStreamId id, CancellationToken ct = default) =>
+        ReadAsync(async c => await Core.GetWatermarkStateAsync(c, id, ct).ConfigureAwait(false), ct);
+
+    public async Task<MultiWatermarkVectorRecord?> GetWatermarkVectorAsync(CdcStreamId id, CancellationToken ct = default)
+    {
+        var json = await GetWatermarkStateAsync(id, ct).ConfigureAwait(false);
+        return new MultiWatermarkVectorRecord(id, MultiWatermarkVector.FromJson(json), 0);
+    }
+
+    public Task ResetWatermarkAsync(CdcStreamId id, string? watermarkState, CancellationToken ct = default) =>
+        WriteAsync<int>(async c => { await Core.ResetWatermarkAsync(c, id, watermarkState, ct).ConfigureAwait(false); return 0; }, ct);
 }

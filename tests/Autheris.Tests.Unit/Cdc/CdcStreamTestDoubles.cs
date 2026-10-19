@@ -38,6 +38,7 @@ internal sealed class FakeCdcStreamStore : ICdcStreamStore
         public long Head { get; set; }
         public long Tail { get; set; } = 1;
         public long? Watermark { get; set; }
+        public string? WatermarkState { get; set; }
         public long WatermarkToken { get; set; }
         public long ProducerToken { get; set; }
         public DateTimeOffset? LastPolled { get; set; }
@@ -133,6 +134,10 @@ internal sealed class FakeCdcStreamStore : ICdcStreamStore
             }
 
             s.Watermark = Math.Max(s.Watermark ?? long.MinValue, batch.NewWatermark);
+            if (batch.WatermarkState is not null)
+            {
+                s.WatermarkState = batch.WatermarkState;
+            }
             s.WatermarkToken = batch.FencingToken;
             s.ProducerToken = batch.FencingToken;
             s.Head += batch.Events.Count;
@@ -152,6 +157,40 @@ internal sealed class FakeCdcStreamStore : ICdcStreamStore
         }
 
         return Task.CompletedTask;
+    }
+
+    public Task<string?> GetWatermarkStateAsync(CdcStreamId id, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult(Streams.TryGetValue(id, out var s) ? s.WatermarkState : null);
+        }
+    }
+
+    public Task<MultiWatermarkVectorRecord?> GetWatermarkVectorAsync(CdcStreamId id, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            if (Streams.TryGetValue(id, out var s))
+            {
+                var vector = MultiWatermarkVector.FromJson(s.WatermarkState);
+                return Task.FromResult<MultiWatermarkVectorRecord?>(new MultiWatermarkVectorRecord(id, vector, s.WatermarkToken));
+            }
+            return Task.FromResult<MultiWatermarkVectorRecord?>(null);
+        }
+    }
+
+    public Task ResetWatermarkAsync(CdcStreamId id, string? newWatermarkStateJson, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            if (Streams.TryGetValue(id, out var s))
+            {
+                s.WatermarkState = newWatermarkStateJson;
+                s.Watermark = null;
+            }
+            return Task.CompletedTask;
+        }
     }
 
     public Task<IReadOnlyList<CdcRowImageRecord>> GetRowImagesAsync(CdcStreamId id, IReadOnlyList<byte[]> fingerprints, CancellationToken ct = default)
@@ -225,6 +264,12 @@ internal sealed class FaultInjectingStreamStore(ICdcStreamStore inner) : ICdcStr
     }
 
     public Task<IReadOnlyList<CdcRowImageRecord>> GetRowImagesAsync(CdcStreamId id, IReadOnlyList<byte[]> fingerprints, CancellationToken ct = default) => inner.GetRowImagesAsync(id, fingerprints, ct);
+
+    public Task<string?> GetWatermarkStateAsync(CdcStreamId id, CancellationToken ct = default) => inner.GetWatermarkStateAsync(id, ct);
+
+    public Task<MultiWatermarkVectorRecord?> GetWatermarkVectorAsync(CdcStreamId id, CancellationToken ct = default) => inner.GetWatermarkVectorAsync(id, ct);
+
+    public Task ResetWatermarkAsync(CdcStreamId id, string? newWatermarkStateJson, CancellationToken ct = default) => inner.ResetWatermarkAsync(id, newWatermarkStateJson, ct);
 
     public Task<CdcReadResult> ReadAsync(CdcStreamId id, long fromOffsetInclusive, int maxEvents, CancellationToken ct = default) => inner.ReadAsync(id, fromOffsetInclusive, maxEvents, ct);
 

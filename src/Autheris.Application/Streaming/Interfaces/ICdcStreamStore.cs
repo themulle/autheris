@@ -41,4 +41,10 @@ public interface ICdcStreamStore
     Task<int> PurgeImagesAsync(CdcStreamId id, int maxRows, CancellationToken ct = default);
 
     Task<int> DiscardUnreadableAsync(CdcStreamId id, IReadOnlyCollection<string> unreadableDekIds, CancellationToken ct = default);
+
+    Task<string?> GetWatermarkStateAsync(CdcStreamId id, CancellationToken ct = default);
+
+    Task<MultiWatermarkVectorRecord?> GetWatermarkVectorAsync(CdcStreamId id, CancellationToken ct = default);
+
+    Task ResetWatermarkAsync(CdcStreamId id, string? watermarkState, CancellationToken ct = default);
 }
