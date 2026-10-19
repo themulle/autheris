@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Streaming.Interfaces;
+using Autheris.Application.Streaming.Services;
 using Autheris.Domain.Model;
 using HotChocolate;
 using HotChocolate.Types;
@@ -133,6 +134,21 @@ public sealed class Subscription
             ct).ConfigureAwait(false);
 
         var sourceStream = eventChannel.SubscribeAsync(topic, guardCts.Token);
+
+        // REQ-CDC-99 I1 (D-A13): MSSQL-tracked tables are read from the durable stream through the shared tail hub; other sources keep using the channel.
+        var streamStore = services.GetService<ICdcStreamStore>();
+        var tailHub = services.GetService<ICdcStreamTailHub>();
+        if (streamStore != null && tailHub != null)
+        {
+            var streamIds = await CdcStreamEventSource.ResolveStreamsAsync(streamStore, topic, CdcSubscriptionGovernor.AllTopic, ct).ConfigureAwait(false);
+            if (streamIds.Count > 0)
+            {
+                sourceStream = CdcStreamEventSource.MergeAsync(
+                    sourceStream, streamIds, tailHub,
+                    services.GetService<IOptions<GatewayOptions>>()?.Value?.CdcStream?.SubscriberBufferSize ?? 1000, guardCts.Token);
+            }
+        }
+
         var subscriber = principal;
 
         await using var enumerator = sourceStream.GetAsyncEnumerator(guardCts.Token);
@@ -146,6 +162,16 @@ public sealed class Subscription
             catch (OperationCanceledException) when (guardCts.IsCancellationRequested && !ct.IsCancellationRequested)
             {
                 break; // session expired or token revoked: end the stream
+            }
+            catch (CdcResyncRequiredException ex)
+            {
+                // The subscriber fell behind the stream (full buffer): end explicitly instead of silently losing events (SEC-CDC99-18).
+                throw new GraphQLException(
+                    ErrorBuilder.New()
+                        .SetMessage("The subscription fell behind the change stream; resubscribe.")
+                        .SetCode(CdcResyncRequiredException.Code)
+                        .SetExtension("lastDeliveredOffset", ex.LastDeliveredOffset)
+                        .Build());
             }
 
             if (!hasNext || guardCts.IsCancellationRequested)

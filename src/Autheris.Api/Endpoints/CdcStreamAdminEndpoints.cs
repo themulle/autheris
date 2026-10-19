@@ -1,0 +1,140 @@
+namespace Autheris.Api.Endpoints;
+
+using System;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using Autheris.Api.Extensions;
+using Autheris.Api.Security;
+using Autheris.Application.Audit;
+using Autheris.Application.Interfaces;
+using Autheris.Application.Streaming;
+using Autheris.Application.Streaming.Services;
+using Autheris.Domain.Audit;
+using Autheris.Domain.Common;
+using Autheris.Domain.Model;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
+
+/// <summary>
+/// PLAN-CDC-99 D-A14 / SEC-CDC99-21: administration of the governed CDC streams. Global governance administrators only; never returns
+/// payloads, fingerprints, wrapped keys or key material (SEC-CDC99-11). Unknown and malformed ids answer identically (404).
+/// </summary>
+public static class CdcStreamAdminEndpoints
+{
+    public static IEndpointRouteBuilder MapCdcStreamAdminEndpoints(this IEndpointRouteBuilder app)
+    {
+        app.MapGet("/api/v1/cdc/streams", (HttpContext context, CdcStreamAdminService service, CancellationToken ct) => ListAsync(context, service, ct))
+            .RequireAuthorization(GatewayPolicies.GovernanceAdmin);
+
+        app.MapPost("/api/v1/cdc/streams/{id}/resync", (
+                string id, bool? discardUnreadable, string? confirmStreamId, HttpContext context, CdcStreamAdminService service, IAuditWriter audit, CancellationToken ct)
+            => ResyncAsync(id, discardUnreadable ?? false, confirmStreamId, context, service, audit, ct))
+            .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+            .WithAudit(AuditLevel.Full, AuditEventTypes.CdcStreamResync);
+
+        app.MapPost("/api/v1/cdc/streams/{id}/rotate-image-key", (
+                string id, HttpContext context, CdcStreamAdminService service, IAuditWriter audit, CancellationToken ct)
+            => RotateImageKeyAsync(id, context, service, audit, ct))
+            .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+            .WithAudit(AuditLevel.Full, AuditEventTypes.CdcStreamKeyRotated);
+
+        return app;
+    }
+
+    internal static async Task<IResult> ListAsync(HttpContext context, CdcStreamAdminService service, CancellationToken ct)
+    {
+        if (!EndpointSecurity.IsGlobalGovernanceAdmin(context.User))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var listing = await service.ListAsync(ct).ConfigureAwait(false);
+        return Results.Ok(new { streams = listing.Streams, keyCountsByKek = listing.WrappedKeysByKek });
+    }
+
+    internal static async Task<IResult> ResyncAsync(
+        string id, bool discardUnreadable, string? confirmStreamId, HttpContext context, CdcStreamAdminService service, IAuditWriter audit, CancellationToken ct)
+    {
+        if (!EndpointSecurity.IsGlobalGovernanceAdmin(context.User))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        if (!CdcStreamId.TryParse(id, out var streamId))
+        {
+            return Results.NotFound();
+        }
+
+        // SEC-CDC99-21: the destructive variant needs an explicit confirmation naming the stream.
+        if (discardUnreadable && !string.Equals(confirmStreamId, streamId.Value, StringComparison.Ordinal))
+        {
+            return Results.BadRequest(new { error = "discardUnreadable requires confirmStreamId equal to the stream id." });
+        }
+
+        var outcome = await service.ResyncAsync(streamId, discardUnreadable, ct).ConfigureAwait(false);
+        if (outcome.Status == CdcResyncStatus.NotFound)
+        {
+            return Results.NotFound();
+        }
+
+        // The resync (and a discard) is already committed: the audit write never takes the request token.
+        if (outcome.Status == CdcResyncStatus.Done || outcome.DiscardedEvents > 0)
+        {
+            await RecordAsync(context, audit, AuditEventTypes.CdcStreamResync, new
+            {
+                streamId = streamId.Value,
+                discardUnreadable,
+                discardedEvents = outcome.DiscardedEvents,
+                restarted = outcome.Status == CdcResyncStatus.Done
+            }).ConfigureAwait(false);
+        }
+
+        return outcome.Status == CdcResyncStatus.Done
+            ? Results.Ok(new { streamId = streamId.Value, discardedEvents = outcome.DiscardedEvents })
+            : Results.Json(new { error = "The stream could not be restarted now; retry later.", discardedEvents = outcome.DiscardedEvents }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+
+    internal static async Task<IResult> RotateImageKeyAsync(
+        string id, HttpContext context, CdcStreamAdminService service, IAuditWriter audit, CancellationToken ct)
+    {
+        if (!EndpointSecurity.IsGlobalGovernanceAdmin(context.User))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        if (!CdcStreamId.TryParse(id, out var streamId) || !await service.RotateImageKeyAsync(streamId, ct).ConfigureAwait(false))
+        {
+            return Results.NotFound();
+        }
+
+        await RecordAsync(context, audit, AuditEventTypes.CdcStreamKeyRotated, new { streamId = streamId.Value, purpose = "image" }).ConfigureAwait(false);
+        return Results.Ok(new { streamId = streamId.Value });
+    }
+
+    private static async Task RecordAsync(HttpContext context, IAuditWriter audit, string eventType, object details)
+    {
+        TenantId tenant;
+        try
+        {
+            tenant = context.User.GetTenantId();
+        }
+        catch (System.Security.SecurityException)
+        {
+            tenant = default;
+        }
+
+        await audit.RecordAsync(new AuditLogEntry
+        {
+            TenantId = tenant,
+            EventType = eventType,
+            ActorSid = context.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+            TargetTable = string.Empty,
+            Decision = "ALLOW",
+            TraceId = context.TraceIdentifier,
+            DetailsJson = JsonSerializer.Serialize(details)
+        }, CancellationToken.None).ConfigureAwait(false);
+        context.Features.Get<AuditContext>()?.MarkHandled();
+    }
+}
