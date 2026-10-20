@@ -2,6 +2,141 @@
   "engine": "sqlserver",
   "tables": [
     {
+      "name": "ACCESS_POLICIES",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "policy_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "description",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "is_active",
+          "type": "BIT",
+          "family": "boolean"
+        },
+        {
+          "name": "priority",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "decision",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_by",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "approved_by",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "approved_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "policy_id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "ACCESS_POLICY_GRANTEES",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "policy_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "realm_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "grantee_type",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "grantee_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "policy_id",
+        "realm_id",
+        "grantee_type",
+        "grantee_id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "ACCESS_POLICY_SELECTORS",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "policy_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "selector_type",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "selector_value",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "policy_id",
+        "selector_type",
+        "selector_value"
+      ],
+      "indexes": []
+    },
+    {
       "name": "ACCESS_PROFILE_ASSIGNMENTS",
       "columns": [
         {
@@ -1561,6 +1696,283 @@
       ]
     },
     {
+      "name": "FUNCTIONAL_RIGHT_MAPPINGS",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "realm_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "group_or_role",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "functional_right",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "approved_by",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "approved_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "recert_class",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_by",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "realm_id",
+        "group_or_role",
+        "functional_right"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "IDENTITY_GROUP_MEMBERS",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "realm_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "group_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "user_key",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "realm_id",
+        "group_id",
+        "user_key"
+      ],
+      "indexes": [
+        {
+          "name": "IX_IDENTITY_GROUP_MEMBERS_USER",
+          "unique": false,
+          "columns": [
+            "tenant_id",
+            "realm_id",
+            "user_key"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IDENTITY_GROUPS",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "realm_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "group_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "external_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "display_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "realm_id",
+        "group_id"
+      ],
+      "indexes": [
+        {
+          "name": "UX_IDENTITY_GROUPS_EXT",
+          "unique": true,
+          "columns": [
+            "tenant_id",
+            "realm_id",
+            "external_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IDENTITY_LOCKS",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "realm_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "user_key",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "reason",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "source",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "locked_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "realm_id",
+        "user_key"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "IDENTITY_USERS",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "realm_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "user_key",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "external_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "user_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "email",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "display_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "active",
+          "type": "BIT",
+          "family": "boolean"
+        },
+        {
+          "name": "deactivated_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "realm_id",
+        "user_key"
+      ],
+      "indexes": [
+        {
+          "name": "UX_IDENTITY_USERS_EXT",
+          "unique": true,
+          "columns": [
+            "tenant_id",
+            "realm_id",
+            "external_id"
+          ]
+        }
+      ]
+    },
+    {
       "name": "ITSM_OUTBOX",
       "columns": [
         {
@@ -1686,6 +2098,117 @@
           ]
         }
       ]
+    },
+    {
+      "name": "RECERT_CAMPAIGNS",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "campaign_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "recert_class",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "status",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "deadline",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "campaign_id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "RECERT_ITEMS",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "campaign_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "item_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "asset_type",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "asset_key",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "assigned_to",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "reviewer_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "decision",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "decision_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "decision_by",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "comments",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "campaign_id",
+        "item_id"
+      ],
+      "indexes": []
     },
     {
       "name": "ROLE_MEMBERS",

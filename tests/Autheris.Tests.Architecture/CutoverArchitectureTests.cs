@@ -426,6 +426,10 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Caching.TableCache.DuckDbPersistentTableCacheStore", "DuckDB persistent table cache store (BL-04, REQ-DATA-BL04): executes internal staging, swapping, insertion and drop statements on embedded cache database with bound parameters; no client text"),
         ("Autheris.Infrastructure.Caching.TableCache.InMemoryTableCacheStore", "In-memory table cache store (BL-04, REQ-DATA-BL04): executes internal memory-table DDL and mutation statements with bound parameters; no client text"),
         ("Autheris.Api.Hosting.Warmup.DataSourceConnectionWarmup", "Startup pre-warming probe (Issue #254, SEC-PERF254-02): executes read-only constant expression SELECT 1 to verify database connectivity on startup; constants only, no client text"),
+        ("Autheris.Infrastructure.Persistence.GovernanceSchemaValidator", "governance store startup validator (SEC-SC-20): validates presence of Wave 2 tables at startup, fixed information_schema queries, no client text"),
+        ("Autheris.Infrastructure.Persistence.IdentityStore", "governance store: SCIM and local identity provider storage (WP-SC-07, REQ-SCALE-5000-WAVE2), fixed statements with bound parameters, no client text"),
+        ("Autheris.Infrastructure.Persistence.RightsAndPoliciesStore", "governance store: functional rights mappings and scoped access policies (WP-SC-06, WP-SC-14), fixed statements with bound parameters, no client text"),
+        ("Autheris.Infrastructure.Persistence.RecertificationStore", "governance store: recertification campaigns and items (WP-SC-08), fixed statements with bound parameters, no client text"),
     ];
 
     private static bool IsAllowedCommandTextSite(string top) =>

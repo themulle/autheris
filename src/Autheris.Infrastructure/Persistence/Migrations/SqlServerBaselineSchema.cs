@@ -750,6 +750,138 @@ CREATE TABLE dbo.SEMANTIC_MANIFESTS (
     imported_by NVARCHAR(256) NOT NULL,
     imported_at NVARCHAR(64) NOT NULL
 );
+
+IF OBJECT_ID(N'dbo.IDENTITY_USERS', N'U') IS NULL
+CREATE TABLE dbo.IDENTITY_USERS (
+    tenant_id NVARCHAR(64) NOT NULL,
+    realm_id NVARCHAR(64) NOT NULL,
+    user_key NVARCHAR(128) NOT NULL,
+    external_id NVARCHAR(128) NOT NULL,
+    user_name NVARCHAR(256) NOT NULL,
+    email NVARCHAR(256) NULL,
+    display_name NVARCHAR(256) NULL,
+    active BIT NOT NULL DEFAULT 1,
+    deactivated_at NVARCHAR(64) NULL,
+    created_at NVARCHAR(64) NOT NULL,
+    updated_at NVARCHAR(64) NOT NULL,
+    CONSTRAINT PK_IDENTITY_USERS PRIMARY KEY (tenant_id, realm_id, user_key)
+);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_IDENTITY_USERS_EXT' AND object_id = OBJECT_ID(N'dbo.IDENTITY_USERS'))
+    CREATE UNIQUE INDEX UX_IDENTITY_USERS_EXT ON dbo.IDENTITY_USERS (tenant_id, realm_id, external_id);
+
+IF OBJECT_ID(N'dbo.IDENTITY_GROUPS', N'U') IS NULL
+CREATE TABLE dbo.IDENTITY_GROUPS (
+    tenant_id NVARCHAR(64) NOT NULL,
+    realm_id NVARCHAR(64) NOT NULL,
+    group_id NVARCHAR(128) NOT NULL,
+    external_id NVARCHAR(128) NOT NULL,
+    display_name NVARCHAR(256) NOT NULL,
+    created_at NVARCHAR(64) NOT NULL,
+    updated_at NVARCHAR(64) NOT NULL,
+    CONSTRAINT PK_IDENTITY_GROUPS PRIMARY KEY (tenant_id, realm_id, group_id)
+);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_IDENTITY_GROUPS_EXT' AND object_id = OBJECT_ID(N'dbo.IDENTITY_GROUPS'))
+    CREATE UNIQUE INDEX UX_IDENTITY_GROUPS_EXT ON dbo.IDENTITY_GROUPS (tenant_id, realm_id, external_id);
+
+IF OBJECT_ID(N'dbo.IDENTITY_GROUP_MEMBERS', N'U') IS NULL
+CREATE TABLE dbo.IDENTITY_GROUP_MEMBERS (
+    tenant_id NVARCHAR(64) NOT NULL,
+    realm_id NVARCHAR(64) NOT NULL,
+    group_id NVARCHAR(128) NOT NULL,
+    user_key NVARCHAR(128) NOT NULL,
+    created_at NVARCHAR(64) NOT NULL,
+    CONSTRAINT PK_IDENTITY_GROUP_MEMBERS PRIMARY KEY (tenant_id, realm_id, group_id, user_key)
+);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_IDENTITY_GROUP_MEMBERS_USER' AND object_id = OBJECT_ID(N'dbo.IDENTITY_GROUP_MEMBERS'))
+    CREATE INDEX IX_IDENTITY_GROUP_MEMBERS_USER ON dbo.IDENTITY_GROUP_MEMBERS (tenant_id, realm_id, user_key);
+
+IF OBJECT_ID(N'dbo.IDENTITY_LOCKS', N'U') IS NULL
+CREATE TABLE dbo.IDENTITY_LOCKS (
+    tenant_id NVARCHAR(64) NOT NULL,
+    realm_id NVARCHAR(64) NOT NULL,
+    user_key NVARCHAR(128) NOT NULL,
+    reason NVARCHAR(256) NOT NULL,
+    source NVARCHAR(64) NOT NULL,
+    locked_at NVARCHAR(64) NOT NULL,
+    CONSTRAINT PK_IDENTITY_LOCKS PRIMARY KEY (tenant_id, realm_id, user_key)
+);
+
+IF OBJECT_ID(N'dbo.FUNCTIONAL_RIGHT_MAPPINGS', N'U') IS NULL
+CREATE TABLE dbo.FUNCTIONAL_RIGHT_MAPPINGS (
+    tenant_id NVARCHAR(64) NOT NULL,
+    realm_id NVARCHAR(64) NOT NULL,
+    group_or_role NVARCHAR(128) NOT NULL,
+    functional_right NVARCHAR(64) NOT NULL,
+    approved_by NVARCHAR(128) NOT NULL,
+    approved_at NVARCHAR(64) NOT NULL,
+    recert_class NVARCHAR(32) NOT NULL DEFAULT 'Standard',
+    created_by NVARCHAR(128) NOT NULL,
+    created_at NVARCHAR(64) NOT NULL,
+    CONSTRAINT PK_FUNCTIONAL_RIGHT_MAPPINGS PRIMARY KEY (tenant_id, realm_id, group_or_role, functional_right)
+);
+
+IF OBJECT_ID(N'dbo.ACCESS_POLICIES', N'U') IS NULL
+CREATE TABLE dbo.ACCESS_POLICIES (
+    tenant_id NVARCHAR(64) NOT NULL,
+    policy_id NVARCHAR(64) NOT NULL,
+    name NVARCHAR(128) NOT NULL,
+    description NVARCHAR(512) NULL,
+    is_active BIT NOT NULL DEFAULT 1,
+    priority INT NOT NULL DEFAULT 100,
+    decision NVARCHAR(16) NOT NULL DEFAULT 'Permit',
+    created_by NVARCHAR(128) NOT NULL,
+    approved_by NVARCHAR(128) NULL,
+    created_at NVARCHAR(64) NOT NULL,
+    approved_at NVARCHAR(64) NULL,
+    CONSTRAINT PK_ACCESS_POLICIES PRIMARY KEY (tenant_id, policy_id)
+);
+
+IF OBJECT_ID(N'dbo.ACCESS_POLICY_GRANTEES', N'U') IS NULL
+CREATE TABLE dbo.ACCESS_POLICY_GRANTEES (
+    tenant_id NVARCHAR(64) NOT NULL,
+    policy_id NVARCHAR(64) NOT NULL,
+    realm_id NVARCHAR(64) NOT NULL,
+    grantee_type NVARCHAR(32) NOT NULL,
+    grantee_id NVARCHAR(128) NOT NULL,
+    CONSTRAINT PK_ACCESS_POLICY_GRANTEES PRIMARY KEY (tenant_id, policy_id, realm_id, grantee_type, grantee_id)
+);
+
+IF OBJECT_ID(N'dbo.ACCESS_POLICY_SELECTORS', N'U') IS NULL
+CREATE TABLE dbo.ACCESS_POLICY_SELECTORS (
+    tenant_id NVARCHAR(64) NOT NULL,
+    policy_id NVARCHAR(64) NOT NULL,
+    selector_type NVARCHAR(32) NOT NULL,
+    selector_value NVARCHAR(256) NOT NULL,
+    CONSTRAINT PK_ACCESS_POLICY_SELECTORS PRIMARY KEY (tenant_id, policy_id, selector_type, selector_value)
+);
+
+IF OBJECT_ID(N'dbo.RECERT_CAMPAIGNS', N'U') IS NULL
+CREATE TABLE dbo.RECERT_CAMPAIGNS (
+    tenant_id NVARCHAR(64) NOT NULL,
+    campaign_id NVARCHAR(64) NOT NULL,
+    name NVARCHAR(128) NOT NULL,
+    recert_class NVARCHAR(32) NOT NULL,
+    status NVARCHAR(32) NOT NULL,
+    deadline NVARCHAR(64) NOT NULL,
+    created_at NVARCHAR(64) NOT NULL,
+    CONSTRAINT PK_RECERT_CAMPAIGNS PRIMARY KEY (tenant_id, campaign_id)
+);
+
+IF OBJECT_ID(N'dbo.RECERT_ITEMS', N'U') IS NULL
+CREATE TABLE dbo.RECERT_ITEMS (
+    tenant_id NVARCHAR(64) NOT NULL,
+    campaign_id NVARCHAR(64) NOT NULL,
+    item_id NVARCHAR(64) NOT NULL,
+    asset_type NVARCHAR(64) NOT NULL,
+    asset_key NVARCHAR(256) NOT NULL,
+    assigned_to NVARCHAR(128) NOT NULL,
+    reviewer_id NVARCHAR(128) NOT NULL,
+    decision NVARCHAR(32) NOT NULL DEFAULT 'Pending',
+    decision_at NVARCHAR(64) NULL,
+    decision_by NVARCHAR(128) NULL,
+    comments NVARCHAR(512) NULL,
+    CONSTRAINT PK_RECERT_ITEMS PRIMARY KEY (tenant_id, campaign_id, item_id)
+);
 ");
 
             // Append-only audit table (a table owner can still drop the trigger; the runtime login should only

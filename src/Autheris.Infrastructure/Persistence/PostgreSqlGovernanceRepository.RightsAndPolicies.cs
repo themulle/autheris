@@ -1,0 +1,58 @@
+namespace Autheris.Infrastructure.Persistence;
+
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using Autheris.Domain.Common;
+using Autheris.Domain.Governance;
+using Autheris.Domain.Interfaces;
+
+public partial class PostgreSqlGovernanceRepository : IFunctionalRightRepository, IAccessPolicyRepository
+{
+    private RightsAndPoliciesStore? _rightsAndPoliciesStore;
+
+    private RightsAndPoliciesStore RightsAndPoliciesInstance => _rightsAndPoliciesStore ??= new RightsAndPoliciesStore(RightsAndPoliciesDialect.PostgreSql, async (_, ct) =>
+    {
+        var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        return new RightsAndPoliciesScope(connection, connection.DisposeAsync);
+    });
+
+    // ---------------------------------------------------- FUNCTIONAL RIGHTS
+    public Task<IReadOnlyList<FunctionalRightMapping>> GetMappingsAsync(TenantId tenantId, string realmId, CancellationToken ct = default) =>
+        RightsAndPoliciesInstance.GetMappingsAsync(tenantId, realmId, ct);
+
+    public Task<IReadOnlyList<FunctionalRightMapping>> GetApprovedMappingsForGroupsAndRolesAsync(TenantId tenantId, string realmId, IReadOnlyCollection<string> groupsAndRoles, CancellationToken ct = default) =>
+        RightsAndPoliciesInstance.GetApprovedMappingsForGroupsAndRolesAsync(tenantId, realmId, groupsAndRoles, ct);
+
+    public Task<FunctionalRightMapping?> GetMappingAsync(TenantId tenantId, string realmId, string groupOrRole, FunctionalRight functionalRight, CancellationToken ct = default) =>
+        RightsAndPoliciesInstance.GetMappingAsync(tenantId, realmId, groupOrRole, functionalRight, ct);
+
+    public Task CreateMappingAsync(FunctionalRightMapping mapping, CancellationToken ct = default) =>
+        RightsAndPoliciesInstance.CreateMappingAsync(mapping, ct);
+
+    public Task ApproveMappingAsync(TenantId tenantId, string realmId, string groupOrRole, FunctionalRight functionalRight, string approvedBy, CancellationToken ct = default) =>
+        RightsAndPoliciesInstance.ApproveMappingAsync(tenantId, realmId, groupOrRole, functionalRight, approvedBy, ct);
+
+    public Task DeleteMappingAsync(TenantId tenantId, string realmId, string groupOrRole, FunctionalRight functionalRight, CancellationToken ct = default) =>
+        RightsAndPoliciesInstance.DeleteMappingAsync(tenantId, realmId, groupOrRole, functionalRight, ct);
+
+    // ---------------------------------------------------- ACCESS POLICIES
+    public Task<IReadOnlyList<AccessPolicy>> GetPoliciesAsync(TenantId tenantId, CancellationToken ct = default) =>
+        RightsAndPoliciesInstance.GetPoliciesAsync(tenantId, ct);
+
+    public Task<AccessPolicy?> GetPolicyByIdAsync(TenantId tenantId, string policyId, CancellationToken ct = default) =>
+        RightsAndPoliciesInstance.GetPolicyByIdAsync(tenantId, policyId, ct);
+
+    public Task CreatePolicyAsync(AccessPolicy policy, CancellationToken ct = default) =>
+        RightsAndPoliciesInstance.CreatePolicyAsync(policy, ct);
+
+    public Task UpdatePolicyAsync(AccessPolicy policy, CancellationToken ct = default) =>
+        RightsAndPoliciesInstance.UpdatePolicyAsync(policy, ct);
+
+    public Task DeletePolicyAsync(TenantId tenantId, string policyId, CancellationToken ct = default) =>
+        RightsAndPoliciesInstance.DeletePolicyAsync(tenantId, policyId, ct);
+
+    public Task<IReadOnlyList<AccessPolicy>> GetActivePoliciesForGranteesAsync(TenantId tenantId, string realmId, IReadOnlyCollection<string> groupIds, IReadOnlyCollection<string> roles, CancellationToken ct = default) =>
+        RightsAndPoliciesInstance.GetActivePoliciesForGranteesAsync(tenantId, realmId, groupIds, roles, ct);
+}

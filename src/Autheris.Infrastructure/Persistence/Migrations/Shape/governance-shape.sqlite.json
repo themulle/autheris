@@ -2,6 +2,141 @@
   "engine": "sqlite",
   "tables": [
     {
+      "name": "ACCESS_POLICIES",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "policy_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "is_active",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "priority",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "decision",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_by",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "approved_by",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "approved_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "policy_id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "ACCESS_POLICY_GRANTEES",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "policy_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "realm_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "grantee_type",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "grantee_id",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "policy_id",
+        "realm_id",
+        "grantee_type",
+        "grantee_id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "ACCESS_POLICY_SELECTORS",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "policy_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "selector_type",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "selector_value",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "policy_id",
+        "selector_type",
+        "selector_value"
+      ],
+      "indexes": []
+    },
+    {
       "name": "ACCESS_PROFILES",
       "columns": [
         {
@@ -1197,6 +1332,283 @@
       "indexes": []
     },
     {
+      "name": "FUNCTIONAL_RIGHT_MAPPINGS",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "realm_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "group_or_role",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "functional_right",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "approved_by",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "approved_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "recert_class",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_by",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "realm_id",
+        "group_or_role",
+        "functional_right"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "IDENTITY_GROUPS",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "realm_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "group_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "external_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "display_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "realm_id",
+        "group_id"
+      ],
+      "indexes": [
+        {
+          "name": "UX_IDENTITY_GROUPS_EXT",
+          "unique": true,
+          "columns": [
+            "tenant_id",
+            "realm_id",
+            "external_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IDENTITY_GROUP_MEMBERS",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "realm_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "group_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "user_key",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "realm_id",
+        "group_id",
+        "user_key"
+      ],
+      "indexes": [
+        {
+          "name": "IX_IDENTITY_GROUP_MEMBERS_USER",
+          "unique": false,
+          "columns": [
+            "tenant_id",
+            "realm_id",
+            "user_key"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IDENTITY_LOCKS",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "realm_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "user_key",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "reason",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "locked_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "realm_id",
+        "user_key"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "IDENTITY_USERS",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "realm_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "user_key",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "external_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "user_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "email",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "display_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "active",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "deactivated_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "realm_id",
+        "user_key"
+      ],
+      "indexes": [
+        {
+          "name": "UX_IDENTITY_USERS_EXT",
+          "unique": true,
+          "columns": [
+            "tenant_id",
+            "realm_id",
+            "external_id"
+          ]
+        }
+      ]
+    },
+    {
       "name": "ITSM_OUTBOX",
       "columns": [
         {
@@ -1322,6 +1734,117 @@
           ]
         }
       ]
+    },
+    {
+      "name": "RECERT_CAMPAIGNS",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "campaign_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "recert_class",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "deadline",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "campaign_id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "RECERT_ITEMS",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "campaign_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "item_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "asset_type",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "asset_key",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "assigned_to",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "reviewer_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "decision",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "decision_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "decision_by",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "comments",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "campaign_id",
+        "item_id"
+      ],
+      "indexes": []
     },
     {
       "name": "ROLES",

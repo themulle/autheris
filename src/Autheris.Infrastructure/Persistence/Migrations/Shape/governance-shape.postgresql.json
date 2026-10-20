@@ -2,6 +2,141 @@
   "engine": "postgresql",
   "tables": [
     {
+      "name": "access_policies",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "policy_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "name",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "description",
+          "type": "CHARACTER VARYING(512)",
+          "family": "string"
+        },
+        {
+          "name": "is_active",
+          "type": "BOOLEAN",
+          "family": "boolean"
+        },
+        {
+          "name": "priority",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "decision",
+          "type": "CHARACTER VARYING(16)",
+          "family": "string"
+        },
+        {
+          "name": "created_by",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "approved_by",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "family": "datetime"
+        },
+        {
+          "name": "approved_at",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "family": "datetime"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "policy_id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "access_policy_grantees",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "policy_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "realm_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "grantee_type",
+          "type": "CHARACTER VARYING(32)",
+          "family": "string"
+        },
+        {
+          "name": "grantee_id",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "policy_id",
+        "realm_id",
+        "grantee_type",
+        "grantee_id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "access_policy_selectors",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "policy_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "selector_type",
+          "type": "CHARACTER VARYING(32)",
+          "family": "string"
+        },
+        {
+          "name": "selector_value",
+          "type": "CHARACTER VARYING(256)",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "policy_id",
+        "selector_type",
+        "selector_value"
+      ],
+      "indexes": []
+    },
+    {
       "name": "access_profile_assignments",
       "columns": [
         {
@@ -1542,6 +1677,283 @@
       ]
     },
     {
+      "name": "functional_right_mappings",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "realm_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "group_or_role",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "functional_right",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "approved_by",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "approved_at",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "family": "datetime"
+        },
+        {
+          "name": "recert_class",
+          "type": "CHARACTER VARYING(32)",
+          "family": "string"
+        },
+        {
+          "name": "created_by",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "family": "datetime"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "realm_id",
+        "group_or_role",
+        "functional_right"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "identity_group_members",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "realm_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "group_id",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "user_key",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "family": "datetime"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "realm_id",
+        "group_id",
+        "user_key"
+      ],
+      "indexes": [
+        {
+          "name": "ix_identity_group_members_user",
+          "unique": false,
+          "columns": [
+            "tenant_id",
+            "realm_id",
+            "user_key"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "identity_groups",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "realm_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "group_id",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "external_id",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "display_name",
+          "type": "CHARACTER VARYING(256)",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "family": "datetime"
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "family": "datetime"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "realm_id",
+        "group_id"
+      ],
+      "indexes": [
+        {
+          "name": "ux_identity_groups_ext",
+          "unique": true,
+          "columns": [
+            "tenant_id",
+            "realm_id",
+            "external_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "identity_locks",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "realm_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "user_key",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "reason",
+          "type": "CHARACTER VARYING(256)",
+          "family": "string"
+        },
+        {
+          "name": "source",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "locked_at",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "family": "datetime"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "realm_id",
+        "user_key"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "identity_users",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "realm_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "user_key",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "external_id",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "user_name",
+          "type": "CHARACTER VARYING(256)",
+          "family": "string"
+        },
+        {
+          "name": "email",
+          "type": "CHARACTER VARYING(256)",
+          "family": "string"
+        },
+        {
+          "name": "display_name",
+          "type": "CHARACTER VARYING(256)",
+          "family": "string"
+        },
+        {
+          "name": "active",
+          "type": "BOOLEAN",
+          "family": "boolean"
+        },
+        {
+          "name": "deactivated_at",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "family": "datetime"
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "family": "datetime"
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "family": "datetime"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "realm_id",
+        "user_key"
+      ],
+      "indexes": [
+        {
+          "name": "ux_identity_users_ext",
+          "unique": true,
+          "columns": [
+            "tenant_id",
+            "realm_id",
+            "external_id"
+          ]
+        }
+      ]
+    },
+    {
       "name": "itsm_outbox",
       "columns": [
         {
@@ -1667,6 +2079,117 @@
           ]
         }
       ]
+    },
+    {
+      "name": "recert_campaigns",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "campaign_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "name",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "recert_class",
+          "type": "CHARACTER VARYING(32)",
+          "family": "string"
+        },
+        {
+          "name": "status",
+          "type": "CHARACTER VARYING(32)",
+          "family": "string"
+        },
+        {
+          "name": "deadline",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "family": "datetime"
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "family": "datetime"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "campaign_id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "recert_items",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "campaign_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "item_id",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "asset_type",
+          "type": "CHARACTER VARYING(64)",
+          "family": "string"
+        },
+        {
+          "name": "asset_key",
+          "type": "CHARACTER VARYING(256)",
+          "family": "string"
+        },
+        {
+          "name": "assigned_to",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "reviewer_id",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "decision",
+          "type": "CHARACTER VARYING(32)",
+          "family": "string"
+        },
+        {
+          "name": "decision_at",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "family": "datetime"
+        },
+        {
+          "name": "decision_by",
+          "type": "CHARACTER VARYING(128)",
+          "family": "string"
+        },
+        {
+          "name": "comments",
+          "type": "CHARACTER VARYING(512)",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "campaign_id",
+        "item_id"
+      ],
+      "indexes": []
     },
     {
       "name": "role_members",

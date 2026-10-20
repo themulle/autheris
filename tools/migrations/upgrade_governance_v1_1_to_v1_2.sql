@@ -264,6 +264,126 @@ CREATE TABLE IF NOT EXISTS autheris_cdc_stream_keys (
 );
 CREATE INDEX IF NOT EXISTS ix_cdc_stream_keys_kek ON autheris_cdc_stream_keys (kek_id);
 
+-- Wave 2: Identity Tables & Deprovisioning Locks
+CREATE TABLE IF NOT EXISTS IDENTITY_USERS (
+    tenant_id TEXT NOT NULL,
+    realm_id TEXT NOT NULL,
+    user_key TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    user_name TEXT NOT NULL,
+    email TEXT,
+    display_name TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    deactivated_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, realm_id, user_key)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS UX_IDENTITY_USERS_EXT ON IDENTITY_USERS (tenant_id, realm_id, external_id);
+
+CREATE TABLE IF NOT EXISTS IDENTITY_GROUPS (
+    tenant_id TEXT NOT NULL,
+    realm_id TEXT NOT NULL,
+    group_id TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, realm_id, group_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS UX_IDENTITY_GROUPS_EXT ON IDENTITY_GROUPS (tenant_id, realm_id, external_id);
+
+CREATE TABLE IF NOT EXISTS IDENTITY_GROUP_MEMBERS (
+    tenant_id TEXT NOT NULL,
+    realm_id TEXT NOT NULL,
+    group_id TEXT NOT NULL,
+    user_key TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, realm_id, group_id, user_key)
+);
+CREATE INDEX IF NOT EXISTS IX_IDENTITY_GROUP_MEMBERS_USER ON IDENTITY_GROUP_MEMBERS (tenant_id, realm_id, user_key);
+
+CREATE TABLE IF NOT EXISTS IDENTITY_LOCKS (
+    tenant_id TEXT NOT NULL,
+    realm_id TEXT NOT NULL,
+    user_key TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    source TEXT NOT NULL,
+    locked_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, realm_id, user_key)
+);
+
+CREATE TABLE IF NOT EXISTS FUNCTIONAL_RIGHT_MAPPINGS (
+    tenant_id TEXT NOT NULL,
+    realm_id TEXT NOT NULL,
+    group_or_role TEXT NOT NULL,
+    functional_right TEXT NOT NULL,
+    approved_by TEXT NOT NULL,
+    approved_at TEXT NOT NULL,
+    recert_class TEXT NOT NULL DEFAULT 'Standard',
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, realm_id, group_or_role, functional_right)
+);
+
+CREATE TABLE IF NOT EXISTS ACCESS_POLICIES (
+    tenant_id TEXT NOT NULL,
+    policy_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    priority INTEGER NOT NULL DEFAULT 100,
+    decision TEXT NOT NULL DEFAULT 'Permit',
+    created_by TEXT NOT NULL,
+    approved_by TEXT,
+    created_at TEXT NOT NULL,
+    approved_at TEXT,
+    PRIMARY KEY (tenant_id, policy_id)
+);
+
+CREATE TABLE IF NOT EXISTS ACCESS_POLICY_GRANTEES (
+    tenant_id TEXT NOT NULL,
+    policy_id TEXT NOT NULL,
+    realm_id TEXT NOT NULL,
+    grantee_type TEXT NOT NULL,
+    grantee_id TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, policy_id, realm_id, grantee_type, grantee_id)
+);
+
+CREATE TABLE IF NOT EXISTS ACCESS_POLICY_SELECTORS (
+    tenant_id TEXT NOT NULL,
+    policy_id TEXT NOT NULL,
+    selector_type TEXT NOT NULL,
+    selector_value TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, policy_id, selector_type, selector_value)
+);
+
+CREATE TABLE IF NOT EXISTS RECERT_CAMPAIGNS (
+    tenant_id TEXT NOT NULL,
+    campaign_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    recert_class TEXT NOT NULL,
+    status TEXT NOT NULL,
+    deadline TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, campaign_id)
+);
+
+CREATE TABLE IF NOT EXISTS RECERT_ITEMS (
+    tenant_id TEXT NOT NULL,
+    campaign_id TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    asset_type TEXT NOT NULL,
+    asset_key TEXT NOT NULL,
+    assigned_to TEXT NOT NULL,
+    reviewer_id TEXT NOT NULL,
+    decision TEXT NOT NULL DEFAULT 'Pending',
+    decision_at TEXT,
+    decision_by TEXT,
+    comments TEXT,
+    PRIMARY KEY (tenant_id, campaign_id, item_id)
+);
+
 -- 2. Add missing columns on existing tables
 ALTER TABLE TABLES ADD COLUMN required_filter_columns_json TEXT;
 ALTER TABLE TABLES ADD COLUMN texts_json TEXT;

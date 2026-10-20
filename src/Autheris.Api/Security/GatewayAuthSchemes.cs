@@ -6,9 +6,13 @@ public static class GatewayAuthSchemes
     public const string Basic = "Basic";
     public const string ForwardAuth = "ForwardAuth";
     public const string JwtBearer = "Bearer";
+    public const string RejectScheme = "RejectScheme";
+    public const string Scim = "Scim";
 
     /// <summary>API-14: separate scheme for AD FS when Entra ID is enabled as well.</summary>
     public const string JwtBearerAdfs = "BearerAdfs";
+
+    public static string RealmJwt(string realmId) => $"BearerRealm_{realmId}";
 
     /// <summary>
     /// API-14: chooses the JWT scheme for a bearer token. Only routing: the issuer is read without validation, the selected

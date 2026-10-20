@@ -317,6 +317,19 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IDataContractEngine, InMemoryDataContractEngine>();
         services.AddScoped<IDataHubCatalogClient, DataHubCatalogClient>();
 
+        // Wave 2: Identity & Access Governance
+        services.AddSingleton<Autheris.Application.Identity.IIdentityRealmRegistry, Autheris.Application.Identity.IdentityRealmRegistry>();
+        services.AddSingleton<Autheris.Application.Identity.Caching.IRoleResolverCache, Autheris.Application.Identity.Caching.RoleResolverCache>();
+        services.AddSingleton<Autheris.Application.Identity.IRoleResolver, Autheris.Application.Identity.RoleResolver>();
+        services.AddSingleton<Autheris.Application.Identity.Services.IRedisLockPubSubChannel, Autheris.Infrastructure.Identity.Locks.RedisLockPubSubChannel>();
+        services.AddSingleton<Autheris.Application.Identity.Services.IIdentityDeprovisioningService, Autheris.Application.Identity.Services.IdentityDeprovisioningService>();
+        services.AddSingleton<Autheris.Application.Identity.Services.IScimService, Autheris.Application.Identity.Services.ScimService>();
+        services.AddSingleton<Autheris.Application.Governance.Rights.IFunctionalRightMapper, Autheris.Application.Governance.Rights.FunctionalRightMapper>();
+        services.AddSingleton<Autheris.Application.Governance.Policies.IPolicyEpochService, Autheris.Application.Governance.Policies.PolicyEpochService>();
+        services.AddSingleton<Autheris.Application.Governance.Policies.IScopedAccessPolicyEngine, Autheris.Application.Governance.Policies.ScopedAccessPolicyEngine>();
+        services.AddSingleton<Autheris.Application.Governance.Recertification.IRecertificationService, Autheris.Application.Governance.Recertification.RecertificationService>();
+        services.AddHostedService<Autheris.Application.Governance.Recertification.RecertificationGovernorHostedService>();
+
         return services;
     }
 
@@ -343,7 +356,11 @@ public static class GatewayGovernanceServiceExtensions
             Autheris.Application.Dbt.Interfaces.ISemanticManifestStore,
             ICloudEventSubscriptionStore,
             Autheris.Application.Streaming.Interfaces.ICdcStreamStore,
-            Autheris.Application.Streaming.Interfaces.ICdcStreamKeyStore
+            Autheris.Application.Streaming.Interfaces.ICdcStreamKeyStore,
+            IIdentityStoreRepository,
+            IFunctionalRightRepository,
+            IAccessPolicyRepository,
+            IRecertificationRepository
         where TMigrationRunner : class, IGovernanceMigrationRunner
     {
         services.AddSingleton<TRepository>();
@@ -371,6 +388,10 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<ICallerAttributeRepository>(sp => sp.GetRequiredService<TRepository>());
         // WP-SC-03: every engine persists access profiles; the in-memory repository is a test double only.
         services.AddSingleton<IAccessProfileRepository>(sp => (IAccessProfileRepository)sp.GetRequiredService<TRepository>());
+        services.AddSingleton<IIdentityStoreRepository>(sp => (IIdentityStoreRepository)sp.GetRequiredService<TRepository>());
+        services.AddSingleton<IFunctionalRightRepository>(sp => (IFunctionalRightRepository)sp.GetRequiredService<TRepository>());
+        services.AddSingleton<IAccessPolicyRepository>(sp => (IAccessPolicyRepository)sp.GetRequiredService<TRepository>());
+        services.AddSingleton<IRecertificationRepository>(sp => (IRecertificationRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsumerAggregationRepository>(sp => sp.GetRequiredService<TRepository>());
