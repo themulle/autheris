@@ -76,6 +76,9 @@ public static class GatewayStartupWarmupServiceExtensions
         var state = new StartupWarmupState(enabled ? WarmupPhase.Pending : WarmupPhase.Ready);
         services.AddSingleton(state);
         services.AddSingleton<IStartupWarmupState>(state);
+        services.AddSingleton<IStartupWarmup, DataSourceConnectionWarmup>();
+        services.AddSingleton<IStartupWarmup, DiscoveryDocumentWarmup>();
+
         if (enabled)
         {
             services.AddHostedService<StartupWarmupService>();

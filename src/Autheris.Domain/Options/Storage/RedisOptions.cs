@@ -19,6 +19,14 @@ public sealed class GarnetOptions
     public bool EnableEmbeddedServer { get; init; } = false;
 
     /// <summary>
+    /// Explicit memory limit in megabytes for the embedded Garnet cache (--memory).
+    /// If null, derives automatically from container cgroups (25% of cgroup limit, clamped 64MB-4096MB)
+    /// or defaults to 512MB outside containers.
+    /// </summary>
+    [Range(64, 65536)]
+    public int? MemorySizeMb { get; init; }
+
+    /// <summary>
     /// Bind address for the embedded Garnet server (default: 127.0.0.1).
     /// </summary>
     public string Host { get; init; } = "127.0.0.1";

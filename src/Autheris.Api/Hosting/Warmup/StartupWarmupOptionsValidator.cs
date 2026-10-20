@@ -20,10 +20,12 @@ public sealed class StartupWarmupOptionsValidator : IValidateOptions<StartupWarm
 
         foreach (var step in options.Steps.Keys)
         {
-            if (!string.Equals(step, StartupWarmupOptions.McpSerializationStep, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(step, StartupWarmupOptions.McpSerializationStep, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(step, StartupWarmupOptions.DataSourceConnectionStep, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(step, StartupWarmupOptions.DiscoveryDocumentStep, StringComparison.OrdinalIgnoreCase))
             {
                 // The step name is not echoed: it is operator input and must not reach logs verbatim.
-                failures.Add($"{StartupWarmupOptions.SectionName}:Steps contains an unknown or non-configurable step name; allowed: {StartupWarmupOptions.McpSerializationStep}.");
+                failures.Add($"{StartupWarmupOptions.SectionName}:Steps contains an unknown or non-configurable step name; allowed: {StartupWarmupOptions.McpSerializationStep}, {StartupWarmupOptions.DataSourceConnectionStep}, {StartupWarmupOptions.DiscoveryDocumentStep}.");
             }
         }
 

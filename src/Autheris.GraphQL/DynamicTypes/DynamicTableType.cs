@@ -1,4 +1,5 @@
 using Autheris.Application.Interfaces;
+using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using HotChocolate.Types;
@@ -24,7 +25,17 @@ public sealed class DynamicTableType : ObjectType
         foreach (var col in _metadata.Columns)
         {
             var fieldDesc = descriptor.Field(col.ColumnName);
-            ConfigureType(fieldDesc, col.DataType, _metadata.Dialect);
+            var isHmac = _metadata.ColumnMaskingRules != null &&
+                         _metadata.ColumnMaskingRules.TryGetValue(col.ColumnName, out var maskRule) &&
+                         maskRule.IsHmac;
+            if (isHmac)
+            {
+                fieldDesc.Type<StringType>();
+            }
+            else
+            {
+                ConfigureType(fieldDesc, col.DataType, _metadata.Dialect);
+            }
 
             var colDesc = FormatColumnMarkdownDescription(col);
             if (!string.IsNullOrWhiteSpace(colDesc))
@@ -69,10 +80,46 @@ public sealed class DynamicTableType : ObjectType
                         sbag.Add(ctx.Path.Print());
                     }
 
-                    var rule = _metadata.ColumnMaskingRules.TryGetValue(col.ColumnName, out var r)
+                    var rule = _metadata.ColumnMaskingRules != null && _metadata.ColumnMaskingRules.TryGetValue(col.ColumnName, out var r)
                         ? r
                         : new MaskingRule { RuleType = "REDACT" };
-                    var masked = _maskingProvider.MaskValue(col.ColumnName, val, rule);
+
+                    if (rule.IsHmac)
+                    {
+                        var httpContext = ctx.Service<Microsoft.AspNetCore.Http.IHttpContextAccessor>()?.HttpContext;
+                        var principal = (ctx.ContextData.TryGetValue(nameof(System.Security.Claims.ClaimsPrincipal), out var cp) && cp is System.Security.Claims.ClaimsPrincipal p)
+                            ? p
+                            : (ctx.ScopedContextData.TryGetValue(nameof(System.Security.Claims.ClaimsPrincipal), out var scp) && scp is System.Security.Claims.ClaimsPrincipal sp)
+                                ? sp
+                                : httpContext?.User ?? new System.Security.Claims.ClaimsPrincipal();
+                        var tenant = principal.GetTenantId().Value;
+                        string? defaultKeyId = null;
+                        try
+                        {
+                            var options = ctx.Service<Microsoft.Extensions.Options.IOptions<GatewayOptions>>();
+                            defaultKeyId = options?.Value?.DataMasking?.HmacKeyId;
+                        }
+                        catch
+                        {
+                            // ignore
+                        }
+                        if (!string.IsNullOrWhiteSpace(tenant))
+                        {
+                            rule = MaskingRule.CreateTenantScopedHmacRule(rule, tenant, defaultKeyId);
+                        }
+                    }
+
+                    object? masked;
+                    try
+                    {
+                        masked = _maskingProvider.MaskValue(col.ColumnName, val, rule);
+                    }
+                    catch
+                    {
+                        // Fail-closed
+                        return null;
+                    }
+
                     if (masked is string s && s == "REDACTED" && !IsStringType(col.DataType))
                     {
                         return null;

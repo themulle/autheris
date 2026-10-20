@@ -11,6 +11,7 @@ using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Caching.Memory;
 
 public static class BackstageEndpoints
 {
@@ -83,6 +84,8 @@ public static class BackstageEndpoints
 
         app.MapGet("/api/integrations/backstage/catalog-info.yaml", async (
             IBackstageCatalogExportService backstageService,
+            Autheris.Application.Catalog.ICatalogVersionProvider versionProvider,
+            Microsoft.Extensions.Caching.Memory.IMemoryCache memoryCache,
             HttpContext context,
             CancellationToken ct) =>
         {
@@ -91,7 +94,34 @@ public static class BackstageEndpoints
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
-            var yaml = await backstageService.ExportCatalogEntitiesYamlAsync(cancellationToken: ct);
+            var version = await versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
+            var etagValue = $"\"{version.StructureVersion}-{version.ContentVersion}\"";
+            context.Response.Headers.ETag = etagValue;
+
+            var ifNoneMatch = context.Request.Headers.IfNoneMatch.ToString().Trim();
+            if (!string.IsNullOrEmpty(ifNoneMatch))
+            {
+                var candidates = ifNoneMatch.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                foreach (var candidate in candidates)
+                {
+                    if (candidate == "*" || candidate == etagValue || candidate == $"W/{etagValue}" || candidate == etagValue.Trim('"'))
+                    {
+                        return Results.StatusCode(StatusCodes.Status304NotModified);
+                    }
+                }
+            }
+
+            var cacheKey = $"backstage:yaml:{etagValue}";
+            if (!memoryCache.TryGetValue(cacheKey, out var raw) || raw is not string yaml || string.IsNullOrEmpty(yaml))
+            {
+                yaml = await backstageService.ExportCatalogEntitiesYamlAsync(cancellationToken: ct).ConfigureAwait(false);
+                memoryCache.Set(cacheKey, yaml, new Microsoft.Extensions.Caching.Memory.MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1),
+                    Size = Math.Max(256, yaml.Length * 2L)
+                });
+            }
+
             return Results.Content(yaml, "text/yaml; charset=utf-8", Encoding.UTF8);
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 

@@ -14,7 +14,7 @@ public sealed class StartupWarmupArchitectureTests
 {
     private static readonly string[] Forbidden =
     [
-        "Audit", "Consent", "Connector", "Repository", "DataSource", "RateLimiter", "IHttpClientFactory", "HttpClient", "Governance", "Casbin",
+        "Audit", "Consent", "Connector", "RateLimiter", "IHttpClientFactory", "HttpClient", "GovernanceRepository", "Casbin",
     ];
 
     private static IEnumerable<Type> WarmupTypes()

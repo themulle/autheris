@@ -24,7 +24,8 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
     private readonly IConnectionMultiplexer? _multiplexer;
     private readonly IDatabase? _redisDb;
     private readonly string _prefix;
-    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _tableCacheKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, long>> _tableCacheKeys = new(StringComparer.OrdinalIgnoreCase);
+    private static long _keySequence;
     private readonly IDisposable? _subscription;
 
     private readonly object _syncLock = new();
@@ -426,7 +427,9 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
         var cacheEntryOptions = new MemoryCacheEntryOptions
         {
             AbsoluteExpirationRelativeToNow = ttl,
-            Size = Math.Max(256, estimatedBytes)
+            SlidingExpiration = TimeSpan.FromMinutes(15),
+            Size = Math.Max(256, estimatedBytes),
+            Priority = CacheItemPriority.Low
         };
 
         cacheEntryOptions.RegisterPostEvictionCallback((evictedKey, _, _, _) =>
@@ -444,8 +447,20 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
             }
         });
 
-        var keys = _tableCacheKeys.GetOrAdd(tableKey, _ => new ConcurrentDictionary<string, byte>(StringComparer.Ordinal));
-        keys.TryAdd(cacheKey, 0);
+        const int maxTrackedKeysPerTable = 5000;
+        var keys = _tableCacheKeys.GetOrAdd(tableKey, _ => new ConcurrentDictionary<string, long>(StringComparer.Ordinal));
+        if (keys.Count >= maxTrackedKeysPerTable)
+        {
+            // Evict oldest 20% tracked keys from L1 to prevent memory exhaustion (FIFO/LRU)
+            var keysToRemove = keys.OrderBy(kv => kv.Value).Take(maxTrackedKeysPerTable / 5).Select(kv => kv.Key).ToList();
+            foreach (var k in keysToRemove)
+            {
+                keys.TryRemove(k, out _);
+                _memoryCache.Remove(k);
+            }
+        }
+
+        keys[cacheKey] = Interlocked.Increment(ref _keySequence);
         _memoryCache.Set(cacheKey, envelope, cacheEntryOptions);
     }
 

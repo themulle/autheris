@@ -13,6 +13,7 @@ using Autheris.Application.OData.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
@@ -23,15 +24,21 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
     private readonly ITableMetadataRepository _metadataRepo;
     private readonly ILogger<DynamicOpenApiGenerator> _logger;
     private readonly OpenApiDocumentOptions _options;
+    private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
+    private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _versionProvider;
 
     public DynamicOpenApiGenerator(
         ITableMetadataRepository metadataRepo,
         ILogger<DynamicOpenApiGenerator> logger,
-        OpenApiDocumentOptions? options = null)
+        OpenApiDocumentOptions? options = null,
+        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
+        Autheris.Application.Catalog.ICatalogVersionProvider? versionProvider = null)
     {
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options ?? new OpenApiDocumentOptions();
+        _memoryCache = memoryCache;
+        _versionProvider = versionProvider;
     }
 
     public async Task<string> GenerateOpenApiJsonAsync(string? domainScope = null, bool modular = false, CancellationToken ct = default)
@@ -70,6 +77,16 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
     public async Task<OpenApiIndexDocument> GetIndexDocumentAsync(string? baseUrl = null, CancellationToken ct = default)
     {
         var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var structureVersion = _versionProvider != null ? (await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false)).StructureVersion : 1;
+        var visibilityHash = Autheris.Application.Catalog.Search.CatalogVisibleBitSet.ComputeSha256(allTables.Select(t => t.Identifier));
+        var tenantId = "default";
+        var cacheKey = $"openapi:index:{tenantId}:s{structureVersion}:{visibilityHash}:{baseUrl ?? ""}";
+
+        if (_memoryCache != null && _memoryCache.TryGetValue(cacheKey, out OpenApiIndexDocument? cached) && cached != null)
+        {
+            return cached;
+        }
+
         var serverPrefix = _options.ServerUrl.Trim('/');
         var root = string.IsNullOrWhiteSpace(baseUrl)
             ? (string.IsNullOrEmpty(serverPrefix) ? "" : "/" + serverPrefix)
@@ -121,12 +138,23 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
             ));
         }
 
-        return new OpenApiIndexDocument(
+        var doc = new OpenApiIndexDocument(
             TotalDomains: domainGroups.Count,
             TotalTables: allTables.Count,
             Domains: summaries,
             Apis: apis
         );
+
+        if (_memoryCache != null)
+        {
+            _memoryCache.Set(cacheKey, doc, new Microsoft.Extensions.Caching.Memory.MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1),
+                Size = 1024L + domainGroups.Count * 256L
+            });
+        }
+
+        return doc;
     }
 
     private async Task<JsonObject> BuildOpenApiNodeAsync(string? domainScope, bool modular, CancellationToken ct)

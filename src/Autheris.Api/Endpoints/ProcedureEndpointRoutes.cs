@@ -388,7 +388,7 @@ public static class ProcedureEndpointRoutes
         {
             http.Response.Headers.RetryAfter = ex.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
             http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-            await http.Response.WriteAsJsonAsync(new { error = "Too many concurrent requests. Retry later.", code = "TOO_MANY_REQUESTS" }, ct).ConfigureAwait(false);
+            await http.Response.WriteAsJsonAsync(new { error = "Too many concurrent requests. Retry later.", code = "TOO_MANY_REQUESTS", retryAfterSeconds = ex.RetryAfterSeconds, traceId = http.TraceIdentifier }, ct).ConfigureAwait(false);
         }
         catch (ArgumentException ex)
         {
