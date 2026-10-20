@@ -1163,7 +1163,7 @@ public partial class SqlServerGovernanceRepository
                             WHERE id = 1;";
         cmd.Parameters.AddWithValue("@structureDelta", structureDelta);
         cmd.Parameters.AddWithValue("@contentDelta", contentDelta);
-        cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
+        cmd.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("now", System.Data.SqlDbType.DateTimeOffset) { Value = DateTimeOffset.UtcNow });
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         if (await reader.ReadAsync(ct).ConfigureAwait(false))

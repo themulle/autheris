@@ -269,7 +269,7 @@ internal static class PostgreSqlBaselineSchema
             );
 
             INSERT INTO CATALOG_STATE (id, structure_version, content_version, updated_at)
-            VALUES (1, 1, 1, '1970-01-01T00:00:00Z')
+            VALUES (1, 1, 1, '1970-01-01T00:00:00Z'::timestamptz)
             ON CONFLICT (id) DO NOTHING;
 
             CREATE TABLE IF NOT EXISTS TABLE_RELATIONS (

@@ -1135,12 +1135,12 @@ public partial class PostgreSqlGovernanceRepository
         cmd.CommandText = @"UPDATE catalog_state
                             SET structure_version = structure_version + @structureDelta,
                                 content_version = content_version + @contentDelta,
-                                updated_at = @now
+                                updated_at = @now::timestamptz
                             WHERE id = 1
                             RETURNING structure_version, content_version;";
         cmd.Parameters.AddWithValue("@structureDelta", structureDelta);
         cmd.Parameters.AddWithValue("@contentDelta", contentDelta);
-        cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
+        cmd.Parameters.Add(new NpgsqlParameter("now", NpgsqlTypes.NpgsqlDbType.TimestampTz) { Value = DateTimeOffset.UtcNow });
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         if (await reader.ReadAsync(ct).ConfigureAwait(false))
