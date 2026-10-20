@@ -615,23 +615,40 @@ public static class TableStreamEndpoints
                 }
             }
         }
+        catch (GatewayThrottledException ex) when (!httpContext.Response.HasStarted)
+        {
+            httpContext.Response.Clear();
+            httpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            httpContext.Response.Headers.RetryAfter = ex.RetryAfterSeconds.ToString(CultureInfo.InvariantCulture);
+            await httpContext.Response.WriteAsJsonAsync(new
+            {
+                error = "Too many concurrent requests. Retry later.",
+                code = "TOO_MANY_REQUESTS",
+                retryAfterSeconds = ex.RetryAfterSeconds,
+                traceId = httpContext.TraceIdentifier
+            }, ct).ConfigureAwait(false);
+            return;
+        }
         finally
         {
-            // 9. Post-Stream Settlement & Response Metadata
-            usageRecorder?.RecordUsage(tableId, tenant, userSid, ConsumerOutcome.Allow, rowsEmitted, rowsMeasured: true);
-            SetResponseMetadata(httpContext.Response, "X-Rows-Streamed", rowsEmitted.ToString(CultureInfo.InvariantCulture));
-            if (!string.IsNullOrEmpty(nextCursor))
+            if (httpContext.Response.StatusCode != StatusCodes.Status429TooManyRequests)
             {
-                SetResponseMetadata(httpContext.Response, "X-Next-Cursor", nextCursor);
-            }
-            SetResponseMetadata(httpContext.Response, "X-Has-More", hasMore ? "true" : "false");
-            SetResponseMetadata(httpContext.Response, "X-Stream-Truncated", truncatedReason ?? "false");
+                // 9. Post-Stream Settlement & Response Metadata
+                usageRecorder?.RecordUsage(tableId, tenant, userSid, ConsumerOutcome.Allow, rowsEmitted, rowsMeasured: true);
+                SetResponseMetadata(httpContext.Response, "X-Rows-Streamed", rowsEmitted.ToString(CultureInfo.InvariantCulture));
+                if (!string.IsNullOrEmpty(nextCursor))
+                {
+                    SetResponseMetadata(httpContext.Response, "X-Next-Cursor", nextCursor);
+                }
+                SetResponseMetadata(httpContext.Response, "X-Has-More", hasMore ? "true" : "false");
+                SetResponseMetadata(httpContext.Response, "X-Stream-Truncated", truncatedReason ?? "false");
 
-            if (rateLimiter != null)
-            {
-                int actualCost = baseCost + (rowsEmitted * costPerRow);
-                var settlement = await rateLimiter.SettleCostQuotaAsync(subjectId, reservedCost, actualCost, policy, ct).ConfigureAwait(false);
-                SetResponseMetadata(httpContext.Response, "X-RateLimit-Remaining", settlement.RemainingTokens.ToString(CultureInfo.InvariantCulture));
+                if (rateLimiter != null)
+                {
+                    int actualCost = baseCost + (rowsEmitted * costPerRow);
+                    var settlement = await rateLimiter.SettleCostQuotaAsync(subjectId, reservedCost, actualCost, policy, ct).ConfigureAwait(false);
+                    SetResponseMetadata(httpContext.Response, "X-RateLimit-Remaining", settlement.RemainingTokens.ToString(CultureInfo.InvariantCulture));
+                }
             }
         }
     }

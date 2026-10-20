@@ -5,8 +5,10 @@ public sealed class StartupWarmupOptions
 {
     public const string SectionName = "Gateway:Startup:Warmup";
 
-    /// <summary>The only step name that may be configured (A-150-9). The GraphQL executor is never a configurable step.</summary>
+    /// <summary>Configurable step names (A-150-9, PLAN-PERF-254). The GraphQL executor is never a configurable step.</summary>
     public const string McpSerializationStep = "McpSerialization";
+    public const string DataSourceConnectionStep = "DataSourceConnection";
+    public const string DiscoveryDocumentStep = "DiscoveryDocument";
 
     /// <summary>Disables the best-effort steps only; the executor gate stays evaluated (SEC-OPS150-01).</summary>
     public bool Enabled { get; init; } = true;

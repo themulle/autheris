@@ -45,6 +45,18 @@ public sealed class GraphQLOptions
 
     /// <summary>Issue #240: GraphQL metrics options (<c>Gateway:GraphQL:Metrics</c>).</summary>
     public GraphQLMetricsOptions Metrics { get; init; } = new();
+
+    /// <summary>Issue #254: ERP table GraphQL schema partitioning mode.</summary>
+    public GraphQlSchemaPartitioningMode SchemaPartitioning { get; init; } = GraphQlSchemaPartitioningMode.None;
+    public List<string> PartitionAllowedDomains { get; init; } = [];
+    public List<string> PartitionAllowedConsentScopes { get; init; } = [];
+}
+
+public enum GraphQlSchemaPartitioningMode
+{
+    None = 0,
+    ByConsentScope = 1,
+    ByPermissionTier = 2
 }
 
 /// <summary>Issue #240: switches for GraphQL metrics read path (queryMetrics).</summary>

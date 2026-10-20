@@ -551,7 +551,8 @@ public static class GatewayServiceCollectionExtensions
             TimeSpan.FromSeconds(gatewayOptions.GraphQL.CatalogSchemaRefreshSeconds),
             aggregationEnabled: gatewayOptions.GraphQL.Aggregation.Enabled,
             crossSourceEnabled: gatewayOptions.IsCrossSourceEnabled,
-            metricsEnabled: (gatewayOptions.GraphQL.Metrics?.Enabled ?? true) && gatewayOptions.GraphQL.Aggregation.Enabled));
+            metricsEnabled: (gatewayOptions.GraphQL.Metrics?.Enabled ?? true) && gatewayOptions.GraphQL.Aggregation.Enabled,
+            graphQlOptions: gatewayOptions.GraphQL));
         services.AddSingleton<ICatalogSchemaDiagnostics>(sp => sp.GetRequiredService<CatalogGraphQlTypeModule>());
         services.AddSingleton<ISocketTokenValidator, JwtSocketTokenValidator>();
         services.AddOptions<RevocationWatchOptions>()

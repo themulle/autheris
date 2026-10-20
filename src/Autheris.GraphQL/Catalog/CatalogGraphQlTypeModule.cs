@@ -43,6 +43,8 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
     private long _builtStructureVersion = -1;
     private int _checking;
 
+    private readonly GraphQLOptions _graphQlOptions;
+
     public CatalogGraphQlTypeModule(
         ITableMetadataRepository metadataRepo,
         ITableRelationRepository relationRepo,
@@ -51,7 +53,8 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         Autheris.Application.Catalog.ICatalogVersionProvider? versionProvider = null,
         bool aggregationEnabled = true,
         bool crossSourceEnabled = false,
-        bool metricsEnabled = true)
+        bool metricsEnabled = true,
+        GraphQLOptions? graphQlOptions = null)
     {
         _aggregationEnabled = aggregationEnabled;
         _crossSourceEnabled = crossSourceEnabled;
@@ -61,6 +64,42 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         _logger = logger;
         _refreshInterval = refreshInterval ?? TimeSpan.Zero;
         _versionProvider = versionProvider;
+        _graphQlOptions = graphQlOptions ?? new GraphQLOptions();
+    }
+
+    private Func<TableMetadata, bool>? GetTableFilter()
+    {
+        if (_graphQlOptions.SchemaPartitioning == GraphQlSchemaPartitioningMode.None)
+        {
+            return null;
+        }
+
+        if (_graphQlOptions.SchemaPartitioning == GraphQlSchemaPartitioningMode.ByConsentScope)
+        {
+            var allowedDomains = new HashSet<string>(_graphQlOptions.PartitionAllowedDomains, StringComparer.OrdinalIgnoreCase);
+            var allowedScopes = new HashSet<string>(_graphQlOptions.PartitionAllowedConsentScopes, StringComparer.OrdinalIgnoreCase);
+
+            return meta =>
+            {
+                if (allowedDomains.Count > 0 && allowedDomains.Contains(meta.Identifier.Domain))
+                {
+                    return true;
+                }
+                if (allowedScopes.Count > 0 && meta.Table?.Tags != null && meta.Table.Tags.Any(s => allowedScopes.Contains(s)))
+                {
+                    return true;
+                }
+                return false;
+            };
+        }
+
+        if (_graphQlOptions.SchemaPartitioning == GraphQlSchemaPartitioningMode.ByPermissionTier)
+        {
+            var allowedDomains = new HashSet<string>(_graphQlOptions.PartitionAllowedDomains, StringComparer.OrdinalIgnoreCase);
+            return meta => allowedDomains.Count == 0 || allowedDomains.Contains(meta.Identifier.Domain);
+        }
+
+        return null;
     }
 
     public event EventHandler<EventArgs>? TypesChanged;
@@ -99,7 +138,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
             string current;
             try
             {
-                current = (await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, null, dialectRegistry: null, crossSourceEnabled: _crossSourceEnabled, ct).ConfigureAwait(false)).Fingerprint();
+                current = (await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, null, dialectRegistry: null, crossSourceEnabled: _crossSourceEnabled, tableFilter: GetTableFilter(), ct).ConfigureAwait(false)).Fingerprint();
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -151,7 +190,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         CatalogSchemaModel schemaModel;
         try
         {
-            schemaModel = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, _logger, dialectRegistry: null, crossSourceEnabled: _crossSourceEnabled, cancellationToken)
+            schemaModel = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, _logger, dialectRegistry: null, crossSourceEnabled: _crossSourceEnabled, tableFilter: GetTableFilter(), cancellationToken)
                 .ConfigureAwait(false);
             _built = new BuiltState(schemaModel.Fingerprint(), schemaModel.OmittedTables);
             if (_versionProvider != null)
@@ -468,10 +507,10 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         {
             CatalogFieldType.Int => prop.ValueKind == JsonValueKind.Number
                 ? (prop.TryGetInt32(out var n) ? n : (int.TryParse(prop.GetRawText(), System.Globalization.NumberStyles.Integer, inv, out var pi) ? pi : ReportMasked(ctx, col)))
-                : (int.TryParse(prop.GetString(), System.Globalization.NumberStyles.Integer, inv, out var strN) ? strN : ReportMasked(ctx, col)),
+                : (int.TryParse(prop.GetString(), System.Globalization.NumberStyles.Integer, inv, out var strN) ? strN : (IsHmacHexString(prop.GetString()) ? prop.GetString() : ReportMasked(ctx, col))),
             CatalogFieldType.Long => prop.ValueKind == JsonValueKind.Number
                 ? (prop.TryGetInt64(out var l) ? l : (long.TryParse(prop.GetRawText(), System.Globalization.NumberStyles.Integer, inv, out var pl) ? pl : ReportMasked(ctx, col)))
-                : (long.TryParse(prop.GetString(), System.Globalization.NumberStyles.Integer, inv, out var strL) ? strL : ReportMasked(ctx, col)),
+                : (long.TryParse(prop.GetString(), System.Globalization.NumberStyles.Integer, inv, out var strL) ? strL : (IsHmacHexString(prop.GetString()) ? prop.GetString() : ReportMasked(ctx, col))),
             CatalogFieldType.Float => prop.ValueKind == JsonValueKind.Number
                 ? (prop.TryGetDouble(out var d) ? d : (double.TryParse(prop.GetRawText(), System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, inv, out var pd) ? pd : ReportMasked(ctx, col)))
                 : (double.TryParse(prop.GetString(), System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, inv, out var strD) ? strD : ReportMasked(ctx, col)),
@@ -639,7 +678,15 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         }
         catch (GatewayThrottledException ex)
         {
-            throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode("TOO_MANY_REQUESTS").Build());
+            if (httpContext != null && !httpContext.Response.HasStarted)
+            {
+                httpContext.Response.Headers.RetryAfter = ex.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetMessage(ex.Message)
+                .SetCode("TOO_MANY_REQUESTS")
+                .SetExtension("retryAfterSeconds", ex.RetryAfterSeconds)
+                .Build());
         }
         catch (GatewaySecurityException ex) when (string.Equals(ex.ErrorCode, "RESPONSE_TOO_LARGE", StringComparison.OrdinalIgnoreCase))
         {
@@ -659,5 +706,11 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
             throw;
         }
     }
+
+    private static readonly System.Text.RegularExpressions.Regex HmacRegex =
+        new("^[a-fA-F0-9]{64}$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    public static bool IsHmacHexString(string? value) =>
+        !string.IsNullOrEmpty(value) && value.Length == 64 && HmacRegex.IsMatch(value);
 }
 

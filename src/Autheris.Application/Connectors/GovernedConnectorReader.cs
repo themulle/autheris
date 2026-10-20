@@ -164,6 +164,122 @@ public static class GovernedConnectorReader
     }
 
     /// <summary>
+    /// Reads splits and yields raw rows one-by-one via IAsyncEnumerable without buffering into a list.
+    /// Evaluates MaxRows on-the-fly.
+    /// </summary>
+    public static async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamRawAsync(
+        IAutherisConnector connector,
+        ConnectorSessionContext session,
+        TableMetadata metadata,
+        int? maxRows,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(connector);
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(metadata);
+
+        session.Items["TableMetadata"] = metadata;
+        var splits = await connector.SplitManager.GetSplitsAsync(metadata, session, ct).ConfigureAwait(false);
+        int totalCount = 0;
+
+        foreach (var split in splits)
+        {
+            ct.ThrowIfCancellationRequested();
+            var batch = await connector.RecordSource.ReadBatchAsync(split, session, ct).ConfigureAwait(false);
+            foreach (var row in batch)
+            {
+                if (maxRows is { } max && ++totalCount > max)
+                {
+                    throw new ConnectorRowLimitExceededException(metadata.Identifier, max);
+                }
+                yield return row;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Governed row-by-row streaming: streams from upstream, evaluates Virtual Filter, row filter,
+    /// column masking/projection, and cumulative byte limit row-by-row without buffering in memory.
+    /// SEC-PERF254-03: Throws RESPONSE_TOO_LARGE as soon as cumulativeEstimatedBytes exceeds policy.MaxBytes.
+    /// </summary>
+    public static async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamAsync(
+        IAutherisConnector connector,
+        ConnectorSessionContext session,
+        TableMetadata metadata,
+        TableAccessDecision decision,
+        GovernedRowPolicy policy,
+        VirtualFilterEnforcement? enforcement = null,
+        bool mayAttest = false,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(connector);
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(metadata);
+        ArgumentNullException.ThrowIfNull(decision);
+        ArgumentNullException.ThrowIfNull(policy);
+
+        if (policy.SkipUpstream)
+        {
+            yield break;
+        }
+
+        var effectiveDecision = decision;
+        if (enforcement != null)
+        {
+            if (enforcement.Table != metadata.Identifier)
+            {
+                throw new GatewaySecurityException(
+                    $"The Virtual Filter enforcement for '{enforcement.Table}' cannot be applied to '{metadata.Identifier}'.",
+                    VirtualFilterErrorCodes.EnforcementIncomplete);
+            }
+
+            effectiveDecision = effectiveDecision.WithoutEnforcedVirtualFilters(enforcement.Bindings);
+        }
+
+        if (!mayAttest && !string.IsNullOrWhiteSpace(effectiveDecision.CombinedRowFilterSql))
+        {
+            GatewayExecutionService.EnsureInMemoryFilterIsEnforceable(effectiveDecision);
+        }
+
+        var pushedDown = mayAttest && IsSet(session.Items, RlsPushdownExecutedKey);
+        var masked = mayAttest && IsSet(session.Items, InDbColumnMaskingExecutedKey);
+        long cumulativeEstimatedBytes = 0;
+
+        await foreach (var rawRow in StreamRawAsync(connector, session, metadata, policy.MaxRows, ct).ConfigureAwait(false))
+        {
+            var row = rawRow;
+            if (enforcement != null)
+            {
+                var singleList = new List<IReadOnlyDictionary<string, object?>>(1) { row };
+                var filtered = enforcement.Apply(singleList);
+                if (filtered.Count == 0) continue;
+                row = filtered[0];
+            }
+
+            if (!pushedDown && !string.IsNullOrWhiteSpace(effectiveDecision.CombinedRowFilterSql))
+            {
+                var singleList = new List<IReadOnlyDictionary<string, object?>>(1) { row };
+                var filtered = GatewayExecutionService.FilterRows(singleList, effectiveDecision, metadata);
+                if (filtered.Count == 0) continue;
+                row = filtered[0];
+            }
+
+            var projected = ProjectRow(row, metadata, effectiveDecision, session.Tenant?.Value, policy, masked);
+
+            if (policy.MaxBytes is { } maxBytes)
+            {
+                cumulativeEstimatedBytes += EstimateRowBytes(projected);
+                if (cumulativeEstimatedBytes > maxBytes)
+                {
+                    throw new GatewaySecurityException($"Response size ({cumulativeEstimatedBytes} bytes) exceeds the configured limit of {maxBytes} bytes.", "RESPONSE_TOO_LARGE");
+                }
+            }
+
+            yield return projected;
+        }
+    }
+
+    /// <summary>
     /// Row filter (unless pushed down), column projection with masking (unless masked in the database) and byte limit.
     /// Also used for rows from <see cref="IDataSourceExecutor"/>s, which report the same two flags.
     /// </summary>
@@ -262,22 +378,30 @@ public static class GovernedConnectorReader
         return dict;
     }
 
+    public static long EstimateRowBytes(IReadOnlyDictionary<string, object?> row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        long estimatedBytes = 0;
+        foreach (var (key, val) in row)
+        {
+            estimatedBytes += key.Length * 2;
+            estimatedBytes += val switch
+            {
+                string s => s.Length * 2,
+                byte[] b => b.Length,
+                null => 0,
+                _ => 16
+            };
+        }
+        return estimatedBytes;
+    }
+
     public static long EstimateBytes(IReadOnlyList<IReadOnlyDictionary<string, object?>> rows)
     {
         long estimatedBytes = 0;
         foreach (var row in rows)
         {
-            foreach (var (key, val) in row)
-            {
-                estimatedBytes += key.Length * 2;
-                estimatedBytes += val switch
-                {
-                    string s => s.Length * 2,
-                    byte[] b => b.Length,
-                    null => 0,
-                    _ => 16
-                };
-            }
+            estimatedBytes += EstimateRowBytes(row);
         }
 
         return estimatedBytes;

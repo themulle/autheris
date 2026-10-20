@@ -110,7 +110,7 @@ public sealed class GarnetServerManager : IGarnetServerManager, IHostedService
     /// Builds the Garnet command line arguments. SEC H-01: always <c>--auth Password</c>; with
     /// <see cref="GarnetOptions.EnableTls"/> additionally <c>--tls --cert-file-name &lt;pfx&gt; [--cert-password &lt;pw&gt;]</c>.
     /// </summary>
-    internal static List<string> BuildServerArguments(GarnetOptions options, string password, string? tlsCertPassword)
+    internal static List<string> BuildServerArguments(GarnetOptions options, string password, string? tlsCertPassword, int? effectiveMemoryMb = null)
     {
         ArgumentNullException.ThrowIfNull(options);
 
@@ -123,6 +123,12 @@ public sealed class GarnetServerManager : IGarnetServerManager, IHostedService
             // Lease acquisition/renewal and budget consumption run as Lua scripts; Garnet disables scripting by default.
             "--lua"
         };
+
+        if (effectiveMemoryMb.HasValue && effectiveMemoryMb.Value > 0)
+        {
+            args.Add("--memory");
+            args.Add($"{effectiveMemoryMb.Value}m");
+        }
 
         if (options.EnableTls)
         {
@@ -195,7 +201,10 @@ public sealed class GarnetServerManager : IGarnetServerManager, IHostedService
                     $"Security error: Caching.Garnet.EnableTls is enabled, but the certificate '{_options.TlsCertFile}' was not found.");
             }
 
-            var args = BuildServerArguments(_options, ClientPassword, _tlsCertPassword);
+            var effectiveMemoryMb = Autheris.Infrastructure.Hardware.ContainerMemoryDetector.ResolveGarnetMemoryLimitMb(_options.MemorySizeMb);
+            _logger?.LogInformation("Embedded Microsoft Garnet memory budget: {MemoryMb} MB.", effectiveMemoryMb);
+
+            var args = BuildServerArguments(_options, ClientPassword, _tlsCertPassword, effectiveMemoryMb);
 
             _server = _loggerFactory != null
                 ? new GarnetServer(args.ToArray(), _loggerFactory)

@@ -138,7 +138,17 @@ internal sealed class ParseWorkerPool : IDisposable
     {
         lock (_gate)
         {
-            if (_live >= Size || _queue.Count <= Volatile.Read(ref _idle))
+            int queueCount;
+            try
+            {
+                queueCount = _queue.Count;
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
+
+            if (_live >= Size || queueCount <= Volatile.Read(ref _idle))
             {
                 return;
             }
@@ -179,7 +189,7 @@ internal sealed class ParseWorkerPool : IDisposable
             {
                 work = _queue.Take();
             }
-            catch (InvalidOperationException)
+            catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
             {
                 return; // the pool was disposed (completed or disposed queue)
             }
@@ -188,7 +198,17 @@ internal sealed class ParseWorkerPool : IDisposable
                 Interlocked.Decrement(ref _idle);
             }
 
-            if (_queue.Count > Volatile.Read(ref _idle))
+            int queueCount;
+            try
+            {
+                queueCount = _queue.Count;
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
+
+            if (queueCount > Volatile.Read(ref _idle))
             {
                 EnsureWorker();
             }

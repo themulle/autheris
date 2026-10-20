@@ -61,6 +61,13 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
             code = mapped.Code;
             limit = mapped.Limit;
         }
+        else if (exception is GatewayThrottledException throttled)
+        {
+            status = StatusCodes.Status429TooManyRequests;
+            title = "Too many concurrent requests. Retry later.";
+            retryAfter = throttled.RetryAfterSeconds;
+            code = "TOO_MANY_REQUESTS";
+        }
         else
         {
             (status, title, retryAfter) = Map(exception);
@@ -91,6 +98,11 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         if (code is not null)
         {
             problem.Extensions["code"] = code;
+        }
+
+        if (retryAfter.HasValue)
+        {
+            problem.Extensions["retryAfterSeconds"] = retryAfter.Value;
         }
 
         if (limit is not null)

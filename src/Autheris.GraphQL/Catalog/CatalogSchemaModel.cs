@@ -125,7 +125,15 @@ public sealed partial class CatalogSchemaModel
         ITableRelationRepository relationRepository,
         Microsoft.Extensions.Logging.ILogger? logger = null,
         CancellationToken ct = default)
-        => BuildAsync(metadataRepository, relationRepository, logger, dialectRegistry: null, crossSourceEnabled: false, ct);
+        => BuildAsync(metadataRepository, relationRepository, logger, dialectRegistry: null, crossSourceEnabled: false, tableFilter: null, ct: ct);
+
+    public static Task<CatalogSchemaModel> BuildFilteredAsync(
+        ITableMetadataRepository metadataRepository,
+        ITableRelationRepository relationRepository,
+        Func<TableMetadata, bool>? tableFilter,
+        Microsoft.Extensions.Logging.ILogger? logger = null,
+        CancellationToken ct = default)
+        => BuildAsync(metadataRepository, relationRepository, logger, dialectRegistry: null, crossSourceEnabled: false, tableFilter: tableFilter, ct: ct);
 
     public static Task<CatalogSchemaModel> BuildAsync(
         ITableMetadataRepository metadataRepository,
@@ -135,12 +143,22 @@ public sealed partial class CatalogSchemaModel
         CancellationToken ct = default)
         => BuildAsync(metadataRepository, relationRepository, logger, dialectRegistry, crossSourceEnabled: false, ct);
 
+    public static Task<CatalogSchemaModel> BuildAsync(
+        ITableMetadataRepository metadataRepository,
+        ITableRelationRepository relationRepository,
+        Microsoft.Extensions.Logging.ILogger? logger,
+        Autheris.Application.Sql.Dialects.ISqlDialectRegistry? dialectRegistry,
+        bool crossSourceEnabled,
+        CancellationToken ct = default)
+        => BuildAsync(metadataRepository, relationRepository, logger, dialectRegistry, crossSourceEnabled, tableFilter: null, ct);
+
     public static async Task<CatalogSchemaModel> BuildAsync(
         ITableMetadataRepository metadataRepository,
         ITableRelationRepository relationRepository,
         Microsoft.Extensions.Logging.ILogger? logger,
         Autheris.Application.Sql.Dialects.ISqlDialectRegistry? dialectRegistry,
         bool crossSourceEnabled,
+        Func<TableMetadata, bool>? tableFilter,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(metadataRepository);
@@ -153,9 +171,15 @@ public sealed partial class CatalogSchemaModel
         // the tree compiler (Descriptor.SupportsTreeCompile, G-6), so an admitted dialect without tree support (Oracle) would
         // appear in the schema while every query failed (R-GQL-13); those tables are excluded and logged once. They stay
         // readable as flat tables through OData, REST and MCP (governed compile path), ordered deterministically
-        var sqlTables = allTables
-            .Where(t => t.Table.IsActive && t.DataSourceType == DataSourceType.Sql)
-            .ToList();
+        var candidateTables = allTables
+            .Where(t => t.Table.IsActive && t.DataSourceType == DataSourceType.Sql);
+
+        if (tableFilter != null)
+        {
+            candidateTables = candidateTables.Where(tableFilter);
+        }
+
+        var sqlTables = candidateTables.ToList();
         var omittedTables = new List<CatalogOmittedTable>();
         foreach (var excluded in sqlTables.Where(t =>
                      registry.TryGetByName(t.Table.SourceType, out var provider) &&

@@ -19,7 +19,8 @@ public sealed partial class ODataHandler(
     IGatewayExecutionService executionService,
     ILogger<ODataHandler> logger,
     Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
-    Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null) : IODataHandler
+    Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
+    Autheris.Application.Catalog.ICatalogVersionProvider? versionProvider = null) : IODataHandler
 {
     private const string GenericDenied = "Access denied.";
 
@@ -43,18 +44,23 @@ public sealed partial class ODataHandler(
     private readonly IGatewayExecutionService _executionService = executionService ?? throw new ArgumentNullException(nameof(executionService));
     private readonly ILogger<ODataHandler> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache = memoryCache;
+    private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _versionProvider = versionProvider;
 
     public async Task<string> GetMetadataCsdlAsync(ClaimsPrincipal? principal = null, CancellationToken ct = default)
     {
         if (principal?.Identity?.IsAuthenticated == true && _memoryCache != null)
         {
-            var cacheKey = $"odata:csdl:{principal.GetTenantId().Value}:{principal.GetUserSid()?.Value}";
+            var (tables, complete) = await GetAuthorizedTablesCoreAsync(principal, ct).ConfigureAwait(false);
+            var tenantId = principal.GetTenantId().Value;
+            var structureVersion = _versionProvider != null ? (await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false)).StructureVersion : 1;
+            var visibilityHash = Autheris.Application.Catalog.Search.CatalogVisibleBitSet.ComputeSha256(tables.Select(t => t.Identifier));
+            var cacheKey = $"odata:csdl:{tenantId}:s{structureVersion}:{visibilityHash}";
+
             if (_memoryCache.TryGetValue(cacheKey, out string? cachedXml) && cachedXml != null)
             {
                 return cachedXml;
             }
 
-            var (tables, complete) = await GetAuthorizedTablesCoreAsync(principal, ct).ConfigureAwait(false);
             var xml = ODataCsdlGenerator.GenerateMetadataXml(tables);
             if (complete)
             {
@@ -73,13 +79,17 @@ public sealed partial class ODataHandler(
         ArgumentException.ThrowIfNullOrWhiteSpace(serviceRootUrl);
         if (principal?.Identity?.IsAuthenticated == true && _memoryCache != null)
         {
-            var cacheKey = $"odata:servicedoc:{principal.GetTenantId().Value}:{principal.GetUserSid()?.Value}:{serviceRootUrl}";
+            var (tables, complete) = await GetAuthorizedTablesCoreAsync(principal, ct).ConfigureAwait(false);
+            var tenantId = principal.GetTenantId().Value;
+            var structureVersion = _versionProvider != null ? (await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false)).StructureVersion : 1;
+            var visibilityHash = Autheris.Application.Catalog.Search.CatalogVisibleBitSet.ComputeSha256(tables.Select(t => t.Identifier));
+            var cacheKey = $"odata:servicedoc:{tenantId}:s{structureVersion}:{visibilityHash}:{serviceRootUrl}";
+
             if (_memoryCache.TryGetValue(cacheKey, out object? cachedDoc) && cachedDoc != null)
             {
                 return cachedDoc;
             }
 
-            var (tables, complete) = await GetAuthorizedTablesCoreAsync(principal, ct).ConfigureAwait(false);
             var doc = ODataResponseFormatter.FormatServiceDocument(serviceRootUrl, tables);
             if (complete)
             {

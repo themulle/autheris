@@ -191,7 +191,9 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
             entry.Value = dbProfiles;
             // WP-PF-06: the shared L1 SizeLimit counts bytes, so an entry is sized in (estimated) bytes, not as "1".
             entry.Size = EstimateEntryBytes(cacheKey, dbProfiles.Count);
-            entry.AbsoluteExpirationRelativeToNow = ProfileEntryTtl;
+            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1);
+            entry.SlidingExpiration = TimeSpan.FromMinutes(15);
+            entry.Priority = CacheItemPriority.Low;
 
             return dbProfiles;
         }
@@ -258,6 +260,17 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
     private async ValueTask<long?> GetEpochAsync(TenantId tenantId, CancellationToken ct)
     {
         var now = _timeProvider.GetUtcNow();
+        if (_epochCache.Count > 1000)
+        {
+            foreach (var kvp in _epochCache)
+            {
+                if (kvp.Value.ExpiresAt <= now)
+                {
+                    _epochCache.TryRemove(kvp.Key, out _);
+                }
+            }
+        }
+
         if (_epochCache.TryGetValue(tenantId.Value, out var cached) && cached.ExpiresAt > now)
         {
             return cached.Epoch;

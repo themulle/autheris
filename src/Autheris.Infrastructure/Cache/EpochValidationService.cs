@@ -28,6 +28,7 @@ public sealed class EpochValidationService : IEpochValidationService, IHostedSer
     private readonly IConnectionMultiplexer? _multiplexer;
     private readonly string _redisPrefix;
     private readonly ConcurrentDictionary<string, long> _highestSeenRedisEpoch = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _lastRollbackWarningTime = new(StringComparer.OrdinalIgnoreCase);
     private readonly ILogger<EpochValidationService>? _logger;
     private readonly ITableSensitivityLookup _sensitivityLookup;
     private readonly object _subscriptionLock = new();
@@ -80,6 +81,7 @@ end";
                 _epochs.Clear();
                 _lastEpochRefresh.Clear();
                 _microCache.Clear();
+                _lastRollbackWarningTime.Clear();
                 EnsureSubscribed();
             };
         }
@@ -166,7 +168,15 @@ end";
                 {
                     // Missing or rolled-back epoch: never fall back below anything this node has already seen.
                     var restored = highestSeen > 0 ? highestSeen + 1 : 1;
-                    _logger?.LogWarning("Policy epoch rollback detected for {Table} (redis={RedisEpoch}, highestSeen={HighestSeen}); forcing epoch {Restored}.", key, rEpoch, highestSeen, restored);
+                    if (rEpoch <= 0 && highestSeen <= 0)
+                    {
+                        _logger?.LogDebug("Empty policy epoch cache bootstrap for {Table}; initializing epoch to {Restored}.", key, restored);
+                    }
+                    else
+                    {
+                        LogRollbackWarning(key, rEpoch, highestSeen, restored);
+                    }
+
                     var evalResult = await db.ScriptEvaluateAsync(
                         RollbackLuaScript,
                         [(RedisKey)redisKey],
@@ -430,6 +440,15 @@ end";
         if (parsed <= 0 || parsed < highestSeen)
         {
             var minRequired = highestSeen > 0 ? highestSeen + 1 : 1;
+            if (parsed <= 0 && highestSeen <= 0)
+            {
+                _logger?.LogDebug("Empty policy epoch cache bootstrap for {Table}; initializing epoch to {Restored}.", key, minRequired);
+            }
+            else
+            {
+                LogRollbackWarning(key, parsed, highestSeen, minRequired);
+            }
+
             var evalResult = await db.ScriptEvaluateAsync(
                 RollbackLuaScript,
                 [redisKey],
@@ -445,6 +464,35 @@ end";
 
         _highestSeenRedisEpoch.AddOrUpdate(key, authoritativeEpoch, (_, old) => Math.Max(old, authoritativeEpoch));
         return authoritativeEpoch;
+    }
+
+    private void LogRollbackWarning(string key, long redisEpoch, long highestSeen, long restored)
+    {
+        var now = _time.GetUtcNow();
+        if (_lastRollbackWarningTime.TryGetValue(key, out var last) && now - last < TimeSpan.FromSeconds(30))
+        {
+            return;
+        }
+
+        bool shouldLog = false;
+        _lastRollbackWarningTime.AddOrUpdate(
+            key,
+            _ => { shouldLog = true; return now; },
+            (_, lastSeen) =>
+            {
+                if (now - lastSeen >= TimeSpan.FromSeconds(30))
+                {
+                    shouldLog = true;
+                    return now;
+                }
+                shouldLog = false;
+                return lastSeen;
+            });
+
+        if (shouldLog)
+        {
+            _logger?.LogWarning("Policy epoch rollback detected for {Table} (redis={RedisEpoch}, highestSeen={HighestSeen}); forcing epoch {Restored}.", key, redisEpoch, highestSeen, restored);
+        }
     }
 
     public async Task<bool> IsEpochValidAsync(TableIdentifier table, long cachedEpoch, CancellationToken ct = default)

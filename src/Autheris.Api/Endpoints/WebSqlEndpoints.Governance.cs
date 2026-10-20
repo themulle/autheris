@@ -47,11 +47,12 @@ public static partial class WebSqlEndpoints
             case GatewayThrottledException throttledEx:
                 logger.Warning(throttledEx, "WebSQL concurrency limit reached. TraceId={TraceId}", httpContext.TraceIdentifier);
                 httpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-                httpContext.Response.Headers.RetryAfter = throttledEx.RetryAfterSeconds.ToString();
+                httpContext.Response.Headers.RetryAfter = throttledEx.RetryAfterSeconds.ToString(CultureInfo.InvariantCulture);
                 httpContext.Response.ContentType = "application/json; charset=utf-8";
                 await httpContext.Response.WriteAsJsonAsync(new
                 {
                     error = "TooManyRequests",
+                    code = "TOO_MANY_REQUESTS",
                     message = "Too many concurrent requests. Retry later.",
                     retryAfterSeconds = throttledEx.RetryAfterSeconds,
                     traceId = httpContext.TraceIdentifier
