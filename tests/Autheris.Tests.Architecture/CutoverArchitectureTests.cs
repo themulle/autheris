@@ -78,7 +78,9 @@ public sealed class CutoverArchitectureTests
     {
         var t = type;
         while (t.DeclaringType is not null) t = t.DeclaringType;
-        return t.FullName;
+        var name = t.FullName;
+        var slash = name.IndexOf('/');
+        return slash >= 0 ? name[..slash] : name;
     }
 
     private static string RepositoryRoot()

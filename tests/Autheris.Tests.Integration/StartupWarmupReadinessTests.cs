@@ -257,6 +257,7 @@ public sealed class StartupWarmupReadinessTests
     {
         var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.UseEnvironment("Development");
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-warmup-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");

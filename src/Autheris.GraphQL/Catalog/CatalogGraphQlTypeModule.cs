@@ -85,7 +85,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                 {
                     return true;
                 }
-                if (allowedScopes.Count > 0 && (meta.CatalogTags.Any(s => allowedScopes.Contains(s)) || (meta.Table?.Tags != null && meta.Table.Tags.Any(s => allowedScopes.Contains(s)))))
+                if (allowedScopes.Count > 0 && meta.Table?.Tags != null && meta.Table.Tags.Any(s => allowedScopes.Contains(s)))
                 {
                     return true;
                 }
