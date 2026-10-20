@@ -10,4 +10,5 @@ using System;
 public sealed record TypedPolicySources(
     RowPolicyFactory RowPolicies,
     ColumnMaskPolicyFactory MaskPolicies,
-    Autheris.Application.Identity.Attributes.ICallerAttributeResolver? CallerAttributes = null);
+    Autheris.Application.Identity.Attributes.ICallerAttributeResolver? CallerAttributes = null,
+    Autheris.Application.Plugins.Auth.IAuthPluginHost? AuthPlugins = null);

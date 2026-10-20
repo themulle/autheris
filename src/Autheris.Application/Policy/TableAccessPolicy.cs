@@ -10,10 +10,12 @@ using System.Threading.Tasks;
 using Autheris.Application.Governance.Contracts;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Security.Rebac.Interfaces;
+using Autheris.Application.Plugins.Auth;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Plugins.Auth;
 
 /// <summary>Where the ReBAC <c>can_query</c> gate applies (see <see cref="RebacTableGate"/>).</summary>
 public enum RebacEnforcement
@@ -106,6 +108,8 @@ public sealed partial class TableAccessPolicy
     private readonly Autheris.Domain.Security.IRestrictedScopePolicy _restrictedScopes;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
     private readonly Autheris.Application.Policy.Interfaces.IAccessProfileCache? _accessProfileCache;
+    private readonly IAuthPluginHost? _authPluginHost;
+    private readonly Autheris.Application.Audit.IAuditWriter? _auditWriter;
 
     /// <param name="mandatoryFilters">
     /// Virtual filters; required on purpose: a decision point without it would silently skip them. Use
@@ -127,12 +131,16 @@ public sealed partial class TableAccessPolicy
         RowPolicyFactory? rowPolicyFactory = null,
         ColumnMaskPolicyFactory? maskPolicyFactory = null,
         Autheris.Application.Identity.Attributes.ICallerAttributeResolver? callerAttributes = null,
-        Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null)
+        Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
+        IAuthPluginHost? authPluginHost = null,
+        Autheris.Application.Audit.IAuditWriter? auditWriter = null)
     {
         _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
         _callerAttributes = callerAttributes;
         _rowPolicyFactory = rowPolicyFactory;
         _maskPolicyFactory = maskPolicyFactory;
+        _authPluginHost = authPluginHost;
+        _auditWriter = auditWriter;
         _mandatoryFilters = mandatoryFilters ?? throw new ArgumentNullException(nameof(mandatoryFilters));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _resolutionService = resolutionService ?? throw new ArgumentNullException(nameof(resolutionService));
@@ -357,16 +365,85 @@ public sealed partial class TableAccessPolicy
             }
         }
 
-        if (!decision.IsAllowed || consentBypassed ||
-            _policyEnforcementService == null || !_policyEnforcementService.HasPolicies(query.Tenant))
+        if (!decision.IsAllowed)
         {
             return decision;
         }
 
-        var policyDecision = await _policyEnforcementService.EvaluatePolicyAsync(BuildEvaluationContext(query), ct).ConfigureAwait(false);
-        return policyDecision.IsAllowed
-            ? Restrict(decision, policyDecision, query.Metadata)
-            : TableAccessDecision.Denied(table, $"Casbin ABAC Policy Denial: Access denied for subject '{query.UserSid.Value}' in tenant '{query.Tenant.Value}'.");
+        if (!consentBypassed && _policyEnforcementService != null && _policyEnforcementService.HasPolicies(query.Tenant))
+        {
+            var policyDecision = await _policyEnforcementService.EvaluatePolicyAsync(BuildEvaluationContext(query), ct).ConfigureAwait(false);
+            if (!policyDecision.IsAllowed)
+            {
+                return TableAccessDecision.Denied(table, $"Casbin ABAC Policy Denial: Access denied for subject '{query.UserSid.Value}' in tenant '{query.Tenant.Value}'.");
+            }
+
+            decision = Restrict(decision, policyDecision, query.Metadata);
+        }
+
+        // Extension Point 2: Custom Authorization Hooks
+        var authOpt = _options?.Plugins?.Auth;
+        if (decision.IsAllowed &&
+            authOpt?.Enabled == true &&
+            authOpt.AllowAuthorizationHooks &&
+            _authPluginHost != null &&
+            _authPluginHost.HasAuthorizationHooks)
+        {
+            var authzContext = new PluginAuthorizationContext
+            {
+                TenantId = query.Tenant,
+                UserSid = query.UserSid,
+                GroupSids = query.GroupSids,
+                Roles = query.Roles,
+                TableIdentifier = table,
+                RequestedColumns = query.RequestedColumns,
+                TableTags = query.Metadata.Table.Tags,
+                TableSensitivity = query.Metadata.Table.Sensitivity,
+                ClientIp = query.ClientIp,
+                ExtraAttributes = query.ExtraAttributes
+            };
+
+            var hookResult = await _authPluginHost.EvaluateAuthorizationHooksAsync(authzContext, ct).ConfigureAwait(false);
+            if (hookResult.Outcome == PluginAuthorizationOutcome.Deny)
+            {
+                return TableAccessDecision.Denied(table,
+                    $"Plugin Authorization Denial ({hookResult.HookName ?? "Unknown"}): {hookResult.ReasonCode ?? "Access denied by enterprise plugin."}");
+            }
+            else if (hookResult.Outcome == PluginAuthorizationOutcome.Restrict)
+            {
+                var restrictedColumns = new Dictionary<string, ColumnAccessLevel>(decision.ColumnAccess, StringComparer.OrdinalIgnoreCase);
+                if (hookResult.DeniedColumns != null)
+                {
+                    foreach (var col in hookResult.DeniedColumns)
+                    {
+                        // Invariant 3: Hook can only lower access to Deny, never elevate from Mask/Deny to Clear
+                        restrictedColumns[col] = ColumnAccessLevel.Deny;
+                    }
+                }
+
+                decision = decision with { ColumnAccess = restrictedColumns };
+
+                if (!string.IsNullOrWhiteSpace(hookResult.AdditionalRowFilterSql))
+                {
+                    // SEC-BL08-10: AST validation and parenthesis wrapping
+                    try
+                    {
+                        Autheris.Application.Sql.SqlSecurityValidator.ValidatePredicateSql(
+                            hookResult.AdditionalRowFilterSql,
+                            nameof(hookResult.AdditionalRowFilterSql),
+                            allowSubqueries: false);
+                    }
+                    catch (Exception)
+                    {
+                        return TableAccessDecision.Denied(table, "AUTH_HOOK_INVALID_FILTER: Additional row filter SQL failed validation.");
+                    }
+
+                    decision = decision.WithAdditionalRowFilter($"({hookResult.AdditionalRowFilterSql.Trim()})");
+                }
+            }
+        }
+
+        return decision;
     }
 
     /// <summary>
