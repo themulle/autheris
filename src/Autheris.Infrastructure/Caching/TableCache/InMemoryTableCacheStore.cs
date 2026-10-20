@@ -147,6 +147,8 @@ public sealed class InMemoryTableCacheStore : ITableCacheStore, IDisposable
     private async Task InsertBatchAsync(string insertBase, int colCount, List<IReadOnlyList<object?>> batch, CancellationToken ct)
     {
         var sb = new StringBuilder(insertBase);
+        using var cmd = _sharedConnection.CreateCommand();
+        int paramIndex = 1;
         for (int i = 0; i < batch.Count; i++)
         {
             if (i > 0) sb.Append(", ");
@@ -156,20 +158,18 @@ public sealed class InMemoryTableCacheStore : ITableCacheStore, IDisposable
             {
                 if (c > 0) sb.Append(", ");
                 var val = c < r.Count ? r[c] : null;
-                if (val == null)
-                {
-                    sb.Append("NULL");
-                }
-                else
-                {
-                    var s = val.ToString()?.Replace("'", "''") ?? string.Empty;
-                    sb.Append('\'').Append(s).Append('\'');
-                }
+                sb.Append($"$p{paramIndex}");
+
+                var p = cmd.CreateParameter();
+                p.ParameterName = $"p{paramIndex}";
+                p.Value = val ?? DBNull.Value;
+                cmd.Parameters.Add(p);
+
+                paramIndex++;
             }
             sb.Append(')');
         }
 
-        using var cmd = _sharedConnection.CreateCommand();
         cmd.CommandText = sb.ToString();
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
