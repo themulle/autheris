@@ -423,6 +423,7 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Application.Caching.TableCache.Governance.GovernedTableCacheExecutionService", "Governed table cache execution service (BL-04, REQ-DATA-BL04): executes governed SELECT queries with AST tenant pushdown and bound parameters over embedded cache store; no client text"),
         ("Autheris.Infrastructure.Caching.TableCache.DuckDbPersistentTableCacheStore", "DuckDB persistent table cache store (BL-04, REQ-DATA-BL04): executes internal staging, swapping, insertion and drop statements on embedded cache database with bound parameters; no client text"),
         ("Autheris.Infrastructure.Caching.TableCache.InMemoryTableCacheStore", "In-memory table cache store (BL-04, REQ-DATA-BL04): executes internal memory-table DDL and mutation statements with bound parameters; no client text"),
+        ("Autheris.Api.Hosting.Warmup.DataSourceConnectionWarmup", "Startup pre-warming probe (Issue #254, SEC-PERF254-02): executes read-only constant expression SELECT 1 to verify database connectivity on startup; constants only, no client text"),
     ];
 
     private static bool IsAllowedCommandTextSite(string top) =>
