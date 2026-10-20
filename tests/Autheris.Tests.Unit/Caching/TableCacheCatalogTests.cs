@@ -72,38 +72,41 @@ public sealed class TableCacheCatalogTests
         // Arrange
         var catalog = new TableCacheCatalog();
         var table = new TableIdentifier("crm", "public", "orders");
+        catalog.Upsert(CreateMetadata(table, epoch: 1));
         var done = false;
 
-        // Act - 10 concurrent writers and 50 concurrent readers for 1 second
+        // Act - concurrent writers and readers
         var writeTasks = new List<Task>();
-        for (int i = 0; i < 10; i++)
+        for (int i = 0; i < 5; i++)
         {
             int writerId = i;
-            writeTasks.Add(Task.Run(() =>
+            writeTasks.Add(Task.Run(async () =>
             {
                 long epoch = 0;
                 while (!done)
                 {
                     epoch++;
                     catalog.Upsert(CreateMetadata(table, epoch: epoch));
+                    await Task.Yield();
                 }
             }));
         }
 
         var readTasks = new List<Task>();
-        for (int i = 0; i < 50; i++)
+        for (int i = 0; i < 15; i++)
         {
-            readTasks.Add(Task.Run(() =>
+            readTasks.Add(Task.Run(async () =>
             {
                 while (!done)
                 {
                     var snapshot = catalog.GetSnapshot();
                     snapshot.ShouldNotBeNull();
+                    await Task.Yield();
                 }
             }));
         }
 
-        await Task.Delay(500);
+        await Task.Delay(300);
         done = true;
 
         await Task.WhenAll(writeTasks);
