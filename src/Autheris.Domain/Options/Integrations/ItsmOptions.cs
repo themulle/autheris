@@ -41,6 +41,7 @@ public sealed class PluginsOptions
     public string Directory { get; init; } = "plugins";
     public bool RequireIntegrityManifest { get; init; } = false;
     public Dictionary<string, string> TrustedPluginHashes { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    public Autheris.Domain.Options.Plugins.AuthPluginOptions Auth { get; init; } = new();
 }
 
 public sealed class ExtensibilityOptions

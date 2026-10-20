@@ -1,16 +1,21 @@
 namespace Autheris.Api.Middleware;
 
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Security;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Autheris.Api.Security;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Plugins.Auth;
 using Autheris.Application.Security;
 using Autheris.Domain.Audit;
+using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Plugins.Auth;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -220,6 +225,60 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
         if (await DenyByRegistryAsync(context, securityContext).ConfigureAwait(false))
         {
             return;
+        }
+
+        // Extension Point 1A: Role & Group SID Enrichment
+        var authPluginHost = context.RequestServices?.GetService<IAuthPluginHost>();
+        var authOptions = context.RequestServices?.GetService<IOptions<GatewayOptions>>()?.Value.Plugins.Auth;
+
+        if (securityContext.IsAuthenticated &&
+            authOptions?.Enabled == true &&
+            authOptions.AllowRoleEnrichment &&
+            authPluginHost != null &&
+            authPluginHost.HasRoleProviders)
+        {
+            var pluginContext = new PluginSecurityContext
+            {
+                TenantId = securityContext.TenantId,
+                UserSid = securityContext.UserSid,
+                GroupSids = securityContext.GroupSids,
+                ExistingTenantRoles = securityContext.TenantRoles,
+                Claims = securityContext.Claims?.ToList() ?? (IReadOnlyList<Claim>)context.User.Claims.ToList(),
+                ClientIp = securityContext.ClientIp,
+                AuthenticationScheme = securityContext.AuthenticationScheme
+            };
+
+            var enrichment = await authPluginHost.EnrichRolesAsync(pluginContext, context.RequestAborted).ConfigureAwait(false);
+            if (!enrichment.IsSuccess)
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                context.Response.ContentType = "application/json";
+                var errorCode = enrichment.ErrorCode ?? "AUTH_PLUGIN_FAILED";
+                await context.Response.WriteAsync(
+                    $"{{\"errors\":[{{\"message\":\"Authentication plugin execution failed.\",\"code\":\"{errorCode}\"}}]}}").ConfigureAwait(false);
+                return;
+            }
+
+            if (enrichment.Result.AddedRoles.Count > 0 || enrichment.Result.AddedGroupSids.Count > 0)
+            {
+                var enrichedRoles = new HashSet<string>(securityContext.TenantRoles, StringComparer.OrdinalIgnoreCase);
+                foreach (var role in enrichment.Result.AddedRoles)
+                {
+                    enrichedRoles.Add(role);
+                }
+
+                var enrichedSids = new HashSet<Sid>(securityContext.GroupSids);
+                foreach (var sid in enrichment.Result.AddedGroupSids)
+                {
+                    enrichedSids.Add(sid);
+                }
+
+                securityContext = securityContext with
+                {
+                    TenantRoles = enrichedRoles,
+                    GroupSids = enrichedSids
+                };
+            }
         }
 
         // Populate both canonical context and legacy item key for zero-downtime migration

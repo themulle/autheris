@@ -798,7 +798,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             _memoryCache,
             rowPolicyFactory: _typedPolicies?.RowPolicies,
             maskPolicyFactory: _typedPolicies?.MaskPolicies,
-            callerAttributes: _typedPolicies?.CallerAttributes);
+            callerAttributes: _typedPolicies?.CallerAttributes,
+            authPluginHost: _typedPolicies?.AuthPlugins);
 
     private System.Net.IPAddress ResolveClientIp()
     {

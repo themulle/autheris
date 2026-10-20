@@ -154,6 +154,12 @@ public static class GatewayApplicationBuilderExtensions
             pluginManager.LoadPluginsFromDirectory(gatewayOptions.Plugins.Directory);
         }
 
+        var authPluginHost = app.Services.GetService<Autheris.Application.Plugins.Auth.IAuthPluginHost>();
+        if (authPluginHost != null && !string.IsNullOrWhiteSpace(gatewayOptions.Plugins.Directory))
+        {
+            authPluginHost.LoadPluginsFromDirectory(gatewayOptions.Plugins.Directory);
+        }
+
         app.UseWebSockets();
         // GraphQL API endpoint: Nitro (Banana Cake Pop) UI is disabled on /graphql so it serves strictly as
         // a headless, deterministic machine-to-machine API without HTML multiplexing.

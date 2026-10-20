@@ -101,7 +101,8 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
             _contractManager,
             rowPolicyFactory: _typedPolicies?.RowPolicies,
             maskPolicyFactory: _typedPolicies?.MaskPolicies,
-            restrictedScopes: _restrictedScopes)
+            restrictedScopes: _restrictedScopes,
+            authPluginHost: _typedPolicies?.AuthPlugins)
             .DecideAsync(query, ct).ConfigureAwait(false);
         if (!decision.IsAllowed)
         {

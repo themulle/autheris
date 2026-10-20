@@ -192,6 +192,14 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Policy.RowPolicyFactory>();
         services.AddSingleton<Autheris.Application.Sql.Masking.SqlDataMaskingProvider>();
         services.AddSingleton<Autheris.Application.Policy.ColumnMaskPolicyFactory>();
+        services.AddSingleton<Autheris.Application.Plugins.Auth.AuthPluginRoleEscalationGuard>(sp =>
+            new Autheris.Application.Plugins.Auth.AuthPluginRoleEscalationGuard(
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value.Plugins.Auth,
+                sp.GetService<Microsoft.Extensions.Logging.ILogger<Autheris.Application.Plugins.Auth.AuthPluginRoleEscalationGuard>>(),
+                sp.GetService<Autheris.Application.Audit.IAuditWriter>()));
+        services.AddSingleton<Autheris.Infrastructure.Plugins.Auth.GuardedPluginInvoker>();
+        services.AddSingleton<Autheris.Application.Plugins.Auth.IAuthPluginHost, Autheris.Infrastructure.Plugins.Auth.AuthPluginHost>();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<GatewayOptions>, Autheris.Application.Plugins.Auth.AuthPluginOptionsValidator>();
         services.AddSingleton<Autheris.Application.Policy.TypedPolicySources>();
         // WP-X0l: assembles the typed GovernancePolicy of a statement (no caller until X1). The catalog provider is registered with the storage.
         services.AddSingleton<Autheris.Application.Sql.Policy.GovernancePolicyFactory>();

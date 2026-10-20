@@ -44,19 +44,22 @@ public sealed class CallerAttributeResolver : ICallerAttributeResolver, ICallerA
     private readonly ConcurrentDictionary<string, Breaker> _breakers = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _bulkheads = new(StringComparer.Ordinal);
     private readonly ConditionalWeakTable<ClaimsPrincipal, CallerAttributeRequestState> _states = new();
+    private readonly Autheris.Application.Plugins.Auth.IAuthPluginHost? _authPluginHost;
 
     public CallerAttributeResolver(
         ICallerAttributeRegistry registry,
         IEnumerable<ICallerAttributeProvider> providers,
         IOptions<GatewayOptions> options,
         TimeProvider? time = null,
-        ILogger<CallerAttributeResolver>? logger = null)
+        ILogger<CallerAttributeResolver>? logger = null,
+        Autheris.Application.Plugins.Auth.IAuthPluginHost? authPluginHost = null)
     {
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _providers = (providers ?? []).GroupBy(p => p.Kind, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Last(), StringComparer.Ordinal);
         _options = options?.Value?.CallerAttributes ?? new CallerAttributeOptions();
         _time = time ?? TimeProvider.System;
         _logger = logger;
+        _authPluginHost = authPluginHost;
         _cache = new SingleFlightKeySetCache<ResolvedAttributeEntry>(_options.Cache.SizeLimitBytes, _time);
     }
 
@@ -212,7 +215,14 @@ public sealed class CallerAttributeResolver : ICallerAttributeResolver, ICallerA
 
         if (!_providers.TryGetValue(kind, out var provider))
         {
-            return CallerAttributeResult.Failed("ProviderUnavailable");
+            if (_authPluginHost != null && _authPluginHost.TryGetCallerAttributeProvider(kind, out var pluginProvider) && pluginProvider != null)
+            {
+                provider = pluginProvider;
+            }
+            else
+            {
+                return CallerAttributeResult.Failed("ProviderUnavailable");
+            }
         }
 
         int max = Math.Max(1, Math.Min(definition.MaxValues, _options.MaxValuesHardCap));

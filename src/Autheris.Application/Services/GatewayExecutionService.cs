@@ -578,7 +578,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             _memoryCache,
             rowPolicyFactory: _typedPolicies?.RowPolicies,
             maskPolicyFactory: _typedPolicies?.MaskPolicies,
-            callerAttributes: _typedPolicies?.CallerAttributes);
+            callerAttributes: _typedPolicies?.CallerAttributes,
+            authPluginHost: _typedPolicies?.AuthPlugins);
 
     /// <summary>
     /// Virtual filters: an in-memory row filter cannot evaluate their subqueries (it would return nothing and look like
