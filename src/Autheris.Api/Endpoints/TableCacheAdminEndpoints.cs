@@ -41,9 +41,9 @@ public static class TableCacheAdminEndpoints
                 await manager.ForceRefreshAsync(table, ct).ConfigureAwait(false);
                 return Results.Ok(new { Message = $"Table cache refresh initiated for '{table}'." });
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status500InternalServerError);
+                return Results.Problem(detail: "Table cache refresh operation failed.", statusCode: StatusCodes.Status500InternalServerError);
             }
         });
 

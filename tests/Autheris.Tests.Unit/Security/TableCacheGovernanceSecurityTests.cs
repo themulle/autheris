@@ -33,6 +33,7 @@ public sealed class TableCacheGovernanceSecurityTests : IDisposable
     private readonly TableCacheOptions _options;
     private readonly InMemoryTableCacheStore _store;
     private readonly TableCacheCatalog _catalog;
+    private readonly IAuditLogRepository _auditRepo;
     private readonly byte[] _masterKey = Encoding.UTF8.GetBytes("01234567890123456789012345678901");
 
     public TableCacheGovernanceSecurityTests()
@@ -56,6 +57,7 @@ public sealed class TableCacheGovernanceSecurityTests : IDisposable
 
         _store = new InMemoryTableCacheStore(Options.Create(_options));
         _catalog = new TableCacheCatalog();
+        _auditRepo = Substitute.For<IAuditLogRepository>();
     }
 
     public void Dispose()
@@ -96,7 +98,7 @@ public sealed class TableCacheGovernanceSecurityTests : IDisposable
         var table = new TableIdentifier("crm", "public", "customers");
         await SeedTableDataAsync(table);
 
-        var service = new GovernedTableCacheExecutionService(_catalog, _store, Options.Create(_options));
+        var service = new GovernedTableCacheExecutionService(_catalog, _store, Options.Create(_options), _auditRepo);
 
         var unauthorizedCaller = new TableCacheCallerContext(
             Principal: new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "malicious_user")])),
@@ -119,7 +121,7 @@ public sealed class TableCacheGovernanceSecurityTests : IDisposable
         var table = new TableIdentifier("crm", "public", "customers");
         await SeedTableDataAsync(table);
 
-        var service = new GovernedTableCacheExecutionService(_catalog, _store, Options.Create(_options));
+        var service = new GovernedTableCacheExecutionService(_catalog, _store, Options.Create(_options), _auditRepo);
 
         var callerAlpha = new TableCacheCallerContext(
             Principal: new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "user_alpha")])),
@@ -155,7 +157,7 @@ public sealed class TableCacheGovernanceSecurityTests : IDisposable
         var table = new TableIdentifier("crm", "public", "customers");
         await SeedTableDataAsync(table);
 
-        var service = new GovernedTableCacheExecutionService(_catalog, _store, Options.Create(_options));
+        var service = new GovernedTableCacheExecutionService(_catalog, _store, Options.Create(_options), _auditRepo);
 
         var caller = new TableCacheCallerContext(
             Principal: new ClaimsPrincipal(new ClaimsIdentity()),
@@ -189,7 +191,7 @@ public sealed class TableCacheGovernanceSecurityTests : IDisposable
         var table = new TableIdentifier("crm", "public", "customers");
         await SeedTableDataAsync(table);
 
-        var service = new GovernedTableCacheExecutionService(_catalog, _store, Options.Create(_options));
+        var service = new GovernedTableCacheExecutionService(_catalog, _store, Options.Create(_options), _auditRepo);
 
         // Caller has RLS attribute dept_code = 'FIN'
         var caller = new TableCacheCallerContext(
@@ -333,6 +335,7 @@ public sealed class TableCacheGovernanceSecurityTests : IDisposable
             _catalog,
             _store,
             Options.Create(_options),
+            _auditRepo,
             consentService: consentService);
 
         var caller = new TableCacheCallerContext(
@@ -385,6 +388,7 @@ public sealed class TableCacheGovernanceSecurityTests : IDisposable
             _catalog,
             _store,
             Options.Create(shortStaleOptions),
+            _auditRepo,
             timeProvider: timeProvider);
 
         var caller = new TableCacheCallerContext(

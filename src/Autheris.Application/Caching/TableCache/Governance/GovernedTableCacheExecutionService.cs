@@ -17,6 +17,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options.TableCache;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -50,7 +51,7 @@ public sealed class GovernedTableCacheExecutionService
     private readonly ITableCacheCatalog _catalog;
     private readonly ITableCacheStore _store;
     private readonly IConsentResolutionService? _consentService;
-    private readonly IAuditLogRepository? _auditRepo;
+    private readonly IAuditLogRepository _auditRepo;
     private readonly TableCacheOptions _options;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<GovernedTableCacheExecutionService>? _logger;
@@ -59,16 +60,16 @@ public sealed class GovernedTableCacheExecutionService
         ITableCacheCatalog catalog,
         ITableCacheStore store,
         IOptions<TableCacheOptions> options,
+        IAuditLogRepository auditRepo,
         IConsentResolutionService? consentService = null,
-        IAuditLogRepository? auditRepo = null,
         TimeProvider? timeProvider = null,
         ILogger<GovernedTableCacheExecutionService>? logger = null)
     {
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _options = (options ?? throw new ArgumentNullException(nameof(options))).Value;
+        _auditRepo = auditRepo ?? throw new ArgumentNullException(nameof(auditRepo));
         _consentService = consentService;
-        _auditRepo = auditRepo;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger;
     }
@@ -102,12 +103,14 @@ public sealed class GovernedTableCacheExecutionService
         if (_consentService != null)
         {
             var sid = new Sid(caller.Principal.Identity?.Name ?? "anonymous");
+            var scopes = TokenAccessScope.GetScopeSet(caller.Principal.Claims);
             var consentDecision = _consentService.ResolveAccess(
                 userSid: sid,
                 subjectGroupSids: new HashSet<Sid>(),
                 userRoles: caller.Roles ?? new HashSet<string>(),
                 table: table,
-                activeConsents: caller.ActiveConsents ?? []);
+                activeConsents: caller.ActiveConsents ?? [],
+                callerScopes: scopes.Count > 0 ? scopes : null);
 
             if (!consentDecision.IsAllowed)
             {
@@ -255,35 +258,32 @@ public sealed class GovernedTableCacheExecutionService
         // -------------------------------------------------------------------
         // SEC-BL04-13: Comprehensive WORM Audit Trail Parity
         // -------------------------------------------------------------------
-        if (_auditRepo != null)
+        var queryHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sql)));
+        var auditDetails = new Dictionary<string, object?>
         {
-            var queryHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sql)));
-            var auditDetails = new Dictionary<string, object?>
-            {
-                ["CacheHit"] = true,
-                ["GenerationEpoch"] = metadata.GenerationEpoch,
-                ["InternalStoragePath"] = metadata.InternalStoragePath,
-                ["QueryHash"] = queryHash,
-                ["MaskedColumns"] = maskedColumnList,
-                ["InjectedFilters"] = injectedFilters,
-                ["IsStale"] = isStale,
-                ["ExecutionDurationMs"] = stopwatch.ElapsedMilliseconds,
-                ["RowCount"] = resultRows.Count
-            };
+            ["CacheHit"] = true,
+            ["GenerationEpoch"] = metadata.GenerationEpoch,
+            ["InternalStoragePath"] = metadata.InternalStoragePath,
+            ["QueryHash"] = queryHash,
+            ["MaskedColumns"] = maskedColumnList,
+            ["InjectedFilters"] = injectedFilters,
+            ["IsStale"] = isStale,
+            ["ExecutionDurationMs"] = stopwatch.ElapsedMilliseconds,
+            ["RowCount"] = resultRows.Count
+        };
 
-            var auditEntry = new AuditLogEntry
-            {
-                TenantId = caller.TenantId,
-                OccurredAt = now,
-                EventType = "TABLE_CACHE_QUERY",
-                TargetTable = table.ToString(),
-                Decision = "ALLOW",
-                Query = sql,
-                DetailsJson = JsonSerializer.Serialize(auditDetails)
-            };
+        var auditEntry = new AuditLogEntry
+        {
+            TenantId = caller.TenantId,
+            OccurredAt = now,
+            EventType = "TABLE_CACHE_QUERY",
+            TargetTable = table.ToString(),
+            Decision = "ALLOW",
+            Query = sql,
+            DetailsJson = JsonSerializer.Serialize(auditDetails)
+        };
 
-            await _auditRepo.RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
-        }
+        await _auditRepo.RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
 
         return new GovernedCacheQueryResult(
             Columns: resultColumns,
