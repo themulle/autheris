@@ -28,6 +28,7 @@ public static class TableCacheAdminEndpoints
 
         group.MapPost("/refresh/{tableName}", async (
             string tableName,
+            ITableCacheCatalog catalog,
             ITableCacheManager manager,
             CancellationToken ct) =>
         {
@@ -36,10 +37,15 @@ public static class TableCacheAdminEndpoints
                 return Results.BadRequest($"Invalid table identifier format: '{tableName}'. Expected 'domain.schema.table' or 'schema.table'.");
             }
 
+            if (!catalog.TryGet(table, out var target) || target is null)
+            {
+                return Results.NotFound(new { Message = $"Table '{table}' is not registered in the table cache catalog." });
+            }
+
             try
             {
-                await manager.ForceRefreshAsync(table, ct).ConfigureAwait(false);
-                return Results.Ok(new { Message = $"Table cache refresh initiated for '{table}'." });
+                await manager.ForceRefreshAsync(target.Table, ct).ConfigureAwait(false);
+                return Results.Ok(new { Message = $"Table cache refresh initiated for '{target.Table}'." });
             }
             catch (Exception)
             {
@@ -49,6 +55,7 @@ public static class TableCacheAdminEndpoints
 
         group.MapPost("/invalidate/{tableName}", async (
             string tableName,
+            ITableCacheCatalog catalog,
             ITableCacheInvalidator invalidator,
             CancellationToken ct) =>
         {
@@ -57,8 +64,13 @@ public static class TableCacheAdminEndpoints
                 return Results.BadRequest($"Invalid table identifier format: '{tableName}'. Expected 'domain.schema.table' or 'schema.table'.");
             }
 
-            await invalidator.InvalidateAsync(table, "Admin request", ct).ConfigureAwait(false);
-            return Results.Ok(new { Message = $"Table cache invalidated for '{table}'." });
+            if (!catalog.TryGet(table, out var target) || target is null)
+            {
+                return Results.NotFound(new { Message = $"Table '{table}' is not registered in the table cache catalog." });
+            }
+
+            await invalidator.InvalidateAsync(target.Table, "Admin request", ct).ConfigureAwait(false);
+            return Results.Ok(new { Message = $"Table cache invalidated for '{target.Table}'." });
         });
 
         return endpoints;

@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -67,14 +68,21 @@ public sealed class InMemoryTableCacheStore : ITableCacheStore, IDisposable
         return trimmed;
     }
 
+    public static string GetSafeTableToken(TableIdentifier table)
+    {
+        var raw = $"{table.Domain}_{table.Schema}_{table.TableName}".ToLowerInvariant();
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(raw)));
+        return hash[..16].ToLowerInvariant();
+    }
+
     public static string GetActiveViewName(TableIdentifier table)
     {
-        return SanitizeIdentifier($"{table.Domain}_{table.Schema}_{table.TableName}");
+        return "v_" + GetSafeTableToken(table);
     }
 
     public static string GetShadowTableName(TableIdentifier table, long epoch)
     {
-        return SanitizeIdentifier($"staging_{table.Domain}_{table.Schema}_{table.TableName}_{epoch}");
+        return "st_" + GetSafeTableToken(table) + "_" + Math.Max(0, epoch);
     }
 
     public async Task InitializeTableAsync(TableCacheTargetOptions options, CancellationToken ct = default)
@@ -175,7 +183,7 @@ public sealed class InMemoryTableCacheStore : ITableCacheStore, IDisposable
         DateTimeOffset? expiresAt,
         CancellationToken ct = default)
     {
-        var shadow = SanitizeIdentifier(shadowIdentifier);
+        var shadow = GetShadowTableName(table, epoch);
         var activeView = GetActiveViewName(table);
 
         await _lock.WaitAsync(ct).ConfigureAwait(false);

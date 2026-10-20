@@ -77,22 +77,27 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
         return trimmed;
     }
 
+    public static string GetSafeTableToken(TableIdentifier table)
+    {
+        var raw = $"{table.Domain}_{table.Schema}_{table.TableName}".ToLowerInvariant();
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(raw)));
+        return hash[..16].ToLowerInvariant();
+    }
+
     public string GetTableDirectory(TableIdentifier table)
     {
-        var sanitizedDomain = SanitizeIdentifier(table.Domain);
-        var sanitizedSchema = SanitizeIdentifier(table.Schema);
-        var sanitizedTable = SanitizeIdentifier(table.TableName);
-        return Path.Combine(_options.PersistentDirectory, $"{sanitizedDomain}_{sanitizedSchema}_{sanitizedTable}");
+        var token = GetSafeTableToken(table);
+        return Path.Combine(_options.PersistentDirectory, "tbl_" + token);
     }
 
     public static string GetActiveViewName(TableIdentifier table)
     {
-        return SanitizeIdentifier($"{table.Domain}_{table.Schema}_{table.TableName}");
+        return "v_" + GetSafeTableToken(table);
     }
 
     public static string GetShadowTableName(TableIdentifier table, long epoch)
     {
-        return SanitizeIdentifier($"staging_{table.Domain}_{table.Schema}_{table.TableName}_{epoch}");
+        return "st_" + GetSafeTableToken(table) + "_" + Math.Max(0, epoch);
     }
 
     public async Task InitializeTableAsync(TableCacheTargetOptions options, CancellationToken ct = default)
@@ -214,7 +219,7 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
         var dir = GetTableDirectory(table);
         var activeView = GetActiveViewName(table);
         var dbPath = Path.Combine(dir, $"generation_{epoch}.duckdb");
-        var shadow = SanitizeIdentifier(shadowIdentifier);
+        var shadow = GetShadowTableName(table, epoch);
 
         await _lock.WaitAsync(ct).ConfigureAwait(false);
         try
