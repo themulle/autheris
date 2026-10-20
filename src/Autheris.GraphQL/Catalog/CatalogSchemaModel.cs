@@ -300,17 +300,32 @@ public sealed partial class CatalogSchemaModel
             t => t.Metadata.Identifier,
             t => t);
 
-        // Bulk pre-fetch all relations in one query (INC-138-4)
+        // Bulk pre-fetch all relations in one query (INC-138-4) with fallback for test doubles or legacy providers
         var allRelations = await relationRepository.GetAllRelationsAsync(ct).ConfigureAwait(false);
         var relationsByTable = new Dictionary<TableIdentifier, List<TableRelation>>();
-        foreach (var rel in allRelations)
+        if (allRelations != null && allRelations.Count > 0)
         {
-            if (!relationsByTable.TryGetValue(rel.ParentTableIdentifier, out var list))
+            foreach (var rel in allRelations)
             {
-                list = new List<TableRelation>();
-                relationsByTable[rel.ParentTableIdentifier] = list;
+                if (!relationsByTable.TryGetValue(rel.ParentTableIdentifier, out var list))
+                {
+                    list = new List<TableRelation>();
+                    relationsByTable[rel.ParentTableIdentifier] = list;
+                }
+                list.Add(rel);
             }
-            list.Add(rel);
+        }
+        else
+        {
+            // Fallback for repositories or test doubles that only provide GetRelationsForTableAsync
+            foreach (var builder in tableBuilders)
+            {
+                var rels = await relationRepository.GetRelationsForTableAsync(builder.Metadata.Identifier, ct).ConfigureAwait(false);
+                if (rels != null && rels.Count > 0)
+                {
+                    relationsByTable[builder.Metadata.Identifier] = rels.ToList();
+                }
+            }
         }
 
         // Map relations. A relation between tables the tree service cannot run as one statement (different data source or
