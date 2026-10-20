@@ -263,9 +263,21 @@ public sealed partial class TableAccessPolicy
             }
         }
 
-        if (await IsRebacDeniedAsync(query, ct).ConfigureAwait(false))
+        var rebacBypassed = _options?.IsRebacBypassed == true;
+        var rebacEnforced = !rebacBypassed && (query.Rebac switch
         {
-            return TableAccessDecision.Denied(table, RebacDeniedReason);
+            RebacEnforcement.WhenEnabled => _rebacEvaluator is { IsEnabled: true },
+            _ => RebacTableGate.IsEnforcedOnQueryPaths(_options)
+        });
+
+        bool rebacAllowed = false;
+        if (rebacEnforced)
+        {
+            rebacAllowed = await RebacTableGate.IsAllowedAsync(_rebacEvaluator, query.Tenant, query.UserSid, table, ct).ConfigureAwait(false);
+            if (!rebacAllowed)
+            {
+                return TableAccessDecision.Denied(table, RebacDeniedReason);
+            }
         }
 
         var consentBypassed = _options?.IsConsentBypassed == true;
@@ -367,6 +379,16 @@ public sealed partial class TableAccessPolicy
 
         if (!decision.IsAllowed)
         {
+            if (rebacAllowed)
+            {
+                const string diagnosticNote = "(ReBAC: Allowed, Consent: Denied - Zero-Trust requires an active ALLOW consent for subject or subject's groups)";
+                var reasons = new List<string>(decision.DeniedReasons);
+                if (!reasons.Contains(diagnosticNote))
+                {
+                    reasons.Add(diagnosticNote);
+                }
+                decision = decision with { DeniedReasons = reasons };
+            }
             return decision;
         }
 

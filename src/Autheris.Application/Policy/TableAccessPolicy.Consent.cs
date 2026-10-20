@@ -13,22 +13,6 @@ using Autheris.Domain.Model;
 
 public sealed partial class TableAccessPolicy
 {
-    private async Task<bool> IsRebacDeniedAsync(TableAccessQuery query, CancellationToken ct)
-    {
-        if (_options?.IsRebacBypassed == true)
-        {
-            return false;
-        }
-
-        var enforced = query.Rebac switch
-        {
-            RebacEnforcement.WhenEnabled => _rebacEvaluator is { IsEnabled: true },
-            _ => RebacTableGate.IsEnforcedOnQueryPaths(_options)
-        };
-
-        return enforced &&
-               !await RebacTableGate.IsAllowedAsync(_rebacEvaluator, query.Tenant, query.UserSid, query.Metadata.Identifier, ct).ConfigureAwait(false);
-    }
 
     private async Task<TableAccessDecision> ResolveConsentAsync(TableAccessQuery query, CancellationToken ct)
     {
