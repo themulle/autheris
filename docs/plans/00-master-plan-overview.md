@@ -131,10 +131,10 @@ Assessment: [`INTAKE-2026-10-17`](2026-10-17-issue-intake-assessment.md). All ei
 | 2.8 | **#150** startup warm-up before `/health/ready`, measurement first ([`REQ-OPS-150`](2026-10-17-req-issue-150-startup-warmup-readiness.md)) | M | ✅ | **COMPLETED & VERIFIED ✅** (PR #172, [`PLAN-OPS-150`](2026-10-17-plan-issue-150-startup-warmup-readiness.md), closed) |
 | 2.9 | **#152-#154 INC-2** procedure `limit` after row scoping, `MaxScanRows`, read-only `POST`, error map, `ddl_hash` warning | M | ✅ | **COMPLETED & VERIFIED ✅** (PR #170, [`PLAN-PROC-152-INC2`](2026-10-17-plan-issue-152-154-inc2-procedure-limits.md), closed) |
 | 2.10 | **#146 step A** `displayName` in MCP catalog tools ([`REQ-CAT-146`](2026-10-17-req-issue-146-multilingual-catalog-texts.md)) | S | ✅ | **COMPLETED & VERIFIED ✅** (PR #169, [`PLAN-CAT-146-A`](2026-10-17-plan-issue-146-stepA-catalog-display-name.md), closed) |
-| 3.8 | **#138 INC-2..4** catalog version counter and snapshot, ranking within the visible set, bulk relations and indexes | L | ✅ | **IN ARCHITECTURE DESIGN 🚀** (Gemini 4 Pro: [`PLAN-CAT-138-INC2-5`](2026-10-20-plan-issue-138-catalog-at-scale-inc2-5.md)) |
+| 3.8 | **#138 INC-2..4** catalog version counter and snapshot, ranking within the visible set, bulk relations and indexes | L | ✅ | **COMPLETED & VERIFIED ✅** (Phases 1–5 done, [`PLAN-CAT-138-INC2-5`](2026-10-20-plan-issue-138-catalog-at-scale-inc2-5.md), PR #252) |
 | 3.9 | **#153** stored procedures in catalog and MCP (`REQ-GOV-153`, integrates #152-#154 INC-3/4 and INC-5) | M-L | ✅ | **COMPLETED & VERIFIED ✅** (PR #188, closed) |
 | 3.10 | **#146 steps B/C** per-language texts, language negotiation, multilingual search | M | ✅ | Phase 2 |
-| 4.9 | **#138 INC-5** opt-in embedding providers (no model in the default image) | L | ✅ | **IN ARCHITECTURE DESIGN 🚀** (integrated into [`PLAN-CAT-138-INC2-5`](2026-10-20-plan-issue-138-catalog-at-scale-inc2-5.md)) |
+| 4.9 | **#138 INC-5** opt-in embedding providers (no model in the default image) | L | ✅ | **COMPLETED & VERIFIED ✅** (Phases 1–5 done, integrated into [`PLAN-CAT-138-INC2-5`](2026-10-20-plan-issue-138-catalog-at-scale-inc2-5.md), PR #252) |
 | 4.10 | **#153 INC-5** MCP tool to call procedures | – | ✅ | Consolidated into rank 3.9 (`REQ-GOV-153`) |
 
 ### Issue intake 2026-10-17, second batch (placement confirmed by the owner 2026-10-17)
