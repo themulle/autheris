@@ -125,8 +125,11 @@ jobs:
               exit 1
             fi
             TAGS+=("${IMAGE}:${INPUT_TAG}")
-            if [ "$INPUT_TAG" = "latest" ]; then
+            if [ "$INPUT_TAG" = "latest" ] || [[ "$INPUT_TAG" =~ ^v[0-9] ]]; then
               TAGS+=("${IMAGE}:getting-started")
+              if [[ "$INPUT_TAG" =~ ^v[0-9] ]]; then
+                TAGS+=("${IMAGE}:latest")
+              fi
             fi
           elif [ "$REF_TYPE" = "tag" ]; then
             TAGS+=("${IMAGE}:${REF_NAME}")

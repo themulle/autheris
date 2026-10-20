@@ -96,6 +96,15 @@ public sealed class TableAccessPolicyArch1Tests
         return evaluator;
     }
 
+    private static IRebacEvaluator RebacAllowingAll()
+    {
+        var evaluator = Substitute.For<IRebacEvaluator>();
+        evaluator.IsEnabled.Returns(true);
+        evaluator.CheckAsync(Arg.Any<RebacCheckRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<RebacCheckResult>(RebacCheckResult.Permitted));
+        return evaluator;
+    }
+
     private static GatewayOptions RebacOptions(bool enforceOnQueryPaths = false) => new()
     {
         Rebac = new RebacOptions { Enabled = true, EnforceOnQueryPaths = enforceOnQueryPaths },
@@ -294,5 +303,52 @@ public sealed class TableAccessPolicyArch1Tests
 
         decision.IsAllowed.ShouldBeFalse();
         decision.DeniedReasons.ShouldContain(r => r.Contains("not active"));
+    }
+
+    [Fact]
+    public async Task Policy_RebacAllowed_ConsentDenied_IncludesDiagnosticAttribution()
+    {
+        var policy = Policy(
+            ResolvesTo(false),
+            rebac: RebacAllowingAll(),
+            options: RebacOptions(enforceOnQueryPaths: true));
+
+        var decision = await policy.DecideAsync(Query(), default);
+
+        decision.IsAllowed.ShouldBeFalse();
+        decision.DeniedReasons.ShouldContain("(ReBAC: Allowed, Consent: Denied - Zero-Trust requires an active ALLOW consent for subject or subject's groups)");
+        decision.DeniedReasons.ShouldContain("no consent");
+    }
+
+    [Fact]
+    public async Task Policy_RebacDenied_ReturnsImmediately_WithoutConsentEvaluation()
+    {
+        var consent = Substitute.For<IConsentResolutionService>();
+        var policy = Policy(
+            consent,
+            rebac: RebacDenyingAll(),
+            options: RebacOptions(enforceOnQueryPaths: true));
+
+        var decision = await policy.DecideAsync(Query(), default);
+
+        decision.IsAllowed.ShouldBeFalse();
+        decision.DeniedReasons.Count.ShouldBe(1);
+        decision.DeniedReasons.Single().ShouldBe(TableAccessPolicy.RebacDeniedReason);
+        consent.DidNotReceiveWithAnyArgs().ResolveAccess(default!, default!, default!, default!, default!, default!);
+    }
+
+    [Fact]
+    public async Task Policy_RebacDisabled_ConsentDenied_DoesNotIncludeRebacAttribution()
+    {
+        var policy = Policy(
+            ResolvesTo(false),
+            rebac: Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
+            options: new GatewayOptions());
+
+        var decision = await policy.DecideAsync(Query(), default);
+
+        decision.IsAllowed.ShouldBeFalse();
+        decision.DeniedReasons.ShouldContain("no consent");
+        decision.DeniedReasons.ShouldNotContain("(ReBAC: Allowed, Consent: Denied - Zero-Trust requires an active ALLOW consent for subject or subject's groups)");
     }
 }

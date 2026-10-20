@@ -9,7 +9,7 @@ Dieser Leitfaden beschreibt die End-to-End-Integration von **dbt Core / dbt Clou
 Moderne Data-Mesh- und Analytics-Teams nutzen dbt für Transformationen, Datenqualitätsprüfungen (`dbt test`) und Schemaverträge (`contract: { enforced: true }`).
 
 Das Modul `Dbt` schlägt die Brücke zwischen Data Engineering und GraphQL-API-Governance:
-1. **Streaming Ingestion von `manifest.json`**: Modelle, Seeds, Spaltentypen, DSGVO-Tags und Abhängigkeiten fließen direkt in den [`LineageGraphStore`](file:///root/gql/src/Autheris.Application/Interfaces/ILineageGraphStore.cs).
+1. **Streaming Ingestion von `manifest.json`**: Modelle, Seeds und Quellen (top-level `sources`), Spaltentypen, DSGVO-Tags und Abhängigkeiten fließen direkt in den [`LineageGraphStore`](file:///root/gql/src/Autheris.Application/Interfaces/ILineageGraphStore.cs) und den Governance-Katalog.
 2. **Zero-Trust Proposal & Freigabe-Workflow**: Erkannte PII- und DSGVO-Attribute werden nicht ungeprüft aktiv, sondern erzeugen [`DbtMetadataProposal`](file:///root/gql/src/Autheris.Domain/Model/DbtMetadataModels.cs)-Einträge (`PendingReview`). Nach 4-Augen-Freigabe werden Maskierungsregeln im [`ITableMetadataRepository`](file:///root/gql/src/Autheris.Application/Interfaces/IGovernanceRepository.cs) aktiviert und die Policy-Epoche invalidiert.
 3. **CI/CD Breaking-Change Contract Enforcement**: Der [`DbtContractValidator`](file:///root/gql_extensions/src/Autheris.Extensions/Dbt/DbtContractValidator.cs) gleicht neue dbt-Manifeste im Pull-Request-CI gegen aktive GraphQL-Schemata ab und verhindert Breaking Changes (entfernte Pflichtfelder, Typ-Inkompatibilitäten).
 4. **Bidirektionale Exposures**: Der [`DbtExposurePublisher`](file:///root/gql_extensions/src/Autheris.Extensions/Dbt/DbtExposurePublisher.cs) meldet aktive GraphQL-Entitäten und Konsumenten als `exposures.yaml` an dbt zurück.
@@ -120,7 +120,11 @@ Rückgabe bei Inkompatibilität (HTTP 422):
 
 Da dbt-Manifeste in großen Projekten Hunderte Megabytes groß sein können, liest [`DbtArtifactStreamingParser`](file:///root/gql_extensions/src/Autheris.Extensions/Dbt/DbtArtifactStreamingParser.cs) den Stream asynchron mit konfigurierbarer Tiefen- und Kommentar-Toleranz (`JsonDocumentOptions.MaxDepth = 64`, `CommentHandling = Skip`).
 
-- **Selektive Node-Filterung**: Verarbeitet ausschließlich `model.*`- und `seed.*`-Knoten; Makros, Tests und Operationen werden im Lesepfad übersprungen.
+- **Selektive Node- & Source-Verarbeitung**: Der Parser verarbeitet `model.*`- und `seed.*`-Knoten aus `nodes` sowie alle deklarierten Tabellen unter dem Top-Level-Objekt `sources`. Makros, Tests und Operationen werden im Lesepfad übersprungen.
+- **Mapping von dbt Sources**:
+  - `UniqueId`: `source.<project>.<database>.<schema>.<table>`
+  - `Materialization`: `"source"`
+  - Attribute: Tabellen- und Spaltenbeschreibungen, Typen, Tags (`tags: ["pii", "gdpr"]`), Meta-Dictionaries (`meta: { "owner": "DataPlatform", "pii": "true" }`) und deklarierte Constraints.
 - **Deduplizierung**: Mehrfache Ingestion-Läufe (z. B. nach jedem nächtlichen Build) führen dank Deduplizierungsprüfung nicht zu redundanten Vorschlägen für dieselbe Spalte.
 
 ---
