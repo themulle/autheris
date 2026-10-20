@@ -5,6 +5,9 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 
+using Autheris.Api.Extensions;
+using Autheris.Domain.Audit;
+
 public static class ScimDiscoveryEndpoints
 {
     public static IEndpointRouteBuilder MapScimDiscoveryEndpoints(this IEndpointRouteBuilder app)
@@ -36,7 +39,7 @@ public static class ScimDiscoveryEndpoints
                 }
             };
             return Results.Ok(config);
-        });
+        }).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         group.MapGet("/Schemas", (string realmId) =>
         {
@@ -65,7 +68,7 @@ public static class ScimDiscoveryEndpoints
                 }
             };
             return Results.Ok(schemas);
-        });
+        }).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         group.MapGet("/ResourceTypes", (string realmId) =>
         {
@@ -96,7 +99,7 @@ public static class ScimDiscoveryEndpoints
                 }
             };
             return Results.Ok(resourceTypes);
-        });
+        }).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         return app;
     }

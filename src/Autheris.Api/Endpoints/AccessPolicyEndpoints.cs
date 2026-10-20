@@ -12,6 +12,9 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 
+using Autheris.Api.Extensions;
+using Autheris.Domain.Audit;
+
 public static class AccessPolicyEndpoints
 {
     public static IEndpointRouteBuilder MapAccessPolicyEndpoints(this IEndpointRouteBuilder app)
@@ -31,7 +34,7 @@ public static class AccessPolicyEndpoints
                 policies = policies.Where(p => p.IsActive).ToList();
             }
             return Results.Ok(policies);
-        });
+        }).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         group.MapGet("/{policyId}", async (
             string tenantId,
@@ -41,7 +44,7 @@ public static class AccessPolicyEndpoints
         {
             var policy = await repository.GetPolicyByIdAsync(new TenantId(tenantId), policyId, ct).ConfigureAwait(false);
             return policy != null ? Results.Ok(policy) : Results.NotFound();
-        });
+        }).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         group.MapPost("", async (
             string tenantId,
@@ -66,7 +69,7 @@ public static class AccessPolicyEndpoints
 
             await engine.CreatePolicyAsync(policy, creatorSid, ct).ConfigureAwait(false);
             return Results.Created($"/api/v1/tenants/{tenantId}/governance/policies/{policy.PolicyId}", policy);
-        });
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         group.MapPut("/{policyId}", async (
             string tenantId,
@@ -90,7 +93,7 @@ public static class AccessPolicyEndpoints
 
             await engine.UpdatePolicyAsync(policy, actorSid, ct).ConfigureAwait(false);
             return Results.Ok(policy);
-        });
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         group.MapDelete("/{policyId}", async (
             string tenantId,
@@ -102,7 +105,7 @@ public static class AccessPolicyEndpoints
             var actorSid = httpContext.User.GetUserSid() ?? new Sid("ADMIN");
             await engine.DeletePolicyAsync(new TenantId(tenantId), policyId, actorSid, ct).ConfigureAwait(false);
             return Results.NoContent();
-        });
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         return app;
     }

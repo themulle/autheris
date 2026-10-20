@@ -11,6 +11,9 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 
+using Autheris.Api.Extensions;
+using Autheris.Domain.Audit;
+
 public static class ScimGroupsEndpoints
 {
     public static IEndpointRouteBuilder MapScimGroupsEndpoints(this IEndpointRouteBuilder app)
@@ -31,7 +34,7 @@ public static class ScimGroupsEndpoints
             var result = await scimService.ListGroupsAsync(
                 tenantId, realmId, startIndex ?? 1, count ?? 100, filter, ct).ConfigureAwait(false);
             return Results.Ok(result);
-        });
+        }).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         group.MapGet("/{id}", async (
             string realmId,
@@ -43,7 +46,7 @@ public static class ScimGroupsEndpoints
             var tenantId = httpContext.User.GetTenantId();
             var grp = await scimService.GetGroupAsync(tenantId, realmId, id, ct).ConfigureAwait(false);
             return grp != null ? Results.Ok(grp) : Results.NotFound();
-        });
+        }).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         group.MapPost("", async (
             string realmId,
@@ -55,7 +58,7 @@ public static class ScimGroupsEndpoints
             var tenantId = httpContext.User.GetTenantId();
             var created = await scimService.CreateGroupAsync(tenantId, realmId, groupModel, ct).ConfigureAwait(false);
             return Results.Created($"/scim/v2/{realmId}/Groups/{created.GroupId}", created);
-        });
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         group.MapPut("/{id}", async (
             string realmId,
@@ -68,7 +71,7 @@ public static class ScimGroupsEndpoints
             var tenantId = httpContext.User.GetTenantId();
             var updated = await scimService.UpdateGroupAsync(tenantId, realmId, id, groupModel, ct).ConfigureAwait(false);
             return updated != null ? Results.Ok(updated) : Results.NotFound();
-        });
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         group.MapPatch("/{id}", async (
             string realmId,
@@ -81,7 +84,7 @@ public static class ScimGroupsEndpoints
             var tenantId = httpContext.User.GetTenantId();
             var patched = await scimService.PatchGroupAsync(tenantId, realmId, id, patch, ct).ConfigureAwait(false);
             return patched != null ? Results.Ok(patched) : Results.NotFound();
-        });
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         group.MapDelete("/{id}", async (
             string realmId,
@@ -93,7 +96,7 @@ public static class ScimGroupsEndpoints
             var tenantId = httpContext.User.GetTenantId();
             var deleted = await scimService.DeleteGroupAsync(tenantId, realmId, id, ct).ConfigureAwait(false);
             return deleted ? Results.NoContent() : Results.NotFound();
-        });
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         return app;
     }

@@ -12,6 +12,9 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 
+using Autheris.Api.Extensions;
+using Autheris.Domain.Audit;
+
 public static class FunctionalRightEndpoints
 {
     public sealed record ProposeMappingRequest(string GroupOrRole, string FunctionalRight, RecertClass? RecertClass);
@@ -31,7 +34,7 @@ public static class FunctionalRightEndpoints
         {
             var mappings = await repository.GetMappingsAsync(new TenantId(tenantId), realmId, ct).ConfigureAwait(false);
             return Results.Ok(mappings);
-        });
+        }).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         group.MapPost("", async (
             string tenantId,
@@ -52,7 +55,7 @@ public static class FunctionalRightEndpoints
                 ct).ConfigureAwait(false);
 
             return Results.Created($"/api/v1/tenants/{tenantId}/governance/rights/{realmId}", mapping);
-        });
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         group.MapPost("/approve", async (
             string tenantId,
@@ -72,7 +75,7 @@ public static class FunctionalRightEndpoints
                 ct).ConfigureAwait(false);
 
             return Results.Ok(new { message = "Mapping approved successfully." });
-        });
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
 
         group.MapDelete("", async (
             string tenantId,
@@ -93,7 +96,7 @@ public static class FunctionalRightEndpoints
                 ct).ConfigureAwait(false);
 
             return Results.NoContent();
-        });
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         return app;
     }

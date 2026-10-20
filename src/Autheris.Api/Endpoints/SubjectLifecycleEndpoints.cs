@@ -11,6 +11,9 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 
+using Autheris.Api.Extensions;
+using Autheris.Domain.Audit;
+
 public static class SubjectLifecycleEndpoints
 {
     public sealed record DeprovisionRequest(string UserKey, string RealmId, string Reason);
@@ -42,7 +45,7 @@ public static class SubjectLifecycleEndpoints
                 ct).ConfigureAwait(false);
 
             return Results.Ok(new { message = $"User {request.UserKey} successfully locked and deprovisioned in realm {request.RealmId}." });
-        });
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.TokenRevoked);
 
         group.MapGet("/locks/{realmId}/{userKey}", async (
             string tenantId,
@@ -53,7 +56,7 @@ public static class SubjectLifecycleEndpoints
         {
             var isLocked = await identityStore.IsSubjectLockedAsync(new TenantId(tenantId), realmId, userKey, ct).ConfigureAwait(false);
             return Results.Ok(new { userKey, realmId, isLocked });
-        });
+        }).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         group.MapDelete("/locks/{realmId}/{userKey}", async (
             string tenantId,
@@ -64,7 +67,7 @@ public static class SubjectLifecycleEndpoints
         {
             await identityStore.RemoveLockAsync(new TenantId(tenantId), realmId, userKey, ct).ConfigureAwait(false);
             return Results.NoContent();
-        });
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         return app;
     }
