@@ -7,6 +7,8 @@ public interface ITableMetadataRepository
     Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default);
     Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default);
     Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default);
+    Task<Autheris.Application.Catalog.CatalogVersion> GetCatalogVersionAsync(CancellationToken ct = default)
+        => Task.FromResult(new Autheris.Application.Catalog.CatalogVersion(1, 1));
 
     /// <summary>
     /// Issue #107: upserts the object-level row filter evaluation settings (null deletes the row) in TABLE_ROW_FILTER_STRATEGIES and bumps
@@ -328,6 +330,7 @@ public interface IDataOwnershipRepository
 public interface ITableRelationRepository
 {
     Task<IReadOnlyList<TableRelation>> GetRelationsForTableAsync(TableIdentifier parentTable, CancellationToken ct = default);
+    Task<IReadOnlyList<TableRelation>> GetAllRelationsAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Creates or updates a relation by its natural key (parent table, child table, relation name) together with its ordered key pairs in one

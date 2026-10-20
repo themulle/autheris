@@ -69,4 +69,18 @@ public sealed record CatalogSearchHit(
     IReadOnlyList<TableRelationship> RelatedJoinPaths,
     string? SuggestedGraphQlField,
     string Kind = "table",
-    string? DatasetId = null);
+    string? DatasetId = null,
+    string? EffectiveMode = null);
+
+/// <summary>
+/// Typed key uniquely identifying an entity in the catalog index.
+/// </summary>
+public readonly record struct CatalogEntryKey(string Kind, string Id)
+{
+    public const string KindTable = "table";
+    public const string KindProcedure = "procedure";
+
+    public static CatalogEntryKey ForTable(TableIdentifier table) => new(KindTable, table.ToString());
+    public static CatalogEntryKey ForTable(Guid tableId) => new(KindTable, tableId.ToString("D"));
+    public override string ToString() => $"{Kind}:{Id}";
+}

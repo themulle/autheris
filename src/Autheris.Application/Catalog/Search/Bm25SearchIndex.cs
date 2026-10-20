@@ -70,7 +70,10 @@ public sealed class Bm25SearchIndex
         }
     }
 
-    public IReadOnlyList<(TableIdentifier TableId, double Score, IReadOnlyList<string> MatchedTerms)> Search(string query, int topK = 25)
+    public IReadOnlyList<(TableIdentifier TableId, double Score, IReadOnlyList<string> MatchedTerms)> Search(
+        string query,
+        int topK = 25,
+        Func<TableIdentifier, bool>? isAllowed = null)
     {
         var queryTerms = SmartSchemaTokenizer.Tokenize(query, expandAbbreviations: false);
         if (queryTerms.Length == 0 || _documents.Count == 0) return [];
@@ -79,6 +82,11 @@ public sealed class Bm25SearchIndex
 
         foreach (var doc in _documents)
         {
+            if (isAllowed != null && !isAllowed(doc.TableId))
+            {
+                continue;
+            }
+
             double score = 0.0;
             List<string>? matched = null;
 

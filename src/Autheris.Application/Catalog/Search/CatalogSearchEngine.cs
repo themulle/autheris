@@ -1,8 +1,11 @@
 namespace Autheris.Application.Catalog.Search;
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Security;
@@ -23,6 +26,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
     private readonly ILocalEmbeddingGenerator _embeddingGenerator;
     private readonly IOptions<CatalogSearchOptions> _options;
     private readonly ILogger<CatalogSearchEngine> _logger;
+    private readonly ConcurrentDictionary<string, ReadOnlyMemory<float>> _embeddingCache = new();
 
     private CatalogSearchSnapshot? _currentSnapshot;
 
@@ -112,14 +116,22 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
             }
         }
 
-        // 2. Vektorisierung aller Tabellendokumente
-        var texts = bm25Docs.Select(x => x.Item2).ToList();
-        var vectors = await _embeddingGenerator.GenerateNormalizedEmbeddingsAsync(texts, ct).ConfigureAwait(false);
+        // 2. Vektorisierung aller Tabellendokumente (falls Honest Embedding Provider aktiv)
+        bool vectorAvailable = _embeddingGenerator is not ICatalogEmbeddingGenerator ceg || ceg.IsAvailable;
+        if (_options.Value.EmbeddingProvider == CatalogEmbeddingProvider.None)
+        {
+            vectorAvailable = false;
+        }
 
         var vectorDocs = new List<(TableIdentifier, ReadOnlyMemory<float>)>(tables.Count);
-        for (int i = 0; i < bm25Docs.Count; i++)
+        if (vectorAvailable)
         {
-            vectorDocs.Add((bm25Docs[i].Item1, vectors[i]));
+            var texts = bm25Docs.Select(x => x.Item2).ToList();
+            var vectors = await _embeddingGenerator.GenerateNormalizedEmbeddingsAsync(texts, ct).ConfigureAwait(false);
+            for (int i = 0; i < bm25Docs.Count; i++)
+            {
+                vectorDocs.Add((bm25Docs[i].Item1, vectors[i]));
+            }
         }
 
         // 3. Atomarer Snapshot-Austausch (Zero-Downtime)
@@ -148,21 +160,45 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
             throw new CatalogSearchIndexNotReadyException();
         }
 
-        int rrfK = _options.Value.RrfConstantK;
-        int candidatePoolSize = Math.Clamp(query.Limit * 5, 20, 100);
+        bool isDomainMatch(TableIdentifier id) =>
+            string.IsNullOrWhiteSpace(query.DomainFilter) || 
+            string.Equals(id.Domain, query.DomainFilter.Trim(), StringComparison.OrdinalIgnoreCase);
 
-        // 1. BM25 Ausführung
-        var bm25Hits = query.Mode != CatalogSearchMode.SemanticVector
-            ? snapshot.Bm25Index.Search(query.QueryText, candidatePoolSize)
+        bool isAllowed(TableIdentifier id) =>
+            isDomainMatch(id) && isVisiblePredicate(id);
+
+        bool vectorAvailable = _embeddingGenerator is not ICatalogEmbeddingGenerator ceg || ceg.IsAvailable;
+        if (_options.Value.EmbeddingProvider == CatalogEmbeddingProvider.None)
+        {
+            vectorAvailable = false;
+        }
+
+        string effectiveMode = (query.Mode, vectorAvailable) switch
+        {
+            (CatalogSearchMode.KeywordBm25, _) => "keyword",
+            (_, false) => "keyword",
+            (CatalogSearchMode.SemanticVector, true) => "semantic",
+            (CatalogSearchMode.Hybrid, true) => "hybrid",
+            _ => "keyword"
+        };
+
+        int rrfK = _options.Value.RrfConstantK;
+        int topK = Math.Max(query.Limit * 3, 50);
+
+        // 1. BM25 Ausführung mit Pre-Filtering
+        var bm25Hits = (effectiveMode == "keyword" || effectiveMode == "hybrid")
+            ? snapshot.Bm25Index.Search(query.QueryText, topK, isAllowed: isAllowed)
             : [];
 
-        // 2. Vektor Ausführung
-        var queryVec = query.Mode != CatalogSearchMode.KeywordBm25
-            ? _embeddingGenerator.GenerateNormalizedEmbedding(query.QueryText)
-            : ReadOnlyMemory<float>.Empty;
+        // 2. Vektor Ausführung mit Pre-Filtering
+        ReadOnlyMemory<float> queryVec = ReadOnlyMemory<float>.Empty;
+        if (effectiveMode == "semantic" || effectiveMode == "hybrid")
+        {
+            queryVec = GetOrComputeQueryEmbedding(query.QueryText);
+        }
 
-        var vectorHits = query.Mode != CatalogSearchMode.KeywordBm25
-            ? snapshot.VectorIndex.Search(queryVec, _options.Value.MinVectorSimilarity, candidatePoolSize)
+        var vectorHits = !queryVec.IsEmpty
+            ? snapshot.VectorIndex.Search(queryVec, _options.Value.MinVectorSimilarity, topK, isAllowed: isAllowed)
             : [];
 
         // 3. Reciprocal Rank Fusion (RRF)
@@ -194,11 +230,8 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
             scoreMap[hit.TableId] = (cur.Score + rrf, cur.Bm25, cur.Vec, cur.Terms);
         }
 
-        // 4. Governance ReBAC-Filterung & Join-Graph-Expansion
+        // 4. Governance ReBAC-Filterung (bereits vorab angewendet) & Join-Graph-Expansion
         var finalHits = scoreMap
-            .Where(kvp => isVisiblePredicate(kvp.Key))
-            .Where(kvp => string.IsNullOrWhiteSpace(query.DomainFilter) || 
-                          string.Equals(kvp.Key.Domain, query.DomainFilter.Trim(), StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(kvp => kvp.Value.Score)
             .Take(query.Limit)
             .Select(kvp =>
@@ -232,11 +265,23 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
                     MatchedTerms: kvp.Value.Terms,
                     RelevantColumns: matchedCols,
                     RelatedJoinPaths: relations,
-                    SuggestedGraphQlField: $"{kvp.Key.Domain}_{kvp.Key.TableName}"
+                    SuggestedGraphQlField: $"{kvp.Key.Domain}_{kvp.Key.TableName}",
+                    EffectiveMode: effectiveMode
                 );
             })
             .ToList();
 
         return finalHits;
+    }
+
+    private ReadOnlyMemory<float> GetOrComputeQueryEmbedding(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return ReadOnlyMemory<float>.Empty;
+        }
+
+        var hashKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+        return _embeddingCache.GetOrAdd(hashKey, _ => _embeddingGenerator.GenerateNormalizedEmbedding(text));
     }
 }

@@ -693,7 +693,9 @@ public partial class SqliteGovernanceRepository
                 }
 
                 await IncrementTableEpochInternalAsync(conn, metadata.Identifier, tx, ct);
+                var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
                 await tx.CommitAsync(ct);
+                await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
             }
             catch
             {
@@ -757,9 +759,11 @@ public partial class SqliteGovernanceRepository
                     return null;
                 }
 
+                var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
                 // Queued inside the write scope: the scope disposal applies it under the write gate.
                 QueueMetadataInvalidation(table);
                 await tx.CommitAsync(ct);
+                await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
             }
             catch
             {
@@ -791,9 +795,11 @@ public partial class SqliteGovernanceRepository
                     return null;
                 }
 
+                var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
                 // Queued inside the write scope: the scope disposal applies it under the write gate.
                 QueueMetadataInvalidation(table);
                 await tx.CommitAsync(ct);
+                await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
             }
             catch
             {
@@ -850,10 +856,20 @@ public partial class SqliteGovernanceRepository
                 return null;
             }
 
+            Autheris.Application.Catalog.CatalogVersion? newVersion = null;
+            if (change.Changed)
+            {
+                newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 0, 1, ct).ConfigureAwait(false);
+            }
+
             await tx.CommitAsync(ct);
             if (change.Changed)
             {
                 QueueMetadataInvalidation(table);
+                if (newVersion.HasValue)
+                {
+                    await PublishCatalogChangedEventAsync(newVersion.Value, ct).ConfigureAwait(false);
+                }
             }
 
             return change;
@@ -1035,8 +1051,11 @@ public partial class SqliteGovernanceRepository
     {
         await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
         var conn = scope.Connection;
+        using var tx = conn.BeginTransaction();
+        try
         {
             using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
             cmd.CommandText = @"INSERT INTO DATA_OWNER_DELEGATIONS (id, data_owner_id, delegate_sid, valid_from, valid_to, reason)
                                 VALUES (@id, @ownerId, @delSid, @from, @to, @reason)";
             cmd.Parameters.AddWithValue("@id", delegation.Id.ToString());
@@ -1047,7 +1066,15 @@ public partial class SqliteGovernanceRepository
             cmd.Parameters.AddWithValue("@reason", delegation.Reason);
 
             await cmd.ExecuteNonQueryAsync(ct);
+            var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 0, 1, ct).ConfigureAwait(false);
+            await tx.CommitAsync(ct);
+            await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
             return delegation;
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
         }
     }
 
@@ -1303,7 +1330,9 @@ public partial class SqliteGovernanceRepository
         }
 
         ct.ThrowIfCancellationRequested();
+        var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
         tx.Commit();
+        await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
         return new RelationWriteResult(Guid.Parse(storedId), created, keysChanged);
     }
 
@@ -1346,11 +1375,129 @@ public partial class SqliteGovernanceRepository
     {
         await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
         var conn = scope.Connection;
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = @"UPDATE TABLE_RELATIONS SET allow_cross_data_source = @allowed WHERE id = @id";
+            cmd.Parameters.AddWithValue("@id", relationId.ToString());
+            cmd.Parameters.AddWithValue("@allowed", allowCrossDataSource ? 1 : 0);
+            int rows = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            if (rows > 0)
+            {
+                var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
+                await tx.CommitAsync(ct).ConfigureAwait(false);
+                await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
+                return true;
+            }
+
+            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            return false;
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    public async Task<Autheris.Application.Catalog.CatalogVersion> GetCatalogVersionAsync(CancellationToken ct = default)
+    {
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        using var cmd = scope.Connection.CreateCommand();
+        cmd.CommandText = "SELECT structure_version, content_version FROM CATALOG_STATE WHERE id = 1;";
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return new Autheris.Application.Catalog.CatalogVersion(reader.GetInt64(0), reader.GetInt64(1));
+        }
+        return new Autheris.Application.Catalog.CatalogVersion(1, 1);
+    }
+
+    public async Task<IReadOnlyList<TableRelation>> GetAllRelationsAsync(CancellationToken ct = default)
+    {
+        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
+
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"UPDATE TABLE_RELATIONS SET allow_cross_data_source = @allowed WHERE id = @id";
-        cmd.Parameters.AddWithValue("@id", relationId.ToString());
-        cmd.Parameters.AddWithValue("@allowed", allowCrossDataSource ? 1 : 0);
-        int rows = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        return rows > 0;
+        cmd.CommandText = @"SELECT r.id, r.parent_table_id, r.child_table_id, r.relation_name, r.cardinality,
+                                   COALESCE(tp.source_name, 'default'), tp.schema_name, tp.table_name,
+                                   COALESCE(tc.source_name, 'default'), tc.schema_name, tc.table_name,
+                                   k.key_ordinal, k.parent_column, k.child_column,
+                                   COALESCE(r.allow_cross_data_source, 0)
+                            FROM TABLE_RELATIONS r
+                            JOIN TABLES tp ON r.parent_table_id = tp.id
+                            JOIN TABLES tc ON r.child_table_id = tc.id
+                            LEFT JOIN TABLE_RELATION_KEYS k ON k.relation_id = r.id
+                            ORDER BY r.id, k.key_ordinal";
+
+        var rows = new List<RelationRowData>();
+        using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                rows.Add(new RelationRowData(
+                    reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4),
+                    new TableIdentifier(reader.GetString(5), reader.GetString(6), reader.GetString(7)),
+                    new TableIdentifier(reader.GetString(8), reader.GetString(9), reader.GetString(10)),
+                    reader.IsDBNull(11) ? null : reader.GetInt32(11),
+                    reader.IsDBNull(12) ? null : reader.GetString(12),
+                    reader.IsDBNull(13) ? null : reader.GetString(13),
+                    !reader.IsDBNull(14) && reader.GetInt64(14) != 0));
+            }
+        }
+
+        return RelationRowAssembler.Assemble(rows, _logger);
+    }
+
+    private async Task<Autheris.Application.Catalog.CatalogVersion> BumpCatalogVersionInternalAsync(
+        SqliteConnection conn,
+        SqliteTransaction tx,
+        long structureDelta,
+        long contentDelta,
+        CancellationToken ct)
+    {
+        if (structureDelta < 0 || contentDelta < 0 || (structureDelta == 0 && contentDelta == 0))
+        {
+            throw new ArgumentException("Version deltas must be non-negative with at least one positive delta.");
+        }
+
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = @"UPDATE CATALOG_STATE
+                            SET structure_version = structure_version + @structureDelta,
+                                content_version = content_version + @contentDelta,
+                                updated_at = @now
+                            WHERE id = 1
+                            RETURNING structure_version, content_version;";
+        cmd.Parameters.AddWithValue("@structureDelta", structureDelta);
+        cmd.Parameters.AddWithValue("@contentDelta", contentDelta);
+        cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
+
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return new Autheris.Application.Catalog.CatalogVersion(reader.GetInt64(0), reader.GetInt64(1));
+        }
+        return new Autheris.Application.Catalog.CatalogVersion(1, 1);
+    }
+
+    private async Task PublishCatalogChangedEventAsync(Autheris.Application.Catalog.CatalogVersion version, CancellationToken ct)
+    {
+        if (_eventBus != null)
+        {
+            try
+            {
+                await _eventBus.PublishAsync(
+                    Autheris.Application.Catalog.ICatalogVersionProvider.CatalogChangedEventChannel,
+                    new Autheris.Application.Catalog.CatalogChangedEvent(version.StructureVersion, version.ContentVersion, DateTimeOffset.UtcNow),
+                    ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to publish catalog changed event; polling will detect changes.");
+            }
+        }
     }
 }

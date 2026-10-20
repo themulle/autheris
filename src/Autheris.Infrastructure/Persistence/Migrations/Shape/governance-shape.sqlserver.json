@@ -921,6 +921,35 @@
       "indexes": []
     },
     {
+      "name": "CATALOG_STATE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "structure_version",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "content_version",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "updated_at",
+          "type": "DATETIMEOFFSET",
+          "family": "datetime"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
       "name": "CLOUDEVENT_SUBSCRIPTIONS",
       "columns": [
         {
@@ -2102,6 +2131,20 @@
         "id"
       ],
       "indexes": [
+        {
+          "name": "ix_table_relations_child",
+          "unique": false,
+          "columns": [
+            "child_table_id"
+          ]
+        },
+        {
+          "name": "ix_table_relations_parent",
+          "unique": false,
+          "columns": [
+            "parent_table_id"
+          ]
+        },
         {
           "name": "UX_TABLE_RELATIONS_NATURAL",
           "unique": true,

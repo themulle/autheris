@@ -264,6 +264,16 @@ internal sealed class SqliteBaselineSchema
             CREATE INDEX IF NOT EXISTS ix_tables_natural_ci
                 ON TABLES (source_name COLLATE NOCASE, schema_name COLLATE NOCASE, table_name COLLATE NOCASE);
 
+            CREATE TABLE IF NOT EXISTS CATALOG_STATE (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                structure_version INTEGER NOT NULL DEFAULT 1,
+                content_version INTEGER NOT NULL DEFAULT 1,
+                updated_at TEXT NOT NULL
+            );
+
+            INSERT OR IGNORE INTO CATALOG_STATE (id, structure_version, content_version, updated_at)
+            VALUES (1, 1, 1, '1970-01-01T00:00:00Z');
+
             CREATE TABLE IF NOT EXISTS TABLE_RELATIONS (
                 id TEXT PRIMARY KEY,
                 parent_table_id TEXT NOT NULL,
@@ -276,6 +286,8 @@ internal sealed class SqliteBaselineSchema
             -- Issue #151: composite-key relations. One row per ordered key pair; column names are validated on write.
             CREATE UNIQUE INDEX IF NOT EXISTS UX_TABLE_RELATIONS_NATURAL
                 ON TABLE_RELATIONS (parent_table_id, child_table_id, relation_name);
+            CREATE INDEX IF NOT EXISTS IX_TABLE_RELATIONS_PARENT ON TABLE_RELATIONS (parent_table_id);
+            CREATE INDEX IF NOT EXISTS IX_TABLE_RELATIONS_CHILD ON TABLE_RELATIONS (child_table_id);
             CREATE TABLE IF NOT EXISTS TABLE_RELATION_KEYS (
                 relation_id TEXT NOT NULL,
                 key_ordinal INTEGER NOT NULL CHECK (key_ordinal >= 1),

@@ -160,6 +160,9 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
 
         public Task<bool> SetRelationCrossDataSourceOptInAsync(Guid relationId, bool allowCrossDataSource, CancellationToken ct = default) =>
             Task.FromResult(true);
+
+        public Task<IReadOnlyList<TableRelation>> GetAllRelationsAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<TableRelation>>(relations);
     }
 
     [Fact]
