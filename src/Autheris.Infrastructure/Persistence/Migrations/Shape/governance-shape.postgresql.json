@@ -902,6 +902,35 @@
       "indexes": []
     },
     {
+      "name": "catalog_state",
+      "columns": [
+        {
+          "name": "id",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "structure_version",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "content_version",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "family": "datetime"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
       "name": "cloudevent_subscriptions",
       "columns": [
         {
@@ -2083,6 +2112,20 @@
         "id"
       ],
       "indexes": [
+        {
+          "name": "ix_table_relations_child",
+          "unique": false,
+          "columns": [
+            "child_table_id"
+          ]
+        },
+        {
+          "name": "ix_table_relations_parent",
+          "unique": false,
+          "columns": [
+            "parent_table_id"
+          ]
+        },
         {
           "name": "ux_table_relations_natural",
           "unique": true,

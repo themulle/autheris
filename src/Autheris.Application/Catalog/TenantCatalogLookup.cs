@@ -47,7 +47,7 @@ public sealed class TenantCatalogLookup : ICatalogLookup, IDisposable
 
         if (eventBus != null)
         {
-            _eventSubscription = eventBus.Subscribe<string>(
+            _eventSubscription = eventBus.Subscribe<object>(
                 ICatalogVersionProvider.CatalogChangedEventChannel,
                 _ =>
                 {

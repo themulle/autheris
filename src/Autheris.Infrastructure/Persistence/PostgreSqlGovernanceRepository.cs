@@ -70,6 +70,7 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, ICo
     private string? _auditChainViolation;
     private readonly GatewayOptions? _options;
     private readonly ICallerContextProvider? _callerContextProvider;
+    private readonly IEventBus? _eventBus;
 
     public PostgreSqlGovernanceRepository(
         IEpochValidationService epochValidationService,
@@ -78,7 +79,8 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, ICo
         IKeyVaultSecretProvider secretProvider,
         IAuditChainAnchorStore auditAnchorStore,
         ICallerContextProvider callerContextProvider,
-        ILogger<PostgreSqlGovernanceRepository>? logger = null)
+        ILogger<PostgreSqlGovernanceRepository>? logger = null,
+        IEventBus? eventBus = null)
     {
         ArgumentNullException.ThrowIfNull(epochValidationService);
         ArgumentNullException.ThrowIfNull(options);
@@ -89,6 +91,7 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, ICo
 
         _epochValidationService = epochValidationService;
         _logger = logger;
+        _eventBus = eventBus;
         _options = options.Value;
         _callerContextProvider = callerContextProvider;
 

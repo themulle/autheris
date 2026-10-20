@@ -303,6 +303,18 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_table_owners_owner' A
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_tables_natural_ci' AND object_id = OBJECT_ID(N'dbo.TABLES'))
     CREATE INDEX ix_tables_natural_ci ON dbo.TABLES (source_name_lc, schema_name_lc, table_name_lc);
 
+IF OBJECT_ID(N'dbo.CATALOG_STATE', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.CATALOG_STATE (
+        id BIGINT NOT NULL CONSTRAINT PK_CATALOG_STATE PRIMARY KEY CONSTRAINT CK_CATALOG_STATE_SINGLETON CHECK (id = 1),
+        structure_version BIGINT NOT NULL DEFAULT 1,
+        content_version BIGINT NOT NULL DEFAULT 1,
+        updated_at DATETIMEOFFSET NOT NULL DEFAULT SYSDATETIMEOFFSET()
+    );
+    INSERT INTO dbo.CATALOG_STATE (id, structure_version, content_version, updated_at)
+    VALUES (1, 1, 1, '1970-01-01T00:00:00Z');
+END;
+
 IF OBJECT_ID(N'dbo.TABLE_RELATIONS', N'U') IS NULL
 CREATE TABLE dbo.TABLE_RELATIONS (
     id NVARCHAR(128) NOT NULL PRIMARY KEY,
@@ -316,6 +328,11 @@ CREATE TABLE dbo.TABLE_RELATIONS (
 -- Issue #151: composite-key relations. One row per ordered key pair; column names are validated on write.
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_TABLE_RELATIONS_NATURAL' AND object_id = OBJECT_ID(N'dbo.TABLE_RELATIONS'))
     CREATE UNIQUE INDEX UX_TABLE_RELATIONS_NATURAL ON dbo.TABLE_RELATIONS (parent_table_id, child_table_id, relation_name);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_table_relations_parent' AND object_id = OBJECT_ID(N'dbo.TABLE_RELATIONS'))
+    CREATE INDEX ix_table_relations_parent ON dbo.TABLE_RELATIONS (parent_table_id);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_table_relations_child' AND object_id = OBJECT_ID(N'dbo.TABLE_RELATIONS'))
+    CREATE INDEX ix_table_relations_child ON dbo.TABLE_RELATIONS (child_table_id);
 
 IF OBJECT_ID(N'dbo.TABLE_RELATION_KEYS', N'U') IS NULL
 CREATE TABLE dbo.TABLE_RELATION_KEYS (

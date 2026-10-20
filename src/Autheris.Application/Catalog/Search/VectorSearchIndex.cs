@@ -24,7 +24,8 @@ public sealed class VectorSearchIndex
     public IReadOnlyList<(TableIdentifier TableId, double Score)> Search(
         ReadOnlyMemory<float> queryNormalizedVector, 
         float minScore = 0.20f, 
-        int topK = 25)
+        int topK = 25,
+        Func<TableIdentifier, bool>? isAllowed = null)
     {
         if (_records.Length == 0 || queryNormalizedVector.IsEmpty) return [];
         var querySpan = queryNormalizedVector.Span;
@@ -34,6 +35,10 @@ public sealed class VectorSearchIndex
         for (int i = 0; i < _records.Length; i++)
         {
             ref readonly var item = ref _records[i];
+            if (isAllowed != null && !isAllowed(item.TableId))
+            {
+                continue;
+            }
             
             // SIMD AVX2 / AVX-512 Vektorberechnung (0 Allokationen!)
             float similarity = TensorPrimitives.CosineSimilarity(querySpan, item.Vector);

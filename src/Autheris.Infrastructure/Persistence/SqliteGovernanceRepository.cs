@@ -233,6 +233,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IConsen
     private string? _auditChainViolation;
     private readonly GatewayOptions? _options;
     private readonly ICallerContextProvider? _callerContextProvider;
+    private readonly IEventBus? _eventBus;
 
     public SqliteGovernanceRepository(
         IEpochValidationService epochValidationService,
@@ -242,7 +243,8 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IConsen
         IAuditChainAnchorStore auditAnchorStore,
         ICallerContextProvider callerContextProvider,
         IGatewayStatePaths statePaths,
-        ILogger<SqliteGovernanceRepository>? logger = null)
+        ILogger<SqliteGovernanceRepository>? logger = null,
+        IEventBus? eventBus = null)
     {
         ArgumentNullException.ThrowIfNull(epochValidationService);
         ArgumentNullException.ThrowIfNull(options);
@@ -255,6 +257,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IConsen
         _epochValidationService = epochValidationService;
         _writeGate = new ReadinessGatedLock(() => _ready, nameof(SqliteGovernanceRepository));
         _logger = logger;
+        _eventBus = eventBus;
         _options = options.Value;
         _callerContextProvider = callerContextProvider;
         var connStr = statePaths.ResolveGovernanceConnectionString(options.Value?.GovernanceDb?.ConnectionString);

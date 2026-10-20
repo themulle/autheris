@@ -48,6 +48,7 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
     private string? _auditChainViolation;
     private readonly GatewayOptions? _options;
     private readonly ICallerContextProvider? _callerContextProvider;
+    private readonly IEventBus? _eventBus;
 
     public SqlServerGovernanceRepository(
         IEpochValidationService epochValidationService,
@@ -56,7 +57,8 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
         IKeyVaultSecretProvider secretProvider,
         IAuditChainAnchorStore auditAnchorStore,
         ICallerContextProvider callerContextProvider,
-        ILogger<SqlServerGovernanceRepository>? logger = null)
+        ILogger<SqlServerGovernanceRepository>? logger = null,
+        IEventBus? eventBus = null)
     {
         ArgumentNullException.ThrowIfNull(epochValidationService);
         ArgumentNullException.ThrowIfNull(options);
@@ -67,6 +69,7 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
 
         _epochValidationService = epochValidationService;
         _logger = logger;
+        _eventBus = eventBus;
         _options = options.Value;
         _callerContextProvider = callerContextProvider;
 

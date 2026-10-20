@@ -40,7 +40,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
 
     // One volatile reference so readers never observe a fingerprint paired with another build's omissions.
     private volatile BuiltState _built = new(null, []);
-    private volatile string? _builtVersion;
+    private long _builtStructureVersion = -1;
     private int _checking;
 
     public CatalogGraphQlTypeModule(
@@ -79,19 +79,20 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
 
         try
         {
-            if (_versionProvider != null && _builtVersion != null)
+            var builtVer = Volatile.Read(ref _builtStructureVersion);
+            if (_versionProvider != null && builtVer >= 0)
             {
                 try
                 {
-                    var currentVersion = await _versionProvider.GetVersionAsync(ct).ConfigureAwait(false);
-                    if (string.Equals(currentVersion, _builtVersion, StringComparison.Ordinal))
+                    var currentVersion = await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
+                    if (currentVersion.StructureVersion == builtVer)
                     {
                         return false;
                     }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    _logger?.LogDebug(ex, "GraphQL catalog version check failed; falling back to schema fingerprint check.");
+                    _logger?.LogDebug(ex, "GraphQL catalog structure version check failed; falling back to schema fingerprint check.");
                 }
             }
 
@@ -155,7 +156,8 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
             _built = new BuiltState(schemaModel.Fingerprint(), schemaModel.OmittedTables);
             if (_versionProvider != null)
             {
-                _builtVersion = await _versionProvider.GetVersionAsync(cancellationToken).ConfigureAwait(false);
+                var catVer = await _versionProvider.GetCatalogVersionAsync(cancellationToken).ConfigureAwait(false);
+                Volatile.Write(ref _builtStructureVersion, catVer.StructureVersion);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -163,7 +165,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
             _logger?.LogError(ex, "GraphQL catalog schema could not be built; serving the schema without catalog tables until the catalog is reachable.");
             schemaModel = CatalogSchemaModel.Empty;
             _built = new BuiltState(null, []);
-            _builtVersion = null;
+            Volatile.Write(ref _builtStructureVersion, -1);
         }
 
         EnsureRefreshTimer();

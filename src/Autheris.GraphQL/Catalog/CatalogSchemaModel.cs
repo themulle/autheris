@@ -300,12 +300,17 @@ public sealed partial class CatalogSchemaModel
             t => t.Metadata.Identifier,
             t => t);
 
-        // Pre-fetch relations for all active tables in O(N) instead of O(N^2) (R-GQL-7)
-        var relationsByTable = new Dictionary<TableIdentifier, IReadOnlyList<TableRelation>>();
-        foreach (var builder in tableBuilders)
+        // Bulk pre-fetch all relations in one query (INC-138-4)
+        var allRelations = await relationRepository.GetAllRelationsAsync(ct).ConfigureAwait(false);
+        var relationsByTable = new Dictionary<TableIdentifier, List<TableRelation>>();
+        foreach (var rel in allRelations)
         {
-            var rels = await relationRepository.GetRelationsForTableAsync(builder.Metadata.Identifier, ct).ConfigureAwait(false);
-            relationsByTable[builder.Metadata.Identifier] = rels ?? Array.Empty<TableRelation>();
+            if (!relationsByTable.TryGetValue(rel.ParentTableIdentifier, out var list))
+            {
+                list = new List<TableRelation>();
+                relationsByTable[rel.ParentTableIdentifier] = list;
+            }
+            list.Add(rel);
         }
 
         // Map relations. A relation between tables the tree service cannot run as one statement (different data source or

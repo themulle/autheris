@@ -261,6 +261,17 @@ internal static class PostgreSqlBaselineSchema
             CREATE INDEX IF NOT EXISTS ix_tables_natural_ci
                 ON TABLES (LOWER(source_name), LOWER(schema_name), LOWER(table_name));
 
+            CREATE TABLE IF NOT EXISTS CATALOG_STATE (
+                id BIGINT PRIMARY KEY CHECK (id = 1),
+                structure_version BIGINT NOT NULL DEFAULT 1,
+                content_version BIGINT NOT NULL DEFAULT 1,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            INSERT INTO CATALOG_STATE (id, structure_version, content_version, updated_at)
+            VALUES (1, 1, 1, '1970-01-01T00:00:00Z')
+            ON CONFLICT (id) DO NOTHING;
+
             CREATE TABLE IF NOT EXISTS TABLE_RELATIONS (
                 id TEXT PRIMARY KEY,
                 parent_table_id TEXT NOT NULL,
@@ -273,6 +284,8 @@ internal static class PostgreSqlBaselineSchema
             -- Issue #151: composite-key relations. One row per ordered key pair; column names are validated on write.
             CREATE UNIQUE INDEX IF NOT EXISTS ux_table_relations_natural
                 ON TABLE_RELATIONS (parent_table_id, child_table_id, relation_name);
+            CREATE INDEX IF NOT EXISTS ix_table_relations_parent ON TABLE_RELATIONS (parent_table_id);
+            CREATE INDEX IF NOT EXISTS ix_table_relations_child ON TABLE_RELATIONS (child_table_id);
             CREATE TABLE IF NOT EXISTS TABLE_RELATION_KEYS (
                 relation_id TEXT NOT NULL,
                 key_ordinal INTEGER NOT NULL CHECK (key_ordinal >= 1),

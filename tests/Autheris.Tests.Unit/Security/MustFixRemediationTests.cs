@@ -368,5 +368,8 @@ p, auditor, *, {table}, read, true, allow
             }
             return Task.FromResult(false);
         }
+
+        public Task<IReadOnlyList<TableRelation>> GetAllRelationsAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<TableRelation>>(_relations.ToList());
     }
 }

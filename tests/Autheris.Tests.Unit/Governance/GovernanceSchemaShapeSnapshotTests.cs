@@ -113,4 +113,21 @@ public sealed class GovernanceSchemaShapeSnapshotTests
         relationTable.Columns.Select(c => c.Name).ShouldNotContain("join_key_parent");
         relationTable.Columns.Select(c => c.Name).ShouldNotContain("join_key_child");
     }
+
+    [Theory]
+    [InlineData("sqlite", "CATALOG_STATE", "TABLE_RELATIONS", "IX_TABLE_RELATIONS_PARENT", "IX_TABLE_RELATIONS_CHILD")]
+    [InlineData("postgresql", "catalog_state", "table_relations", "ix_table_relations_parent", "ix_table_relations_child")]
+    [InlineData("sqlserver", "CATALOG_STATE", "TABLE_RELATIONS", "ix_table_relations_parent", "ix_table_relations_child")]
+    public void EmbeddedSnapshot_CoversCatalogStateAndRelationIndexes(string engine, string catalogState, string relations, string parentIndex, string childIndex)
+    {
+        var shape = GovernanceSchemaShapeLoader.LoadEmbedded(engine);
+
+        var stateTable = shape.Tables.Single(t => string.Equals(t.Name, catalogState, StringComparison.Ordinal));
+        stateTable.Columns.Select(c => c.Name).ShouldBe(["id", "structure_version", "content_version", "updated_at"]);
+        stateTable.PrimaryKey.ShouldBe(["id"]);
+
+        var relTable = shape.Tables.Single(t => string.Equals(t.Name, relations, StringComparison.Ordinal));
+        relTable.Indexes.Select(i => i.Name).ShouldContain(parentIndex);
+        relTable.Indexes.Select(i => i.Name).ShouldContain(childIndex);
+    }
 }
