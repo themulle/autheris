@@ -149,6 +149,8 @@ public sealed record Table
     public bool IsActive { get; init; } = true;
 
     public DataSourceType DataSourceType { get; init; } = DataSourceType.Sql;
+    public Autheris.Domain.Options.EnforcementMode EnforcementMode { get; init; } = Autheris.Domain.Options.EnforcementMode.AutherisEnforced;
+    public bool IsDelegatedSource => EnforcementMode == Autheris.Domain.Options.EnforcementMode.Delegated;
     /// <summary>Issue #132: Explicit physical database name if different from connection string catalog or source name.</summary>
     public string? PhysicalDatabaseName { get; init; }
     public string? Location { get; init; }
@@ -252,6 +254,8 @@ public enum DatasetProfilePublicationPolicy
 public sealed record TableMetadata
 {
     public Table Table { get; init; } = new();
+    public Autheris.Domain.Options.EnforcementMode EnforcementMode => Table.EnforcementMode;
+    public bool IsDelegatedSource => Table.IsDelegatedSource;
     public TableIdentifier Identifier { get; init; }
     public string? OwnerTenantId { get; init; }
     public IReadOnlyList<TableColumn> Columns { get; init; } = Array.Empty<TableColumn>();

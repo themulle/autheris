@@ -180,7 +180,7 @@ public sealed partial class TableAccessPolicy
     /// </summary>
     private TableAccessDecision AttachTypedMasks(TableAccessDecision decision, TableAccessQuery query)
     {
-        if (_maskPolicyFactory == null || !decision.IsAllowed || decision.ColumnMasks != null)
+        if (_maskPolicyFactory == null || !decision.IsAllowed || decision.ColumnMasks != null || query.Metadata.IsDelegatedSource)
         {
             return decision;
         }

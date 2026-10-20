@@ -248,6 +248,12 @@ public static class GatewayServiceCollectionExtensions
         authBuilder.AddScheme<AuthenticationSchemeOptions, BasicAuthenticationHandler>(
             GatewayAuthSchemes.Basic, _ => { });
 
+        // 1a. RejectScheme and Scim Authentication (Wave 2)
+        authBuilder.AddScheme<AuthenticationSchemeOptions, RejectAuthenticationHandler>(
+            GatewayAuthSchemes.RejectScheme, _ => { });
+        authBuilder.AddScheme<AuthenticationSchemeOptions, ScimAuthenticationHandler>(
+            GatewayAuthSchemes.Scim, _ => { });
+
         // 1b. F-AUTH-DX: cookie session after a successful Basic login (allowlisted non-production environments only)
         var isBasicSessionAllowed = BasicAuthSession.IsAllowed(gatewayOptions, environment);
         var basicSessionCookieName = gatewayOptions.Authentication.BasicAuth.Session.CookieName;
@@ -559,6 +565,11 @@ public static class GatewayServiceCollectionExtensions
             .BindConfiguration(RevocationWatchOptions.SectionName)
             .ValidateOnStart();
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<RevocationWatchOptions>, RevocationWatchOptionsValidator>();
+        services.AddSingleton<IRealmSchemeSelector, RealmSchemeSelector>();
+        services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, RequireFunctionalRightHandler>();
+        services.AddOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>()
+            .BindConfiguration(Autheris.Domain.Options.Security.IdentityRealmsOptions.SectionName);
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>, Autheris.Application.Identity.Validators.IdentityRealmOptionsValidator>();
         services.AddSingleton<WebSocketAuthInterceptor>();
 
         var gqlBuilder = services

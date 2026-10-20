@@ -1,0 +1,100 @@
+namespace Autheris.Api.Endpoints;
+
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Autheris.Api.Security;
+using Autheris.Application.Identity.Services;
+using Autheris.Domain.Common;
+using Autheris.Domain.Identity;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
+
+public static class ScimGroupsEndpoints
+{
+    public static IEndpointRouteBuilder MapScimGroupsEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("/scim/v2/{realmId}/Groups")
+            .RequireAuthorization(GatewayAuthSchemes.Scim);
+
+        group.MapGet("", async (
+            string realmId,
+            int? startIndex,
+            int? count,
+            string? filter,
+            HttpContext httpContext,
+            IScimService scimService,
+            CancellationToken ct) =>
+        {
+            var tenantId = httpContext.User.GetTenantId();
+            var result = await scimService.ListGroupsAsync(
+                tenantId, realmId, startIndex ?? 1, count ?? 100, filter, ct).ConfigureAwait(false);
+            return Results.Ok(result);
+        });
+
+        group.MapGet("/{id}", async (
+            string realmId,
+            string id,
+            HttpContext httpContext,
+            IScimService scimService,
+            CancellationToken ct) =>
+        {
+            var tenantId = httpContext.User.GetTenantId();
+            var grp = await scimService.GetGroupAsync(tenantId, realmId, id, ct).ConfigureAwait(false);
+            return grp != null ? Results.Ok(grp) : Results.NotFound();
+        });
+
+        group.MapPost("", async (
+            string realmId,
+            ScimGroup groupModel,
+            HttpContext httpContext,
+            IScimService scimService,
+            CancellationToken ct) =>
+        {
+            var tenantId = httpContext.User.GetTenantId();
+            var created = await scimService.CreateGroupAsync(tenantId, realmId, groupModel, ct).ConfigureAwait(false);
+            return Results.Created($"/scim/v2/{realmId}/Groups/{created.GroupId}", created);
+        });
+
+        group.MapPut("/{id}", async (
+            string realmId,
+            string id,
+            ScimGroup groupModel,
+            HttpContext httpContext,
+            IScimService scimService,
+            CancellationToken ct) =>
+        {
+            var tenantId = httpContext.User.GetTenantId();
+            var updated = await scimService.UpdateGroupAsync(tenantId, realmId, id, groupModel, ct).ConfigureAwait(false);
+            return updated != null ? Results.Ok(updated) : Results.NotFound();
+        });
+
+        group.MapPatch("/{id}", async (
+            string realmId,
+            string id,
+            ScimPatchRequest patch,
+            HttpContext httpContext,
+            IScimService scimService,
+            CancellationToken ct) =>
+        {
+            var tenantId = httpContext.User.GetTenantId();
+            var patched = await scimService.PatchGroupAsync(tenantId, realmId, id, patch, ct).ConfigureAwait(false);
+            return patched != null ? Results.Ok(patched) : Results.NotFound();
+        });
+
+        group.MapDelete("/{id}", async (
+            string realmId,
+            string id,
+            HttpContext httpContext,
+            IScimService scimService,
+            CancellationToken ct) =>
+        {
+            var tenantId = httpContext.User.GetTenantId();
+            var deleted = await scimService.DeleteGroupAsync(tenantId, realmId, id, ct).ConfigureAwait(false);
+            return deleted ? Results.NoContent() : Results.NotFound();
+        });
+
+        return app;
+    }
+}

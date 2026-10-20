@@ -14,6 +14,12 @@ public readonly record struct Sid(string Value) : IEquatable<Sid>
 
     public override int GetHashCode() =>
         StringComparer.OrdinalIgnoreCase.GetHashCode(Value ?? string.Empty);
+
+    public static Func<string, Autheris.Domain.Identity.IdentityRealm?>? RealmLookup
+    {
+        get => ClaimsPrincipalExtensions.RealmLookup;
+        set => ClaimsPrincipalExtensions.RealmLookup = value;
+    }
 }
 
 public static class ClaimsPrincipalExtensions
@@ -163,9 +169,21 @@ public static class ClaimsPrincipalExtensions
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
+    public static Func<string, Autheris.Domain.Identity.IdentityRealm?>? RealmLookup { get; set; }
+
     public static TenantId GetTenantId(this System.Security.Claims.ClaimsPrincipal? principal)
     {
         if (principal == null) return TenantId.LegacySingleTenant;
+
+        var realmId = principal.FindFirst("autheris:realm")?.Value;
+        if (!string.IsNullOrWhiteSpace(realmId) && RealmLookup != null)
+        {
+            var realm = RealmLookup(realmId);
+            if (realm != null)
+            {
+                return realm.TenantBinding.ResolveTenant(principal);
+            }
+        }
 
         var val = principal.FindFirst("tenant_id")?.Value
             ?? principal.FindFirst("tid")?.Value

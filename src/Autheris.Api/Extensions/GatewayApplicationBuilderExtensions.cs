@@ -84,6 +84,7 @@ public static class GatewayApplicationBuilderExtensions
         // SR-M-02: IP-limit Bearer-exempted but unauthenticated requests before authorization can short-circuit with 401/403
         app.UseMiddleware<UnauthenticatedBearerIpRateLimitingMiddleware>();
         app.UseMiddleware<TokenRevocationMiddleware>();
+        app.UseMiddleware<SubjectLockoutMiddleware>();
         // F-AUTH-DX: issue the session cookie after a Basic login (no-op unless BasicAuth.Session is allowed)
         app.UseMiddleware<BasicAuthSessionMiddleware>();
         // ADR-017 / K-K10: Canonicalize AD Windows SIDs, OIDC claims, client certs, and GatewayRoles before authorization
@@ -240,6 +241,13 @@ public static class GatewayApplicationBuilderExtensions
         app.MapRebacEndpoints();
         app.MapVirtualFilterEndpoints();
         app.MapCallerAttributeAdminEndpoints();
+        app.MapScimUsersEndpoints();
+        app.MapScimGroupsEndpoints();
+        app.MapScimDiscoveryEndpoints();
+        app.MapSubjectLifecycleEndpoints();
+        app.MapFunctionalRightEndpoints();
+        app.MapAccessPolicyEndpoints();
+        app.MapRecertificationEndpoints();
         if (gatewayOptions.Arrow.Enabled)
         {
             app.MapArrowExportEndpoints();

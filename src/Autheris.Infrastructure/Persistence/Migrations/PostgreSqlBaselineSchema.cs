@@ -643,6 +643,125 @@ internal static class PostgreSqlBaselineSchema
                 imported_by TEXT NOT NULL,
                 imported_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS IDENTITY_USERS (
+                tenant_id VARCHAR(64) NOT NULL,
+                realm_id VARCHAR(64) NOT NULL,
+                user_key VARCHAR(128) NOT NULL,
+                external_id VARCHAR(128) NOT NULL,
+                user_name VARCHAR(256) NOT NULL,
+                email VARCHAR(256),
+                display_name VARCHAR(256),
+                active BOOLEAN NOT NULL DEFAULT TRUE,
+                deactivated_at TIMESTAMP WITH TIME ZONE,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                PRIMARY KEY (tenant_id, realm_id, user_key)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS UX_IDENTITY_USERS_EXT ON IDENTITY_USERS (tenant_id, realm_id, external_id);
+
+            CREATE TABLE IF NOT EXISTS IDENTITY_GROUPS (
+                tenant_id VARCHAR(64) NOT NULL,
+                realm_id VARCHAR(64) NOT NULL,
+                group_id VARCHAR(128) NOT NULL,
+                external_id VARCHAR(128) NOT NULL,
+                display_name VARCHAR(256) NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                PRIMARY KEY (tenant_id, realm_id, group_id)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS UX_IDENTITY_GROUPS_EXT ON IDENTITY_GROUPS (tenant_id, realm_id, external_id);
+
+            CREATE TABLE IF NOT EXISTS IDENTITY_GROUP_MEMBERS (
+                tenant_id VARCHAR(64) NOT NULL,
+                realm_id VARCHAR(64) NOT NULL,
+                group_id VARCHAR(128) NOT NULL,
+                user_key VARCHAR(128) NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                PRIMARY KEY (tenant_id, realm_id, group_id, user_key)
+            );
+            CREATE INDEX IF NOT EXISTS IX_IDENTITY_GROUP_MEMBERS_USER ON IDENTITY_GROUP_MEMBERS (tenant_id, realm_id, user_key);
+
+            CREATE TABLE IF NOT EXISTS IDENTITY_LOCKS (
+                tenant_id VARCHAR(64) NOT NULL,
+                realm_id VARCHAR(64) NOT NULL,
+                user_key VARCHAR(128) NOT NULL,
+                reason VARCHAR(256) NOT NULL,
+                source VARCHAR(64) NOT NULL,
+                locked_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                PRIMARY KEY (tenant_id, realm_id, user_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS FUNCTIONAL_RIGHT_MAPPINGS (
+                tenant_id VARCHAR(64) NOT NULL,
+                realm_id VARCHAR(64) NOT NULL,
+                group_or_role VARCHAR(128) NOT NULL,
+                functional_right VARCHAR(64) NOT NULL,
+                approved_by VARCHAR(128) NOT NULL,
+                approved_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                recert_class VARCHAR(32) NOT NULL DEFAULT 'Standard',
+                created_by VARCHAR(128) NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                PRIMARY KEY (tenant_id, realm_id, group_or_role, functional_right)
+            );
+
+            CREATE TABLE IF NOT EXISTS ACCESS_POLICIES (
+                tenant_id VARCHAR(64) NOT NULL,
+                policy_id VARCHAR(64) NOT NULL,
+                name VARCHAR(128) NOT NULL,
+                description VARCHAR(512),
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                priority INT NOT NULL DEFAULT 100,
+                decision VARCHAR(16) NOT NULL DEFAULT 'Permit',
+                created_by VARCHAR(128) NOT NULL,
+                approved_by VARCHAR(128),
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                approved_at TIMESTAMP WITH TIME ZONE,
+                PRIMARY KEY (tenant_id, policy_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS ACCESS_POLICY_GRANTEES (
+                tenant_id VARCHAR(64) NOT NULL,
+                policy_id VARCHAR(64) NOT NULL,
+                realm_id VARCHAR(64) NOT NULL,
+                grantee_type VARCHAR(32) NOT NULL,
+                grantee_id VARCHAR(128) NOT NULL,
+                PRIMARY KEY (tenant_id, policy_id, realm_id, grantee_type, grantee_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS ACCESS_POLICY_SELECTORS (
+                tenant_id VARCHAR(64) NOT NULL,
+                policy_id VARCHAR(64) NOT NULL,
+                selector_type VARCHAR(32) NOT NULL,
+                selector_value VARCHAR(256) NOT NULL,
+                PRIMARY KEY (tenant_id, policy_id, selector_type, selector_value)
+            );
+
+            CREATE TABLE IF NOT EXISTS RECERT_CAMPAIGNS (
+                tenant_id VARCHAR(64) NOT NULL,
+                campaign_id VARCHAR(64) NOT NULL,
+                name VARCHAR(128) NOT NULL,
+                recert_class VARCHAR(32) NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                deadline TIMESTAMP WITH TIME ZONE NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                PRIMARY KEY (tenant_id, campaign_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS RECERT_ITEMS (
+                tenant_id VARCHAR(64) NOT NULL,
+                campaign_id VARCHAR(64) NOT NULL,
+                item_id VARCHAR(64) NOT NULL,
+                asset_type VARCHAR(64) NOT NULL,
+                asset_key VARCHAR(256) NOT NULL,
+                assigned_to VARCHAR(128) NOT NULL,
+                reviewer_id VARCHAR(128) NOT NULL,
+                decision VARCHAR(32) NOT NULL DEFAULT 'Pending',
+                decision_at TIMESTAMP WITH TIME ZONE,
+                decision_by VARCHAR(128),
+                comments VARCHAR(512),
+                PRIMARY KEY (tenant_id, campaign_id, item_id)
+            );
         ";
         cmd.ExecuteNonQuery();
 

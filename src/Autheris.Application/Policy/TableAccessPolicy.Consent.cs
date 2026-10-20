@@ -66,12 +66,19 @@ public sealed partial class TableAccessPolicy
             await _cacheService.SetCachedDecisionAsync(query.Tenant, query.UserSid, table, decision, ttl, contextHash!, epochAtLoad, ct).ConfigureAwait(false);
         }
 
+        if (query.Metadata.IsDelegatedSource && decision.IsAllowed)
+        {
+            // Task B3 (PLAN-SCALE-5000-WAVE2 / SEC-SC-13): Coarse gate on delegated sources
+            // Defers fine-grained row-level filters and column masks to native source dynamic policies (current_user())
+            return decision with { CombinedRowFilterSql = null, RowPolicy = null, MandatoryRowPredicateSql = null };
+        }
+
         return await WithTypedConsentPolicyAsync(decision, query, ct).ConfigureAwait(false);
     }
 
     /// <summary>The compiler path needs the typed form only for SQL sources; the other sources keep the legacy text (no marker consumers there).</summary>
     private bool WantsTypedConsentPolicy(TableMetadata metadata) =>
-        _rowPolicyFactory != null && metadata.DataSourceType == DataSourceType.Sql;
+        _rowPolicyFactory != null && metadata.DataSourceType == DataSourceType.Sql && !metadata.IsDelegatedSource;
 
     /// <summary>
     /// WP-X0l: a cached decision that carries a consent row filter as text only (an entry written before the recipe existed, or one whose

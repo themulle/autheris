@@ -168,6 +168,7 @@ public sealed class EntraIdAuthOptions
     public string ClientId { get; init; } = string.Empty;
     public string Audience { get; init; } = string.Empty;
     public string MetadataAddress { get; init; } = string.Empty;
+    public string Authority => string.IsNullOrWhiteSpace(TenantId) ? Instance : $"{Instance.TrimEnd('/')}/{TenantId.Trim('/')}";
     public bool RequireHttpsMetadata { get; init; } = true;
     public string SidClaimType { get; init; } = "oid";
     public string GroupsClaimType { get; init; } = "groups";
